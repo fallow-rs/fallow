@@ -53,10 +53,10 @@ describe("toWalkthroughDocument", () => {
       partition: { order: ["m"], units: [{ module_dir: "m", files: ["m/hub.ts", "m/scored.ts"] }] },
       focus: {
         review_here: [
-          { file: "m/hub.ts", reason: "high fan-in (17 importers)", score: { total: 10 } },
+          { file: "m/hub.ts", reason: "fan-in (17 importers)", score: { total: 10 } },
           {
             file: "m/scored.ts",
-            reason: "high fan-in (5 importers), fan-out 7",
+            reason: "fan-in (5 importers), fan-out 7",
             score: { total: 12 },
           },
         ],

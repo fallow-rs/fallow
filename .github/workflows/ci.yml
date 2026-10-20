@@ -55,6 +55,9 @@ jobs:
       action-current: ${{ steps.filter.outputs.action-current }}
       viz: ${{ steps.filter.outputs.viz }}
       mutation-runner: ${{ steps.filter.outputs.mutation-runner }}
+      # A failed or skipped selector step never publishes partial output.
+      heavy-runner: ${{ steps.heavy-runner.outcome == 'success' && steps.heavy-runner.outputs.runner || 'ubuntu-26.04' }}
+      miri-runner: ${{ steps.miri-runner.outcome == 'success' && steps.miri-runner.outputs.runner || 'ubuntu-26.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -125,6 +128,9 @@ jobs:
               - 'editors/vscode/package.json'
               - 'tools/type-aware-sidecar/src/generated-protocol.mjs'
               - 'tools/mutation-runner/src/**'
+              - 'tools/mutation-runner/package.json'
+              - 'tools/mutation-runner/package-lock.json'
+              - 'tools/mutation-runner/test/fixtures/**'
               - 'scripts/generate-all.mjs'
               - 'scripts/generation-transaction.mjs'
               - 'scripts/contract-surfaces.mjs'
@@ -278,6 +284,7 @@ jobs:
               - 'Dockerfile.dev'
               - '.dockerignore'
               - 'examples/docker/**'
+              - 'tools/corepack/**'
               - '.github/dependabot.yml'
               - '.github/workflows/ci.yml'
             miri:
@@ -330,6 +337,86 @@ jobs:
               - 'crates/api/mutation-runner-protocol.json'
               - '.github/workflows/ci.yml'
               - 'scripts/workflow-policy.test.mjs'
+
+      # The Blacksmith trial selectors run here, not in jobs of their own, so
+      # Check, Lint and contracts, and Miri wait for no extra runner. The
+      # default branch owns the allocation policy, including for internal
+      # pull requests, so the selector scripts come from a checkout of main.
+      - name: Check out the runner selectors from main
+        if: >-
+          (vars.BLACKSMITH_HEAVY_ALLOCATION != '' || vars.BLACKSMITH_MIRI_ALLOCATION != '') &&
+          github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+          github.actor != 'dependabot[bot]' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          path: .ci-selectors
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: >-
+          github.event_name != 'push' &&
+          (vars.BLACKSMITH_HEAVY_ALLOCATION != '' || vars.BLACKSMITH_MIRI_ALLOCATION != '') &&
+          github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+          github.actor != 'dependabot[bot]' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        with:
+          node-version: '22'
+
+      - name: Select Check runner
+        id: heavy-runner
+        if: >-
+          vars.BLACKSMITH_HEAVY_ALLOCATION != '' &&
+          (steps.filter.outputs.rust == 'true' || (github.event_name == 'push' && steps.policy.outputs.main-full != 'false')) &&
+          github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+          github.actor != 'dependabot[bot]' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        continue-on-error: true
+        env:
+          BLACKSMITH_HEAVY_ALLOCATION: ${{ vars.BLACKSMITH_HEAVY_ALLOCATION }}
+          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
+          HEAVY_JOB: check
+          HEAVY_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        working-directory: .ci-selectors
+        run: |
+          if [ ! -f scripts/select-heavy-runner.mjs ]; then
+            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
+            echo 'Check uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/select-heavy-runner.mjs
+          fi
+
+      - name: Select Miri runner
+        id: miri-runner
+        if: >-
+          vars.BLACKSMITH_MIRI_ALLOCATION != '' &&
+          (steps.filter.outputs.miri == 'true' || (github.event_name == 'push' && steps.policy.outputs.main-full != 'false')) &&
+          github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+          github.actor != 'dependabot[bot]' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        continue-on-error: true
+        env:
+          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
+          MIRI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        working-directory: .ci-selectors
+        run: |
+          if [ ! -f scripts/select-miri-runner.mjs ]; then
+            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
+            echo 'Miri uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/select-miri-runner.mjs
+          fi
+
+      - name: Report selector fallback
+        if: steps.heavy-runner.outcome == 'failure' || steps.miri-runner.outcome == 'failure'
+        run: echo 'A Blacksmith selector failed, so its jobs use GitHub.' >> "$GITHUB_STEP_SUMMARY"
 
   docker:
     name: Docker
@@ -404,60 +491,24 @@ jobs:
           test "$dirty_code" -eq 1
           test "$clean_code" -eq 0
 
-  heavy-runner:
-    name: Select Check runner
-    needs: changes
-    if: >-
-      vars.BLACKSMITH_HEAVY_ALLOCATION != '' &&
-      (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')) &&
-      github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
-      github.actor != 'dependabot[bot]' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-26.04' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-      - name: Select within the shared heavy allocation
-        id: runner
-        continue-on-error: true
-        env:
-          BLACKSMITH_HEAVY_ALLOCATION: ${{ vars.BLACKSMITH_HEAVY_ALLOCATION }}
-          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
-          HEAVY_JOB: check
-          HEAVY_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-        run: |
-          if [ ! -f scripts/select-heavy-runner.mjs ]; then
-            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
-            echo 'Check uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            node scripts/select-heavy-runner.mjs
-          fi
-      - name: Report selector fallback
-        if: steps.runner.outcome == 'failure'
-        run: echo 'Check uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
-
-  # Check and Lint and contracts share no step, so they run in parallel. Both
-  # use the runner that the heavy-runner job selects, and each one ends with
-  # its own check for uncommitted changes.
+  # Check, Lint and contracts, and NAPI package share no step, so they run in
+  # parallel, and each one ends with its own check for uncommitted changes.
+  # Check splits the nextest run over two jobs. The Blacksmith credit model in
+  # scripts/select-heavy-runner.mjs reserves one Check job and Lint and
+  # contracts, so only partition 1 and Lint and contracts may use the runner
+  # that the heavy-runner step selects.
   check:
-    name: Check
-    needs: [changes, heavy-runner]
+    name: Check (${{ matrix.partition }}/2)
+    needs: changes
     if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
-    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
+    runs-on: ${{ matrix.partition == 1 && github.run_attempt == 1 && needs.changes.outputs.heavy-runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -471,7 +522,17 @@ jobs:
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      # The end-to-end mutation tests in fallow-api run the companion against
+      # Vitest from this install, and the bun-test runner against Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.x'
+          no-cache: true
+
+      - name: Install mutation runner dependencies
+        run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
+
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
 
@@ -481,18 +542,24 @@ jobs:
         # process, which spreads the large integration binaries over all
         # cores. It selects the same targets as `cargo test` with these flags;
         # neither runs doctests. The `ci` profile is in .config/nextest.toml.
-        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples
+        # Each partition builds every test binary and runs half of the tests.
+        # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
+        # the end-to-end mutation tests instead of a skip.
+        env:
+          FALLOW_MUTATION_E2E_REQUIRED: '1'
+        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/2
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: nextest-junit-check
+          name: nextest-junit-check-${{ matrix.partition }}
           path: target/nextest/ci/junit.xml
           if-no-files-found: ignore
           retention-days: 14
 
       - name: Run coverage producer conformance
+        if: matrix.partition == 1
         # Rides this job rather than a job of its own: the `rust` filter above
         # already covers crates/** and tests/**, the test step has already
         # built target/debug/fallow, and setup-node is already present. The
@@ -502,9 +569,11 @@ jobs:
         run: npm run check:coverage-producers
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
+        if: matrix.partition == 1
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
+        if: matrix.partition == 1
         run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
 
       - name: Check for uncommitted changes
@@ -512,11 +581,11 @@ jobs:
 
   check-lint:
     name: Lint and contracts
-    needs: [changes, heavy-runner]
+    needs: changes
     if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
-    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
-    # A cold Rust cache can leave the NAPI release build finishing just after
-    # the previous 20-minute limit on merged commits.
+    runs-on: ${{ github.run_attempt == 1 && needs.changes.outputs.heavy-runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
+    # scripts/select-heavy-runner.mjs reserves Blacksmith credits for this
+    # timeout. Change both together.
     timeout-minutes: 30
     permissions:
       contents: read
@@ -545,6 +614,9 @@ jobs:
       - name: Run contract bundle drift gate
         run: CI=true npm run generate:contracts:check
 
+      - name: Cargo feature unification
+        run: npm run check:cargo-features
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -558,6 +630,31 @@ jobs:
 
       - name: Format
         run: cargo fmt --all -- --check
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
+
+  napi:
+    name: NAPI package
+    needs: changes
+    if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
+    runs-on: ubuntu-26.04
+    # A cold Rust cache can leave the NAPI release build finishing just after
+    # 20 minutes on merged commits.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
 
       - name: Install NAPI package dependencies
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
@@ -639,7 +736,7 @@ jobs:
         with:
           components: clippy
           shared-key: windows-debug
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
       # One nextest run replaces ten `cargo test` calls. The calls had no
@@ -677,7 +774,7 @@ jobs:
           | (binary_id(fallow-multicall::integration) & test(/^parity::/))'
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nextest-junit-windows-rust
           path: target/nextest/ci/junit.xml
@@ -1249,7 +1346,7 @@ jobs:
       - name: Package target VSIX artifacts
         run: pnpm --dir editors/vscode package:variants -- --output-dir "$RUNNER_TEMP/fallow-vscode-targets"
       - name: Upload target VSIX artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-vscode-targets
           path: ${{ runner.temp }}/fallow-vscode-targets
@@ -1400,7 +1497,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-audit
       - run: cargo audit
@@ -1427,7 +1524,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-shear
       - run: cargo shear
@@ -1442,7 +1539,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
       # Scope to repo's own workflows + composite action. tests/fixtures/ contains
@@ -1485,51 +1582,9 @@ jobs:
       - name: Check compilation
         run: cargo check --workspace --locked --offline
 
-  miri-runner:
-    name: Select Miri runner
-    needs: changes
-    if: >-
-      vars.BLACKSMITH_MIRI_ALLOCATION != '' &&
-      (needs.changes.outputs.miri == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')) &&
-      github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
-      github.actor != 'dependabot[bot]' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-26.04' }}
-    steps:
-      # The default branch owns allocation policy, including for internal PRs.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-      - name: Select within the reserved trial window
-        id: runner
-        continue-on-error: true
-        env:
-          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
-          MIRI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-        run: |
-          if [ ! -f scripts/select-miri-runner.mjs ]; then
-            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
-            echo 'Miri uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            node scripts/select-miri-runner.mjs
-          fi
-      - name: Report selector fallback
-        if: steps.runner.outcome == 'failure'
-        run: echo 'Miri uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
-
   miri:
     name: Miri
-    needs: [changes, miri-runner]
+    needs: changes
     # On pull requests, path-filtered to crates/{graph,extract,types,config}: catches
     # contributor PRs that add tempdir / fs-IO tests without inheriting
     # #[cfg_attr(miri, ignore)] from sibling tests. On release pushes it always runs, so the
@@ -1537,7 +1592,7 @@ jobs:
     # The local pre-push hook checks formatting and Clippy, not Miri.
     if: always() && !cancelled() && (needs.changes.outputs.miri == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
     # Rerun-failed-jobs can retain the selector output from attempt one.
-    runs-on: ${{ github.run_attempt == 1 && needs['miri-runner'].result == 'success' && needs['miri-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
+    runs-on: ${{ github.run_attempt == 1 && needs.changes.outputs.miri-runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
     # 60, not 45: the fallow-extract step shares this budget with types+graph and
     # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
     # JSX harvesting) grew the extract suite's interpreter runtime past the old
@@ -1664,7 +1719,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, docker, check, check-lint, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor]
+    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}

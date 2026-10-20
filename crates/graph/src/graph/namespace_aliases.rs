@@ -619,6 +619,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn dense_alias_cycle_is_bounded_by_member_states() {
         const MODULES: usize = 10;
         const DEPTH: usize = 8;
@@ -640,6 +641,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn repeated_alias_diamonds_grow_by_states_and_edges_not_paths() {
         const LAYERS: usize = 24;
         let module_count = 1 + (LAYERS * 2);

@@ -28,7 +28,7 @@
   "candidate_evidence": [
     {
       "file": "evidence/jina-v2-code-q8.json",
-      "sha256": "d0cadf95396c01ed10f24f5c81b05470e4d16d52a6b71d07241ee0acbcb06418"
+      "sha256": "a46aebb07b05eefa0db72cbd687e729259db08b04ca6fbcc12b0393e33fbb9ed"
     }
   ],
   "cases": [

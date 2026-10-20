@@ -583,6 +583,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn scale_300_file_multi_module_graph_is_stable() {
         // 30 directories x 10 files = 300 files. Each dir's first file imports the
         // previous dir's first file (a chain across modules), so the order is a

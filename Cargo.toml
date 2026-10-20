@@ -53,7 +53,11 @@ cssparser = "=0.37.0"
 clap = { version = "4", features = ["derive"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
+# `rc` here and `chrono04` on schemars match the features that rmcp
+# (fallow-mcp) enables. A package-scoped build such as `cargo build -p
+# fallow-cli` then resolves the same feature set as a workspace build, and a
+# switch between the two does not rebuild the dependents.
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 deser-value = "0.10"
 deser-yaml = "0.10"
@@ -61,7 +65,7 @@ semver = "1"
 jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
 toml = "1.1"
 toml_edit = "0.25"
-schemars = "1"
+schemars = { version = "1", features = ["chrono04"] }
 flate2 = "1"
 
 # Parallelism
@@ -111,7 +115,8 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 # LSP
 ls-types = "0.0.6"
 tower-lsp-server = "0.23"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "signal", "time"] }
+# `io-util` matches the feature that rmcp (fallow-mcp) enables; see the serde note.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "process", "signal", "time"] }
 tokio-util = { version = "0.7", default-features = false }
 
 # File watching

@@ -127,6 +127,95 @@ fn install_dry_run_writes_nothing_and_reports_the_plan() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A dry run names the command that applies its plan, first in
+/// `next_actions`. After the install, a dry run plans no writes and names no
+/// apply command.
+#[test]
+fn install_dry_run_names_the_apply_command() {
+    let dir = agent_temp_dir("dry-run-apply");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let args = [
+        "install",
+        "--dry-run",
+        "--harness",
+        "codex",
+        "--without",
+        "mcp",
+    ];
+
+    let output = run_agent(&dir, &home, &args);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    let first = &json["next_actions"][0];
+    assert_eq!(first["id"], "agent-install-apply", "json: {json}");
+    assert_eq!(first["mutating"], true);
+    let command = first["command"].as_str().unwrap();
+    assert!(
+        command.starts_with("fallow agent install --harness codex --without mcp --root "),
+        "the command must repeat the plan flags and drop --dry-run: {command}"
+    );
+    assert!(!command.contains("--dry-run"), "{command}");
+
+    let install = run_agent(
+        &dir,
+        &home,
+        &["install", "--harness", "codex", "--without", "mcp"],
+    );
+    assert_eq!(install.code, 0, "stderr: {}", install.stderr);
+    let again = crate::common::parse_json(&run_agent(&dir, &home, &args));
+    let ids: Vec<&str> = again["next_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|action| action["id"].as_str())
+        .collect();
+    assert!(
+        !ids.contains(&"agent-install-apply"),
+        "nothing is left to write, so no apply command: {ids:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A harness that only the session environment detects is repeated as
+/// `--harness`. The person who runs the command in a plain shell must get the
+/// same plan as the dry run.
+#[test]
+fn install_dry_run_apply_command_repeats_a_detected_harness() {
+    let dir = agent_temp_dir("dry-run-apply-detected");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let root_str = dir.to_str().unwrap();
+    let output = run_fallow_raw_with_env(
+        &[
+            "agent",
+            "install",
+            "--dry-run",
+            "--root",
+            root_str,
+            "--format",
+            "json",
+        ],
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("CLAUDECODE", "1"),
+            ("CODEX_THREAD_ID", ""),
+            ("CURSOR_AGENT", ""),
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    assert_eq!(json["detected"], true, "json: {json}");
+    let first = &json["next_actions"][0];
+    assert_eq!(first["id"], "agent-install-apply", "json: {json}");
+    let command = first["command"].as_str().unwrap();
+    assert!(
+        command.starts_with("fallow agent install --harness claude --root "),
+        "a detected harness must be explicit in the apply command: {command}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn install_is_idempotent_and_uninstall_round_trips() {
     let dir = agent_temp_dir("round-trip");

@@ -87,7 +87,7 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
   assert.match(job, /-max_total_time="\$FUZZ_TIME_SECONDS" -timeout=10/);
   assert.match(job, /-dict="\$PWD\/fuzz\/dicts\/\$\{target\}\.dict"/);
   assert.match(job, /if ! cargo[\s\S]*failed=1[\s\S]*exit "\$failed"/);
-  assert.match(job, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
+  assert.match(job, /actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9/);
   assert.match(job, /if: failure\(\)[\s\S]*path: fuzz\/artifacts\//);
 
   for (const path of [
@@ -384,7 +384,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   for (const job of [checkJob, indentedBlock(workflow, "check-lint", 2)]) {
     assert.match(job, /runs-on:.*\|\| \x27ubuntu-26.04\x27/);
     assert.match(job, /timeout-minutes: 30/);
-    assert.doesNotMatch(job, /matrix\.|windows-latest|macos-latest/);
+    assert.doesNotMatch(job, /matrix\.(?!partition\b)|windows-latest|macos-latest/);
   }
   assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-26.04/);
   assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
@@ -779,7 +779,7 @@ test("release publication waits for the aggregate verification gate", () => {
   ]) {
     assert.match(
       job,
-      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep\]/,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved\]/,
       registry,
     );
     assert.match(job, /permissions:\n\s+contents: read/, registry);
@@ -812,7 +812,7 @@ test("release publication waits for the aggregate verification gate", () => {
       /echo "::warning::[^\n]*\$\{remaining\[\*\]\}[^\n]*"\n\s+sleep "\$delay"/u,
       registry,
     );
-    assert.match(job, /^ {4}timeout-minutes: 360$/mu, registry);
+    assert.match(job, /^ {4}timeout-minutes: 60$/mu, registry);
   }
 
   assert.match(
@@ -894,12 +894,21 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   assert.match(releaseReady, /needs: \[[^\]]*\bnpm-root-approved\b[^\]]*\]/u);
   const gateWait = waitStepBody(gate);
   assert.ok(gateWait, "npm-root-approved must run the public root wait");
+  assert.doesNotMatch(gateWait, /Waiting for the maintainer/u, "the wait body stays neutral");
+  const announce = gate.indexOf("- name: Ask for the npm approval of the staged fallow root");
+  assert.ok(announce !== -1 && announce < gate.indexOf(`- name: ${WAIT_STEP}`));
+  assert.match(gate.slice(announce), /Verify the stage against sha256/u);
   for (const publisher of [marketplace, openVsx]) {
-    // The publishers start in the same wave as npm-publish, so one review of
-    // the release environment covers every publication job. Each publisher
-    // then waits for the approved root itself, before it uploads anything.
-    assert.match(publisher, /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep\]/u);
-    assert.doesNotMatch(publisher, /needs: \[[^\]]*\b(?:npm-publish|npm-root-approved)\b/u);
+    // npm-root-approved is the only job that waits for the npm approval. The
+    // publishers need it, so they hold no runner while the approval is
+    // pending. Each publisher still checks the public bytes itself before it
+    // uploads anything, with a short bound instead of a long poll.
+    assert.match(
+      publisher,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved\]/u,
+    );
+    assert.doesNotMatch(publisher, /needs: \[[^\]]*\bnpm-publish\b/u);
+    assert.match(publisher, /^ {4}timeout-minutes: 60$/mu);
     assert.equal(waitStepBody(publisher), gateWait, "publishers reuse the exact wait logic");
     const steps = publisher.split(/^ {6}- /mu).slice(1);
     const waitIndex = steps.findIndex((step) => step.startsWith(`name: ${WAIT_STEP}`));
@@ -912,10 +921,10 @@ test("release publishes no VSIX before the approved fallow root is public", () =
     assert.match(digest, /name: npm-tarballs/u);
     assert.match(digest, /sha256sum "\$NPM_TARBALLS\/20-cli-root\/fallow-\$\{VERSION\}\.tgz"/u);
     assert.match(digest, /EXPECTED_SHA256=\$digest" >> "\$GITHUB_ENV"/u);
-    assert.match(steps[waitIndex], /WAIT_MINUTES: '3[0-4][0-9]'/u);
+    assert.match(steps[waitIndex], /WAIT_MINUTES: '[1-9]'/u);
   }
   assert.match(security, /Publish no VSIX before the approved `fallow` root is public/u);
-  assert.match(security, /same wave as\s+`npm-publish`/u);
+  assert.match(security, /`npm-root-approved` is the only job that waits/u);
   assert.match(procedure, /Wait for the approved fallow root/u);
   assert.match(procedure, /Do this right after\s+`release-ready` without other work in between/u);
 });
@@ -1197,7 +1206,7 @@ test("coverage producer conformance rides the check job instead of a job of its 
 
   assert.match(
     checkJob,
-    /name: Run coverage producer conformance\n(?:\s+#.*\n)*\s+run: npm run check:coverage-producers/,
+    /name: Run coverage producer conformance\n\s+if: matrix\.partition == 1\n(?:\s+#.*\n)*\s+run: npm run check:coverage-producers/,
     "deleting the census step must fail this test rather than pass silently",
   );
   assert.ok(
@@ -1306,6 +1315,35 @@ test("CI runs the mutation runner tests at the declared runtime floors", () => {
   );
   assert.match(job, /persist-credentials: false/u);
   assert.match(indentedBlock(workflow, "ci-ok", 2), /mutation-runner-floor/u);
+});
+
+test("the check job runs the end-to-end mutation tests instead of a skip", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const checkJob = indentedBlock(workflow, "check", 2);
+  const rustPaths = listedPaths(indentedBlock(workflow, "rust", 12));
+  const install = checkJob.indexOf(
+    "npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts",
+  );
+  const bun = checkJob.indexOf("uses: oven-sh/setup-bun@");
+  const tests = checkJob.indexOf("name: Run tests");
+
+  assert.ok(install > 0, "the check job must install the mutation runner dependencies");
+  assert.ok(bun > 0, "the check job must install Bun for the bun-test end-to-end test");
+  assert.ok(install < tests && bun < tests, "the installs must come before the tests");
+  // Without the env var, a missing install skips each test and CI stays green.
+  assert.match(
+    checkJob,
+    /FALLOW_MUTATION_E2E_REQUIRED: '1'\n\s+run: cargo nextest run --profile ci --workspace/u,
+  );
+  for (const file of [
+    "tools/mutation-runner/src/companion.mjs",
+    "tools/mutation-runner/package.json",
+    "tools/mutation-runner/package-lock.json",
+    "tools/mutation-runner/test/fixtures/vitest-basic/vitest.config.mjs",
+    "crates/api/src/mutation/e2e_tests.rs",
+  ]) {
+    assert.ok(matchesListedPath(rustPaths, file), `the rust filter must include ${file}`);
+  }
 });
 
 test("mise.toml follows the tool versions that CI pins", () => {
@@ -1626,32 +1664,42 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
   assert.ok(compare.includes(PGO_CONFIG_FLAG), "the PGO build must use the release mechanism");
 });
 
+// The Blacksmith selectors are steps of the `changes` job. These helpers read
+// one selector step and evaluate expressions that use hyphenated keys.
+const changesStep = (workflow, name) => {
+  const changes = indentedBlock(workflow, "changes", 2);
+  const start = changes.indexOf(`      - name: ${name}\n`);
+  assert.ok(start >= 0, `Detect changes must run "${name}"`);
+  const next = changes.indexOf("\n      - ", start + 1);
+  return changes.slice(start, next === -1 ? undefined : next + 1);
+};
+const bracketKeys = (expression) => expression.replace(/\.([\w]+-[\w-]+)/g, '["$1"]');
+const stepCondition = (step) =>
+  bracketKeys(step.match(/        if: >-\n([\s\S]+?)\n        [a-z-]+:/)?.[1].trim() ?? "");
+
 test("Miri falls back to GitHub when runner selection fails or a job is rerun", async () => {
   const { runInNewContext } = await import("node:vm");
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const miri = indentedBlock(workflow, "miri", 2);
+  assert.match(miri, /^    needs: changes$/m, "Miri must not wait for a selector job");
   const condition = miri.match(/^    if: (.+)$/m)?.[1];
-  assert.match(condition, /always\(\)/, "selector failures must not skip Miri");
+  assert.match(condition, /always\(\)/, "a failed detection must not skip Miri");
   assert.match(condition, /!cancelled\(\)/);
-  const runner = miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)?.[1];
+  const runner = bracketKeys(miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)?.[1] ?? "");
   assert.ok(runner, "Miri must select a runner with GitHub fallback");
   const context = {
     github: { run_attempt: 1, event_name: "push" },
     needs: {
-      changes: { outputs: { miri: "true" } },
-      "miri-runner": { result: "success", outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } },
+      changes: { outputs: { miri: "true", "miri-runner": "blacksmith-4vcpu-ubuntu-2404" } },
     },
     always: () => true,
     cancelled: () => false,
   };
   assert.equal(runInNewContext(condition, context), true);
   assert.equal(runInNewContext(runner, context), "blacksmith-4vcpu-ubuntu-2404");
-  for (const result of ["failure", "skipped", "cancelled"]) {
-    context.needs["miri-runner"].result = result;
-    assert.equal(runInNewContext(condition, context), true);
-    assert.equal(runInNewContext(runner, context), "ubuntu-26.04", result);
-  }
-  context.needs["miri-runner"].result = "success";
+  context.needs.changes.outputs["miri-runner"] = "ubuntu-26.04";
+  assert.equal(runInNewContext(runner, context), "ubuntu-26.04", "the fallback output");
+  context.needs.changes.outputs["miri-runner"] = "blacksmith-4vcpu-ubuntu-2404";
   context.github.run_attempt = 2;
   assert.equal(
     runInNewContext(runner, context),
@@ -1659,9 +1707,9 @@ test("Miri falls back to GitHub when runner selection fails or a job is rerun", 
     "rerun-failed-jobs may reuse old selector output",
   );
   context.github.run_attempt = 1;
-  context.needs["miri-runner"].outputs = {};
+  context.needs.changes.outputs["miri-runner"] = undefined;
   assert.equal(runInNewContext(runner, context), "ubuntu-26.04", "missing output falls back");
-  context.needs["miri-runner"].outputs.runner = "unexpected-runner";
+  context.needs.changes.outputs["miri-runner"] = "unexpected-runner";
   assert.equal(runInNewContext(runner, context), "ubuntu-26.04", "unknown labels fail closed");
   context.cancelled = () => true;
   assert.equal(runInNewContext(condition, context), false);
@@ -1677,13 +1725,20 @@ test("Miri falls back to GitHub when runner selection fails or a job is rerun", 
 
 test("Miri allocation uses a trusted optional helper and routing edits trigger Miri", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
-  assert.match(workflow, /^  miri-runner:$/m, "CI must run the optional allocation selector");
-  const selector = indentedBlock(workflow, "miri-runner", 2);
-  assert.match(selector, /runs-on: ubuntu-26.04/);
-  assert.match(selector, /permissions:\n      contents: read\n/);
-  assert.doesNotMatch(selector, /secrets\.|id-token:|actions: write|pull-requests:/);
-  assert.match(selector, /ref: refs\/heads\/main/);
-  assert.match(selector, /persist-credentials: false/);
+  assert.doesNotMatch(workflow, /^  (?:miri|heavy)-runner:$/m, "selectors must not be jobs");
+  const changes = indentedBlock(workflow, "changes", 2);
+  assert.match(
+    changes,
+    /permissions:\n      contents: read\n      pull-requests: read\n    outputs:/,
+  );
+  assert.doesNotMatch(changes, /secrets\.|id-token:|actions: write|contents: write/);
+  const checkout = changesStep(workflow, "Check out the runner selectors from main");
+  assert.match(checkout, /ref: refs\/heads\/main/);
+  assert.match(checkout, /path: \.ci-selectors/);
+  assert.match(checkout, /persist-credentials: false/);
+  assert.match(checkout, /continue-on-error: true/);
+  const selector = changesStep(workflow, "Select Miri runner");
+  assert.match(selector, /id: miri-runner/);
   assert.match(selector, /github\.repository == 'fallow-rs\/fallow'/);
   assert.match(
     selector,
@@ -1694,13 +1749,13 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
     /BLACKSMITH_MIRI_ALLOCATION: \$\{\{ vars\.BLACKSMITH_MIRI_ALLOCATION \}\}/,
   );
   assert.match(selector, /continue-on-error: true/);
+  assert.match(selector, /working-directory: \.ci-selectors/);
   assert.match(
     selector,
     /if \[ ! -f scripts\/select-miri-runner\.mjs \]; then[\s\S]*runner=ubuntu-26.04[\s\S]*else[\s\S]*node scripts\/select-miri-runner\.mjs/,
   );
   const miri = indentedBlock(workflow, "miri", 2);
   assert.doesNotMatch(miri, /continue-on-error/);
-  const changes = indentedBlock(workflow, "changes", 2);
   const paths = listedPaths(indentedBlock(changes, "miri", 12));
   const rustPaths = listedPaths(indentedBlock(changes, "rust", 12));
   for (const path of [
@@ -1717,11 +1772,13 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
 test("an unset Miri allocation skips selector startup without skipping Miri", async () => {
   const { runInNewContext } = await import("node:vm");
   const workflow = readWorkflow(".github/workflows/ci.yml");
-  const selector = indentedBlock(workflow, "miri-runner", 2);
-  const condition = selector.match(/    if: >-\n([\s\S]+?)\n    runs-on:/)?.[1].trim();
+  const condition = stepCondition(changesStep(workflow, "Select Miri runner"));
+  const checkoutCondition = stepCondition(
+    changesStep(workflow, "Check out the runner selectors from main"),
+  );
   assert.ok(condition, "selector must declare its eligibility condition");
   const context = {
-    vars: { BLACKSMITH_MIRI_ALLOCATION: "" },
+    vars: { BLACKSMITH_MIRI_ALLOCATION: "", BLACKSMITH_HEAVY_ALLOCATION: "" },
     github: {
       repository: "fallow-rs/fallow",
       event_name: "push",
@@ -1729,24 +1786,20 @@ test("an unset Miri allocation skips selector startup without skipping Miri", as
       run_attempt: 1,
       actor: "maintainer",
     },
-    needs: {
-      changes: { outputs: { miri: "true" } },
-      "miri-runner": { result: "skipped", outputs: {} },
-    },
+    steps: { filter: { outputs: { miri: "true" } }, policy: { outputs: { "main-full": "true" } } },
+    needs: { changes: { outputs: { miri: "true", "miri-runner": "ubuntu-26.04" } } },
     always: () => true,
     cancelled: () => false,
   };
-  assert.equal(
-    runInNewContext(condition, context),
-    false,
-    "default CI must not start a selector runner",
-  );
+  assert.equal(runInNewContext(condition, context), false, "default CI must not run a selector");
+  assert.equal(runInNewContext(checkoutCondition, context), false, "nor check out main");
   context.vars.BLACKSMITH_MIRI_ALLOCATION = '{"month":"2026-09","firstRunNumber":100,"slots":2}';
   assert.equal(runInNewContext(condition, context), true, "an allocation must reach the selector");
+  assert.equal(runInNewContext(checkoutCondition, context), true);
   const miri = indentedBlock(workflow, "miri", 2);
-  assert.equal(runInNewContext(miri.match(/^    if: (.+)$/m)[1], context), true);
+  assert.equal(runInNewContext(bracketKeys(miri.match(/^    if: (.+)$/m)[1]), context), true);
   assert.equal(
-    runInNewContext(miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)[1], context),
+    runInNewContext(bracketKeys(miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)[1]), context),
     "ubuntu-26.04",
   );
 });
@@ -1805,7 +1858,7 @@ test("main scheduling conditions execute release checks and fail closed", async 
   const aggregate = indentedBlock(workflow, "ci-ok", 2);
   for (const match of indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([\w-]+):\n/gmu)) {
     const name = match[1];
-    if (["changes", "miri-runner", "heavy-runner", "ci-ok"].includes(name)) continue;
+    if (["changes", "ci-ok"].includes(name)) continue;
     const job = indentedBlock(workflow, name, 2);
     assert.ok(aggregate.includes(name), `${name} failures must reach CI`);
     const condition = job
@@ -1918,26 +1971,19 @@ test("type-aware benchmarks supersede only the same pull request", async () => {
 
 test("failed selector steps discard partial Blacksmith output despite continue-on-error", async () => {
   const { runInNewContext } = await import("node:vm");
-  const selector = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "miri-runner", 2);
-  const output = selector.match(/^      runner: \$\{\{ (.+) \}\}$/m)?.[1];
-  assert.ok(output);
-  for (const outcome of ["failure", "skipped", "cancelled"]) {
-    assert.equal(
-      runInNewContext(output, {
-        steps: { runner: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
-      }),
-      "ubuntu-26.04",
-      outcome,
-    );
+  const changes = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "changes", 2);
+  for (const id of ["miri-runner", "heavy-runner"]) {
+    const output = changes.match(new RegExp(`^      ${id}: \\$\\{\\{ (.+) \\}\\}$`, "m"))?.[1];
+    assert.ok(output, `Detect changes must publish ${id}`);
+    const evaluate = (outcome) =>
+      runInNewContext(bracketKeys(output), {
+        steps: { [id]: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
+      });
+    for (const outcome of ["failure", "skipped", "cancelled"]) {
+      assert.equal(evaluate(outcome), "ubuntu-26.04", `${id} ${outcome}`);
+    }
+    assert.equal(evaluate("success"), "blacksmith-4vcpu-ubuntu-2404");
   }
-  assert.equal(
-    runInNewContext(output, {
-      steps: {
-        runner: { outcome: "success", outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } },
-      },
-    }),
-    "blacksmith-4vcpu-ubuntu-2404",
-  );
 });
 
 test("workflow environments do not assign an explicit empty Cargo build target", () => {
@@ -1973,41 +2019,60 @@ test("heavy jobs admit a reserved runner and retain GitHub fallback after select
   ]) {
     const workflow = readWorkflow(`.github/workflows/${file}`);
     const job = indentedBlock(workflow, jobName, 2);
-    const runner = job.match(/^    runs-on: (.+)$/m)[1].replace(/^\$\{\{ | \}\}$/g, "");
+    const runner = bracketKeys(
+      job.match(/^    runs-on: (.+)$/m)[1].replace(/^\$\{\{ | \}\}$/g, ""),
+    );
+    const inCi = file === "ci.yml";
+    const blacksmith = "blacksmith-4vcpu-ubuntu-2404";
     const context = {
       github: { run_attempt: 1, event_name: "push" },
+      matrix: { partition: 1 },
       needs: {
-        changes: { outputs: { rust: "true", "main-full": "true" } },
-        "heavy-runner": { result: "success", outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } },
+        changes: {
+          outputs: { rust: "true", "main-full": "true", "heavy-runner": blacksmith },
+        },
+        "heavy-runner": { result: "success", outputs: { runner: blacksmith } },
       },
       always: () => true,
       cancelled: () => false,
     };
+    const setSelection = (runnerLabel, result = "success") => {
+      context.needs.changes.outputs["heavy-runner"] = runnerLabel;
+      context.needs["heavy-runner"] = { result, outputs: { runner: runnerLabel } };
+    };
     const evaluateRunner = () =>
       runner === "ubuntu-26.04" ? runner : runInNewContext(runner, context);
-    assert.equal(
-      evaluateRunner(),
-      "blacksmith-4vcpu-ubuntu-2404",
-      `${file} must admit a reserved first attempt`,
-    );
-    const condition = job.match(/^    if: (.+)$/m)?.[1]?.replace(/\.([\w]+-[\w-]+)/g, '["$1"]');
+    assert.equal(evaluateRunner(), blacksmith, `${file} must admit a reserved first attempt`);
+    const condition = bracketKeys(job.match(/^    if: (.+)$/m)?.[1] ?? "");
     assert.ok(condition, `${file} must survive optional selector failure`);
-    for (const result of ["failure", "skipped", "cancelled"]) {
-      context.needs["heavy-runner"].result = result;
+    if (inCi) {
+      assert.match(job, /^    needs: changes$/m, `${jobName} must not wait for a selector job`);
+      setSelection("ubuntu-26.04");
       assert.equal(runInNewContext(condition, context), true);
-      assert.equal(evaluateRunner(), "ubuntu-26.04");
+      assert.equal(evaluateRunner(), "ubuntu-26.04", "the selector fallback output");
+    } else {
+      for (const result of ["failure", "skipped", "cancelled"]) {
+        setSelection(blacksmith, result);
+        assert.equal(runInNewContext(condition, context), true);
+        assert.equal(evaluateRunner(), "ubuntu-26.04");
+      }
     }
-    context.needs["heavy-runner"].result = "success";
+    setSelection(blacksmith);
+    if (jobName === "check") {
+      context.matrix.partition = 2;
+      assert.equal(evaluateRunner(), "ubuntu-26.04", "the credit model reserves one Check job");
+      context.matrix.partition = 1;
+    }
     context.github.run_attempt = 2;
     assert.equal(evaluateRunner(), "ubuntu-26.04", "retained outputs cannot admit reruns");
     context.github.run_attempt = 1;
-    for (const outputs of [{}, { runner: "blacksmith-8vcpu-ubuntu-2404" }]) {
-      context.needs["heavy-runner"].outputs = outputs;
+    for (const label of [undefined, "blacksmith-8vcpu-ubuntu-2404"]) {
+      setSelection(label);
       assert.equal(evaluateRunner(), "ubuntu-26.04");
     }
     context.cancelled = () => true;
     assert.equal(runInNewContext(condition, context), false);
-    if (file === "ci.yml") {
+    if (inCi) {
       context.cancelled = () => false;
       context.github.event_name = "pull_request";
       context.needs.changes.outputs.rust = "false";
@@ -2016,80 +2081,98 @@ test("heavy jobs admit a reserved runner and retain GitHub fallback after select
   }
 });
 
-test("heavy selectors skip startup when unset and publish only successful trusted outputs", async () => {
-  const { runInNewContext } = await import("node:vm");
-  for (const file of ["ci.yml", "release-validation.yml"]) {
-    const workflow = readWorkflow(`.github/workflows/${file}`);
-    const selector = indentedBlock(workflow, "heavy-runner", 2);
-    const condition = selector
-      .match(/    if: >-\n([\s\S]+?)\n    runs-on:/)?.[1]
-      .trim()
-      .replace(/\.([\w]+-[\w-]+)/g, '["$1"]');
-    assert.ok(condition, "the selector must gate startup");
-    const context = {
-      vars: { BLACKSMITH_HEAVY_ALLOCATION: "" },
-      github: {
-        repository: "fallow-rs/fallow",
-        run_attempt: 1,
-        actor: "maintainer",
-        ref: "refs/heads/main",
-        event_name: file === "ci.yml" ? "push" : "workflow_dispatch",
-        event: { pull_request: { head: { repo: { full_name: "fallow-rs/fallow" } } } },
-      },
-      needs: { changes: { outputs: { rust: "true", "main-full": "true" } } },
-    };
+const heavySelectorContext = (eventName) => ({
+  vars: { BLACKSMITH_HEAVY_ALLOCATION: "", BLACKSMITH_MIRI_ALLOCATION: "" },
+  github: {
+    repository: "fallow-rs/fallow",
+    run_attempt: 1,
+    actor: "maintainer",
+    ref: "refs/heads/main",
+    event_name: eventName,
+    event: { pull_request: { head: { repo: { full_name: "fallow-rs/fallow" } } } },
+  },
+  steps: { filter: { outputs: { rust: "true" } }, policy: { outputs: { "main-full": "true" } } },
+  needs: { changes: { outputs: { rust: "true", "main-full": "true" } } },
+});
+
+// Shared eligibility: no variable, reruns, Dependabot and forks never select.
+const assertHeavySelectorEligibility = (runInNewContext, condition, context) => {
+  assert.ok(condition, "the selector must gate startup");
+  assert.equal(runInNewContext(condition, context), false, "no variable means no selector startup");
+  context.vars.BLACKSMITH_HEAVY_ALLOCATION = "configured";
+  assert.equal(runInNewContext(condition, context), true);
+  context.github.run_attempt = 2;
+  assert.equal(runInNewContext(condition, context), false);
+  context.github.run_attempt = 1;
+  context.github.actor = "dependabot[bot]";
+  assert.equal(runInNewContext(condition, context), false);
+  context.github.actor = "maintainer";
+  context.github.repository = "fork/fallow";
+  assert.equal(runInNewContext(condition, context), false);
+  context.github.repository = "fallow-rs/fallow";
+};
+
+const assertHeavySelectorScript = (runInNewContext, selector, output) => {
+  assert.match(
+    selector,
+    /BLACKSMITH_MIRI_ALLOCATION: \$\{\{ vars\.BLACKSMITH_MIRI_ALLOCATION \}\}/,
+  );
+  assert.match(selector, /if \[ ! -f scripts\/select-heavy-runner\.mjs \]; then/);
+  assert.doesNotMatch(selector, /secrets\.|id-token:|contents: write/);
+  assert.ok(output);
+  for (const outcome of ["success", "failure", "skipped", "cancelled"]) {
+    const step = { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } };
     assert.equal(
-      runInNewContext(condition, context),
-      false,
-      "no variable means no selector runner startup",
+      runInNewContext(bracketKeys(output), { steps: { runner: step, "heavy-runner": step } }),
+      outcome === "success" ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-26.04",
     );
-    context.vars.BLACKSMITH_HEAVY_ALLOCATION = "configured";
-    assert.equal(runInNewContext(condition, context), true);
-    context.github.run_attempt = 2;
-    assert.equal(runInNewContext(condition, context), false);
-    context.github.run_attempt = 1;
-    context.github.actor = "dependabot[bot]";
-    assert.equal(runInNewContext(condition, context), false);
-    context.github.actor = "maintainer";
-    context.github.repository = "fork/fallow";
-    assert.equal(runInNewContext(condition, context), false);
-    context.github.repository = "fallow-rs/fallow";
-    if (file === "ci.yml") {
-      context.github.event_name = "pull_request";
-      assert.equal(runInNewContext(condition, context), true);
-      context.github.event.pull_request.head.repo.full_name = "fork/fallow";
-      assert.equal(runInNewContext(condition, context), false);
-      context.github.event_name = "push";
-      context.needs.changes.outputs.rust = "false";
-      context.needs.changes.outputs["main-full"] = "false";
-      assert.equal(runInNewContext(condition, context), false);
-    } else {
-      context.github.event_name = "schedule";
-      assert.equal(runInNewContext(condition, context), true);
-      context.github.ref = "refs/heads/topic";
-      assert.equal(runInNewContext(condition, context), false);
-    }
-    assert.match(selector, /runs-on: ubuntu-26.04/);
-    assert.match(selector, /permissions:\n      contents: read\n/);
-    assert.match(selector, /ref: refs\/heads\/main\n          persist-credentials: false/);
-    assert.match(selector, /node-version: '22'/);
-    assert.match(
-      selector,
-      /BLACKSMITH_MIRI_ALLOCATION: \$\{\{ vars\.BLACKSMITH_MIRI_ALLOCATION \}\}/,
-    );
-    assert.match(selector, /if \[ ! -f scripts\/select-heavy-runner\.mjs \]; then/);
-    assert.doesNotMatch(selector, /secrets\.|id-token:|contents: write/);
-    const output = selector.match(/^      runner: \$\{\{ (.+) \}\}$/m)?.[1];
-    assert.ok(output);
-    for (const outcome of ["success", "failure", "skipped", "cancelled"]) {
-      assert.equal(
-        runInNewContext(output, {
-          steps: { runner: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
-        }),
-        outcome === "success" ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-26.04",
-      );
-    }
   }
+};
+
+test("the CI heavy selector step skips startup when unset and publishes only trusted output", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const selector = changesStep(workflow, "Select Check runner");
+  const condition = stepCondition(selector);
+  const context = heavySelectorContext("push");
+  assertHeavySelectorEligibility(runInNewContext, condition, context);
+  context.github.event_name = "pull_request";
+  assert.equal(runInNewContext(condition, context), true);
+  context.github.event.pull_request.head.repo.full_name = "fork/fallow";
+  assert.equal(runInNewContext(condition, context), false);
+  context.github.event_name = "push";
+  context.steps.filter.outputs.rust = "false";
+  context.steps.policy.outputs["main-full"] = "false";
+  assert.equal(runInNewContext(condition, context), false);
+  const checkout = changesStep(workflow, "Check out the runner selectors from main");
+  assert.match(checkout, /ref: refs\/heads\/main\n          path: \.ci-selectors/);
+  assert.match(checkout, /persist-credentials: false/);
+  assert.match(selector, /working-directory: \.ci-selectors/);
+  const output = indentedBlock(workflow, "changes", 2).match(
+    /^      heavy-runner: \$\{\{ (.+) \}\}$/m,
+  )?.[1];
+  assertHeavySelectorScript(runInNewContext, selector, output);
+});
+
+test("the release validation heavy selector skips startup when unset", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/release-validation.yml");
+  const selector = indentedBlock(workflow, "heavy-runner", 2);
+  const condition = bracketKeys(
+    selector.match(/    if: >-\n([\s\S]+?)\n    runs-on:/)?.[1].trim() ?? "",
+  );
+  const context = heavySelectorContext("workflow_dispatch");
+  assertHeavySelectorEligibility(runInNewContext, condition, context);
+  context.github.event_name = "schedule";
+  assert.equal(runInNewContext(condition, context), true);
+  context.github.ref = "refs/heads/topic";
+  assert.equal(runInNewContext(condition, context), false);
+  assert.match(selector, /runs-on: ubuntu-26.04/);
+  assert.match(selector, /permissions:\n      contents: read\n/);
+  assert.match(selector, /ref: refs\/heads\/main\n          persist-credentials: false/);
+  assert.match(selector, /node-version: '22'/);
+  const output = selector.match(/^      runner: \$\{\{ (.+) \}\}$/m)?.[1];
+  assertHeavySelectorScript(runInNewContext, selector, output);
 });
 
 test("CI aggregate ignores optional selector failure while real Check failure propagates", async () => {
@@ -2308,10 +2391,8 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
       "Clippy",
       "Clippy (test-sidecar-key and schema-emit features)",
       "Format",
-      "Install NAPI package dependencies",
-      "Build NAPI package",
-      "Run NAPI smoke test",
     ],
+    napi: ["Install NAPI package dependencies", "Build NAPI package", "Run NAPI smoke test"],
     "windows-rust": ["Test Windows path and subprocess handling", "Clippy platform-specific paths"],
     "windows-drift": ["Build fallow-mcp for the drift harness", "Test drift harness on Windows"],
   };
@@ -2329,7 +2410,10 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
       );
     }
   }
-  assert.equal(indentedBlock(workflow, "check", 2).match(/^    name: (.+)$/m)?.[1], "Check");
+  assert.equal(
+    indentedBlock(workflow, "check", 2).match(/^    name: (.+)$/m)?.[1],
+    "Check (${{ matrix.partition }}/2)",
+  );
   assert.equal(
     indentedBlock(workflow, "windows-rust", 2).match(/^    name: (.+)$/m)?.[1],
     "Windows path and subprocess handling",
@@ -2338,11 +2422,25 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   const lint = indentedBlock(workflow, "check-lint", 2);
   assert.doesNotMatch(check, /cargo clippy|cargo fmt|napi build/);
   assert.doesNotMatch(lint, /cargo nextest run|cargo test /);
-  for (const job of [check, lint]) {
-    assert.match(job, /^    needs: \[changes, heavy-runner\]$/m);
+  const napi = indentedBlock(workflow, "napi", 2);
+  assert.doesNotMatch(lint, /napi build/);
+  assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/2/);
+  assert.match(check, /partition: \[1, 2\]/);
+  for (const job of [check, lint, napi]) {
+    assert.match(job, /^    needs: changes$/m);
     assert.equal(job.match(/^    if: (.+)$/m)?.[1], check.match(/^    if: (.+)$/m)?.[1]);
-    assert.equal(job.match(/^    runs-on: (.+)$/m)?.[1], check.match(/^    runs-on: (.+)$/m)?.[1]);
   }
+  const lintRunner = lint.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.equal(
+    check.match(/^    runs-on: (.+)$/m)?.[1],
+    `\${{ matrix.partition == 1 && ${lintRunner} }}`,
+    "only Check partition 1 shares the Lint and contracts runner",
+  );
+  assert.match(
+    napi,
+    /^    runs-on: ubuntu-26\.04$/m,
+    "NAPI is outside the Blacksmith credit model",
+  );
 });
 
 test("release build dependencies never receive the binary signing credential", () => {
@@ -2732,6 +2830,12 @@ const workflowRunScripts = () => {
   const scripts = workflowSources().flatMap((source) =>
     commandSteps(source).flatMap((step) => commandScripts(step.lines, step.dir, state)),
   );
+  // CI runs the runner selectors from a checkout of main in `.ci-selectors`,
+  // and the Dependabot repair runs its triage from one in `trusted`. Both
+  // hold the same tracked scripts.
+  for (const [index, script] of scripts.entries()) {
+    scripts[index] = script.replace(/^(?:\.ci-selectors|trusted)\//u, "");
+  }
   return {
     scripts: [...new Set(scripts)]
       .filter((script) => !script.endsWith(".test.mjs") && !script.includes("node_modules"))
@@ -2883,4 +2987,75 @@ test("optional Marketplace publisher proof installs only the frozen CLI before A
     job,
     /sparse-checkout: \|\n\s+.github\/scripts\/marketplace-profile.mjs\n\s+.github\/publishers\/marketplace/u,
   );
+});
+
+// Each pull request job takes a runner slot from every other open pull
+// request. A new workflow with a pull request trigger must pass the "Rule for
+// new workflows" in docs/development/quality-gates.md before it joins this list.
+const PULL_REQUEST_WORKFLOWS = [
+  "bench-cli-instructions.yml",
+  "bench-type-aware.yml",
+  "bench.yml",
+  "ci.yml",
+  "codeql.yml",
+  "commitlint.yml",
+  "dependabot-auto-merge.yml",
+  "ecosystem.yml",
+  "pgo-validate.yml",
+  "protocol-parity.yml",
+  "review-electron.yml",
+  "signing-migration.yml",
+  "test-action.yml",
+];
+
+test("only reviewed workflows run on pull requests", () => {
+  const triggered = readdirSync(".github/workflows")
+    .filter((file) => /\.ya?ml$/u.test(file))
+    .filter((file) =>
+      /^ {2}pull_request(?:_target)?:/mu.test(readWorkflow(`.github/workflows/${file}`)),
+    )
+    .toSorted();
+  assert.deepEqual(
+    triggered,
+    PULL_REQUEST_WORKFLOWS,
+    "A workflow with a pull_request trigger must be a required check, or catch a bug " +
+      "that main cannot catch one commit later. Read the Rule for new workflows in " +
+      "docs/development/quality-gates.md, then update PULL_REQUEST_WORKFLOWS.",
+  );
+});
+
+test("the Dependabot repair workflow keeps its trust boundary", () => {
+  const workflow = readWorkflow(".github/workflows/dependabot-repair.yml");
+  const jobs = indentedBlock(workflow, "jobs", 0);
+  const repair = indentedBlock(jobs, "repair", 2);
+  const publish = indentedBlock(jobs, "publish", 2);
+
+  assert.match(workflow, /^    branches: \['dependabot\/\*\*'\]$/mu);
+  assert.match(workflow, /head_repository\.full_name == github\.repository/u);
+  assert.doesNotMatch(workflow, /^\s+contents: write$/mu, "only the App token may push");
+
+  // The job that runs third-party code holds no token that can write.
+  assert.doesNotMatch(repair, /id-token: write|DEPENDABOT_APP|: write$/mu);
+  assert.match(repair, /^          github_token: \$\{\{ github\.token \}\}$/mu);
+  assert.match(repair, /^      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'$/mu);
+  assert.match(repair, /node trusted\/\.github\/scripts\/dependabot-triage\.mjs/u);
+  assert.match(repair, /--model claude-sonnet-5-5/u);
+  assert.doesNotMatch(repair, /pull_request\.body|Bash\(gh|Bash\(git:|Bash\(git push/u);
+
+  // The job that pushes runs no project code and checks the patch first.
+  assert.match(publish, /cp trusted\/\.github\/scripts\/dependabot-repair-guard\.mjs/u);
+  assert.ok(
+    publish.indexOf('dependabot-repair-guard.mjs" >') < publish.indexOf(' push "https://'),
+    "the guard runs before the push",
+  );
+  assert.doesNotMatch(publish, /\b(?:npm|pnpm|cargo) /u);
+
+  // The push token cannot write workflow files.
+  const pushToken = indentedBlock(
+    publish.replace(/^ {6}- id: push-token$/mu, "      push-token:"),
+    "push-token",
+    6,
+  );
+  assert.match(pushToken, /permission-contents: write/u);
+  assert.doesNotMatch(pushToken, /permission-workflows/u);
 });

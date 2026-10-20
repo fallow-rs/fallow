@@ -175,6 +175,10 @@ pub enum RunStatus {
 pub struct RunTest {
     pub test_id: String,
     pub status: TestStatus,
+    /// How a failed test failed: `assertion`, `error` or `timeout`. An older
+    /// companion leaves it out.
+    #[serde(default)]
+    pub failure_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -361,6 +365,7 @@ mod tests {
         assert_eq!(result.killed_by.as_deref(), Some("t::a"));
         assert_eq!(result.tests_executed, 1);
         assert_eq!(result.tests[0].status, TestStatus::Fail);
+        assert_eq!(result.tests[0].failure_kind.as_deref(), Some("assertion"));
     }
 
     #[test]

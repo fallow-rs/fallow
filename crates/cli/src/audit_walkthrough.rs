@@ -244,7 +244,7 @@ fn is_reviewable_source_unit(file: &str) -> bool {
 
 /// Read the displayed fan-in (importer) and fan-out counts back out of a focus
 /// unit's reason string. The reason is the canonical rendered "why" both surfaces
-/// print verbatim for a Stage-2 row ("high fan-in (N importers), fan-out M, ..."),
+/// print verbatim for a Stage-2 row ("fan-in (N importers), fan-out M, ..."),
 /// built in `audit_focus::build_reason` straight from the raw
 /// `facts.fan_in` / `facts.fan_out`. Sorting on these parsed counts makes the
 /// within-stage order EQUAL the number on the row, instead of the hidden, capped
@@ -252,7 +252,7 @@ fn is_reviewable_source_unit(file: &str) -> bool {
 /// past the cap). Returns `(0, 0)` when neither phrase is present (the reason has
 /// no fan signal), so such a unit sorts last and falls to the path tiebreak.
 fn parse_fan_counts(reason: &str) -> (u32, u32) {
-    let fan_in = extract_count(reason, "high fan-in (");
+    let fan_in = extract_count(reason, "fan-in (");
     let fan_out = extract_count(reason, "fan-out ");
     (fan_in, fan_out)
 }
@@ -332,7 +332,7 @@ pub fn build_direction(
     // consumers) ahead of the rest, ordered by their consumer count (the number
     // each Stage-1 row shows as "consumed by N modules"). Within the
     // non-contract-break tier (Stage 2, out-of-diff empty) the order follows the
-    // exact importer count each row displays as "high fan-in (N importers)" --
+    // exact importer count each row displays as "fan-in (N importers)" --
     // descending fan-in, then descending fan-out, then path. We read those counts
     // back out of the focus reason string (the canonical rendered text both
     // surfaces print), so the top-to-bottom order is always the visible number,
@@ -739,7 +739,7 @@ mod tests {
     }
 
     /// A focus unit whose `reason` carries a displayed importer count (the exact
-    /// "high fan-in (N importers)" phrasing `build_reason` emits) AND a deliberately
+    /// "fan-in (N importers)" phrasing `build_reason` emits) AND a deliberately
     /// disagreeing, capped `fan_io` + composite `total`, so a test can prove the
     /// within-stage order follows the DISPLAYED importer count, not the hidden blend.
     fn focus_unit_fan(
@@ -757,13 +757,13 @@ mod tests {
                 ..Default::default()
             },
             label: crate::audit_focus::FocusLabel::ReviewHere,
-            reason: format!("high fan-in ({importers} importer{s})"),
+            reason: format!("fan-in ({importers} importer{s})"),
             confidence: Vec::new(),
         }
     }
 
     // ORDERING PRINCIPLE: within Stage 2 the order is the DISPLAYED importer count
-    // ("high fan-in (N importers)"), NOT the hidden, capped `fan_io` blend. Here
+    // ("fan-in (N importers)"), NOT the hidden, capped `fan_io` blend. Here
     // a.ts shows 5 importers, b.ts shows 60 -- but both cap to the SAME `fan_io`
     // and a.ts even has the larger composite `total`. Neither has out-of-diff
     // consumers (both Stage 2), so the order must follow the shown importer count:

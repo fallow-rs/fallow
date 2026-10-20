@@ -291,6 +291,8 @@ test(
       "docs: sync the Fallow skill from fallow (#42, #43)",
     );
     assert.match(git(skills, "cat-file", "commit", "HEAD"), /^gpgsig /mu);
+    // The companion repository requires a DCO sign-off on each commit.
+    assert.match(git(skills, "log", "-1", "--format=%B"), /^Signed-off-by: .+ <.+>$/mu);
     assert.equal(git(skills, "status", "--porcelain"), "");
     assert.equal(git(skills, "rev-parse", "origin/main"), before);
     assert.doesNotMatch(output, /push origin main/u, "the companion main branch is protected");

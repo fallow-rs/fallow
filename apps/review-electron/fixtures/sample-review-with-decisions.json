@@ -63,7 +63,7 @@
       {
         "file": "src/services/api/client.ts",
         "label": "review-here",
-        "reason": "high fan-in (4 importers), fan-out 2",
+        "reason": "fan-in (4 importers), fan-out 2",
         "score": {
           "fan_io": 6,
           "security_taint": 0,

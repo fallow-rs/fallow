@@ -140,3 +140,41 @@ fn a_content_change_between_runs_is_not_warned_about() {
         perf.stderr
     );
 }
+
+/// A warning written to a pipe must be plain text.
+///
+/// The tracing layer colored its output for every writer, so an agent or a
+/// log file that captured stderr got escape codes such as `\x1b[33m` around
+/// each `WARN` line. `NO_COLOR` is left unset here on purpose: a normal shell
+/// does not set it.
+#[test]
+fn warnings_on_a_pipe_carry_no_ansi_escape_codes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"no-install","main":"src/index.ts","dependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+
+    let mut cmd = std::process::Command::new(crate::common::fallow_bin());
+    crate::common::scrub_analysis_env(&mut cmd);
+    cmd.env_remove("RUST_LOG")
+        .env_remove("NO_COLOR")
+        .arg("dead-code")
+        .arg("--root")
+        .arg(root);
+    let output = cmd.output().expect("failed to run fallow binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr.contains("WARN") && stderr.contains("node_modules"),
+        "the missing node_modules warning is the probe; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains('\u{1b}'),
+        "stderr is a pipe, so it must not carry ANSI escape codes; stderr:\n{stderr:?}"
+    );
+}

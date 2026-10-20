@@ -95,20 +95,37 @@ export const label = (count) => ((__fallow_m_a("m10") ? (count >= 1) : (__fallow
 </style>
 `;
 
+const INSTRUMENTED_SHIPPING = `${PRELUDE}
+const FREE_SHIPPING_MINIMUM = 50;
+
+const shippingFee = (subtotal) => ((__fallow_m_a("m20") ? (subtotal > FREE_SHIPPING_MINIMUM) : (__fallow_m_c("m20"), (subtotal >= FREE_SHIPPING_MINIMUM))) ? 0 : 5);
+
+module.exports = { shippingFee };
+`;
+
 const PATH_MAP = {
   "src/faults.ts": "files/src/faults.ts",
   "src/math.ts": "files/src/math.ts",
   "src/unused.ts": "files/src/unused.ts",
 };
 
-/** The run files and the path map, with the component file when asked. */
-const fixtureFiles = (components) =>
-  components
-    ? {
-        runFiles: { ...RUN_FILES, "files/src/Badge.vue": INSTRUMENTED_BADGE },
-        pathMap: { ...PATH_MAP, "src/Badge.vue": "files/src/Badge.vue" },
-      }
-    : { runFiles: RUN_FILES, pathMap: PATH_MAP };
+/** The optional run files, each with its path-map key. */
+const OPTIONAL_FILES = {
+  components: { source: "src/Badge.vue", text: INSTRUMENTED_BADGE },
+  commonjs: { source: "require/shipping.cjs", text: INSTRUMENTED_SHIPPING },
+};
+
+/** The run files and the path map, with each optional file that is asked for. */
+const fixtureFiles = (options) => {
+  const runFiles = { ...RUN_FILES };
+  const pathMap = { ...PATH_MAP };
+  for (const [option, { source, text }] of Object.entries(OPTIONAL_FILES)) {
+    if (!options[option]) continue;
+    runFiles[`files/${source}`] = text;
+    pathMap[source] = `files/${source}`;
+  }
+  return { runFiles, pathMap };
+};
 
 const write = (root, relativePath, text) => {
   const path = join(root, relativePath);
@@ -126,12 +143,14 @@ const write = (root, relativePath, text) => {
  * `node_modules/vitest`. `fixture` selects the fixture directory; a fixture
  * other than `vitest-basic` gets no `node_modules`. `components` adds the
  * instrumented component file `src/Badge.vue` to the run directory and the
- * path map.
+ * path map. `commonjs` adds the instrumented CommonJS file
+ * `require/shipping.cjs` in the same way.
  */
 export const createFixtureProject = ({
   packageName = "vitest",
   fixture = "vitest-basic",
   components = false,
+  commonjs = false,
 } = {}) => {
   const workspace = mkdtempSync(join(tmpdir(), `fallow-mutation-${fixture}-`));
   const root = join(workspace, "project");
@@ -148,7 +167,7 @@ export const createFixtureProject = ({
       "dir",
     );
   }
-  const { runFiles, pathMap } = fixtureFiles(components);
+  const { runFiles, pathMap } = fixtureFiles({ components, commonjs });
   for (const [path, text] of Object.entries(runFiles)) write(runDir, path, text);
   return {
     root,

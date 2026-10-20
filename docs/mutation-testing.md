@@ -118,6 +118,63 @@ Each of its 7971 regex mutants compiled with `new RegExp`. Most literals give
 one mutant. Locale data with many patterns gives many: date-fns has 6723 regex
 mutants, 6555 of them in its locale files.
 
+A `case` label of a `switch` gives no `string-literal` or `boolean-literal`
+mutant when the mutant is equivalent. The rule needs all of these conditions:
+
+- the switch has a `default` clause;
+- each label is a string, number, boolean or `null` literal;
+- the clause body and the `default` body have the same source text;
+- both bodies end in `return`, `throw`, or a `break` or `continue` without
+  a label;
+- no other label has the original value or the mutated value.
+
+The original label and the mutated label then select the same body for each
+input. Mutants in the clause body do not change.
+
+The test of a counted `for` loop gives no `!=` mutant for `relational-operator`,
+because that mutant is equivalent. The rule needs all of these conditions:
+
+- the init declares one `let` counter with a non-negative integer literal start;
+- the test is `i < N` or `i > N`, where `N` is a non-negative integer literal
+  that the start does not pass;
+- the update is `i++`, `++i` or `i += 1` for `<`, and `i--`, `--i` or
+  `i -= 1` for `>`;
+- the body has no write to a variable with the counter name, also in a nested
+  function, and no `eval` call.
+
+The counter then takes each integer from the start to the bound, so `i < N` and
+`i != N` select the same iterations. The `<=` or `>=` mutant and the constant
+mutant of the test do not change. A `var` counter, a bound that is not a
+literal, and the reversed form `N > i` keep the `!=` mutant.
+
+A zero comparison on the length of a known array gives no equivalent
+`relational-operator` mutant. An array length is a non-negative integer `n`,
+so these mutants are equivalent:
+
+| Comparison | Equivalent mutant |
+| --- | --- |
+| `n > 0` or `0 < n` | the `!=` swap |
+| `n <= 0` or `0 >= n` | the `==` swap |
+| `n < 0` or `0 > n` | the constant `false` |
+| `n >= 0` or `0 <= n` | the constant `true` |
+
+The receiver of `.length` must be an array literal or a name that resolves
+to a known array binding. Scope resolution finds the binding of each
+reference. A binding is a known array when it is one of these:
+
+- a `const` with an array literal, `Array.from(...)` or `Array.of(...)` value;
+- a variable or parameter with the type `T[]`, `readonly T[]`, `Array<T>`,
+  `ReadonlyArray<T>` or a tuple type;
+- a rest parameter (`...items`) with no assignment to it.
+
+A reference to a global, or to a different binding with the same name, keeps
+each mutant. A binding with a redeclaration is not a known array. A `with`
+statement, a direct `eval` call, or a local binding of `Array` or
+`ReadonlyArray` stops each proof in the file. An object with a `length`
+property, an optional chain (`items?.length`) and a computed access
+(`items["length"]`) keep each mutant. A type annotation is a type-level
+proof: a cast such as `as any` can pass another value.
+
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has
 114119 mutants, and the operator adds 6473 mutants (5.7 %), 24 % of them on
@@ -249,7 +306,9 @@ shows as `pending`.
   plan, also a mutant after the `--max-mutants` limit. A test covers a
   mutant when it hits the mutant, or when its file loads the module of a
   mutant that the module load hits. A static import path alone is not a
-  cover. A `pending` mutant that no dry-run test covers is `no_coverage`.
+  cover. When a module loads at collection time in one test file and inside
+  a test of another file (for example through a dynamic `import()`), the
+  mutant is static and runs the tests of both files. A `pending` mutant that no dry-run test covers is `no_coverage`.
   A run that `--max-mutants` caps therefore reports the coverage and the
   `no_coverage` mutants of the full run.
 - `no_coverage` never enters the score. A capped run of 200
@@ -305,6 +364,14 @@ tests detect the mutant.
   plus 2 seconds.
 - `retried: true` on a mutant result marks a status from a first run and
   a retry. A `survived` or `timeout` mutant without the field got no retry.
+- A retried mutant result has an `attempts` array: the first run, then the
+  retry. Each entry has the `status` and the `duration_ms` of that run
+  alone. A `killed` entry has `killed_by` and a `failure_kind`
+  (`assertion`, `error` or `timeout`). A `timeout` entry has the
+  `failure_kind` `timeout`. A `runtime_error` entry has a `detail` with the
+  first line of the reason. A mutant without a retry, and a `cached`
+  mutant, have no `attempts`. No fingerprint or baseline comparison uses
+  the field.
 - A retry of a real infinite loop costs two more timeout windows.
 - A `runtime_error` retry takes the mutant out of the score, also after a
   first `timeout`. The completion is then `partial` (`runtime-error`).
@@ -396,6 +463,13 @@ mutant. Their results decide no mutant status.
   affected mutants in `mutant_ids`. The mutant runs with its other covering
   tests. Only a mutant with no covering test left is `runtime_error`, and its
   `errors[]` entry names the mutant.
+- A static mutant needs a new companion before and after its run when the
+  runner keeps modules loaded between runs (Vitest with `isolate: false`).
+  After a reload of the worker gave `restart_required`, the companion that
+  starts for such a mutant dry-runs only the test files of its covering
+  tests. Each other companion dry-runs each test file of the run. A kept
+  companion with a narrow dry run restarts when a later job needs a test file
+  outside it.
 - The dry run of a restarted companion shares the host with the other
   workers. Its timeout is the first dry-run time times 2 times the worker
   count, and at least `--setup-timeout` (2 minutes by default). On a slow
@@ -592,6 +666,25 @@ test run.
 - Internal protocol detail: the companion applies the `options.env` values
   of the init request after these variables, so they win. The API sends an
   empty `options.env`.
+
+### Vitest module loading
+
+- A Vite plugin of the adapter serves the instrumented files to each
+  `import` that the Vite module runner handles. A script file gets its copy
+  in the `transform` hook, and a component file in the `load` hook.
+- A native `require`, for example through `createRequire(import.meta.url)`,
+  does not go through Vite. The setup file of the adapter registers a
+  synchronous module hook (`module.registerHooks`) in each worker, so that
+  load also gets the instrumented file. The hook replaces only the files of
+  the overlay, and it reports each served path in the test meta
+  (`fallowLoaded`). The adapter adds these paths to the loaded set, so
+  `unloaded_paths` stays correct.
+- The adapter gives the overlay to each project with `project.provide`. A
+  worker that runs more than one test file (`isolate: false`) registers the
+  hook once.
+- The hook needs Node 22.15 or later. On an older Node, and in browser mode,
+  a native `require` loads the original file, and the path stays in
+  `unloaded_paths`. A static `import` of the file is the workaround.
 
 ### `node:test` and `bun test`
 

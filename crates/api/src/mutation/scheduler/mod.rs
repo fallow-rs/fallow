@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fallow_output::MutantStatus;
+use fallow_output::{MutantAttempt, MutantFailureKind, MutantStatus};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::manifest::RunnerRange;
@@ -114,6 +114,8 @@ pub struct MutantOutcome {
     pub duration_ms: Option<u64>,
     /// True when the status comes from a first run and a retry.
     pub retried: bool,
+    /// The first run and the retry of a `retried` mutant. Empty otherwise.
+    pub attempts: Vec<MutantAttempt>,
     /// True when the result comes from the result cache. The mutant did not
     /// run.
     pub cached: bool,
@@ -128,6 +130,7 @@ impl MutantOutcome {
             static_mutant: false,
             duration_ms: None,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
         }
     }
@@ -265,11 +268,24 @@ struct Job {
     /// the watchdog waits for it (section 8).
     setup_ms: u64,
     static_mutant: bool,
+    /// The sorted test files of `tests`.
+    test_files: Vec<String>,
     /// The result cache key. `None` without a cache.
     cache_key: Option<String>,
 }
 
 impl Job {
+    /// The test files that a companion must dry-run for this job. `None`
+    /// means each file of the phase.
+    ///
+    /// A companion that runs a static mutant without fresh modules is
+    /// discarded after the job when its reload restarts it, so a dry run of
+    /// the other test files has no use (issue #3650).
+    fn dry_scope(&self, caps: Capabilities, restarts_on_reload: bool) -> Option<&[String]> {
+        let discarded = self.static_mutant && !caps.fresh_modules_per_run && restarts_on_reload;
+        (discarded && !self.test_files.is_empty()).then_some(self.test_files.as_slice())
+    }
+
     /// The watchdog wait: `timeout_ms`, the file setup time and the grace.
     fn watchdog_ms(&self) -> u64 {
         self.timeout_ms + self.setup_ms + WATCHDOG_GRACE_MS
@@ -291,6 +307,8 @@ struct Attempt {
     status: MutantStatus,
     killed_by: Option<String>,
     duration_ms: Option<u64>,
+    /// How the run detected the mutant, when the runner states it.
+    failure_kind: Option<MutantFailureKind>,
     issue: Option<ScheduleIssue>,
     /// The covering tests that the companion left out, because they did not
     /// pass in its dry run or in a control run.
@@ -306,6 +324,7 @@ impl Attempt {
             status: MutantStatus::RuntimeError,
             killed_by: None,
             duration_ms: None,
+            failure_kind: None,
             issue: Some(ScheduleIssue {
                 code: "runtime-error",
                 message,
@@ -324,6 +343,7 @@ impl Attempt {
             status: MutantStatus::NoCoverage,
             killed_by: None,
             duration_ms: None,
+            failure_kind: None,
             issue: None,
             dropped_tests,
             settled: true,
@@ -335,10 +355,15 @@ impl Attempt {
         killed_by: Option<String>,
         duration_ms: Option<u64>,
     ) -> Self {
+        let failure_kind = match status {
+            MutantStatus::Timeout => Some(MutantFailureKind::Timeout),
+            _ => None,
+        };
         Self {
             status,
             killed_by,
             duration_ms,
+            failure_kind,
             issue: None,
             dropped_tests: Vec::new(),
             settled: false,
@@ -423,6 +448,42 @@ fn classify(
             }
             Ok((MutantStatus::Survived, None))
         }
+    }
+}
+
+/// How a `killed` run detected the mutant: the failure kind of the killing
+/// test, or `error` for a kill by an error outside each test.
+fn kill_kind(
+    result: &RunResult,
+    status: MutantStatus,
+    killed_by: Option<&str>,
+) -> Option<MutantFailureKind> {
+    if status != MutantStatus::Killed {
+        return None;
+    }
+    let Some(killer) = killed_by else {
+        return Some(MutantFailureKind::Error);
+    };
+    result
+        .tests
+        .iter()
+        .find(|test| test.test_id == killer)
+        .and_then(|test| test.failure_kind.as_deref())
+        .and_then(MutantFailureKind::from_wire)
+}
+
+/// The evidence of one run, for the attempt history of a retried mutant.
+fn attempt_record(attempt: &Attempt) -> MutantAttempt {
+    let detail = (attempt.status == MutantStatus::RuntimeError)
+        .then_some(attempt.issue.as_ref())
+        .flatten()
+        .map(|issue| first_line(&issue.message).to_owned());
+    MutantAttempt {
+        status: attempt.status,
+        duration_ms: attempt.duration_ms,
+        killed_by: attempt.killed_by.clone(),
+        failure_kind: attempt.failure_kind,
+        detail,
     }
 }
 
@@ -626,6 +687,10 @@ struct Worker<'a> {
     dry_run_timeout: Duration,
     link: Option<Box<dyn CompanionLink>>,
     known_tests: FxHashSet<String>,
+    /// The test files of the dry run of `link`. `None` means `dry_files`.
+    loaded_files: Option<Vec<String>>,
+    /// A reload of a companion of this worker gave `restart_required`.
+    restarts_on_reload: bool,
     memo: &'a ControlMemo,
 }
 
@@ -649,6 +714,8 @@ impl<'a> Worker<'a> {
             dry_run_timeout,
             link: None,
             known_tests: FxHashSet::default(),
+            loaded_files: None,
+            restarts_on_reload: false,
             memo,
         }
     }
@@ -658,9 +725,22 @@ impl<'a> Worker<'a> {
             link.shutdown();
         }
         self.known_tests.clear();
+        self.loaded_files = None;
     }
 
-    fn ensure(&mut self) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
+    /// Gives a companion whose dry run covers `scope`, or each file of the
+    /// phase for `None`. A companion with a narrower dry run is replaced:
+    /// the protocol has no second dry run.
+    fn ensure(
+        &mut self,
+        scope: Option<&[String]>,
+    ) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
+        if let Some(loaded) = &self.loaded_files
+            && self.link.is_some()
+            && scope.is_none_or(|scope| scope.iter().any(|file| !loaded.contains(file)))
+        {
+            self.reset();
+        }
         if self.link.is_none() {
             let mut link = self.spawner.spawn().map_err(|failure| match failure {
                 SpawnFailure::Integrity(message) => {
@@ -700,7 +780,7 @@ impl<'a> Worker<'a> {
                 Err(error) => return Err(fault("init", &error)),
             }
             let request = Request::DryRun {
-                test_files: self.dry_files.to_vec(),
+                test_files: scope.unwrap_or(self.dry_files).to_vec(),
             };
             match link.request(&request, self.dry_run_timeout) {
                 Ok(Response::DryRun(result)) => {
@@ -720,6 +800,7 @@ impl<'a> Worker<'a> {
                 Err(error) => return Err(fault("dry run", &error)),
             }
             self.link = Some(link);
+            self.loaded_files = scope.map(<[String]>::to_vec);
         }
         self.link
             .as_mut()
@@ -732,7 +813,7 @@ impl<'a> Worker<'a> {
         if needs_reload && self.link.is_some() {
             self.reload();
         }
-        match self.ensure() {
+        match self.ensure(job.dry_scope(caps, self.restarts_on_reload)) {
             Ok(_) => {}
             Err(EnsureError::Fatal(error)) => return Err(error),
             Err(EnsureError::Fault(message, tail)) => {
@@ -773,7 +854,12 @@ impl<'a> Worker<'a> {
             Ok(Response::Run(result)) => match classify(job, &tests, &result) {
                 Ok((status, killed_by)) => {
                     load_kill = is_load_kill(&result, status, killed_by.as_ref());
-                    Attempt::decided(status, killed_by, round_ms(result.duration_ms))
+                    let kind = kill_kind(&result, status, killed_by.as_deref());
+                    let decided = Attempt::decided(status, killed_by, round_ms(result.duration_ms));
+                    Attempt {
+                        failure_kind: kind.or(decided.failure_kind),
+                        ..decided
+                    }
                 }
                 Err(reason) => {
                     self.reset();
@@ -920,7 +1006,8 @@ impl<'a> Worker<'a> {
         if !caps.hot_switch && self.link.is_some() {
             self.reload();
         }
-        match self.ensure() {
+        // The control tests are a subset of the tests of `job`.
+        match self.ensure(job.dry_scope(caps, self.restarts_on_reload)) {
             Ok(_) => {}
             Err(EnsureError::Fatal(error)) => return Err(error),
             Err(EnsureError::Fault(message, _)) => {
@@ -994,6 +1081,10 @@ impl<'a> Worker<'a> {
         match link.request(&Request::Reload, self.config.runner_timeout) {
             Ok(Response::Reloaded(reloaded))
                 if reloaded.method != ReloadMethod::RestartRequired => {}
+            Ok(Response::Reloaded(_)) => {
+                self.restarts_on_reload = true;
+                self.reset();
+            }
             _ => self.reset(),
         }
     }
@@ -1142,13 +1233,7 @@ fn read_dry_run(
             }
         }
     }
-    let test_hit: FxHashSet<&String> = result.hits.values().flatten().collect();
-    let static_ids = result
-        .static_hits
-        .iter()
-        .filter(|id| !test_hit.contains(id))
-        .cloned()
-        .collect();
+    let static_ids = result.static_hits.iter().cloned().collect();
     Ok(DryRunFacts {
         passing,
         covering,
@@ -1159,8 +1244,10 @@ fn read_dry_run(
 }
 
 /// The covering tests of `mutant` from the dry run. A static mutant runs
-/// each passing test of the dry-run files that load its module. A static
-/// map miss has no static test file, so it runs each passing dry-run test.
+/// each passing test of the dry-run files that load its module, and also the
+/// tests that hit it at run time (for example through a dynamic `import()`).
+/// A static map miss has no static test file, so it runs each passing
+/// dry-run test.
 fn covering_tests(
     plan: &SchedulePlan,
     facts: &DryRunFacts,
@@ -1179,12 +1266,16 @@ fn covering_tests(
         .flatten()
         .filter(|file| dry_files.contains(file))
         .collect();
-    facts
+    let mut tests: BTreeSet<String> = facts
         .passing
         .iter()
         .filter(|(_, (file, _))| map_miss || files.contains(file))
         .map(|(test, _)| test.clone())
-        .collect()
+        .collect();
+    if let Some(runtime) = facts.covering.get(&mutant.id) {
+        tests.extend(runtime.iter().cloned());
+    }
+    tests
 }
 
 /// Widens `tests` to each passing test of their files. Without
@@ -1242,6 +1333,7 @@ fn cached_outcome(
         duration_ms: hit.duration_ms,
         // The cache stores a survivor only after its retry.
         retried: hit.status == MutantStatus::Survived,
+        attempts: Vec::new(),
         cached: true,
     })
 }
@@ -1340,15 +1432,13 @@ fn build_jobs(
         let total: f64 = tests.iter().map(|(duration, _)| duration).sum();
         let setup_ms = scaled_ms(facts.setup_of(&tests));
         let tests: Vec<String> = tests.into_iter().map(|(_, test)| test).collect();
-        let cache_key = cache.map(|cache| {
-            let mut test_files: Vec<String> = tests
-                .iter()
-                .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
-                .collect();
-            test_files.sort_unstable();
-            test_files.dedup();
-            cache.key(ready, mutant, &tests, &test_files)
-        });
+        let mut test_files: Vec<String> = tests
+            .iter()
+            .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
+            .collect();
+        test_files.sort_unstable();
+        test_files.dedup();
+        let cache_key = cache.map(|cache| cache.key(ready, mutant, &tests, &test_files));
         if let Some(cached) =
             cached_outcome(cache, cache_key.as_ref(), mutant, &tests, static_mutant)
         {
@@ -1361,6 +1451,7 @@ fn build_jobs(
             timeout_ms: timeout_ms(total),
             setup_ms,
             static_mutant,
+            test_files,
             cache_key,
         };
         if static_mutant {
@@ -1550,6 +1641,7 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
             static_mutant: job.static_mutant,
             duration_ms: attempt.duration_ms,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
         },
     );
@@ -1759,6 +1851,30 @@ const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatu
     }
 }
 
+/// Records the first run of each mutant. Gives the survivors and the
+/// timeouts to run again, and the evidence of their first run.
+fn record_first_runs(
+    outcome: &mut ScheduleOutcome,
+    facts: &DryRunFacts,
+    attempts: Vec<(Job, Attempt)>,
+) -> (Vec<Job>, FxHashMap<String, MutantAttempt>) {
+    let mut suspects = Vec::new();
+    let mut first_runs = FxHashMap::default();
+    for (job, attempt) in attempts {
+        let suspect = match attempt.status {
+            MutantStatus::Survived => Some(job.clone()),
+            MutantStatus::Timeout => Some(job.clone().with_doubled_timeout()),
+            _ => None,
+        };
+        if let Some(suspect) = suspect {
+            first_runs.insert(job.id.clone(), attempt_record(&attempt));
+            suspects.push(suspect);
+        }
+        record(outcome, facts, job, attempt);
+    }
+    (suspects, first_runs)
+}
+
 /// Runs each survivor and each timeout again in a new companion (section
 /// 10), see [`retried_status`]. Host load alone can make a test time out,
 /// so a single timeout is not proof of detection. The retry stays inside the time budget: a
@@ -1768,6 +1884,7 @@ fn retry_suspects(
     runner: PhaseRunner<'_>,
     facts: &DryRunFacts,
     suspects: Vec<Job>,
+    mut first_runs: FxHashMap<String, MutantAttempt>,
     outcome: &mut ScheduleOutcome,
 ) -> Result<(), ScheduleError> {
     let mut retry_files: Vec<String> = suspects
@@ -1802,6 +1919,11 @@ fn retry_suspects(
             first.and_then(|first| first.duration_ms)
         };
         let id = job.id.clone();
+        let attempts: Vec<MutantAttempt> = first_runs
+            .remove(&id)
+            .into_iter()
+            .chain([attempt_record(&attempt)])
+            .collect();
         record(
             outcome,
             facts,
@@ -1814,6 +1936,7 @@ fn retry_suspects(
         );
         if let Some(result) = outcome.results.get_mut(&id) {
             result.retried = true;
+            result.attempts = attempts;
         }
     }
     Ok(())
@@ -2111,18 +2234,10 @@ pub fn run_schedule_with_progress(
     outcome.workers = workers;
     outcome.timings.mutants = mutants_started.elapsed();
     note_control_failures(&mut outcome, &facts, &memo);
-    let mut suspects = Vec::new();
-    for (job, attempt) in attempts {
-        match attempt.status {
-            MutantStatus::Survived => suspects.push(job.clone()),
-            MutantStatus::Timeout => suspects.push(job.clone().with_doubled_timeout()),
-            _ => {}
-        }
-        record(&mut outcome, &facts, job, attempt);
-    }
+    let (suspects, first_runs) = record_first_runs(&mut outcome, &facts, attempts);
     if !suspects.is_empty() {
         let retry_started = Instant::now();
-        retry_suspects(runner, &facts, suspects, &mut outcome)?;
+        retry_suspects(runner, &facts, suspects, first_runs, &mut outcome)?;
         outcome.timings.retry = retry_started.elapsed();
     }
     outcome

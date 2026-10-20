@@ -123,6 +123,11 @@ MCP exposes two read-only tools:
   containing the unchanged discovery `schema_version`, `generation`, selected
   `candidate`, `completion`, and `diagnostics`, then returns its inspect packet.
 
+The `fallow://schema/similar-code-snapshot` resource serves
+`crates/api/similar-code-snapshot-schema.json`. `npm run generate:contracts`
+regenerates the file from the `schema` derive, and a schema-emit test fails when
+the file is stale. The MCP server therefore builds without the `schema` feature.
+
 For scoped discovery, `generation.scope.paths` is the sorted materialized scope
 that actually reached analysis. It is provenance for auditing the run, not an
 argument list to replay. Construct the MCP snapshot directly from the discovery

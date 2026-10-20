@@ -4,7 +4,11 @@
 //! site holds the candidate mutants for that expression. The walk skips the
 //! positions where a mutant is invalid or useless: type positions, enum
 //! members, decorators, module syntax, directives, assignment targets,
-//! property keys and the arguments of logging calls.
+//! property keys, the arguments of logging calls, a `case` label whose
+//! literal mutant is equivalent because its body is the `default` body, and
+//! the `!=` mutant of a counted `for` loop test (see `counted_loop_test`),
+//! and the equivalent mutant of a zero comparison on the length of a known
+//! array (see `ArrayBindings`).
 //!
 //! The logging rule is broad: a `console.*` or `debug(...)` call gives no
 //! mutant at all. This covers each expression in its arguments (strings,
@@ -14,24 +18,29 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_ast::ast::{
     AccessorProperty, ArrowFunctionExpression, AssignmentExpression, AssignmentTarget,
-    BinaryExpression, BooleanLiteral, CallExpression, ChainElement, ChainExpression, Class,
-    ConditionalExpression, Decorator, Directive, DoWhileStatement, ExportAllDeclaration,
-    ExportDefaultDeclaration, ExportFromDeclaration, ExportNamedDeclaration, Expression,
-    ExpressionStatement, ForStatement, ForStatementLeft, Function, IfStatement, ImportDeclaration,
-    ImportExpression, JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition,
-    MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral,
-    ReturnStatement, SimpleAssignmentTarget, StringLiteral, TSEnumDeclaration, TSExportAssignment,
+    AssignmentTargetPropertyIdentifier, BinaryExpression, BindingIdentifier, BindingPattern,
+    BooleanLiteral, CallExpression, ChainElement, ChainExpression, Class, ConditionalExpression,
+    Decorator, Directive, DoWhileStatement, ExportAllDeclaration, ExportDefaultDeclaration,
+    ExportFromDeclaration, ExportNamedDeclaration, Expression, ExpressionStatement, ForStatement,
+    ForStatementInit, ForStatementLeft, FormalParameter, FormalParameterRest, Function,
+    IfStatement, ImportDeclaration, ImportExpression, JSXAttributeValue, LogicalExpression,
+    MemberExpression, MethodDefinition, MethodDefinitionKind, ObjectProperty, Program,
+    PropertyDefinition, PropertyKey, RegExpLiteral, ReturnStatement, SimpleAssignmentTarget,
+    Statement, StringLiteral, SwitchCase, SwitchStatement, TSEnumDeclaration, TSExportAssignment,
     TSExternalModuleDeclaration, TSGlobalDeclaration, TSImportEqualsDeclaration,
     TSInterfaceDeclaration, TSNamespaceDeclaration, TSNamespaceExportDeclaration, TSType,
-    TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeParameterDeclaration,
-    TSTypeParameterInstantiation, TaggedTemplateExpression, UnaryExpression, UpdateExpression,
-    VariableDeclaration, VariableDeclarator, WhileStatement,
+    TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeName, TSTypeOperatorOperator,
+    TSTypeParameterDeclaration, TSTypeParameterInstantiation, TaggedTemplateExpression,
+    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarationKind,
+    VariableDeclarator, WhileStatement, WithStatement,
 };
 use oxc_ast_visit::{Visit, walk};
+use oxc_semantic::SemanticBuilder;
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::operator::{
     AssignmentOperator, BinaryOperator, LogicalOperator, UnaryOperator, UpdateOperator,
 };
+use oxc_syntax::reference::ReferenceId;
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::{FunctionRef, Operator, is_identifier_byte};
@@ -85,6 +94,9 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         logical_operands: BTreeSet::new(),
         relational_operands: BTreeSet::new(),
         expression_starts: BTreeSet::new(),
+        equivalent_labels: BTreeSet::new(),
+        counted_loop_tests: BTreeSet::new(),
+        known_arrays: ArrayBindings::known_array_references(program),
     };
     collector.visit_program(program);
     let mut sites: Vec<Site> = collector.sites.into_values().collect();
@@ -117,6 +129,16 @@ struct Collector<'s> {
     /// At these positions a leading `function`, `class` or `{` changes the
     /// parse, as at the start of a statement.
     expression_starts: BTreeSet<u32>,
+    /// String and boolean case labels whose literal mutant is equivalent:
+    /// the clause runs the same body as `default`. See
+    /// `equivalent_case_labels`.
+    equivalent_labels: BTreeSet<(u32, u32)>,
+    /// Counted `for` loop tests whose `!=` mutant is equivalent. See
+    /// `counted_loop_test`.
+    counted_loop_tests: BTreeSet<(u32, u32)>,
+    /// The identifier references that resolve to a binding that holds an
+    /// array. See `ArrayBindings`.
+    known_arrays: BTreeSet<ReferenceId>,
 }
 
 const fn pair(span: Span) -> (u32, u32) {
@@ -127,6 +149,408 @@ fn is_function_like(expression: &Expression<'_>) -> bool {
     matches!(
         expression.without_parentheses(),
         Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+    )
+}
+
+/// The value of a literal case label, compared with JS strict equality.
+#[derive(PartialEq)]
+enum LabelValue<'a> {
+    String(&'a str),
+    Boolean(bool),
+    /// A number or `null`. No string or boolean mutant can take its value.
+    Other,
+}
+
+fn label_value<'a>(test: &Expression<'a>) -> Option<LabelValue<'a>> {
+    match test {
+        Expression::StringLiteral(it) => Some(LabelValue::String(it.value.as_str())),
+        Expression::BooleanLiteral(it) => Some(LabelValue::Boolean(it.value)),
+        Expression::NumericLiteral(_) | Expression::NullLiteral(_) => Some(LabelValue::Other),
+        _ => None,
+    }
+}
+
+/// The value that the `string-literal` or `boolean-literal` mutant gives.
+fn mutated_value(value: &LabelValue<'_>) -> Option<LabelValue<'static>> {
+    match value {
+        LabelValue::String("") => Some(LabelValue::String("fallow")),
+        LabelValue::String(_) => Some(LabelValue::String("")),
+        LabelValue::Boolean(flag) => Some(LabelValue::Boolean(!flag)),
+        LabelValue::Other => None,
+    }
+}
+
+/// True when the statement always leaves the clause, so control never falls
+/// through into the next clause.
+fn is_exit(statement: &Statement<'_>) -> bool {
+    match statement {
+        Statement::ReturnStatement(_) | Statement::ThrowStatement(_) => true,
+        Statement::BreakStatement(it) => it.label.is_none(),
+        Statement::ContinueStatement(it) => it.label.is_none(),
+        _ => false,
+    }
+}
+
+/// The source text of a clause body that ends in an exit.
+fn exiting_body<'s>(source: &'s str, case: &SwitchCase<'_>) -> Option<&'s str> {
+    let first = case.consequent.first()?;
+    let last = case.consequent.last()?;
+    if !is_exit(last) {
+        return None;
+    }
+    source.get(first.span().start as usize..last.span().end as usize)
+}
+
+/// The spans of the case labels whose literal mutant cannot change the
+/// result (#3639). For such a label, the original and the mutated switch
+/// both run the `default` body for each input that the label matched, and
+/// the mutated value selects no other clause. The rule needs all of these:
+///
+/// - every label is a string, number, boolean or `null` literal, so a label
+///   has no side effect and the evaluation order does not matter;
+/// - the clause body and the `default` body are the same text and both end
+///   in an unconditional exit, so neither falls through;
+/// - no other label has the original or the mutated value.
+fn equivalent_case_labels(source: &str, switch: &SwitchStatement<'_>) -> Vec<(u32, u32)> {
+    let Some(default_body) = switch
+        .cases
+        .iter()
+        .find(|case| case.test.is_none())
+        .and_then(|case| exiting_body(source, case))
+    else {
+        return Vec::new();
+    };
+    let mut labels = Vec::with_capacity(switch.cases.len());
+    for case in &switch.cases {
+        let Some(test) = &case.test else { continue };
+        let Some(value) = label_value(test) else {
+            return Vec::new();
+        };
+        labels.push((case, test.span(), value));
+    }
+    labels
+        .iter()
+        .enumerate()
+        .filter(|(index, (case, _, value))| {
+            let Some(mutated) = mutated_value(value) else {
+                return false;
+            };
+            exiting_body(source, case) == Some(default_body)
+                && labels
+                    .iter()
+                    .enumerate()
+                    .all(|(other, (_, _, other_value))| {
+                        other == *index || (other_value != value && *other_value != mutated)
+                    })
+        })
+        .map(|(_, (_, span, _))| pair(*span))
+        .collect()
+}
+
+/// The largest integer that a `number` holds without a loss of precision.
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// The value of a non-negative safe integer literal.
+fn safe_integer(expression: &Expression<'_>) -> Option<f64> {
+    let Expression::NumericLiteral(literal) = expression else {
+        return None;
+    };
+    let value = literal.value;
+    (value.fract() == 0.0 && (0.0..=MAX_SAFE_INTEGER).contains(&value)).then_some(value)
+}
+
+/// True when `update` moves the counter `name` one step: up for `<`, down
+/// for `>`.
+fn is_unit_step(update: &Expression<'_>, name: &str, up: bool) -> bool {
+    match update {
+        Expression::UpdateExpression(update) => {
+            let operator = if up {
+                UpdateOperator::Increment
+            } else {
+                UpdateOperator::Decrement
+            };
+            update.operator == operator
+                && matches!(&update.argument, SimpleAssignmentTarget::AssignmentTargetIdentifier(id) if id.name == name)
+        }
+        Expression::AssignmentExpression(assignment) => {
+            let operator = if up {
+                AssignmentOperator::Addition
+            } else {
+                AssignmentOperator::Subtraction
+            };
+            assignment.operator == operator
+                && matches!(&assignment.left, AssignmentTarget::AssignmentTargetIdentifier(id) if id.name == name)
+                && matches!(&assignment.right, Expression::NumericLiteral(one) if one.value.total_cmp(&1.0).is_eq())
+        }
+        _ => false,
+    }
+}
+
+/// The test of a counted `for` loop, where `i < N` and `i != N` select the
+/// same iterations, so the `!=` mutant is equivalent. The rule needs all of
+/// these:
+///
+/// - the init declares one `let` counter with a safe integer start `s`;
+///   a `var` counter can have a write outside the loop;
+/// - the test is `i < N` with `s <= N`, or `i > N` with `s >= N`, where `N`
+///   is a safe integer literal, so the counter reaches the bound exactly;
+/// - the update is `i++`, `++i` or `i += 1` for `<`, and the decrement for
+///   `>`;
+/// - the body has no write to a variable with the counter name, also in a
+///   nested function, and no `eval` call.
+fn counted_loop_test(it: &ForStatement<'_>) -> Option<(u32, u32)> {
+    let Some(ForStatementInit::VariableDeclaration(init)) = &it.init else {
+        return None;
+    };
+    let [declarator] = init.declarations.as_slice() else {
+        return None;
+    };
+    if init.kind != VariableDeclarationKind::Let {
+        return None;
+    }
+    let BindingPattern::BindingIdentifier(counter) = &declarator.id else {
+        return None;
+    };
+    let name = counter.name.as_str();
+    let start = safe_integer(declarator.init.as_ref()?)?;
+    let Some(Expression::BinaryExpression(test)) = &it.test else {
+        return None;
+    };
+    if !test.left.is_specific_id(name) {
+        return None;
+    }
+    let bound = safe_integer(&test.right)?;
+    let up = match test.operator {
+        BinaryOperator::LessThan if start <= bound => true,
+        BinaryOperator::GreaterThan if start >= bound => false,
+        _ => return None,
+    };
+    if !is_unit_step(it.update.as_ref()?, name, up) {
+        return None;
+    }
+    let mut writes = CounterWrites { name, found: false };
+    writes.visit_statement(&it.body);
+    (!writes.found).then_some(pair(test.span))
+}
+
+/// Finds a write to a variable by name, or an `eval` call that can make one.
+/// The check uses the name only, so a shadowed variable also counts.
+struct CounterWrites<'n> {
+    name: &'n str,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for CounterWrites<'_> {
+    fn visit_simple_assignment_target(&mut self, it: &SimpleAssignmentTarget<'a>) {
+        let target = match it {
+            SimpleAssignmentTarget::AssignmentTargetIdentifier(identifier) => {
+                identifier.name == self.name
+            }
+            _ => it
+                .get_expression()
+                .is_some_and(|inner| callee_without_wrappers(inner).is_specific_id(self.name)),
+        };
+        self.found |= target;
+        walk::walk_simple_assignment_target(self, it);
+    }
+
+    fn visit_assignment_target_property_identifier(
+        &mut self,
+        it: &AssignmentTargetPropertyIdentifier<'a>,
+    ) {
+        self.found |= it.binding.name == self.name;
+        walk::walk_assignment_target_property_identifier(self, it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.found |= callee_without_wrappers(&it.callee).is_specific_id("eval");
+        walk::walk_call_expression(self, it);
+    }
+}
+
+/// The global names that a known-array proof by constructor or type depends
+/// on. A file that binds one of these names gets no known-array proof.
+const ARRAY_GLOBALS: [&str; 2] = ["Array", "ReadonlyArray"];
+
+/// How a binding proves that it holds an array.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArrayProof {
+    /// A `const` array value or a TypeScript array type. Each value that
+    /// the binding can hold is an array.
+    Fixed,
+    /// A rest parameter without a type annotation. It starts as an array,
+    /// so it qualifies only when no write to it exists.
+    Unwritten,
+}
+
+/// Finds the identifier references that resolve to a binding that holds an
+/// array, so that `name.length` is a non-negative integer. A binding
+/// qualifies when it is:
+///
+/// - a `const` declarator with an array literal, `Array.from(...)` or
+///   `Array.of(...)` initializer;
+/// - a declarator or parameter with a TypeScript array type annotation:
+///   `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>` or a tuple;
+/// - a rest parameter, when no write to it exists or it has an array type.
+///
+/// Scope resolution decides which binding a reference uses, so a global or
+/// a different binding with the same name gets no proof. A binding with a
+/// redeclaration is not proven. A `with` statement or a direct `eval` call
+/// can bind a name at run time, so they cancel every proof. A type
+/// annotation is a type-level proof only: a cast such as `as any` can pass
+/// another value. The rule accepts this, as the type checker does.
+#[derive(Default)]
+struct ArrayBindings {
+    qualifying: BTreeMap<(u32, u32), ArrayProof>,
+    array_globals_bound: bool,
+    dynamic_scope: bool,
+}
+
+impl ArrayBindings {
+    fn known_array_references(program: &Program<'_>) -> BTreeSet<ReferenceId> {
+        let mut bindings = Self::default();
+        bindings.visit_program(program);
+        if bindings.qualifying.is_empty() || bindings.dynamic_scope || bindings.array_globals_bound
+        {
+            return BTreeSet::new();
+        }
+        let semantic = SemanticBuilder::new().build(program).semantic;
+        let scoping = semantic.scoping();
+        let mut references = BTreeSet::new();
+        for symbol in scoping.symbol_ids() {
+            let Some(proof) = bindings.qualifying.get(&pair(scoping.symbol_span(symbol))) else {
+                continue;
+            };
+            if !scoping.symbol_redeclarations(symbol).is_empty() {
+                continue;
+            }
+            if *proof == ArrayProof::Unwritten
+                && scoping
+                    .get_resolved_references(symbol)
+                    .any(|reference| reference.is_write())
+            {
+                continue;
+            }
+            references.extend(scoping.get_resolved_reference_ids(symbol).iter().copied());
+        }
+        references
+    }
+}
+
+fn is_array_type(annotation: Option<&TSTypeAnnotation<'_>>) -> bool {
+    let Some(annotation) = annotation else {
+        return false;
+    };
+    match &annotation.type_annotation {
+        TSType::TSArrayType(_) | TSType::TSTupleType(_) => true,
+        TSType::TSTypeOperatorType(operator) => {
+            operator.operator == TSTypeOperatorOperator::Readonly
+                && matches!(
+                    operator.type_annotation,
+                    TSType::TSArrayType(_) | TSType::TSTupleType(_)
+                )
+        }
+        TSType::TSTypeReference(reference) => {
+            reference.type_arguments.is_some()
+                && matches!(&reference.type_name, TSTypeName::IdentifierReference(name) if ARRAY_GLOBALS.contains(&name.name.as_str()))
+        }
+        _ => false,
+    }
+}
+
+/// True for an array literal, `Array.from(...)` or `Array.of(...)`.
+fn is_array_value(init: &Expression<'_>) -> bool {
+    match init {
+        Expression::ArrayExpression(_) => true,
+        Expression::CallExpression(call) => matches!(
+            &call.callee,
+            Expression::StaticMemberExpression(member)
+                if member.object.is_specific_id("Array")
+                    && matches!(member.property.name.as_str(), "from" | "of")
+        ),
+        _ => false,
+    }
+}
+
+impl<'a> Visit<'a> for ArrayBindings {
+    fn visit_variable_declaration(&mut self, it: &VariableDeclaration<'a>) {
+        for declarator in &it.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            let constant = it.kind == VariableDeclarationKind::Const
+                && declarator.init.as_ref().is_some_and(is_array_value);
+            if constant || is_array_type(declarator.type_annotation.as_deref()) {
+                self.qualifying.insert(pair(id.span), ArrayProof::Fixed);
+            }
+        }
+        walk::walk_variable_declaration(self, it);
+    }
+
+    fn visit_formal_parameter(&mut self, it: &FormalParameter<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &it.pattern
+            && is_array_type(it.type_annotation.as_deref())
+        {
+            self.qualifying.insert(pair(id.span), ArrayProof::Fixed);
+        }
+        walk::walk_formal_parameter(self, it);
+    }
+
+    fn visit_formal_parameter_rest(&mut self, it: &FormalParameterRest<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &it.rest.argument {
+            let proof = if is_array_type(it.type_annotation.as_deref()) {
+                ArrayProof::Fixed
+            } else {
+                ArrayProof::Unwritten
+            };
+            self.qualifying.insert(pair(id.span), proof);
+        }
+        walk::walk_formal_parameter_rest(self, it);
+    }
+
+    fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
+        self.array_globals_bound |= ARRAY_GLOBALS.contains(&it.name.as_str());
+    }
+
+    fn visit_with_statement(&mut self, it: &WithStatement<'a>) {
+        self.dynamic_scope = true;
+        walk::walk_with_statement(self, it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.dynamic_scope |= callee_without_wrappers(&it.callee).is_specific_id("eval");
+        walk::walk_call_expression(self, it);
+    }
+}
+
+/// The comparison operator with its operands swapped: `0 < n` is `n > 0`.
+const fn mirrored(operator: BinaryOperator) -> BinaryOperator {
+    match operator {
+        BinaryOperator::LessThan => BinaryOperator::GreaterThan,
+        BinaryOperator::LessEqualThan => BinaryOperator::GreaterEqualThan,
+        BinaryOperator::GreaterThan => BinaryOperator::LessThan,
+        BinaryOperator::GreaterEqualThan => BinaryOperator::LessEqualThan,
+        other => other,
+    }
+}
+
+/// The replacement that is equivalent for `n <operator> 0` when `n` is a
+/// non-negative integer: `n > 0` is `n != 0`, `n <= 0` is `n == 0`,
+/// `n < 0` is always false and `n >= 0` is always true.
+const fn equivalent_zero_replacement(operator: BinaryOperator) -> Option<&'static str> {
+    match operator {
+        BinaryOperator::GreaterThan => Some("!="),
+        BinaryOperator::LessEqualThan => Some("=="),
+        BinaryOperator::LessThan => Some("false"),
+        BinaryOperator::GreaterEqualThan => Some("true"),
+        _ => None,
+    }
+}
+
+fn is_zero(expression: &Expression<'_>) -> bool {
+    matches!(
+        callee_without_wrappers(expression),
+        Expression::NumericLiteral(literal) if literal.value == 0.0
     )
 }
 
@@ -500,6 +924,41 @@ impl Collector<'_> {
         self.expression_links(object, links);
     }
 
+    /// True when `expression` is always a non-negative integer. Only the
+    /// `length` of an array literal or of a known array qualifies, never an
+    /// arbitrary object with a `length` property, which can be negative.
+    fn is_non_negative_integer(&self, expression: &Expression<'_>) -> bool {
+        let Expression::StaticMemberExpression(member) = callee_without_wrappers(expression) else {
+            return false;
+        };
+        if member.optional || member.property.name != "length" {
+            return false;
+        }
+        match callee_without_wrappers(&member.object) {
+            Expression::ArrayExpression(_) => true,
+            Expression::Identifier(id) => id
+                .reference_id
+                .get()
+                .is_some_and(|reference| self.known_arrays.contains(&reference)),
+            _ => false,
+        }
+    }
+
+    /// The relational replacement that gives the same result as `it`, if
+    /// one is provable. The collector does not emit it.
+    fn equivalent_replacement(&self, it: &BinaryExpression<'_>) -> Option<&'static str> {
+        if self.counted_loop_tests.contains(&pair(it.span)) {
+            return Some("!=");
+        }
+        if is_zero(&it.right) && self.is_non_negative_integer(&it.left) {
+            return equivalent_zero_replacement(it.operator);
+        }
+        if is_zero(&it.left) && self.is_non_negative_integer(&it.right) {
+            return equivalent_zero_replacement(mirrored(it.operator));
+        }
+        None
+    }
+
     fn logical_operand(&self, operand: &Expression<'_>) -> String {
         let text = self.text(operand.span().start, operand.span().end);
         if matches!(operand, Expression::LogicalExpression(_)) {
@@ -644,6 +1103,9 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
+        if let Some(test) = counted_loop_test(it) {
+            self.counted_loop_tests.insert(test);
+        }
         walk::walk_for_statement(self, it);
         if let Some(test) = &it.test {
             self.negate(test);
@@ -671,14 +1133,20 @@ impl<'a> Visit<'a> for Collector<'_> {
                 }
             }
             if let Some((operators, constant)) = relational_replacements(operator) {
-                self.add(
-                    it.span,
-                    Operator::RelationalOperator,
-                    pair(it.span),
-                    constant.to_owned(),
-                );
+                let equivalent = self.equivalent_replacement(it);
+                if equivalent != Some(constant) {
+                    self.add(
+                        it.span,
+                        Operator::RelationalOperator,
+                        pair(it.span),
+                        constant.to_owned(),
+                    );
+                }
                 let operand = self.relational_operands.contains(&pair(it.span));
                 for replacement in operators {
+                    if equivalent == Some(*replacement) {
+                        continue;
+                    }
                     if operand && lowers_precedence(operator, replacement) {
                         let text = format!(
                             "({}{replacement}{})",
@@ -852,7 +1320,16 @@ impl<'a> Visit<'a> for Collector<'_> {
         walk::walk_call_expression(self, it);
     }
 
+    fn visit_switch_statement(&mut self, it: &SwitchStatement<'a>) {
+        let labels = equivalent_case_labels(self.source, it);
+        self.equivalent_labels.extend(labels);
+        walk::walk_switch_statement(self, it);
+    }
+
     fn visit_boolean_literal(&mut self, it: &BooleanLiteral) {
+        if self.equivalent_labels.contains(&pair(it.span)) {
+            return;
+        }
         let replacement = if it.value { "false" } else { "true" };
         self.add(
             it.span,
@@ -863,6 +1340,9 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_string_literal(&mut self, it: &StringLiteral<'a>) {
+        if self.equivalent_labels.contains(&pair(it.span)) {
+            return;
+        }
         let quote = self.text(it.span.start, it.span.start + 1).to_owned();
         if quote != "\"" && quote != "'" {
             return;

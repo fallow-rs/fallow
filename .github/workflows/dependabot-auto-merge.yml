@@ -1,5 +1,14 @@
 name: Dependabot auto-merge
 
+# A merge with GITHUB_TOKEN has two limits. GitHub disables auto-merge when the
+# pull request changes a workflow file, because GITHUB_TOKEN cannot get the
+# `workflows` permission. And a push by GITHUB_TOKEN starts no workflows, so
+# CI does not run on main for the merge commit. A GitHub App token has neither
+# limit. Set the DEPENDABOT_APP_CLIENT_ID variable and the
+# DEPENDABOT_APP_PRIVATE_KEY secret to use one. Without them, or when the token
+# request fails, the job uses GITHUB_TOKEN. See
+# docs/development/dependency-updates.md.
+
 on:
   pull_request_target:
     branches: [main]
@@ -20,10 +29,23 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # A run that Dependabot starts can see only Dependabot secrets. When the
+      # key is missing there, the token request fails and GITHUB_TOKEN is used.
+      - id: app
+        if: vars.DEPENDABOT_APP_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
       - if: steps.meta.outputs.update-type != 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           if output=$(gh pr merge "$PR_URL" --auto --squash 2>&1); then
@@ -32,14 +54,17 @@ jobs:
           # GitHub refuses to ENABLE auto-merge when there is nothing left to
           # wait for. That happens whenever this job queues behind a burst of
           # dependabot pull requests: by the time it runs, every required
-          # context has already reported and the pull request is mergeable, so
-          # the mutation is rejected for clean or unstable status. A pull
-          # request that closed while the job waited is the same story. Neither
-          # is a fault, and failing here paints a red check on a pull request
-          # whose own checks are green.
+          # context has already reported. In clean status every check passed,
+          # so merge now; otherwise the pull request waits for a person. In
+          # unstable status a check that is not required failed, and
+          # dependabot-repair.yml looks at that run. A pull request that closed
+          # while the job waited needs nothing.
           printf '%s\n' "$output"
           case "$output" in
-            *"is in clean status"*|*"is in unstable status"*|*"Pull request is closed"*)
+            *"is in clean status"*)
+              gh pr merge "$PR_URL" --squash
+              ;;
+            *"is in unstable status"*|*"Pull request is closed"*)
               echo "auto-merge not enabled: this pull request is no longer waiting on checks."
               ;;
             *)

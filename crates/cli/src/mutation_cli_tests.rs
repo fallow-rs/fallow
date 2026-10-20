@@ -249,6 +249,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         duration_ms: Some(3),
         test_reach: None,
         retried: false,
+        attempts: Vec::new(),
         cached: false,
         type_error_codes: Vec::new(),
     }

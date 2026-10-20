@@ -118,7 +118,13 @@ cd "${PROJECT_DIR}"
 # Ensure node_modules exists for knip to analyze
 if [[ ! -d "node_modules" ]]; then
     echo "  Installing node_modules for knip..." >&2
-    npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
+    # Prefer the project's lockfile so the install is reproducible. Projects
+    # without a package-lock.json keep the plain install.
+    if [[ -f "package-lock.json" ]]; then
+        npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
+    else
+        npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
+    fi
 fi
 
 npx --yes "knip@${KNIP_VERSION:-6.32.0}" --reporter json > "${KNIP_OUT}" 2>/dev/null || KNIP_EXIT=$?

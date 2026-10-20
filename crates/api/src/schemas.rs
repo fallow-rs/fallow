@@ -34,12 +34,23 @@ pub fn rule_pack_schema() -> serde_json::Value {
     RulePackDef::json_schema()
 }
 
+/// Committed copy of the derived snapshot schema. The copy keeps the `schema`
+/// feature (and its `JsonSchema` derives) out of embedders such as the MCP
+/// server. `fallow-schema-emit --similar-code-snapshot` regenerates it, and
+/// the schema-emit drift test compares it with the derive.
+const SIMILAR_CODE_SNAPSHOT_SCHEMA_JSON: &str =
+    include_str!("../similar-code-snapshot-schema.json");
+
+static SIMILAR_CODE_SNAPSHOT_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
+    serde_json::from_str(SIMILAR_CODE_SNAPSHOT_SCHEMA_JSON)
+        .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+});
+
 /// JSON Schema of the `inspect_similar_code` candidate snapshot handoff, the
 /// object `find_similar_code` hands back and `inspect` reads from stdin.
-#[cfg(feature = "schema")]
 #[must_use]
 pub fn similar_code_snapshot_schema() -> serde_json::Value {
-    fallow_output::SimilarCodeCandidateSnapshot::json_schema()
+    SIMILAR_CODE_SNAPSHOT_SCHEMA.clone()
 }
 
 /// The zero-config `rules.*` severities as a flat JSON object keyed by config

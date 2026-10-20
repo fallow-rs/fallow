@@ -4,7 +4,7 @@
 # build has network access. The scan after it has none, so every crate and npm
 # package that a build or a test needs must be fetched here.
 # Keep the base image tag aligned with rust-toolchain.toml.
-FROM rust:1.99.0-bookworm
+FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_TERM_COLOR=never \
@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js runs the type-aware sidecar and the mutation runner tests.
-COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
-COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 

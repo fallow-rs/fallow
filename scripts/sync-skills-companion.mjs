@@ -76,7 +76,7 @@ export const COMPANION_CHECKS = [
 const CHECK_PREREQUISITES = [
   {
     command: ["python3", "-c", "import yaml"],
-    fix: "install PyYAML (python3 -m pip install pyyaml)",
+    fix: "install PyYAML (python3 -m pip install pyyaml). If pip refuses an externally managed Python, run python3 -m venv <dir>, then <dir>/bin/pip install pyyaml, and put <dir>/bin first on PATH",
   },
 ];
 
@@ -387,7 +387,7 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     if (!skipChecks) {
       runChecks(companion, source, version.old, env, log);
     }
-    git(companion, "commit", "-S", "--quiet", "-m", message);
+    git(companion, "commit", "-S", "-s", "--quiet", "-m", message);
     log(`${PREFIX}: committed ${git(companion, "rev-parse", "--short", "HEAD")} in ${companion}.`);
     // The companion main branch is protected, so the commit lands through a pull request.
     const branch = `docs/sync-fallow-${pin.slice(0, 9)}`;

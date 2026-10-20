@@ -344,6 +344,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "too slow under Miri: a dense-line comparison with the naive reference in safe code"
+    )]
     fn class_token_lines_match_naive_reference_on_dense_line() {
         // Many static class attributes packed onto a single long line (the
         // pathological zero-newline prefix) plus one on the next line: the

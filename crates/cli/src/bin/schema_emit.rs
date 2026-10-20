@@ -181,7 +181,20 @@ fn main() -> ExitCode {
     }
 }
 
+/// Argument that prints the similar-code snapshot schema instead of the output
+/// schema. `scripts/generate-all.mjs` writes the result to
+/// `crates/api/similar-code-snapshot-schema.json`.
+const SIMILAR_CODE_SNAPSHOT_FLAG: &str = "--similar-code-snapshot";
+
 fn run() -> Result<(), String> {
+    if std::env::args().nth(1).as_deref() == Some(SIMILAR_CODE_SNAPSHOT_FLAG) {
+        let pretty = serde_json::to_string_pretty(
+            &fallow_output::SimilarCodeCandidateSnapshot::json_schema(),
+        )
+        .map_err(|err| format!("failed to serialize snapshot schema: {err}"))?;
+        println!("{pretty}");
+        return Ok(());
+    }
     let derived = derived_definitions();
     validate_graph_facts_descriptions(&derived)?;
     validate_review_brief_wire_contract(&derived)?;
@@ -1674,6 +1687,19 @@ mod drift_tests {
 
     const BACKWARDS_COMPATIBILITY_DOC: &str =
         include_str!("../../../../docs/backwards-compatibility.md");
+
+    /// The MCP server serves the committed snapshot schema without the
+    /// `schema` feature, so the committed copy must equal the derive. The
+    /// serialized forms are compared, because `Value` equality ignores key order.
+    #[test]
+    fn committed_similar_code_snapshot_schema_matches_the_derive() {
+        assert_eq!(
+            fallow_api::schemas::similar_code_snapshot_schema().to_string(),
+            fallow_output::SimilarCodeCandidateSnapshot::json_schema().to_string(),
+            "crates/api/similar-code-snapshot-schema.json is stale. Regenerate it with \
+             `npm run generate:contracts`."
+        );
+    }
 
     /// Recursively normalize a JSON value for drift comparison.
     fn canonicalize(mut value: Value) -> Value {

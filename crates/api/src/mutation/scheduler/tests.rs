@@ -196,12 +196,14 @@ fn run_result(run: &RunRequest, status: RunStatus, killed_by: Option<&str>) -> R
             .map(|test| RunTest {
                 test_id: test.clone(),
                 status: TestStatus::Pass,
+                failure_kind: None,
             })
             .collect(),
         RunStatus::Killed => killed_by
             .map(|test| RunTest {
                 test_id: test.to_owned(),
                 status: TestStatus::Fail,
+                failure_kind: Some("assertion".to_owned()),
             })
             .into_iter()
             .collect(),
@@ -477,6 +479,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 tests: vec![RunTest {
                     test_id: run.test_ids[0].clone(),
                     status: TestStatus::Pass,
+                    failure_kind: None,
                 }],
                 unhandled_errors: Vec::new(),
             })
@@ -492,10 +495,12 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                     RunTest {
                         test_id: run.test_ids[0].clone(),
                         status: TestStatus::Pass,
+                        failure_kind: None,
                     },
                     RunTest {
                         test_id: run.test_ids[1].clone(),
                         status: TestStatus::Fail,
+                        failure_kind: None,
                     },
                 ],
                 unhandled_errors: Vec::new(),
@@ -551,6 +556,7 @@ fn a_kill_by_an_unhandled_error_has_no_killer() {
                 tests: vec![RunTest {
                     test_id: run.test_ids[0].clone(),
                     status: TestStatus::Pass,
+                    failure_kind: None,
                 }],
                 unhandled_errors: vec![UnhandledError {
                     message: "late rejection".to_owned(),
@@ -706,6 +712,157 @@ fn a_timeout_reruns_in_a_new_companion_and_a_survived_retry_is_flaky() {
         2 * runs[0].1.timeout_ms,
         "host load that slowed the first run can last, so the retry waits twice as long"
     );
+}
+
+/// Runs m1 with `first` in the first companion and `retry` in the next one.
+fn retried_m1(
+    first: impl Fn(&RunRequest) -> Result<Response, LinkFault> + Send + Sync + 'static,
+    retry: impl Fn(&RunRequest) -> Result<Response, LinkFault> + Send + Sync + 'static,
+) -> MutantOutcome {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        move |index, run| if index == 0 { first(run) } else { retry(run) },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    outcome.results["m1"].clone()
+}
+
+#[test]
+fn a_flaky_result_keeps_the_history_of_each_attempt() {
+    let timeout_then_survived = retried_m1(
+        |_| Err(LinkFault::Timeout),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    let survived_then_killed = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+        |run| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+    );
+    assert_eq!(timeout_then_survived.status, MutantStatus::Flaky);
+    assert_eq!(survived_then_killed.status, MutantStatus::Flaky);
+    let watchdog_ms = timeout_then_survived
+        .attempts
+        .first()
+        .and_then(|attempt| attempt.duration_ms);
+    assert!(watchdog_ms.is_some_and(|ms| ms > 12), "{watchdog_ms:?}");
+    assert_eq!(
+        timeout_then_survived.attempts,
+        [
+            MutantAttempt {
+                status: MutantStatus::Timeout,
+                duration_ms: watchdog_ms,
+                killed_by: None,
+                failure_kind: Some(MutantFailureKind::Timeout),
+                detail: None,
+            },
+            MutantAttempt {
+                status: MutantStatus::Survived,
+                duration_ms: Some(12),
+                killed_by: None,
+                failure_kind: None,
+                detail: None,
+            },
+        ]
+    );
+    assert_eq!(
+        survived_then_killed.attempts,
+        [
+            MutantAttempt {
+                status: MutantStatus::Survived,
+                duration_ms: Some(12),
+                killed_by: None,
+                failure_kind: None,
+                detail: None,
+            },
+            MutantAttempt {
+                status: MutantStatus::Killed,
+                duration_ms: Some(12),
+                killed_by: Some(tid("t1")),
+                failure_kind: Some(MutantFailureKind::Assertion),
+                detail: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_timeout_from_the_companion_keeps_its_failure_kind() {
+    let timeout_then_survived = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Timeout, None)),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    assert_eq!(timeout_then_survived.status, MutantStatus::Flaky);
+    assert_eq!(
+        timeout_then_survived.attempts.first(),
+        Some(&MutantAttempt {
+            status: MutantStatus::Timeout,
+            duration_ms: Some(12),
+            killed_by: None,
+            failure_kind: Some(MutantFailureKind::Timeout),
+            detail: None,
+        }),
+        "a runner timeout carries the duration of the run result"
+    );
+}
+
+#[test]
+fn a_runtime_error_retry_keeps_its_reason_and_a_single_run_has_no_attempts() {
+    let survived_then_error = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+        |run| Ok(run_result(run, RunStatus::RuntimeError, None)),
+    );
+    assert_eq!(survived_then_error.status, MutantStatus::RuntimeError);
+    let statuses: Vec<_> = survived_then_error
+        .attempts
+        .iter()
+        .map(|attempt| (attempt.status, attempt.detail.as_deref()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            (MutantStatus::Survived, None),
+            (
+                MutantStatus::RuntimeError,
+                Some("the companion reported a runtime error")
+            ),
+        ]
+    );
+    let killed = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    assert_eq!(killed.status, MutantStatus::Killed);
+    assert!(!killed.retried);
+    assert!(killed.attempts.is_empty(), "a kill gets no retry");
+}
+
+#[test]
+fn a_kill_names_the_failure_kind_of_its_killing_test_or_an_error() {
+    let request = RunRequest {
+        mutant_id: Some("m1".to_owned()),
+        test_ids: vec![tid("t1")],
+        timeout_ms: 1000,
+        bail: true,
+    };
+    let Response::Run(mut result) = run_result(&request, RunStatus::Killed, Some(&tid("t1")))
+    else {
+        unreachable!("run_result gives a run response")
+    };
+    let killed = MutantStatus::Killed;
+    let killer = tid("t1");
+    assert_eq!(
+        kill_kind(&result, killed, Some(&killer)),
+        Some(MutantFailureKind::Assertion)
+    );
+    assert_eq!(
+        kill_kind(&result, killed, None),
+        Some(MutantFailureKind::Error)
+    );
+    assert_eq!(
+        kill_kind(&result, MutantStatus::Survived, Some(&killer)),
+        None
+    );
+    result.tests[0].failure_kind = Some("segfault".to_owned());
+    assert_eq!(kill_kind(&result, killed, Some(&killer)), None);
 }
 
 #[test]
@@ -936,6 +1093,44 @@ fn static_mutants_run_last_with_a_reload_around_each_when_modules_stay_loaded() 
         vec!["init", "dry_run", "run", "reload"],
         "the reload after the static mutant"
     );
+}
+
+#[test]
+fn a_module_level_mutant_with_static_and_test_hits_runs_static_importer_tests() {
+    let dyn_test = "test/b.test.ts::dyn".to_owned();
+    let dry_test = dyn_test.clone();
+    let spawner = FakeSpawner::new(script(
+        move |_| {
+            let mut dry = standard_dry();
+            dry.tests.push(DryTest {
+                test_id: dry_test.clone(),
+                file: "test/b.test.ts".to_owned(),
+                duration_ms: Some(5.0),
+                status: TestStatus::Pass,
+            });
+            dry.hits.insert(dry_test.clone(), vec!["m0".to_owned()]);
+            dry.static_hits = vec!["m0".to_owned()];
+            dry
+        },
+        |_, run| {
+            if run.test_ids.contains(&tid("t1")) {
+                Ok(run_result(run, RunStatus::Killed, Some(&tid("t1"))))
+            } else {
+                Ok(run_result(run, RunStatus::Survived, None))
+            }
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m0"]), &config(1)).expect("run");
+    let runs = spawner.runs();
+    let mut test_ids = runs[0].1.test_ids.clone();
+    test_ids.sort();
+    assert_eq!(
+        test_ids,
+        vec![tid("t1"), tid("t2"), dyn_test],
+        "a module that loads at collection time and inside a test runs the tests of both files"
+    );
+    assert!(outcome.results["m0"].static_mutant);
+    assert_eq!(status(&outcome, "m0"), MutantStatus::Killed);
 }
 
 #[test]
@@ -1762,6 +1957,7 @@ fn t2_fails_in_control(run: &RunRequest) -> Response {
             } else {
                 TestStatus::Pass
             },
+            failure_kind: None,
         })
         .collect();
     let failed = run.test_ids.contains(&tid("t2"));
@@ -2084,6 +2280,7 @@ fn only_t1_passes_in_control(run: &RunRequest) -> Response {
             } else {
                 TestStatus::Fail
             },
+            failure_kind: None,
         })
         .collect();
     let failed = tests.iter().any(|test| test.status == TestStatus::Fail);
@@ -2157,6 +2354,7 @@ fn load_kill_job() -> Job {
         timeout_ms: 6000,
         setup_ms: 0,
         static_mutant: false,
+        test_files: vec!["test/a.test.ts".to_owned()],
         cache_key: None,
     }
 }
@@ -2273,4 +2471,127 @@ fn a_hanging_control_set_costs_one_control_run_for_each_load_kill_mutant_with_it
         .filter(|(_, run)| run.mutant_id.as_deref() != Some("m1"))
         .count();
     assert_eq!(mutant_runs, 2, "no retry of m2 or m3");
+}
+
+/// t1 in `test/a.test.ts` hits m1. t2 in `test/b.test.ts` hits nothing.
+/// `src/a.ts` (m1, m_a) loads at import time in `test/a.test.ts` only, and
+/// `src/b.ts` (m_b) in `test/b.test.ts` only.
+fn two_file_dry() -> DryRunResult {
+    DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            DryTest {
+                test_id: "test/b.test.ts::t2".to_owned(),
+                file: "test/b.test.ts".to_owned(),
+                duration_ms: Some(3.0),
+                status: TestStatus::Pass,
+            },
+        ],
+        hits: BTreeMap::from([(tid("t1"), vec!["m1".to_owned()])]),
+        static_hits: vec!["m_a".to_owned(), "m_b".to_owned()],
+        ..standard_dry()
+    }
+}
+
+fn two_file_plan(mutants: &[(&str, &str)]) -> SchedulePlan {
+    let mut plan = plan(&[]);
+    plan.mutants = mutants
+        .iter()
+        .map(|(id, file)| ScheduledMutant {
+            id: (*id).to_owned(),
+            file: (*file).to_owned(),
+        })
+        .collect();
+    plan.known_ids.extend(["m_a", "m_b"].map(str::to_owned));
+    plan.test_files = vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()];
+    plan.file_test_files = BTreeMap::from([
+        ("src/a.ts".to_owned(), vec!["test/a.test.ts".to_owned()]),
+        ("src/b.ts".to_owned(), vec!["test/b.test.ts".to_owned()]),
+    ]);
+    plan
+}
+
+fn dry_runs_of(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
+    spawner
+        .log
+        .lock()
+        .expect("log")
+        .iter()
+        .filter_map(|(index, request)| match request {
+            Request::DryRun { test_files } => Some((*index, test_files.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_companion_restarted_for_a_static_mutant_dry_runs_only_the_files_of_the_mutant() {
+    let caps = Capabilities {
+        fresh_modules_per_run: false,
+        ..VITEST_CAPS
+    };
+    let spawner = FakeSpawner::new(move |_, request| match request {
+        Request::Init(_) => Ok(ready(caps, "4.1.11")),
+        Request::DryRun { .. } => Ok(Response::DryRun(two_file_dry())),
+        Request::Run(run) => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        Request::Reload => Ok(Response::Reloaded(Reloaded {
+            method: ReloadMethod::RestartRequired,
+        })),
+        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+    });
+    let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts")]);
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m_a"), MutantStatus::Killed);
+    let both = vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()];
+    assert_eq!(
+        dry_runs_of(&spawner),
+        vec![(0, both), (1, vec!["test/a.test.ts".to_owned()])],
+        "the first companion dry-runs each file, the restarted one only the files of m_a"
+    );
+    let runs = spawner.runs();
+    assert_eq!(runs[1].0, 1);
+    assert_eq!(runs[1].1.test_ids, vec![tid("t1")]);
+}
+
+#[test]
+fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
+    // The reload restarts only the first companion. Later companions keep
+    // their narrow dry run, and a job with other test files needs a new one.
+    let caps = Capabilities {
+        fresh_modules_per_run: false,
+        ..VITEST_CAPS
+    };
+    let spawner = FakeSpawner::new(move |index, request| match request {
+        Request::Init(_) => Ok(ready(caps, "4.1.11")),
+        Request::DryRun { .. } => Ok(Response::DryRun(two_file_dry())),
+        Request::Run(run) => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        Request::Reload => Ok(Response::Reloaded(Reloaded {
+            method: if index == 0 {
+                ReloadMethod::RestartRequired
+            } else {
+                ReloadMethod::Invalidate
+            },
+        })),
+        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+    });
+    let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts"), ("m_b", "src/b.ts")]);
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    for id in ["m1", "m_a", "m_b"] {
+        assert_eq!(status(&outcome, id), MutantStatus::Killed, "{id}");
+    }
+    assert_eq!(
+        dry_runs_of(&spawner),
+        vec![
+            (
+                0,
+                vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()]
+            ),
+            (1, vec!["test/a.test.ts".to_owned()]),
+            (2, vec!["test/b.test.ts".to_owned()]),
+        ]
+    );
+    let runs = spawner.runs();
+    assert_eq!(runs[2].0, 2);
+    assert_eq!(runs[2].1.test_ids, vec!["test/b.test.ts::t2".to_owned()]);
 }

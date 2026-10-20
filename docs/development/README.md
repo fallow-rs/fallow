@@ -7,6 +7,8 @@ Start with the smallest route that matches the task:
 - [Quality gates](quality-gates.md) before validation, review, commit, or push.
 - [Release procedure](release-procedure.md) for the maintainer publication steps.
 - [Release security](release-security.md) for publication workflow boundaries.
+- [Dependency updates](dependency-updates.md) for the Dependabot auto-merge
+  and repair workflows.
 - [Drift contract](drift-contract.md) when a change touches behavior that
   more than one command, the MCP server or the API shares.
 - [Review routing](review-routing.md) when a change crosses output or

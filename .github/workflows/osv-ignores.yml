@@ -1,0 +1,55 @@
+name: osv-scanner ignores
+
+# Fails when an IgnoredVulns entry in an osv-scanner.toml matches no advisory
+# in the lockfile next to it. A dependency bump can fix an ignored advisory,
+# and the stale entry then makes .vex/openvex.json claim not_affected for it.
+# A stale entry is not urgent, so a push run on main catches it, and the
+# release gate (scripts/verify-release-ci.mjs) stops a release that would
+# ship the wrong VEX file. The weekly run catches an advisory that the OSV
+# database withdrew or changed.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+  OSV_SCANNER_VERSION: v2.7.0
+
+jobs:
+  stale-ignores:
+    name: Stale IgnoredVulns entries
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install osv-scanner
+        shell: bash
+        run: |
+          install_root="${RUNNER_TEMP}/osv-scanner"
+          mkdir -p "${install_root}"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            --retry 5 --retry-connrefused --retry-delay 2 \
+            --output "${install_root}/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          printf '%s *%s\n' "${OSV_SCANNER_SHA256}" "${install_root}/osv-scanner" \
+            | sha256sum --check --strict
+          chmod +x "${install_root}/osv-scanner"
+          printf '%s\n' "${install_root}" >> "${GITHUB_PATH}"
+
+      - name: Check IgnoredVulns entries
+        run: node scripts/check-osv-ignores.mjs

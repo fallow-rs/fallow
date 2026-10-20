@@ -402,7 +402,7 @@ jobs:
       # `fallow-`: release-assets downloads that pattern as release assets.
       - name: Upload PGO profile
         if: steps.mode.outputs.enabled == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pgo-profile-${{ matrix.target }}
           path: pgo-profile/fallow.profdata
@@ -555,11 +555,12 @@ jobs:
       # the `--fix-cortex-a53-843419` linker arg that rustc 1.98 passes for
       # this target and that zig rejects. x86_64-musl (native musl-gcc) and
       # aarch64-gnu (glibc cross-gcc against a glibc target) keep the plain
-      # cargo build.
+      # cargo build. The versions and wheel hashes live in
+      # .github/requirements/cargo-zigbuild.txt.
       - name: Install cargo-zigbuild for aarch64-musl C cross-compile
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          python3 -m pip install --user --break-system-packages cargo-zigbuild==0.23.4 ziglang==0.16.0
+          python3 -m pip install --user --break-system-packages --require-hashes --only-binary=:all: -r .github/requirements/cargo-zigbuild.txt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cargo-zigbuild" --version
           python3 -m ziglang version
@@ -800,7 +801,7 @@ jobs:
           7z a "../../../fallow-${FALLOW_TARGET}.zip" "$FALLOW_BINARY" "$FALLOW_LSP_BINARY" "$FALLOW_MCP_BINARY" fallow-similar-code.exe
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-${{ matrix.target }}
           path: fallow-${{ matrix.target }}.*
@@ -844,7 +845,7 @@ jobs:
           cp "target/${FALLOW_TARGET}/release/fallow-similar-code.exe" "fallow-similar-code-${FALLOW_NPM_DIR}.exe"
 
       - name: Upload unsigned binary payload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: unsigned-binaries-${{ matrix.npm_dir }}
           if-no-files-found: error
@@ -856,7 +857,7 @@ jobs:
             fallow-similar-code-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
       - name: Upload NAPI addon
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: napi-${{ matrix.npm_dir }}
           path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
@@ -1030,7 +1031,7 @@ jobs:
           cp "unsigned-binaries/fallow-similar-code-${FALLOW_NPM_DIR}${ext}.sig" "npm-payload/fallow-similar-code${ext}.sig"
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-cli-${{ matrix.npm_dir }}
           path: |
@@ -1038,7 +1039,7 @@ jobs:
             unsigned-binaries/fallow-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload LSP artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-lsp-${{ matrix.npm_dir }}
           path: |
@@ -1046,7 +1047,7 @@ jobs:
             unsigned-binaries/fallow-lsp-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload MCP artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-mcp-${{ matrix.npm_dir }}
           path: |
@@ -1054,7 +1055,7 @@ jobs:
             unsigned-binaries/fallow-mcp-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload similar-code provider artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-similar-code-${{ matrix.npm_dir }}
           path: |
@@ -1062,7 +1063,7 @@ jobs:
             unsigned-binaries/fallow-similar-code-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload npm binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-${{ matrix.npm_dir }}
           path: |
@@ -1145,7 +1146,7 @@ jobs:
           ' similar-code-candle-conformance.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload compact production conformance evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: similar-code-candle-conformance
           path: similar-code-candle-conformance.json
@@ -1198,7 +1199,7 @@ jobs:
           cp "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" sbom/
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-sbom-${{ matrix.target }}
           path: sbom/fallow-${{ matrix.target }}.cdx.json
@@ -1265,7 +1266,7 @@ jobs:
           done
 
       - name: Upload release asset bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: release-assets/
@@ -1585,7 +1586,7 @@ jobs:
             tarballs/20-cli-root/*.tgz
 
       - name: Upload npm tarballs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-tarballs
           path: tarballs/
@@ -1802,9 +1803,11 @@ jobs:
   # own version and purges an installed binary of another version, so a VSIX
   # that is public before that release exists breaks every auto-updating
   # install. The release is created after the maintainer approves the staged
-  # `fallow` root, so both VSIX publishers wait here until that approval has
-  # made `fallow@<version>` public, and until the public bytes are the ones
-  # this run staged. No credentials: this job only reads the public registry.
+  # `fallow` root. This is the only job that waits for that approval: it runs
+  # until the approval has made `fallow@<version>` public, and until the public
+  # bytes are the ones this run staged. Both VSIX publishers need this job, so
+  # they hold no runner while the approval is pending. No credentials: this job
+  # only reads the public registry.
   npm-root-approved:
     name: Wait for the approved fallow root
     if: ${{ !inputs.auth_check }}
@@ -1821,6 +1824,16 @@ jobs:
       WAIT_MINUTES: '350'
       POLL_SECONDS: '30'
     steps:
+      - name: Ask for the npm approval of the staged fallow root
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
+          {
+            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Wait until fallow@version is public with the staged bytes
         shell: bash
         run: |
@@ -1831,10 +1844,6 @@ jobs:
             echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
-          {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
-          } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
           while :; do
@@ -1957,7 +1966,7 @@ jobs:
             "$root/inventory.json"
 
       - name: Upload VSIX target artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-vscode-targets
           path: ${{ runner.temp }}/fallow-vscode-targets/
@@ -2120,19 +2129,18 @@ jobs:
   vscode-publish-marketplace:
     name: Publish VS Code Marketplace targets
     if: ${{ !inputs.auth_check }}
-    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 360
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
     steps:
-      # The publisher starts in the same wave as npm-publish and
-      # publish-crates, so one review of the release environment covers every
-      # publication job. It uploads nothing before the maintainer-approved
-      # fallow root is public with the bytes that this run staged. The steps
-      # below use no credential.
+      # The publisher starts after npm-root-approved has seen the approved
+      # fallow root public with the bytes that this run staged. It checks
+      # those public bytes again against its own copy of the staged tarball
+      # before it uploads anything. The steps below use no credential.
       - name: Download npm tarballs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2154,8 +2162,9 @@ jobs:
         shell: bash
         working-directory: ${{ runner.temp }}
         env:
-          # The job limit is 360 minutes. The rest is for the publication.
-          WAIT_MINUTES: '300'
+          # npm-root-approved did the long wait, so the root is already
+          # public. This short bound only covers a lagging registry read.
+          WAIT_MINUTES: '5'
           POLL_SECONDS: '30'
         run: |
           set -euo pipefail
@@ -2165,10 +2174,6 @@ jobs:
             echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
-          {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
-          } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
           while :; do
@@ -2362,19 +2367,18 @@ jobs:
   vscode-publish-open-vsx:
     name: Publish Open VSX targets
     if: ${{ !inputs.auth_check }}
-    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 360
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
     steps:
-      # The publisher starts in the same wave as npm-publish and
-      # publish-crates, so one review of the release environment covers every
-      # publication job. It uploads nothing before the maintainer-approved
-      # fallow root is public with the bytes that this run staged. The steps
-      # below use no credential.
+      # The publisher starts after npm-root-approved has seen the approved
+      # fallow root public with the bytes that this run staged. It checks
+      # those public bytes again against its own copy of the staged tarball
+      # before it uploads anything. The steps below use no credential.
       - name: Download npm tarballs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2396,8 +2400,9 @@ jobs:
         shell: bash
         working-directory: ${{ runner.temp }}
         env:
-          # The job limit is 360 minutes. The rest is for the publication.
-          WAIT_MINUTES: '300'
+          # npm-root-approved did the long wait, so the root is already
+          # public. This short bound only covers a lagging registry read.
+          WAIT_MINUTES: '5'
           POLL_SECONDS: '30'
         run: |
           set -euo pipefail
@@ -2407,10 +2412,6 @@ jobs:
             echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
-          {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
-          } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
           while :; do

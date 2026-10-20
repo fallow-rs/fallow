@@ -6,6 +6,7 @@ use common::{expected, pairs, run};
 use fallow_mutation::{Operator, SourceKind};
 
 const JS: SourceKind = SourceKind::Js;
+const TS: SourceKind = SourceKind::Ts;
 
 #[test]
 fn arithmetic_operator_swaps_and_skips_string_concatenation() {
@@ -63,6 +64,316 @@ fn relational_operator_uses_the_non_redundant_subset() {
         assert_eq!(
             pairs(&result, Operator::RelationalOperator),
             expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn relational_operator_skips_not_equal_in_a_counted_loop() {
+    let up: &[(&str, &str)] = &[("<", "<="), ("i < 12", "false")];
+    let down: &[(&str, &str)] = &[(">", ">="), ("i > 0", "false")];
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("for (let i = 0; i < 12; i++) { r.push(i); }", up),
+        ("for (let i = 0; i < 12; ++i) { r.push(i); }", up),
+        ("for (let i = 0; i < 12; i += 1) { r.push(i); }", up),
+        ("for (let i = 12; i < 12; i++) {}", up),
+        ("for (let i = 12; i > 0; i--) {}", down),
+        ("for (let i = 12; i > 0; --i) {}", down),
+        ("for (let i = 12; i > 0; i -= 1) {}", down),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+    let kept: &[(&str, &str)] = &[("<", "<="), ("<", "!="), ("i < 12", "false")];
+    let near = [
+        "for (var i = 0; i < 12; i++) {}",
+        "for (let i = 0; i < 12; i += 2) {}",
+        "for (let i = 0; i < 12; i++) { i++; }",
+        "for (let i = 0; i < 12; i++) { i = 3; }",
+        "for (let i = 0; i < 12; i++) { [i] = r; }",
+        "for (let i = 0; i < 12; i++) { ({ i } = r); }",
+        "for (let i = 0; i < 12; i++) { for (i of r) {} }",
+        "for (let i = 0; i < 12; i++) { f(() => { i = 3; }); }",
+        "for (let i = 0; i < 12; i++) { eval(s); }",
+        "for (let i = 20; i < 12; i++) {}",
+        "for (let i = 0.5; i < 12; i++) {}",
+        "for (let i = 0; i < 12; i--) {}",
+        "for (let i = 0, j = 0; i < 12; i++) {}",
+        "for (let j = 0; i < 12; i++) {}",
+        "for (let i = 0; i < 12; j++) {}",
+        "for (let i = 0; i < 12; i++, j++) {}",
+        "for (let i = 0; i < 12; o.i++) {}",
+        "for (let i = 0; i < 12; o.i += 1) {}",
+    ];
+    for source in near {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(kept),
+            "{source}"
+        );
+    }
+    for source in [
+        "for (let i = 0; i < 12; i++) { (i as any) = 3; }",
+        "for (let i = 0; i < 12; i++) { i! = 3; }",
+    ] {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(kept),
+            "{source}"
+        );
+    }
+    let typed = run("for (let i: number = 0; i < 12; i++) {}", TS);
+    assert_eq!(pairs(&typed, Operator::RelationalOperator), expected(up));
+    let other: &[(&str, &[(&str, &str)])] = &[
+        (
+            "for (let i = 0; i < n; i++) {}",
+            &[("<", "<="), ("<", "!="), ("i < n", "false")],
+        ),
+        (
+            "for (let i = 0; i < 12.5; i++) {}",
+            &[("<", "<="), ("<", "!="), ("i < 12.5", "false")],
+        ),
+        (
+            "for (let i = 0; 12 > i; i++) {}",
+            &[(">", ">="), (">", "!="), ("12 > i", "false")],
+        ),
+        (
+            "while (i < 12) { i++; }",
+            &[("<", "<="), ("<", "!="), ("i < 12", "false")],
+        ),
+    ];
+    for (source, want) in other {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn relational_operator_skips_equivalent_zero_comparisons_of_array_length() {
+    let pruned: &[(&str, &[(&str, &str)])] = &[
+        (
+            "const items = []; x = items.length > 0;",
+            &[(">", ">="), ("items.length > 0", "false")],
+        ),
+        (
+            "const items = []; x = 0 < items.length;",
+            &[("<", "<="), ("0 < items.length", "false")],
+        ),
+        (
+            "const items = []; x = items.length <= 0;",
+            &[("<=", "<"), ("items.length <= 0", "true")],
+        ),
+        (
+            "const items = []; x = 0 >= items.length;",
+            &[(">=", ">"), ("0 >= items.length", "true")],
+        ),
+        (
+            "const items = []; x = items.length < 0;",
+            &[("<", "<="), ("<", "!=")],
+        ),
+        (
+            "const items = []; x = 0 > items.length;",
+            &[(">", ">="), (">", "!=")],
+        ),
+        (
+            "const items = []; x = items.length >= 0;",
+            &[(">=", ">"), (">=", "==")],
+        ),
+        (
+            "const items = []; x = 0 <= items.length;",
+            &[("<=", "<"), ("<=", "==")],
+        ),
+        (
+            "const items = []; function f() { return (items).length > 0; }",
+            &[(">", ">="), ("(items).length > 0", "false")],
+        ),
+        (
+            "x = [a, b].length > 0;",
+            &[(">", ">="), ("[a, b].length > 0", "false")],
+        ),
+        (
+            "const items = Array.from(s); x = items.length > 0;",
+            &[(">", ">="), ("items.length > 0", "false")],
+        ),
+        (
+            "function f(...items) { return items.length > 0; }",
+            &[(">", ">="), ("items.length > 0", "false")],
+        ),
+        (
+            "function a() { const items = []; return items.length > 0; } function b() { const items = [1]; return items.length > 0; }",
+            &[
+                (">", ">="),
+                ("items.length > 0", "false"),
+                (">", ">="),
+                ("items.length > 0", "false"),
+            ],
+        ),
+    ];
+    for (source, want) in pruned {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn relational_operator_skips_equivalent_zero_comparisons_of_typed_arrays() {
+    let typed = [
+        (
+            "const f = (items: string[]) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: readonly string[]) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: Array<string>) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: ReadonlyArray<string>) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: [string, number]) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "let items: string[] = load(); x = items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: string[]) => (items as any).length > 0;",
+            "(items as any).length > 0",
+        ),
+        (
+            "const f = (items: string[]) => items!.length > 0;",
+            "items!.length > 0",
+        ),
+        (
+            "const f = (...items: string[]) => { items = load(); return items.length > 0; };",
+            "items.length > 0",
+        ),
+    ];
+    for (source, text) in typed {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(&[(">", ">="), (text, "false")]),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn relational_operator_keeps_zero_comparisons_without_an_array_proof() {
+    let kept = |text: &str| -> Vec<(String, String)> {
+        expected(&[(">", ">="), (">", "!="), (text, "false")])
+    };
+    let near = [
+        ("x = items.length > 0;", "items.length > 0"),
+        (
+            "const o = { length: -1 }; x = o.length > 0;",
+            "o.length > 0",
+        ),
+        ("let items = []; x = items.length > 0;", "items.length > 0"),
+        ("var items = []; x = items.length > 0;", "items.length > 0"),
+        (
+            "const items = []; function f(items) { return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; { const items = o; x = items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; x = items.length > 1;",
+            "items.length > 1",
+        ),
+        (
+            "const items = []; x = items?.length > 0;",
+            "items?.length > 0",
+        ),
+        (
+            "const items = []; x = items[\"length\"] > 0;",
+            "items[\"length\"] > 0",
+        ),
+        ("const items = []; x = items.size > 0;", "items.size > 0"),
+        (
+            "const [items] = [o]; x = items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; with (o) { x = items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; function f() { eval(s); return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const Array = { from: () => o }; const items = Array.from(s); x = items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "function a() { const items = []; return items; } function b() { return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "function f(items) { const g = (...items) => items; return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "function f(...items) { items = o; return items.length > 0; }",
+            "items.length > 0",
+        ),
+    ];
+    for (source, text) in near {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            kept(text),
+            "{source}"
+        );
+    }
+    for (source, text) in [
+        (
+            "const f = (items: any) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: string[] | Sized) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "type Array<T> = { length: number }; const f = (items: Array<string>) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const items = [] as Sized; x = items.length > 0;",
+            "items.length > 0",
+        ),
+    ] {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            kept(text),
             "{source}"
         );
     }
@@ -336,6 +647,76 @@ fn string_literal_empties_and_fills() {
             "{source}"
         );
     }
+}
+
+/// A case label whose clause runs the same exiting body as `default` selects
+/// that body for every input, before and after the literal mutation.
+#[test]
+fn string_literal_skips_a_case_label_equivalent_to_default() {
+    let tail = "default: return amount; } }";
+    let head = "function f(frequency, amount) { switch (frequency) { ";
+    let skipped = [
+        "case \"monthly\": return amount; case \"yearly\": return amount * 12; ",
+        "case \"monthly\": throw amount; case \"yearly\": return 1; default: throw amount; } } //",
+        "case \"weekly\": case \"monthly\": return amount; ",
+        "case \"monthly\": return amount; case 1: return 0; case null: return 0; ",
+    ];
+    for clauses in skipped {
+        let source = format!("{head}{clauses}{tail}");
+        let result = run(&source, TS);
+        assert!(
+            !pairs(&result, Operator::StringLiteral)
+                .contains(&("\"monthly\"".to_owned(), "\"\"".to_owned())),
+            "{source}"
+        );
+    }
+    let kept = [
+        format!(
+            "{head}case \"monthly\": return amount; case \"yearly\": return amount * 12; }} }}"
+        ),
+        format!("{head}case \"monthly\": return 0; {tail}"),
+        format!("{head}case \"monthly\": case \"weekly\": return amount; {tail}"),
+        format!("{head}case \"monthly\": log(); {tail}"),
+        format!("{head}case \"monthly\": return amount; case \"\": return amount * 2; {tail}"),
+        format!("{head}case \"monthly\": return amount; case \"monthly\": return 0; {tail}"),
+        format!("{head}case \"monthly\": return amount; case g(): return 0; {tail}"),
+        format!("{head}case \"monthly\": if (amount) return amount; {tail}"),
+    ];
+    for source in &kept {
+        let result = run(source, TS);
+        assert!(
+            pairs(&result, Operator::StringLiteral)
+                .contains(&("\"monthly\"".to_owned(), "\"\"".to_owned())),
+            "{source}"
+        );
+    }
+    let result = run(
+        &format!(
+            "{head}case \"monthly\": return amount; case \"yearly\": return amount * 12; {tail}"
+        ),
+        TS,
+    );
+    assert!(
+        pairs(&result, Operator::StringLiteral)
+            .contains(&("\"yearly\"".to_owned(), "\"\"".to_owned()))
+    );
+}
+
+#[test]
+fn boolean_literal_skips_a_case_label_equivalent_to_default() {
+    let skipped = run(
+        "function f(v) { switch (v) { case true: return 1; case 0: return 2; default: return 1; } }",
+        TS,
+    );
+    assert_eq!(pairs(&skipped, Operator::BooleanLiteral), expected(&[]));
+    let kept = run(
+        "function f(v) { switch (v) { case true: return 1; case false: return 2; default: return 1; } }",
+        TS,
+    );
+    assert_eq!(
+        pairs(&kept, Operator::BooleanLiteral),
+        expected(&[("false", "true"), ("true", "false")]),
+    );
 }
 
 #[test]

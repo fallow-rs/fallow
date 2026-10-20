@@ -1701,6 +1701,10 @@ export type MutationScopeKind = ("changed" | "all" | "paths")
  */
 export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent" | "compile_error")
 /**
+ * How a run detected a mutant.
+ */
+export type MutantFailureKind = ("assertion" | "error" | "timeout")
+/**
  * Why the type check did not check a survivor.
  */
 export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing" | "unsupported-file")
@@ -19971,6 +19975,13 @@ test_reach?: (MutantTestReach | null)
  */
 retried?: boolean
 /**
+ * The runs that gave the status of a `retried` mutant: the first run,
+ * then the retry. Absent when the mutant got no retry, and absent for a
+ * `cached` mutant. Each duration is evidence of one run, so no
+ * fingerprint or baseline comparison uses this field.
+ */
+attempts?: MutantAttempt[]
+/**
  * True when the status comes from the result cache of an earlier run.
  * The mutant did not run in this run. `--no-cache` runs each mutant.
  */
@@ -20008,6 +20019,30 @@ tests?: string[]
  * A mocked module can be a barrel in front of the file of the mutant.
  */
 mocked_targets?: string[]
+}
+/**
+ * One run of a retried mutant.
+ */
+export interface MutantAttempt {
+status: MutantStatus
+/**
+ * The duration of this run in milliseconds. A watchdog timeout reports
+ * the wait of the watchdog.
+ */
+duration_ms?: (number | null)
+/**
+ * The test that killed the mutant in this run.
+ */
+killed_by?: (string | null)
+/**
+ * How the run detected the mutant. Absent for a run that did not detect
+ * it, and absent when the runner did not state the kind.
+ */
+failure_kind?: (MutantFailureKind | null)
+/**
+ * The first line of the reason of a `runtime_error` run.
+ */
+detail?: (string | null)
 }
 /**
  * The results of the mutants of one function.
