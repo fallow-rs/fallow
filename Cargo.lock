@@ -1152,7 +1152,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tempfile",
  "xxhash-rust",
 ]
@@ -1223,7 +1223,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signal-hook",
  "similar 3.2.0",
  "srcmap-sourcemap",
@@ -1309,7 +1309,7 @@ checksum = "2452633c503f12054cf3128ac25d9eee5429135afea3e3a178bf4704f02a9307"
 dependencies = [
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -1344,7 +1344,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "srcmap-sourcemap",
  "tempfile",
  "toml",
@@ -1374,7 +1374,7 @@ dependencies = [
  "rayon",
  "regex",
  "rustc-hash",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tracing",
  "xxhash-rust",
 ]
@@ -2956,7 +2956,7 @@ dependencies = [
  "oxc_transformer",
  "oxc_traverse",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -4147,9 +4147,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
