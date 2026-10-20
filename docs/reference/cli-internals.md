@@ -533,6 +533,30 @@ after every gate set the exit code.
   compares rule indexes. The globs use `literal_separator`, so `docs/*`
   matches the direct children of `docs` only.
 
+- A stderr warning that repeats a `workspace_diagnostics[]` entry, or that
+  describes the analysis inputs, uses the tracing target
+  `fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET` (`fallow::analysis_diagnostic`).
+  `build_tracing_filter` in `crates/cli/src/cli_startup.rs` turns that target
+  off when the run is quiet (`--quiet`, `--ci` or `FALLOW_QUIET`) and
+  `RUST_LOG` is not set. Use the target for a new warning of this type. Do not
+  use it for a config-load warning, such as an unknown rule key, because a
+  quiet run must still show those.
+- `ignoreFindings` also covers parse degradations.
+  `record_source_parse_degradations` drops the degradation of a covered file
+  before the registry write and the stderr warning, so the envelope, the
+  `parse-error` gate and the health note see the same set.
+  `GraphConfidenceContext::for_run` skips a covered degraded module, and that
+  check records the pattern as matched.
+- A dead-code baseline records the install state of the saving run in
+  `analysis_identity.node_modules` through `BaselineAnalysisIdentity` in
+  `crates/engine/src/baseline/install_state.rs`. The key is not part of
+  `SemanticAnalysisIdentity`, so a difference never stops the comparison. On
+  load, `check/baseline_notes.rs` prints the mismatch also under `--quiet` and
+  stores the `baseline-install-state-mismatch` diagnostic on
+  `LoadedBaselineStaleness::install_state`. `complete_check_execution` merges
+  it into `workspace_diagnostics`. The programmatic API adds the same
+  diagnostic in `apply_baseline`.
+
 ## Health grouping stage order
 
 `health --group-by` runs these steps in order:
