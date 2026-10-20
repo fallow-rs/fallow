@@ -33300,6 +33300,13 @@
           "type": "boolean",
           "description": "True when the status comes from a first run and a retry in a new\ncompanion. A `survived` or `timeout` mutant without this field got no\nretry, because the time budget ended first."
         },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutantAttempt"
+          },
+          "description": "The runs that gave the status of a `retried` mutant: the first run,\nthen the retry. Absent when the mutant got no retry, and absent for a\n`cached` mutant. Each duration is evidence of one run, so no\nfingerprint or baseline comparison uses this field."
+        },
         "cached": {
           "type": "boolean",
           "description": "True when the status comes from the result cache of an earlier run.\nThe mutant did not run in this run. `--no-cache` runs each mutant."
@@ -34193,6 +34200,71 @@
         "reason"
       ],
       "description": "One file of the mutation report that does not match the current source."
+    },
+    "MutantAttempt": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "The status of this run alone.",
+          "$ref": "#/definitions/MutantStatus"
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The duration of this run in milliseconds. A timeout reports the wait\nof the watchdog."
+        },
+        "killed_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The test that killed the mutant in this run."
+        },
+        "failure_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantFailureKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the run detected the mutant. Absent for a run that did not detect\nit, and absent when the runner did not state the kind."
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The first line of the reason of a `runtime_error` run."
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "description": "One run of a retried mutant."
+    },
+    "MutantFailureKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "assertion",
+          "description": "A test assertion failed."
+        },
+        {
+          "type": "string",
+          "const": "error",
+          "description": "A test or the module load threw an error that is not an assertion."
+        },
+        {
+          "type": "string",
+          "const": "timeout",
+          "description": "A test or the run passed its time limit."
+        }
+      ],
+      "description": "How a run detected a mutant."
     }
   }
 }

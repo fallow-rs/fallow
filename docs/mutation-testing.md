@@ -364,6 +364,14 @@ tests detect the mutant.
   plus 2 seconds.
 - `retried: true` on a mutant result marks a status from a first run and
   a retry. A `survived` or `timeout` mutant without the field got no retry.
+- A retried mutant result has an `attempts` array: the first run, then the
+  retry. Each entry has the `status` and the `duration_ms` of that run
+  alone. A `killed` entry has `killed_by` and a `failure_kind`
+  (`assertion`, `error` or `timeout`). A `timeout` entry has the
+  `failure_kind` `timeout`. A `runtime_error` entry has a `detail` with the
+  first line of the reason. A mutant without a retry, and a `cached`
+  mutant, have no `attempts`. No fingerprint or baseline comparison uses
+  the field.
 - A retry of a real infinite loop costs two more timeout windows.
 - A `runtime_error` retry takes the mutant out of the score, also after a
   first `timeout`. The completion is then `partial` (`runtime-error`).

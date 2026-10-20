@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fallow_output::MutantStatus;
+use fallow_output::{MutantAttempt, MutantFailureKind, MutantStatus};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::manifest::RunnerRange;
@@ -114,6 +114,8 @@ pub struct MutantOutcome {
     pub duration_ms: Option<u64>,
     /// True when the status comes from a first run and a retry.
     pub retried: bool,
+    /// The first run and the retry of a `retried` mutant. Empty otherwise.
+    pub attempts: Vec<MutantAttempt>,
     /// True when the result comes from the result cache. The mutant did not
     /// run.
     pub cached: bool,
@@ -128,6 +130,7 @@ impl MutantOutcome {
             static_mutant: false,
             duration_ms: None,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
         }
     }
@@ -304,6 +307,8 @@ struct Attempt {
     status: MutantStatus,
     killed_by: Option<String>,
     duration_ms: Option<u64>,
+    /// How the run detected the mutant, when the runner states it.
+    failure_kind: Option<MutantFailureKind>,
     issue: Option<ScheduleIssue>,
     /// The covering tests that the companion left out, because they did not
     /// pass in its dry run or in a control run.
@@ -319,6 +324,7 @@ impl Attempt {
             status: MutantStatus::RuntimeError,
             killed_by: None,
             duration_ms: None,
+            failure_kind: None,
             issue: Some(ScheduleIssue {
                 code: "runtime-error",
                 message,
@@ -337,6 +343,7 @@ impl Attempt {
             status: MutantStatus::NoCoverage,
             killed_by: None,
             duration_ms: None,
+            failure_kind: None,
             issue: None,
             dropped_tests,
             settled: true,
@@ -348,10 +355,15 @@ impl Attempt {
         killed_by: Option<String>,
         duration_ms: Option<u64>,
     ) -> Self {
+        let failure_kind = match status {
+            MutantStatus::Timeout => Some(MutantFailureKind::Timeout),
+            _ => None,
+        };
         Self {
             status,
             killed_by,
             duration_ms,
+            failure_kind,
             issue: None,
             dropped_tests: Vec::new(),
             settled: false,
@@ -436,6 +448,42 @@ fn classify(
             }
             Ok((MutantStatus::Survived, None))
         }
+    }
+}
+
+/// How a `killed` run detected the mutant: the failure kind of the killing
+/// test, or `error` for a kill by an error outside each test.
+fn kill_kind(
+    result: &RunResult,
+    status: MutantStatus,
+    killed_by: Option<&str>,
+) -> Option<MutantFailureKind> {
+    if status != MutantStatus::Killed {
+        return None;
+    }
+    let Some(killer) = killed_by else {
+        return Some(MutantFailureKind::Error);
+    };
+    result
+        .tests
+        .iter()
+        .find(|test| test.test_id == killer)
+        .and_then(|test| test.failure_kind.as_deref())
+        .and_then(MutantFailureKind::from_wire)
+}
+
+/// The evidence of one run, for the attempt history of a retried mutant.
+fn attempt_record(attempt: &Attempt) -> MutantAttempt {
+    let detail = (attempt.status == MutantStatus::RuntimeError)
+        .then_some(attempt.issue.as_ref())
+        .flatten()
+        .map(|issue| first_line(&issue.message).to_owned());
+    MutantAttempt {
+        status: attempt.status,
+        duration_ms: attempt.duration_ms,
+        killed_by: attempt.killed_by.clone(),
+        failure_kind: attempt.failure_kind,
+        detail,
     }
 }
 
@@ -806,7 +854,11 @@ impl<'a> Worker<'a> {
             Ok(Response::Run(result)) => match classify(job, &tests, &result) {
                 Ok((status, killed_by)) => {
                     load_kill = is_load_kill(&result, status, killed_by.as_ref());
-                    Attempt::decided(status, killed_by, round_ms(result.duration_ms))
+                    let kind = kill_kind(&result, status, killed_by.as_deref());
+                    Attempt {
+                        failure_kind: kind,
+                        ..Attempt::decided(status, killed_by, round_ms(result.duration_ms))
+                    }
                 }
                 Err(reason) => {
                     self.reset();
@@ -1280,6 +1332,7 @@ fn cached_outcome(
         duration_ms: hit.duration_ms,
         // The cache stores a survivor only after its retry.
         retried: hit.status == MutantStatus::Survived,
+        attempts: Vec::new(),
         cached: true,
     })
 }
@@ -1587,6 +1640,7 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
             static_mutant: job.static_mutant,
             duration_ms: attempt.duration_ms,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
         },
     );
@@ -1796,6 +1850,30 @@ const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatu
     }
 }
 
+/// Records the first run of each mutant. Gives the survivors and the
+/// timeouts to run again, and the evidence of their first run.
+fn record_first_runs(
+    outcome: &mut ScheduleOutcome,
+    facts: &DryRunFacts,
+    attempts: Vec<(Job, Attempt)>,
+) -> (Vec<Job>, FxHashMap<String, MutantAttempt>) {
+    let mut suspects = Vec::new();
+    let mut first_runs = FxHashMap::default();
+    for (job, attempt) in attempts {
+        let suspect = match attempt.status {
+            MutantStatus::Survived => Some(job.clone()),
+            MutantStatus::Timeout => Some(job.clone().with_doubled_timeout()),
+            _ => None,
+        };
+        if let Some(suspect) = suspect {
+            first_runs.insert(job.id.clone(), attempt_record(&attempt));
+            suspects.push(suspect);
+        }
+        record(outcome, facts, job, attempt);
+    }
+    (suspects, first_runs)
+}
+
 /// Runs each survivor and each timeout again in a new companion (section
 /// 10), see [`retried_status`]. Host load alone can make a test time out,
 /// so a single timeout is not proof of detection. The retry stays inside the time budget: a
@@ -1805,6 +1883,7 @@ fn retry_suspects(
     runner: PhaseRunner<'_>,
     facts: &DryRunFacts,
     suspects: Vec<Job>,
+    mut first_runs: FxHashMap<String, MutantAttempt>,
     outcome: &mut ScheduleOutcome,
 ) -> Result<(), ScheduleError> {
     let mut retry_files: Vec<String> = suspects
@@ -1839,6 +1918,11 @@ fn retry_suspects(
             first.and_then(|first| first.duration_ms)
         };
         let id = job.id.clone();
+        let attempts: Vec<MutantAttempt> = first_runs
+            .remove(&id)
+            .into_iter()
+            .chain([attempt_record(&attempt)])
+            .collect();
         record(
             outcome,
             facts,
@@ -1851,6 +1935,7 @@ fn retry_suspects(
         );
         if let Some(result) = outcome.results.get_mut(&id) {
             result.retried = true;
+            result.attempts = attempts;
         }
     }
     Ok(())
@@ -2148,18 +2233,10 @@ pub fn run_schedule_with_progress(
     outcome.workers = workers;
     outcome.timings.mutants = mutants_started.elapsed();
     note_control_failures(&mut outcome, &facts, &memo);
-    let mut suspects = Vec::new();
-    for (job, attempt) in attempts {
-        match attempt.status {
-            MutantStatus::Survived => suspects.push(job.clone()),
-            MutantStatus::Timeout => suspects.push(job.clone().with_doubled_timeout()),
-            _ => {}
-        }
-        record(&mut outcome, &facts, job, attempt);
-    }
+    let (suspects, first_runs) = record_first_runs(&mut outcome, &facts, attempts);
     if !suspects.is_empty() {
         let retry_started = Instant::now();
-        retry_suspects(runner, &facts, suspects, &mut outcome)?;
+        retry_suspects(runner, &facts, suspects, first_runs, &mut outcome)?;
         outcome.timings.retry = retry_started.elapsed();
     }
     outcome

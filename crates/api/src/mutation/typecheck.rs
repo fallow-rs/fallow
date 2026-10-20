@@ -284,6 +284,7 @@ mod tests {
             duration_ms: None,
             test_reach: None,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
             type_error_codes: Vec::new(),
         }

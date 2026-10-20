@@ -362,6 +362,12 @@ pub struct MutantResult {
     /// retry, because the time budget ended first.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retried: bool,
+    /// The runs that gave the status of a `retried` mutant: the first run,
+    /// then the retry. Absent when the mutant got no retry, and absent for a
+    /// `cached` mutant. Each duration is evidence of one run, so no
+    /// fingerprint or baseline comparison uses this field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<MutantAttempt>,
     /// True when the status comes from the result cache of an earlier run.
     /// The mutant did not run in this run. `--no-cache` runs each mutant.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -370,6 +376,55 @@ pub struct MutantResult {
     /// `compile_error` mutant, sorted, at most 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_error_codes: Vec<u32>,
+}
+
+/// One run of a retried mutant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutantAttempt {
+    /// The status of this run alone.
+    pub status: MutantStatus,
+    /// The duration of this run in milliseconds. A timeout reports the wait
+    /// of the watchdog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// The test that killed the mutant in this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub killed_by: Option<String>,
+    /// How the run detected the mutant. Absent for a run that did not detect
+    /// it, and absent when the runner did not state the kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<MutantFailureKind>,
+    /// The first line of the reason of a `runtime_error` run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// How a run detected a mutant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutantFailureKind {
+    /// A test assertion failed.
+    Assertion,
+    /// A test or the module load threw an error that is not an assertion.
+    Error,
+    /// A test or the run passed its time limit.
+    Timeout,
+}
+
+impl MutantFailureKind {
+    /// The kind of a `failure_kind` value of the companion protocol. An
+    /// unknown value gives `None`.
+    #[must_use]
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "assertion" => Some(Self::Assertion),
+            "error" => Some(Self::Error),
+            "timeout" => Some(Self::Timeout),
+            _ => None,
+        }
+    }
 }
 
 /// How tests reach the code of one mutant in the module graph. The class
@@ -1041,6 +1096,7 @@ mod tests {
             duration_ms: None,
             test_reach: None,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
             type_error_codes: Vec::new(),
         }
@@ -1177,6 +1233,7 @@ mod tests {
             duration_ms: None,
             test_reach: None,
             retried: false,
+            attempts: Vec::new(),
             cached: false,
             type_error_codes: Vec::new(),
         };
@@ -1196,5 +1253,55 @@ mod tests {
                 "status": "no_coverage"
             })
         );
+    }
+    #[test]
+    fn a_retried_mutant_serializes_each_attempt_in_run_order() {
+        let attempt = |status, duration_ms, failure_kind| MutantAttempt {
+            status,
+            duration_ms: Some(duration_ms),
+            killed_by: None,
+            failure_kind,
+            detail: None,
+        };
+        let result = MutantResult {
+            location: MutantLocation {
+                mutant_id: "m1".to_owned(),
+                file: "src/math.ts".to_owned(),
+                line: 2,
+                column: 10,
+                span: (40, 45),
+                operator: "arithmetic".to_owned(),
+                function: None,
+                function_line: None,
+                rank: None,
+            },
+            status: MutantStatus::Flaky,
+            prune_reason: None,
+            killed_by: None,
+            covering_tests: Vec::new(),
+            static_mutant: false,
+            duration_ms: Some(5000),
+            test_reach: None,
+            retried: true,
+            attempts: vec![
+                attempt(
+                    MutantStatus::Timeout,
+                    5000,
+                    Some(MutantFailureKind::Timeout),
+                ),
+                attempt(MutantStatus::Survived, 12, None),
+            ],
+            cached: false,
+            type_error_codes: Vec::new(),
+        };
+        let value = serde_json::to_value(&result).expect("serializes");
+        assert_eq!(
+            value["attempts"],
+            serde_json::json!([
+                {"status": "timeout", "duration_ms": 5000, "failure_kind": "timeout"},
+                {"status": "survived", "duration_ms": 12}
+            ])
+        );
+        assert_eq!(value["retried"], serde_json::json!(true));
     }
 }
