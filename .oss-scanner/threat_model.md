@@ -60,8 +60,8 @@ Out of scope:
 
 - `benchmarks/`, `tests/fixtures/`, `examples/`, `fuzz/corpus/`: test data.
   Some fixtures contain deliberate bad code.
-- `editors/`, `viz-frontend/`, `apps/`, `npm/`, `action/`, `ci/`: not part
-  of this build.
+- `editors/`, `viz-frontend/`, `npm/`, `action/`, `ci/`: not part of this
+  build.
 
 ## How to exercise it
 
