@@ -203,8 +203,12 @@ and reads its default export. Named exports of the file stay reportable. Add
 them to `usedExports` when the tool reads them. Without `includeEntryExports`,
 this rule does not change the output.
 
-A pattern without a `/` matches in every directory, as config discovery does,
-so `my-framework.config.ts` also matches `packages/web/my-framework.config.ts`.
+Config discovery adds a `**/` prefix to a pattern that has no `/`, does not
+start with a dot and names only source extensions (`.ts`, `.js` and similar).
+The credit uses the same prefix, so `my-framework.config.ts` also matches
+`src/my-framework.config.ts`. A pattern such as `.my-frameworkrc.js` gets no
+prefix and matches only at the project root and at the root of each workspace
+package.
 Keep config patterns specific: a broad pattern such as `config*.ts` also
 gives the credit to source files such as `src/configUtils.ts`.
 

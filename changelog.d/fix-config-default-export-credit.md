@@ -7,9 +7,10 @@
   `tailwind.config.js`, `jest.config.js`, `playwright.config.ts` and a config
   file in a workspace package. Named exports of a config file stay
   reportable. Some patterns do not get the credit: Gatsby `gatsby-node`,
-  `gatsby-browser` and `gatsby-ssr` (Gatsby reads named exports), and GraphQL
-  Codegen `codegen*`, Serverless `serverless.*` and Vercel `vercel.*`, because
-  these patterns also match ordinary source files. Output without
+  `gatsby-browser` and `gatsby-ssr` (Gatsby reads named exports), Vercel
+  `vercel.*` (Vercel reads the named `config` export), and GraphQL Codegen
+  `codegen*` and Serverless `serverless.*`, because these patterns also match
+  ordinary source files. Output without
   `includeEntryExports` does not change. Thanks to
   [@osazemeu](https://github.com/osazemeu) for the report.
   (Closes [#3691](https://github.com/fallow-rs/fallow/issues/3691))
