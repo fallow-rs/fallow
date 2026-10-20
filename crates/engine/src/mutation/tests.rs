@@ -992,6 +992,21 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
 }
 
 #[test]
+fn a_prepared_statement_in_a_class_field_or_an_assignment_is_pruned() {
+    let plan = plan_all(&fixture("mutation-plan-orm-write"));
+    let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);
+    let functions = function_dispositions(&plan, "src/repository.ts");
+    for function in ["clearAssigned", "addField", "setField"] {
+        assert_eq!(functions.get(function), Some(&pruned), "{function}");
+    }
+    assert_eq!(
+        functions.get("findField"),
+        Some(&PLANNED),
+        "a prepared `SELECT` class field is not a write"
+    );
+}
+
+#[test]
 fn a_provenance_row_prunes_only_the_calls_of_its_import_source() {
     let plan = plan_all(&fixture("mutation-plan-provenance"));
     let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);

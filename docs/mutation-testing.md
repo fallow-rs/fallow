@@ -213,9 +213,11 @@ or relational mutant, so it adds little test-strength signal for its run time.
   first argument is a path, such as the route `app.delete("/items/:id",
   handler)`, does not count. A prepared statement run (`run`, `all`, `get`,
   `iterate`, `each`) counts when the receiver is a `.prepare(...)` call, such as
-  `db.prepare(INSERT_SQL).run(value)`, or a name that a declarator sets to one,
-  such as `insertStmt.run(value)` after `const insertStmt = db.prepare("INSERT
-  ...")`. A prepared statement whose static SQL text starts with `select` is a
+  `db.prepare(INSERT_SQL).run(value)`, or a name or a `this` field that a
+  declarator, a class field or an assignment sets to one, such as
+  `insertStmt.run(value)` after `const insertStmt = db.prepare("INSERT ...")`,
+  or `this.insert.run(value)` after the class field `insert =
+  db.prepare("INSERT ...")`. A prepared statement whose static SQL text starts with `select` is a
   read and does not count. The check matches the name in the same module only,
   so a statement that a function gets as a parameter, or that the module
   imports, does not count. In a module that loads a database client package

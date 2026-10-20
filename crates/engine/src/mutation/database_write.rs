@@ -2,8 +2,8 @@
 //! module with database reach.
 
 use oxc_ast::ast::{
-    Argument, BindingPattern, CallExpression, Expression, TaggedTemplateExpression,
-    VariableDeclarator,
+    Argument, AssignmentExpression, AssignmentTarget, BindingPattern, CallExpression, Expression,
+    PropertyDefinition, TaggedTemplateExpression, VariableDeclarator,
 };
 use oxc_ast_visit::Visit;
 use rustc_hash::FxHashSet;
@@ -61,9 +61,10 @@ const STATEMENT_RUN_METHODS: [&str; 2] = ["exec", "run"];
 
 /// Method names that run a prepared statement: `stmt.run(value)` and
 /// `db.prepare(sql).all()`. In a module with database reach, these count when
-/// the receiver is a `.prepare(...)` call, or a name whose declarator
-/// initializes it with one. A prepared statement whose static SQL text starts
-/// with `select` is a read and does not count.
+/// the receiver is a `.prepare(...)` call, or a name or a `this.<field>` that
+/// a declarator, a class field or an assignment sets to one. A prepared
+/// statement whose static SQL text starts with `select` is a read and does
+/// not count.
 const PREPARED_RUN_METHODS: [&str; 5] = ["all", "each", "get", "iterate", "run"];
 
 /// The method name that creates a prepared statement.
@@ -178,12 +179,48 @@ fn is_prepared_write(expression: &Expression<'_>) -> bool {
             .is_some_and(|text| sql_verb(text).eq_ignore_ascii_case(SQL_READ_VERB))
 }
 
-/// A statement run whose receiver is a name. The declarator of the name
-/// can come after the call in source order, so the check waits for the
-/// end of the walk.
+/// The receiver of a statement run: a name, such as `stmt` in `stmt.run()`,
+/// or a field of `this`, such as `insert` in `this.insert.run()`.
+#[derive(PartialEq, Eq, Hash)]
+enum Receiver {
+    Name(String),
+    Field(String),
+}
+
+impl Receiver {
+    fn of(expression: &Expression<'_>) -> Option<Self> {
+        match expression.without_parentheses() {
+            Expression::Identifier(name) => Some(Self::Name(name.name.to_string())),
+            Expression::StaticMemberExpression(member)
+                if matches!(member.object, Expression::ThisExpression(_)) =>
+            {
+                Some(Self::Field(member.property.name.to_string()))
+            }
+            _ => None,
+        }
+    }
+
+    fn of_target(target: &AssignmentTarget<'_>) -> Option<Self> {
+        match target {
+            AssignmentTarget::AssignmentTargetIdentifier(name) => {
+                Some(Self::Name(name.name.to_string()))
+            }
+            AssignmentTarget::StaticMemberExpression(member)
+                if matches!(member.object, Expression::ThisExpression(_)) =>
+            {
+                Some(Self::Field(member.property.name.to_string()))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// A statement run whose receiver is a name or a field. The declarator or
+/// the assignment of the receiver can come after the call in source order,
+/// so the check waits for the end of the walk.
 struct NamedRun {
     start: u32,
-    receiver: String,
+    receiver: Receiver,
     prepared: bool,
 }
 
@@ -191,7 +228,7 @@ struct NamedRun {
 struct Writes {
     direct: bool,
     starts: Vec<u32>,
-    prepared_names: FxHashSet<String>,
+    prepared_receivers: FxHashSet<Receiver>,
     regex_names: FxHashSet<String>,
     named_runs: Vec<NamedRun>,
 }
@@ -215,10 +252,10 @@ impl Writes {
         if PREPARED_RUN_METHODS.contains(&name) {
             if is_prepared_write(object) {
                 self.starts.push(start);
-            } else if let Expression::Identifier(receiver) = object {
+            } else if let Some(receiver) = Receiver::of(object) {
                 self.named_runs.push(NamedRun {
                     start,
-                    receiver: receiver.name.to_string(),
+                    receiver,
                     prepared: true,
                 });
             }
@@ -227,7 +264,7 @@ impl Writes {
             match object {
                 Expression::Identifier(receiver) => self.named_runs.push(NamedRun {
                     start,
-                    receiver: receiver.name.to_string(),
+                    receiver: Receiver::Name(receiver.name.to_string()),
                     prepared: false,
                 }),
                 _ => self.starts.push(start),
@@ -237,10 +274,10 @@ impl Writes {
 
     fn finish(mut self) -> Vec<u32> {
         for run in &self.named_runs {
-            let write = if run.prepared {
-                self.prepared_names.contains(&run.receiver)
-            } else {
-                !self.regex_names.contains(&run.receiver)
+            let write = match (&run.receiver, run.prepared) {
+                (receiver, true) => self.prepared_receivers.contains(receiver),
+                (Receiver::Name(name), false) => !self.regex_names.contains(name),
+                (Receiver::Field(_), false) => true,
             };
             if write {
                 self.starts.push(run.start);
@@ -254,12 +291,33 @@ impl<'a> Visit<'a> for Writes {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
         if let (BindingPattern::BindingIdentifier(id), Some(init)) = (&it.id, &it.init) {
             if is_prepared_write(init) {
-                self.prepared_names.insert(id.name.to_string());
+                self.prepared_receivers
+                    .insert(Receiver::Name(id.name.to_string()));
             } else if is_regex(init) {
                 self.regex_names.insert(id.name.to_string());
             }
         }
         oxc_ast_visit::walk::walk_variable_declarator(self, it);
+    }
+
+    fn visit_property_definition(&mut self, it: &PropertyDefinition<'a>) {
+        if let (Some(name), Some(value)) = (it.key.static_name(), &it.value)
+            && !it.r#static
+            && is_prepared_write(value)
+        {
+            self.prepared_receivers
+                .insert(Receiver::Field(name.to_string()));
+        }
+        oxc_ast_visit::walk::walk_property_definition(self, it);
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if is_prepared_write(&it.right)
+            && let Some(receiver) = Receiver::of_target(&it.left)
+        {
+            self.prepared_receivers.insert(receiver);
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, it);
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {

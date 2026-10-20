@@ -12,6 +12,7 @@ import { addRow } from "./pg";
 import { addUser, countUsers } from "./pgjs";
 import { clearAll, runAll } from "./prisma";
 import { removeRecord } from "./remove";
+import { clearAssigned, Repository } from "./repository";
 import { pageCount } from "./routes";
 import { runTask } from "./runner";
 import { clamp, save } from "./save";
@@ -52,7 +53,15 @@ test("writers exist", () => {
     parseId,
     parseWord,
     parseStored,
+    clearAssigned,
   ]) {
     expect(typeof writer).toBe("function");
+  }
+});
+
+test("repository methods exist", () => {
+  const repository = new Repository();
+  for (const method of [repository.addField, repository.setField, repository.findField]) {
+    expect(typeof method).toBe("function");
   }
 });
