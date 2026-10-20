@@ -583,11 +583,17 @@ pub fn missing_node_modules_diagnostic(root: &Path) -> Option<WorkspaceDiagnosti
 /// exact same values as the process registry used by direct core and CLI paths.
 #[must_use]
 pub fn record_source_parse_degradations(
-    root: &Path,
+    config: &crate::ResolvedConfig,
     degradations: &[fallow_types::extract::SourceParseDegradation],
 ) -> Vec<WorkspaceDiagnostic> {
+    let root = config.root.as_path();
     let diagnostics: Vec<WorkspaceDiagnostic> = degradations
         .iter()
+        .filter(|degradation| {
+            !config
+                .ignore_findings
+                .is_ignored_path(root, &degradation.path)
+        })
         .map(|degradation| {
             WorkspaceDiagnostic::new(
                 root,

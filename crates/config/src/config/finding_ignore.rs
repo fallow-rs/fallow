@@ -1,6 +1,8 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use fallow_types::discover::StableFileKey;
 use globset::{GlobSet, GlobSetBuilder};
 
 /// Compiled project-relative patterns for hiding source-owned findings.
@@ -77,6 +79,16 @@ impl FindingIgnoreMatcher {
         }
     }
 
+    /// Compile `ignoreFindings` patterns outside config resolution.
+    ///
+    /// # Errors
+    ///
+    /// Returns the glob error of the first invalid pattern.
+    pub fn try_compile(patterns: &[String]) -> Result<Self, globset::Error> {
+        Self::build_sets(patterns)?;
+        Ok(Self::compile(patterns))
+    }
+
     pub(super) fn validate_compilation(patterns: &[String]) -> Result<(), globset::Error> {
         Self::build_sets(patterns).map(|_| ())
     }
@@ -132,6 +144,25 @@ impl FindingIgnoreMatcher {
         usage.record(&usage.reported_origins, &indices);
 
         (self.hidden.is_empty() || hidden_hit) && !reported_hit
+    }
+
+    /// Whether a source path is hidden, for an absolute or a root-relative path.
+    ///
+    /// An absolute path outside `root` is never hidden.
+    #[must_use]
+    pub fn is_ignored_path(&self, root: &Path, path: &Path) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+        let key = if path.is_absolute() {
+            let Ok(relative) = path.strip_prefix(root) else {
+                return false;
+            };
+            StableFileKey::from_relative(relative)
+        } else {
+            StableFileKey::from_relative(path)
+        };
+        self.is_ignored(key.as_str())
     }
 
     /// Forget the pattern hits of an earlier analysis pass.
@@ -201,6 +232,17 @@ mod tests {
 
         assert!(matcher.is_ignored("src/app.test.ts"));
         assert!(!matcher.is_ignored("src/app.ts"));
+    }
+
+    #[test]
+    fn path_lookup_accepts_absolute_and_relative_paths() {
+        let matcher = matcher(&["test/fixtures/**"]);
+        let root = Path::new("/project");
+
+        assert!(matcher.is_ignored_path(root, Path::new("/project/test/fixtures/bad.js")));
+        assert!(matcher.is_ignored_path(root, Path::new("test/fixtures/bad.js")));
+        assert!(!matcher.is_ignored_path(root, Path::new("/project/src/app.js")));
+        assert!(!matcher.is_ignored_path(root, Path::new("/elsewhere/test/fixtures/bad.js")));
     }
 
     #[test]

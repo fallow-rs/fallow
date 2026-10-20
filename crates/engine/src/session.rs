@@ -1151,7 +1151,7 @@ impl AnalysisSession {
             // diagnostics. Record the kept ones again, so the diagnostics of
             // this run are the same as after a parse.
             record_source_diagnostics(
-                &self.config.root,
+                &self.config,
                 &parse.read_failures,
                 &parse.parse_degradations,
             );
@@ -1316,7 +1316,7 @@ impl AnalysisSession {
             .retain(|degradation| !reparsed.contains(&degradation.file_id));
         cache.parse_degradations.extend(parsed.parse_degradations);
         record_source_diagnostics(
-            &self.config.root,
+            &self.config,
             &cache.read_failures,
             &cache.parse_degradations,
         );
@@ -1420,7 +1420,7 @@ fn parse_files_with_config(
         &config.flags.patterns(),
     );
     let source_diagnostics = record_source_diagnostics(
-        &config.root,
+        config,
         &parse_result.read_failures,
         &parse_result.parse_degradations,
     );
@@ -1470,13 +1470,13 @@ fn parse_files_with_config(
 /// Record the read failures and parse degradations of a parse for the
 /// project, and return them as workspace diagnostics.
 fn record_source_diagnostics(
-    root: &Path,
+    config: &ResolvedConfig,
     read_failures: &[SourceReadFailure],
     parse_degradations: &[SourceParseDegradation],
 ) -> Vec<WorkspaceDiagnostic> {
-    let mut diagnostics = fallow_config::record_source_read_failures(root, read_failures);
+    let mut diagnostics = fallow_config::record_source_read_failures(&config.root, read_failures);
     diagnostics.extend(fallow_config::record_source_parse_degradations(
-        root,
+        config,
         parse_degradations,
     ));
     diagnostics

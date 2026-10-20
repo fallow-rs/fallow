@@ -175,6 +175,10 @@ pub enum WorkspaceDiagnosticKind {
     /// syntax newer than the parser as well as for genuinely broken files, so
     /// gating findings on this would mute real results project-wide instead of
     /// just the affected file.
+    ///
+    /// A file that `ignoreFindings` covers is not reported. The user marked it
+    /// as broken on purpose, so its partial parse also adds no caveat to other
+    /// findings and does not count for the parse-error gate.
     SourceParseDegraded {
         /// Number of parser diagnostics reported for the file.
         error_count: u32,

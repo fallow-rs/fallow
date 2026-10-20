@@ -205,3 +205,66 @@ fn a_dependency_only_the_broken_file_imports_carries_the_caveat() {
         "the file a dependency finding names is a package.json, never a parsed module"
     );
 }
+
+/// A syntax-error test fixture is broken on purpose. When `ignoreFindings`
+/// covers it, the run must not report it as degraded or caveat other findings
+/// because of it. A broken file outside the patterns is still reported.
+#[test]
+fn ignore_findings_hides_the_degradation_of_a_covered_file() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    std::fs::create_dir_all(root.join("src")).expect("create project src");
+    std::fs::create_dir_all(root.join("test/fixtures/bad")).expect("create fixture dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "ignored-degraded", "version": "1.0.0", "main": "src/index.ts" }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { helper } from \"./helper\";\n\nexport const run = (): string => helper();\n",
+    )
+    .expect("write entry module");
+    std::fs::write(
+        root.join("src/helper.ts"),
+        "export const helper = (): string => \"helper\";\nexport const unused = 1;\n",
+    )
+    .expect("write helper module");
+    std::fs::write(
+        root.join("test/fixtures/bad/broken.js"),
+        "const broken = = 1;\n",
+    )
+    .expect("write covered broken fixture");
+    std::fs::write(root.join("src/also-broken.ts"), "export const x = = 1;\n")
+        .expect("write uncovered broken file");
+    let mut config = create_config_with_cache(root, temp.path().join("cache"));
+    config.ignore_findings =
+        fallow_config::FindingIgnoreMatcher::try_compile(&["test/fixtures/**".to_owned()])
+            .expect("valid ignoreFindings pattern");
+
+    let results = fallow_core::analyze(&config).expect("analysis succeeds on a broken source");
+
+    let degraded = degraded_diagnostics(&config.root);
+    assert_eq!(
+        degraded.len(),
+        1,
+        "only the broken file outside ignoreFindings is reported, got {degraded:?}"
+    );
+    assert!(degraded[0].path.ends_with("src/also-broken.ts"));
+    let unused = results
+        .unused_exports
+        .iter()
+        .find(|issue| issue.export.export_name == "unused")
+        .expect("the unused helper export is reported");
+    assert!(
+        !unused
+            .reachability_caveats
+            .contains(&ReachabilityCaveat::IncompleteImportGraph),
+        "an unreachable broken file and a covered fixture must not caveat the graph, got {:?}",
+        unused.reachability_caveats
+    );
+    assert!(
+        config.ignore_findings.unmatched_patterns().is_empty(),
+        "a pattern that covers a broken fixture is a used pattern"
+    );
+}

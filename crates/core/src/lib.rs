@@ -1663,10 +1663,8 @@ fn parse_analysis_modules(
         &config.flags.patterns(),
     );
     let _ = fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
-    let _ = fallow_config::record_source_parse_degradations(
-        &config.root,
-        &parse_result.parse_degradations,
-    );
+    let _ =
+        fallow_config::record_source_parse_degradations(config, &parse_result.parse_degradations);
     let modules = parse_result.modules;
     let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     let cache_ms = update_parse_cache_if_enabled(

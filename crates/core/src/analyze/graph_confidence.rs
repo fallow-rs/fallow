@@ -115,6 +115,7 @@ use std::path::Path;
 
 use rustc_hash::FxHashSet;
 
+use fallow_config::FindingIgnoreMatcher;
 use fallow_types::output_dead_code::{CaveatedFinding, ReachabilityCaveat};
 use fallow_types::workspace::WorkspaceDiagnostic;
 
@@ -150,10 +151,16 @@ impl<'a> GraphConfidenceContext<'a> {
     /// the degraded-parse leg narrow on reachability. `diagnostics` is the run's
     /// workspace-diagnostic list, the ONLY record of a file that was never read:
     /// it has no `ModuleInfo` and no graph node to ask.
+    ///
+    /// A degraded module that `ignoreFindings` covers is skipped. The user
+    /// marked that file as broken on purpose (for example a syntax-error test
+    /// fixture), so its partial parse must not caveat other findings.
     pub(super) fn new(
         graph: &'a ModuleGraph,
         modules: &[ModuleInfo],
         diagnostics: &'a [WorkspaceDiagnostic],
+        ignore_findings: &FindingIgnoreMatcher,
+        root: &Path,
     ) -> Self {
         let mut incomplete_paths = FxHashSet::default();
         let mut graph_incomplete = false;
@@ -164,6 +171,9 @@ impl<'a> GraphConfidenceContext<'a> {
             let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
                 continue;
             };
+            if ignore_findings.is_ignored_path(root, &node.path) {
+                continue;
+            }
             incomplete_paths.insert(node.path.as_path());
             graph_incomplete = graph_incomplete || node.is_reachable() || node.is_entry_point();
         }
@@ -178,6 +188,22 @@ impl<'a> GraphConfidenceContext<'a> {
             incomplete_paths,
             graph_incomplete,
         }
+    }
+
+    /// [`Self::new`] with the `ignoreFindings` patterns and root of `config`.
+    pub(super) fn for_run(
+        graph: &'a ModuleGraph,
+        modules: &[ModuleInfo],
+        diagnostics: &'a [WorkspaceDiagnostic],
+        config: &fallow_config::ResolvedConfig,
+    ) -> Self {
+        Self::new(
+            graph,
+            modules,
+            diagnostics,
+            &config.ignore_findings,
+            &config.root,
+        )
     }
 
     /// Whether this run analyzed every file it discovered, in which case the
@@ -293,6 +319,10 @@ mod tests {
     const INDEX: &str = "/p/src/index.ts";
     const HELPER: &str = "/p/src/helper.ts";
     const ORPHAN: &str = "/p/src/orphan.ts";
+
+    fn no_ignores() -> FindingIgnoreMatcher {
+        FindingIgnoreMatcher::default()
+    }
 
     /// A three-file graph whose only entry point is `index.ts`; nothing imports
     /// anything, so `helper.ts` and `orphan.ts` are both unreachable.
@@ -445,7 +475,14 @@ mod tests {
         let graph = graph();
         let mut results = unused(&[HELPER, ORPHAN]);
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results
@@ -463,7 +500,14 @@ mod tests {
 
         // The entry file is the one that failed to parse: the imports it never
         // credited are exactly why the other two read as unused.
-        GraphConfidenceContext::new(&graph, &modules([3, 0, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([3, 0, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         for finding in &results.unused_files {
             assert_eq!(
@@ -482,7 +526,14 @@ mod tests {
 
         // Only `helper.ts` degraded, and it is unreachable: no missing edge of
         // its can change any verdict but its own, whose export list is short.
-        GraphConfidenceContext::new(&graph, &modules([0, 2, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 2, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         let helper = results
             .unused_files
@@ -510,7 +561,14 @@ mod tests {
         let graph = graph();
         let mut results = with_unused_dependency(unused(&[]));
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results.unused_dependencies[0]
@@ -531,7 +589,14 @@ mod tests {
         let graph = graph();
         let mut results = with_unused_dependency(unused(&[HELPER, ORPHAN]));
 
-        GraphConfidenceContext::new(&graph, &modules([0, 2, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 2, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert_eq!(
             results.unused_dependencies[0].reachability_caveats,
@@ -557,7 +622,14 @@ mod tests {
         let graph = graph();
         let mut results = with_unused_dependency(unused(&[]));
 
-        GraphConfidenceContext::new(&graph, &modules([3, 2, 1]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([3, 2, 1]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             !results.unused_dependencies[0]
@@ -614,8 +686,14 @@ mod tests {
             let mut results = with_unused_dependency(unused(&[HELPER, ORPHAN]));
             let diagnostics = vec![diagnostic("/p/src/huge.ts", kind)];
 
-            GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-                .annotate(&mut results);
+            GraphConfidenceContext::new(
+                &graph,
+                &modules([0, 0, 0]),
+                &diagnostics,
+                &no_ignores(),
+                Path::new(ROOT),
+            )
+            .annotate(&mut results);
 
             for finding in &results.unused_files {
                 assert_eq!(
@@ -649,8 +727,14 @@ mod tests {
             },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert_eq!(
             results.unused_files[0].reachability_caveats,
@@ -673,8 +757,14 @@ mod tests {
             },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         let helper = results
             .unused_files
@@ -708,8 +798,14 @@ mod tests {
             },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results
@@ -739,8 +835,14 @@ mod tests {
             diagnostic("/p", WorkspaceDiagnosticKind::BoundariesNotConfigured),
         ];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results
@@ -775,8 +877,14 @@ mod tests {
             },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         let member = &results.unused_enum_members[0];
         assert_eq!(
@@ -801,7 +909,14 @@ mod tests {
         let mut results = with_unused_class_member(with_unused_enum_member(unused(&[ORPHAN])));
 
         // `helper.ts` (index 1) is unreachable and parsed with errors.
-        GraphConfidenceContext::new(&graph, &modules([0, 2, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 2, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results.unused_files[0].reachability_caveats.is_empty(),
@@ -843,8 +958,14 @@ mod tests {
             },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         let member = &results.unused_store_members[0];
         assert_eq!(
@@ -865,7 +986,14 @@ mod tests {
         let graph = graph();
         let mut results = with_unused_store_member(unused(&[]));
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results.unused_store_members[0]
@@ -888,8 +1016,14 @@ mod tests {
             },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         let member = &results.unused_class_members[0];
         assert_eq!(
@@ -915,8 +1049,14 @@ mod tests {
             WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
         )];
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
-            .annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &diagnostics,
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert_eq!(
             results.unused_types[0].reachability_caveats,
@@ -939,7 +1079,14 @@ mod tests {
         let graph = graph();
         let mut results = with_unused_enum_member(with_unused_export_and_type(unused(&[ORPHAN])));
 
-        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
+        GraphConfidenceContext::new(
+            &graph,
+            &modules([0, 0, 0]),
+            &[],
+            &no_ignores(),
+            Path::new(ROOT),
+        )
+        .annotate(&mut results);
 
         assert!(
             results.unused_enum_members[0]
@@ -955,5 +1102,42 @@ mod tests {
                 .any(IssueAction::is_auto_fixable),
             "and withholds nothing"
         );
+    }
+
+    #[test]
+    fn a_degraded_module_that_ignore_findings_covers_flags_nothing() {
+        let graph = graph();
+        let mut results = unused(&[HELPER, ORPHAN]);
+        let ignores = FindingIgnoreMatcher::try_compile(&["src/index.ts".to_owned()])
+            .expect("valid ignoreFindings pattern");
+
+        GraphConfidenceContext::new(&graph, &modules([3, 0, 0]), &[], &ignores, Path::new(ROOT))
+            .annotate(&mut results);
+
+        assert!(
+            results
+                .unused_files
+                .iter()
+                .all(|finding| finding.reachability_caveats.is_empty()),
+            "a broken file that ignoreFindings covers must not caveat other findings"
+        );
+    }
+
+    #[test]
+    fn a_degraded_module_outside_ignore_findings_still_flags_findings() {
+        let graph = graph();
+        let mut results = unused(&[HELPER, ORPHAN]);
+        let ignores = FindingIgnoreMatcher::try_compile(&["fixtures/**".to_owned()])
+            .expect("valid ignoreFindings pattern");
+
+        GraphConfidenceContext::new(&graph, &modules([3, 0, 0]), &[], &ignores, Path::new(ROOT))
+            .annotate(&mut results);
+
+        for finding in &results.unused_files {
+            assert_eq!(
+                finding.reachability_caveats,
+                vec![ReachabilityCaveat::IncompleteImportGraph],
+            );
+        }
     }
 }

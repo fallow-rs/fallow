@@ -798,7 +798,7 @@ pub(crate) fn find_dead_code_full(
     // run failed to read it at all. `clear_analysis_stage_diagnostics` above
     // touches only analyze-stage kinds, so the walk's skip list is intact here.
     let diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
-    graph_confidence::GraphConfidenceContext::new(graph, modules, &diagnostics)
+    graph_confidence::GraphConfidenceContext::for_run(graph, modules, &diagnostics, config)
         .annotate(&mut results);
 
     results.sort();
