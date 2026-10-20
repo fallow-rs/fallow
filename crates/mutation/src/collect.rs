@@ -22,22 +22,25 @@ use oxc_ast::ast::{
     BooleanLiteral, CallExpression, ChainElement, ChainExpression, Class, ConditionalExpression,
     Decorator, Directive, DoWhileStatement, ExportAllDeclaration, ExportDefaultDeclaration,
     ExportFromDeclaration, ExportNamedDeclaration, Expression, ExpressionStatement, ForStatement,
-    ForStatementInit, ForStatementLeft, FormalParameter, Function, IfStatement, ImportDeclaration,
-    ImportExpression, JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition,
-    MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral,
-    ReturnStatement, SimpleAssignmentTarget, Statement, StringLiteral, SwitchCase, SwitchStatement,
-    TSEnumDeclaration, TSExportAssignment, TSExternalModuleDeclaration, TSGlobalDeclaration,
-    TSImportEqualsDeclaration, TSInterfaceDeclaration, TSNamespaceDeclaration,
-    TSNamespaceExportDeclaration, TSType, TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeName,
-    TSTypeOperatorOperator, TSTypeParameterDeclaration, TSTypeParameterInstantiation,
-    TaggedTemplateExpression, UnaryExpression, UpdateExpression, VariableDeclaration,
-    VariableDeclarationKind, VariableDeclarator, WhileStatement, WithStatement,
+    ForStatementInit, ForStatementLeft, FormalParameter, FormalParameterRest, Function,
+    IfStatement, ImportDeclaration, ImportExpression, JSXAttributeValue, LogicalExpression,
+    MemberExpression, MethodDefinition, MethodDefinitionKind, ObjectProperty, Program,
+    PropertyDefinition, PropertyKey, RegExpLiteral, ReturnStatement, SimpleAssignmentTarget,
+    Statement, StringLiteral, SwitchCase, SwitchStatement, TSEnumDeclaration, TSExportAssignment,
+    TSExternalModuleDeclaration, TSGlobalDeclaration, TSImportEqualsDeclaration,
+    TSInterfaceDeclaration, TSNamespaceDeclaration, TSNamespaceExportDeclaration, TSType,
+    TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeName, TSTypeOperatorOperator,
+    TSTypeParameterDeclaration, TSTypeParameterInstantiation, TaggedTemplateExpression,
+    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarationKind,
+    VariableDeclarator, WhileStatement, WithStatement,
 };
 use oxc_ast_visit::{Visit, walk};
+use oxc_semantic::SemanticBuilder;
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::operator::{
     AssignmentOperator, BinaryOperator, LogicalOperator, UnaryOperator, UpdateOperator,
 };
+use oxc_syntax::reference::ReferenceId;
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::{FunctionRef, Operator, is_identifier_byte};
@@ -93,7 +96,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         expression_starts: BTreeSet::new(),
         equivalent_labels: BTreeSet::new(),
         counted_loop_tests: BTreeSet::new(),
-        known_arrays: ArrayBindings::known_arrays(program),
+        known_arrays: ArrayBindings::known_array_references(program),
     };
     collector.visit_program(program);
     let mut sites: Vec<Site> = collector.sites.into_values().collect();
@@ -133,9 +136,9 @@ struct Collector<'s> {
     /// Counted `for` loop tests whose `!=` mutant is equivalent. See
     /// `counted_loop_test`.
     counted_loop_tests: BTreeSet<(u32, u32)>,
-    /// The names that bind an array everywhere in the file. See
-    /// `ArrayBindings`.
-    known_arrays: BTreeSet<String>,
+    /// The identifier references that resolve to a binding that holds an
+    /// array. See `ArrayBindings`.
+    known_arrays: BTreeSet<ReferenceId>,
 }
 
 const fn pair(span: Span) -> (u32, u32) {
@@ -369,41 +372,68 @@ impl<'a> Visit<'a> for CounterWrites<'_> {
 /// on. A file that binds one of these names gets no known-array proof.
 const ARRAY_GLOBALS: [&str; 2] = ["Array", "ReadonlyArray"];
 
-/// Finds the names whose every binding in the file holds an array, so that
-/// `name.length` is a non-negative integer. A binding qualifies when it is:
+/// How a binding proves that it holds an array.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArrayProof {
+    /// A `const` array value or a TypeScript array type. Each value that
+    /// the binding can hold is an array.
+    Fixed,
+    /// A rest parameter without a type annotation. It starts as an array,
+    /// so it qualifies only when no write to it exists.
+    Unwritten,
+}
+
+/// Finds the identifier references that resolve to a binding that holds an
+/// array, so that `name.length` is a non-negative integer. A binding
+/// qualifies when it is:
 ///
 /// - a `const` declarator with an array literal, `Array.from(...)` or
 ///   `Array.of(...)` initializer;
 /// - a declarator or parameter with a TypeScript array type annotation:
-///   `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>` or a tuple.
+///   `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>` or a tuple;
+/// - a rest parameter, when no write to it exists or it has an array type.
 ///
-/// The rule uses names, not scopes: a name with one other binding anywhere
-/// in the file is not proven. A `with` statement or a direct `eval` call
+/// Scope resolution decides which binding a reference uses, so a global or
+/// a different binding with the same name gets no proof. A binding with a
+/// redeclaration is not proven. A `with` statement or a direct `eval` call
 /// can bind a name at run time, so they cancel every proof. A type
 /// annotation is a type-level proof only: a cast such as `as any` can pass
 /// another value. The rule accepts this, as the type checker does.
 #[derive(Default)]
 struct ArrayBindings {
-    qualifying: BTreeSet<(u32, u32)>,
-    names: BTreeMap<String, bool>,
+    qualifying: BTreeMap<(u32, u32), ArrayProof>,
+    array_globals_bound: bool,
     dynamic_scope: bool,
 }
 
 impl ArrayBindings {
-    fn known_arrays(program: &Program<'_>) -> BTreeSet<String> {
+    fn known_array_references(program: &Program<'_>) -> BTreeSet<ReferenceId> {
         let mut bindings = Self::default();
         bindings.visit_program(program);
-        let globals_bound = ARRAY_GLOBALS
-            .iter()
-            .any(|name| bindings.names.contains_key(*name));
-        if bindings.dynamic_scope || globals_bound {
+        if bindings.qualifying.is_empty() || bindings.dynamic_scope || bindings.array_globals_bound
+        {
             return BTreeSet::new();
         }
-        bindings
-            .names
-            .into_iter()
-            .filter_map(|(name, all)| all.then_some(name))
-            .collect()
+        let semantic = SemanticBuilder::new().build(program).semantic;
+        let scoping = semantic.scoping();
+        let mut references = BTreeSet::new();
+        for symbol in scoping.symbol_ids() {
+            let Some(proof) = bindings.qualifying.get(&pair(scoping.symbol_span(symbol))) else {
+                continue;
+            };
+            if !scoping.symbol_redeclarations(symbol).is_empty() {
+                continue;
+            }
+            if *proof == ArrayProof::Unwritten
+                && scoping
+                    .get_resolved_references(symbol)
+                    .any(|reference| reference.is_write())
+            {
+                continue;
+            }
+            references.extend(scoping.get_resolved_reference_ids(symbol).iter().copied());
+        }
+        references
     }
 }
 
@@ -451,7 +481,7 @@ impl<'a> Visit<'a> for ArrayBindings {
             let constant = it.kind == VariableDeclarationKind::Const
                 && declarator.init.as_ref().is_some_and(is_array_value);
             if constant || is_array_type(declarator.type_annotation.as_deref()) {
-                self.qualifying.insert(pair(id.span));
+                self.qualifying.insert(pair(id.span), ArrayProof::Fixed);
             }
         }
         walk::walk_variable_declaration(self, it);
@@ -461,17 +491,25 @@ impl<'a> Visit<'a> for ArrayBindings {
         if let BindingPattern::BindingIdentifier(id) = &it.pattern
             && is_array_type(it.type_annotation.as_deref())
         {
-            self.qualifying.insert(pair(id.span));
+            self.qualifying.insert(pair(id.span), ArrayProof::Fixed);
         }
         walk::walk_formal_parameter(self, it);
     }
 
+    fn visit_formal_parameter_rest(&mut self, it: &FormalParameterRest<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &it.rest.argument {
+            let proof = if is_array_type(it.type_annotation.as_deref()) {
+                ArrayProof::Fixed
+            } else {
+                ArrayProof::Unwritten
+            };
+            self.qualifying.insert(pair(id.span), proof);
+        }
+        walk::walk_formal_parameter_rest(self, it);
+    }
+
     fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
-        let qualifies = self.qualifying.contains(&pair(it.span));
-        self.names
-            .entry(it.name.to_string())
-            .and_modify(|all| *all &= qualifies)
-            .or_insert(qualifies);
+        self.array_globals_bound |= ARRAY_GLOBALS.contains(&it.name.as_str());
     }
 
     fn visit_with_statement(&mut self, it: &WithStatement<'a>) {
@@ -898,7 +936,10 @@ impl Collector<'_> {
         }
         match callee_without_wrappers(&member.object) {
             Expression::ArrayExpression(_) => true,
-            Expression::Identifier(id) => self.known_arrays.contains(id.name.as_str()),
+            Expression::Identifier(id) => id
+                .reference_id
+                .get()
+                .is_some_and(|reference| self.known_arrays.contains(&reference)),
             _ => false,
         }
     }

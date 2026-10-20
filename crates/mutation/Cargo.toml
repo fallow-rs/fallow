@@ -20,6 +20,7 @@ oxc_allocator = { workspace = true }
 oxc_ast = { workspace = true }
 oxc_ast_visit = { workspace = true }
 oxc_parser = { workspace = true }
+oxc_semantic = { workspace = true }
 oxc_span = { workspace = true }
 oxc_syntax = { workspace = true }
 serde = { workspace = true }
@@ -27,7 +28,6 @@ xxhash-rust = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
-oxc_semantic = { workspace = true }
 
 [lints]
 workspace = true

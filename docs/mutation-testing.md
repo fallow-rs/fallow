@@ -158,19 +158,21 @@ so these mutants are equivalent:
 | `n < 0` or `0 > n` | the constant `false` |
 | `n >= 0` or `0 <= n` | the constant `true` |
 
-The receiver of `.length` must be an array literal or a known array name. A
-name is a known array when each binding of that name in the file is one of
-these:
+The receiver of `.length` must be an array literal or a name that resolves
+to a known array binding. Scope resolution finds the binding of each
+reference. A binding is a known array when it is one of these:
 
 - a `const` with an array literal, `Array.from(...)` or `Array.of(...)` value;
 - a variable or parameter with the type `T[]`, `readonly T[]`, `Array<T>`,
-  `ReadonlyArray<T>` or a tuple type.
+  `ReadonlyArray<T>` or a tuple type;
+- a rest parameter (`...items`) with no assignment to it.
 
-The rule uses names, not scopes, so a second binding of the name anywhere in
-the file stops the proof. A `with` statement, a direct `eval` call, or a local
-binding of `Array` or `ReadonlyArray` stops each proof in the file. An object
-with a `length` property, an optional chain (`items?.length`) and a computed
-access (`items["length"]`) keep each mutant. A type annotation is a type-level
+A reference to a global, or to a different binding with the same name, keeps
+each mutant. A binding with a redeclaration is not a known array. A `with`
+statement, a direct `eval` call, or a local binding of `Array` or
+`ReadonlyArray` stops each proof in the file. An object with a `length`
+property, an optional chain (`items?.length`) and a computed access
+(`items["length"]`) keep each mutant. A type annotation is a type-level
 proof: a cast such as `as any` can pass another value.
 
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies

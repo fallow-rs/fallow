@@ -207,6 +207,19 @@ fn relational_operator_skips_equivalent_zero_comparisons_of_array_length() {
             "const items = Array.from(s); x = items.length > 0;",
             &[(">", ">="), ("items.length > 0", "false")],
         ),
+        (
+            "function f(...items) { return items.length > 0; }",
+            &[(">", ">="), ("items.length > 0", "false")],
+        ),
+        (
+            "function a() { const items = []; return items.length > 0; } function b() { const items = [1]; return items.length > 0; }",
+            &[
+                (">", ">="),
+                ("items.length > 0", "false"),
+                (">", ">="),
+                ("items.length > 0", "false"),
+            ],
+        ),
     ];
     for (source, want) in pruned {
         let result = run(source, JS);
@@ -252,6 +265,10 @@ fn relational_operator_skips_equivalent_zero_comparisons_of_typed_arrays() {
         (
             "const f = (items: string[]) => items!.length > 0;",
             "items!.length > 0",
+        ),
+        (
+            "const f = (...items: string[]) => { items = load(); return items.length > 0; };",
+            "items.length > 0",
         ),
     ];
     for (source, text) in typed {
@@ -312,6 +329,18 @@ fn relational_operator_keeps_zero_comparisons_without_an_array_proof() {
         ),
         (
             "const Array = { from: () => o }; const items = Array.from(s); x = items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "function a() { const items = []; return items; } function b() { return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "function f(items) { const g = (...items) => items; return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "function f(...items) { items = o; return items.length > 0; }",
             "items.length > 0",
         ),
     ];
