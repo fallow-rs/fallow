@@ -233,6 +233,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
             function: Some("add".to_owned()),
             function_line: Some(1),
             rank: Some(rank),
+            change: None,
         },
         status,
         prune_reason: (status == MutantStatus::Pruned).then(|| "side-effect-sink".to_owned()),

@@ -10260,7 +10260,7 @@
           ]
         },
         {
-          "description": "`fallow mutation --format json`. Independently versioned mutation testing\nresults: one status per mutant, the score, and the completion status. No\nsource text.",
+          "description": "`fallow mutation --format json`. Independently versioned mutation testing\nresults: one status per mutant, the score, and the completion status. No\nsource text: the `change` of a mutant uses a fixed token vocabulary.",
           "allOf": [
             {
               "$ref": "#/definitions/MutationReport"
@@ -32776,6 +32776,17 @@
           ],
           "description": "The 1-based execution rank of a planned mutant."
         },
+        "change": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantChange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The edit of the mutant, without project text. Absent in a report\nthat an older version wrote."
+        },
         "report_status": {
           "anyOf": [
             {
@@ -33274,6 +33285,17 @@
             "null"
           ],
           "description": "The 1-based execution rank of a planned mutant."
+        },
+        "change": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantChange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The edit of the mutant, without project text. Absent in a report\nthat an older version wrote."
         },
         "status": {
           "description": "The final status.",
@@ -33792,6 +33814,17 @@
             "null"
           ],
           "description": "The 1-based execution rank of a planned mutant."
+        },
+        "change": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantChange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The edit of the mutant, without project text. Absent in a report\nthat an older version wrote."
         },
         "disposition": {
           "description": "The status in the plan.",
@@ -34379,6 +34412,24 @@
         }
       ],
       "description": "A measured metric of a complexity finding."
+    },
+    "MutantChange": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "The token or placeholder before the edit."
+        },
+        "to": {
+          "type": "string",
+          "description": "The token or placeholder after the edit."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "description": "The edit of a mutant, without project text.\n\nEach side is an operator token (for example `??` or `<=`), a fixed literal\n(`true`, `undefined`, `\"\"`, `\"fallow\"`, `void 0`), a regular expression\ntoken (`^`, `$`, `[`, `[^`, `\\d`), or a placeholder for a side that is\nproject code: `<condition>`, `<call>`, `<expression>` or `<string>`. An\nempty side means that the edit removes the token."
     }
   }
 }

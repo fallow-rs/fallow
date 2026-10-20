@@ -1472,7 +1472,7 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "mutation",
         &["MutationReport"],
-        "`fallow mutation --format json`. Independently versioned mutation testing\nresults: one status per mutant, the score, and the completion status. No\nsource text.",
+        "`fallow mutation --format json`. Independently versioned mutation testing\nresults: one status per mutant, the score, and the completion status. No\nsource text: the `change` of a mutant uses a fixed token vocabulary.",
     ),
     (
         "mutation-plan",

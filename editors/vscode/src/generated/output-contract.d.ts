@@ -19984,6 +19984,11 @@ function_line?: (number | null)
  * The 1-based execution rank of a planned mutant.
  */
 rank?: (number | null)
+/**
+ * The edit of the mutant, without project text. Absent in a report
+ * that an older version wrote.
+ */
+change?: (MutantChange | null)
 status: MutantStatus
 /**
  * The static rule of a `pruned` mutant, kebab-case.
@@ -20040,6 +20045,25 @@ cached?: boolean
  * `compile_error` mutant, sorted, at most 8.
  */
 type_error_codes?: number[]
+}
+/**
+ * The edit of a mutant, without project text.
+ *
+ * Each side is an operator token (for example `??` or `<=`), a fixed literal
+ * (`true`, `undefined`, `""`, `"fallow"`, `void 0`), a regular expression
+ * token (`^`, `$`, `[`, `[^`, `\d`), or a placeholder for a side that is
+ * project code: `<condition>`, `<call>`, `<expression>` or `<string>`. An
+ * empty side means that the edit removes the token.
+ */
+export interface MutantChange {
+/**
+ * The token or placeholder before the edit.
+ */
+from: string
+/**
+ * The token or placeholder after the edit.
+ */
+to: string
 }
 /**
  * How tests reach the code of one mutant in the module graph. The class
@@ -20448,6 +20472,11 @@ function_line?: (number | null)
  * The 1-based execution rank of a planned mutant.
  */
 rank?: (number | null)
+/**
+ * The edit of the mutant, without project text. Absent in a report
+ * that an older version wrote.
+ */
+change?: (MutantChange | null)
 disposition: MutationPlanDisposition
 /**
  * The static rule of a `pruned` mutant, kebab-case.
@@ -20509,6 +20538,11 @@ function_line?: (number | null)
  * The 1-based execution rank of a planned mutant.
  */
 rank?: (number | null)
+/**
+ * The edit of the mutant, without project text. Absent in a report
+ * that an older version wrote.
+ */
+change?: (MutantChange | null)
 /**
  * The status of the mutant in the report. Absent for a plan.
  */

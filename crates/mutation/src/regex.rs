@@ -12,9 +12,11 @@
 //! negation, because a negated class with strings is a syntax error in that
 //! mode. An empty pattern becomes `(?:)`, because `//` starts a comment.
 
+use crate::MutantChange;
+
 /// The mutated literals of `raw`, the source text of a regular expression
-/// literal, in pattern order.
-pub fn mutations(raw: &str) -> Vec<String> {
+/// literal, with the changed token, in pattern order.
+pub fn mutations(raw: &str) -> Vec<(String, MutantChange)> {
     let Some(close) = raw.rfind('/').filter(|&close| close > 0) else {
         return Vec::new();
     };
@@ -23,33 +25,37 @@ pub fn mutations(raw: &str) -> Vec<String> {
     };
     edits(pattern, flags.contains('v'))
         .into_iter()
-        .map(|(start, end, text)| {
+        .map(|(start, end, text, change)| {
             let mutated = format!("{}{text}{}", &pattern[..start], &pattern[end..]);
             let body = if mutated.is_empty() { "(?:)" } else { &mutated };
-            format!("/{body}/{flags}")
+            (format!("/{body}/{flags}"), change)
         })
         .collect()
 }
 
-/// The opposite-case class escape of `byte`.
-const fn swapped_class_escape(byte: u8) -> Option<&'static str> {
-    match byte {
-        b'd' => Some("D"),
-        b'D' => Some("d"),
-        b'w' => Some("W"),
-        b'W' => Some("w"),
-        b's' => Some("S"),
-        b'S' => Some("s"),
-        _ => None,
-    }
+/// The opposite-case class escape of `byte`, and the change of the escape.
+const fn swapped_class_escape(byte: u8) -> Option<(&'static str, MutantChange)> {
+    let (swap, from, to) = match byte {
+        b'd' => ("D", "\\d", "\\D"),
+        b'D' => ("d", "\\D", "\\d"),
+        b'w' => ("W", "\\w", "\\W"),
+        b'W' => ("w", "\\W", "\\w"),
+        b's' => ("S", "\\s", "\\S"),
+        b'S' => ("s", "\\S", "\\s"),
+        _ => return None,
+    };
+    Some((swap, MutantChange::new(from, to)))
 }
 
-/// The edits of `pattern` as `(start, end, replacement)`, in pattern order.
-fn edits(pattern: &str, sets: bool) -> Vec<(usize, usize, &'static str)> {
+/// One edit of a pattern: `(start, end, replacement, change)`.
+type Edit = (usize, usize, &'static str, MutantChange);
+
+/// The edits of `pattern`, in pattern order.
+fn edits(pattern: &str, sets: bool) -> Vec<Edit> {
     let bytes = pattern.as_bytes();
     let mut edits = Vec::new();
     if bytes.first() == Some(&b'^') {
-        edits.push((0, 1, ""));
+        edits.push((0, 1, "", MutantChange::new("^", "")));
     }
     let mut depth = 0_usize;
     let mut index = 0;
@@ -60,8 +66,10 @@ fn edits(pattern: &str, sets: bool) -> Vec<(usize, usize, &'static str)> {
                     .get(index + 1..)
                     .and_then(|rest| rest.chars().next())
                     .map_or(0, char::len_utf8);
-                if let Some(swap) = bytes.get(index + 1).and_then(|&b| swapped_class_escape(b)) {
-                    edits.push((index + 1, index + 2, swap));
+                if let Some((swap, change)) =
+                    bytes.get(index + 1).and_then(|&b| swapped_class_escape(b))
+                {
+                    edits.push((index + 1, index + 2, swap, change));
                 }
                 index += 1 + next_len;
                 continue;
@@ -69,15 +77,17 @@ fn edits(pattern: &str, sets: bool) -> Vec<(usize, usize, &'static str)> {
             b'[' if depth == 0 || sets => {
                 if depth == 0 && !sets {
                     if bytes.get(index + 1) == Some(&b'^') {
-                        edits.push((index + 1, index + 2, ""));
+                        edits.push((index + 1, index + 2, "", MutantChange::new("[^", "[")));
                     } else {
-                        edits.push((index + 1, index + 1, "^"));
+                        edits.push((index + 1, index + 1, "^", MutantChange::new("[", "[^")));
                     }
                 }
                 depth += 1;
             }
             b']' if depth > 0 => depth -= 1,
-            b'$' if depth == 0 && index + 1 == bytes.len() => edits.push((index, index + 1, "")),
+            b'$' if depth == 0 && index + 1 == bytes.len() => {
+                edits.push((index, index + 1, "", MutantChange::new("$", "")));
+            }
             _ => {}
         }
         index += 1;

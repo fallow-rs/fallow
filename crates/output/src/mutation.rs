@@ -2,6 +2,8 @@
 //!
 //! A mutation report never contains source text, so a report can leave the
 //! machine without the code of the project. A mutant is identified by its id, file, position and operator.
+//! The `change` of a mutant uses a fixed vocabulary of operator tokens,
+//! literals and placeholders, never project text.
 //! The `inspect` command shows the code of one mutant.
 
 use fallow_types::envelope::{ElapsedMs, ToolVersion};
@@ -320,6 +322,26 @@ pub struct MutantLocation {
     /// The 1-based execution rank of a planned mutant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rank: Option<u32>,
+    /// The edit of the mutant, without project text. Absent in a report
+    /// that an older version wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<MutantChange>,
+}
+
+/// The edit of a mutant, without project text.
+///
+/// Each side is an operator token (for example `??` or `<=`), a fixed literal
+/// (`true`, `undefined`, `""`, `"fallow"`, `void 0`), a regular expression
+/// token (`^`, `$`, `[`, `[^`, `\d`), or a placeholder for a side that is
+/// project code: `<condition>`, `<call>`, `<expression>` or `<string>`. An
+/// empty side means that the edit removes the token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutantChange {
+    /// The token or placeholder before the edit.
+    pub from: String,
+    /// The token or placeholder after the edit.
+    pub to: String,
 }
 
 /// One mutant of a run.
@@ -1084,6 +1106,7 @@ mod tests {
                 function: None,
                 function_line: None,
                 rank: None,
+                change: None,
             },
             status,
             prune_reason: None,
@@ -1224,6 +1247,7 @@ mod tests {
                 function: Some("add".to_owned()),
                 function_line: Some(1),
                 rank: Some(1),
+                change: None,
             },
             status: MutantStatus::NoCoverage,
             prune_reason: None,
@@ -1274,6 +1298,7 @@ mod tests {
                 function: None,
                 function_line: None,
                 rank: None,
+                change: None,
             },
             status: MutantStatus::Flaky,
             prune_reason: None,

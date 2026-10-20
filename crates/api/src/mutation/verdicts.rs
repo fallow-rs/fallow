@@ -226,6 +226,7 @@ mod tests {
                 function: Some("add".to_owned()),
                 function_line: Some(1),
                 rank: Some(1),
+                change: None,
             },
             status,
             prune_reason: None,

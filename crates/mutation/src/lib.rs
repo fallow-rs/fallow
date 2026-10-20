@@ -133,6 +133,39 @@ pub struct Mutant {
     pub replacement: String,
     /// The innermost function that contains the mutant.
     pub enclosing_function: Option<FunctionRef>,
+    /// The edit in a form without project text.
+    pub change: MutantChange,
+}
+
+/// The edit of a mutant without project text.
+///
+/// Each side is an operator token, a fixed literal, or a placeholder for a
+/// side that is project code. The values are `&'static str`, so a side can
+/// never hold text of the source. An empty side means that the edit removes
+/// the token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MutantChange {
+    /// The token or placeholder before the edit.
+    pub from: &'static str,
+    /// The token or placeholder after the edit.
+    pub to: &'static str,
+}
+
+impl MutantChange {
+    /// Placeholder for the test of a condition.
+    pub const CONDITION: &'static str = "<condition>";
+    /// Placeholder for a call statement.
+    pub const CALL: &'static str = "<call>";
+    /// Placeholder for an expression, for example a returned value or a
+    /// comparison.
+    pub const EXPRESSION: &'static str = "<expression>";
+    /// Placeholder for a non-empty string literal.
+    pub const STRING: &'static str = "<string>";
+
+    /// A change from `from` to `to`.
+    pub const fn new(from: &'static str, to: &'static str) -> Self {
+        Self { from, to }
+    }
 }
 
 /// One copied run of original text in the instrumented output.
@@ -338,6 +371,7 @@ pub(crate) fn instrument_text(
                 original: slice(source, candidate.region).to_owned(),
                 replacement: candidate.replacement,
                 enclosing_function: site.function.clone(),
+                change: candidate.change,
             });
         }
         emit_sites.push(emit::EmitSite {
@@ -517,6 +551,7 @@ fn select_candidates(
             operator: candidate.operator,
             region: candidate.region,
             replacement,
+            change: candidate.change,
         });
     }
     kept

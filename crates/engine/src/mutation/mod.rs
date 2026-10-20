@@ -30,7 +30,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 pub use fallow_mutation::{
-    FunctionRef, Mutant, MutantId, MutationError, Operator, RESERVED_PREFIX, SourceKind,
+    FunctionRef, Mutant, MutantChange, MutantId, MutationError, Operator, RESERVED_PREFIX,
+    SourceKind,
 };
 pub use fallow_output::DiffIndex;
 pub use layout::{instrument_source, is_component_file};

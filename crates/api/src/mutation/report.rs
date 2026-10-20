@@ -43,6 +43,10 @@ fn location(mutant: &PlannedMutant) -> MutantLocation {
             .and_then(|function| function.name.clone()),
         function_line: mutant.function.as_ref().map(|function| function.line),
         rank: mutant.rank,
+        change: Some(fallow_output::MutantChange {
+            from: mutant.mutant.change.from.to_owned(),
+            to: mutant.mutant.change.to.to_owned(),
+        }),
     }
 }
 
@@ -450,8 +454,8 @@ mod tests {
     use super::super::scheduler::{MutantOutcome, ScheduleTimings};
     use super::*;
     use fallow_engine::mutation::{
-        FunctionFacts, Mutant, MutantId, MutationPlanCounts, Operator, PlannedFile, PruneCounts,
-        SkipReason, SkippedFile,
+        FunctionFacts, Mutant, MutantChange, MutantId, MutationPlanCounts, Operator, PlannedFile,
+        PruneCounts, SkipReason, SkippedFile,
     };
     use fallow_output::MutationCompletionStatus;
     use rustc_hash::FxHashMap;
@@ -483,6 +487,7 @@ mod tests {
                 original: "a + b".to_owned(),
                 replacement: "a - b".to_owned(),
                 enclosing_function: None,
+                change: MutantChange::new("+", "-"),
             },
             file: "src/a.ts".to_owned(),
             rank,
@@ -1062,6 +1067,10 @@ mod tests {
         );
         let files = serde_json::to_string(&plan_files(&plan)).expect("json");
         let mutants = serde_json::to_string(&plan_mutants(&plan)).expect("json");
+        assert!(
+            mutants.contains(r#""change":{"from":"+","to":"-"}"#),
+            "{mutants}"
+        );
         for text in [&files, &mutants] {
             assert!(!text.contains("SECRET SOURCE"));
             assert!(!text.contains("a + b"));
@@ -1073,5 +1082,30 @@ mod tests {
             "{mutants}"
         );
         assert!(files.contains("test/a.test.ts"), "{files}");
+    }
+
+    #[test]
+    fn results_carry_the_change_without_project_text() {
+        let mut logical = planned("m1", Some(1), MutantDisposition::Planned, None);
+        logical.mutant.operator = Operator::LogicalOperator;
+        logical.mutant.original = "??".to_owned();
+        logical.mutant.replacement = "&&".to_owned();
+        logical.mutant.change = MutantChange::new("??", "&&");
+        let mut string = planned("m2", Some(2), MutantDisposition::Planned, None);
+        string.mutant.operator = Operator::StringLiteral;
+        string.mutant.original = "\"SECRET SOURCE\"".to_owned();
+        string.mutant.replacement = "\"\"".to_owned();
+        string.mutant.change = MutantChange::new(MutantChange::STRING, "\"\"");
+        let plan = plan(vec![logical, string], 2);
+        let value = serde_json::to_value(mutant_results(&plan, None)).expect("json");
+        assert_eq!(
+            value[0]["change"],
+            serde_json::json!({"from": "??", "to": "&&"})
+        );
+        assert_eq!(
+            value[1]["change"],
+            serde_json::json!({"from": "<string>", "to": "\"\""})
+        );
+        assert!(!value.to_string().contains("SECRET SOURCE"), "{value}");
     }
 }

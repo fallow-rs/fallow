@@ -13,7 +13,7 @@ use std::path::Path;
 
 use fallow_mutation::MutationOptions;
 use fallow_output::{
-    MutantLocation, MutantStatus, MutationInspectCode, MutationInspectOutput,
+    MutantChange, MutantLocation, MutantStatus, MutationInspectCode, MutationInspectOutput,
     MutationInspectSchemaVersion, MutationInspectStatus, MutationStaleReason,
 };
 use fallow_types::envelope::ToolVersion;
@@ -49,6 +49,8 @@ struct SavedMutant {
     function_line: Option<u32>,
     #[serde(default)]
     rank: Option<u32>,
+    #[serde(default)]
+    change: Option<MutantChange>,
     #[serde(default)]
     status: Option<MutantStatus>,
     #[serde(default)]
@@ -207,6 +209,7 @@ fn location(mutant: &SavedMutant) -> MutantLocation {
         function: mutant.function.clone(),
         function_line: mutant.function_line,
         rank: mutant.rank,
+        change: mutant.change.clone(),
     }
 }
 

@@ -976,6 +976,28 @@ A verdict document replaces an inline suppression comment:
 - Version 1 still runs the mutants that a verdict marks. The join happens after
   the run.
 
+## The change of a mutant
+
+Each mutant of the `mutation` report and of the `mutation-plan` document has a
+`change` object, for example `{"from": "??", "to": "&&"}`. The object tells
+which edit the mutant makes, and it keeps the rule that a report holds no
+source text.
+
+- The collector sets the change when it makes the candidate. The type of each
+  side is `&'static str` (`fallow_mutation::MutantChange`), so a side cannot
+  hold text of the source file.
+- A side is an operator token, a fixed literal (`true`, `false`, `undefined`,
+  `void 0`, `""`, `''`, `"fallow"`, `'fallow'`), or a regular expression token
+  (`^`, `$`, `[`, `[^`, or a class escape such as `\d`).
+- A side that is project code is a placeholder. A `negate-condition` test is
+  `<condition>`. A `removed-call` statement is `<call>`. A `return-value`
+  argument and a relational expression that becomes `true` or `false` are
+  `<expression>`. A non-empty `string-literal` is `<string>`.
+- An empty side means that the edit removes the token, for example
+  `{"from": "!", "to": ""}` for `unary-operator`.
+- A report that an older version wrote has no `change`. `inspect` copies the
+  saved value and does not add one.
+
 ## Inspect
 
 `inspect` reads a saved `mutation` or `mutation-plan` document and the current

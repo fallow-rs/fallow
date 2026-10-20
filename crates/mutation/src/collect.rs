@@ -43,13 +43,14 @@ use oxc_syntax::operator::{
 use oxc_syntax::reference::ReferenceId;
 use oxc_syntax::scope::ScopeFlags;
 
-use crate::{FunctionRef, Operator, is_identifier_byte};
+use crate::{FunctionRef, MutantChange, Operator, is_identifier_byte};
 
 /// One candidate mutant: replace `region` with `replacement`.
 pub struct Candidate {
     pub operator: Operator,
     pub region: (u32, u32),
     pub replacement: String,
+    pub change: MutantChange,
 }
 
 /// One expression that the instrumentation wraps.
@@ -747,7 +748,14 @@ impl Collector<'_> {
         }
     }
 
-    fn add(&mut self, site: Span, operator: Operator, region: (u32, u32), replacement: String) {
+    fn add(
+        &mut self,
+        site: Span,
+        operator: Operator,
+        region: (u32, u32),
+        replacement: String,
+        change: MutantChange,
+    ) {
         let replacement = self.separate(region, replacement);
         let anchor = self
             .frames
@@ -767,6 +775,7 @@ impl Collector<'_> {
                 operator,
                 region,
                 replacement,
+                change,
             });
     }
 
@@ -810,6 +819,7 @@ impl Collector<'_> {
                 Operator::NegateCondition,
                 region,
                 value.to_owned(),
+                MutantChange::new(MutantChange::CONDITION, value),
             );
         }
     }
@@ -1060,7 +1070,13 @@ impl<'a> Visit<'a> for Collector<'_> {
         self.statement_starts.insert(expression.span().start);
         if Self::removable_call(expression) {
             let span = expression.span();
-            self.add(span, Operator::RemovedCall, pair(span), "void 0".to_owned());
+            self.add(
+                span,
+                Operator::RemovedCall,
+                pair(span),
+                "void 0".to_owned(),
+                MutantChange::new(MutantChange::CALL, "void 0"),
+            );
         }
         self.visit_expression(expression);
     }
@@ -1081,6 +1097,7 @@ impl<'a> Visit<'a> for Collector<'_> {
                     Operator::ReturnValue,
                     pair(span),
                     "undefined".to_owned(),
+                    MutantChange::new(MutantChange::EXPRESSION, "undefined"),
                 );
             }
             self.visit_expression(argument);
@@ -1129,7 +1146,13 @@ impl<'a> Visit<'a> for Collector<'_> {
                     concatenation && (is_text_operand(&it.left) || is_text_operand(&it.right));
                 if !text {
                     let padded = self.pad_operator(replacement, end);
-                    self.add(it.span, Operator::ArithmeticOperator, (start, end), padded);
+                    self.add(
+                        it.span,
+                        Operator::ArithmeticOperator,
+                        (start, end),
+                        padded,
+                        MutantChange::new(operator.as_str(), replacement),
+                    );
                 }
             }
             if let Some((operators, constant)) = relational_replacements(operator) {
@@ -1140,6 +1163,7 @@ impl<'a> Visit<'a> for Collector<'_> {
                         Operator::RelationalOperator,
                         pair(it.span),
                         constant.to_owned(),
+                        MutantChange::new(MutantChange::EXPRESSION, constant),
                     );
                 }
                 let operand = self.relational_operands.contains(&pair(it.span));
@@ -1147,19 +1171,27 @@ impl<'a> Visit<'a> for Collector<'_> {
                     if equivalent == Some(*replacement) {
                         continue;
                     }
+                    let change = MutantChange::new(operator.as_str(), replacement);
                     if operand && lowers_precedence(operator, replacement) {
                         let text = format!(
                             "({}{replacement}{})",
                             self.text(it.span.start, start),
                             self.text(end, it.span.end),
                         );
-                        self.add(it.span, Operator::RelationalOperator, pair(it.span), text);
+                        self.add(
+                            it.span,
+                            Operator::RelationalOperator,
+                            pair(it.span),
+                            text,
+                            change,
+                        );
                     } else {
                         self.add(
                             it.span,
                             Operator::RelationalOperator,
                             (start, end),
                             (*replacement).to_owned(),
+                            change,
                         );
                     }
                 }
@@ -1184,6 +1216,7 @@ impl<'a> Visit<'a> for Collector<'_> {
                 LogicalOperator::And => "||",
                 LogicalOperator::Or | LogicalOperator::Coalesce => "&&",
             };
+            let change = MutantChange::new(operator.as_str(), replacement);
             let left_nested = matches!(it.left, Expression::LogicalExpression(_));
             let right_nested = matches!(it.right, Expression::LogicalExpression(_));
             if left_nested {
@@ -1202,14 +1235,20 @@ impl<'a> Visit<'a> for Collector<'_> {
                     self.logical_operand(&it.right),
                 );
                 let text = if operand { format!("({text})") } else { text };
-                self.add(it.span, Operator::LogicalOperator, pair(it.span), text);
+                self.add(
+                    it.span,
+                    Operator::LogicalOperator,
+                    pair(it.span),
+                    text,
+                    change,
+                );
             } else {
-                let replacement = replacement.to_owned();
                 self.add(
                     it.span,
                     Operator::LogicalOperator,
                     (start, end),
-                    replacement,
+                    replacement.to_owned(),
+                    change,
                 );
             }
         }
@@ -1227,6 +1266,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             _ => false,
         };
         if mutable && self.text(it.span.start, it.span.start + 1) == it.operator.as_str() {
+            let change = MutantChange::new(it.operator.as_str(), "");
             if self.statement_starts.contains(&it.span.start)
                 || self.expression_starts.contains(&it.span.start)
             {
@@ -1234,11 +1274,23 @@ impl<'a> Visit<'a> for Collector<'_> {
                 // `function` and parse as a declaration.
                 let argument = it.argument.span();
                 let replacement = format!("({})", self.text(argument.start, argument.end));
-                self.add(it.span, Operator::UnaryOperator, pair(it.span), replacement);
+                self.add(
+                    it.span,
+                    Operator::UnaryOperator,
+                    pair(it.span),
+                    replacement,
+                    change,
+                );
             } else {
                 let region = (it.span.start, it.span.start + 1);
                 let replacement = self.removal_text(region.0, region.1);
-                self.add(it.span, Operator::UnaryOperator, region, replacement);
+                self.add(
+                    it.span,
+                    Operator::UnaryOperator,
+                    region,
+                    replacement,
+                    change,
+                );
             }
         }
         walk::walk_unary_expression(self, it);
@@ -1258,12 +1310,19 @@ impl<'a> Visit<'a> for Collector<'_> {
             return;
         }
         let before = region.0.checked_sub(1).and_then(|offset| self.byte(offset));
+        let change = MutantChange::new(text, replacement);
         let replacement = if it.prefix && matches!(before, Some(b'+' | b'-')) {
             format!(" {replacement}")
         } else {
             replacement.to_owned()
         };
-        self.add(it.span, Operator::UpdateOperator, region, replacement);
+        self.add(
+            it.span,
+            Operator::UpdateOperator,
+            region,
+            replacement,
+            change,
+        );
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
@@ -1282,6 +1341,7 @@ impl<'a> Visit<'a> for Collector<'_> {
                 Operator::ArithmeticOperator,
                 region,
                 replacement.to_owned(),
+                MutantChange::new(token, replacement),
             );
         }
         self.visit_expression(&it.right);
@@ -1304,6 +1364,7 @@ impl<'a> Visit<'a> for Collector<'_> {
                     Operator::OptionalChaining,
                     region,
                     replacement.to_owned(),
+                    MutantChange::new("?.", replacement.trim_start()),
                 );
             }
         }
@@ -1330,12 +1391,17 @@ impl<'a> Visit<'a> for Collector<'_> {
         if self.equivalent_labels.contains(&pair(it.span)) {
             return;
         }
-        let replacement = if it.value { "false" } else { "true" };
+        let (original, replacement) = if it.value {
+            ("true", "false")
+        } else {
+            ("false", "true")
+        };
         self.add(
             it.span,
             Operator::BooleanLiteral,
             pair(it.span),
             replacement.to_owned(),
+            MutantChange::new(original, replacement),
         );
     }
 
@@ -1343,22 +1409,35 @@ impl<'a> Visit<'a> for Collector<'_> {
         if self.equivalent_labels.contains(&pair(it.span)) {
             return;
         }
-        let quote = self.text(it.span.start, it.span.start + 1).to_owned();
-        if quote != "\"" && quote != "'" {
-            return;
-        }
-        let replacement = if it.value.is_empty() {
-            format!("{quote}fallow{quote}")
-        } else {
-            format!("{quote}{quote}")
+        let (empty, filled) = match self.text(it.span.start, it.span.start + 1) {
+            "\"" => ("\"\"", "\"fallow\""),
+            "'" => ("''", "'fallow'"),
+            _ => return,
         };
-        self.add(it.span, Operator::StringLiteral, pair(it.span), replacement);
+        let (replacement, change) = if it.value.is_empty() {
+            (filled, MutantChange::new(empty, filled))
+        } else {
+            (empty, MutantChange::new(MutantChange::STRING, empty))
+        };
+        self.add(
+            it.span,
+            Operator::StringLiteral,
+            pair(it.span),
+            replacement.to_owned(),
+            change,
+        );
     }
 
     fn visit_reg_exp_literal(&mut self, it: &RegExpLiteral<'a>) {
         let raw = self.text(it.span.start, it.span.end).to_owned();
-        for replacement in crate::regex::mutations(&raw) {
-            self.add(it.span, Operator::RegexLiteral, pair(it.span), replacement);
+        for (replacement, change) in crate::regex::mutations(&raw) {
+            self.add(
+                it.span,
+                Operator::RegexLiteral,
+                pair(it.span),
+                replacement,
+                change,
+            );
         }
     }
 

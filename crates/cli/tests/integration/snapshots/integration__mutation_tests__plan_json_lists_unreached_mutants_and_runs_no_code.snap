@@ -33,6 +33,10 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "return-value",
       "function": "add",
       "function_line": 1,
+      "change": {
+        "from": "<expression>",
+        "to": "undefined"
+      },
       "disposition": "no_coverage",
       "test_reach": {
         "reach": "none-file",
@@ -51,6 +55,10 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "arithmetic-operator",
       "function": "add",
       "function_line": 1,
+      "change": {
+        "from": "+",
+        "to": "-"
+      },
       "disposition": "no_coverage",
       "test_reach": {
         "reach": "none-file",
@@ -69,6 +77,10 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "return-value",
       "function": "isPositive",
       "function_line": 5,
+      "change": {
+        "from": "<expression>",
+        "to": "undefined"
+      },
       "disposition": "no_coverage",
       "test_reach": {
         "reach": "none-file",
@@ -87,6 +99,10 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "relational-operator",
       "function": "isPositive",
       "function_line": 5,
+      "change": {
+        "from": "<expression>",
+        "to": "false"
+      },
       "disposition": "no_coverage",
       "test_reach": {
         "reach": "none-file",
@@ -105,6 +121,10 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "relational-operator",
       "function": "isPositive",
       "function_line": 5,
+      "change": {
+        "from": ">",
+        "to": ">="
+      },
       "disposition": "no_coverage",
       "test_reach": {
         "reach": "none-file",
@@ -123,6 +143,10 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "relational-operator",
       "function": "isPositive",
       "function_line": 5,
+      "change": {
+        "from": ">",
+        "to": "!="
+      },
       "disposition": "no_coverage",
       "test_reach": {
         "reach": "none-file",
