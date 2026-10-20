@@ -2240,7 +2240,7 @@ WORSENED_EXIT=0
 OUT=$(run_generated_gitlab_fixture "$WORSENED_WORK" \
   FALLOW_COMMAND=audit \
   FALLOW_AUDIT_WORSENED=strict) || WORSENED_EXIT=$?
-assert_contains "$OUT" "FALLOW_AUDIT_WORSENED must be 'warn' or 'error', got: strict" \
+assert_contains "$OUT" "FALLOW_AUDIT_WORSENED must be 'warn', 'error' or 'off', got: strict" \
   "audit worsened: a bad FALLOW_AUDIT_WORSENED value is rejected"
 [ "$WORSENED_EXIT" -eq 2 ] && pass "audit worsened: a bad value exits 2" \
   || fail "audit worsened: a bad value exits 2" "exit $WORSENED_EXIT"

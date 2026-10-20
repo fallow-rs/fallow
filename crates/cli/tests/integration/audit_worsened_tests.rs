@@ -145,6 +145,42 @@ fn grown_function_fails_with_worsened_error() {
 }
 
 #[test]
+fn worsened_off_keeps_the_grown_function_inherited_and_the_verdict_pass() {
+    let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 20, 40), CONFIG);
+    let run = audit(tmp.path(), &["--worsened", "off"]);
+    let finding = run.finding("work");
+    assert_eq!(finding["attribution"], "inherited", "{:#}", run.json);
+    assert!(
+        finding
+            .get("worsened_metrics")
+            .is_none_or(|metrics| metrics.as_array().unwrap().is_empty())
+    );
+    assert_eq!(run.json["attribution"]["worsened"], "off");
+    assert_eq!(
+        run.json["attribution"]["complexity_worsened"]
+            .as_u64()
+            .unwrap_or(0),
+        0
+    );
+    assert_eq!(run.verdict(), "pass");
+    assert_eq!(run.code, 0);
+}
+
+#[test]
+fn config_worsened_off_is_accepted() {
+    let config = CONFIG.replacen('{', r#"{"audit": {"worsened": "off"}, "#, 1);
+    let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 20, 40), &config);
+    let run = audit(tmp.path(), &[]);
+    assert_eq!(
+        run.finding("work")["attribution"],
+        "inherited",
+        "{:#}",
+        run.json
+    );
+    assert_eq!(run.verdict(), "pass");
+}
+
+#[test]
 fn config_worsened_error_gates_and_the_flag_overrides_it() {
     let config = r#"{"entry": ["src/*.js"], "audit": {"worsened": "error"}, "health": {"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 999999999, "maxUnitSize": 999999}}"#;
     let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 20, 40), config);

@@ -5273,7 +5273,7 @@ else
   fail "count: worsened warn passes the job" "got $GATE_EXIT: $GATE_STDOUT"
 fi
 run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="audit" INPUT_WORSENED="strict"
-assert_contains "$GATE_STDOUT" "worsened must be 'warn' or 'error', got: strict" \
+assert_contains "$GATE_STDOUT" "worsened must be 'warn', 'error' or 'off', got: strict" \
   "count: a bad worsened input is rejected"
 if [ "$GATE_EXIT" = "2" ]; then
   pass "count: a bad worsened input exits 2"

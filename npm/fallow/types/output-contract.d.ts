@@ -153,7 +153,7 @@ export type AuditGate = ("new-only" | "all")
  * Value of `audit.worsened`: how a worsened complexity finding affects the
  * `fallow audit` verdict.
  */
-export type AuditWorsened = ("warn" | "error")
+export type AuditWorsened = ("warn" | "error" | "off")
 /**
  * What a gate concluded on this run.
  *

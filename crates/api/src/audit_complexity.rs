@@ -154,21 +154,15 @@ fn grown_metrics(
 /// The smallest line count growth, in lines, that makes a finding worsened.
 const LINE_COUNT_MIN_GROWTH_LINES: u32 = 5;
 
-/// The smallest line count growth, in percent of the base line count, that
-/// makes a finding worsened.
-const LINE_COUNT_MIN_GROWTH_PERCENT: u32 = 10;
-
-/// Whether the line count grew by at least
-/// [`LINE_COUNT_MIN_GROWTH_LINES`] lines and at least
-/// [`LINE_COUNT_MIN_GROWTH_PERCENT`] percent of the base line count.
+/// Whether the line count grew by at least [`LINE_COUNT_MIN_GROWTH_LINES`]
+/// lines. The floor is fixed and does not scale with the function size, so
+/// growth in a large function is not hidden.
 ///
 /// The line count is the physical span of the function, so comments and blank
 /// lines in the body count. The minimum keeps a comment or a formatter rewrap
 /// from making a finding worsened.
 fn line_count_grew(base: u32, head: u32) -> bool {
-    let growth = head.saturating_sub(base);
-    growth >= LINE_COUNT_MIN_GROWTH_LINES
-        && u64::from(growth) * 100 >= u64::from(base) * u64::from(LINE_COUNT_MIN_GROWTH_PERCENT)
+    head.saturating_sub(base) >= LINE_COUNT_MIN_GROWTH_LINES
 }
 
 /// Base complexity findings by identity key (`complexity:<path>:<function>`),
@@ -743,35 +737,29 @@ mod tests {
         // A comment line or a formatter rewrap adds a few physical lines.
         let classes = attribution(
             vec![with_lines(finding("f", 1, 17, 16), 80)],
-            &[with_lines(finding("f", 1, 17, 16), 87)],
+            &[with_lines(finding("f", 1, 17, 16), 84)],
         );
         assert_eq!(classes[0].attribution(), AuditFindingAttribution::Inherited);
         assert!(classes[0].worsened_metrics.is_empty());
     }
 
     #[test]
-    fn line_growth_needs_both_the_line_and_the_percent_minimum() {
-        // 4 lines on a 20-line function is 20 percent, but below 5 lines.
+    fn line_growth_needs_five_lines_at_any_function_size() {
+        // 4 lines are below the floor, also on a short function.
         let short = attribution(
             vec![with_lines(finding("f", 1, 17, 16), 20)],
             &[with_lines(finding("f", 1, 17, 16), 24)],
         );
         assert_eq!(short[0].attribution(), AuditFindingAttribution::Inherited);
-        // 5 lines on a 20-line function passes both minimums.
         let grown = attribution(
             vec![with_lines(finding("f", 1, 17, 16), 20)],
             &[with_lines(finding("f", 1, 17, 16), 25)],
         );
         assert_eq!(grown[0].attribution(), AuditFindingAttribution::Worsened);
-        // 9 lines on a 100-line function is below 10 percent.
+        // The floor does not scale: 9 lines on a 300-line function count.
         let long = attribution(
-            vec![with_lines(finding("f", 1, 17, 16), 100)],
-            &[with_lines(finding("f", 1, 17, 16), 109)],
-        );
-        assert_eq!(long[0].attribution(), AuditFindingAttribution::Inherited);
-        let long = attribution(
-            vec![with_lines(finding("f", 1, 17, 16), 100)],
-            &[with_lines(finding("f", 1, 17, 16), 110)],
+            vec![with_lines(finding("f", 1, 17, 16), 300)],
+            &[with_lines(finding("f", 1, 17, 16), 309)],
         );
         assert_eq!(long[0].attribution(), AuditFindingAttribution::Worsened);
     }

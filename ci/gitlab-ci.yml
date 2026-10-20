@@ -177,7 +177,7 @@ variables:
 
   # Audit specific
   FALLOW_AUDIT_GATE: ""                 # new-only or all
-  FALLOW_AUDIT_WORSENED: ""             # warn or error: effect of an inherited complexity finding that got worse
+  FALLOW_AUDIT_WORSENED: ""             # warn, error or off: effect of an inherited complexity finding that got worse
   FALLOW_AUDIT_DEAD_CODE_BASELINE: ""   # Baseline from fallow dead-code --save-baseline
   FALLOW_AUDIT_HEALTH_BASELINE: ""      # Baseline from fallow health --save-baseline
   FALLOW_AUDIT_DUPES_BASELINE: ""       # Baseline from fallow dupes --save-baseline
@@ -488,8 +488,8 @@ variables:
       if [ -n "$FALLOW_AUDIT_GATE" ] && [ "$FALLOW_AUDIT_GATE" != "new-only" ] && [ "$FALLOW_AUDIT_GATE" != "all" ]; then
         echo "ERROR: FALLOW_AUDIT_GATE must be 'new-only' or 'all', got: ${FALLOW_AUDIT_GATE}"; exit 2
       fi
-      if [ -n "$FALLOW_AUDIT_WORSENED" ] && [ "$FALLOW_AUDIT_WORSENED" != "warn" ] && [ "$FALLOW_AUDIT_WORSENED" != "error" ]; then
-        echo "ERROR: FALLOW_AUDIT_WORSENED must be 'warn' or 'error', got: ${FALLOW_AUDIT_WORSENED}"; exit 2
+      if [ -n "$FALLOW_AUDIT_WORSENED" ] && [ "$FALLOW_AUDIT_WORSENED" != "warn" ] && [ "$FALLOW_AUDIT_WORSENED" != "error" ] && [ "$FALLOW_AUDIT_WORSENED" != "off" ]; then
+        echo "ERROR: FALLOW_AUDIT_WORSENED must be 'warn', 'error' or 'off', got: ${FALLOW_AUDIT_WORSENED}"; exit 2
       fi
       if [ -n "$FALLOW_SECURITY_GATE" ] && [ "$FALLOW_SECURITY_GATE" != "new" ] && [ "$FALLOW_SECURITY_GATE" != "newly-reachable" ]; then
         echo "ERROR: FALLOW_SECURITY_GATE must be 'new' or 'newly-reachable', got: ${FALLOW_SECURITY_GATE}"; exit 2

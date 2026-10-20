@@ -434,6 +434,16 @@ impl AuditComparison {
             .filter(|class| class.is_worsened())
             .count()
     }
+
+    /// Reclassify each worsened complexity finding as inherited, for
+    /// `audit.worsened: off`. An introduced finding keeps its grown values.
+    pub fn clear_worsened(&mut self) {
+        for class in &mut self.health_classes {
+            if !class.introduced {
+                class.worsened_metrics.clear();
+            }
+        }
+    }
 }
 
 /// Remap root-relative path tokens inside base-snapshot attribution keys so a

@@ -537,8 +537,8 @@ fi
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
   echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
 fi
-if [ -n "${INPUT_WORSENED:-}" ] && [ "$INPUT_WORSENED" != "warn" ] && [ "$INPUT_WORSENED" != "error" ]; then
-  echo "::error::worsened must be 'warn' or 'error', got: ${INPUT_WORSENED}"; exit 2
+if [ -n "${INPUT_WORSENED:-}" ] && [ "$INPUT_WORSENED" != "warn" ] && [ "$INPUT_WORSENED" != "error" ] && [ "$INPUT_WORSENED" != "off" ]; then
+  echo "::error::worsened must be 'warn', 'error' or 'off', got: ${INPUT_WORSENED}"; exit 2
 fi
 if [ -n "${INPUT_SECURITY_GATE:-}" ] && [ "$INPUT_SECURITY_GATE" != "new" ] && [ "$INPUT_SECURITY_GATE" != "newly-reachable" ]; then
   echo "::error::security-gate must be 'new' or 'newly-reachable', got: ${INPUT_SECURITY_GATE}"; exit 2

@@ -1878,10 +1878,11 @@ pub enum Command {
         ///
         /// A worsened finding was already in the base snapshot, and a measured
         /// value is higher now. Any growth of cyclomatic, cognitive or CRAP
-        /// counts. The line count must grow by at least 5 lines and 10
-        /// percent. It includes comments and blank lines in the function.
+        /// counts. The line count must grow by at least 5 lines. It includes
+        /// comments and blank lines in the function.
         /// warn (default): the verdict is at least warn, and the run does not
         /// fail. error: a worsened finding counts like an introduced finding.
+        /// off: no finding is worsened, and the verdict does not change.
         /// Overrides `audit.worsened` in config. Has no effect with
         /// `--gate all`, which counts every finding.
         #[arg(long, value_enum)]
@@ -3190,6 +3191,8 @@ pub enum AuditWorsenedArg {
     Warn,
     /// A worsened finding counts like an introduced finding.
     Error,
+    /// No finding is worsened, and the verdict does not change.
+    Off,
 }
 
 impl From<AuditWorsenedArg> for fallow_config::AuditWorsened {
@@ -3197,6 +3200,7 @@ impl From<AuditWorsenedArg> for fallow_config::AuditWorsened {
         match value {
             AuditWorsenedArg::Warn => Self::Warn,
             AuditWorsenedArg::Error => Self::Error,
+            AuditWorsenedArg::Off => Self::Off,
         }
     }
 }

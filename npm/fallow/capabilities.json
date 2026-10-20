@@ -2343,7 +2343,8 @@
           "description": "How a worsened complexity finding affects the audit verdict",
           "possible_values": [
             "warn",
-            "error"
+            "error",
+            "off"
           ]
         },
         {

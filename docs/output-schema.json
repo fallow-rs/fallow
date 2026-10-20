@@ -34303,6 +34303,11 @@
           "type": "string",
           "const": "error",
           "description": "A worsened finding counts like an introduced finding."
+        },
+        {
+          "type": "string",
+          "const": "off",
+          "description": "No finding is worsened: a grown inherited finding stays inherited and\ndoes not change the verdict. This is the behavior before `worsened`\nexisted."
         }
       ],
       "description": "Value of `audit.worsened`: how a worsened complexity finding affects the\n`fallow audit` verdict."

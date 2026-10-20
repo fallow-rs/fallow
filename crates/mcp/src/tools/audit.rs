@@ -113,7 +113,7 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
         && !VALID_AUDIT_WORSENED.contains(&worsened.as_str())
     {
         return Err(validation_error_body(format!(
-            "Invalid worsened '{worsened}'. Valid values: warn, error"
+            "Invalid worsened '{worsened}'. Valid values: warn, error, off"
         )));
     }
     validate_audit_selection(params)?;
@@ -385,8 +385,9 @@ fn audit_worsened_from_param(value: Option<&str>) -> Result<Option<AuditWorsened
         .map(|worsened| match worsened {
             "warn" => Ok(AuditWorsened::Warn),
             "error" => Ok(AuditWorsened::Error),
+            "off" => Ok(AuditWorsened::Off),
             other => Err(validation_error_body(format!(
-                "Invalid worsened '{other}'. Valid values: warn, error"
+                "Invalid worsened '{other}'. Valid values: warn, error, off"
             ))),
         })
         .transpose()

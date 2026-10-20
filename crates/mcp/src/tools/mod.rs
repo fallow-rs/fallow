@@ -264,7 +264,7 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
 pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
 /// Valid `worsened` values for the `audit` tool.
-pub const VALID_AUDIT_WORSENED: &[&str] = &["warn", "error"];
+pub const VALID_AUDIT_WORSENED: &[&str] = &["warn", "error", "off"];
 
 /// Build a structured validation error body matching the shape `run_tool` emits
 /// for CLI-level errors.

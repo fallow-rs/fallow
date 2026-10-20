@@ -4,9 +4,8 @@
   complexity finding that is in the base snapshot is now `worsened` when a
   measured value is higher than at the base. The measured values are
   cyclomatic, cognitive, CRAP (when both sides have a score) and the line
-  count of the function. The line count must grow by at least 5 lines and at
-  least 10 percent. The line count includes comments and blank lines. The
-  minimum keeps a finding inherited after a short comment or a formatter
+  count of the function. The line count must grow by at least 5 lines. The
+  line count includes comments and blank lines. The minimum keeps a finding inherited after a short comment or a formatter
   rewrap. A function that grows from 80 to 300 lines with the same complexity
   values is now `worsened`, not inherited.
 
@@ -28,6 +27,8 @@
   - `warn` (default): a worsened finding makes the verdict at least `warn`.
     The exit code stays 0.
   - `error`: a worsened finding counts like an introduced finding.
+  - `off`: no finding is worsened, and the verdict does not change. Use it to
+    keep the verdict of earlier versions.
 
   The GitHub Action takes a `worsened` input. The GitLab template takes
   `FALLOW_AUDIT_WORSENED`. The MCP `audit` tool takes a `worsened` parameter.

@@ -1863,7 +1863,7 @@ pub struct AuditParams {
     pub gate: Option<String>,
 
     /// Verdict effect of an inherited complexity finding whose measured value
-    /// grew: "warn" (default) or "error" (counts as introduced). Unset uses
+    /// grew: "warn" (default), "error" (counts as introduced) or "off". Unset uses
     /// `audit.worsened`.
     pub worsened: Option<String>,
 

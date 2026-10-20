@@ -799,6 +799,7 @@ const fn worsened_class_label(mode: AuditWorsened) -> &'static str {
     match mode {
         AuditWorsened::Warn => "worsened: warn only, --worsened error gates it",
         AuditWorsened::Error => "worsened: gated by --worsened error",
+        AuditWorsened::Off => "worsened: off",
     }
 }
 
