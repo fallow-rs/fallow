@@ -359,28 +359,106 @@ pub(super) fn collect_quoted_class_tokens(
 /// always surface as a (false) unreferenced-class candidate. `:global` is the
 /// author's explicit "not locally scoped, applied elsewhere" marker, so excluding
 /// these from the candidate set is semantically correct, not a heuristic guess.
+///
+/// Three forms are recognized: the function form `:global(.x)`, the Svelte 5
+/// block form `:global { .x {} }`, and the selector form `div :global .x {}`,
+/// where the rest of the selector up to `{` or `,` is global.
 fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+    const MARKER: &str = ":global";
     let bytes = source.as_bytes();
     let mut i = 0;
-    while let Some(rel) = source[i..].find(":global(") {
-        let open = i + rel + ":global(".len();
-        // Balance parentheses so a `:global(:is(.a, .b))` still closes correctly.
-        let mut depth = 1usize;
-        let mut j = open;
-        while j < bytes.len() && depth > 0 {
-            match bytes[j] {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
-                _ => {}
+    while let Some(rel) = source[i..].find(MARKER) {
+        let after = i + rel + MARKER.len();
+        i = match bytes.get(after) {
+            Some(b'(') => collect_global_function(source, after + 1, out),
+            Some(byte) if byte.is_ascii_whitespace() || *byte == b'{' => {
+                collect_global_unparenthesized(source, after, out)
             }
-            j += 1;
-        }
-        let inner_end = j.saturating_sub(1).max(open);
-        if let Some(inner) = source.get(open..inner_end) {
-            extract_dotted_class_names(inner, out);
-        }
-        i = j.max(open + 1);
+            _ => after,
+        };
     }
+}
+
+/// Collect the classes of a `:global(...)` argument that starts at `open`.
+/// Returns the index after the closing parenthesis.
+fn collect_global_function(
+    source: &str,
+    open: usize,
+    out: &mut rustc_hash::FxHashSet<String>,
+) -> usize {
+    let bytes = source.as_bytes();
+    // Balance parentheses so a `:global(:is(.a, .b))` still closes correctly.
+    let mut depth = 1usize;
+    let mut j = open;
+    while j < bytes.len() && depth > 0 {
+        match bytes[j] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {}
+        }
+        j += 1;
+    }
+    let inner_end = j.saturating_sub(1).max(open);
+    if let Some(inner) = source.get(open..inner_end) {
+        extract_dotted_class_names(inner, out);
+    }
+    j.max(open)
+}
+
+/// Collect the classes of a `:global` marker without parentheses that ends at
+/// `start`: a block (`:global { .x {} }`) or the rest of a selector
+/// (`:global .x {}`). Returns the index where the scan continues.
+fn collect_global_unparenthesized(
+    source: &str,
+    start: usize,
+    out: &mut rustc_hash::FxHashSet<String>,
+) -> usize {
+    let rest = &source[start..];
+    let Some(end) = rest.find(['{', ',', ';', '}']) else {
+        return source.len();
+    };
+    let prelude = &rest[..end];
+    if !prelude.trim().is_empty() {
+        extract_dotted_class_names(prelude, out);
+        return start + end;
+    }
+    if rest.as_bytes()[end] != b'{' {
+        return start + end;
+    }
+    collect_global_block(source, start + end + 1, out)
+}
+
+/// Collect the classes in the rule selectors of a `:global { ... }` block whose
+/// body starts at `open`. Declarations are skipped, so a value such as
+/// `url(./a.png)` adds no class. Returns the index after the closing brace.
+fn collect_global_block(
+    source: &str,
+    open: usize,
+    out: &mut rustc_hash::FxHashSet<String>,
+) -> usize {
+    let bytes = source.as_bytes();
+    let mut depth = 1usize;
+    let mut segment_start = open;
+    let mut j = open;
+    while j < bytes.len() && depth > 0 {
+        match bytes[j] {
+            b'{' => {
+                if let Some(selector) = source.get(segment_start..j) {
+                    extract_dotted_class_names(selector, out);
+                }
+                depth += 1;
+                segment_start = j + 1;
+            }
+            b'}' => {
+                depth -= 1;
+                segment_start = j + 1;
+            }
+            b';' => segment_start = j + 1,
+            _ => {}
+        }
+        j += 1;
+    }
+    j
 }
 
 /// Push every `.class` token in a CSS selector fragment (the bare name, no dot)
@@ -1122,6 +1200,35 @@ mod tests {
     use super::*;
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_types::discover::{DiscoveredFile, FileId};
+
+    fn global_classes(source: &str) -> Vec<String> {
+        let mut out = rustc_hash::FxHashSet::default();
+        collect_global_scoped_classes(source, &mut out);
+        let mut classes: Vec<String> = out.into_iter().collect();
+        classes.sort();
+        classes
+    }
+
+    #[test]
+    fn global_scoped_classes_cover_every_global_form() {
+        assert_eq!(
+            global_classes("nav :global(.fn-a:is(.fn-b)) { color: red; }"),
+            ["fn-a", "fn-b"]
+        );
+        assert_eq!(
+            global_classes("div :global .sel-a .sel-b, .local { color: red; }"),
+            ["sel-a", "sel-b"]
+        );
+        assert_eq!(
+            global_classes(
+                ":global {\n  .blk-a { background: url(./img.png); }\n  \
+                 .blk-b { margin: 0 } .blk-c:hover { .blk-d { color: red; } }\n}\n\
+                 .local { color: blue; }"
+            ),
+            ["blk-a", "blk-b", "blk-c", "blk-d"]
+        );
+        assert!(global_classes(".local { color: red; }").is_empty());
+    }
 
     fn reference_surface(sources: &[(&str, &str)]) -> CssReferenceSurface {
         let dir = tempfile::tempdir().unwrap();

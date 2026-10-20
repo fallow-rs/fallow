@@ -426,6 +426,34 @@ fn global_scoped_style_block_class_counts_as_defined() {
 }
 
 #[test]
+fn svelte_global_block_and_selector_classes_count_as_defined() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"svelte-global"}"#).unwrap();
+    let drawer = write_file(
+        root,
+        0,
+        "src/Drawer.svelte",
+        "<Chevron class=\"sb-chev\" />\n<span class=\"sc-chev\"></span>\n\
+         <style>\n:global {\n  .sb-chev { rotate: 90deg; }\n}\n.sc-chev { color: red; }\n</style>\n",
+    );
+    let menu = write_file(
+        root,
+        1,
+        "src/Menu.svelte",
+        "<Chevron class=\"xa-chev\" />\n<span class=\"xb-chev\"></span>\n\
+         <style>\ndiv :global .xa-chev { rotate: 90deg; }\n.xb-chev { color: red; }\n</style>\n",
+    );
+
+    let computation = assert_cached_css_report_parity(root, &[drawer, menu], &[]);
+    assert!(
+        computation.report.unresolved_class_references.is_empty(),
+        "a class defined through an unparenthesized :global is defined: {:?}",
+        unresolved_pairs(&computation)
+    );
+}
+
+#[test]
 fn html_style_block_classes_count_as_defined() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
