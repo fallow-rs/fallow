@@ -2445,8 +2445,10 @@ fn add_source_package_manifests(
                 continue;
             }
             // A manifest without a name cannot be published, so it inherits
-            // the declarations of its ancestors like a private package.
-            let is_private = pkg.private == Some(true) || pkg.name.is_none();
+            // the declarations of its ancestors like a private package. A
+            // manifest that declares no dependencies holds only metadata (for
+            // example a tegg `eggModule` marker), so it inherits them too.
+            let is_private = pkg.private == Some(true) || pkg.name.is_none() || deps.is_empty();
             deps.extend(pkg.name);
             manifests.push(WorkspaceDependencies {
                 root: directory.to_path_buf(),
