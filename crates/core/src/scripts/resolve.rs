@@ -42,6 +42,12 @@ static BINARY_TO_PACKAGE: &[(&str, &[&str])] = &[
     ("manypkg", &["@manypkg/cli"]),
     ("rstest", &["@rstest/core"]),
     ("sls", &["serverless", "osls"]),
+    ("napi", &["@napi-rs/cli"]),
+    ("napi-raw", &["@napi-rs/cli"]),
+    ("taplo", &["@taplo/cli"]),
+    ("oxnode", &["@oxc-node/cli"]),
+    ("ut", &["utoo"]),
+    ("utx", &["utoo"]),
 ];
 
 /// The packages that the static table maps `binary` to.
@@ -93,21 +99,62 @@ pub fn build_bin_to_package_map(
             continue;
         };
 
-        match bin {
-            serde_json::Value::String(_) => {
-                let bin_name = dep_name.rsplit('/').next().unwrap_or(dep_name);
-                map.insert(bin_name.to_string(), dep_name.clone());
-            }
-            serde_json::Value::Object(ref obj) => {
-                for key in obj.keys() {
-                    map.insert(key.clone(), dep_name.clone());
-                }
-            }
-            _ => {}
+        for bin_name in bin_names(dep_name, &bin) {
+            map.insert(bin_name.to_string(), dep_name.clone());
         }
     }
 
     map
+}
+
+/// The binary names that a `bin` field declares: the unscoped package name
+/// for the string form, the keys for the object form.
+fn bin_names<'a>(package: &'a str, bin: &'a serde_json::Value) -> Vec<&'a str> {
+    match bin {
+        serde_json::Value::String(_) => vec![package.rsplit('/').next().unwrap_or(package)],
+        serde_json::Value::Object(obj) => obj.keys().map(String::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The bin map of a project: the `bin` fields that `node_modules` holds for
+/// `dep_names`, plus the `bin` fields of the declared workspace packages.
+#[must_use]
+pub fn project_bin_map<'a>(
+    node_modules_roots: &[&Path],
+    dep_names: &[String],
+    workspace_packages: impl IntoIterator<Item = &'a fallow_config::PackageJson>,
+    declared: &FxHashSet<String>,
+) -> FxHashMap<String, String> {
+    let mut map = build_bin_to_package_map(node_modules_roots, dep_names);
+    add_workspace_binaries(&mut map, workspace_packages, declared);
+    map
+}
+
+/// Add the `bin` fields of workspace packages to `map`.
+///
+/// The package manager links the binaries of a workspace package only into
+/// the packages that declare it, so a package that no manifest declares adds
+/// nothing. An entry that `node_modules` already supplies keeps priority.
+/// This lets a script that calls a workspace binary credit its package when
+/// `node_modules` is absent.
+fn add_workspace_binaries<'a>(
+    map: &mut FxHashMap<String, String>,
+    packages: impl IntoIterator<Item = &'a fallow_config::PackageJson>,
+    declared: &FxHashSet<String>,
+) {
+    for pkg in packages {
+        let (Some(name), Some(bin)) = (pkg.name.as_deref(), pkg.bin.as_ref()) else {
+            continue;
+        };
+        if !declared.contains(name) {
+            continue;
+        }
+        for bin_name in bin_names(name, bin) {
+            map.entry(bin_name.to_string())
+                .or_insert_with(|| name.to_string());
+        }
+    }
 }
 
 /// Resolve a binary name to the npm packages that can provide it.
@@ -305,6 +352,12 @@ mod tests {
             ("npmPkgJsonLint", "npm-package-json-lint"),
             ("i18next", "i18next-parser"),
             ("manypkg", "@manypkg/cli"),
+            ("napi", "@napi-rs/cli"),
+            ("napi-raw", "@napi-rs/cli"),
+            ("taplo", "@taplo/cli"),
+            ("oxnode", "@oxc-node/cli"),
+            ("ut", "utoo"),
+            ("utx", "utoo"),
         ];
         for (binary, package) in cases {
             let pkg = resolve_binary_to_packages(binary, Path::new("/nonexistent"), &empty_map());
@@ -587,5 +640,54 @@ mod tests {
 
         let map = build_bin_to_package_map(&[root.path(), ws.path()], &["my-ws-tool".to_string()]);
         assert_eq!(&map["wstool"], "my-ws-tool");
+    }
+
+    fn workspace_package(json: &str) -> fallow_config::PackageJson {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn workspace_bin_object_form_maps_each_name() {
+        let pkg = workspace_package(
+            r#"{"name": "@scope/tool", "bin": {"my-tool": "./a.js", "tool-alias": "./b.js"}}"#,
+        );
+        let mut map = empty_map();
+        add_workspace_binaries(&mut map, [&pkg], &declared(&["@scope/tool"]));
+        assert_eq!(map.get("my-tool").map(String::as_str), Some("@scope/tool"));
+        assert_eq!(
+            map.get("tool-alias").map(String::as_str),
+            Some("@scope/tool")
+        );
+    }
+
+    #[test]
+    fn workspace_bin_string_form_uses_unscoped_name() {
+        let pkg = workspace_package(r#"{"name": "@eggjs/scripts", "bin": "./bin/cli.js"}"#);
+        let mut map = empty_map();
+        add_workspace_binaries(&mut map, [&pkg], &declared(&["@eggjs/scripts"]));
+        assert_eq!(
+            map.get("scripts").map(String::as_str),
+            Some("@eggjs/scripts")
+        );
+    }
+
+    #[test]
+    fn undeclared_workspace_package_bins_are_skipped() {
+        let pkg = workspace_package(r#"{"name": "@scope/tool", "bin": {"my-tool": "./a.js"}}"#);
+        let mut map = empty_map();
+        add_workspace_binaries(&mut map, [&pkg], &declared(&["other"]));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn node_modules_bin_entry_wins_over_workspace_bin() {
+        let pkg = workspace_package(r#"{"name": "@scope/tool", "bin": {"my-tool": "./a.js"}}"#);
+        let mut map = empty_map();
+        map.insert("my-tool".to_string(), "installed-tool".to_string());
+        add_workspace_binaries(&mut map, [&pkg], &declared(&["@scope/tool"]));
+        assert_eq!(
+            map.get("my-tool").map(String::as_str),
+            Some("installed-tool")
+        );
     }
 }

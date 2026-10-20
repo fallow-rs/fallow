@@ -1,0 +1,8 @@
+{
+  "name": "@scope/tool",
+  "version": "1.0.0",
+  "bin": {
+    "my-tool": "./bin/cli.js",
+    "tool-alias": "./bin/cli.js"
+  }
+}

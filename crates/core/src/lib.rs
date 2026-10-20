@@ -2288,9 +2288,9 @@ fn analyze_all_scripts(
     let workspace_packages =
         discover::collect_workspace_packages(&config.root, root_pkg, workspace_pkgs);
     let all_scripts = collect_all_scripts(root_pkg, workspace_pkgs, &workspace_packages);
-
     let nm_roots = collect_node_modules_roots(config, workspaces);
-    let bin_map = scripts::build_bin_to_package_map(&nm_roots, &all_dep_names);
+    let ws_manifests = workspace_pkgs.iter().map(|(_, pkg)| pkg);
+    let bin_map = scripts::project_bin_map(&nm_roots, &all_dep_names, ws_manifests, &all_dep_set);
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let deps = ScriptDependencyContext {
         bin_map: &bin_map,

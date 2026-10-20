@@ -32,7 +32,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub use resolve::{
-    DependencyBinaries, build_bin_to_package_map, resolve_binary_to_packages,
+    DependencyBinaries, build_bin_to_package_map, project_bin_map, resolve_binary_to_packages,
     resolve_known_dependency_binary,
 };
 pub use shell::command_substitutions;
