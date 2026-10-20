@@ -365,6 +365,9 @@ pub(super) fn collect_quoted_class_tokens(
 /// where the rest of the selector up to `{` or `,` is global.
 fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
     const MARKER: &str = ":global";
+    // A `:global` word in a comment is prose, not a selector.
+    let blanked = blank_block_comments(source);
+    let source = blanked.as_str();
     let bytes = source.as_bytes();
     let mut i = 0;
     while let Some(rel) = source[i..].find(MARKER) {
@@ -377,6 +380,24 @@ fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::FxHashSet<S
             _ => after,
         };
     }
+}
+
+/// Replace each `/* ... */` comment with spaces of the same byte length, so
+/// byte offsets into the result match the source. An unclosed comment runs to
+/// the end of the source, as in CSS.
+fn blank_block_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start]);
+        let comment_len = rest[start + 2..]
+            .find("*/")
+            .map_or(rest.len() - start, |end| end + 4);
+        out.extend(std::iter::repeat_n(' ', comment_len));
+        rest = &rest[start + comment_len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Collect the classes of a `:global(...)` argument that starts at `open`.
@@ -1207,6 +1228,15 @@ mod tests {
         let mut classes: Vec<String> = out.into_iter().collect();
         classes.sort();
         classes
+    }
+
+    #[test]
+    fn global_marker_inside_a_comment_marks_no_class() {
+        assert!(global_classes("/* use :global here */\n.foo { color: red; }\n.bar {}").is_empty());
+        assert_eq!(
+            global_classes("/* :global */ .a {} :global(.b) {}"),
+            vec!["b".to_string()]
+        );
     }
 
     #[test]
