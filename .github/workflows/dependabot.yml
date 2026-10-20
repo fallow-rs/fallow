@@ -1,0 +1,50 @@
+name: Dependabot
+
+# Calls the org-wide Dependabot workflow in fallow-rs/.github. After a failed
+# CI or CodeQL run on a Dependabot pull request it reruns, repairs or hands
+# off; after a successful run it merges when every check passed. The repair
+# reads .github/dependabot-repair.md from main. dependabot-auto-merge.yml still
+# arms GitHub auto-merge on the required checks. See
+# docs/development/dependency-updates.md.
+
+on:
+  workflow_run:
+    workflows: [CI, CodeQL]
+    types: [completed]
+    branches: ['dependabot/**']
+  schedule:
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+# Failed runs share one group per branch, so two repairs never race. A
+# successful run gets its own group, so it cannot replace a pending repair.
+concurrency:
+  group: dependabot-${{ github.event.workflow_run.head_branch || github.event_name }}-${{ github.event.workflow_run.conclusion == 'failure' && 'repair' || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  dependabot:
+    uses: fallow-rs/.github/.github/workflows/dependabot.yml@c2aa294638fe85770df6c71343d32114c79ec8fb # main
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: read
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DEPENDABOT_APP_PRIVATE_KEY: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+    with:
+      # The CI job only aggregates the other jobs.
+      ignore-jobs: '^CI$'
+      # The VS Code download can hang after the tests pass.
+      flaky-jobs: '^VS Code Extension$'
+      # CodSpeed is not a required check and flakes on unrelated updates.
+      ignore-checks: '^CodSpeed'
+      generated-paths: '^crates/cli/viz-assets/|^tests/coverage-producer-corpus/manifest\.json$'
+      # Contract files that scripts/generate-all.mjs and the editor codegen
+      # write. A dependency update can reorder them; they still need review.
+      review-generated-paths: '^((plugin-|rule-pack-)?schema\.json|docs/output-schema\.json|npm/fallow/(capabilities|issue-registry)\.json|crates/api/[\w-]+\.json|npm/fallow/types/output-contract\.d\.ts|editors/vscode/src/generated/[\w.-]+\.ts)$|(^|/)generated-protocol\.mjs$'

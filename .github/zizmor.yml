@@ -26,10 +26,10 @@ rules:
   dangerous-triggers:
     ignore:
       - dependabot-auto-merge.yml
-      # Runs only for same-repository dependabot/** branches. It runs the
-      # triage script from the default branch and starts Claude with a scrubbed
-      # subprocess environment. It never merges.
-      - dependabot-repair.yml
+      # Calls the org-wide Dependabot workflow in fallow-rs/.github, pinned
+      # by SHA. That workflow acts only on same-repository dependabot/**
+      # branches and loads its scripts from its own commit.
+      - dependabot.yml
   # github.actor == 'dependabot[bot]' is the standard GitHub-documented pattern;
   # risk is mitigated by --auto (waits for CI) and no code checkout
   bot-conditions:

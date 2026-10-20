@@ -57,7 +57,7 @@ jobs:
           # context has already reported. In clean status every check passed,
           # so merge now; otherwise the pull request waits for a person. In
           # unstable status a check that is not required failed, and
-          # dependabot-repair.yml looks at that run. A pull request that closed
+          # dependabot.yml looks at that run. A pull request that closed
           # while the job waited needs nothing.
           printf '%s\n' "$output"
           case "$output" in

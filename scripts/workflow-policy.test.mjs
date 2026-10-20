@@ -2831,10 +2831,9 @@ const workflowRunScripts = () => {
     commandSteps(source).flatMap((step) => commandScripts(step.lines, step.dir, state)),
   );
   // CI runs the runner selectors from a checkout of main in `.ci-selectors`,
-  // and the Dependabot repair runs its triage from one in `trusted`. Both
-  // hold the same tracked scripts.
+  // which holds the same tracked scripts.
   for (const [index, script] of scripts.entries()) {
-    scripts[index] = script.replace(/^(?:\.ci-selectors|trusted)\//u, "");
+    scripts[index] = script.replace(/^\.ci-selectors\//u, "");
   }
   return {
     scripts: [...new Set(scripts)]
@@ -3024,38 +3023,18 @@ test("only reviewed workflows run on pull requests", () => {
   );
 });
 
-test("the Dependabot repair workflow keeps its trust boundary", () => {
-  const workflow = readWorkflow(".github/workflows/dependabot-repair.yml");
-  const jobs = indentedBlock(workflow, "jobs", 0);
-  const repair = indentedBlock(jobs, "repair", 2);
-  const publish = indentedBlock(jobs, "publish", 2);
+test("the Dependabot caller pins the org-wide workflow and passes only what it needs", () => {
+  const workflow = readWorkflow(".github/workflows/dependabot.yml");
 
   assert.match(workflow, /^    branches: \['dependabot\/\*\*'\]$/mu);
-  assert.match(workflow, /head_repository\.full_name == github\.repository/u);
-  assert.doesNotMatch(workflow, /^\s+contents: write$/mu, "only the App token may push");
-
-  // The job that runs third-party code holds no token that can write.
-  assert.doesNotMatch(repair, /id-token: write|DEPENDABOT_APP|: write$/mu);
-  assert.match(repair, /^          github_token: \$\{\{ github\.token \}\}$/mu);
-  assert.match(repair, /^      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'$/mu);
-  assert.match(repair, /node trusted\/\.github\/scripts\/dependabot-triage\.mjs/u);
-  assert.match(repair, /--model claude-sonnet-5-5/u);
-  assert.doesNotMatch(repair, /pull_request\.body|Bash\(gh|Bash\(git:|Bash\(git push/u);
-
-  // The job that pushes runs no project code and checks the patch first.
-  assert.match(publish, /cp trusted\/\.github\/scripts\/dependabot-repair-guard\.mjs/u);
-  assert.ok(
-    publish.indexOf('dependabot-repair-guard.mjs" >') < publish.indexOf(' push "https://'),
-    "the guard runs before the push",
+  assert.match(
+    workflow,
+    /^    uses: fallow-rs\/\.github\/\.github\/workflows\/dependabot\.yml@[0-9a-f]{40} # main$/mu,
   );
-  assert.doesNotMatch(publish, /\b(?:npm|pnpm|cargo) /u);
-
-  // The push token cannot write workflow files.
-  const pushToken = indentedBlock(
-    publish.replace(/^ {6}- id: push-token$/mu, "      push-token:"),
-    "push-token",
-    6,
+  assert.doesNotMatch(workflow, /secrets: inherit/u, "pass each secret by name");
+  assert.doesNotMatch(
+    workflow,
+    /^\s+(?:contents|id-token): write$/mu,
+    "only the App token may push",
   );
-  assert.match(pushToken, /permission-contents: write/u);
-  assert.doesNotMatch(pushToken, /permission-workflows/u);
 });

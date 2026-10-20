@@ -7,41 +7,36 @@ workflows take them to `main` without a maintainer in most cases.
 
 1. Dependabot opens a pull request. The cooldown in `.github/dependabot.yml`
    waits 7 days after each upstream release.
-2. `dependabot-auto-merge.yml` arms auto-merge for every update that is not a
-   major version. When the checks already passed, it merges at once.
-3. When CI or CodeQL fails, `dependabot-repair.yml` triages the run with
-   `.github/scripts/dependabot-triage.mjs`:
-   - `rerun`: only cancelled jobs, or the flaky `VS Code Extension` job on the
-     first attempt, failed.
-   - `repair`: a job failed. Claude Sonnet 5.5 gets
-     `.github/dependabot-repair.md` and an excerpt of the failed job logs. It
-     makes one local commit.
-   - `give-up`: two repair commits did not make the run pass. The pull request
-     gets the `needs-human` label and a comment.
-   - `skip`: the run is out of date, a person pushed to the branch, or the
-     pull request has the `needs-human` label.
-4. The publish job checks the commit with
-   `.github/scripts/dependabot-repair-guard.mjs` and pushes it with the
-   Dependabot GitHub App token. The push starts CI.
-   - When the commit changes only lockfiles, generated artifacts or
-     snapshots, and every URL it adds to a lockfile points to the official
-     registry, a minor or patch update keeps auto-merge. It merges when the
-     required checks pass.
-   - When the commit changes any other file, the job turns auto-merge off and
-     checks that it is off before the push. The pull request gets the
-     `needs-review` label. That code can change what a build, a release or a
-     policy test runs, so a maintainer reviews it and merges. When auto-merge
-     does not turn off, the job does not push.
-5. When the repair makes no commit, or the guard rejects it, the pull request
-   gets the `needs-human` label and a comment with the diagnosis.
+2. `dependabot-auto-merge.yml` arms GitHub auto-merge for every update that is
+   not a major version. It uses the token of the fallow-dependabot GitHub App,
+   so a merge of a workflow change works and starts CI on `main`. When the
+   checks already passed, it merges at once.
+3. `dependabot.yml` calls the org-wide workflow in
+   [`fallow-rs/.github`](https://github.com/fallow-rs/.github/blob/main/dependabot/README.md)
+   after each CI or CodeQL run on a Dependabot branch, and every three hours:
+   - After a failed run, it reruns cancelled jobs and the flaky
+     `VS Code Extension` job, or asks Claude for a repair, or labels the pull
+     request `needs-human` after two failed repairs.
+   - A repair of generated files (the viz bundle, the coverage producer
+     manifest) or snapshots is pushed by the App and merges when the checks
+     pass.
+   - Any other repair is not pushed. The pull request gets the `needs-review`
+     label, auto-merge is turned off, and a comment holds the patch, the list
+     of changed files and a command that applies the patch after a SHA-256
+     check.
+   - After a successful run, it merges the pull request when every check on
+     the head commit passed, except CodSpeed.
 
 Major updates do not auto-merge. The repair still runs on them, so a
 maintainer can review a green pull request.
 
-## Why updates fail
+## Repository notes
 
-These causes made a person act on a Dependabot pull request in the past. The
-repair instructions hold the fix for each one.
+`.github/dependabot-repair.md` holds the fallow install commands, local checks
+and known causes. The repair reads the `main` copy. Update it when a new cause
+repeats.
+
+These causes made a person act on a Dependabot pull request in the past:
 
 - A test in `scripts/*.test.mjs` pins the SHA or version of an action or a
   package.
@@ -49,68 +44,30 @@ repair instructions hold the fix for each one.
   the root and in `npm/fallow`.
 - A bundler update changes the committed viz bundle, or a producer update
   changes the digest in the coverage producer corpus.
-- A semver-compatible update changes an API that a crate calls.
+- A semver-compatible update reorders the generated contract files or changes
+  an API that a crate calls.
 - `github/codeql-action` sub-actions on different versions. The
-  `codeql-action` group in `.github/dependabot.yml` now prevents this.
-- Auto-merge armed with `GITHUB_TOKEN` on an update of a workflow action. The
-  Dependabot GitHub App removes this cause.
-
-A repair does not fix a change under `.github/`, an advisory that also affects
-`main`, or an update that needs a review of changed behavior. A failure in
-the `Commit messages` check is outside the repair, because the repair watches
-only the CI and CodeQL workflows.
+  `codeql-action` group in `.github/dependabot.yml` prevents this.
 
 ## Setup
 
-| Setting | Type | Use |
+| Setting | Scope | Use |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Actions secret | The repair uses the Claude API. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Actions secret | The repair uses a Claude subscription. Create the token with `claude setup-token`. |
-| `DEPENDABOT_APP_CLIENT_ID` | Actions variable | The client ID of the Dependabot GitHub App. |
-| `DEPENDABOT_APP_PRIVATE_KEY` | Actions secret and Dependabot secret | The private key of that App. `dependabot-auto-merge.yml` runs for Dependabot, so it can need the Dependabot copy. |
-
-Set one of the two Claude secrets. Without either, the repair job logs a
-notice and stops.
+| `DEPENDABOT_APP_CLIENT_ID` | Organization and repository variable | The client ID of the fallow-dependabot GitHub App. |
+| `DEPENDABOT_APP_PRIVATE_KEY` | Actions and Dependabot secret | The private key of that App. `dependabot-auto-merge.yml` runs for Dependabot, so it can need the Dependabot copy. |
+| `ANTHROPIC_API_KEY` | Actions secret | The Claude API key for the repair. |
 
 The App needs the `contents`, `pull_requests` and `workflows` write
-permissions on this repository. Without the App:
-
-- Auto-merge uses `GITHUB_TOKEN`. GitHub disables auto-merge on a pull
-  request that changes a workflow file, and a merge by `GITHUB_TOKEN` starts
-  no workflow, so CI does not run on `main` for that merge commit.
-- The publish job does not push the repair. The patch stays in the run
-  artifacts, and the pull request gets the `needs-human` label.
+permissions on this repository.
 
 ## Security
 
-- The repair runs only for `dependabot/**` branches in this repository.
-- The triage script, the guard and the repair instructions come from `main`,
-  not from the pull request branch.
-- The repair job installs and builds the updated dependency, which is
-  third-party code. So that job holds only a read-only `GITHUB_TOKEN`.
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` removes the Claude secret from each
-  command, and bubblewrap gives each command its own PID namespace. The
-  install commands use `--ignore-scripts`, as CI does.
-- The publish job runs on a new runner and runs no project code. The guard
-  accepts one commit only. It rejects changes under `.github/`, to the
-  changelog and to git metadata files, binary files, symbolic links,
-  submodules and paths with control characters. It limits the hand-written
-  change to 300 lines.
-- The push token can write contents only. A second token with `workflows`
-  write sets or clears auto-merge after the push.
-- Only a repair of lockfiles, generated artifacts or snapshots merges without
-  review, and a lockfile change must keep every new URL on the official
-  registry. A change to `scripts/*.test.mjs` needs review, because those
-  tests hold the repository policy. A generated artifact, such as the viz bundle, is not
-  reviewable by a person, and a person rebuilt it the same way before this
-  workflow existed.
-- The comment shows the repair summary in a code block, because the repair
-  runner wrote it.
-- Claude gets the failed job logs, not the pull request body, which holds
-  upstream release notes. The prompt marks the logs as untrusted data.
+The org-wide workflow documents its trust boundary in its README. In short:
 
-## Cost
-
-The repair runs only on a failed run that the triage does not rerun or skip.
-In the 150 Dependabot pull requests before this workflow, about 10 needed a
-companion commit, in roughly one month. A repair run is capped at 80 turns.
+- The repair job installs and builds third-party code, so it holds only a
+  read-only `GITHUB_TOKEN` and no OIDC permission.
+- A separate job on a new runner checks the patch and pushes only generated
+  files. A push from the App starts CI with the repository secrets, so code
+  changes wait for a maintainer.
+- The scripts and instructions come from the pinned commit of the org-wide
+  workflow, and the repository notes from `main`.
