@@ -142,3 +142,10 @@ export const isInferredProject = (project) =>
 /** Config file name with the 7.0 value `/dev/null/inferred` for the inferred project. */
 export const projectConfigFileName = (project) =>
   isInferredProject(project) ? INFERRED_PROJECT_ID : project.configFileName;
+
+/**
+ * Name node of a heritage clause type. TypeScript 7.0 wraps it in an
+ * ExpressionWithTypeArguments (`expression`). TypeScript 7.1 uses a
+ * TypeReference (`typeName`) in `implements` and interface `extends` clauses.
+ */
+export const heritageTypeName = (heritageType) => heritageType.expression ?? heritageType.typeName;

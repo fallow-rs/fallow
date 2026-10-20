@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { ast, createApi as createBackendApi, projectConfigFileName, sync } from "./backend.mjs";
+import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
+import { projectPackage } from "./project-package.mjs";
 import { projectResult, projectState } from "./project-state.mjs";
 import {
   declarationName,
@@ -1001,10 +1002,6 @@ const declarationIsProjectLocal = (root, declaration) => {
   return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`));
 };
 
-// TypeScript 7.0 wraps a heritage type in ExpressionWithTypeArguments
-// (`expression`). TypeScript 7.1 uses a TypeReference (`typeName`).
-const heritageTypeName = (heritageType) => heritageType.expression ?? heritageType.typeName;
-
 const frameworkContractRelationsFor = (root, project, declaration, contracts, memberName) => {
   const owner = ownerDeclaration(declaration);
   if (!owner || (!isClassDeclaration(owner) && !isClassExpression(owner))) {
@@ -1298,31 +1295,6 @@ const wildcardPattern = (target) => {
     .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&"))
     .join("[^/]+");
   return new RegExp(`^${escaped}$`, "u");
-};
-
-const pathWithin = (root, candidate) =>
-  candidate === root || candidate.startsWith(`${root}${path.sep}`);
-
-const packageAt = (directory) => {
-  const packageFile = path.join(directory, "package.json");
-  if (!existsSync(packageFile)) return undefined;
-  try {
-    return { root: directory, json: JSON.parse(readFileSync(packageFile, "utf8")) };
-  } catch {
-    return { root: directory, json: {} };
-  }
-};
-
-const projectPackage = (root, project) => {
-  const normalizedRoot = path.resolve(root);
-  let current = path.dirname(projectConfigFileName(project));
-  while (pathWithin(normalizedRoot, current)) {
-    const found = packageAt(current);
-    if (found) return found;
-    if (current === normalizedRoot) break;
-    current = path.dirname(current);
-  }
-  return { root: normalizedRoot, json: {} };
 };
 
 const ancestorRoots = (root, start) => {
