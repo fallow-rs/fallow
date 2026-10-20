@@ -87,7 +87,7 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
   assert.match(job, /-max_total_time="\$FUZZ_TIME_SECONDS" -timeout=10/);
   assert.match(job, /-dict="\$PWD\/fuzz\/dicts\/\$\{target\}\.dict"/);
   assert.match(job, /if ! cargo[\s\S]*failed=1[\s\S]*exit "\$failed"/);
-  assert.match(job, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
+  assert.match(job, /actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9/);
   assert.match(job, /if: failure\(\)[\s\S]*path: fuzz\/artifacts\//);
 
   for (const path of [
