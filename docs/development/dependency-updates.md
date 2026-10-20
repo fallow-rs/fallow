@@ -23,12 +23,15 @@ workflows take them to `main` without a maintainer in most cases.
 4. The publish job checks the commit with
    `.github/scripts/dependabot-repair-guard.mjs` and pushes it with the
    Dependabot GitHub App token. The push starts CI.
-   - When the commit changes only lockfiles, generated artifacts, snapshots
-     or `scripts/*.test.mjs`, a minor or patch update keeps auto-merge. It
-     merges when the required checks pass.
-   - When the commit changes any other file, auto-merge is turned off and the
-     pull request gets the `needs-review` label. That code can change what a
-     build or a release runs, so a maintainer reviews it and merges.
+   - When the commit changes only lockfiles, generated artifacts or
+     snapshots, and every URL it adds to a lockfile points to the official
+     registry, a minor or patch update keeps auto-merge. It merges when the
+     required checks pass.
+   - When the commit changes any other file, the job turns auto-merge off and
+     checks that it is off before the push. The pull request gets the
+     `needs-review` label. That code can change what a build, a release or a
+     policy test runs, so a maintainer reviews it and merges. When auto-merge
+     does not turn off, the job does not push.
 5. When the repair makes no commit, or the guard rejects it, the pull request
    gets the `needs-human` label and a comment with the diagnosis.
 
@@ -95,8 +98,10 @@ permissions on this repository. Without the App:
   change to 300 lines.
 - The push token can write contents only. A second token with `workflows`
   write sets or clears auto-merge after the push.
-- Only a repair of lockfiles, generated artifacts, snapshots or script tests
-  merges without review. A generated artifact, such as the viz bundle, is not
+- Only a repair of lockfiles, generated artifacts or snapshots merges without
+  review, and a lockfile change must keep every new URL on the official
+  registry. A change to `scripts/*.test.mjs` needs review, because those
+  tests hold the repository policy. A generated artifact, such as the viz bundle, is not
   reviewable by a person, and a person rebuilt it the same way before this
   workflow existed.
 - The comment shows the repair summary in a code block, because the repair

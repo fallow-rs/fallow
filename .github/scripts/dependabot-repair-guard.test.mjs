@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  addedUrls,
   checkRepair,
   MAX_CHANGED_LINES,
   parseNumstat,
@@ -21,9 +22,9 @@ import {
 const SCRIPT_PATH = fileURLToPath(new URL("./dependabot-repair-guard.mjs", import.meta.url));
 const file = (path, added = 1, deleted = 1, mode = "100644") => ({ path, added, deleted, mode });
 
-test("one commit with a test and a lockfile change passes", () => {
+test("one commit with a test and a lockfile change passes and needs review", () => {
   const files = [file("scripts/workflow-policy.test.mjs"), file("package-lock.json", 900, 900)];
-  assert.deepEqual(checkRepair({ commits: 1, files }), { ok: true, problems: [], merge: "auto" });
+  assert.deepEqual(checkRepair({ commits: 1, files }), { ok: true, problems: [], merge: "review" });
 });
 
 test("more than one commit is rejected", () => {
@@ -85,20 +86,41 @@ test("a change to code that a build runs is accepted but needs review", () => {
     "crates/cli/build.rs",
     "package.json",
     "hk.pkl",
+    "scripts/workflow-policy.test.mjs",
   ]) {
     const result = checkRepair({ commits: 1, files: [file(path), file("Cargo.lock")] });
     assert.equal(result.ok, true, path);
     assert.equal(result.merge, "review", path);
   }
-  const tests = [
-    file("scripts/workflow-policy.test.mjs"),
-    file("crates/cli/tests/snapshots/a.snap"),
-  ];
-  assert.equal(checkRepair({ commits: 1, files: tests }).merge, "auto");
-  assert.equal(
-    checkRepair({ commits: 1, files: [file("scripts/nested/x.test.mjs")] }).merge,
-    "review",
-  );
+  const generated = [file("crates/cli/tests/snapshots/a.snap"), file("Cargo.lock")];
+  assert.equal(checkRepair({ commits: 1, files: generated }).merge, "auto");
+});
+
+test("a lockfile URL outside the official registry needs review", () => {
+  const files = [file("package-lock.json")];
+  const npm = "https://registry.npmjs.org/acorn/-/acorn-8.19.0.tgz";
+  const crates = "registry+https://github.com/rust-lang/crates.io-index";
+  assert.equal(checkRepair({ commits: 1, files, lockfileUrls: [npm, crates] }).merge, "auto");
+  for (const url of [
+    "https://evil.example/acorn.tgz",
+    "git+https://github.com/x/y",
+    "http://registry.npmjs.org/a",
+  ]) {
+    assert.equal(checkRepair({ commits: 1, files, lockfileUrls: [url] }).merge, "review", url);
+  }
+});
+
+test("only added diff lines give URLs", () => {
+  const diff = [
+    "+++ b/package-lock.json",
+    '-      "resolved": "https://registry.npmjs.org/old.tgz",',
+    '+      "resolved": "https://registry.npmjs.org/new.tgz",',
+    '+source = "registry+https://github.com/rust-lang/crates.io-index"',
+  ].join("\n");
+  assert.deepEqual(addedUrls(diff), [
+    "https://registry.npmjs.org/new.tgz",
+    "registry+https://github.com/rust-lang/crates.io-index",
+  ]);
 });
 
 test("the raw diff gives the new mode of each path", () => {

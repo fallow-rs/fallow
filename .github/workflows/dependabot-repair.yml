@@ -279,35 +279,10 @@ jobs:
             echo "result=rejected" >> "$GITHUB_OUTPUT"
           fi
 
-      # The push token can write contents only, so a guard bug cannot push a
-      # workflow file.
-      - id: push-token
-        if: steps.check.outputs.result == 'accepted' && vars.DEPENDABOT_APP_CLIENT_ID != ''
-        continue-on-error: true
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
-          permission-contents: write
-
-      - id: push
-        if: steps.check.outputs.result == 'accepted'
-        env:
-          APP_TOKEN: ${{ steps.push-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          if [ -z "$APP_TOKEN" ]; then
-            echo "result=no-token" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          auth=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
-            push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
-          echo "result=pushed" >> "$GITHUB_OUTPUT"
-
-      # The merge needs `workflows` for an update of a workflow action.
+      # This token sets or clears auto-merge. The merge of an update of a
+      # workflow action needs `workflows`.
       - id: merge-token
-        if: steps.push.outputs.result == 'pushed'
+        if: steps.check.outputs.result == 'accepted' && vars.DEPENDABOT_APP_CLIENT_ID != ''
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -317,26 +292,64 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
-      # A repair of lockfiles, generated files, snapshots or script tests of a
-      # minor or patch update merges like the update itself. Any other repair
-      # can change what a build or a release runs, so auto-merge stays off
-      # until a maintainer reviews it. dependabot-auto-merge.yml may have
-      # armed it when the pull request opened.
-      - id: merge
-        if: steps.push.outputs.result == 'pushed'
-        continue-on-error: true
+      # A repair of lockfiles, generated files or snapshots of a minor or patch
+      # update merges like the update itself. Any other repair can change what
+      # a build, a release or a policy test runs, so a maintainer reviews it.
+      # dependabot-auto-merge.yml may have armed auto-merge when the pull
+      # request opened, so it is turned off and checked before the push.
+      - id: mode
+        if: steps.check.outputs.result == 'accepted'
         env:
           GH_TOKEN: ${{ steps.merge-token.outputs.token }}
           MERGE: ${{ steps.check.outputs.merge }}
           UPDATE_SIZE: ${{ needs.repair.outputs.update_size }}
         run: |
-          if [ "$MERGE" = auto ] && [ "$UPDATE_SIZE" = minor-or-patch ]; then
-            gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --squash
-            echo "mode=auto" >> "$GITHUB_OUTPUT"
-          else
-            gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto || true
-            echo "mode=review" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "mode=no-token" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ "$MERGE" = auto ] && [ "$UPDATE_SIZE" = minor-or-patch ]; then
+            echo "mode=auto" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
+          armed=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$armed" = false ]; then
+            echo "mode=review" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=disable-failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The push token can write contents only, so a guard bug cannot push a
+      # workflow file.
+      - id: push-token
+        if: steps.mode.outputs.mode == 'auto' || steps.mode.outputs.mode == 'review'
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - id: push
+        if: steps.push-token.outputs.token != ''
+        env:
+          APP_TOKEN: ${{ steps.push-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          auth=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
+          echo "result=pushed" >> "$GITHUB_OUTPUT"
+
+      # A failure here leaves auto-merge off, which is the safe side.
+      - name: Arm auto-merge
+        if: steps.push.outputs.result == 'pushed' && steps.mode.outputs.mode == 'auto'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.merge-token.outputs.token }}
+        run: gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --squash
 
       # The summary comes from the repair runner, so the comment shows it in
       # a code block, where links and mentions do nothing.
@@ -346,7 +359,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHECK: ${{ steps.check.outputs.result }}
           RESULT: ${{ steps.push.outputs.result }}
-          MODE: ${{ steps.merge.outputs.mode }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
           comment="$RUNNER_TEMP/comment.md"
@@ -358,14 +371,18 @@ jobs:
             printf '\n%s\n' "$fence"
           }
           label=needs-human
-          case "$CHECK/$RESULT/$MODE" in
-            accepted/pushed/auto)
+          case "$CHECK/$MODE/$RESULT" in
+            accepted/auto/pushed)
               label=""
               echo "The repair workflow pushed a commit. Auto-merge is on." > "$comment" ;;
-            accepted/pushed/*)
+            accepted/review/pushed)
               label=needs-review
               echo "The repair workflow pushed a commit that changes code. Review it, then merge. Auto-merge is off." > "$comment" ;;
-            accepted/no-token/*)
+            accepted/auto/*|accepted/review/*)
+              echo "The repair workflow could not push the commit. The patch is in the run artifacts." > "$comment" ;;
+            accepted/disable-failed/*)
+              echo "The repair workflow did not push the commit: it could not turn auto-merge off. The patch is in the run artifacts." > "$comment" ;;
+            accepted/*)
               echo "The repair workflow did not push the commit: set the Dependabot GitHub App. The patch is in the run artifacts." > "$comment" ;;
             rejected/*)
               echo "The repair workflow did not push the commit. The guard rejected it:" > "$comment"

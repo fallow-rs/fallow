@@ -7,8 +7,10 @@
 // a submodule, or changes more than MAX_CHANGED_LINES hand-written lines.
 //
 // An accepted commit may merge without review only when every path is a
-// lockfile, a generated artifact, a snapshot or a script test. Any other path
-// can change code that a build or a release runs, so a maintainer reviews it.
+// lockfile, a generated artifact or a snapshot, and every URL that the commit
+// adds to a lockfile points to the official registry. Any other change can
+// alter what a build, a release or a policy test runs, so a maintainer
+// reviews it.
 //
 // The CLI compares HEAD with BEFORE in the current repository and prints each
 // problem. It writes `merge=auto` or `merge=review` to GITHUB_OUTPUT when that
@@ -34,20 +36,22 @@ const SYMLINK_MODE = "120000";
 const GITLINK_MODE = "160000";
 const GENERATED_PATH =
   /(?:^|\/)(?:Cargo\.lock|package-lock\.json|pnpm-lock\.yaml)$|^crates\/cli\/viz-assets\/|^tests\/coverage-producer-corpus\/manifest\.json$/u;
-const AUTO_MERGE_PATH = new RegExp(
-  `${GENERATED_PATH.source}|\\.snap$|^scripts\\/[\\w.-]+\\.test\\.mjs$`,
-  "u",
-);
+const AUTO_MERGE_PATH = new RegExp(`${GENERATED_PATH.source}|\\.snap$`, "u");
+const LOCKFILE_PATH = /(?:^|\/)(?:Cargo\.lock|package-lock\.json|pnpm-lock\.yaml)$/u;
+const URL = /\b(?:registry\+|git\+)?https?:\/\/[^\s"',]+/gu;
+const REGISTRY_URL =
+  /^(?:https:\/\/registry\.npmjs\.org\/|registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index$)/u;
 
 /**
  * Checks a repair commit.
  * @param {{
  *   commits: number,
  *   files: { path: string, added: number | null, deleted: number | null, mode: string }[],
+ *   lockfileUrls?: string[],
  * }} input
  * @returns {{ ok: boolean, problems: string[], merge: "auto" | "review" }}
  */
-export const checkRepair = ({ commits, files }) => {
+export const checkRepair = ({ commits, files, lockfileUrls = [] }) => {
   const problems = [];
   if (commits !== 1) problems.push(`the patch has ${commits} commits, not 1`);
   for (const { path, added, mode } of files) {
@@ -64,7 +68,10 @@ export const checkRepair = ({ commits, files }) => {
   if (changed > MAX_CHANGED_LINES) {
     problems.push(`${changed} hand-written lines changed, more than ${MAX_CHANGED_LINES}`);
   }
-  const merge = files.every(({ path }) => AUTO_MERGE_PATH.test(path)) ? "auto" : "review";
+  const auto =
+    files.every(({ path }) => AUTO_MERGE_PATH.test(path)) &&
+    lockfileUrls.every((url) => REGISTRY_URL.test(url));
+  const merge = auto ? "auto" : "review";
   return { ok: problems.length === 0, problems, merge };
 };
 
@@ -104,6 +111,17 @@ export const parseRawModes = (output) => {
   return modes;
 };
 
+/**
+ * Lists the URLs on the lines that a diff adds.
+ * @param {string} diff
+ * @returns {string[]}
+ */
+export const addedUrls = (diff) =>
+  diff
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .flatMap((line) => line.match(URL) ?? []);
+
 const main = () => {
   const before = process.env.BEFORE;
   if (!before) throw new Error("missing environment: BEFORE");
@@ -112,7 +130,12 @@ const main = () => {
   const files = parseNumstat(git("diff", "--numstat", "-z", "--no-renames", before, "HEAD")).map(
     (file) => ({ ...file, mode: modes.get(file.path) ?? "" }),
   );
-  const result = checkRepair({ commits, files });
+  const lockfiles = files.map(({ path }) => path).filter((path) => LOCKFILE_PATH.test(path));
+  const lockfileUrls =
+    lockfiles.length === 0
+      ? []
+      : addedUrls(git("diff", "--unified=0", "--no-renames", before, "HEAD", "--", ...lockfiles));
+  const result = checkRepair({ commits, files, lockfileUrls });
   for (const problem of result.problems) console.log(problem);
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(process.env.GITHUB_OUTPUT, `merge=${result.merge}\n`);
