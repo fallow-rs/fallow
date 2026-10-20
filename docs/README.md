@@ -27,6 +27,8 @@ for contributors and maintainers of the open-source codebase.
   steps and the invariants the policy tests assert
 - [Release security](development/release-security.md): credential boundaries
   and publication workflow ownership.
+- [Dependency updates](development/dependency-updates.md): Dependabot
+  auto-merge, the repair workflow, and its setup.
 
 ## Architecture and extension points
 

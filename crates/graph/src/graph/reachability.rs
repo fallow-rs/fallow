@@ -1743,6 +1743,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn many_unmasked_roots_use_one_test_traversal() {
         let test_roots: Vec<u32> = (0..512).collect();
         let graph = build_reachability_graph(512, &[], &[], &test_roots);
@@ -1763,6 +1764,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn many_roots_share_one_profile_worklist() {
         let test_roots: Vec<u32> = (0..128).collect();
         let edges: Vec<_> = test_roots
@@ -1794,6 +1796,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn unique_masks_cross_profile_words_in_one_deterministic_worklist() {
         let test_roots: Vec<u32> = (0..65).collect();
         let mut edges = Vec::with_capacity(test_roots.len() * 2);
@@ -1862,6 +1865,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn staggered_profile_words_propagate_without_clean_word_scans() {
         const PROFILE_COUNT: u32 = 65;
         const MASK_START: u32 = PROFILE_COUNT;
@@ -1919,6 +1923,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
     fn no_profile_coverage_omits_unused_reference_provenance() {
         const CHAIN_LENGTH: u32 = 128;
 

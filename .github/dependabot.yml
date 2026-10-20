@@ -165,6 +165,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      # CodeQL fails when init, analyze and upload-sarif run different
+      # versions, so they update in one pull request.
+      codeql-action:
+        patterns: ["github/codeql-action*"]
 
   # The hash-pinned cargo-zigbuild and ziglang wheels that release.yml installs.
   - package-ecosystem: pip

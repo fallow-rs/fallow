@@ -222,3 +222,49 @@ fn nameless_nested_manifests_do_not_block_root_declarations() {
         "a marker manifest is not an owner, and a nameless manifest inherits root declarations"
     );
 }
+
+#[test]
+fn metadata_only_nested_manifests_inherit_ancestor_declarations() {
+    let temp = tempfile::tempdir().expect("temporary project");
+    let root = temp.path().canonicalize().expect("canonical project");
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "root", "private": true, "workspaces": ["examples/*"], "dependencies": { "@repro/rootdep": "*" } }"#,
+    );
+    write(
+        &root.join("examples/demo/package.json"),
+        r#"{ "name": "demo", "dependencies": { "egg": "*" } }"#,
+    );
+    write(
+        &root.join("examples/demo/index.ts"),
+        "import './app/biz/Foo';\n",
+    );
+    write(
+        &root.join("examples/demo/app/biz/package.json"),
+        r#"{ "name": "biz", "eggModule": { "name": "biz" } }"#,
+    );
+    write(
+        &root.join("examples/demo/app/biz/Foo.ts"),
+        "import 'egg'; import '@repro/rootdep'; import 'biz'; import '@repro/missing'; import '../owned/Bar';\n",
+    );
+    write(
+        &root.join("examples/demo/app/owned/package.json"),
+        r#"{ "name": "owned", "dependencies": {} }"#,
+    );
+    write(
+        &root.join("examples/demo/app/owned/Bar.ts"),
+        "import 'egg';\n",
+    );
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis succeeds");
+    assert_eq!(
+        unlisted_sites(&results, &root),
+        vec![
+            (
+                "@repro/missing".into(),
+                "examples/demo/app/biz/Foo.ts".into()
+            ),
+            ("egg".into(), "examples/demo/app/owned/Bar.ts".into()),
+        ],
+        "a manifest without a dependency field inherits ancestor declarations; an explicit empty field keeps the owner"
+    );
+}

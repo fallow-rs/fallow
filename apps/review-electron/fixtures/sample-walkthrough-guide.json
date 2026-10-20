@@ -80,7 +80,7 @@
             "total": 5
           },
           "label": "review-here",
-          "reason": "high fan-in (1 importer), fan-out 3"
+          "reason": "fan-in (1 importer), fan-out 3"
         },
         {
           "file": "apps/review-electron/fixtures/sample-app/src/main.tsx",
@@ -92,7 +92,7 @@
             "total": 3
           },
           "label": "review-here",
-          "reason": "high fan-in (1 importer), fan-out 1"
+          "reason": "fan-in (1 importer), fan-out 1"
         }
       ],
       "deprioritized": [
@@ -118,7 +118,7 @@
             "total": 2
           },
           "label": "not-prioritized",
-          "reason": "high fan-in (1 importer)"
+          "reason": "fan-in (1 importer)"
         },
         {
           "file": "apps/review-electron/fixtures/sample-app/src/components/Card.tsx",
@@ -130,7 +130,7 @@
             "total": 2
           },
           "label": "not-prioritized",
-          "reason": "high fan-in (1 importer)"
+          "reason": "fan-in (1 importer)"
         },
         {
           "file": "apps/review-electron/fixtures/sample-app/src/components/Header.tsx",
@@ -142,7 +142,7 @@
             "total": 2
           },
           "label": "not-prioritized",
-          "reason": "high fan-in (1 importer)"
+          "reason": "fan-in (1 importer)"
         },
         {
           "file": "apps/review-electron/fixtures/sample-app/vite.config.ts",

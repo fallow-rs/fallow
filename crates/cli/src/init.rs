@@ -700,7 +700,7 @@ pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
             prune_baselines: false,
         });
     }
-    run_init_config(opts.root, opts.use_toml)
+    run_init_config(opts.root, opts.use_toml, opts.quiet)
 }
 
 /// `init --decline`: persist a deliberate "stay unconfigured" decision so the
@@ -729,7 +729,7 @@ fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
+fn run_init_config(root: &Path, use_toml: bool, quiet: bool) -> ExitCode {
     let existing_names = [
         ".fallowrc.json",
         ".fallowrc.jsonc",
@@ -766,8 +766,38 @@ fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
 
     print_detection_summary(&info);
     ensure_gitignore(root);
+    if !quiet {
+        let cwd = std::env::current_dir().ok();
+        eprintln!("{}", init_next_step(root, cwd.as_deref()));
+    }
 
     ExitCode::SUCCESS
+}
+
+/// The line `fallow init` prints after it writes the config. Without it, the
+/// first run ends with no pointer to the first report.
+///
+/// When the config root is not the current directory, both commands carry
+/// `--root`, because a bare `fallow` analyzes the current directory.
+fn init_next_step(root: &Path, cwd: Option<&Path>) -> String {
+    let same_dir =
+        cwd.is_some_and(
+            |cwd| match (dunce::canonicalize(root), dunce::canonicalize(cwd)) {
+                (Ok(root), Ok(cwd)) => root == cwd,
+                _ => false,
+            },
+        );
+    let root_flag = if same_dir {
+        String::new()
+    } else {
+        format!(
+            " --root {}",
+            fallow_engine::shell_quote::shell_quote(&root.to_string_lossy())
+        )
+    };
+    format!(
+        "Next: run `fallow{root_flag}` for a first report. Run `fallow agent install --dry-run{root_flag}` to see the setup for coding agents."
+    )
 }
 
 fn run_init_agents(root: &Path) -> ExitCode {
@@ -1221,6 +1251,27 @@ pub fn run_rule_pack_schema(json_style: crate::json_style::JsonStyle) -> ExitCod
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The next step names a bare `fallow` only when the config root is the
+    /// current directory.
+    #[test]
+    fn init_next_step_adds_root_only_for_another_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = init_next_step(dir.path(), Some(dir.path()));
+        assert!(
+            here.starts_with("Next: run `fallow` for a first report."),
+            "{here}"
+        );
+        assert!(!here.contains("--root"), "{here}");
+
+        let other = tempfile::tempdir().unwrap();
+        let there = init_next_step(dir.path(), Some(other.path()));
+        assert!(there.contains("`fallow --root "), "{there}");
+        assert!(
+            there.contains("`fallow agent install --dry-run --root "),
+            "{there}"
+        );
+    }
 
     fn config_opts(root: &Path, use_toml: bool) -> InitOptions<'_> {
         InitOptions {

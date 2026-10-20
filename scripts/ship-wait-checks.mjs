@@ -2,8 +2,10 @@
 
 // Wait until the checks of a pull request, or the workflow runs of a commit,
 // are complete. Right after a push, GitHub can report no checks or only the
-// first few, and "nothing pending" is then true too early. The --min-checks
-// guard waits until at least that count of checks exists. GitHub starts no
+// first few, and "nothing pending" is then true too early. For a pull request,
+// the --min-checks guard waits until at least that count of checks exists. For
+// a commit, the runs that GitHub created are the expected set, and the wait
+// ends when they stay complete for a short settle time. GitHub starts no
 // pull_request workflow for a pull request that conflicts with its base, so
 // with --pr the wait also stops when GitHub reports a conflict. With
 // --commit and --follow-main, a cancelled run moves the wait to the newest
@@ -57,6 +59,10 @@ const MINUTE = 60 * SECOND;
 // request can get fewer checks than --min-checks. When the checks stay
 // complete and unchanged this long, no further check comes, and the wait ends.
 const SETTLE_MS = 10 * MINUTE;
+// GitHub creates all push runs of a commit together, and a new run is pending.
+// So a complete set of runs contains all push runs. The short settle time catches a
+// run that a completed run starts, for example through workflow_run.
+export const COMMIT_SETTLE_MS = 2 * MINUTE;
 // A GitHub API outage of a few minutes must not stop the wait. After a failed
 // read, the delay doubles from the interval up to this cap. The wait stops
 // when the reads fail for the whole error window.
@@ -69,14 +75,23 @@ Wait until a pull request has at least --min-checks checks and none of them
 is pending. Then print a summary of the checks. With --commit, wait for the
 workflow runs of a commit instead, for example a merge commit on main.
 
+With --commit, the expected set is the set of runs that GitHub created for
+the commit. Path filters decide which workflows a push starts, so the count
+changes from commit to commit. The wait ends when all runs are complete and
+no run started or changed for ${COMMIT_SETTLE_MS / MINUTE} minutes. A read without runs never ends
+the wait.
+
 Options:
   --pr <number>           The pull request.
   --commit <sha>          The full 40-character commit SHA. Each workflow
                           run of the commit counts as one check.
   --repo <owner/name>     The repository (default: the repository of the
                           working directory).
-  --min-checks <count>    The count of checks that must exist (default: 1).
-                          Use the check count of a recent complete run.
+  --min-checks <count>    The count of checks that must exist (--pr default:
+                          1). Use the check count of a recent complete run.
+                          With --commit, the option is not necessary. When
+                          that count of runs is complete, the wait ends
+                          before the settle time.
   --required              Wait for the required checks only (--pr only).
                           When the repository reports no required checks,
                           wait for all checks.
@@ -99,8 +114,9 @@ Options:
 With --pr, the wait stops when the pull request conflicts with its base
 branch, because GitHub then starts no pull_request workflows.
 
-Path filters can start fewer checks than --min-checks. When the checks stay
-complete and unchanged for ${SETTLE_MS / MINUTE} minutes, the wait ends below the count.
+With --pr, path filters can start fewer checks than --min-checks. When the
+checks stay complete and unchanged for ${SETTLE_MS / MINUTE} minutes, the wait ends below the
+count.
 
 With --follow-main, the script runs "git fetch ${FOLLOW_REMOTE} ${FOLLOW_BRANCH}" in the
 working directory, so it does not work with --repo. The wait moves to a
@@ -222,6 +238,21 @@ export const waitForChecks = async ({
     }
   }
 };
+
+/**
+ * Wait for the workflow runs of a commit. The expected set is the set of runs
+ * that GitHub created for the commit, so no count is necessary. The wait
+ * passes when that set is complete and unchanged for `COMMIT_SETTLE_MS`.
+ * A read without runs never passes. With `minChecks`, the wait also passes
+ * as soon as that count of runs is complete. The other options and the
+ * result are the same as for `waitForChecks`.
+ */
+export const waitForCommitRuns = ({ minChecks = null, ...options }) =>
+  waitForChecks({
+    ...options,
+    minChecks: minChecks ?? Number.POSITIVE_INFINITY,
+    settleMs: COMMIT_SETTLE_MS,
+  });
 
 /** True when the checks contain a cancelled run and no real failure. */
 const onlyCancelled = (checks) =>
@@ -823,6 +854,17 @@ const validateHead = ({ head, pr }) => {
   }
 };
 
+/**
+ * The --min-checks count. A pull request wait defaults to 1. A commit wait
+ * defaults to null, because the runs that GitHub created are the expected set.
+ */
+const minChecksOption = (value, pr) => {
+  if (value !== undefined) {
+    return positiveInteger("--min-checks", value);
+  }
+  return pr === null ? null : 1;
+};
+
 const parseOptions = (argv) => {
   const { values } = parseArgs({
     args: argv,
@@ -831,7 +873,7 @@ const parseOptions = (argv) => {
       commit: { type: "string" },
       head: { type: "string" },
       repo: { type: "string" },
-      "min-checks": { type: "string", default: "1" },
+      "min-checks": { type: "string" },
       required: { type: "boolean", default: false },
       "follow-main": { type: "boolean", default: false },
       interval: { type: "string", default: "30" },
@@ -877,7 +919,7 @@ const parseOptions = (argv) => {
     head: values.head,
     required: values.required,
     followMain: values["follow-main"],
-    minChecks: positiveInteger("--min-checks", values["min-checks"]),
+    minChecks: minChecksOption(values["min-checks"], pr),
     intervalMs: positiveInteger("--interval", values.interval) * SECOND,
     timeoutMs: positiveInteger("--timeout", values.timeout) * MINUTE,
     errorWindowMs: positiveInteger("--error-window", values["error-window"]) * SECOND,
@@ -915,11 +957,18 @@ export const reportChecks = (
   log = console.log,
 ) => {
   const summary = checks.length === 0 ? "no checks" : bucketSummary(checks);
+  const settleMinutes = settleMs / MINUTE;
   const headline = {
     pass: `${label}: all checks passed (${summary}).`,
-    settled: `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMs / MINUTE} minutes (${summary}).`,
+    settled:
+      minChecks === null
+        ? `${label}: all ${checks.length} runs passed, and no run started or changed for ${settleMinutes} minutes (${summary}).`
+        : `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMinutes} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
-    timeout: `${label}: timed out with ${checks.length} of at least ${minChecks} checks (${summary}).`,
+    timeout:
+      minChecks === null
+        ? `${label}: timed out with ${checks.length} checks (${summary}).`
+        : `${label}: timed out with ${checks.length} of at least ${minChecks} checks (${summary}).`,
     error: `${label}: stopped after ${readErrors} failed reads of the checks in ${formatSeconds(errorMs)}.`,
     hops: `${label}: runs cancelled again after ${maxHops} moves to a newer commit (${summary}).`,
     "head-error": `${label}: read of ${FOLLOW_REF} failed: ${error}`,
@@ -953,24 +1002,28 @@ const main = async () => {
       commit: options.commit,
       timeoutMs: options.timeoutMs,
       waitCommit: (sha, timeoutMs) =>
-        waitForChecks({
+        waitForCommitRuns({
           ...options,
-          settleMs: SETTLE_MS,
           timeoutMs,
           readChecks: ghRunsReader({ commit: sha, repo: options.repo }),
         }),
       readHead: gitHeadReader(runGit),
       isAncestor: gitAncestorChecker(runGit),
     });
-    return reportChecks(result, { ...options, label: commitLabel(result.commit) });
+    return reportChecks(result, {
+      ...options,
+      label: commitLabel(result.commit),
+      settleMs: COMMIT_SETTLE_MS,
+    });
   }
-  const isPr = options.commit === null;
-  const readChecks = isPr ? ghChecksReader(options) : ghRunsReader(options);
-  const readMergeable = isPr ? ghMergeableReader(options) : null;
+  if (options.commit !== null) {
+    const result = await waitForCommitRuns({ ...options, readChecks: ghRunsReader(options) });
+    return reportChecks(result, { ...options, settleMs: COMMIT_SETTLE_MS });
+  }
   const result = await waitForChecks({
     ...options,
-    readChecks,
-    readMergeable,
+    readChecks: ghChecksReader(options),
+    readMergeable: ghMergeableReader(options),
     settleMs: SETTLE_MS,
   });
   return reportChecks(result, options);

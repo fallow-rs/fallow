@@ -2025,6 +2025,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "too slow under Miri: loops over every issue kind in safe code"
+    )]
     fn contract_tokens_resolve_through_metadata() {
         for meta in ISSUE_KIND_META {
             assert_eq!(

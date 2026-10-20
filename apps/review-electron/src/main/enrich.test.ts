@@ -22,7 +22,7 @@ const doc = (): WalkthroughDocument => ({
           path: "src/components/Button.tsx",
           attention: 5,
           label: "review-here",
-          reason: "high fan-in (3 importers)",
+          reason: "fan-in (3 importers)",
           deprioritized: false,
           score: { fanIo: 5, securityTaint: 0, riskZone: 0, changeShape: 0, total: 5 },
         },
@@ -39,7 +39,7 @@ const doc = (): WalkthroughDocument => ({
 describe("factsForFile", () => {
   it("returns grounded facts for a known file", () => {
     const facts = factsForFile(doc(), "src/components/Button.tsx");
-    expect(facts).toContain("high fan-in (3 importers)");
+    expect(facts).toContain("fan-in (3 importers)");
     expect(facts.some((f) => f.startsWith("stage 1"))).toBe(true);
     expect(facts.some((f) => f.startsWith("attention 5"))).toBe(true);
   });

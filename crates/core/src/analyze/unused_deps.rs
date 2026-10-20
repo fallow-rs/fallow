@@ -2348,7 +2348,9 @@ struct WorkspaceDependencies {
     /// Every declared dependency name, the workspace's own name, and for a
     /// Deno member the ambient names of the other Deno members.
     deps: FxHashSet<String>,
-    /// `"private": true` in the manifest.
+    /// Files of this package may use the declarations of ancestor manifests:
+    /// `"private": true`, or a nested manifest without a name or without any
+    /// dependency field.
     is_private: bool,
 }
 
@@ -2445,8 +2447,16 @@ fn add_source_package_manifests(
                 continue;
             }
             // A manifest without a name cannot be published, so it inherits
-            // the declarations of its ancestors like a private package.
-            let is_private = pkg.private == Some(true) || pkg.name.is_none();
+            // the declarations of its ancestors like a private package. A
+            // manifest without any dependency field holds only metadata (for
+            // example a tegg `eggModule` marker), so it inherits them too. An
+            // explicit empty field such as `"dependencies": {}` keeps the owner.
+            let has_dependency_field = pkg.dependencies.is_some()
+                || pkg.dev_dependencies.is_some()
+                || pkg.peer_dependencies.is_some()
+                || pkg.optional_dependencies.is_some();
+            let is_private =
+                pkg.private == Some(true) || pkg.name.is_none() || !has_dependency_field;
             deps.extend(pkg.name);
             manifests.push(WorkspaceDependencies {
                 root: directory.to_path_buf(),

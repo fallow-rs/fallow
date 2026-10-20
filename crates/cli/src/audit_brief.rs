@@ -3109,7 +3109,7 @@ mod tests {
     /// The widest real inputs: a deep monorepo path and an unbounded reason.
     fn wide_focus() -> crate::audit_focus::FocusMap {
         let deep = "packages/platform/features/checkout/pricing/discounts/seasonal/regional/tiers/rules.ts";
-        let reason = "high fan-in (312 importers), fan-out 47, changes a contract consumed \
+        let reason = "fan-in (312 importers), fan-out 47, changes a contract consumed \
              outside the diff, sits in a risk zone, and carries a security-tainted \
              argument reachable from an untrusted source";
         use crate::audit_focus::FocusLabel;
@@ -3165,7 +3165,7 @@ mod tests {
     #[test]
     fn a_wrapped_focus_reason_keeps_every_word() {
         let reason =
-            "high fan-in (2 importers), fan-out 4, changes a contract consumed outside the diff";
+            "fan-in (2 importers), fan-out 4, changes a contract consumed outside the diff";
         let lines = focus_lines(
             &crate::audit_focus::FocusMap {
                 review_here: vec![focus_unit(
