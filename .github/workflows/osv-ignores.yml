@@ -3,29 +3,19 @@ name: osv-scanner ignores
 # Fails when an IgnoredVulns entry in an osv-scanner.toml matches no advisory
 # in the lockfile next to it. A dependency bump can fix an ignored advisory,
 # and the stale entry then makes .vex/openvex.json claim not_affected for it.
-# The pull request run catches a bump before merge. The weekly run catches an
-# advisory that the OSV database withdrew or changed.
+# A stale entry is not urgent, so a push run on main catches it, and the
+# release gate (scripts/verify-release-ci.mjs) stops a release that would
+# ship the wrong VEX file. The weekly run catches an advisory that the OSV
+# database withdrew or changed.
 
 on:
-  pull_request:
-    paths:
-      - '**/osv-scanner.toml'
-      - '**/Cargo.lock'
-      - '**/bun.lock'
-      - '**/package-lock.json'
-      - '**/pnpm-lock.yaml'
-      - '**/yarn.lock'
-      - 'scripts/check-osv-ignores.mjs'
-      - '.github/workflows/osv-ignores.yml'
+  push:
+    branches: [main]
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
 permissions: {}
-
-concurrency:
-  group: osv-ignores-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b

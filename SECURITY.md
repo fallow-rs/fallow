@@ -25,7 +25,7 @@ CodeQL analyzes every pull request and every push to `main`. The `Analyze` check
 
 ## Vulnerability exploitability (VEX)
 
-The file [`.vex/openvex.json`](.vex/openvex.json) is an OpenVEX document. It states that fallow is not affected by each advisory that the repository ignores in its `osv-scanner.toml` files, with the reason for each. Run `node scripts/generate-vex.mjs` to regenerate it after you change an ignore entry. The `osv-scanner ignores` workflow runs `node scripts/check-osv-ignores.mjs`. It fails when an ignore entry matches no advisory in the lockfile next to it, for example after a dependency bump fixed the advisory. The `deny.toml` file ignores no advisories.
+The file [`.vex/openvex.json`](.vex/openvex.json) is an OpenVEX document. It states that fallow is not affected by each advisory that the repository ignores in its `osv-scanner.toml` files, with the reason for each. Run `node scripts/generate-vex.mjs` to regenerate it after you change an ignore entry. The `osv-scanner ignores` workflow runs `node scripts/check-osv-ignores.mjs` on each push to `main` and every week. A release waits for it to pass. It fails when an ignore entry matches no advisory in the lockfile next to it, for example after a dependency bump fixed the advisory. The `deny.toml` file ignores no advisories.
 
 ## Software bill of materials
 

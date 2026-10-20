@@ -290,6 +290,8 @@ On push to `main` only (each one also has `workflow_dispatch`):
 - `Cross-Architecture`.
 - `Fuzz Smoke`, which also runs every week.
 - `Scorecard`.
+- `osv-scanner ignores`, which also runs every week. It fails when an
+  `IgnoredVulns` entry matches no advisory in its lockfile.
 
 On push to `main`, and on a pull request only with the `ci:perf` label:
 
