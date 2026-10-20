@@ -384,10 +384,11 @@ added stay, also from a config that did not replace. The Jest, Playwright,
 Rstest, Jasmine and Vitest plugins accumulate.
 
 Vitest resolves `test.include` and a reporter path against the directory that
-it runs in. It finds a `vitest.config.*` or `vite.config.*` file in that
-directory, so for these names the plugin uses the directory of the config. A
-config with another name loads only through `--config` from a package script,
-so the plugin uses the `root` argument. The include globs of a config that
+it runs in. It finds a `vitest.config.<ext>` or `vite.config.<ext>` file in
+that directory, so for these names the plugin uses the directory of the
+config. A config with another name, such as `vitest.config.e2e.ts`, loads only
+through `--config` from a package script, so the plugin uses the `root`
+argument. The include globs of a config that
 runs below `root` get the prefix of that directory. Only a config that runs in
 `root` replaces the defaults. A config below `root`
 is often a fixture, and its `test.include` must not remove the test entries

@@ -245,10 +245,11 @@ fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &
 }
 
 /// The directory that Vitest runs in for `config_path`. Vitest finds a
-/// `vitest.config.*` or `vite.config.*` file in the directory that it runs
-/// in, so that directory is the directory of the config. A config with
-/// another name loads only through `--config`, from a package script that
-/// runs in `root`. A config outside `root` also gives `root`.
+/// `vitest.config.<ext>` or `vite.config.<ext>` file in the directory that
+/// it runs in, so that directory is the directory of the config. A config
+/// with another name, such as `vitest.config.e2e.ts`, loads only through
+/// `--config`, from a package script that runs in `root`. A config outside
+/// `root` also gives `root`.
 fn vitest_run_dir(config_path: &Path, root: &Path) -> PathBuf {
     let discovered = config_path
         .file_name()

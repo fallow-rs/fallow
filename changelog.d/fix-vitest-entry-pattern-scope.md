@@ -9,8 +9,8 @@
   points of the whole project.** The `test.include` globs of such a config,
   for example a fixture config, now apply below the directory of that config.
   Only a config in the project root or the workspace root replaces the default
-  test patterns. A config with another name than `vitest.config.*` or
-  `vite.config.*` loads through `--config`, so its globs stay relative to the
+  test patterns. A config with another name than `vitest.config.<ext>` or
+  `vite.config.<ext>` loads through `--config`, so its globs stay relative to the
   package root. A replacing config also keeps the patterns of the configs
   that Fallow read before it.
 - **A Vitest reporter path is now a used file, not a dependency.** A
