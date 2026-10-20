@@ -917,8 +917,8 @@ impl PluginRegistry {
     /// (empty for the root package). Each file is resolved into its own
     /// result, so a `test.include` in a script config adds entry patterns
     /// and does not replace the patterns of the plugin's default config.
-    /// A file that a `config_patterns()` entry matches is skipped, because
-    /// the normal plugin run resolves it already.
+    /// A file in the package root that a `config_patterns()` entry matches is
+    /// skipped, because the normal plugin run resolves it already.
     pub(crate) fn resolve_script_config_files(
         &self,
         config_files: &[scripts::BinaryConfigFile],
@@ -933,18 +933,24 @@ impl PluginRegistry {
             else {
                 continue;
             };
+            let abs_path = package_root.join(config_file.path.trim_start_matches("./"));
+            // The normal plugin run reads a matched config with its own
+            // directory as the directory that the tool runs in. A script runs
+            // the tool in the package root, so a matched config below the
+            // package root is also read here, against the package root.
+            let in_package_root = abs_path.parent() == Some(package_root);
             for plugin in &self.plugins {
                 let plugin = plugin.as_ref();
                 if !plugin
                     .script_config_binaries()
                     .contains(&config_file.binary.as_str())
-                    || cached_plugin_config_matchers(plugin)
-                        .iter()
-                        .any(|m| m.is_match(rel_path.as_str()))
+                    || (in_package_root
+                        && cached_plugin_config_matchers(plugin)
+                            .iter()
+                            .any(|m| m.is_match(rel_path.as_str())))
                 {
                     continue;
                 }
-                let abs_path = package_root.join(config_file.path.trim_start_matches("./"));
                 if !super::config_parser::is_inside_root(&abs_path, project_root) {
                     continue;
                 }
@@ -955,12 +961,8 @@ impl PluginRegistry {
                 file_result
                     .entry_point_roles
                     .insert(plugin.name().to_string(), plugin.entry_point_role());
-                let plugin_result = plugin.resolve_config_in_project(
-                    &abs_path,
-                    &source,
-                    package_root,
-                    project_root,
-                );
+                let plugin_result =
+                    plugin.resolve_script_config(&abs_path, &source, package_root, project_root);
                 if let Err(errors) = process_config_result(
                     plugin.name(),
                     plugin_result,

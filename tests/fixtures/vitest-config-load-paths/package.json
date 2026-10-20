@@ -1,0 +1,12 @@
+{
+  "name": "vitest-config-load-paths",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test:e2e": "vitest run --config test/vitest.config.ts"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
+  }
+}

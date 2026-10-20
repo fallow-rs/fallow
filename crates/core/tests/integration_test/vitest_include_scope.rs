@@ -44,3 +44,13 @@ fn nested_vitest_include_keeps_the_default_test_patterns_of_the_project() {
          test entries of the project"
     );
 }
+
+#[test]
+fn vitest_configs_that_a_script_or_a_project_loads_keep_their_includes() {
+    assert_eq!(
+        unused_files("vitest-config-load-paths"),
+        vec!["src/orphan.ts"],
+        "a script `--config` below the package root runs in the package root, \
+         and a vite config that a `projects` entry names is not shadowed"
+    );
+}

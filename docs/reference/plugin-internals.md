@@ -388,12 +388,19 @@ it runs in. It finds a `vitest.config.<ext>` or `vite.config.<ext>` file in
 that directory, so for these names the plugin uses the directory of the
 config. A config with another name, such as `vitest.config.e2e.ts`, loads only
 through `--config` from a package script, so the plugin uses the `root`
-argument. The include globs of a config that
-runs below `root` get the prefix of that directory. Only a config that runs in
-`root` replaces the defaults. A config below `root`
-is often a fixture, and its `test.include` must not remove the test entries
-of the project. A replacing config keeps the bench files, because
-`test.benchmark.include` is a separate Vitest option with its own default.
+argument. The include globs of a config that runs below `root` get the prefix
+of that directory. Only a config that runs in `root` replaces the defaults. A
+config below `root` is often a fixture, and its `test.include` must not remove
+the test entries of the project. A replacing config keeps the bench files,
+because `test.benchmark.include` is a separate Vitest option with its own
+default.
+
+A package script that passes a config below the package root with `--config`
+runs Vitest in the package root. The normal plugin run reads such a config
+against its own directory, so `resolve_script_config_files` reads it again
+against the package root. Both results add up. A `vite.config` file next to
+a `vitest.config` file is shadowed only when the `vitest.config` file does not
+name it: a `projects` entry, an `extends` path and an import all load it.
 
 ## Entries that a source file declares
 
