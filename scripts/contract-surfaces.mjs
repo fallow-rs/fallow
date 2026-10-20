@@ -87,6 +87,15 @@ export const contractSurfaces = Object.freeze([
     newIssueKind: true,
   },
   {
+    id: "similar-code-snapshot-schema",
+    owner: "fallow-schema-emit --similar-code-snapshot",
+    generatedPaths: ["crates/api/similar-code-snapshot-schema.json"],
+    checkCommand: "npm run generate:contracts:check",
+    docs: ["docs/similar-code-analysis.md"],
+    publicStability: "stable",
+    newIssueKind: false,
+  },
+  {
     id: "typescript-output-contract",
     owner: "editors/vscode/scripts/codegen-contracts.mjs",
     generatedPaths: [

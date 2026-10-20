@@ -136,7 +136,7 @@ jobs:
         run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run benchmark shard
-        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        uses: CodSpeedHQ/action@f842b9a3ffe213dbb81768fd7f7eeb4dfcf1c369 # v5.4.2
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
@@ -186,7 +186,7 @@ jobs:
         run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run full benchmark shard
-        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        uses: CodSpeedHQ/action@f842b9a3ffe213dbb81768fd7f7eeb4dfcf1c369 # v5.4.2
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}

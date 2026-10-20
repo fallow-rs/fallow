@@ -3,9 +3,9 @@
   "corpus_revision": "0290537e84752f8bd1dac11fe6417064d82e46f9",
   "provider": {
     "runtime": "@huggingface/transformers",
-    "runtime_version": "4.2.0",
+    "runtime_version": "4.3.1",
     "runtime_lock_file": "runtime/package-lock.json",
-    "runtime_lock_sha256": "98df80dce038997f22cc1474fdf494f761f284012dd075941bf03315d3cf454d",
+    "runtime_lock_sha256": "dbd6373faf99c04c6999616c19a16eaba7b4fa4897647c248a67cb45e450b16f",
     "runtime_lock_version": 3,
     "execution": "local-onnx",
     "source_left_machine": false
@@ -25,11 +25,11 @@
   "resource_observation": {
     "model_cache": "unknown",
     "embedding_batch_size": 1,
-    "load_ms": 7696,
-    "embedding_ms": 1275,
-    "max_observed_rss_bytes": 820871168,
-    "rss_bytes_after_embedding": 820871168,
-    "runtime": "v24.13.0",
+    "load_ms": 10979,
+    "embedding_ms": 7977,
+    "max_observed_rss_bytes": 432390144,
+    "rss_bytes_after_embedding": 407142400,
+    "runtime": "v24.20.0",
     "platform": "darwin",
     "architecture": "arm64"
   },
@@ -42,31 +42,31 @@
       "cases": [
         {
           "id": "different-algorithm-ts-02",
-          "similarity": 0.650999
+          "similarity": 0.647537
         },
         {
           "id": "refactored-structure-ts-02",
-          "similarity": 0.97766
+          "similarity": 0.978561
         },
         {
           "id": "renamed-identifiers-ts-02",
-          "similarity": 0.837897
+          "similarity": 0.83736
         },
         {
           "id": "same-identifiers-ts-02",
-          "similarity": 0.701298
+          "similarity": 0.705125
         },
         {
           "id": "same-boilerplate-ts-05",
-          "similarity": 0.633305
+          "similarity": 0.634718
         },
         {
           "id": "shared-fragments-ts-02",
-          "similarity": 0.288818
+          "similarity": 0.292144
         },
         {
           "id": "unrelated-ts-02",
-          "similarity": 0.258229
+          "similarity": 0.259748
         }
       ]
     },
@@ -78,31 +78,31 @@
       "cases": [
         {
           "id": "different-algorithm-ts-02",
-          "similarity": 0.686232
+          "similarity": 0.683824
         },
         {
           "id": "refactored-structure-ts-02",
-          "similarity": 0.981269
+          "similarity": 0.981925
         },
         {
           "id": "renamed-identifiers-ts-02",
-          "similarity": 0.844962
+          "similarity": 0.841346
         },
         {
           "id": "same-identifiers-ts-02",
-          "similarity": 0.700938
+          "similarity": 0.704814
         },
         {
           "id": "same-boilerplate-ts-05",
-          "similarity": 0.639757
+          "similarity": 0.638214
         },
         {
           "id": "shared-fragments-ts-02",
-          "similarity": 0.278794
+          "similarity": 0.28578
         },
         {
           "id": "unrelated-ts-02",
-          "similarity": 0.214402
+          "similarity": 0.213947
         }
       ]
     }

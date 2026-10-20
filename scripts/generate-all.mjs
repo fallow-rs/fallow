@@ -28,6 +28,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
 const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
+const SIMILAR_CODE_SNAPSHOT_SCHEMA_PATH = "crates/api/similar-code-snapshot-schema.json";
 /**
  * The maintainer copy in `.agents/skills/fallow` is not a target here. The
  * adapter generator mirrors it from the released tree, so the released tree
@@ -72,7 +73,7 @@ const cargoFallow = (subcommand, ...args) =>
     ...args,
   ]);
 
-const outputSchema = () =>
+const outputSchema = (...args) =>
   run("cargo", [
     "run",
     "--quiet",
@@ -82,6 +83,8 @@ const outputSchema = () =>
     "schema-emit",
     "--bin",
     "fallow-schema-emit",
+    "--",
+    ...args,
   ]);
 
 const writeStaged = (stagingRoot, path, content) => {
@@ -123,6 +126,7 @@ const generateSchemaFiles = (stagingRoot) => {
   const capabilitySchema = ensureTrailingNewline(cargoFallow("schema", "--pretty"));
   const registry = issueRegistry(capabilitySchema);
   const output = ensureTrailingNewline(outputSchema());
+  const similarCodeSnapshotSchema = ensureTrailingNewline(outputSchema("--similar-code-snapshot"));
 
   writeStaged(stagingRoot, "schema.json", configSchema);
   writeStaged(stagingRoot, "plugin-schema.json", pluginSchema);
@@ -130,6 +134,7 @@ const generateSchemaFiles = (stagingRoot) => {
   writeStaged(stagingRoot, CAPABILITY_SCHEMA_PATH, capabilitySchema);
   writeStaged(stagingRoot, ISSUE_REGISTRY_PATH, registry);
   writeStaged(stagingRoot, OUTPUT_SCHEMA_PATH, output);
+  writeStaged(stagingRoot, SIMILAR_CODE_SNAPSHOT_SCHEMA_PATH, similarCodeSnapshotSchema);
 };
 
 const generateExtensionContracts = (stagingRoot) => {

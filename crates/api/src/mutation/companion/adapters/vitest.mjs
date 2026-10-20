@@ -27,6 +27,7 @@ import {
 
 const RUNNER_NAME = "vitest";
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
+const OVERLAY_KEY = "fallowOverlay";
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
 const TIMEOUT_MESSAGE = /\b(?:Test|Hook) timed out in \d+ms/u;
 const OVERLAY_PLUGIN = "fallow-mutation-overlay";
@@ -230,6 +231,20 @@ const provideActiveMutant = (vitest, mutantId) => {
   }
 };
 
+/**
+ * Gives each project the overlay as a plain object, keyed by the real path
+ * of each source file. The setup file serves it to a native `require`, which
+ * the Vite overlay plugin never sees.
+ */
+const provideOverlay = (vitest, overlay) => {
+  const entries = Object.fromEntries(
+    [...overlay].map(([path, { source, target }]) => [path, { source, target }]),
+  );
+  for (const project of vitest.projects) {
+    project.provide(OVERLAY_KEY, entries);
+  }
+};
+
 const hasOverlay = (project) =>
   project.vite.config.plugins.some((plugin) => plugin.name === OVERLAY_PLUGIN);
 
@@ -413,7 +428,7 @@ const moduleSetupMs = (testModule, entries) => {
   return Math.max(0, total - tests);
 };
 
-/** Reads each test of one dry-run module with its hits and its report entry. */
+/** Reads each test of one dry-run module with its hits, its loaded paths and its report entry. */
 const readDryRunTests = (testModule, file, prefix) => {
   const testCases = [...testModule.children.allTests()];
   const names = uniqueNames(testCases.map((testCase) => testCase.fullName));
@@ -424,6 +439,7 @@ const readDryRunTests = (testModule, file, prefix) => {
       shared: isConcurrent(testCase),
       hits: metaList(meta, "fallowHits"),
       staticHits: metaList(meta, "fallowStaticHits"),
+      loaded: metaList(meta, "fallowLoaded"),
       report: {
         test_id: `${prefix}${file}${TEST_ID_SEPARATOR}${names[index]}`,
         file,
@@ -491,6 +507,7 @@ export const createAdapter = async (init) => {
   });
   await assertOverlayInEachProject(vitest);
   forceRunnerOptions(vitest);
+  provideOverlay(vitest, overlay);
   const freshModulesPerRun = vitest.projects.every((project) => project.config.isolate !== false);
   const setTimeouts = createTimeoutControl(vitest.projects);
 
@@ -522,6 +539,7 @@ export const createAdapter = async (init) => {
   const recordDryRunModule = (testModule, file, summary) => {
     const entries = readDryRunTests(testModule, file, testIdPrefix(testModule.project));
     for (const entry of entries) {
+      for (const source of entry.loaded) loaded.add(source);
       testIndex.set(entry.report.test_id, {
         project: testModule.project,
         moduleId: testModule.moduleId,

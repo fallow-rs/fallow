@@ -1,0 +1,969 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SimilarCodeCandidateSnapshot",
+  "description": "Bounded handoff for inspecting one immutable discovery candidate without\nrerunning global retrieval or ranking.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Schema version of the discovery envelope that produced the candidate.",
+      "$ref": "#/$defs/SimilarCodeSchemaVersion"
+    },
+    "generation": {
+      "description": "Immutable provider, model, parameter, and scope provenance.",
+      "$ref": "#/$defs/SimilarCodeGeneration"
+    },
+    "candidate": {
+      "description": "The exact unverified candidate selected from discovery.",
+      "$ref": "#/$defs/SimilarCodeCandidate"
+    },
+    "completion": {
+      "description": "Original discovery completeness and limit accounting.",
+      "$ref": "#/$defs/SimilarCodeCompletion"
+    },
+    "diagnostics": {
+      "description": "Original non-severity discovery diagnostics.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SimilarCodeDiagnostic"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generation",
+    "candidate",
+    "completion",
+    "diagnostics"
+  ],
+  "$defs": {
+    "SimilarCodeSchemaVersion": {
+      "description": "Version singleton for raw similar-code output.",
+      "oneOf": [
+        {
+          "description": "Initial independent contract.",
+          "type": "string",
+          "const": "1"
+        }
+      ]
+    },
+    "SimilarCodeGeneration": {
+      "description": "Complete provenance needed to reproduce candidate generation.",
+      "type": "object",
+      "properties": {
+        "extraction_semantics_version": {
+          "description": "Version of extraction and normalization semantics used for both IDs.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "embedding_semantics_version": {
+          "description": "Version of the calculation that produces model embeddings.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "provider": {
+          "description": "Local provider provenance.",
+          "$ref": "#/$defs/SimilarCodeProviderProvenance"
+        },
+        "model": {
+          "description": "Immutable model provenance.",
+          "$ref": "#/$defs/SimilarCodeModelProvenance"
+        },
+        "parameters": {
+          "description": "Effective generation parameters.",
+          "$ref": "#/$defs/SimilarCodeGenerationParameters"
+        },
+        "scope": {
+          "description": "Materialized endpoint scope needed to reproduce scoped discovery.",
+          "$ref": "#/$defs/SimilarCodeScopeProvenance"
+        },
+        "threshold": {
+          "description": "Minimum cosine similarity admitted into the candidate set.",
+          "type": "number",
+          "format": "double"
+        },
+        "min_lines": {
+          "description": "Minimum source line count admitted into function extraction.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "extraction_semantics_version",
+        "embedding_semantics_version",
+        "provider",
+        "model",
+        "parameters",
+        "scope",
+        "threshold",
+        "min_lines"
+      ]
+    },
+    "SimilarCodeProviderProvenance": {
+      "description": "Immutable local provider provenance for one generation run.",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "description": "Provider family. Version 1 accepts only the official local companion.",
+          "$ref": "#/$defs/SimilarCodeProvider"
+        },
+        "companion_version": {
+          "description": "Exact companion package version.",
+          "type": "string"
+        },
+        "protocol_version": {
+          "description": "Companion protocol version negotiated for this run.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "source_left_machine": {
+          "description": "Whether source content left the local machine. Version 1 requires false.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "companion_version",
+        "protocol_version",
+        "source_left_machine"
+      ]
+    },
+    "SimilarCodeProvider": {
+      "description": "Provider families admitted by the version 1 public contract.",
+      "oneOf": [
+        {
+          "description": "Exact-version official companion executed locally.",
+          "type": "string",
+          "const": "official-local-companion"
+        }
+      ]
+    },
+    "SimilarCodeModelProvenance": {
+      "description": "Immutable model artifact provenance.",
+      "type": "object",
+      "properties": {
+        "model_id": {
+          "description": "Stable model identifier.",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Immutable model revision.",
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "description": "SHA-256 digest of the exact model artifact bytes.",
+          "type": "string"
+        },
+        "license": {
+          "description": "SPDX license identifier or reviewed license label.",
+          "type": "string"
+        },
+        "dimensions": {
+          "description": "Embedding vector dimensions.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "model_id",
+        "revision",
+        "artifact_sha256",
+        "license",
+        "dimensions"
+      ]
+    },
+    "SimilarCodeGenerationParameters": {
+      "description": "Parameters that materially affect generated embeddings and scores.",
+      "type": "object",
+      "properties": {
+        "dtype": {
+          "description": "Numeric representation used for model inference.",
+          "type": "string"
+        },
+        "pooling": {
+          "description": "Pooling strategy applied to model output.",
+          "type": "string"
+        },
+        "normalized": {
+          "description": "Whether vectors were normalized before comparison.",
+          "type": "boolean"
+        },
+        "batch_size": {
+          "description": "Maximum inference batch size used by the run.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "Maximum tokenizer length before deterministic truncation.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "parameter_sha256": {
+          "description": "Digest over the complete effective generation parameter set.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dtype",
+        "pooling",
+        "normalized",
+        "batch_size",
+        "max_tokens",
+        "parameter_sha256"
+      ]
+    },
+    "SimilarCodeScopeProvenance": {
+      "description": "Effective endpoint scope used for corpus admission and pair retention.",
+      "type": "object",
+      "properties": {
+        "active": {
+          "description": "Whether file, changed-file, diff, or workspace scoping was active.",
+          "type": "boolean"
+        },
+        "paths": {
+          "description": "Sorted project-root-relative paths satisfying every active predicate.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "active",
+        "paths"
+      ]
+    },
+    "SimilarCodeCandidate": {
+      "description": "One unverified semantic similar-code candidate.",
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "description": "Snapshot-stable opaque candidate identity.",
+          "type": "string"
+        },
+        "review_key": {
+          "description": "Content-stable key used for safe line-movement rebinding.",
+          "type": "string"
+        },
+        "left": {
+          "description": "First location in deterministic pair order.",
+          "$ref": "#/$defs/SimilarCodeLocation"
+        },
+        "right": {
+          "description": "Second location in deterministic pair order.",
+          "$ref": "#/$defs/SimilarCodeLocation"
+        },
+        "similarity": {
+          "description": "Cosine similarity reported by the pinned provider and model.",
+          "type": "number",
+          "format": "double"
+        },
+        "similarity_band": {
+          "description": "Stable score band for consumers that do not need the raw score.",
+          "$ref": "#/$defs/SimilarCodeSimilarityBand"
+        },
+        "verification_status": {
+          "description": "Raw candidates are always explicitly unverified.",
+          "$ref": "#/$defs/SimilarCodeVerificationStatus"
+        },
+        "enrichment": {
+          "description": "Availability of optional deterministic and runtime context.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentAvailability"
+        },
+        "actions": {
+          "description": "Read-only inspect and review affordances.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SimilarCodeAction"
+          }
+        }
+      },
+      "required": [
+        "candidate_id",
+        "review_key",
+        "left",
+        "right",
+        "similarity",
+        "similarity_band",
+        "verification_status",
+        "enrichment",
+        "actions"
+      ]
+    },
+    "SimilarCodeLocation": {
+      "description": "Exact named location of one candidate function.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Project-root-relative, forward-slash path.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Extracted function or method name.",
+          "type": "string"
+        },
+        "start_line": {
+          "description": "One-based inclusive start line.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "start_column": {
+          "description": "One-based inclusive start column.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "end_line": {
+          "description": "One-based inclusive end line.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "end_column": {
+          "description": "One-based inclusive end column.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "source_sha256": {
+          "description": "SHA-256 digest of the exact extracted function source.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "start_line",
+        "start_column",
+        "end_line",
+        "end_column",
+        "source_sha256"
+      ]
+    },
+    "SimilarCodeSimilarityBand": {
+      "description": "Stable, coarse interpretation of a candidate score.",
+      "oneOf": [
+        {
+          "description": "Candidate is close to the configured lower threshold.",
+          "type": "string",
+          "const": "moderate"
+        },
+        {
+          "description": "Candidate has a strong semantic similarity score.",
+          "type": "string",
+          "const": "high"
+        },
+        {
+          "description": "Candidate has an exceptionally high semantic similarity score.",
+          "type": "string",
+          "const": "very-high"
+        }
+      ]
+    },
+    "SimilarCodeVerificationStatus": {
+      "description": "Verification state of a raw semantic candidate.",
+      "oneOf": [
+        {
+          "description": "Candidate generation is discovery only and has not verified behavior.",
+          "type": "string",
+          "const": "unverified"
+        }
+      ]
+    },
+    "SimilarCodeEnrichmentAvailability": {
+      "description": "Availability of every supported source-grounded enrichment.",
+      "type": "object",
+      "properties": {
+        "graph_relationship": {
+          "description": "Import or workspace relationship evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "entry_point_reachability": {
+          "description": "Entry-point reachability evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "callers": {
+          "description": "Direct caller evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "callees": {
+          "description": "Direct callee evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "ownership": {
+          "description": "Ownership evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "churn": {
+          "description": "Churn evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "tests": {
+          "description": "Test relationship evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "deterministic_clone_coverage": {
+          "description": "Deterministic clone coverage evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        },
+        "runtime": {
+          "description": "Runtime evidence.",
+          "$ref": "#/$defs/SimilarCodeEnrichmentState"
+        }
+      },
+      "required": [
+        "graph_relationship",
+        "entry_point_reachability",
+        "callers",
+        "callees",
+        "ownership",
+        "churn",
+        "tests",
+        "deterministic_clone_coverage",
+        "runtime"
+      ]
+    },
+    "SimilarCodeEnrichmentState": {
+      "description": "Explicit availability state for one optional enrichment source.",
+      "oneOf": [
+        {
+          "description": "Evidence is included in the inspect packet.",
+          "type": "string",
+          "const": "available"
+        },
+        {
+          "description": "Evidence was requested but could not be obtained.",
+          "type": "string",
+          "const": "unavailable"
+        },
+        {
+          "description": "Evidence was not requested for this run.",
+          "type": "string",
+          "const": "not-requested"
+        }
+      ]
+    },
+    "SimilarCodeAction": {
+      "description": "Read-only follow-up exposed for a candidate.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Stable action identifier.",
+          "$ref": "#/$defs/SimilarCodeActionType"
+        },
+        "description": {
+          "description": "Human-readable description of the read-only operation.",
+          "type": "string"
+        },
+        "read_only": {
+          "description": "Explicit mutation guarantee. Version 1 requires this to be true.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "description",
+        "read_only"
+      ]
+    },
+    "SimilarCodeActionType": {
+      "description": "Read-only actions supported by the candidate workflow.",
+      "oneOf": [
+        {
+          "description": "Build a bounded source-grounded inspect packet.",
+          "type": "string",
+          "const": "inspect"
+        },
+        {
+          "description": "Join this candidate with an external verdict document.",
+          "type": "string",
+          "const": "review"
+        }
+      ]
+    },
+    "SimilarCodeCompletion": {
+      "description": "Typed completion, limit, skip, and cache accounting.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Overall completion status. Only `complete` makes an empty set conclusive.",
+          "$ref": "#/$defs/SimilarCodeCompletionStatus"
+        },
+        "phases": {
+          "description": "Per-phase completion in pipeline order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SimilarCodePhaseCompletion"
+          }
+        },
+        "limits": {
+          "description": "Effective run limits.",
+          "$ref": "#/$defs/SimilarCodeLimits"
+        },
+        "skips": {
+          "description": "Aggregated skips in phase and reason order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SimilarCodeSkip"
+          }
+        },
+        "cache": {
+          "description": "Privacy-safe vector cache accounting.",
+          "$ref": "#/$defs/SimilarCodeCacheSummary"
+        },
+        "provider_inference_ms": {
+          "description": "Aggregate model inference wall time reported by the local provider.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "status",
+        "phases",
+        "limits",
+        "skips",
+        "cache",
+        "provider_inference_ms"
+      ]
+    },
+    "SimilarCodeCompletionStatus": {
+      "description": "Overall trustworthiness of an emitted result set.",
+      "oneOf": [
+        {
+          "description": "Every admitted generation phase completed.",
+          "type": "string",
+          "const": "complete"
+        },
+        {
+          "description": "One or more limits, skips, or timeouts made the result partial.",
+          "type": "string",
+          "const": "partial"
+        }
+      ]
+    },
+    "SimilarCodePhaseCompletion": {
+      "description": "Accounting for one bounded generation phase.",
+      "type": "object",
+      "properties": {
+        "phase": {
+          "description": "Pipeline phase.",
+          "$ref": "#/$defs/SimilarCodePhase"
+        },
+        "status": {
+          "description": "Whether this phase completed, skipped, or returned partial data.",
+          "$ref": "#/$defs/SimilarCodePhaseStatus"
+        },
+        "processed": {
+          "description": "Number of admitted inputs processed by this phase.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "total": {
+          "description": "Total admitted inputs known to this phase, when available.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reason": {
+          "description": "Stable explanation when the phase did not complete.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "phase",
+        "status",
+        "processed"
+      ]
+    },
+    "SimilarCodePhase": {
+      "description": "Bounded phase names in the similar-code pipeline.",
+      "oneOf": [
+        {
+          "description": "Discover eligible source files.",
+          "type": "string",
+          "const": "discovery"
+        },
+        {
+          "description": "Extract and normalize supported functions.",
+          "type": "string",
+          "const": "extraction"
+        },
+        {
+          "description": "Load or populate the local vector cache.",
+          "type": "string",
+          "const": "cache"
+        },
+        {
+          "description": "Generate embeddings with the official local companion.",
+          "type": "string",
+          "const": "embedding"
+        },
+        {
+          "description": "Validate provider output before using it.",
+          "type": "string",
+          "const": "validation"
+        },
+        {
+          "description": "Compare vectors and select bounded candidates.",
+          "type": "string",
+          "const": "comparison"
+        },
+        {
+          "description": "Build optional deterministic context.",
+          "type": "string",
+          "const": "enrichment"
+        }
+      ]
+    },
+    "SimilarCodePhaseStatus": {
+      "description": "Completion state for one generation phase.",
+      "oneOf": [
+        {
+          "description": "Phase completed its admitted scope.",
+          "type": "string",
+          "const": "complete"
+        },
+        {
+          "description": "Phase returned bounded partial results.",
+          "type": "string",
+          "const": "partial"
+        },
+        {
+          "description": "Phase was intentionally not run.",
+          "type": "string",
+          "const": "skipped"
+        },
+        {
+          "description": "Phase reached its configured timeout.",
+          "type": "string",
+          "const": "timed-out"
+        }
+      ]
+    },
+    "SimilarCodeLimits": {
+      "description": "Effective resource limits for a similar-code run.",
+      "type": "object",
+      "properties": {
+        "max_files": {
+          "description": "Maximum source files admitted.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_functions": {
+          "description": "Maximum extracted functions admitted.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_source_bytes": {
+          "description": "Maximum aggregate normalized source bytes admitted.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_function_bytes": {
+          "description": "Maximum normalized bytes admitted for one function.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_batch_size": {
+          "description": "Maximum embedding batch size.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_vector_bytes": {
+          "description": "Maximum vector bytes retained for comparison.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_comparisons": {
+          "description": "Maximum pair comparisons performed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_candidates": {
+          "description": "Maximum candidates returned.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_neighbors_per_function": {
+          "description": "Maximum returned neighbors per function.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "timeout_ms": {
+          "description": "End-to-end timeout in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "max_files",
+        "max_functions",
+        "max_source_bytes",
+        "max_function_bytes",
+        "max_batch_size",
+        "max_vector_bytes",
+        "max_comparisons",
+        "max_candidates",
+        "max_neighbors_per_function",
+        "timeout_ms"
+      ]
+    },
+    "SimilarCodeSkip": {
+      "description": "Count of skipped work for a stable reason.",
+      "type": "object",
+      "properties": {
+        "phase": {
+          "description": "Phase that skipped the work.",
+          "$ref": "#/$defs/SimilarCodePhase"
+        },
+        "reason": {
+          "description": "Stable skip reason.",
+          "$ref": "#/$defs/SimilarCodeSkipReason"
+        },
+        "count": {
+          "description": "Number of inputs skipped for this phase and reason.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "phase",
+        "reason",
+        "count"
+      ]
+    },
+    "SimilarCodeSkipReason": {
+      "description": "Stable reasons why admitted work was skipped or truncated.",
+      "oneOf": [
+        {
+          "description": "Function was shorter than the configured minimum source-line count.",
+          "type": "string",
+          "const": "below-minimum-lines"
+        },
+        {
+          "description": "Syntax form is outside the supported extraction contract.",
+          "type": "string",
+          "const": "unsupported-function"
+        },
+        {
+          "description": "Generated source was excluded.",
+          "type": "string",
+          "const": "generated-source"
+        },
+        {
+          "description": "One function exceeded the per-function byte limit.",
+          "type": "string",
+          "const": "function-too-large"
+        },
+        {
+          "description": "File or function admission limit was reached.",
+          "type": "string",
+          "const": "input-limit"
+        },
+        {
+          "description": "Aggregate source byte limit was reached.",
+          "type": "string",
+          "const": "source-bytes-limit"
+        },
+        {
+          "description": "Vector memory limit was reached.",
+          "type": "string",
+          "const": "vector-memory-limit"
+        },
+        {
+          "description": "Pair comparison limit was reached.",
+          "type": "string",
+          "const": "comparison-limit"
+        },
+        {
+          "description": "Candidate result limit was reached.",
+          "type": "string",
+          "const": "candidate-limit"
+        },
+        {
+          "description": "Per-function neighbor limit was reached.",
+          "type": "string",
+          "const": "neighbor-limit"
+        },
+        {
+          "description": "Provider or overall timeout was reached.",
+          "type": "string",
+          "const": "timeout"
+        },
+        {
+          "description": "Local provider failed after returning a usable subset of vectors.",
+          "type": "string",
+          "const": "provider-failure"
+        },
+        {
+          "description": "Provider tokenization truncated an otherwise admitted source fragment.",
+          "type": "string",
+          "const": "token-truncation"
+        },
+        {
+          "description": "Optional enrichment source was unavailable.",
+          "type": "string",
+          "const": "enrichment-unavailable"
+        }
+      ]
+    },
+    "SimilarCodeCacheSummary": {
+      "description": "Privacy-safe cache accounting. Source fragments are never represented.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Aggregate cache outcome.",
+          "$ref": "#/$defs/SimilarCodeCacheStatus"
+        },
+        "hits": {
+          "description": "Valid vector cache hits.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "misses": {
+          "description": "Vector cache misses.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "writes": {
+          "description": "Newly written vector cache entries.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "invalid_entries": {
+          "description": "Corrupt or incompatible entries ignored safely.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "status",
+        "hits",
+        "misses",
+        "writes",
+        "invalid_entries"
+      ]
+    },
+    "SimilarCodeCacheStatus": {
+      "description": "Vector cache outcome for a run.",
+      "oneOf": [
+        {
+          "description": "Cache use was disabled.",
+          "type": "string",
+          "const": "disabled"
+        },
+        {
+          "description": "Every requested vector was found in the cache.",
+          "type": "string",
+          "const": "hit"
+        },
+        {
+          "description": "No requested vector was found in the cache.",
+          "type": "string",
+          "const": "miss"
+        },
+        {
+          "description": "The run used both cached and newly generated vectors.",
+          "type": "string",
+          "const": "mixed"
+        }
+      ]
+    },
+    "SimilarCodeDiagnostic": {
+      "description": "Actionable diagnostic without a severity or gate implication.",
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Stable diagnostic domain.",
+          "$ref": "#/$defs/SimilarCodeDiagnosticDomain"
+        },
+        "code": {
+          "description": "Stable machine-readable code.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Bounded human-readable explanation.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Optional project-root-relative path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "domain",
+        "code",
+        "message"
+      ]
+    },
+    "SimilarCodeDiagnosticDomain": {
+      "description": "Non-severity diagnostic domain for similar-code generation.",
+      "oneOf": [
+        {
+          "description": "Source discovery or workspace interpretation.",
+          "type": "string",
+          "const": "workspace"
+        },
+        {
+          "description": "Function extraction or normalization.",
+          "type": "string",
+          "const": "extraction"
+        },
+        {
+          "description": "Local provider execution or protocol validation.",
+          "type": "string",
+          "const": "provider"
+        },
+        {
+          "description": "Local vector cache handling.",
+          "type": "string",
+          "const": "cache"
+        },
+        {
+          "description": "Optional source-grounded enrichment.",
+          "type": "string",
+          "const": "enrichment"
+        },
+        {
+          "description": "Verdict matching and review-key rebinding.",
+          "type": "string",
+          "const": "review"
+        }
+      ]
+    }
+  }
+}

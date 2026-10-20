@@ -1,0 +1,11 @@
+{
+  "name": "fallow-docker-corepack",
+  "private": true,
+  "description": "Pins the corepack version that the Docker images install.",
+  "scripts": {
+    "check": "corepack --version"
+  },
+  "dependencies": {
+    "corepack": "0.36.0"
+  }
+}

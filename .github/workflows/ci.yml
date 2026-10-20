@@ -278,6 +278,7 @@ jobs:
               - 'Dockerfile.dev'
               - '.dockerignore'
               - 'examples/docker/**'
+              - 'tools/corepack/**'
               - '.github/dependabot.yml'
               - '.github/workflows/ci.yml'
             miri:
@@ -544,6 +545,9 @@ jobs:
 
       - name: Run contract bundle drift gate
         run: CI=true npm run generate:contracts:check
+
+      - name: Cargo feature unification
+        run: npm run check:cargo-features
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

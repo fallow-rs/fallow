@@ -159,6 +159,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         duration_ms: None,
         test_reach: None,
         retried: false,
+        attempts: Vec::new(),
         cached: false,
         type_error_codes: Vec::new(),
     };
@@ -178,6 +179,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             static_mutant: result.static_mutant,
             duration_ms: result.duration_ms,
             retried: result.retried,
+            attempts: result.attempts.clone(),
             cached: result.cached,
             ..base
         },
@@ -540,6 +542,7 @@ mod tests {
                                 *status,
                                 MutantStatus::Survived | MutantStatus::Timeout
                             ),
+                            attempts: Vec::new(),
                             cached: false,
                         },
                     )

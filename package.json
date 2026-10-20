@@ -14,6 +14,7 @@
     "check:agent-adapters": "node scripts/generate-agent-adapters.mjs --check",
     "check:knowledge-architecture": "node scripts/check-knowledge-architecture.mjs",
     "check:contract-surfaces": "node scripts/check-contract-surfaces.mjs --github-actions .github/workflows/ci.yml",
+    "check:cargo-features": "node scripts/check-cargo-features.mjs",
     "check:crate-boundaries": "node scripts/check-crate-boundaries.mjs",
     "check:miri-cfg": "node scripts/check-miri-cfg.mjs",
     "scaffold:analyzer": "node scripts/scaffold-analyzer-plan.mjs",

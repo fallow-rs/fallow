@@ -994,7 +994,7 @@
     "vscode-languageserver-protocol": "3.18.4"
   },
   "devDependencies": {
-    "@types/node": "26.6.4",
+    "@types/node": "26.6.5",
     "@types/vscode": "1.96.0",
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "3.1.0",
@@ -1004,7 +1004,7 @@
     "rolldown": "1.2.13",
     "ovsx": "1.2.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.3",
+    "vitest": "5.0.4",
     "yauzl": "3.4.0"
   }
 }
