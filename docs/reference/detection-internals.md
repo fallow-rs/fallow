@@ -544,6 +544,21 @@ called script of each selected package as runtime. The public
 seeds, so the type-aware entry points (`list_inventory::collect_entry_points`)
 match the package entry points of the analysis.
 
+CI commands run in the `working-directory` of their step, or of the innermost
+`defaults.run` (`crates/core/src/scripts/ci.rs`). `parse_working_directory` keeps the directory
+as segments relative to the root. A segment with a run-time value
+(`${{ matrix.name }}`) or a directory outside the project (`${{ runner.temp }}`)
+is an `Expression` segment. A file argument that ends on an `Expression`
+segment makes no entry point, but `../x.ts` can pop one. A workspace anchor
+(`$GITHUB_WORKSPACE/`) is rewritten to a relative path back to the root, so it
+always resolves. A workspace package directory resolves script calls with the
+scripts of that package. Composite actions under `.github/actions/` and the
+root `action.yml` are CI files too.
+
+The bin map also holds the `bin` fields of the declared workspace packages
+(`add_workspace_binaries`), so a workspace binary credits its package without
+`node_modules`. An entry from `node_modules` keeps priority.
+
 A declared script name wins over a binary with the same name, as it does in
 the package manager. When the body is unknown (several packages declare the
 name with different bodies), `yarn eslint src/a.ts` keeps `src/a.ts` as a file
