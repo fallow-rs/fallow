@@ -131,6 +131,22 @@ mutant when the mutant is equivalent. The rule needs all of these conditions:
 The original label and the mutated label then select the same body for each
 input. Mutants in the clause body do not change.
 
+The test of a counted `for` loop gives no `!=` mutant for `relational-operator`,
+because that mutant is equivalent. The rule needs all of these conditions:
+
+- the init declares one `let` counter with a non-negative integer literal start;
+- the test is `i < N` or `i > N`, where `N` is a non-negative integer literal
+  that the start does not pass;
+- the update is `i++`, `++i` or `i += 1` for `<`, and `i--`, `--i` or
+  `i -= 1` for `>`;
+- the body has no write to a variable with the counter name, also in a nested
+  function, and no `eval` call.
+
+The counter then takes each integer from the start to the bound, so `i < N` and
+`i != N` select the same iterations. The `<=` or `>=` mutant and the constant
+mutant of the test do not change. A `var` counter, a bound that is not a
+literal, and the reversed form `N > i` keep the `!=` mutant.
+
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has
 114119 mutants, and the operator adds 6473 mutants (5.7 %), 24 % of them on

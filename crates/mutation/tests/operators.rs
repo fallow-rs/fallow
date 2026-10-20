@@ -70,6 +70,97 @@ fn relational_operator_uses_the_non_redundant_subset() {
 }
 
 #[test]
+fn relational_operator_skips_not_equal_in_a_counted_loop() {
+    let up: &[(&str, &str)] = &[("<", "<="), ("i < 12", "false")];
+    let down: &[(&str, &str)] = &[(">", ">="), ("i > 0", "false")];
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("for (let i = 0; i < 12; i++) { r.push(i); }", up),
+        ("for (let i = 0; i < 12; ++i) { r.push(i); }", up),
+        ("for (let i = 0; i < 12; i += 1) { r.push(i); }", up),
+        ("for (let i = 12; i < 12; i++) {}", up),
+        ("for (let i = 12; i > 0; i--) {}", down),
+        ("for (let i = 12; i > 0; --i) {}", down),
+        ("for (let i = 12; i > 0; i -= 1) {}", down),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+    let kept: &[(&str, &str)] = &[("<", "<="), ("<", "!="), ("i < 12", "false")];
+    let near = [
+        "for (var i = 0; i < 12; i++) {}",
+        "for (let i = 0; i < 12; i += 2) {}",
+        "for (let i = 0; i < 12; i++) { i++; }",
+        "for (let i = 0; i < 12; i++) { i = 3; }",
+        "for (let i = 0; i < 12; i++) { [i] = r; }",
+        "for (let i = 0; i < 12; i++) { ({ i } = r); }",
+        "for (let i = 0; i < 12; i++) { for (i of r) {} }",
+        "for (let i = 0; i < 12; i++) { f(() => { i = 3; }); }",
+        "for (let i = 0; i < 12; i++) { eval(s); }",
+        "for (let i = 20; i < 12; i++) {}",
+        "for (let i = 0.5; i < 12; i++) {}",
+        "for (let i = 0; i < 12; i--) {}",
+        "for (let i = 0, j = 0; i < 12; i++) {}",
+        "for (let j = 0; i < 12; i++) {}",
+        "for (let i = 0; i < 12; j++) {}",
+        "for (let i = 0; i < 12; i++, j++) {}",
+        "for (let i = 0; i < 12; o.i++) {}",
+        "for (let i = 0; i < 12; o.i += 1) {}",
+    ];
+    for source in near {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(kept),
+            "{source}"
+        );
+    }
+    for source in [
+        "for (let i = 0; i < 12; i++) { (i as any) = 3; }",
+        "for (let i = 0; i < 12; i++) { i! = 3; }",
+    ] {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(kept),
+            "{source}"
+        );
+    }
+    let typed = run("for (let i: number = 0; i < 12; i++) {}", TS);
+    assert_eq!(pairs(&typed, Operator::RelationalOperator), expected(up));
+    let other: &[(&str, &[(&str, &str)])] = &[
+        (
+            "for (let i = 0; i < n; i++) {}",
+            &[("<", "<="), ("<", "!="), ("i < n", "false")],
+        ),
+        (
+            "for (let i = 0; i < 12.5; i++) {}",
+            &[("<", "<="), ("<", "!="), ("i < 12.5", "false")],
+        ),
+        (
+            "for (let i = 0; 12 > i; i++) {}",
+            &[(">", ">="), (">", "!="), ("12 > i", "false")],
+        ),
+        (
+            "while (i < 12) { i++; }",
+            &[("<", "<="), ("<", "!="), ("i < 12", "false")],
+        ),
+    ];
+    for (source, want) in other {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn logical_operator_swaps_and_keeps_precedence() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("x = a && b;", &[("&&", "||")]),

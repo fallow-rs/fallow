@@ -4,8 +4,9 @@
 //! site holds the candidate mutants for that expression. The walk skips the
 //! positions where a mutant is invalid or useless: type positions, enum
 //! members, decorators, module syntax, directives, assignment targets,
-//! property keys, the arguments of logging calls, and a `case` label whose
-//! literal mutant is equivalent because its body is the `default` body.
+//! property keys, the arguments of logging calls, a `case` label whose
+//! literal mutant is equivalent because its body is the `default` body, and
+//! the `!=` mutant of a counted `for` loop test (see `counted_loop_test`).
 //!
 //! The logging rule is broad: a `console.*` or `debug(...)` call gives no
 //! mutant at all. This covers each expression in its arguments (strings,
@@ -15,18 +16,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_ast::ast::{
     AccessorProperty, ArrowFunctionExpression, AssignmentExpression, AssignmentTarget,
-    BinaryExpression, BooleanLiteral, CallExpression, ChainElement, ChainExpression, Class,
-    ConditionalExpression, Decorator, Directive, DoWhileStatement, ExportAllDeclaration,
-    ExportDefaultDeclaration, ExportFromDeclaration, ExportNamedDeclaration, Expression,
-    ExpressionStatement, ForStatement, ForStatementLeft, Function, IfStatement, ImportDeclaration,
-    ImportExpression, JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition,
-    MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral,
-    ReturnStatement, SimpleAssignmentTarget, Statement, StringLiteral, SwitchCase, SwitchStatement,
+    AssignmentTargetPropertyIdentifier, BinaryExpression, BindingPattern, BooleanLiteral,
+    CallExpression, ChainElement, ChainExpression, Class, ConditionalExpression, Decorator,
+    Directive, DoWhileStatement, ExportAllDeclaration, ExportDefaultDeclaration,
+    ExportFromDeclaration, ExportNamedDeclaration, Expression, ExpressionStatement, ForStatement,
+    ForStatementInit, ForStatementLeft, Function, IfStatement, ImportDeclaration, ImportExpression,
+    JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition, MethodDefinitionKind,
+    ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral, ReturnStatement,
+    SimpleAssignmentTarget, Statement, StringLiteral, SwitchCase, SwitchStatement,
     TSEnumDeclaration, TSExportAssignment, TSExternalModuleDeclaration, TSGlobalDeclaration,
     TSImportEqualsDeclaration, TSInterfaceDeclaration, TSNamespaceDeclaration,
     TSNamespaceExportDeclaration, TSType, TSTypeAliasDeclaration, TSTypeAnnotation,
     TSTypeParameterDeclaration, TSTypeParameterInstantiation, TaggedTemplateExpression,
-    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarator, WhileStatement,
+    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarationKind,
+    VariableDeclarator, WhileStatement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
@@ -87,6 +90,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         relational_operands: BTreeSet::new(),
         expression_starts: BTreeSet::new(),
         equivalent_labels: BTreeSet::new(),
+        counted_loop_tests: BTreeSet::new(),
     };
     collector.visit_program(program);
     let mut sites: Vec<Site> = collector.sites.into_values().collect();
@@ -123,6 +127,9 @@ struct Collector<'s> {
     /// the clause runs the same body as `default`. See
     /// `equivalent_case_labels`.
     equivalent_labels: BTreeSet<(u32, u32)>,
+    /// Counted `for` loop tests whose `!=` mutant is equivalent. See
+    /// `counted_loop_test`.
+    counted_loop_tests: BTreeSet<(u32, u32)>,
 }
 
 const fn pair(span: Span) -> (u32, u32) {
@@ -229,6 +236,127 @@ fn equivalent_case_labels(source: &str, switch: &SwitchStatement<'_>) -> Vec<(u3
         })
         .map(|(_, (_, span, _))| pair(*span))
         .collect()
+}
+
+/// The largest integer that a `number` holds without a loss of precision.
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// The value of a non-negative safe integer literal.
+fn safe_integer(expression: &Expression<'_>) -> Option<f64> {
+    let Expression::NumericLiteral(literal) = expression else {
+        return None;
+    };
+    let value = literal.value;
+    (value.fract() == 0.0 && (0.0..=MAX_SAFE_INTEGER).contains(&value)).then_some(value)
+}
+
+/// True when `update` moves the counter `name` one step: up for `<`, down
+/// for `>`.
+fn is_unit_step(update: &Expression<'_>, name: &str, up: bool) -> bool {
+    match update {
+        Expression::UpdateExpression(update) => {
+            let operator = if up {
+                UpdateOperator::Increment
+            } else {
+                UpdateOperator::Decrement
+            };
+            update.operator == operator
+                && matches!(&update.argument, SimpleAssignmentTarget::AssignmentTargetIdentifier(id) if id.name == name)
+        }
+        Expression::AssignmentExpression(assignment) => {
+            let operator = if up {
+                AssignmentOperator::Addition
+            } else {
+                AssignmentOperator::Subtraction
+            };
+            assignment.operator == operator
+                && matches!(&assignment.left, AssignmentTarget::AssignmentTargetIdentifier(id) if id.name == name)
+                && matches!(&assignment.right, Expression::NumericLiteral(one) if one.value.total_cmp(&1.0).is_eq())
+        }
+        _ => false,
+    }
+}
+
+/// The test of a counted `for` loop, where `i < N` and `i != N` select the
+/// same iterations, so the `!=` mutant is equivalent. The rule needs all of
+/// these:
+///
+/// - the init declares one `let` counter with a safe integer start `s`;
+///   a `var` counter can have a write outside the loop;
+/// - the test is `i < N` with `s <= N`, or `i > N` with `s >= N`, where `N`
+///   is a safe integer literal, so the counter reaches the bound exactly;
+/// - the update is `i++`, `++i` or `i += 1` for `<`, and the decrement for
+///   `>`;
+/// - the body has no write to a variable with the counter name, also in a
+///   nested function, and no `eval` call.
+fn counted_loop_test(it: &ForStatement<'_>) -> Option<(u32, u32)> {
+    let Some(ForStatementInit::VariableDeclaration(init)) = &it.init else {
+        return None;
+    };
+    let [declarator] = init.declarations.as_slice() else {
+        return None;
+    };
+    if init.kind != VariableDeclarationKind::Let {
+        return None;
+    }
+    let BindingPattern::BindingIdentifier(counter) = &declarator.id else {
+        return None;
+    };
+    let name = counter.name.as_str();
+    let start = safe_integer(declarator.init.as_ref()?)?;
+    let Some(Expression::BinaryExpression(test)) = &it.test else {
+        return None;
+    };
+    if !test.left.is_specific_id(name) {
+        return None;
+    }
+    let bound = safe_integer(&test.right)?;
+    let up = match test.operator {
+        BinaryOperator::LessThan if start <= bound => true,
+        BinaryOperator::GreaterThan if start >= bound => false,
+        _ => return None,
+    };
+    if !is_unit_step(it.update.as_ref()?, name, up) {
+        return None;
+    }
+    let mut writes = CounterWrites { name, found: false };
+    writes.visit_statement(&it.body);
+    (!writes.found).then_some(pair(test.span))
+}
+
+/// Finds a write to a variable by name, or an `eval` call that can make one.
+/// The check uses the name only, so a shadowed variable also counts.
+struct CounterWrites<'n> {
+    name: &'n str,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for CounterWrites<'_> {
+    fn visit_simple_assignment_target(&mut self, it: &SimpleAssignmentTarget<'a>) {
+        let target = match it {
+            SimpleAssignmentTarget::AssignmentTargetIdentifier(identifier) => {
+                identifier.name == self.name
+            }
+            _ => it
+                .get_expression()
+                .is_some_and(|inner| callee_without_wrappers(inner).is_specific_id(self.name)),
+        };
+        self.found |= target;
+        walk::walk_simple_assignment_target(self, it);
+    }
+
+    fn visit_assignment_target_property_identifier(
+        &mut self,
+        it: &AssignmentTargetPropertyIdentifier<'a>,
+    ) {
+        self.found |= it.binding.name == self.name;
+        walk::walk_assignment_target_property_identifier(self, it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.found |= callee_without_wrappers(&it.callee).is_specific_id("eval");
+        walk::walk_call_expression(self, it);
+    }
 }
 
 fn key_name(key: &PropertyKey<'_>) -> Option<String> {
@@ -745,6 +873,9 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
+        if let Some(test) = counted_loop_test(it) {
+            self.counted_loop_tests.insert(test);
+        }
         walk::walk_for_statement(self, it);
         if let Some(test) = &it.test {
             self.negate(test);
@@ -779,7 +910,11 @@ impl<'a> Visit<'a> for Collector<'_> {
                     constant.to_owned(),
                 );
                 let operand = self.relational_operands.contains(&pair(it.span));
+                let counted = self.counted_loop_tests.contains(&pair(it.span));
                 for replacement in operators {
+                    if counted && *replacement == "!=" {
+                        continue;
+                    }
                     if operand && lowers_precedence(operator, replacement) {
                         let text = format!(
                             "({}{replacement}{})",
