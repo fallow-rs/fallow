@@ -1,0 +1,7 @@
+{
+  "name": "app-cjs",
+  "private": true,
+  "egg": { "framework": "yadan" },
+  "dependencies": { "egg": "^4.0.0", "yadan": "^1.0.0" },
+  "devDependencies": { "@eggjs/tracer": "^3.0.0", "@eggjs/redis": "^3.0.0", "unused-dev": "^1.0.0" }
+}

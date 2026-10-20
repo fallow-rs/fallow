@@ -494,6 +494,45 @@ object is a Vite config: `vite::credit_dependency_lists` credits its
 `resolve.alias` entries become path aliases. Imports in `<script setup>` of a
 Markdown page are not read.
 
+## Egg.js load units and tegg modules
+
+The `egg` plugin activates on `egg`, `@eggjs/core` or `@eggjs/tegg`, or on an
+`egg`, `eggPlugin` or `eggModule` key in `package.json`. The Egg loader loads
+the files of a load unit by directory convention. The plugin follows
+`packages/core/src/loader/egg_loader.ts` of the Egg repository.
+
+- The static entry patterns cover the load unit at the package root. They are
+  two globs only, because every active workspace adds them to one compiled
+  glob set.
+- A nested load unit, such as an example app or a test fixture app, has a
+  `config/config.default.*` or a `config/plugin.*` file. These are config
+  patterns with a `**/` prefix. For each nested unit, the plugin walks the unit
+  and seeds each convention file as one literal entry path.
+- tegg loads every source file of a directory whose `package.json` has an
+  `eggModule` object. The `package.json` hook walks the package for these
+  directories, or reads `config/module.json` when it exists. Each module file
+  is one literal entry path. The walk skips the directories and files that
+  `LoaderUtil.filePattern` of tegg skips.
+
+Nested units and modules use literal paths and not globs. A repository can
+hold hundreds of fixture apps and modules. One glob for each of them makes
+the glob set too large to compile, and then no plugin entry point applies.
+`discover/entry_points.rs` logs a warning when that happens.
+
+The plugin credits each `package` value of a `config/plugin.*` file, the
+`package` values of `config/module.json`, and `egg.framework`, `egg.tscompiler`
+and the package specifiers of `egg.require`. A load unit without
+`egg.framework` also credits `egg`, the default framework that `egg-bin` and
+`egg-scripts` start. Each credit goes to the owning manifest: the nearest
+`package.json` that has a dependency section and is not in a `test` or
+`fixtures` directory. A fixture app manifest does not install packages, so
+its enclosing workspace package must declare them. A credit never goes to the
+whole project, because a package that only another workspace names is still
+unused in this one.
+
+The plugin has no tooling dependencies. The Egg binaries (`egg-bin`,
+`egg-scripts`) are credited by the scripts that call them.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:

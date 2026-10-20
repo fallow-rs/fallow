@@ -8304,6 +8304,7 @@
       "nestjs-trpc",
       "nest-commander",
       "adonis",
+      "egg",
       "docusaurus",
       "gatsby",
       "sveltekit",

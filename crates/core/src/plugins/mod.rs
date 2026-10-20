@@ -1,13 +1,11 @@
 //! Plugin system for framework-aware codebase analysis.
 //!
-//! Unlike knip's JavaScript plugin system that evaluates config files at runtime,
-//! fallow's plugin system uses Oxc's parser to extract configuration values from
-//! JS/TS/JSON config files via AST walking, no JavaScript evaluation needed.
+//! The plugin system reads JS, TS and JSON config files with the Oxc parser and
+//! walks the AST. It never runs JavaScript.
 //!
 //! Each plugin implements the [`Plugin`] trait with:
 //! - **Static defaults**: Entry patterns, config file patterns, used exports
-//! - **Dynamic resolution**: Parse tool config files to discover additional entries,
-//!   referenced dependencies, and setup files
+//! - **Dynamic resolution**: config files add entries, dependencies and setup files
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +40,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "browser-extension",
     "convex",
     "docusaurus",
+    "egg",
     "electron",
     "ember",
     "eve",
@@ -2065,6 +2064,7 @@ mod deno;
 mod dependency_cruiser;
 mod docusaurus;
 mod drizzle;
+mod egg;
 mod electron;
 mod ember;
 mod eslint;

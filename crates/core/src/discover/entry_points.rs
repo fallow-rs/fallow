@@ -1463,7 +1463,7 @@ fn build_plugin_glob_meta(
             }
         }
     }
-    (builder.build().ok(), glob_meta)
+    (super::plugin_glob_set_or_warn(builder.build()), glob_meta)
 }
 
 /// Match each file against the compiled plugin glob set, categorizing hits by role.

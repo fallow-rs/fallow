@@ -60,6 +60,21 @@ pub fn collect_plugin_hidden_dir_scopes(
     scopes
 }
 
+/// The compiled set of plugin entry patterns, or `None` with a warning when it
+/// does not compile. Without the set no plugin entry point applies, so the
+/// run must not stay silent.
+fn plugin_glob_set_or_warn(
+    built: Result<globset::GlobSet, globset::Error>,
+) -> Option<globset::GlobSet> {
+    built
+        .inspect_err(|err| {
+            tracing::warn!(
+                "plugin entry patterns could not be compiled, so no plugin entry point applies: {err}"
+            );
+        })
+        .ok()
+}
+
 /// Combined plugin-derived and script-derived hidden directory scopes.
 ///
 /// Loads each workspace's `package.json` ONCE and feeds both the plugin
