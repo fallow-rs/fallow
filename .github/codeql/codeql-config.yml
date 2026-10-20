@@ -9,6 +9,5 @@ paths-ignore:
   - benchmarks
   - fuzz/corpus
   - examples
-  - apps/review-electron/fixtures
   - '**/node_modules'
   - '**/dist'

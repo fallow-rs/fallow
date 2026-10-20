@@ -4,7 +4,6 @@
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
     "editors/vscode/test/integration/fixtures/**",
-    "apps/review-electron/test/fixtures/**",
     "benchmarks/knip6/**",
     "reference/knip/**",
     "fuzz/corpus/**",

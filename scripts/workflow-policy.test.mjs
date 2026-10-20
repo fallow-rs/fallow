@@ -2528,7 +2528,7 @@ test("root npm installs disable lifecycle scripts by default", (t) => {
 });
 
 test("ordinary workflow npm installs suppress dependency lifecycle scripts", () => {
-  for (const path of ["bench-type-aware.yml", "review-electron.yml", "ci.yml"]) {
+  for (const path of ["bench-type-aware.yml", "ci.yml"]) {
     const workflow = readWorkflow(`.github/workflows/${path}`);
     const installs = workflow
       .split("\n")
@@ -2541,17 +2541,6 @@ test("ordinary workflow npm installs suppress dependency lifecycle scripts", () 
       );
     }
   }
-  const electron = indentedBlock(readWorkflow(".github/workflows/review-electron.yml"), "test", 2);
-  assert.match(
-    electron,
-    /node node_modules\/electron\/install\.js/u,
-    "the pinned Electron binary must still be initialized explicitly",
-  );
-  assert.doesNotMatch(
-    electron,
-    /secrets\.|environment:|id-token: write/u,
-    "Electron initialization must not run with publishing credentials",
-  );
 });
 
 test("VSIX publishers use reviewed frozen graphs from the validated source commit", () => {
@@ -3002,7 +2991,6 @@ const PULL_REQUEST_WORKFLOWS = [
   "ecosystem.yml",
   "pgo-validate.yml",
   "protocol-parity.yml",
-  "review-electron.yml",
   "signing-migration.yml",
   "test-action.yml",
 ];

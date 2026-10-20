@@ -111,7 +111,7 @@ test("a newer separate run replaces an older failed run", () => {
 });
 
 test("fails when a non-required push run failed", () => {
-  const runs = [...green(), run("review-electron.yml", { conclusion: "failure" })];
+  const runs = [...green(), run("test-action.yml", { conclusion: "failure" })];
   const result = evaluateRuns(runs, { required: REQUIRED });
   assert.equal(result.state, "fail");
   assert.equal(result.failed[0].required, false);
@@ -120,7 +120,7 @@ test("fails when a non-required push run failed", () => {
 test("a non-required run may be skipped or neutral", () => {
   const runs = [
     ...green(),
-    run("review-electron.yml", { conclusion: "skipped" }),
+    run("test-action.yml", { conclusion: "skipped" }),
     run("hawk.yml", { conclusion: "neutral" }),
   ];
   assert.equal(evaluateRuns(runs, { required: REQUIRED }).state, "pass");

@@ -96,25 +96,6 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
-    directory: /apps/review-electron
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
-    ignore:
-      # electron-vite 5 supports Vite through version 7, while plugin-react 6
-      # requires Vite 8. Remove both guards when electron-vite supports Vite 8.
-      - dependency-name: vite
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@vitejs/plugin-react"
-        update-types: ["version-update:semver-major"]
-      # Electron 43 embeds Node 24. Keep the type surface aligned with the
-      # runtime and raise this together with Electron.
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: npm
     directory: /tests/coverage-producer-corpus/producers
     schedule:
       interval: weekly

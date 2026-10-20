@@ -90,24 +90,6 @@ test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
   assert.deepEqual(allowedDependencies, ["libfuzzer-sys"]);
 });
 
-test("review Electron holds majors that exceed its wrapper and runtime", () => {
-  const config = readFileSync(".github/dependabot.yml", "utf8");
-  const update = dependabotUpdate(config, "npm", "/apps/review-electron");
-
-  assert.match(
-    update,
-    /- dependency-name: vite\s+update-types: \["version-update:semver-major"\]/u,
-  );
-  assert.match(
-    update,
-    /- dependency-name: "@vitejs\/plugin-react"\s+update-types: \["version-update:semver-major"\]/u,
-  );
-  assert.match(
-    update,
-    /- dependency-name: "@types\/node"\s+update-types: \["version-update:semver-major"\]/u,
-  );
-});
-
 /** README prose outside fenced code blocks. Sample output keeps its own numbers. */
 const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
 

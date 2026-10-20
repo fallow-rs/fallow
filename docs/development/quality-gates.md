@@ -61,14 +61,6 @@ that load another package's configuration. Run required native builds and
 extension-host downloads through the existing explicit build and test commands.
 Do not turn install scripts back on for the whole dependency tree.
 
-The review desktop app downloads its pinned Electron binary explicitly after
-installation, without enabling lifecycle scripts for other dependencies:
-
-```bash
-npm ci --prefix apps/review-electron --ignore-scripts
-node apps/review-electron/node_modules/electron/install.js
-```
-
 A root-only `npm ci` is enough for the type-aware CLI test targets. The
 type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
 without a sidecar-local install it resolves `typescript` from ancestor
@@ -287,7 +279,7 @@ On pull requests:
   `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`,
   `Cargo.lock`, or `rust-toolchain.toml` changes. It compares a PGO build with
   a base build of the same pull request.
-- `Review Electron` and `Test GitHub Action`, when their own paths change.
+- `Test GitHub Action`, when its own paths change.
 
 On push to `main` only (each one also has `workflow_dispatch`):
 
