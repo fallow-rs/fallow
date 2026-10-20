@@ -196,12 +196,14 @@ fn run_result(run: &RunRequest, status: RunStatus, killed_by: Option<&str>) -> R
             .map(|test| RunTest {
                 test_id: test.clone(),
                 status: TestStatus::Pass,
+                failure_kind: None,
             })
             .collect(),
         RunStatus::Killed => killed_by
             .map(|test| RunTest {
                 test_id: test.to_owned(),
                 status: TestStatus::Fail,
+                failure_kind: Some("assertion".to_owned()),
             })
             .into_iter()
             .collect(),
@@ -477,6 +479,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 tests: vec![RunTest {
                     test_id: run.test_ids[0].clone(),
                     status: TestStatus::Pass,
+                    failure_kind: None,
                 }],
                 unhandled_errors: Vec::new(),
             })
@@ -492,10 +495,12 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                     RunTest {
                         test_id: run.test_ids[0].clone(),
                         status: TestStatus::Pass,
+                        failure_kind: None,
                     },
                     RunTest {
                         test_id: run.test_ids[1].clone(),
                         status: TestStatus::Fail,
+                        failure_kind: None,
                     },
                 ],
                 unhandled_errors: Vec::new(),
@@ -551,6 +556,7 @@ fn a_kill_by_an_unhandled_error_has_no_killer() {
                 tests: vec![RunTest {
                     test_id: run.test_ids[0].clone(),
                     status: TestStatus::Pass,
+                    failure_kind: None,
                 }],
                 unhandled_errors: vec![UnhandledError {
                     message: "late rejection".to_owned(),
@@ -706,6 +712,157 @@ fn a_timeout_reruns_in_a_new_companion_and_a_survived_retry_is_flaky() {
         2 * runs[0].1.timeout_ms,
         "host load that slowed the first run can last, so the retry waits twice as long"
     );
+}
+
+/// Runs m1 with `first` in the first companion and `retry` in the next one.
+fn retried_m1(
+    first: impl Fn(&RunRequest) -> Result<Response, LinkFault> + Send + Sync + 'static,
+    retry: impl Fn(&RunRequest) -> Result<Response, LinkFault> + Send + Sync + 'static,
+) -> MutantOutcome {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        move |index, run| if index == 0 { first(run) } else { retry(run) },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    outcome.results["m1"].clone()
+}
+
+#[test]
+fn a_flaky_result_keeps_the_history_of_each_attempt() {
+    let timeout_then_survived = retried_m1(
+        |_| Err(LinkFault::Timeout),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    let survived_then_killed = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+        |run| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+    );
+    assert_eq!(timeout_then_survived.status, MutantStatus::Flaky);
+    assert_eq!(survived_then_killed.status, MutantStatus::Flaky);
+    let watchdog_ms = timeout_then_survived
+        .attempts
+        .first()
+        .and_then(|attempt| attempt.duration_ms);
+    assert!(watchdog_ms.is_some_and(|ms| ms > 12), "{watchdog_ms:?}");
+    assert_eq!(
+        timeout_then_survived.attempts,
+        [
+            MutantAttempt {
+                status: MutantStatus::Timeout,
+                duration_ms: watchdog_ms,
+                killed_by: None,
+                failure_kind: Some(MutantFailureKind::Timeout),
+                detail: None,
+            },
+            MutantAttempt {
+                status: MutantStatus::Survived,
+                duration_ms: Some(12),
+                killed_by: None,
+                failure_kind: None,
+                detail: None,
+            },
+        ]
+    );
+    assert_eq!(
+        survived_then_killed.attempts,
+        [
+            MutantAttempt {
+                status: MutantStatus::Survived,
+                duration_ms: Some(12),
+                killed_by: None,
+                failure_kind: None,
+                detail: None,
+            },
+            MutantAttempt {
+                status: MutantStatus::Killed,
+                duration_ms: Some(12),
+                killed_by: Some(tid("t1")),
+                failure_kind: Some(MutantFailureKind::Assertion),
+                detail: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_timeout_from_the_companion_keeps_its_failure_kind() {
+    let timeout_then_survived = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Timeout, None)),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    assert_eq!(timeout_then_survived.status, MutantStatus::Flaky);
+    assert_eq!(
+        timeout_then_survived.attempts.first(),
+        Some(&MutantAttempt {
+            status: MutantStatus::Timeout,
+            duration_ms: Some(12),
+            killed_by: None,
+            failure_kind: Some(MutantFailureKind::Timeout),
+            detail: None,
+        }),
+        "a runner timeout carries the duration of the run result"
+    );
+}
+
+#[test]
+fn a_runtime_error_retry_keeps_its_reason_and_a_single_run_has_no_attempts() {
+    let survived_then_error = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+        |run| Ok(run_result(run, RunStatus::RuntimeError, None)),
+    );
+    assert_eq!(survived_then_error.status, MutantStatus::RuntimeError);
+    let statuses: Vec<_> = survived_then_error
+        .attempts
+        .iter()
+        .map(|attempt| (attempt.status, attempt.detail.as_deref()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            (MutantStatus::Survived, None),
+            (
+                MutantStatus::RuntimeError,
+                Some("the companion reported a runtime error")
+            ),
+        ]
+    );
+    let killed = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    assert_eq!(killed.status, MutantStatus::Killed);
+    assert!(!killed.retried);
+    assert!(killed.attempts.is_empty(), "a kill gets no retry");
+}
+
+#[test]
+fn a_kill_names_the_failure_kind_of_its_killing_test_or_an_error() {
+    let request = RunRequest {
+        mutant_id: Some("m1".to_owned()),
+        test_ids: vec![tid("t1")],
+        timeout_ms: 1000,
+        bail: true,
+    };
+    let Response::Run(mut result) = run_result(&request, RunStatus::Killed, Some(&tid("t1")))
+    else {
+        unreachable!("run_result gives a run response")
+    };
+    let killed = MutantStatus::Killed;
+    let killer = tid("t1");
+    assert_eq!(
+        kill_kind(&result, killed, Some(&killer)),
+        Some(MutantFailureKind::Assertion)
+    );
+    assert_eq!(
+        kill_kind(&result, killed, None),
+        Some(MutantFailureKind::Error)
+    );
+    assert_eq!(
+        kill_kind(&result, MutantStatus::Survived, Some(&killer)),
+        None
+    );
+    result.tests[0].failure_kind = Some("segfault".to_owned());
+    assert_eq!(kill_kind(&result, killed, Some(&killer)), None);
 }
 
 #[test]
@@ -1800,6 +1957,7 @@ fn t2_fails_in_control(run: &RunRequest) -> Response {
             } else {
                 TestStatus::Pass
             },
+            failure_kind: None,
         })
         .collect();
     let failed = run.test_ids.contains(&tid("t2"));
@@ -2122,6 +2280,7 @@ fn only_t1_passes_in_control(run: &RunRequest) -> Response {
             } else {
                 TestStatus::Fail
             },
+            failure_kind: None,
         })
         .collect();
     let failed = tests.iter().any(|test| test.status == TestStatus::Fail);

@@ -156,7 +156,10 @@ each commit that conflicts on it. The manifest generator reads the
 directory. The rebase runs in a fresh worktree, so untracked files of the
 checkout do not get into the manifest. The script runs the same merge
 comparison outside that file. Then add `--repo fallow-rs/docs` to the
-wait command.
+pull request wait command. For the merged docs commit, run
+`node <fallow>/scripts/ship-wait-checks.mjs --commit <full sha> --min-checks <count> --follow-main`
+in a docs checkout, without `--repo`. `--follow-main` reads `origin/main`
+of the working directory, so the script refuses it together with `--repo`.
 
 The rebase scripts do not change the checkout where they run. They add a
 temporary worktree with a detached HEAD, and the rebase, the checks and

@@ -2416,6 +2416,7 @@ fn star_fan_out_graph(packages: u32) -> ModuleGraph {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
 fn star_fan_out_checks_each_imported_name_against_its_own_source() {
     let (small, small_checks) = count_star_name_checks(|| star_fan_out_graph(8));
     let (large, large_checks) = count_star_name_checks(|| star_fan_out_graph(32));
@@ -2855,6 +2856,7 @@ fn work_queue_does_not_revisit_unrelated_settled_edge() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
 fn work_queue_matches_legacy_on_generated_small_graphs() {
     with_re_export_differential_check(|| {
         for barrel_count in 1..=8 {
@@ -2937,6 +2939,7 @@ fn propagation_plan_requeues_only_affected_observers_once() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "too slow under Miri: a scale test of safe code")]
 fn named_only_chain_safety_cap_excludes_synthetic_export_states() {
     let graph = graph_for_named_chain(256);
     let re_export_info = graph.collect_re_export_tuples();

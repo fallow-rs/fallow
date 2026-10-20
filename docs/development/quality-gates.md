@@ -330,11 +330,16 @@ specified above.
 
 The slowest `CI` jobs have parts that run in parallel:
 
-- `Check` runs the nextest suite, the runtime-coverage feature tests, the
-  schema drift gate and the coverage producer conformance check.
+- `Check (1/2)` and `Check (2/2)` each build every test binary and run half
+  of the nextest suite (`--partition hash:N/2`). The suite uses about 29
+  CPU-minutes, so one 4-vCPU runner needs more than 7 minutes for it.
+  `Check (1/2)` also runs the runtime-coverage feature tests, the schema drift
+  gate and the coverage producer conformance check.
 - `Lint and contracts` runs both Clippy passes, `cargo fmt --check`, the
-  contract bundle drift gate, the staged subgenerator tests, and the NAPI build
-  and smoke test.
+  contract bundle drift gate and the staged subgenerator tests.
+- `NAPI package` runs the NAPI build and smoke test. On `main` the build uses
+  the `napi-release` profile and takes about 7 minutes, so it runs beside the
+  lint steps and not after them.
 - `Windows path and subprocess handling` runs the Windows nextest selection
   and the platform Clippy pass. `Windows drift harness` runs the drift harness
   on Windows. The two Windows jobs have the same trigger.
@@ -342,11 +347,15 @@ The slowest `CI` jobs have parts that run in parallel:
   `fallow-extract` as three parallel processes in one step. The Miri
   interpreter uses one core, so the job takes as long as the slowest crate.
   Do not use `cargo miri nextest run`: it starts a new Miri process for each
-  test, and each start costs seconds.
+  test, and each start costs seconds. A test that only checks safe logic at
+  scale gets `#[cfg_attr(miri, ignore = "too slow under Miri: ...")]`. Miri
+  looks for undefined behavior, and the normal test run still covers the
+  logic. One such test once took 16 minutes under Miri.
 
-`Check` and `Lint and contracts` have the same trigger, and both use the runner
-that the `heavy-runner` job selects. Each split job uses one more runner slot in
-a run. `scripts/workflow-policy.test.mjs` asserts that each moved step runs in
+`Check`, `Lint and contracts` and `NAPI package` have the same trigger. Only
+`Check (1/2)` and `Lint and contracts` may use the runner that the
+`heavy-runner` selector step picks, because the Blacksmith credit model
+reserves those two jobs. Each split job uses one more runner slot in a run. `scripts/workflow-policy.test.mjs` asserts that each moved step runs in
 exactly one of these jobs.
 
 ### Rule for new workflows
@@ -448,8 +457,11 @@ one record; it cannot validate truthful history. Reconfirm allowance and usage
 at each month change, including carried-over work. Removing the variable
 disables new selections; it does not stop already selected or running jobs.
 
-The selector runs on GitHub with read-only contents access and uses the helper
-from `main`. An old helper rejects extended allocations and uses GitHub until
+The selectors are steps of the `Detect changes` job, so `Check`, `Lint and
+contracts` and `Miri` wait for no extra runner. A separate selector job added
+its own queue wait, about 2 minutes at the median and up to 8 minutes at p90
+on pull requests. The steps check out `scripts/` from `main` into
+`.ci-selectors` and run the helper from there, with read-only access. An old helper rejects extended allocations and uses GitHub until
 the new helper is merged. A failed selector step discards even partial output,
 so Miri uses GitHub. Direct local tests do not establish live extended selection.
 An unavailable Blacksmith runner after selection does not migrate an existing
@@ -507,7 +519,9 @@ previous endpoints; never recycle slots or renew automatically. Earlier-month
 Miri windows expire, but already-running work still needs manual accounting.
 Avoid month-end admission when queue delay could cross billing months.
 
-Selectors use trusted `main` code with read-only permissions. Missing variables
+Selectors use trusted `main` code with read-only permissions. CI publishes
+each selection as an output of `Detect changes`; Release Validation keeps its
+own `heavy-runner` job. Missing variables
 skip startup. Failed selection, unknown callers, forks, Dependabot and reruns
 use GitHub while substantive validation still runs. Only CI main pushes or
 internal PRs, direct main release dispatches or schedules, and Release main
