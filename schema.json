@@ -1241,6 +1241,11 @@
           "description": "One token of a regular expression literal changed: an anchor\nremoved, a character class negated, or a class escape with the\nopposite case.",
           "type": "string",
           "const": "regex-literal"
+        },
+        {
+          "description": "`z.number().int()` to `z.number()` in a module-level `const`\ninitializer: one call link of a fluent chain removed.",
+          "type": "string",
+          "const": "removed-chain-link"
         }
       ]
     },

@@ -739,6 +739,71 @@ fn optional_chaining_removes_each_optional_link() {
 }
 
 #[test]
+fn removed_chain_link_omits_each_fluent_link_of_a_module_const() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        (
+            "export const q = z.number().int().positive();",
+            &[(".int()", ""), (".positive()", "")],
+        ),
+        (
+            "const s = z.object({ n: z.number().int() });",
+            &[(".int()", "")],
+        ),
+        (
+            "const s = z.string().min(1, { message: 'short' });",
+            &[(".min(1, { message: 'short' })", "")],
+        ),
+        ("const s = (z.number() as any).int();", &[(".int()", "")]),
+        ("const s = z.number() // keep\n  .int();", &[(".int()", "")]),
+        ("if (ok) { const s = z.number().int(); }", &[(".int()", "")]),
+        ("const s = z.number() /* a.b */ .int();", &[(".int()", "")]),
+        ("const a = z.number();", &[]),
+        ("const a = z.number;", &[]),
+        ("const a = new Builder().build();", &[]),
+        ("let a = z.number().int();", &[]),
+        ("var a = z.number().int();", &[]),
+        ("x = z.number().int();", &[]),
+        ("const f = () => z.number().int();", &[]),
+        ("function f() { const s = z.number().int(); }", &[]),
+        ("const b = a?.b().c();", &[]),
+        ("const b = a.b?.().c();", &[]),
+        ("const b = a?.b.c().d();", &[]),
+        ("const b = a.b()?.c();", &[]),
+        ("const b = a.b()[k]();", &[]),
+        ("const b = console.log(1).x();", &[]),
+        ("const b = require('x').y();", &[]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RemovedChainLink),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn removed_chain_link_gives_the_only_mutants_of_a_fluent_schema() {
+    let result = run("export const q = z.number().int().positive();", TS);
+    let operators: Vec<_> = result.mutants.iter().map(|m| m.operator).collect();
+    assert_eq!(
+        operators,
+        vec![Operator::RemovedChainLink, Operator::RemovedChainLink]
+    );
+}
+
+#[test]
+fn removed_chain_link_and_removed_call_share_a_statement_chain_only_in_a_const() {
+    let result = run("z.number().int();", TS);
+    assert_eq!(
+        pairs(&result, Operator::RemovedCall),
+        expected(&[("z.number().int()", "void 0")])
+    );
+    assert!(pairs(&result, Operator::RemovedChainLink).is_empty());
+}
+
+#[test]
 fn arithmetic_operator_finds_the_token_after_a_comment() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("x = total // items\n  / count;", &[("/", "*")]),
@@ -951,6 +1016,7 @@ fn operator_names_are_kebab_case() {
             "string-literal",
             "optional-chaining",
             "regex-literal",
+            "removed-chain-link",
         ],
     );
     assert_eq!(

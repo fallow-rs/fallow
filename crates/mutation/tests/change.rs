@@ -120,6 +120,11 @@ fn each_operator_reports_its_tokens() {
         ("i++;", Operator::UpdateOperator, &[("++", "--")]),
         ("save(x);", Operator::RemovedCall, &[("<call>", "void 0")]),
         (
+            "const s = z.number().int();",
+            Operator::RemovedChainLink,
+            &[("<call>", "")],
+        ),
+        (
             "function f() { return a + b; }",
             Operator::ReturnValue,
             &[("<expression>", "undefined")],

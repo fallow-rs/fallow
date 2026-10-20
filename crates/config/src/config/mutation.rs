@@ -50,6 +50,9 @@ pub enum MutationOperatorName {
     /// removed, a character class negated, or a class escape with the
     /// opposite case.
     RegexLiteral,
+    /// `z.number().int()` to `z.number()` in a module-level `const`
+    /// initializer: one call link of a fluent chain removed.
+    RemovedChainLink,
 }
 
 impl MutationOperatorName {
@@ -69,6 +72,7 @@ impl MutationOperatorName {
             Self::StringLiteral => "string-literal",
             Self::OptionalChaining => "optional-chaining",
             Self::RegexLiteral => "regex-literal",
+            Self::RemovedChainLink => "removed-chain-link",
         }
     }
 }
