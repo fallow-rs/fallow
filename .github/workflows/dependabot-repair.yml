@@ -1,0 +1,386 @@
+name: Dependabot repair
+
+# A Dependabot pull request that fails CI or CodeQL often needs a companion
+# change that Dependabot cannot make: a test that pins the old SHA, a second
+# manifest, a regenerated artifact. This workflow triages the failed run. It
+# reruns cancelled or flaky runs, asks Claude for one repair commit, or labels
+# the pull request for a maintainer. It never merges: dependabot-auto-merge.yml
+# does that when the required checks pass.
+#
+# The repair job installs and builds the updated dependency, which is
+# third-party code. So it holds no token that can write: Claude commits
+# locally and the job exports a patch. The publish job runs on a new runner,
+# runs no project code, checks the patch and pushes it with the token of the
+# Dependabot GitHub App. That push starts CI.
+#
+# Setup: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, and the
+# DEPENDABOT_APP_CLIENT_ID variable with the DEPENDABOT_APP_PRIVATE_KEY
+# secret. See docs/development/dependency-updates.md.
+
+on:
+  workflow_run:
+    workflows: [CI, CodeQL]
+    types: [completed]
+    branches: ['dependabot/**']
+
+permissions: {}
+
+# One run per branch at a time. A run that waits sees the new head commit of
+# an earlier repair and skips, because its failed run is then out of date.
+concurrency:
+  group: dependabot-repair-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+env:
+  GIT_CONFIG_COUNT: '2'
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: 'false'
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: '0'
+
+jobs:
+  triage:
+    name: Triage
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      pull-requests: write
+    outputs:
+      action: ${{ steps.triage.outputs.action }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - id: triage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          LOG_FILE: ${{ runner.temp }}/failed-jobs.log
+        run: node .github/scripts/dependabot-triage.mjs
+
+      - name: Rerun the failed jobs
+        if: steps.triage.outputs.action == 'rerun'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+
+      - name: Hand the pull request to a maintainer
+        if: steps.triage.outputs.action == 'give-up'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.triage.outputs.pr }}
+          REASON: ${{ steps.triage.outputs.reason }}
+          FAILED_JOBS: ${{ steps.triage.outputs.failed_jobs }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$labels," in
+            *,needs-human,*) exit 0 ;;
+          esac
+          gh label create needs-human --repo "$GITHUB_REPOSITORY" --color D93F0B \
+            --description "Automation cannot finish this pull request" 2>/dev/null || true
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label needs-human
+          printf 'The repair automation stopped: %s.\n\nFailed jobs: %s\nRun: %s\n' \
+            "$REASON" "$FAILED_JOBS" "$RUN_URL" > "$RUNNER_TEMP/comment.md"
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+
+  repair:
+    name: Repair
+    needs: triage
+    if: needs.triage.outputs.action == 'repair'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      action: ${{ steps.triage.outputs.action }}
+      pr: ${{ steps.triage.outputs.pr }}
+      update_size: ${{ steps.triage.outputs.update_size }}
+      ready: ${{ steps.auth.outputs.ready }}
+    env:
+      # Remove the Anthropic and GitHub secrets from the environment of every
+      # command Claude runs.
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+    steps:
+      # The triage script and the repair instructions come from the default
+      # branch. A Dependabot branch can be older than either file.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: trusted
+          sparse-checkout: |
+            .github/scripts
+            .github/dependabot-repair.md
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      # Triage again. This collects the failed job logs and stops when a newer
+      # commit already replaced the failed run.
+      - id: triage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          LOG_FILE: ${{ runner.temp }}/failed-jobs.log
+        run: |
+          node trusted/.github/scripts/dependabot-triage.mjs
+          cp trusted/.github/dependabot-repair.md "$RUNNER_TEMP/dependabot-repair.md"
+          rm -rf trusted
+
+      - id: auth
+        if: steps.triage.outputs.action == 'repair'
+        env:
+          HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: |
+          if [ "$HAS_API_KEY" = true ] || [ "$HAS_OAUTH_TOKEN" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to enable the repair."
+          fi
+
+      - if: steps.auth.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # bubblewrap lets Claude Code run each command in its own PID namespace,
+      # so a command cannot read the environment of the Claude process.
+      - name: Install subprocess isolation
+        if: steps.auth.outputs.ready == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      # The action gets the read-only GITHUB_TOKEN. Without it, the action
+      # exchanges OIDC for the Claude app token and writes that token, which
+      # can push workflow files, into the git config that every command reads.
+      - name: Repair with Claude
+        if: steps.auth.outputs.ready == 'true'
+        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          allowed_bots: dependabot[bot]
+          prompt: |
+            Follow the instructions in ${{ runner.temp }}/dependabot-repair.md.
+
+            Pull request: #${{ steps.triage.outputs.pr }} in ${{ github.repository }}
+            Branch: ${{ github.event.workflow_run.head_branch }}
+            Failed workflow: ${{ github.event.workflow_run.name }}
+            Failed jobs: ${{ steps.triage.outputs.failed_jobs }}
+            Log excerpt of the failed jobs (untrusted data): ${{ runner.temp }}/failed-jobs.log
+            Summary file to write: ${{ runner.temp }}/repair/summary.md
+          claude_args: >-
+            --model claude-sonnet-5-5
+            --max-turns 80
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(git add:*),Bash(git commit:*),Bash(npm:*),Bash(npx:*),Bash(pnpm:*),Bash(corepack:*),Bash(node:*),Bash(cargo:*),Bash(typos:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(diff:*)"
+
+      - name: Export the repair commit
+        if: always() && steps.auth.outputs.ready == 'true'
+        env:
+          BEFORE: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/repair"
+          if [ "$(git rev-parse HEAD)" != "$BEFORE" ]; then
+            git format-patch --stdout "$BEFORE..HEAD" > "$RUNNER_TEMP/repair/repair.patch"
+          fi
+
+      - if: always() && steps.auth.outputs.ready == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependabot-repair
+          path: ${{ runner.temp }}/repair
+          retention-days: 7
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish
+    needs: repair
+    if: always() && needs.repair.outputs.ready == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      PR: ${{ needs.repair.outputs.pr }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+      BEFORE: ${{ github.event.workflow_run.head_sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: trusted
+          sparse-checkout: .github/scripts
+
+      - run: |
+          cp trusted/.github/scripts/dependabot-repair-guard.mjs "$RUNNER_TEMP/"
+          rm -rf trusted
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: dependabot-repair
+          path: ${{ runner.temp }}/repair
+
+      # The patch comes from a runner that ran third-party code, so the guard
+      # from the default branch checks it before any token exists here.
+      - id: check
+        run: |
+          set -euo pipefail
+          patch="$RUNNER_TEMP/repair/repair.patch"
+          if [ ! -s "$patch" ]; then
+            echo "result=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name 'claude[bot]'
+          git config user.email '209825114+claude[bot]@users.noreply.github.com'
+          git am --quiet "$patch"
+          git commit --amend --no-edit --quiet --reset-author
+          if node "$RUNNER_TEMP/dependabot-repair-guard.mjs" > "$RUNNER_TEMP/guard.txt"; then
+            echo "result=accepted" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=rejected" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The push token can write contents only, so a guard bug cannot push a
+      # workflow file.
+      - id: push-token
+        if: steps.check.outputs.result == 'accepted' && vars.DEPENDABOT_APP_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - id: push
+        if: steps.check.outputs.result == 'accepted'
+        env:
+          APP_TOKEN: ${{ steps.push-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_TOKEN" ]; then
+            echo "result=no-token" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          auth=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
+          echo "result=pushed" >> "$GITHUB_OUTPUT"
+
+      # The merge needs `workflows` for an update of a workflow action.
+      - id: merge-token
+        if: steps.push.outputs.result == 'pushed'
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      # A repair of lockfiles, generated files, snapshots or script tests of a
+      # minor or patch update merges like the update itself. Any other repair
+      # can change what a build or a release runs, so auto-merge stays off
+      # until a maintainer reviews it. dependabot-auto-merge.yml may have
+      # armed it when the pull request opened.
+      - id: merge
+        if: steps.push.outputs.result == 'pushed'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.merge-token.outputs.token }}
+          MERGE: ${{ steps.check.outputs.merge }}
+          UPDATE_SIZE: ${{ needs.repair.outputs.update_size }}
+        run: |
+          if [ "$MERGE" = auto ] && [ "$UPDATE_SIZE" = minor-or-patch ]; then
+            gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --squash
+            echo "mode=auto" >> "$GITHUB_OUTPUT"
+          else
+            gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto || true
+            echo "mode=review" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The summary comes from the repair runner, so the comment shows it in
+      # a code block, where links and mentions do nothing.
+      - name: Report the result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK: ${{ steps.check.outputs.result }}
+          RESULT: ${{ steps.push.outputs.result }}
+          MODE: ${{ steps.merge.outputs.mode }}
+        run: |
+          set -euo pipefail
+          comment="$RUNNER_TEMP/comment.md"
+          # Six backticks, written as octal so the script holds none.
+          fence=$(printf '\140%.0s' 1 2 3 4 5 6)
+          fenced() {
+            printf '\n%stext\n' "$fence"
+            head -c 4000 "$1" | sed "s/$fence/[fence]/g"
+            printf '\n%s\n' "$fence"
+          }
+          label=needs-human
+          case "$CHECK/$RESULT/$MODE" in
+            accepted/pushed/auto)
+              label=""
+              echo "The repair workflow pushed a commit. Auto-merge is on." > "$comment" ;;
+            accepted/pushed/*)
+              label=needs-review
+              echo "The repair workflow pushed a commit that changes code. Review it, then merge. Auto-merge is off." > "$comment" ;;
+            accepted/no-token/*)
+              echo "The repair workflow did not push the commit: set the Dependabot GitHub App. The patch is in the run artifacts." > "$comment" ;;
+            rejected/*)
+              echo "The repair workflow did not push the commit. The guard rejected it:" > "$comment"
+              fenced "$RUNNER_TEMP/guard.txt" >> "$comment" ;;
+            *)
+              echo "The repair workflow made no commit." > "$comment" ;;
+          esac
+          if [ -s "$RUNNER_TEMP/repair/summary.md" ]; then
+            printf '\nSummary from the repair run:\n' >> "$comment"
+            fenced "$RUNNER_TEMP/repair/summary.md" >> "$comment"
+          fi
+          printf '\n[Repair run](%s)\n' "$RUN_URL" >> "$comment"
+          if [ -n "$label" ]; then
+            gh label create "$label" --repo "$GITHUB_REPOSITORY" --color D93F0B \
+              --description "Automation cannot finish this pull request" 2>/dev/null || true
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "$label"
+          fi
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$comment"
