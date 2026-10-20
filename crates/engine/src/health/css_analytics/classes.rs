@@ -61,13 +61,20 @@ fn build_typo_target_index(
     by_len
 }
 
+/// The project-wide inputs of the typo check, shared by every markup file.
+struct TypoTargets<'a> {
+    defined: &'a rustc_hash::FxHashSet<String>,
+    by_len: rustc_hash::FxHashMap<usize, Vec<&'a str>>,
+    /// The project loads Tailwind, so utility-shaped tokens are not checked.
+    uses_tailwind: bool,
+}
+
 /// Collect the likely-typo class references in one markup source into `out`,
 /// deduping by `(rel, line, value)` via `seen`.
-fn collect_unresolved_class_refs_in_file<'a>(
+fn collect_unresolved_class_refs_in_file(
     source: &str,
     rel: &str,
-    defined: &rustc_hash::FxHashSet<String>,
-    by_len: &'a rustc_hash::FxHashMap<usize, Vec<&'a str>>,
+    targets: &TypoTargets<'_>,
     seen: &mut rustc_hash::FxHashSet<(String, u32, String)>,
     out: &mut Vec<fallow_output::UnresolvedClassReference>,
 ) {
@@ -75,11 +82,12 @@ fn collect_unresolved_class_refs_in_file<'a>(
     for token in crate::css::scan_markup_class_tokens(source).static_tokens {
         if token.value.len() < MIN_TOKEN_LEN
             || is_tailwind_shaped(&token.value)
-            || defined.contains(&token.value)
+            || (targets.uses_tailwind && tailwind_utilities::is_tailwind_utility(&token.value))
+            || targets.defined.contains(&token.value)
         {
             continue;
         }
-        let Some(suggestion) = best_class_suggestion(&token.value, by_len) else {
+        let Some(suggestion) = best_class_suggestion(&token.value, &targets.by_len) else {
             continue;
         };
         let key = (rel.to_owned(), token.line, token.value.clone());
@@ -143,7 +151,14 @@ pub(super) fn scan_unresolved_class_references(
     if defined.is_empty() {
         return Vec::new();
     }
-    let by_len = build_typo_target_index(defined);
+    let targets = TypoTargets {
+        defined,
+        by_len: build_typo_target_index(defined),
+        // A Tailwind utility (`w-full`) is generated, never authored, so it is
+        // not in the defined set. Skip utility-shaped tokens when the project
+        // loads Tailwind, else `w-full` reads as a typo of an authored `wl-full`.
+        uses_tailwind: class_inventory.loads_tailwind || project_uses_tailwind(&config.root),
+    };
 
     let mut out: Vec<UnresolvedClassReference> = Vec::new();
     let mut seen: rustc_hash::FxHashSet<(String, u32, String)> = rustc_hash::FxHashSet::default();
@@ -151,7 +166,7 @@ pub(super) fn scan_unresolved_class_references(
         let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
-        collect_unresolved_class_refs_in_file(&source, &rel, defined, &by_len, &mut seen, &mut out);
+        collect_unresolved_class_refs_in_file(&source, &rel, &targets, &mut seen, &mut out);
     }
 
     out.sort_by(|a, b| {
@@ -404,12 +419,15 @@ pub(super) struct CssClassInventory {
     preprocessor_files: usize,
     typo_target_classes: rustc_hash::FxHashSet<String>,
     defined_classes: Vec<(String, Vec<(String, u32)>)>,
+    /// A stylesheet or style block loads Tailwind (`@import "tailwindcss"`).
+    loads_tailwind: bool,
 }
 
 /// Collect both class surfaces in one file pass. The typo-target set includes
-/// every authored class from standalone stylesheets and Astro/Vue/Svelte style
-/// blocks. The located standalone set powers the unreferenced-global-class
-/// check and omits `:global(...)` selectors.
+/// every authored class from standalone stylesheets and Astro/Vue/Svelte/HTML
+/// style blocks, `:global(...)` classes included. The located standalone set
+/// powers the unreferenced-global-class check and omits `:global(...)`
+/// selectors.
 ///
 /// The typo-target surface is not narrowed by `changed_files` or workspace
 /// roots. A definition in an unchanged file must still suppress an unresolved
@@ -426,7 +444,7 @@ pub(super) fn css_class_inventory(
         let extension = path.extension().and_then(|ext| ext.to_str());
         let is_preprocessor = matches!(extension, Some("scss" | "sass" | "less"));
         let is_css = extension == Some("css") || is_preprocessor;
-        let has_style_blocks = matches!(extension, Some("astro" | "vue" | "svelte"));
+        let has_style_blocks = matches!(extension, Some("astro" | "vue" | "svelte" | "html"));
         if !is_css && !has_style_blocks {
             continue;
         }
@@ -444,6 +462,11 @@ pub(super) fn css_class_inventory(
         };
         if has_style_blocks {
             for style in crate::css::extract_sfc_styles(&source) {
+                inventory.loads_tailwind |=
+                    tailwind_utilities::stylesheet_loads_tailwind(&style.body);
+                // A component styles a class passed to a child component's root
+                // through `:global(.x)`. The class is authored, so it is defined.
+                collect_global_scoped_classes(&style.body, &mut inventory.typo_target_classes);
                 let is_style_scss = style
                     .lang
                     .as_deref()
@@ -456,8 +479,12 @@ pub(super) fn css_class_inventory(
             }
             continue;
         }
+        inventory.loads_tailwind |= tailwind_utilities::stylesheet_loads_tailwind(&source);
         let mut global_scoped: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         collect_global_scoped_classes(&source, &mut global_scoped);
+        inventory
+            .typo_target_classes
+            .extend(global_scoped.iter().cloned());
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut classes: Vec<(String, u32)> = Vec::new();
         for export in crate::css::extract_css_module_exports(&source, is_preprocessor) {

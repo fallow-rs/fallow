@@ -14,6 +14,7 @@ mod cva;
 mod markup_scan;
 mod near_duplicates;
 mod preprocessor;
+mod tailwind_utilities;
 mod theme_tokens;
 mod token_consumers;
 
