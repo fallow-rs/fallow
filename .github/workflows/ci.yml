@@ -146,6 +146,7 @@ jobs:
               - 'crates/core/src/discover/walk.rs'
               - 'crates/core/src/plugins/manifest_entries.rs'
               - 'crates/core/src/plugins/mod.rs'
+              - 'crates/core/src/plugins/tests.rs'
               - 'crates/core/tests/integration_test.rs'
               - 'crates/core/tests/integration_test/symlink_root_containment.rs'
               - 'crates/core/tests/integration_test/issue_3324_nested_package.rs'
