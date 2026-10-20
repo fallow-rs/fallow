@@ -1,0 +1,6 @@
+{
+  "name": "@fx/blocked",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

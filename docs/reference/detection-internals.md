@@ -370,6 +370,11 @@ error by suppressing a downstream detector.
   path reference, because the consumer of the path can run the file, and
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
+- A `require` from `createRequire(import.meta.url)` or
+  `createRequire(__filename)` in any scope is the module `require`, so its
+  `require.resolve` calls count. A nested `require` with another base, a
+  parameter or another declaration shadows the module `require`
+  (`is_module_create_require_binding`).
 
 ## Value references and test reach
 
@@ -793,7 +798,12 @@ owned by the nearest package manifest; do not turn unmatched hash specifiers
 into global aliases. Per-file tsconfig failure may degrade to ordinary relative
 or package resolution, with diagnostics, without inventing missing path aliases.
 Web-root-relative asset resolution must preserve the importer/workspace context
-before considering the analysis root.
+before considering the analysis root. A workspace package subpath that names a
+non-source file on disk, such as `<pkg>/package.json`, credits the package
+without `node_modules` (`workspace_package_asset`). An `exports` map that does
+not list the subpath still blocks the import. A relative package root import
+(`require('..')`, `require('.')`) uses the package source entry when `main`
+names build output that is not on disk, the same as `require('../')`.
 
 Style resolution is distinct from JavaScript resolution. Preserve scoped npm
 specifier identity, SCSS partial and directory-index lookup, configured include

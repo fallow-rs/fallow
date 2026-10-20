@@ -141,3 +141,25 @@ fn require_resolve_target_is_outside_the_entry_load_closure() {
         }
     }
 }
+
+/// A `require` from `createRequire(import.meta.url)` inside a function is the
+/// module `require`, so its `require.resolve` calls credit the package. A
+/// parameter named `require` is another function and credits nothing.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn create_require_function_scope_credits_the_package() {
+    let root = fixture_path("create-require-function-scope");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_deps: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert_eq!(
+        unused_deps,
+        ["pkg-e"],
+        "only the package behind the shadowing parameter stays unused"
+    );
+}

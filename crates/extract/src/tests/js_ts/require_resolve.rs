@@ -2,8 +2,10 @@
 //!
 //! A local binding named `require` (a parameter or a nested declaration) is
 //! not the CommonJS `require`, so a `.resolve` call on it references nothing.
-//! A module-level `const require = createRequire(import.meta.url)` gives the
-//! real function, so its calls still count.
+//! A module-level `const require = createRequire(...)` gives the real
+//! function, so its calls still count. In a nested scope, only
+//! `createRequire(import.meta.url)` or `createRequire(__filename)` gives the
+//! module `require`, because another base resolves from another directory.
 //!
 //! `import.meta.resolve` credits a package with the same specifier limits.
 //! A specifier with a subpath, such as `pkg/lib/tsc`, credits `pkg`. Only a
@@ -255,4 +257,76 @@ fn a_conditional_specifier_gets_no_site() {
          export const url = import.meta.resolve(`${compiler}/package.json`);\n\
          export const b = require.resolve(native ? 'cjs-a' : 'cjs-b');\n";
     assert!(package_resolve_sites(source).is_empty());
+}
+
+#[test]
+fn function_scoped_create_require_is_the_module_require() {
+    let source = "import { createRequire } from 'node:module';\n\
+         export async function build() {\n\
+           const require = createRequire(import.meta.url);\n\
+           await run({ shim: require.resolve('./shim.js'), exe: require.resolve('some-pkg') });\n\
+         }\n";
+    assert_eq!(relative_references(source), ["./shim.js"]);
+    assert_eq!(package_references(source), ["some-pkg"]);
+    assert_eq!(package_resolve_sites(source).len(), 1);
+}
+
+#[test]
+fn function_scoped_create_require_from_filename_counts() {
+    let source = "const { createRequire } = require('node:module');\n\
+         function load() {\n\
+           const require = createRequire(__filename);\n\
+           return require.resolve('some-pkg');\n\
+         }\n\
+         load();\n";
+    assert_eq!(package_references(source), ["some-pkg"]);
+}
+
+#[test]
+fn member_create_require_counts() {
+    let source = "import module from 'node:module';\n\
+         export function load() {\n\
+           const require = module.createRequire(import.meta.url);\n\
+           return require.resolve('some-pkg');\n\
+         }\n";
+    assert_eq!(package_references(source), ["some-pkg"]);
+}
+
+#[test]
+fn create_require_with_another_base_still_shadows() {
+    let source = "import { createRequire } from 'node:module';\n\
+         import { join } from 'node:path';\n\
+         export function load(dir) {\n\
+           const require = createRequire(join(dir, 'package.json'));\n\
+           return [require.resolve('./shim.js'), require.resolve('some-pkg')];\n\
+         }\n";
+    assert!(relative_references(source).is_empty());
+    assert!(package_references(source).is_empty());
+}
+
+#[test]
+fn inner_rebinding_shadows_a_create_require_scope() {
+    let source = "import { createRequire } from 'node:module';\n\
+         export function load() {\n\
+           const require = createRequire(import.meta.url);\n\
+           {\n\
+             const require = makeLoader();\n\
+             require.resolve('inner-pkg');\n\
+           }\n\
+           return require.resolve('outer-pkg');\n\
+         }\n";
+    assert_eq!(package_references(source), ["outer-pkg"]);
+}
+
+#[test]
+fn sibling_scope_after_create_require_scope_is_not_affected() {
+    let source = "import { createRequire } from 'node:module';\n\
+         export function f() {\n\
+           const require = createRequire(import.meta.url);\n\
+           return require.resolve('a-pkg');\n\
+         }\n\
+         export function g(require) {\n\
+           return require.resolve('x');\n\
+         }\n";
+    assert_eq!(package_references(source), ["a-pkg"]);
 }

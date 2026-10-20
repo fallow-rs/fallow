@@ -1781,6 +1781,9 @@ impl ModuleInfoExtractor {
                     );
                 }
                 for declarator in &var.declarations {
+                    if is_module_create_require_binding(declarator) {
+                        continue;
+                    }
                     self.record_nested_declaration_names(declarator.id.get_binding_identifiers());
                 }
             }
