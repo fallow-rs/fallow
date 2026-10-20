@@ -554,6 +554,17 @@ pub fn node_modules_missing(root: &Path) -> bool {
     !root.join("node_modules").is_dir() && !super::is_deno_without_node_modules(root)
 }
 
+/// The install state of `root`, by the same rule as [`node_modules_missing`].
+/// A Deno project without `package.json` counts as present.
+#[must_use]
+pub fn node_modules_state(root: &Path) -> fallow_types::workspace::NodeModulesState {
+    if node_modules_missing(root) {
+        fallow_types::workspace::NodeModulesState::Missing
+    } else {
+        fallow_types::workspace::NodeModulesState::Present
+    }
+}
+
 /// Build the missing-`node_modules` diagnostic for `root`, or `None` once the
 /// project has been installed.
 ///

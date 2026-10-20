@@ -110,14 +110,15 @@ pub(super) fn run_dead_code_in_context(
         if let Some(trace) = finding_id_trace.as_mut() {
             trace.start_stage(&mut results);
         }
-        if let Some(baseline) = baseline {
-            apply_baseline(
+        let install_state = match baseline {
+            Some(baseline) => apply_baseline(
                 &mut results,
                 baseline,
                 session.root(),
                 type_aware_meta.as_ref(),
-            )?;
-        }
+            )?,
+            None => None,
+        };
         let finding_id_query = finding_id_trace.map(|mut trace| {
             trace.end_stage(&mut results);
             trace.finish(
@@ -147,6 +148,7 @@ pub(super) fn run_dead_code_in_context(
             CheckEnvelope::DeadCode,
         );
         output.output.finding_id_query = finding_id_query;
+        output.output.workspace_diagnostics.extend(install_state);
         Ok(output)
     })
 }
@@ -438,12 +440,15 @@ fn analyze_session_dead_code(session: &AnalysisSession) -> ProgrammaticResult<An
 }
 
 /// Hide the findings of a saved dead-code baseline, as `--baseline` does.
+///
+/// Returns the `baseline-install-state-mismatch` diagnostic when the baseline
+/// was saved in another install state than this run.
 fn apply_baseline(
     results: &mut AnalysisResults,
     baseline: &Path,
     root: &Path,
     type_aware_meta: Option<&fallow_types::envelope::TypeAwareMeta>,
-) -> ProgrammaticResult<()> {
+) -> ProgrammaticResult<Option<fallow_types::workspace::WorkspaceDiagnostic>> {
     use fallow_engine::baseline::{DeadCodeBaselineError, apply_dead_code_baseline};
 
     let path = if is_absolute_path_any_platform(baseline) {
@@ -462,8 +467,11 @@ fn apply_baseline(
     let identity = type_aware_meta
         .and_then(|meta| meta.identity.clone())
         .unwrap_or_default();
+    let run_state = fallow_config::node_modules_state(root);
     apply_dead_code_baseline(results, &content, root, &identity, false)
-        .map(|_| ())
+        .map(|_| {
+            fallow_engine::baseline::install_state_diagnostic(root, &path, &content, run_state)
+        })
         .map_err(|err| match err {
             DeadCodeBaselineError::Parse(message) => ProgrammaticError::new(
                 format!("failed to parse baseline {}: {message}", path.display()),

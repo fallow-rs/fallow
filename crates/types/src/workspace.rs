@@ -36,6 +36,31 @@ pub enum PnpmWorkspaceOverridesIgnoredCause {
     PnpmVersion,
 }
 
+/// Whether the project had a `node_modules` directory at a point in time.
+///
+/// A dead-code baseline records this when it is saved, so a later run in a
+/// different install state can say that its results can differ.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum NodeModulesState {
+    /// `node_modules` existed, or the project legitimately runs without it.
+    Present,
+    /// `node_modules` did not exist.
+    Missing,
+}
+
+impl NodeModulesState {
+    /// The wire token, as it appears in JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Present => "present",
+            Self::Missing => "missing",
+        }
+    }
+}
+
 /// Why a workspace-discovery candidate was rejected, or why a sibling
 /// directory looked workspace-like but was not declared.
 ///
@@ -558,6 +583,20 @@ pub enum WorkspaceDiagnosticKind {
         /// The `ignoreFindings` entry, as written in the config.
         pattern: String,
     },
+    /// The dead-code baseline was saved in a different install state than
+    /// this run: one of the two runs had `node_modules` and the other did not.
+    /// Findings that need installed packages (dependency, unlisted,
+    /// unresolved-import and script-binary findings) can differ, so the run
+    /// can report baseline findings as new. `path` is the baseline file.
+    ///
+    /// Only a baseline that records its install state can report this. A
+    /// legacy baseline has no record, so the state is unknown.
+    BaselineInstallStateMismatch {
+        /// The install state when the baseline was saved.
+        baseline_node_modules: NodeModulesState,
+        /// The install state of this run.
+        run_node_modules: NodeModulesState,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -603,6 +642,7 @@ impl WorkspaceDiagnosticKind {
             Self::FlagAgeUnavailable { .. } => "flag-age-unavailable",
             Self::IgnoreDependenciesGlobUnmatched { .. } => "ignore-dependencies-glob-unmatched",
             Self::IgnoreFindingsPatternUnmatched { .. } => "ignore-findings-pattern-unmatched",
+            Self::BaselineInstallStateMismatch { .. } => "baseline-install-state-mismatch",
         }
     }
 
@@ -690,7 +730,8 @@ impl WorkspaceDiagnosticKind {
             | Self::TrendSnapshotUnreadable { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::FlagAgeShallowClone
-            | Self::FlagAgeUnavailable { .. } => true,
+            | Self::FlagAgeUnavailable { .. }
+            | Self::BaselineInstallStateMismatch { .. } => true,
         }
     }
 
@@ -822,7 +863,8 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
-            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
+            | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
 
@@ -880,7 +922,8 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
-            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
+            | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
 
@@ -940,7 +983,8 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
-            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
+            | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
 
@@ -1001,7 +1045,8 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
-            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
+            | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
 }
@@ -1669,6 +1714,30 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              it has no effect. A glob matches package names, such as @scope/*. Fix the glob, or \
              remove it from the config."
         ),
+        WorkspaceDiagnosticKind::BaselineInstallStateMismatch {
+            baseline_node_modules,
+            ..
+        } => {
+            let (saved, now, remedy) = match baseline_node_modules {
+                NodeModulesState::Present => (
+                    "present",
+                    "has no node_modules",
+                    "Install dependencies before you compare",
+                ),
+                NodeModulesState::Missing => (
+                    "missing",
+                    "has node_modules",
+                    "Compare without installed dependencies",
+                ),
+            };
+            format!(
+                "The baseline '{display}' was saved with node_modules {saved}, and this run \
+                 {now}. Findings that need installed packages (dependency, unlisted, \
+                 unresolved-import and script-binary findings) can differ, so the run can report \
+                 baseline findings as new. {remedy}, or save the baseline again in the same \
+                 install state."
+            )
+        }
         WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched { pattern } => format!(
             "ignoreFindings pattern '{pattern}' matched no finding in this run, so it has no \
              effect. A pattern is a glob relative to the project root. Fix the pattern, or \

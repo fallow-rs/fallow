@@ -811,12 +811,23 @@ kind: "ignore-dependencies-glob-unmatched"
  */
 pattern: string
 kind: "ignore-findings-pattern-unmatched"
+} | {
+baseline_node_modules: NodeModulesState
+run_node_modules: NodeModulesState
+kind: "baseline-install-state-mismatch"
 })
 /**
  * Why the declared pnpm version ignores the `overrides` section of
  * `pnpm-workspace.yaml`.
  */
 export type PnpmWorkspaceOverridesIgnoredCause = ("package-json-overrides" | "pnpm-version")
+/**
+ * Whether the project had a `node_modules` directory at a point in time.
+ *
+ * A dead-code baseline records this when it is saved, so a later run in a
+ * different install state can say that its results can differ.
+ */
+export type NodeModulesState = ("present" | "missing")
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
  * emitted by the legacy `build_clone_group_actions` walker.

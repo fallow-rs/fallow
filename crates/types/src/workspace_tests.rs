@@ -910,6 +910,57 @@ fn unmatched_config_pattern_kinds_are_advisory_root_notes() {
     );
 }
 
+/// The baseline install-state kind degrades the run, so CI integrations
+/// show it, but it lives outside the registry and every pipeline stage.
+#[test]
+fn baseline_install_state_mismatch_is_a_degrading_baseline_note() {
+    let root = Path::new("/project");
+    for (saved, now, wording) in [
+        (
+            NodeModulesState::Present,
+            NodeModulesState::Missing,
+            "saved with node_modules present, and this run has no node_modules",
+        ),
+        (
+            NodeModulesState::Missing,
+            NodeModulesState::Present,
+            "saved with node_modules missing, and this run has node_modules",
+        ),
+    ] {
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join(".fallow-baseline.json"),
+            WorkspaceDiagnosticKind::BaselineInstallStateMismatch {
+                baseline_node_modules: saved,
+                run_node_modules: now,
+            },
+        );
+        assert_eq!(diag.kind.id(), "baseline-install-state-mismatch");
+        assert!(diag.degrades_analysis);
+        assert!(!diag.kind.source_never_analyzed());
+        assert!(!diag.kind.is_analysis_stage());
+        assert!(!diag.kind.is_health_stage());
+        assert!(!diag.kind.is_plugin_stage());
+        assert!(!diag.kind.is_source_discovery());
+        assert!(!diag.kind.is_source_walk_recorded());
+        assert!(
+            diag.message.contains(".fallow-baseline.json"),
+            "{}",
+            diag.message
+        );
+        assert!(diag.message.contains(wording), "{}", diag.message);
+        assert!(
+            diag.message.contains("save the baseline again"),
+            "next step: {}",
+            diag.message
+        );
+        let json = serde_json::to_value(&diag).expect("serializes");
+        assert_eq!(json["kind"], "baseline-install-state-mismatch");
+        assert_eq!(json["baseline_node_modules"], saved.as_str());
+        assert_eq!(json["run_node_modules"], now.as_str());
+    }
+}
+
 #[test]
 fn undeclared_workspace_message_has_next_step() {
     let root = Path::new("/project");
