@@ -975,6 +975,10 @@ jobs:
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
       - name: Type-aware sidecar tests
         run: node --test tools/type-aware-sidecar/test/*.test.mjs
+      - name: Type-aware sidecar tests (tsrs backend)
+        env:
+          FALLOW_TYPE_AWARE_BACKEND: tsrs
+        run: node --test tools/type-aware-sidecar/test/*.test.mjs
       - name: Type-aware sidecar package check
         working-directory: tools/type-aware-sidecar
         run: npm pack --dry-run --json

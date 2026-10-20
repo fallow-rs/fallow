@@ -2,31 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { API, SignatureKind, SymbolFlags } from "typescript/unstable/sync";
-import {
-  isCallExpression,
-  isClassDeclaration,
-  isClassExpression,
-  isDecorator,
-  isElementAccessExpression,
-  isExportDeclaration,
-  isExportSpecifier,
-  isFunctionBody,
-  isGetAccessorDeclaration,
-  isIdentifier,
-  isImportDeclaration,
-  isImportClause,
-  isImportSpecifier,
-  isImportTypeNode,
-  isNamespaceImport,
-  isPropertyAccessExpression,
-  isQualifiedName,
-  isPrivateIdentifier,
-  isSetAccessorDeclaration,
-  isStringLiteralLikeNode,
-  isTypeNode,
-  isTypeQueryNode,
-} from "typescript/unstable/ast/is";
+import { ast, createApi as createBackendApi, projectConfigFileName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
 import { projectResult, projectState } from "./project-state.mjs";
@@ -52,6 +28,32 @@ import {
 } from "./semantic-identity.mjs";
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
 import { analyzeTypeCoupling } from "./type-coupling.mjs";
+
+const { SignatureKind, SymbolFlags } = sync;
+const {
+  isCallExpression,
+  isClassDeclaration,
+  isClassExpression,
+  isDecorator,
+  isElementAccessExpression,
+  isExportDeclaration,
+  isExportSpecifier,
+  isFunctionBody,
+  isGetAccessorDeclaration,
+  isIdentifier,
+  isImportDeclaration,
+  isImportClause,
+  isImportSpecifier,
+  isImportTypeNode,
+  isNamespaceImport,
+  isPropertyAccessExpression,
+  isQualifiedName,
+  isPrivateIdentifier,
+  isSetAccessorDeclaration,
+  isStringLiteralLikeNode,
+  isTypeNode,
+  isTypeQueryNode,
+} = ast;
 
 const ATTACHED_COMMENT_PATTERN = /\/\/|\/\*/u;
 const MAX_SYMBOL_USE_EVIDENCE = 1;
@@ -999,6 +1001,10 @@ const declarationIsProjectLocal = (root, declaration) => {
   return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`));
 };
 
+// TypeScript 7.0 wraps a heritage type in ExpressionWithTypeArguments
+// (`expression`). TypeScript 7.1 uses a TypeReference (`typeName`).
+const heritageTypeName = (heritageType) => heritageType.expression ?? heritageType.typeName;
+
 const frameworkContractRelationsFor = (root, project, declaration, contracts, memberName) => {
   const owner = ownerDeclaration(declaration);
   if (!owner || (!isClassDeclaration(owner) && !isClassExpression(owner))) {
@@ -1013,7 +1019,7 @@ const frameworkContractRelationsFor = (root, project, declaration, contracts, me
       : "extends";
     for (const heritageType of clause.types ?? []) {
       const rawSymbol =
-        project.checker.getSymbolAtLocation(heritageType.expression) ??
+        project.checker.getSymbolAtLocation(heritageTypeName(heritageType)) ??
         project.checker.getTypeAtLocation(heritageType).aliasSymbol ??
         project.checker.getTypeAtLocation(heritageType).symbol;
       const symbol = resolveAlias(project.checker, rawSymbol);
@@ -1309,7 +1315,7 @@ const packageAt = (directory) => {
 
 const projectPackage = (root, project) => {
   const normalizedRoot = path.resolve(root);
-  let current = path.dirname(project.configFileName);
+  let current = path.dirname(projectConfigFileName(project));
   while (pathWithin(normalizedRoot, current)) {
     const found = packageAt(current);
     if (found) return found;
@@ -2205,7 +2211,7 @@ const executeDisposableSemanticAnalysis = (input) => {
 
 export const analyzeSemanticQueries = (
   { root, projects, queries, evidenceLimit },
-  { createApi = (cwd) => new API({ cwd }) } = {},
+  { createApi = (cwd) => createBackendApi({ cwd }) } = {},
 ) => {
   if (queries.length === 0) return emptyRequestedAnalysis();
   const setupStartedAt = performance.now();
@@ -2224,7 +2230,10 @@ export const analyzeSemanticQueries = (
   }
 };
 
-export const createSemanticSession = (root, { createApi = (cwd) => new API({ cwd }) } = {}) => {
+export const createSemanticSession = (
+  root,
+  { createApi = (cwd) => createBackendApi({ cwd }) } = {},
+) => {
   const api = createApi(root);
   const state = {
     openFiles: new Set(),

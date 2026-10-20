@@ -10,9 +10,16 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { API, DiagnosticCategory } from "typescript/unstable/sync";
+import {
+  READ_FROM_DISK,
+  createApi as createBackendApi,
+  isInferredProject,
+  sync,
+} from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
+
+const { DiagnosticCategory } = sync;
 
 const JAVASCRIPT_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
 const LEADING_COMMENTS = /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/u;
@@ -20,9 +27,6 @@ const NO_CHECK_PRAGMA = /@ts-nocheck\b/u;
 const MAX_CODES = 8;
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-
-const isInferredProject = (project) =>
-  project.configFileName.split(path.sep).join("/").endsWith("/dev/null/inferred");
 
 const hasNoCheckPragma = (text) => NO_CHECK_PRAGMA.test(LEADING_COMMENTS.exec(text)?.[0] ?? "");
 
@@ -99,7 +103,8 @@ const createOverlayApi = (root, createApi) => {
     cwd: root,
     fs: {
       readFile: (fileName) =>
-        overlay.size === 0 ? undefined : overlay.get(canonicalFileIdentity(fileName)),
+        (overlay.size === 0 ? undefined : overlay.get(canonicalFileIdentity(fileName))) ??
+        READ_FROM_DISK,
     },
   });
   return { api, overlay };
@@ -163,10 +168,7 @@ const checkFile = (context, file) => {
 };
 
 /** Type-checks each mutant of a parsed `mutant-typecheck` request. */
-export const checkMutants = (
-  { root, files },
-  { createApi = (options) => new API(options) } = {},
-) => {
+export const checkMutants = ({ root, files }, { createApi = createBackendApi } = {}) => {
   if (files.length === 0) return [];
   const context = createOverlayApi(root, createApi);
   try {

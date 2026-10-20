@@ -29,9 +29,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::manifest::{
-    ANALYSIS_OPERATION as OPERATION, BACKEND_FAMILY, BACKEND_VERSION, QUERY_OPERATIONS,
-    SEMANTIC_SCHEMA_VERSION, WIRE_PROTOCOL_VERSION as PROTOCOL_VERSION,
+    ANALYSIS_OPERATION as OPERATION, QUERY_OPERATIONS, SEMANTIC_SCHEMA_VERSION,
+    WIRE_PROTOCOL_VERSION as PROTOCOL_VERSION, selected_backend, selected_backend_family,
 };
+#[cfg(test)]
+use super::manifest::{BACKEND_FAMILY, BACKEND_VERSION};
 use super::transport::{TypeAwareError, TypeAwareOutcome};
 use queries::{build_dead_code_queries, query_supports_guarded_fix};
 use reconcile::apply_dead_code_response;
@@ -717,7 +719,7 @@ fn empty_semantic_outcome(mut capabilities: Vec<SemanticCapability>) -> Semantic
         semantic_schema_version: SEMANTIC_SCHEMA_VERSION,
         capabilities,
         project_config_hash: DEFERRED_PROJECT_CONFIG_HASH.to_string(),
-        backend_family: BACKEND_FAMILY.to_string(),
+        backend_family: selected_backend_family().to_string(),
         completeness: SemanticCompleteness::Complete,
     };
     SemanticDeadCodeOutcome {
@@ -727,7 +729,7 @@ fn empty_semantic_outcome(mut capabilities: Vec<SemanticCapability>) -> Semantic
                 executed: false,
                 protocol_version: PROTOCOL_VERSION,
                 sidecar_version: None,
-                backend: BACKEND_FAMILY.to_string(),
+                backend: selected_backend_family().to_string(),
                 backend_version: None,
                 ..TypeAwareMeta::default()
             },
@@ -1453,15 +1455,16 @@ fn validate_response(
             env!("CARGO_PKG_VERSION"),
         )));
     }
-    if response.backend != BACKEND_FAMILY {
+    let (backend_family, backend_version) = selected_backend().map_err(TypeAwareError::from)?;
+    if response.backend != backend_family {
         return Err(TypeAwareError::from(format!(
-            "unsupported type-aware backend {}",
+            "unsupported type-aware backend {}; expected {backend_family}",
             response.backend
         )));
     }
-    if response.backend_version != BACKEND_VERSION {
+    if response.backend_version != backend_version {
         return Err(TypeAwareError::from(format!(
-            "unsupported type-aware backend version {}; expected {BACKEND_VERSION}",
+            "unsupported type-aware backend version {}; expected {backend_version}",
             response.backend_version
         )));
     }

@@ -127,7 +127,7 @@ const fixture = (context) => {
   );
 
   writeJson(join(repoRoot, "crates", "api", "type-aware-protocol.json"), {
-    backend: { version: BACKEND_VERSION },
+    backends: [{ family: "typescript-go", package: "typescript", version: BACKEND_VERSION }],
   });
   write(join(repoRoot, "tools", "type-aware-sidecar", "fallow-type-aware.mjs"));
   write(join(repoRoot, "tools", "type-aware-sidecar", "src", "windows-child-process.mjs"));

@@ -14,18 +14,13 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { API } from "typescript/unstable/sync";
+import { BACKEND, createApi } from "../src/backend.mjs";
 
 import { createSemanticResponse, parseRequest } from "../src/protocol.mjs";
 import { analyzeSemanticQueries, createSemanticSession } from "../src/semantic.mjs";
 import { readAll } from "../src/cli.mjs";
 import { canonicalFileIdentity } from "../src/file-identity.mjs";
-import {
-  ANALYSIS_OPERATION,
-  BACKEND_FAMILY,
-  BACKEND_VERSION,
-  WIRE_PROTOCOL_VERSION,
-} from "../src/generated-protocol.mjs";
+import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sidecarPackage = JSON.parse(readFileSync(path.join(sidecarRoot, "package.json"), "utf8"));
@@ -42,8 +37,8 @@ test("status reports protocol and backend without a project request", () => {
   assert.deepEqual(JSON.parse(result.stdout), {
     package_version: sidecarVersion,
     protocol_version: WIRE_PROTOCOL_VERSION,
-    backend_family: BACKEND_FAMILY,
-    backend_version: BACKEND_VERSION,
+    backend_family: BACKEND.family,
+    backend_version: BACKEND.version,
   });
 });
 
@@ -2844,7 +2839,7 @@ test("returns provenance for an empty semantic request", () => {
   assert.equal(response.protocol_version, 7);
   assert.equal(response.operation, "semantic-queries");
   assert.equal(response.sidecar_version, sidecarVersion);
-  assert.equal(response.backend, "typescript-go");
+  assert.equal(response.backend, BACKEND.family);
   assert.deepEqual(response.selected_tsconfigs, []);
   assert.deepEqual(response.projects, []);
   assert.deepEqual(response.results, []);
@@ -2885,7 +2880,7 @@ test("persistent semantic session invalidates changed source without stale refer
     const snapshots = [];
     const session = createSemanticSession(root, {
       createApi: (cwd) => {
-        const api = new API({ cwd });
+        const api = createApi({ cwd });
         return {
           updateSnapshot: (params) => {
             const snapshot = api.updateSnapshot(params);

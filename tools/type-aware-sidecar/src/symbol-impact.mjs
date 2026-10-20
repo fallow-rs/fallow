@@ -1,11 +1,6 @@
 import path from "node:path";
 
-import {
-  isCallExpression,
-  isExportDeclaration,
-  isImportDeclaration,
-  isStringLiteralLikeNode,
-} from "typescript/unstable/ast/is";
+import { ast } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
 import {
@@ -14,6 +9,8 @@ import {
   semanticQueryIdentity,
   sourceFileIdentity,
 } from "./semantic-identity.mjs";
+
+const { isCallExpression, isExportDeclaration, isImportDeclaration, isStringLiteralLikeNode } = ast;
 
 const TEST_FILE_PATTERN = /(?:^|[/_.-])(?:test|spec)\.[cm]?[jt]sx?$/u;
 const compareText = (left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right));

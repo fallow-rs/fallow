@@ -740,6 +740,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Wall clock in seconds allowed for one TypeScript semantic sidecar request (default 120; unset, 0, or a non-numeric value keeps the default). Raise it for very large TypeScript programs, where a semantic query scans the whole program.",
     ),
     (
+        "FALLOW_TYPE_AWARE_BACKEND",
+        "Experimental. Type-checker backend for the TypeScript semantic sidecar: typescript-go (default) or tsrs. The tsrs backend needs the exact pinned tsrs npm package where fallow-type-aware can resolve it. An unknown value makes the type-aware pass unavailable.",
+    ),
+    (
         "FALLOW_TYPE_AWARE_BIN",
         "Trusted executable override for the TypeScript semantic refinement sidecar used by dead-code --type-aware. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     ),

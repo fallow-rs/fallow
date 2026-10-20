@@ -8,10 +8,18 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({
   mutant_typecheck_operation: "mutant-typecheck",
   query_operations: ["symbol-use", "symbol-trace", "api-surface", "symbol-impact", "type-coupling"],
   session_envelope_types: ["analyze", "shutdown"],
-  backend: {
-    family: "typescript-go",
-    version: "7.0.2",
-  },
+  backends: [
+    {
+      family: "typescript-go",
+      package: "typescript",
+      version: "7.0.2",
+    },
+    {
+      family: "tsrs",
+      package: "tsrs",
+      version: "0.18.0-ts7.1.0-dev.20260929",
+    },
+  ],
   sidecar: {
     package: "fallow-type-aware",
     version_source: "workspace-package",
@@ -24,6 +32,7 @@ export const STATUS_OPERATION = TYPE_AWARE_PROTOCOL.status_operation;
 export const MUTANT_TYPECHECK_OPERATION = TYPE_AWARE_PROTOCOL.mutant_typecheck_operation;
 export const QUERY_OPERATIONS = Object.freeze(TYPE_AWARE_PROTOCOL.query_operations);
 export const SESSION_ENVELOPE_TYPES = Object.freeze(TYPE_AWARE_PROTOCOL.session_envelope_types);
-export const BACKEND_FAMILY = TYPE_AWARE_PROTOCOL.backend.family;
-export const BACKEND_VERSION = TYPE_AWARE_PROTOCOL.backend.version;
+export const BACKENDS = Object.freeze(TYPE_AWARE_PROTOCOL.backends.map(Object.freeze));
+export const DEFAULT_BACKEND_FAMILY = BACKENDS[0].family;
+export const BACKEND_VERSION = BACKENDS[0].version;
 export const SIDECAR_PACKAGE = TYPE_AWARE_PROTOCOL.sidecar.package;

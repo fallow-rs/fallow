@@ -16,7 +16,7 @@ struct ProtocolManifest {
     mutant_typecheck_operation: String,
     query_operations: Vec<String>,
     session_envelope_types: Vec<String>,
-    backend: Backend,
+    backends: Vec<Backend>,
     sidecar: Sidecar,
 }
 
@@ -24,6 +24,7 @@ struct ProtocolManifest {
 #[serde(deny_unknown_fields)]
 struct Backend {
     family: String,
+    package: String,
     version: String,
 }
 
@@ -110,6 +111,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if manifest.query_operations.is_empty() {
         return Err(invalid_manifest("query operations must not be empty").into());
     }
+    let Some(default_backend) = manifest.backends.first() else {
+        return Err(invalid_manifest("backends must not be empty").into());
+    };
+    let mut families: Vec<&str> = manifest
+        .backends
+        .iter()
+        .map(|b| b.family.as_str())
+        .collect();
+    families.sort_unstable();
+    families.dedup();
+    if families.len() != manifest.backends.len() {
+        return Err(invalid_manifest("backend families must be unique").into());
+    }
+    if manifest.backends.iter().any(|b| b.package.is_empty()) {
+        return Err(invalid_manifest("backend packages must not be empty").into());
+    }
     if manifest.sidecar.version_source != "workspace-package" {
         return Err(invalid_manifest("unsupported sidecar version source").into());
     }
@@ -125,6 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          pub(super) const SESSION_ENVELOPE_TYPES: &[&str] = &[{}];\n\
          pub(super) const BACKEND_FAMILY: &str = {};\n\
          pub(super) const BACKEND_VERSION: &str = {};\n\
+         pub(super) const BACKENDS: &[(&str, &str)] = &[{}];\n\
          pub(super) const SIDECAR_PACKAGE: &str = {};\n",
         manifest.wire_protocol_version,
         manifest.semantic_schema_version,
@@ -133,8 +151,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rust_string(&manifest.mutant_typecheck_operation),
         rust_string_slice(&manifest.query_operations),
         rust_string_slice(&manifest.session_envelope_types),
-        rust_string(&manifest.backend.family),
-        rust_string(&manifest.backend.version),
+        rust_string(&default_backend.family),
+        rust_string(&default_backend.version),
+        manifest
+            .backends
+            .iter()
+            .map(|b| format!("({}, {})", rust_string(&b.family), rust_string(&b.version)))
+            .collect::<Vec<_>>()
+            .join(", "),
         rust_string(&manifest.sidecar.package),
     );
     let output = PathBuf::from(

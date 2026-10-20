@@ -2,16 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { SymbolFlags } from "typescript/unstable/sync";
-import {
-  isExportDeclaration,
-  isImportDeclaration,
-  isNamedExports,
-  isNamedImports,
-} from "typescript/unstable/ast/is";
+import { ast, isInferredProject, projectConfigFileName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
 import { projectSourceFiles, relativePath } from "./semantic-identity.mjs";
+
+const { SymbolFlags } = sync;
+const { isExportDeclaration, isImportDeclaration, isNamedExports, isNamedImports } = ast;
 
 const INFERRED_PROJECT = "<inferred>";
 const compareText = (left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right));
@@ -105,8 +102,7 @@ const hasSvelteVirtualModuleGap = (project) =>
   );
 
 const configPath = (root, project) => {
-  const normalized = slash(project.configFileName);
-  if (normalized.endsWith("/dev/null/inferred")) return INFERRED_PROJECT;
+  if (isInferredProject(project)) return INFERRED_PROJECT;
   return relativePath(root, project.configFileName) || path.basename(project.configFileName);
 };
 
@@ -256,7 +252,7 @@ const effectiveProjectConfigHash = (root, project) => {
   const effective = {
     config: configPath(root, project),
     compiler_options: normalizedConfigValue(root, project.compilerOptions),
-    config_document: configDocumentClosure(root, project.configFileName),
+    config_document: configDocumentClosure(root, projectConfigFileName(project)),
   };
   return `sha256:${createHash("sha256").update(JSON.stringify(effective)).digest("hex")}`;
 };

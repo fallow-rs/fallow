@@ -1,7 +1,11 @@
 import path from "node:path";
 
-import { SymbolFlags } from "typescript/unstable/sync";
-import {
+import { sync, ast } from "./backend.mjs";
+
+import { canonicalFileIdentity } from "./file-identity.mjs";
+
+const { SymbolFlags } = sync;
+const {
   isClassDeclaration,
   isClassExpression,
   isEnumDeclaration,
@@ -19,9 +23,7 @@ import {
   isSourceFile,
   isTypeAliasDeclaration,
   isVariableDeclaration,
-} from "typescript/unstable/ast/is";
-
-import { canonicalFileIdentity } from "./file-identity.mjs";
+} = ast;
 
 const DECLARATION_KIND_RULES = [
   [[isClassDeclaration, isClassExpression], "class"],

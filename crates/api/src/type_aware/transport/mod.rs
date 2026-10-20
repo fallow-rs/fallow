@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{
-    BACKEND_FAMILY, BACKEND_VERSION, SESSION_ENVELOPE_TYPES, SIDECAR_PACKAGE as SIDECAR_BINARY,
-    STATUS_OPERATION, WIRE_PROTOCOL_VERSION as TYPE_AWARE_PROTOCOL_VERSION,
+    BACKEND_ENV, SESSION_ENVELOPE_TYPES, SIDECAR_PACKAGE as SIDECAR_BINARY, STATUS_OPERATION,
+    WIRE_PROTOCOL_VERSION as TYPE_AWARE_PROTOCOL_VERSION, selected_backend,
 };
 #[cfg(windows)]
 use discovery::canonical_sidecar_path;
@@ -220,6 +220,21 @@ pub fn status(root: &Path) -> TypeAwareStatus {
             };
         }
     };
+    let (backend_family, backend_version) = match selected_backend() {
+        Ok(backend) => backend,
+        Err(error) => {
+            return TypeAwareStatus {
+                available: false,
+                discovery_source: Some(discovery_source),
+                companion_path: Some(sidecar),
+                package_version: None,
+                protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
+                backend_family: None,
+                backend_version: None,
+                remediation: Some(error),
+            };
+        }
+    };
     let request = StatusRequest {
         protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
         operation: STATUS_OPERATION,
@@ -234,8 +249,8 @@ pub fn status(root: &Path) -> TypeAwareStatus {
         Ok(response)
             if response.protocol_version == TYPE_AWARE_PROTOCOL_VERSION
                 && response.package_version == env!("CARGO_PKG_VERSION")
-                && response.backend_family == BACKEND_FAMILY
-                && response.backend_version == BACKEND_VERSION =>
+                && response.backend_family == backend_family
+                && response.backend_version == backend_version =>
         {
             TypeAwareStatus {
                 available: true,
