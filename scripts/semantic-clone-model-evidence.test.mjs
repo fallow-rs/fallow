@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { compareEvidence, formatComparison, parseArgs } from "./semantic-clone-model-evidence.mjs";
+import {
+  compareEvidence,
+  formatComparison,
+  parseArgs,
+  readComparisonBaseline,
+} from "./semantic-clone-model-evidence.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 const LOCKED_EVIDENCE = resolve(
@@ -34,6 +40,9 @@ test("model evidence accepts an optional comparison baseline", () => {
     "/tmp/old.json",
   );
   assert.throws(() => parseArgs([...REQUIRED_ARGS, "--compare"]), /--compare requires/);
+  for (const inherited of ["constructor", "toString", "__proto__"]) {
+    assert.throws(() => parseArgs([...REQUIRED_ARGS, inherited, "value"]), /unknown argument/);
+  }
 });
 
 test("comparison of the locked evidence with itself reports no change", () => {
@@ -111,4 +120,16 @@ test("comparison reports deltas, threshold crossings, and order changes", () => 
   assert.match(summary, /added cases: delta/);
   assert.match(summary, /removed cases: gamma/);
   assert.match(summary, /Removed profiles: removed-profile/);
+});
+
+test("comparison baseline must be model evidence with profiles", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "fallow-model-evidence-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "evidence.json");
+
+  writeFileSync(path, JSON.stringify({ profiles: "none" }));
+  assert.throws(() => readComparisonBaseline(path), /must contain a profiles array/);
+  writeFileSync(path, JSON.stringify({ profiles: [{ id: "native-768", threshold: 0.8 }] }));
+  assert.throws(() => readComparisonBaseline(path), /native-768 must contain a cases array/);
+  assert.equal(readComparisonBaseline(LOCKED_EVIDENCE).profiles.length, 2);
 });

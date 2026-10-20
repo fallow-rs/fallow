@@ -26,19 +26,19 @@ const fail = (message) => {
 
 const sha256 = (contents) => createHash("sha256").update(contents).digest("hex");
 
-const VALUE_FLAGS = {
-  "--compare": { key: "compare", missing: "--compare requires an evidence path" },
-  "--manifest": { key: "manifest", missing: "--manifest requires a path" },
-  "--model-cache-state": {
-    key: "modelCacheState",
-    missing: "--model-cache-state requires cold, warm, or unknown",
-  },
-  "--runtime-lock": { key: "runtimeLock", missing: "--runtime-lock requires a path" },
-  "--transformers-module": {
-    key: "transformersModule",
-    missing: "--transformers-module requires a path",
-  },
-};
+const VALUE_FLAGS = new Map([
+  ["--compare", { key: "compare", missing: "--compare requires an evidence path" }],
+  ["--manifest", { key: "manifest", missing: "--manifest requires a path" }],
+  [
+    "--model-cache-state",
+    { key: "modelCacheState", missing: "--model-cache-state requires cold, warm, or unknown" },
+  ],
+  ["--runtime-lock", { key: "runtimeLock", missing: "--runtime-lock requires a path" }],
+  [
+    "--transformers-module",
+    { key: "transformersModule", missing: "--transformers-module requires a path" },
+  ],
+]);
 
 const parseArgs = (argv) => {
   const options = {
@@ -49,7 +49,7 @@ const parseArgs = (argv) => {
     transformersModule: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
-    const flag = VALUE_FLAGS[argv[index]] ?? fail(`unknown argument: ${argv[index]}`);
+    const flag = VALUE_FLAGS.get(argv[index]) ?? fail(`unknown argument: ${argv[index]}`);
     options[flag.key] = argv[index + 1] ?? fail(flag.missing);
     index += 1;
   }
@@ -354,10 +354,26 @@ const formatComparison = (comparison) => {
   return `${lines.join("\n")}\n`;
 };
 
+/**
+ * Reads the evidence for `--compare` before the model run, so a bad file fails
+ * before the slow part.
+ */
+const readComparisonBaseline = (path) => {
+  const baseline = JSON.parse(readFileSync(resolve(path), "utf8"));
+  if (!Array.isArray(baseline?.profiles)) {
+    fail(`--compare evidence ${path} must contain a profiles array`);
+  }
+  for (const entry of baseline.profiles) {
+    if (!Array.isArray(entry?.cases)) {
+      fail(`--compare evidence profile ${entry?.id} must contain a cases array`);
+    }
+  }
+  return baseline;
+};
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
-  const previous =
-    options.compare === null ? null : JSON.parse(readFileSync(resolve(options.compare), "utf8"));
+  const previous = options.compare === null ? null : readComparisonBaseline(options.compare);
   const evidence = await generateEvidence(options);
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
   if (previous !== null) {
@@ -373,4 +389,4 @@ if (isMain) {
   });
 }
 
-export { compareEvidence, formatComparison, parseArgs };
+export { compareEvidence, formatComparison, parseArgs, readComparisonBaseline };
