@@ -1,0 +1,93 @@
+name: Branch Coverage
+
+# Measures branch coverage once a week and on demand. Branch coverage in
+# cargo-llvm-cov (`--branch`) needs a nightly compiler, so it runs apart from
+# the stable Coverage workflow and its floor. This workflow only reports the
+# number: it has no floor and is not a required check. It does not run on
+# pull requests or on push to main, so scripts/verify-release-ci.mjs does not
+# need it in REQUIRED_WORKFLOWS.
+on:
+  schedule:
+    - cron: '20 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: branch-coverage
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same nightly as Fuzz Smoke, so both nightly jobs share one toolchain bump.
+  NIGHTLY_TOOLCHAIN: nightly-2026-07-20
+  # A background git repack after a fixture commit races the next git add.
+  # See scripts/workflow-policy.test.mjs.
+  GIT_CONFIG_COUNT: '2'
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: 'false'
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: '0'
+
+jobs:
+  branch-coverage:
+    name: Branch coverage
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+          components: llvm-tools-preview
+          cache-key: branch-coverage-${{ env.NIGHTLY_TOOLCHAIN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install type-aware sidecar dependencies
+        run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Build CLI binary for e2e tests
+        run: cargo +"$NIGHTLY_TOOLCHAIN" build -p fallow-cli
+
+      - name: Run tests with branch coverage
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
+        run: |
+          mkdir -p coverage
+          cargo +"$NIGHTLY_TOOLCHAIN" llvm-cov --workspace --branch --lcov --output-path coverage/lcov.info
+
+      - name: Report coverage
+        run: |
+          awk -F: '
+            /^LF:/ { lines += $2 }
+            /^LH:/ { lines_hit += $2 }
+            /^BRF:/ { branches += $2 }
+            /^BRH:/ { branches_hit += $2 }
+            END {
+              printf "| Metric | Covered | Total | Percent |\n|---|---|---|---|\n"
+              printf "| Lines | %d | %d | %.1f%% |\n", lines_hit, lines, lines ? lines_hit / lines * 100 : 0
+              printf "| Branches | %d | %d | %.1f%% |\n", branches_hit, branches, branches ? branches_hit / branches * 100 : 0
+            }
+          ' coverage/lcov.info | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload LCOV report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: branch-coverage-lcov-${{ github.run_id }}
+          path: coverage/lcov.info
+          retention-days: 30
