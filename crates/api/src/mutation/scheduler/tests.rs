@@ -785,6 +785,26 @@ fn a_flaky_result_keeps_the_history_of_each_attempt() {
 }
 
 #[test]
+fn a_timeout_from_the_companion_keeps_its_failure_kind() {
+    let timeout_then_survived = retried_m1(
+        |run| Ok(run_result(run, RunStatus::Timeout, None)),
+        |run| Ok(run_result(run, RunStatus::Survived, None)),
+    );
+    assert_eq!(timeout_then_survived.status, MutantStatus::Flaky);
+    assert_eq!(
+        timeout_then_survived.attempts.first(),
+        Some(&MutantAttempt {
+            status: MutantStatus::Timeout,
+            duration_ms: Some(12),
+            killed_by: None,
+            failure_kind: Some(MutantFailureKind::Timeout),
+            detail: None,
+        }),
+        "a runner timeout carries the duration of the run result"
+    );
+}
+
+#[test]
 fn a_runtime_error_retry_keeps_its_reason_and_a_single_run_has_no_attempts() {
     let survived_then_error = retried_m1(
         |run| Ok(run_result(run, RunStatus::Survived, None)),

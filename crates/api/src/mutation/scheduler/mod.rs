@@ -855,9 +855,10 @@ impl<'a> Worker<'a> {
                 Ok((status, killed_by)) => {
                     load_kill = is_load_kill(&result, status, killed_by.as_ref());
                     let kind = kill_kind(&result, status, killed_by.as_deref());
+                    let decided = Attempt::decided(status, killed_by, round_ms(result.duration_ms));
                     Attempt {
-                        failure_kind: kind,
-                        ..Attempt::decided(status, killed_by, round_ms(result.duration_ms))
+                        failure_kind: kind.or(decided.failure_kind),
+                        ..decided
                     }
                 }
                 Err(reason) => {

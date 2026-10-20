@@ -34213,7 +34213,7 @@
             "integer",
             "null"
           ],
-          "description": "The duration of this run in milliseconds. A timeout reports the wait\nof the watchdog."
+          "description": "The duration of this run in milliseconds. A watchdog timeout reports\nthe wait of the watchdog."
         },
         "killed_by": {
           "type": [

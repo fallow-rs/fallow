@@ -384,8 +384,8 @@ pub struct MutantResult {
 pub struct MutantAttempt {
     /// The status of this run alone.
     pub status: MutantStatus,
-    /// The duration of this run in milliseconds. A timeout reports the wait
-    /// of the watchdog.
+    /// The duration of this run in milliseconds. A watchdog timeout reports
+    /// the wait of the watchdog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     /// The test that killed the mutant in this run.

@@ -20026,8 +20026,8 @@ mocked_targets?: string[]
 export interface MutantAttempt {
 status: MutantStatus
 /**
- * The duration of this run in milliseconds. A timeout reports the wait
- * of the watchdog.
+ * The duration of this run in milliseconds. A watchdog timeout reports
+ * the wait of the watchdog.
  */
 duration_ms?: (number | null)
 /**
