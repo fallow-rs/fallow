@@ -6,7 +6,9 @@
 //! members, decorators, module syntax, directives, assignment targets,
 //! property keys, the arguments of logging calls, a `case` label whose
 //! literal mutant is equivalent because its body is the `default` body, and
-//! the `!=` mutant of a counted `for` loop test (see `counted_loop_test`).
+//! the `!=` mutant of a counted `for` loop test (see `counted_loop_test`),
+//! and the equivalent mutant of a zero comparison on the length of a known
+//! array (see `ArrayBindings`).
 //!
 //! The logging rule is broad: a `console.*` or `debug(...)` call gives no
 //! mutant at all. This covers each expression in its arguments (strings,
@@ -16,20 +18,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_ast::ast::{
     AccessorProperty, ArrowFunctionExpression, AssignmentExpression, AssignmentTarget,
-    AssignmentTargetPropertyIdentifier, BinaryExpression, BindingPattern, BooleanLiteral,
-    CallExpression, ChainElement, ChainExpression, Class, ConditionalExpression, Decorator,
-    Directive, DoWhileStatement, ExportAllDeclaration, ExportDefaultDeclaration,
+    AssignmentTargetPropertyIdentifier, BinaryExpression, BindingIdentifier, BindingPattern,
+    BooleanLiteral, CallExpression, ChainElement, ChainExpression, Class, ConditionalExpression,
+    Decorator, Directive, DoWhileStatement, ExportAllDeclaration, ExportDefaultDeclaration,
     ExportFromDeclaration, ExportNamedDeclaration, Expression, ExpressionStatement, ForStatement,
-    ForStatementInit, ForStatementLeft, Function, IfStatement, ImportDeclaration, ImportExpression,
-    JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition, MethodDefinitionKind,
-    ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral, ReturnStatement,
-    SimpleAssignmentTarget, Statement, StringLiteral, SwitchCase, SwitchStatement,
+    ForStatementInit, ForStatementLeft, FormalParameter, Function, IfStatement, ImportDeclaration,
+    ImportExpression, JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition,
+    MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral,
+    ReturnStatement, SimpleAssignmentTarget, Statement, StringLiteral, SwitchCase, SwitchStatement,
     TSEnumDeclaration, TSExportAssignment, TSExternalModuleDeclaration, TSGlobalDeclaration,
     TSImportEqualsDeclaration, TSInterfaceDeclaration, TSNamespaceDeclaration,
-    TSNamespaceExportDeclaration, TSType, TSTypeAliasDeclaration, TSTypeAnnotation,
-    TSTypeParameterDeclaration, TSTypeParameterInstantiation, TaggedTemplateExpression,
-    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarationKind,
-    VariableDeclarator, WhileStatement,
+    TSNamespaceExportDeclaration, TSType, TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeName,
+    TSTypeOperatorOperator, TSTypeParameterDeclaration, TSTypeParameterInstantiation,
+    TaggedTemplateExpression, UnaryExpression, UpdateExpression, VariableDeclaration,
+    VariableDeclarationKind, VariableDeclarator, WhileStatement, WithStatement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
@@ -91,6 +93,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         expression_starts: BTreeSet::new(),
         equivalent_labels: BTreeSet::new(),
         counted_loop_tests: BTreeSet::new(),
+        known_arrays: ArrayBindings::known_arrays(program),
     };
     collector.visit_program(program);
     let mut sites: Vec<Site> = collector.sites.into_values().collect();
@@ -130,6 +133,9 @@ struct Collector<'s> {
     /// Counted `for` loop tests whose `!=` mutant is equivalent. See
     /// `counted_loop_test`.
     counted_loop_tests: BTreeSet<(u32, u32)>,
+    /// The names that bind an array everywhere in the file. See
+    /// `ArrayBindings`.
+    known_arrays: BTreeSet<String>,
 }
 
 const fn pair(span: Span) -> (u32, u32) {
@@ -357,6 +363,157 @@ impl<'a> Visit<'a> for CounterWrites<'_> {
         self.found |= callee_without_wrappers(&it.callee).is_specific_id("eval");
         walk::walk_call_expression(self, it);
     }
+}
+
+/// The global names that a known-array proof by constructor or type depends
+/// on. A file that binds one of these names gets no known-array proof.
+const ARRAY_GLOBALS: [&str; 2] = ["Array", "ReadonlyArray"];
+
+/// Finds the names whose every binding in the file holds an array, so that
+/// `name.length` is a non-negative integer. A binding qualifies when it is:
+///
+/// - a `const` declarator with an array literal, `Array.from(...)` or
+///   `Array.of(...)` initializer;
+/// - a declarator or parameter with a TypeScript array type annotation:
+///   `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>` or a tuple.
+///
+/// The rule uses names, not scopes: a name with one other binding anywhere
+/// in the file is not proven. A `with` statement or a direct `eval` call
+/// can bind a name at run time, so they cancel every proof. A type
+/// annotation is a type-level proof only: a cast such as `as any` can pass
+/// another value. The rule accepts this, as the type checker does.
+#[derive(Default)]
+struct ArrayBindings {
+    qualifying: BTreeSet<(u32, u32)>,
+    names: BTreeMap<String, bool>,
+    dynamic_scope: bool,
+}
+
+impl ArrayBindings {
+    fn known_arrays(program: &Program<'_>) -> BTreeSet<String> {
+        let mut bindings = Self::default();
+        bindings.visit_program(program);
+        let globals_bound = ARRAY_GLOBALS
+            .iter()
+            .any(|name| bindings.names.contains_key(*name));
+        if bindings.dynamic_scope || globals_bound {
+            return BTreeSet::new();
+        }
+        bindings
+            .names
+            .into_iter()
+            .filter_map(|(name, all)| all.then_some(name))
+            .collect()
+    }
+}
+
+fn is_array_type(annotation: Option<&TSTypeAnnotation<'_>>) -> bool {
+    let Some(annotation) = annotation else {
+        return false;
+    };
+    match &annotation.type_annotation {
+        TSType::TSArrayType(_) | TSType::TSTupleType(_) => true,
+        TSType::TSTypeOperatorType(operator) => {
+            operator.operator == TSTypeOperatorOperator::Readonly
+                && matches!(
+                    operator.type_annotation,
+                    TSType::TSArrayType(_) | TSType::TSTupleType(_)
+                )
+        }
+        TSType::TSTypeReference(reference) => {
+            reference.type_arguments.is_some()
+                && matches!(&reference.type_name, TSTypeName::IdentifierReference(name) if ARRAY_GLOBALS.contains(&name.name.as_str()))
+        }
+        _ => false,
+    }
+}
+
+/// True for an array literal, `Array.from(...)` or `Array.of(...)`.
+fn is_array_value(init: &Expression<'_>) -> bool {
+    match init {
+        Expression::ArrayExpression(_) => true,
+        Expression::CallExpression(call) => matches!(
+            &call.callee,
+            Expression::StaticMemberExpression(member)
+                if member.object.is_specific_id("Array")
+                    && matches!(member.property.name.as_str(), "from" | "of")
+        ),
+        _ => false,
+    }
+}
+
+impl<'a> Visit<'a> for ArrayBindings {
+    fn visit_variable_declaration(&mut self, it: &VariableDeclaration<'a>) {
+        for declarator in &it.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            let constant = it.kind == VariableDeclarationKind::Const
+                && declarator.init.as_ref().is_some_and(is_array_value);
+            if constant || is_array_type(declarator.type_annotation.as_deref()) {
+                self.qualifying.insert(pair(id.span));
+            }
+        }
+        walk::walk_variable_declaration(self, it);
+    }
+
+    fn visit_formal_parameter(&mut self, it: &FormalParameter<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &it.pattern
+            && is_array_type(it.type_annotation.as_deref())
+        {
+            self.qualifying.insert(pair(id.span));
+        }
+        walk::walk_formal_parameter(self, it);
+    }
+
+    fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
+        let qualifies = self.qualifying.contains(&pair(it.span));
+        self.names
+            .entry(it.name.to_string())
+            .and_modify(|all| *all &= qualifies)
+            .or_insert(qualifies);
+    }
+
+    fn visit_with_statement(&mut self, it: &WithStatement<'a>) {
+        self.dynamic_scope = true;
+        walk::walk_with_statement(self, it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.dynamic_scope |= callee_without_wrappers(&it.callee).is_specific_id("eval");
+        walk::walk_call_expression(self, it);
+    }
+}
+
+/// The comparison operator with its operands swapped: `0 < n` is `n > 0`.
+const fn mirrored(operator: BinaryOperator) -> BinaryOperator {
+    match operator {
+        BinaryOperator::LessThan => BinaryOperator::GreaterThan,
+        BinaryOperator::LessEqualThan => BinaryOperator::GreaterEqualThan,
+        BinaryOperator::GreaterThan => BinaryOperator::LessThan,
+        BinaryOperator::GreaterEqualThan => BinaryOperator::LessEqualThan,
+        other => other,
+    }
+}
+
+/// The replacement that is equivalent for `n <operator> 0` when `n` is a
+/// non-negative integer: `n > 0` is `n != 0`, `n <= 0` is `n == 0`,
+/// `n < 0` is always false and `n >= 0` is always true.
+const fn equivalent_zero_replacement(operator: BinaryOperator) -> Option<&'static str> {
+    match operator {
+        BinaryOperator::GreaterThan => Some("!="),
+        BinaryOperator::LessEqualThan => Some("=="),
+        BinaryOperator::LessThan => Some("false"),
+        BinaryOperator::GreaterEqualThan => Some("true"),
+        _ => None,
+    }
+}
+
+fn is_zero(expression: &Expression<'_>) -> bool {
+    matches!(
+        callee_without_wrappers(expression),
+        Expression::NumericLiteral(literal) if literal.value == 0.0
+    )
 }
 
 fn key_name(key: &PropertyKey<'_>) -> Option<String> {
@@ -729,6 +886,38 @@ impl Collector<'_> {
         self.expression_links(object, links);
     }
 
+    /// True when `expression` is always a non-negative integer. Only the
+    /// `length` of an array literal or of a known array qualifies, never an
+    /// arbitrary object with a `length` property, which can be negative.
+    fn is_non_negative_integer(&self, expression: &Expression<'_>) -> bool {
+        let Expression::StaticMemberExpression(member) = callee_without_wrappers(expression) else {
+            return false;
+        };
+        if member.optional || member.property.name != "length" {
+            return false;
+        }
+        match callee_without_wrappers(&member.object) {
+            Expression::ArrayExpression(_) => true,
+            Expression::Identifier(id) => self.known_arrays.contains(id.name.as_str()),
+            _ => false,
+        }
+    }
+
+    /// The relational replacement that gives the same result as `it`, if
+    /// one is provable. The collector does not emit it.
+    fn equivalent_replacement(&self, it: &BinaryExpression<'_>) -> Option<&'static str> {
+        if self.counted_loop_tests.contains(&pair(it.span)) {
+            return Some("!=");
+        }
+        if is_zero(&it.right) && self.is_non_negative_integer(&it.left) {
+            return equivalent_zero_replacement(it.operator);
+        }
+        if is_zero(&it.left) && self.is_non_negative_integer(&it.right) {
+            return equivalent_zero_replacement(mirrored(it.operator));
+        }
+        None
+    }
+
     fn logical_operand(&self, operand: &Expression<'_>) -> String {
         let text = self.text(operand.span().start, operand.span().end);
         if matches!(operand, Expression::LogicalExpression(_)) {
@@ -903,16 +1092,18 @@ impl<'a> Visit<'a> for Collector<'_> {
                 }
             }
             if let Some((operators, constant)) = relational_replacements(operator) {
-                self.add(
-                    it.span,
-                    Operator::RelationalOperator,
-                    pair(it.span),
-                    constant.to_owned(),
-                );
+                let equivalent = self.equivalent_replacement(it);
+                if equivalent != Some(constant) {
+                    self.add(
+                        it.span,
+                        Operator::RelationalOperator,
+                        pair(it.span),
+                        constant.to_owned(),
+                    );
+                }
                 let operand = self.relational_operands.contains(&pair(it.span));
-                let counted = self.counted_loop_tests.contains(&pair(it.span));
                 for replacement in operators {
-                    if counted && *replacement == "!=" {
+                    if equivalent == Some(*replacement) {
                         continue;
                     }
                     if operand && lowers_precedence(operator, replacement) {

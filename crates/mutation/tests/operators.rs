@@ -161,6 +161,196 @@ fn relational_operator_skips_not_equal_in_a_counted_loop() {
 }
 
 #[test]
+fn relational_operator_skips_equivalent_zero_comparisons_of_array_length() {
+    let pruned: &[(&str, &[(&str, &str)])] = &[
+        (
+            "const items = []; x = items.length > 0;",
+            &[(">", ">="), ("items.length > 0", "false")],
+        ),
+        (
+            "const items = []; x = 0 < items.length;",
+            &[("<", "<="), ("0 < items.length", "false")],
+        ),
+        (
+            "const items = []; x = items.length <= 0;",
+            &[("<=", "<"), ("items.length <= 0", "true")],
+        ),
+        (
+            "const items = []; x = 0 >= items.length;",
+            &[(">=", ">"), ("0 >= items.length", "true")],
+        ),
+        (
+            "const items = []; x = items.length < 0;",
+            &[("<", "<="), ("<", "!=")],
+        ),
+        (
+            "const items = []; x = 0 > items.length;",
+            &[(">", ">="), (">", "!=")],
+        ),
+        (
+            "const items = []; x = items.length >= 0;",
+            &[(">=", ">"), (">=", "==")],
+        ),
+        (
+            "const items = []; x = 0 <= items.length;",
+            &[("<=", "<"), ("<=", "==")],
+        ),
+        (
+            "const items = []; function f() { return (items).length > 0; }",
+            &[(">", ">="), ("(items).length > 0", "false")],
+        ),
+        (
+            "x = [a, b].length > 0;",
+            &[(">", ">="), ("[a, b].length > 0", "false")],
+        ),
+        (
+            "const items = Array.from(s); x = items.length > 0;",
+            &[(">", ">="), ("items.length > 0", "false")],
+        ),
+    ];
+    for (source, want) in pruned {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn relational_operator_skips_equivalent_zero_comparisons_of_typed_arrays() {
+    let typed = [
+        (
+            "const f = (items: string[]) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: readonly string[]) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: Array<string>) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: ReadonlyArray<string>) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: [string, number]) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "let items: string[] = load(); x = items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: string[]) => (items as any).length > 0;",
+            "(items as any).length > 0",
+        ),
+        (
+            "const f = (items: string[]) => items!.length > 0;",
+            "items!.length > 0",
+        ),
+    ];
+    for (source, text) in typed {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(&[(">", ">="), (text, "false")]),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn relational_operator_keeps_zero_comparisons_without_an_array_proof() {
+    let kept = |text: &str| -> Vec<(String, String)> {
+        expected(&[(">", ">="), (">", "!="), (text, "false")])
+    };
+    let near = [
+        ("x = items.length > 0;", "items.length > 0"),
+        (
+            "const o = { length: -1 }; x = o.length > 0;",
+            "o.length > 0",
+        ),
+        ("let items = []; x = items.length > 0;", "items.length > 0"),
+        ("var items = []; x = items.length > 0;", "items.length > 0"),
+        (
+            "const items = []; function f(items) { return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; { const items = o; x = items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; x = items.length > 1;",
+            "items.length > 1",
+        ),
+        (
+            "const items = []; x = items?.length > 0;",
+            "items?.length > 0",
+        ),
+        (
+            "const items = []; x = items[\"length\"] > 0;",
+            "items[\"length\"] > 0",
+        ),
+        ("const items = []; x = items.size > 0;", "items.size > 0"),
+        (
+            "const [items] = [o]; x = items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; with (o) { x = items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const items = []; function f() { eval(s); return items.length > 0; }",
+            "items.length > 0",
+        ),
+        (
+            "const Array = { from: () => o }; const items = Array.from(s); x = items.length > 0;",
+            "items.length > 0",
+        ),
+    ];
+    for (source, text) in near {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            kept(text),
+            "{source}"
+        );
+    }
+    for (source, text) in [
+        (
+            "const f = (items: any) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const f = (items: string[] | Sized) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "type Array<T> = { length: number }; const f = (items: Array<string>) => items.length > 0;",
+            "items.length > 0",
+        ),
+        (
+            "const items = [] as Sized; x = items.length > 0;",
+            "items.length > 0",
+        ),
+    ] {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            kept(text),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn logical_operator_swaps_and_keeps_precedence() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("x = a && b;", &[("&&", "||")]),
