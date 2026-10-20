@@ -237,12 +237,16 @@ mod tests {
     #[test]
     fn path_lookup_accepts_absolute_and_relative_paths() {
         let matcher = matcher(&["test/fixtures/**"]);
-        let root = Path::new("/project");
+        // A path such as `/project` is not absolute on Windows, so build the
+        // absolute paths from the platform temp directory.
+        let base = std::env::temp_dir();
+        let root = base.join("project");
+        let root = root.as_path();
 
-        assert!(matcher.is_ignored_path(root, Path::new("/project/test/fixtures/bad.js")));
+        assert!(matcher.is_ignored_path(root, &root.join("test/fixtures/bad.js")));
         assert!(matcher.is_ignored_path(root, Path::new("test/fixtures/bad.js")));
-        assert!(!matcher.is_ignored_path(root, Path::new("/project/src/app.js")));
-        assert!(!matcher.is_ignored_path(root, Path::new("/elsewhere/test/fixtures/bad.js")));
+        assert!(!matcher.is_ignored_path(root, &root.join("src/app.js")));
+        assert!(!matcher.is_ignored_path(root, &base.join("elsewhere/test/fixtures/bad.js")));
     }
 
     #[test]
