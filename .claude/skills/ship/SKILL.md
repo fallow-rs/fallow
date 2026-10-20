@@ -24,11 +24,14 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 4. Create signed conventional commits only.
 5. Merge through the repository's current protected-main workflow.
 6. Monitor the merged commit until required CI completes. Use
-   `node scripts/ship-wait-checks.mjs --commit <full sha> --min-checks <count> --follow-main`,
-   with the run count of a recent push to `main`. A newer push to `main`
-   cancels the runs of the merged commit. With `--follow-main`, the script
-   then waits for the newest commit of `origin/main` that contains the
-   merged commit, and prints one line for each move. On a busy `main`, new
+   `node scripts/ship-wait-checks.mjs --commit <full sha> --follow-main`.
+   Do not give `--min-checks`: path filters decide which workflows a push
+   starts, so the run count of another push is not the count of this
+   commit. The script takes the runs that GitHub created for the commit,
+   and stops when all of them are complete for a short time. A newer push
+   to `main` cancels the runs of the merged commit. With `--follow-main`,
+   the script then waits for the newest commit of `origin/main` that
+   contains the merged commit, and prints one line for each move. On a busy `main`, new
    pushes can cancel each long run, and the wait can time out with pending
    runs. Then do not start the same wait again. For each workflow without a
    pass, watch its newest in-progress run on a commit that contains the

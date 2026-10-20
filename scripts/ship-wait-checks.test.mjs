@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  COMMIT_SETTLE_MS,
   followMain,
   parseGhChecks,
   parseGhMergeable,
@@ -15,6 +16,7 @@ import {
   parseGitHead,
   reportChecks,
   waitForChecks,
+  waitForCommitRuns,
 } from "./ship-wait-checks.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
@@ -138,6 +140,89 @@ test("commit runs that stay complete for the settle window end the wait below th
   assert.equal(script.reads(), 4);
   assert.equal(code, 0);
   assert.match(lines[0], /^Commit abc: all 2 checks passed, fewer than --min-checks 3/u);
+});
+
+// The merge of #3611 changed only a workflow, docs and a policy test. Path
+// filters started 5 runs, and CI ran for most of the timeout.
+const pathFilteredRuns = (bucket) => [
+  check("CI", bucket),
+  check("Commitlint", "pass"),
+  check("Scorecard", "pass"),
+  check("CodeQL", "pass"),
+  check("Coverage", "pass"),
+];
+const COMMIT_INTERVAL_MS = 30 * 1000;
+const COMMIT_TIMEOUT_MS = 30 * 60 * 1000;
+
+const waitCommit = (script, { minChecks = null } = {}) =>
+  waitForCommitRuns({
+    ...script,
+    minChecks,
+    intervalMs: COMMIT_INTERVAL_MS,
+    timeoutMs: COMMIT_TIMEOUT_MS,
+    warn: () => {},
+  });
+
+test("a commit with fewer runs than --min-checks passes soon after its runs complete", async () => {
+  const pendingReads = Array.from({ length: 50 }, () => ({
+    ok: true,
+    checks: pathFilteredRuns("pending"),
+  }));
+  const script = scripted([...pendingReads, { ok: true, checks: pathFilteredRuns("pass") }]);
+
+  const result = await waitCommit(script, { minChecks: 40 });
+
+  assert.equal(result.status, "settled");
+  assert.equal(result.checks.length, 5);
+});
+
+test("a commit wait needs no --min-checks", async () => {
+  const script = scripted([
+    { ok: true, checks: [] },
+    { ok: true, checks: pathFilteredRuns("pending") },
+    { ok: true, checks: pathFilteredRuns("pass") },
+  ]);
+
+  const result = await waitCommit(script);
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label: "Commit abc", minChecks: null, settleMs: COMMIT_SETTLE_MS },
+    (line) => lines.push(line),
+  );
+
+  assert.equal(result.status, "settled");
+  assert.equal(code, 0);
+  assert.match(lines[0], /^Commit abc: all 5 runs passed, and no run started or changed/u);
+});
+
+test("a commit wait does not pass on a read without runs", async () => {
+  const script = scripted([{ ok: true, checks: [] }]);
+
+  const result = await waitCommit(script);
+  const lines = [];
+  const code = reportChecks(result, { label: "Commit abc", minChecks: null }, (line) =>
+    lines.push(line),
+  );
+
+  assert.equal(result.status, "timeout");
+  assert.equal(code, 2);
+  assert.deepEqual(lines, ["Commit abc: timed out with 0 checks (no checks)."]);
+});
+
+test("a commit run that starts after the others complete restarts the settle time", async () => {
+  const done = pathFilteredRuns("pass");
+  const script = scripted([
+    { ok: true, checks: done },
+    { ok: true, checks: done },
+    { ok: true, checks: [...done, check("Release", "pending")] },
+    { ok: true, checks: [...done, check("Release", "pass")] },
+  ]);
+
+  const result = await waitCommit(script);
+
+  assert.equal(result.status, "settled");
+  assert.equal(result.checks.length, 6);
 });
 
 test("pull request checks that stay complete for the settle window end the wait below the count", async () => {
