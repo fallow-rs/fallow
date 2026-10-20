@@ -112,6 +112,7 @@ struct WarningGroups<'a> {
     plans: Vec<PlannedWarning>,
     glob_groups: Vec<(&'a str, Vec<&'a WorkspaceDiagnostic>)>,
     tsconfig_ref_misses: Vec<&'a WorkspaceDiagnostic>,
+    missing_dir_groups: Vec<(&'a Path, Vec<&'a WorkspaceDiagnostic>)>,
 }
 
 /// Turn a batch of workspace diagnostics into the bounded set of stderr
@@ -121,6 +122,8 @@ struct WarningGroups<'a> {
 ///   per pattern instead of one line per package-less directory.
 /// - `TsconfigReferenceDirMissing`: aggregated together, one summary line
 ///   instead of one per missing `references[]` entry in the root tsconfig.
+/// - `WorkspacePatternDirMissing`: aggregated by declaring file, one summary
+///   line per file instead of one per pattern (`vite`, `vite/packages/*`).
 ///
 /// Kinds that [`WorkspaceDiagnosticKind::warns_on_stderr`] answers `false` for
 /// plan no warning at all: they describe a check the user never configured
@@ -138,6 +141,7 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
         mut plans,
         glob_groups,
         tsconfig_ref_misses,
+        missing_dir_groups,
     } = group_warning_diagnostics(diagnostics, &canonical);
 
     for (pattern, group) in glob_groups {
@@ -171,6 +175,21 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
         });
     }
 
+    for (source, group) in missing_dir_groups {
+        if let [only] = group.as_slice() {
+            plans.push(per_instance_warning(&canonical, only));
+            continue;
+        }
+        plans.push(PlannedWarning {
+            dedupe_key: format!(
+                "{}::workspace-pattern-dir-missing-agg::{}",
+                canonical.display(),
+                source.display()
+            ),
+            message: build_missing_dir_group_message(root, source, &group),
+        });
+    }
+
     plans
 }
 
@@ -181,6 +200,7 @@ fn group_warning_diagnostics<'a>(
     let mut plans: Vec<PlannedWarning> = Vec::new();
     let mut glob_groups: Vec<(&str, Vec<&WorkspaceDiagnostic>)> = Vec::new();
     let mut tsconfig_ref_misses: Vec<&WorkspaceDiagnostic> = Vec::new();
+    let mut missing_dir_groups: Vec<(&Path, Vec<&WorkspaceDiagnostic>)> = Vec::new();
     for diag in diagnostics {
         if !diag.kind.warns_on_stderr() {
             continue;
@@ -193,6 +213,13 @@ fn group_warning_diagnostics<'a>(
                 }
             }
             WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => tsconfig_ref_misses.push(diag),
+            WorkspaceDiagnosticKind::WorkspacePatternDirMissing { .. } => {
+                let source = diag.path.as_path();
+                match missing_dir_groups.iter_mut().find(|(p, _)| *p == source) {
+                    Some((_, group)) => group.push(diag),
+                    None => missing_dir_groups.push((source, vec![diag])),
+                }
+            }
             _ => plans.push(per_instance_warning(canonical, diag)),
         }
     }
@@ -200,6 +227,7 @@ fn group_warning_diagnostics<'a>(
         plans,
         glob_groups,
         tsconfig_ref_misses,
+        missing_dir_groups,
     }
 }
 
@@ -293,6 +321,38 @@ fn build_tsconfig_refs_message(root: &Path, paths: &[&Path]) -> String {
         "tsconfig.json references {count} directories that do not exist \
          (e.g. {listed}). Update or remove the references, or restore the \
          missing directories."
+    )
+}
+
+/// Build the aggregated message for the `workspace-pattern-dir-missing`
+/// entries of one declaring file (always called with two or more entries).
+fn build_missing_dir_group_message(
+    root: &Path,
+    source: &Path,
+    group: &[&WorkspaceDiagnostic],
+) -> String {
+    let display = display_relative(root, source);
+    let source = if display.is_empty() || display == "." {
+        "The fallow config `workspaces.patterns`".to_owned()
+    } else {
+        format!("'{display}'")
+    };
+    let patterns: Vec<String> = group
+        .iter()
+        .filter_map(|diag| match &diag.kind {
+            WorkspaceDiagnosticKind::WorkspacePatternDirMissing { pattern } => {
+                Some(format!("'{pattern}'"))
+            }
+            _ => None,
+        })
+        .collect();
+    format!(
+        "{source} declares {count} workspace patterns whose directories do not exist ({list}). \
+         Fallow analyzes no package from them. Unused catalog entries are not reported in \
+         this run, because packages in those directories can use them. Create the \
+         directories before the run, or remove the patterns.",
+        count = patterns.len(),
+        list = patterns.join(", ")
     )
 }
 
@@ -1603,6 +1663,39 @@ mod tests {
             "single miss is not aggregated"
         );
         assert!(!plans[0].message.contains("directories that do not exist"));
+    }
+
+    #[test]
+    fn plan_warnings_aggregates_missing_pattern_dirs_per_declaring_file() {
+        let root = Path::new("/project");
+        let missing = |pattern: &str| {
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("pnpm-workspace.yaml"),
+                WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                    pattern: pattern.to_owned(),
+                },
+            )
+        };
+        let diagnostics = vec![
+            missing("vite"),
+            missing("vite/packages/*"),
+            missing("rolldown"),
+        ];
+
+        let plans = plan_warnings(root, &diagnostics);
+
+        let [plan] = plans.as_slice() else {
+            panic!("expected one aggregated warning: {plans:?}");
+        };
+        assert!(
+            plan.message.starts_with(
+                "'pnpm-workspace.yaml' declares 3 workspace patterns whose directories do not \
+                 exist ('vite', 'vite/packages/*', 'rolldown')."
+            ),
+            "{}",
+            plan.message
+        );
     }
 
     #[test]

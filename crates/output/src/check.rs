@@ -188,7 +188,8 @@ pub struct CheckOutput {
     ///
     /// - workspace discovery, at config load: `undeclared-workspace`,
     ///   `malformed-package-json`, `glob-matched-no-package-json`,
-    ///   `workspace-glob-outside-root`, `malformed-tsconfig`,
+    ///   `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,
+    ///   `nested-project-root`, `malformed-tsconfig`,
     ///   `tsconfig-reference-dir-missing`;
     /// - source discovery, during the file walk: `skipped-large-file`,
     ///   `skipped-minified-file`, `skipped-source-dotdir`,

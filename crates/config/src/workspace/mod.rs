@@ -14,6 +14,7 @@ use rustc_hash::FxHashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use deno_json::manifest_declares_package;
 pub use deno_json::{
     DirManifestProbe, dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
     load_deno_import_map, load_dir_package_json, load_member_package_manifest,
@@ -217,11 +218,17 @@ fn collect_workspaces_and_diagnostics(
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
     let mut diagnostics = Vec::new();
     let manifest_declares_workspaces = !collect_declared_patterns(root, &[])?.is_empty();
-    let patterns = split_outside_root_patterns(
-        root,
-        collect_declared_patterns(root, extra_patterns)?,
-        &mut diagnostics,
-    );
+    let declared = collect_declared_patterns(root, extra_patterns)?;
+    diagnostics.extend(missing_dir_patterns(root, &declared).map(|declared| {
+        pattern_source_diagnostic(
+            root,
+            declared.source.clone(),
+            WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                pattern: declared.pattern.clone(),
+            },
+        )
+    }));
+    let patterns = split_outside_root_patterns(root, declared, &mut diagnostics);
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut manifest_cache = ManifestCache::default();
 
@@ -240,7 +247,18 @@ fn collect_workspaces_and_diagnostics(
         &mut diagnostics,
         &mut manifest_cache,
     ));
-    if !manifest_declares_workspaces {
+    if manifest_declares_workspaces {
+        collect_nested_project_workspaces(
+            &NestedProjectScan {
+                root,
+                canonical_root: &canonical_root,
+                ignore_patterns,
+            },
+            &mut workspaces,
+            &mut diagnostics,
+            &mut manifest_cache,
+        );
+    } else {
         workspaces.extend(collect_shallow_package_workspaces(
             root,
             &canonical_root,
@@ -407,7 +425,10 @@ pub fn find_undeclared_workspaces_with_ignores(
             input.ignore_patterns,
             input.undeclared,
         );
-        scan_child_dirs_for_undeclared(&path, &mut input);
+        // The children of an independent pnpm project belong to that project.
+        if !is_nested_project_dir(&path) {
+            scan_child_dirs_for_undeclared(&path, &mut input);
+        }
     }
 
     undeclared
@@ -458,7 +479,7 @@ fn check_undeclared(
     ignore_patterns: &crate::IgnorePatternSet,
     undeclared: &mut Vec<WorkspaceDiagnostic>,
 ) {
-    if !dir_has_package_manifest(dir) {
+    if !dir_has_package_manifest(dir) || !manifest_declares_package(dir) {
         return;
     }
     let canonical = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
@@ -468,13 +489,7 @@ fn check_undeclared(
     if declared_roots.contains(&canonical) {
         return;
     }
-    let relative = dir.strip_prefix(root).unwrap_or(dir);
-    let relative_str = relative.to_string_lossy().replace('\\', "/");
-    if ignore_patterns.is_match(relative_str.as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/deno.json").as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/deno.jsonc").as_str())
-    {
+    if is_ignored_scan_dir(root, dir, ignore_patterns) {
         return;
     }
     undeclared.push(WorkspaceDiagnostic::new(
@@ -482,6 +497,237 @@ fn check_undeclared(
         dir.to_path_buf(),
         WorkspaceDiagnosticKind::UndeclaredWorkspace,
     ));
+}
+
+/// Whether `ignore_patterns` excludes a directory, or its manifest, that the
+/// undeclared-workspace scan or the nested-project scan visits.
+fn is_ignored_scan_dir(root: &Path, dir: &Path, ignore_patterns: &crate::IgnorePatternSet) -> bool {
+    let relative = dir.strip_prefix(root).unwrap_or(dir);
+    let relative_str = relative.to_string_lossy().replace('\\', "/");
+    ignore_patterns.is_match(relative_str.as_str())
+        || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
+        || ignore_patterns.is_match(format!("{relative_str}/deno.json").as_str())
+        || ignore_patterns.is_match(format!("{relative_str}/deno.jsonc").as_str())
+}
+
+/// Whether `dir` holds both a `package.json` and a `pnpm-workspace.yaml`, so
+/// pnpm treats it as the root of its own project.
+fn is_nested_project_dir(dir: &Path) -> bool {
+    dir.join("package.json").is_file() && dir.join(PNPM_WORKSPACE_FILE).is_file()
+}
+
+const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+
+/// Matches project-root-relative directories against the workspace patterns
+/// that the root manifests declare. The fallow config `workspaces.patterns`
+/// is not part of it: those patterns add directories to the analysis, and
+/// pnpm does not read them.
+struct ManifestPatternMatcher {
+    positive: globset::GlobSet,
+    negative: globset::GlobSet,
+}
+
+impl ManifestPatternMatcher {
+    /// Build the matcher. A root manifest that does not parse gives a matcher
+    /// that declares nothing; discovery reports the parse error.
+    fn load(root: &Path) -> Self {
+        let mut positive = globset::GlobSetBuilder::new();
+        let mut negative = globset::GlobSetBuilder::new();
+        for declared in collect_declared_patterns(root, &[]).unwrap_or_default() {
+            let (builder, pattern) = match declared.pattern.strip_prefix('!') {
+                Some(rest) => (&mut negative, rest),
+                None => (&mut positive, declared.pattern.as_str()),
+            };
+            let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+            let pattern = if pattern.ends_with('/') {
+                format!("{pattern}*")
+            } else {
+                pattern.to_owned()
+            };
+            if let Ok(glob) = globset::GlobBuilder::new(&pattern)
+                .literal_separator(true)
+                .build()
+            {
+                builder.add(glob);
+            }
+        }
+        Self {
+            positive: positive
+                .build()
+                .unwrap_or_else(|_| globset::GlobSet::empty()),
+            negative: negative
+                .build()
+                .unwrap_or_else(|_| globset::GlobSet::empty()),
+        }
+    }
+
+    fn declares(&self, root: &Path, dir: &Path) -> bool {
+        let relative = dir.strip_prefix(root).unwrap_or(dir);
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        self.positive.is_match(relative.as_str()) && !self.negative.is_match(relative.as_str())
+    }
+}
+
+/// Whether the workspace at `ws_root` is an independent pnpm project: it has
+/// its own `pnpm-workspace.yaml` and no workspace pattern of the root
+/// manifests declares it.
+///
+/// pnpm resolves the `catalog:` references of such a project against its own
+/// catalog, so the root catalog checks leave its manifest out. The rule also
+/// holds when the fallow config `workspaces.patterns` adds the directory to
+/// the analysis.
+#[must_use]
+pub fn is_independent_pnpm_project(root: &Path, ws_root: &Path) -> bool {
+    if !ws_root.join(PNPM_WORKSPACE_FILE).is_file() || ws_root.strip_prefix(root).is_err() {
+        return false;
+    }
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if canonical(ws_root) == canonical(root) {
+        return false;
+    }
+    !ManifestPatternMatcher::load(root).declares(root, ws_root)
+}
+
+/// Borrowed inputs of the nested-project scan.
+struct NestedProjectScan<'a> {
+    root: &'a Path,
+    canonical_root: &'a Path,
+    ignore_patterns: &'a crate::IgnorePatternSet,
+}
+
+/// Directories up to two levels below the root that are independent pnpm
+/// projects, in sorted order. The scan skips the same directories as the
+/// undeclared-workspace scan, skips directories that `ignore_patterns`
+/// excludes, and does not look inside a project it found.
+fn nested_project_roots(scan: &NestedProjectScan<'_>) -> Vec<PathBuf> {
+    let matcher = ManifestPatternMatcher::load(scan.root);
+    let is_candidate = |dir: &Path| {
+        is_nested_project_dir(dir)
+            && !matcher.declares(scan.root, dir)
+            && !is_ignored_scan_dir(scan.root, dir, scan.ignore_patterns)
+    };
+    let mut roots = Vec::new();
+    for top in scan_dirs(scan.root) {
+        if is_nested_project_dir(&top) {
+            if is_candidate(&top) {
+                roots.push(top);
+            }
+            continue;
+        }
+        roots.extend(
+            scan_dirs(&top)
+                .into_iter()
+                .filter(|child| is_candidate(child)),
+        );
+    }
+    roots.sort();
+    roots
+}
+
+/// The child directories of `parent` that the workspace scans visit.
+fn scan_dirs(parent: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| !is_undeclared_scan_skip_dir(&entry.file_name().to_string_lossy()))
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// Register each independent pnpm project below the root as a workspace, with
+/// one `nested-project-root` diagnostic.
+///
+/// The project's `package.json` then owns its files and dependencies, and
+/// framework plugins activate from it. A directory that an earlier source
+/// already registered, for example the fallow config `workspaces.patterns`,
+/// keeps that registration and gets no diagnostic.
+fn collect_nested_project_workspaces(
+    scan: &NestedProjectScan<'_>,
+    workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
+) {
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let known: rustc_hash::FxHashSet<PathBuf> = workspaces
+        .iter()
+        .map(|(ws, _)| canonical(&ws.root))
+        .collect();
+    for dir in nested_project_roots(scan) {
+        let canonical_dir = canonical(&dir);
+        if known.contains(&canonical_dir) || !canonical_dir.starts_with(scan.canonical_root) {
+            continue;
+        }
+        let registered_before = workspaces.len();
+        register_matched_workspace(
+            scan.root,
+            dir.clone(),
+            workspaces,
+            diagnostics,
+            manifest_cache,
+        );
+        if workspaces.len() > registered_before {
+            diagnostics.push(WorkspaceDiagnostic::new(
+                scan.root,
+                dir,
+                WorkspaceDiagnosticKind::NestedProjectRoot,
+            ));
+        }
+    }
+}
+
+/// A diagnostic about a declared workspace pattern, anchored at the file that
+/// declares it. A fallow config pattern is anchored at the root, stored as
+/// `.`: the JSON envelopes strip only a `root + separator` prefix, so a path
+/// equal to the root would stay absolute there.
+fn pattern_source_diagnostic(
+    root: &Path,
+    source: PathBuf,
+    kind: WorkspaceDiagnosticKind,
+) -> WorkspaceDiagnostic {
+    let anchored_at_root = source == root;
+    let diagnostic = WorkspaceDiagnostic::new(root, source, kind);
+    if anchored_at_root {
+        diagnostic.into_root_relative(root)
+    } else {
+        diagnostic
+    }
+}
+
+/// The positive declared patterns that stay inside the root and whose
+/// directory part does not exist on disk.
+///
+/// The directory part is the literal prefix of the pattern
+/// ([`fallow_types::workspace::workspace_pattern_literal_dir`]). A pattern
+/// without one never qualifies, and a directory that exists but holds no
+/// package does not qualify either. The rule stays conservative because a
+/// match suppresses the unused-catalog-entries check for the run.
+fn missing_dir_patterns<'a>(
+    root: &'a Path,
+    declared: &'a [DeclaredPattern],
+) -> impl Iterator<Item = &'a DeclaredPattern> {
+    declared.iter().filter(move |declared| {
+        !declared.pattern.starts_with('!')
+            && !crate::glob_validation::escapes_project_root(&declared.pattern)
+            && fallow_types::workspace::workspace_pattern_literal_dir(&declared.pattern)
+                .is_some_and(|dir| !root.join(dir).exists())
+    })
+}
+
+/// Whether a declared workspace pattern names a directory that does not
+/// exist, the condition of the `workspace-pattern-dir-missing` diagnostic.
+///
+/// The catalog analysis reads this to skip the unused-catalog-entries check,
+/// because the packages in that directory can consume catalog entries.
+/// Discovery and the catalog analysis share one predicate, so the
+/// diagnostic and the skip cannot disagree. A root manifest that does not
+/// parse gives `false`; discovery reports it.
+#[must_use]
+pub fn has_missing_workspace_pattern_dirs(root: &Path, extra_patterns: &[String]) -> bool {
+    collect_declared_patterns(root, extra_patterns)
+        .is_ok_and(|declared| missing_dir_patterns(root, &declared).next().is_some())
 }
 
 /// A workspace glob and the file that declares it.
@@ -575,19 +821,11 @@ fn split_outside_root_patterns(
     let mut patterns = Vec::with_capacity(declared.len());
     for DeclaredPattern { pattern, source } in declared {
         if !pattern.starts_with('!') && crate::glob_validation::escapes_project_root(&pattern) {
-            let anchored_at_root = source == root;
-            let diagnostic = WorkspaceDiagnostic::new(
+            diagnostics.push(pattern_source_diagnostic(
                 root,
                 source,
                 WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot { pattern },
-            );
-            // The JSON envelopes strip only a `root + separator` prefix, so a
-            // path equal to the root would stay absolute there.
-            diagnostics.push(if anchored_at_root {
-                diagnostic.into_root_relative(root)
-            } else {
-                diagnostic
-            });
+            ));
             continue;
         }
         patterns.push(pattern);
@@ -2693,5 +2931,276 @@ mod tests {
                 .contains("fallow config `workspaces.patterns`"),
             "{diagnostic:?}"
         );
+    }
+
+    /// A pnpm root with `packages/*`, a nested independent project in `docs`
+    /// and a `bench` directory whose manifest only sets the module type.
+    fn write_layout_fixture(root: &Path) {
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","private":true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - packages/*\n  - vite\n  - vite/packages/*\n",
+        )
+        .unwrap();
+        write_package(&root.join("packages/core"), r#"{"name":"@demo/core"}"#);
+        write_package(&root.join("bench"), r#"{"type":"module"}"#);
+        write_package(
+            &root.join("docs"),
+            r#"{"name":"demo-docs","private":true,"dependencies":{"vue":"^3.5.0"}}"#,
+        );
+        std::fs::write(root.join("docs/pnpm-workspace.yaml"), "packages:\n  - .\n").unwrap();
+        write_package(&root.join("docs/theme"), r#"{"name":"docs-theme"}"#);
+    }
+
+    fn diagnostics_of_kind<'a>(
+        diagnostics: &'a [WorkspaceDiagnostic],
+        id: &str,
+    ) -> Vec<&'a WorkspaceDiagnostic> {
+        diagnostics.iter().filter(|d| d.kind.id() == id).collect()
+    }
+
+    #[test]
+    fn undeclared_skips_manifest_without_name_or_dependencies() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        let declared = discover_workspaces(dir.path());
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
+
+        assert!(
+            undeclared.iter().all(|d| !d.path.ends_with("bench")),
+            "a manifest with no name and no dependencies is not a package: {undeclared:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_still_reports_nameless_manifest_with_dependencies() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+        write_package(
+            &dir.path().join("bench"),
+            r#"{"type":"module","devDependencies":{"tinybench":"^2.0.0"}}"#,
+        );
+
+        let declared = discover_workspaces(dir.path());
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
+
+        assert!(
+            undeclared.iter().any(|d| d.path.ends_with("bench")),
+            "{undeclared:?}"
+        );
+    }
+
+    #[test]
+    fn nested_pnpm_project_is_registered_with_diagnostic() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        let (workspaces, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
+                .expect("valid root");
+
+        assert!(
+            workspaces.iter().any(|ws| ws.name == "demo-docs"),
+            "{workspaces:?}"
+        );
+        let nested = diagnostics_of_kind(&diagnostics, "nested-project-root");
+        let [diagnostic] = nested.as_slice() else {
+            panic!("expected one nested-project-root diagnostic: {diagnostics:?}");
+        };
+        assert_eq!(diagnostic.path, dir.path().join("docs"));
+        assert!(!diagnostic.degrades_analysis);
+    }
+
+    #[test]
+    fn nested_pnpm_project_children_are_not_undeclared() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        let declared = discover_workspaces(dir.path());
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
+
+        assert!(undeclared.is_empty(), "{undeclared:?}");
+    }
+
+    #[test]
+    fn nested_pnpm_project_declared_by_config_pattern_has_no_diagnostic() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        let (workspaces, diagnostics) = discover_workspaces_with_diagnostics_and_patterns(
+            dir.path(),
+            &crate::IgnorePatternSet::empty(),
+            &["docs".to_owned()],
+        )
+        .expect("valid root");
+
+        assert_eq!(
+            workspaces
+                .iter()
+                .filter(|ws| ws.name == "demo-docs")
+                .count(),
+            1,
+            "{workspaces:?}"
+        );
+        assert!(
+            diagnostics_of_kind(&diagnostics, "nested-project-root").is_empty(),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn nested_pnpm_project_honors_ignore_patterns() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        let (workspaces, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &build_globset(&["docs/**"]))
+                .expect("valid root");
+
+        assert!(
+            workspaces.iter().all(|ws| ws.name != "demo-docs"),
+            "{workspaces:?}"
+        );
+        assert!(
+            diagnostics_of_kind(&diagnostics, "nested-project-root").is_empty(),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn nested_pnpm_project_is_not_independent_when_a_manifest_pattern_declares_it() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - packages/*\n  - docs\n",
+        )
+        .unwrap();
+
+        let (_, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
+                .expect("valid root");
+
+        assert!(
+            diagnostics_of_kind(&diagnostics, "nested-project-root").is_empty(),
+            "{diagnostics:?}"
+        );
+        assert!(!is_independent_pnpm_project(
+            dir.path(),
+            &dir.path().join("docs")
+        ));
+    }
+
+    #[test]
+    fn independent_pnpm_project_detection() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        assert!(is_independent_pnpm_project(
+            dir.path(),
+            &dir.path().join("docs")
+        ));
+        assert!(!is_independent_pnpm_project(
+            dir.path(),
+            &dir.path().join("packages/core")
+        ));
+        assert!(!is_independent_pnpm_project(dir.path(), dir.path()));
+    }
+
+    #[test]
+    fn missing_pattern_dir_emits_diagnostic_with_declaring_file() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_layout_fixture(dir.path());
+
+        let (_, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
+                .expect("valid root");
+
+        let missing: Vec<(&Path, &WorkspaceDiagnosticKind)> =
+            diagnostics_of_kind(&diagnostics, "workspace-pattern-dir-missing")
+                .into_iter()
+                .map(|d| (d.path.as_path(), &d.kind))
+                .collect();
+        let yaml = dir.path().join("pnpm-workspace.yaml");
+        assert_eq!(
+            missing,
+            [
+                (
+                    yaml.as_path(),
+                    &WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                        pattern: "vite".to_owned()
+                    }
+                ),
+                (
+                    yaml.as_path(),
+                    &WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                        pattern: "vite/packages/*".to_owned()
+                    }
+                ),
+            ]
+        );
+        assert!(has_missing_workspace_pattern_dirs(dir.path(), &[]));
+    }
+
+    #[test]
+    fn missing_configured_pattern_dir_is_anchored_at_the_root() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(dir.path().join("package.json"), r#"{"name":"root"}"#).unwrap();
+
+        let (_, diagnostics) = discover_workspaces_with_diagnostics_and_patterns(
+            dir.path(),
+            &crate::IgnorePatternSet::empty(),
+            &["vendor/*".to_owned()],
+        )
+        .expect("valid root");
+
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("expected one diagnostic: {diagnostics:?}");
+        };
+        assert_eq!(diagnostic.path, Path::new("."));
+        assert_eq!(diagnostic.kind.id(), "workspace-pattern-dir-missing");
+        assert!(has_missing_workspace_pattern_dirs(
+            dir.path(),
+            &["vendor/*".to_owned()]
+        ));
+        assert!(!has_missing_workspace_pattern_dirs(dir.path(), &[]));
+    }
+
+    #[test]
+    fn existing_dir_with_no_match_emits_no_missing_dir_diagnostic() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*","!vite"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("packages")).unwrap();
+
+        let (_, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
+                .expect("valid root");
+
+        assert!(
+            diagnostics_of_kind(&diagnostics, "workspace-pattern-dir-missing").is_empty(),
+            "{diagnostics:?}"
+        );
+        assert!(!has_missing_workspace_pattern_dirs(dir.path(), &[]));
+    }
+
+    #[test]
+    fn recursive_pattern_without_literal_prefix_is_never_missing() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"root","workspaces":["**/pkg","{a,b}/*"]}"#,
+        )
+        .unwrap();
+
+        assert!(!has_missing_workspace_pattern_dirs(dir.path(), &[]));
     }
 }

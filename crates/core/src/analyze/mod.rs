@@ -2287,7 +2287,15 @@ fn populate_pnpm_catalog_findings(
         return;
     };
 
-    if need_unused {
+    // A workspace pattern whose directory is missing hides packages that can
+    // consume catalog entries, so no entry can be proven unused in this run.
+    // Discovery reports the pattern as `workspace-pattern-dir-missing`.
+    if need_unused
+        && !fallow_config::has_missing_workspace_pattern_dirs(
+            &config.root,
+            &config.workspace_patterns,
+        )
+    {
         results.unused_catalog_entries = find_unused_catalog_entries(&state)
             .into_iter()
             .map(UnusedCatalogEntryFinding::with_actions)

@@ -1888,3 +1888,56 @@ fn configured_workspace_entry_outside_the_root_is_anchored_at_dot() {
         );
     }
 }
+
+/// A nested directory with its own `pnpm-workspace.yaml` is listed as a
+/// workspace with a `nested-project-root` note. A workspace pattern whose
+/// directory is missing gets `workspace-pattern-dir-missing`, anchored at the
+/// declaring file. A manifest with no name and no dependencies is not reported
+/// as an undeclared workspace.
+#[test]
+fn list_workspaces_reports_nested_projects_and_missing_pattern_dirs() {
+    let output = run_list(
+        "pnpm-workspace-layout-diagnostics",
+        &["--workspaces", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let names: Vec<&str> = json["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .filter_map(|workspace| workspace["name"].as_str())
+        .collect();
+    assert!(names.contains(&"layout-docs"), "{names:?}");
+
+    let mut diagnostics: Vec<(String, String, String)> = json["workspace_diagnostics"]
+        .as_array()
+        .expect("workspace_diagnostics array")
+        .iter()
+        .map(|entry| {
+            (
+                entry["kind"].as_str().unwrap_or_default().to_owned(),
+                entry["path"].as_str().unwrap_or_default().to_owned(),
+                entry["pattern"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    diagnostics.sort();
+    assert_eq!(
+        diagnostics,
+        [
+            ("nested-project-root".into(), "docs".into(), String::new()),
+            (
+                "workspace-pattern-dir-missing".into(),
+                "pnpm-workspace.yaml".into(),
+                "vite".into()
+            ),
+            (
+                "workspace-pattern-dir-missing".into(),
+                "pnpm-workspace.yaml".into(),
+                "vite/packages/*".into()
+            ),
+        ]
+    );
+}

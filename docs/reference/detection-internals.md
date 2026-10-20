@@ -728,6 +728,30 @@ merges these sources and keeps the first entry for each canonical directory:
    `optionalDependencies`.
 4. The shallow scan of two directory levels. This source runs only when no
    workspace pattern exists.
+5. Nested independent pnpm projects. This source runs only when a root
+   manifest declares a workspace pattern. A directory up to two levels deep
+   that holds both `package.json` and `pnpm-workspace.yaml`, and that no root
+   manifest pattern declares, is registered as a workspace with a
+   `nested-project-root` diagnostic (`collect_nested_project_workspaces`).
+   `ignorePatterns` excludes it. The undeclared-workspace scan does not look
+   inside such a directory.
+
+Three more rules keep the workspace diagnostics and the catalog checks
+consistent:
+
+- The undeclared-workspace scan skips a `package.json` with no `name` and no
+  dependency field (`manifest_declares_package`). Such a file, for example
+  `{"type":"module"}`, only sets the module type of the scripts next to it.
+- A positive pattern whose literal directory prefix does not exist gets
+  `workspace-pattern-dir-missing`, anchored at the declaring file
+  (`missing_dir_patterns`). `has_missing_workspace_pattern_dirs` reads the
+  same function, and the dead-code pass then does not report
+  `unused-catalog-entries`, because the packages in the missing directory can
+  consume the entries. Unresolved references and empty catalog groups are
+  still reported.
+- `is_independent_pnpm_project` removes a nested pnpm project from the root
+  catalog consumers, also when the fallow config `workspaces.patterns` adds
+  it. pnpm resolves its `catalog:` references against its own catalog.
 
 Source 3 is for yarn-era monorepos such as older Kibana. These repositories
 have no `workspaces` field. The root lists each package as

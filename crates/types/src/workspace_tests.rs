@@ -3,6 +3,92 @@
 use super::*;
 
 #[test]
+fn workspace_pattern_dir_missing_id_degrades_and_names_the_directory() {
+    let root = Path::new("/project");
+    let diag = WorkspaceDiagnostic::new(
+        root,
+        root.join("pnpm-workspace.yaml"),
+        WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+            pattern: "./vite/packages/*".to_owned(),
+        },
+    );
+    assert_eq!(diag.kind.id(), "workspace-pattern-dir-missing");
+    assert!(diag.degrades_analysis);
+    assert_eq!(
+        diag.kind,
+        WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+            pattern: "vite/packages/*".to_owned()
+        },
+        "the `./` prefix is dropped from the payload"
+    );
+    assert!(
+        diag.message.contains("'pnpm-workspace.yaml'")
+            && diag.message.contains("directory 'vite/packages'")
+            && diag
+                .message
+                .contains("Unused catalog entries are not reported"),
+        "{}",
+        diag.message
+    );
+}
+
+#[test]
+fn workspace_pattern_dir_missing_from_config_names_the_setting() {
+    let root = Path::new("/project");
+    let diag = WorkspaceDiagnostic::new(
+        root,
+        root.to_path_buf(),
+        WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+            pattern: "vendor".to_owned(),
+        },
+    );
+    assert!(
+        diag.message
+            .contains("in the fallow config `workspaces.patterns`"),
+        "{}",
+        diag.message
+    );
+}
+
+#[test]
+fn nested_project_root_id_is_information_only() {
+    let root = Path::new("/project");
+    let diag = WorkspaceDiagnostic::new(
+        root,
+        root.join("docs"),
+        WorkspaceDiagnosticKind::NestedProjectRoot,
+    );
+    assert_eq!(diag.kind.id(), "nested-project-root");
+    assert!(!diag.degrades_analysis);
+    assert!(
+        diag.message
+            .contains("Directory 'docs' has its own pnpm-workspace.yaml")
+            && diag.message.contains("ignorePatterns"),
+        "{}",
+        diag.message
+    );
+}
+
+#[test]
+fn workspace_pattern_literal_dir_reads_segments_before_the_first_glob() {
+    assert_eq!(
+        workspace_pattern_literal_dir("vite/packages/*").as_deref(),
+        Some("vite/packages")
+    );
+    assert_eq!(
+        workspace_pattern_literal_dir("vite").as_deref(),
+        Some("vite")
+    );
+    assert_eq!(
+        workspace_pattern_literal_dir("./packages/").as_deref(),
+        Some("packages")
+    );
+    assert_eq!(workspace_pattern_literal_dir("**/pkg"), None);
+    assert_eq!(workspace_pattern_literal_dir("{a,b}/*"), None);
+    assert_eq!(workspace_pattern_literal_dir("./"), None);
+}
+
+#[test]
 fn skipped_large_file_diagnostic_id_and_message() {
     let root = Path::new("/project");
     let diag = WorkspaceDiagnostic::new(

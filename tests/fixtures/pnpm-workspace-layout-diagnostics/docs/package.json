@@ -1,0 +1,9 @@
+{
+  "name": "layout-docs",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "vue": "^3.5.0"
+  }
+}

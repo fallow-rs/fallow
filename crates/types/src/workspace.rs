@@ -102,6 +102,31 @@ pub enum WorkspaceDiagnosticKind {
         /// The workspace entry, as written in the file.
         pattern: String,
     },
+    /// A positive workspace pattern names a directory that does not exist.
+    /// The check reads the literal part of the pattern before the first
+    /// segment with a glob character (`vite` for `vite/packages/*`). A pattern
+    /// without a literal part (`**/pkg`) never gets this diagnostic, and a
+    /// literal directory that exists but holds no package does not get it
+    /// either. `path` is the file that declares the pattern, or the project
+    /// root for an entry of the fallow config `workspaces.patterns`.
+    ///
+    /// A repository that clones other repositories into the workspace in CI
+    /// declares such patterns. The packages there can consume catalog
+    /// entries, so the run does not report `unused-catalog-entries` while a
+    /// pattern of this kind exists.
+    WorkspacePatternDirMissing {
+        /// The workspace pattern, as written in the file.
+        pattern: String,
+    },
+    /// A directory has its own `package.json` and `pnpm-workspace.yaml`, and
+    /// no workspace pattern of the root manifests declares it. pnpm installs
+    /// it as an independent project. Fallow analyzes it as a workspace, so its
+    /// `package.json` owns its files and dependencies, and its `catalog:`
+    /// references are not checked against the root catalog.
+    ///
+    /// Information only: nothing is lost from the analysis, so
+    /// `degrades_analysis` is false.
+    NestedProjectRoot,
     /// The root `tsconfig.json`, or a config in its `extends` chain, exists
     /// but failed to parse. `path` names the file that failed. Fallow ignores
     /// the project references, path aliases and compiler options of that file.
@@ -608,6 +633,8 @@ impl WorkspaceDiagnosticKind {
             Self::MalformedPackageJson { .. } => "malformed-package-json",
             Self::GlobMatchedNoPackageJson { .. } => "glob-matched-no-package-json",
             Self::WorkspaceGlobOutsideRoot { .. } => "workspace-glob-outside-root",
+            Self::WorkspacePatternDirMissing { .. } => "workspace-pattern-dir-missing",
+            Self::NestedProjectRoot => "nested-project-root",
             Self::MalformedTsconfig { .. } => "malformed-tsconfig",
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
             Self::MalformedPnpmWorkspaceYaml { .. } => "malformed-pnpm-workspace-yaml",
@@ -701,11 +728,13 @@ impl WorkspaceDiagnosticKind {
             | Self::TrendGroupBaselineUnavailable { .. }
             | Self::ChangeCouplingSkipped { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
-            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
+            | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::NestedProjectRoot => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
             | Self::WorkspaceGlobOutsideRoot { .. }
+            | Self::WorkspacePatternDirMissing { .. }
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -834,6 +863,8 @@ impl WorkspaceDiagnosticKind {
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
             | Self::WorkspaceGlobOutsideRoot { .. }
+            | Self::WorkspacePatternDirMissing { .. }
+            | Self::NestedProjectRoot
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -898,6 +929,8 @@ impl WorkspaceDiagnosticKind {
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
             | Self::WorkspaceGlobOutsideRoot { .. }
+            | Self::WorkspacePatternDirMissing { .. }
+            | Self::NestedProjectRoot
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::SkippedLargeFile { .. }
@@ -959,6 +992,8 @@ impl WorkspaceDiagnosticKind {
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
             | Self::WorkspaceGlobOutsideRoot { .. }
+            | Self::WorkspacePatternDirMissing { .. }
+            | Self::NestedProjectRoot
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -1014,6 +1049,8 @@ impl WorkspaceDiagnosticKind {
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
             | Self::WorkspaceGlobOutsideRoot { .. }
+            | Self::WorkspacePatternDirMissing { .. }
+            | Self::NestedProjectRoot
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -1253,6 +1290,11 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
                 pattern: canonical_glob_pattern(pattern),
             }
         }
+        WorkspaceDiagnosticKind::WorkspacePatternDirMissing { pattern } => {
+            WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                pattern: canonical_glob_pattern(pattern),
+            }
+        }
         other => other,
     }
 }
@@ -1346,6 +1388,29 @@ pub fn glob_first_literal_segment(pattern: &str) -> Option<&str> {
             && *segment != "."
             && *segment != ".."
     })
+}
+
+/// The directory part of a workspace pattern: the segments before the first
+/// segment with a glob character, joined with `/`.
+///
+/// `vite/packages/*` gives `vite/packages`, `vite` gives `vite`, and a
+/// pattern that starts with a glob segment (`**/pkg`, `{a,b}/*`) gives
+/// `None`. A leading `./` and empty or `.` segments are dropped. Workspace
+/// discovery uses it to find a pattern whose directory does not exist, and
+/// the diagnostic message uses it to name that directory, so both read the
+/// same part of the pattern.
+#[must_use]
+pub fn workspace_pattern_literal_dir(pattern: &str) -> Option<String> {
+    let literal: Vec<&str> = pattern
+        .split(['/', '\\'])
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .take_while(|segment| !segment.contains(['*', '?', '[', ']', '{', '}']))
+        .collect();
+    if literal.is_empty() {
+        None
+    } else {
+        Some(literal.join("/"))
+    }
 }
 
 /// The clause naming why a plugin could not read a config key in full, for one
@@ -1461,6 +1526,26 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                  or run fallow with --root set to a directory that holds both."
             )
         }
+        WorkspaceDiagnosticKind::WorkspacePatternDirMissing { pattern } => {
+            let source = if display.is_empty() {
+                "the fallow config `workspaces.patterns`".to_owned()
+            } else {
+                format!("'{display}'")
+            };
+            let dir = workspace_pattern_literal_dir(pattern).unwrap_or_else(|| pattern.clone());
+            format!(
+                "Workspace pattern '{pattern}' in {source} names directory '{dir}', which does \
+                 not exist. Fallow analyzes no package from it. Unused catalog entries are not \
+                 reported in this run, because packages in that directory can use them. \
+                 Create the directory before the run, or remove the pattern."
+            )
+        }
+        WorkspaceDiagnosticKind::NestedProjectRoot => format!(
+            "Directory '{display}' has its own pnpm-workspace.yaml, so it is an independent \
+             project. Fallow analyzes it as a workspace: its package.json owns its files and \
+             dependencies, and its catalog references are not checked against the root \
+             catalog. Add '{display}' to ignorePatterns to exclude it."
+        ),
         WorkspaceDiagnosticKind::MalformedTsconfig { error } => format!(
             "tsconfig at '{display}' failed to parse ({error}); \
              its project references, path aliases and compiler options are ignored. \

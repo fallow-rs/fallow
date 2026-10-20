@@ -252,6 +252,8 @@ mod node_test_bare_default_patterns;
 mod non_loading_edges;
 #[path = "integration_test/pnpm_package_json_overrides_version.rs"]
 mod pnpm_package_json_overrides_version;
+#[path = "integration_test/pnpm_workspace_layout_diagnostics.rs"]
+mod pnpm_workspace_layout_diagnostics;
 #[path = "integration_test/pnpm_workspace_overrides_precedence.rs"]
 mod pnpm_workspace_overrides_precedence;
 #[path = "integration_test/policy_violations.rs"]
