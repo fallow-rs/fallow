@@ -6,14 +6,25 @@ include!(concat!(env!("OUT_DIR"), "/type_aware_protocol.rs"));
 pub(super) const BACKEND_ENV: &str = "FALLOW_TYPE_AWARE_BACKEND";
 
 /// Backend family and exact version that [`BACKEND_ENV`] selects. An unset or
-/// empty value selects the default backend.
+/// empty value selects the default backend. The process reads the variable
+/// once, so every request and session in one process uses the same backend.
 ///
 /// # Errors
 ///
-/// Returns a message that names the known families when the value is unknown.
+/// Returns a message that names the known families when the value is unknown
+/// or is not valid Unicode.
 pub(super) fn selected_backend() -> Result<(&'static str, &'static str), String> {
-    let requested = std::env::var(BACKEND_ENV).unwrap_or_default();
-    backend_for(requested.trim())
+    static SELECTED: std::sync::OnceLock<Result<(&'static str, &'static str), String>> =
+        std::sync::OnceLock::new();
+    SELECTED
+        .get_or_init(|| match std::env::var_os(BACKEND_ENV) {
+            None => backend_for(""),
+            Some(value) => value.to_str().map_or_else(
+                || Err(format!("{BACKEND_ENV} is not valid Unicode")),
+                |requested| backend_for(requested.trim()),
+            ),
+        })
+        .clone()
 }
 
 fn backend_for(requested: &str) -> Result<(&'static str, &'static str), String> {
@@ -34,12 +45,6 @@ fn backend_for(requested: &str) -> Result<(&'static str, &'static str), String> 
                 known.join(", ")
             )
         })
-}
-
-/// Backend family for metadata when no companion response exists. An invalid
-/// selection falls back to the default; the run reports that error elsewhere.
-pub(super) fn selected_backend_family() -> &'static str {
-    selected_backend().map_or(BACKEND_FAMILY, |(family, _)| family)
 }
 
 #[cfg(test)]

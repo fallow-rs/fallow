@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { selectBackend } from "./backend-selection.mjs";
@@ -51,7 +52,10 @@ const getProject = (snapshot, name) =>
  * - 7.0 `fileChanges` become 7.1 `fileNotifications`, and `ensurePrograms`
  *   rebuilds the programs that those notifications make dirty.
  * - 7.1 derives a snapshot from a live base snapshot, so a snapshot that the
- *   caller disposes stays alive while it is the newest one.
+ *   caller disposes stays alive while it is the newest one. The caller's
+ *   handle still acts as disposed, as it does on 7.0.
+ * - 7.1 rejects the whole update when an `openFiles` entry does not exist.
+ *   7.0 ignores that file, so the wrapper drops missing files first.
  */
 const withLinearSnapshots = (api) => {
   const entries = new Set();
@@ -72,23 +76,27 @@ const withLinearSnapshots = (api) => {
     };
     return new Proxy(entry.snapshot, {
       get(target, property) {
-        if (property === "dispose") return dispose;
+        if (property === "dispose" || property === Symbol.dispose) return dispose;
+        if (property === "isDisposed") return () => released || target.isDisposed();
+        if (released) throw new Error("Snapshot is disposed");
         if (property === "getProject") return getProject.bind(undefined, target);
         const value = Reflect.get(target, property, target);
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
   };
-  const updateSnapshot = ({ fileChanges, ...rest } = {}) => {
+  const updateSnapshot = ({ fileChanges, openFiles, ...rest } = {}) => {
     const changes = {
       ...rest,
+      ...(openFiles ? { openFiles: openFiles.filter((file) => existsSync(file)) } : {}),
       ...(fileChanges ? { fileNotifications: fileChanges } : {}),
       ensurePrograms: true,
     };
     const previous = head;
-    const next = previous ? previous.snapshot.update(changes) : api.createSnapshot(changes);
-    if (previous?.snapshot === next) return handle(previous);
-    head = { snapshot: next, open: 0 };
+    head = {
+      snapshot: previous ? previous.snapshot.update(changes) : api.createSnapshot(changes),
+      open: 0,
+    };
     entries.add(head);
     if (previous) disposeWhenUnused(previous);
     return handle(head);

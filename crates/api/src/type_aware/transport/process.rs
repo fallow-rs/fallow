@@ -86,6 +86,7 @@ where
 }
 
 pub(super) fn sidecar_command(sidecar: &Path, root: &Path) -> Result<Command, String> {
+    selected_backend()?;
     #[cfg(windows)]
     let script = non_empty_env(SIDECAR_SCRIPT_ENV).map(PathBuf::from);
     #[cfg(not(windows))]

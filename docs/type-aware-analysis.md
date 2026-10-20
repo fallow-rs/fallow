@@ -81,7 +81,10 @@ FALLOW_TYPE_AWARE_BACKEND=tsrs node --test tools/type-aware-sidecar/test/*.test.
 ```
 
 tsrs has no Windows or macOS x64 binaries, and the backend stays opt-in while
-tsrs is a 0.x release.
+tsrs is a 0.x release. The VS Code extension bundles only the default backend,
+so the tsrs backend needs an npm or CLI install. Fallow reads the selection
+once per process and rejects an unknown or non-Unicode value before it starts
+the companion.
 
 ## Ownership boundary with tsc and Oxlint
 

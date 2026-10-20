@@ -334,6 +334,7 @@ where
     Request: Serialize + ?Sized,
     Response: DeserializeOwned,
 {
+    selected_backend()?;
     let root = canonicalize_root(root)?;
     let sidecar = discover_type_aware_sidecar(&root)?;
     run_sidecar_json(

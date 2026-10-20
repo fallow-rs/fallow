@@ -3174,3 +3174,38 @@ test("unknown external framework package provenance abstains", () => {
     rmSync(monorepo, { recursive: true, force: true });
   }
 });
+
+test("a query for a deleted file does not fail the other queries in the request", () => {
+  const root = makeProject();
+  try {
+    write(root, "tsconfig.json", JSON.stringify({ include: ["src/**/*.ts"] }));
+    write(root, "src/a.ts", "export const a = 1;\n");
+    const symbol = (file) => ({
+      path: file,
+      namespace: "value",
+      declaration_kind: "variable",
+      exported_name: "a",
+      local_name: "a",
+      line: 1,
+      col: 13,
+    });
+    const parsed = parseRequest(
+      semanticRequest(root, [
+        { id: 0, operation: "symbol-use", symbol: symbol("src/a.ts"), framework_contracts: [] },
+        {
+          id: 1,
+          operation: "symbol-use",
+          symbol: symbol("src/deleted.ts"),
+          framework_contracts: [],
+        },
+      ]),
+    );
+    const { results } = analyzeSemanticQueries(parsed);
+    assert.deepEqual(
+      results.map((result) => result.assertion),
+      ["confirmed-no-static-references", "no-confirmed-use"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
