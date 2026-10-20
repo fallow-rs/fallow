@@ -402,7 +402,7 @@ jobs:
       # `fallow-`: release-assets downloads that pattern as release assets.
       - name: Upload PGO profile
         if: steps.mode.outputs.enabled == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pgo-profile-${{ matrix.target }}
           path: pgo-profile/fallow.profdata
@@ -801,7 +801,7 @@ jobs:
           7z a "../../../fallow-${FALLOW_TARGET}.zip" "$FALLOW_BINARY" "$FALLOW_LSP_BINARY" "$FALLOW_MCP_BINARY" fallow-similar-code.exe
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-${{ matrix.target }}
           path: fallow-${{ matrix.target }}.*
@@ -845,7 +845,7 @@ jobs:
           cp "target/${FALLOW_TARGET}/release/fallow-similar-code.exe" "fallow-similar-code-${FALLOW_NPM_DIR}.exe"
 
       - name: Upload unsigned binary payload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: unsigned-binaries-${{ matrix.npm_dir }}
           if-no-files-found: error
@@ -857,7 +857,7 @@ jobs:
             fallow-similar-code-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
       - name: Upload NAPI addon
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: napi-${{ matrix.npm_dir }}
           path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
@@ -1031,7 +1031,7 @@ jobs:
           cp "unsigned-binaries/fallow-similar-code-${FALLOW_NPM_DIR}${ext}.sig" "npm-payload/fallow-similar-code${ext}.sig"
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-cli-${{ matrix.npm_dir }}
           path: |
@@ -1039,7 +1039,7 @@ jobs:
             unsigned-binaries/fallow-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload LSP artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-lsp-${{ matrix.npm_dir }}
           path: |
@@ -1047,7 +1047,7 @@ jobs:
             unsigned-binaries/fallow-lsp-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload MCP artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-mcp-${{ matrix.npm_dir }}
           path: |
@@ -1055,7 +1055,7 @@ jobs:
             unsigned-binaries/fallow-mcp-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload similar-code provider artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-similar-code-${{ matrix.npm_dir }}
           path: |
@@ -1063,7 +1063,7 @@ jobs:
             unsigned-binaries/fallow-similar-code-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload npm binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-${{ matrix.npm_dir }}
           path: |
@@ -1146,7 +1146,7 @@ jobs:
           ' similar-code-candle-conformance.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload compact production conformance evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: similar-code-candle-conformance
           path: similar-code-candle-conformance.json
@@ -1199,7 +1199,7 @@ jobs:
           cp "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" sbom/
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-sbom-${{ matrix.target }}
           path: sbom/fallow-${{ matrix.target }}.cdx.json
@@ -1266,7 +1266,7 @@ jobs:
           done
 
       - name: Upload release asset bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: release-assets/
@@ -1586,7 +1586,7 @@ jobs:
             tarballs/20-cli-root/*.tgz
 
       - name: Upload npm tarballs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-tarballs
           path: tarballs/
@@ -1966,7 +1966,7 @@ jobs:
             "$root/inventory.json"
 
       - name: Upload VSIX target artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-vscode-targets
           path: ${{ runner.temp }}/fallow-vscode-targets/

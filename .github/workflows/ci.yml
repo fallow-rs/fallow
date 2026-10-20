@@ -551,7 +551,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nextest-junit-check-${{ matrix.partition }}
           path: target/nextest/ci/junit.xml
@@ -774,7 +774,7 @@ jobs:
           | (binary_id(fallow-multicall::integration) & test(/^parity::/))'
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nextest-junit-windows-rust
           path: target/nextest/ci/junit.xml
@@ -1338,7 +1338,7 @@ jobs:
       - name: Package target VSIX artifacts
         run: pnpm --dir editors/vscode package:variants -- --output-dir "$RUNNER_TEMP/fallow-vscode-targets"
       - name: Upload target VSIX artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fallow-vscode-targets
           path: ${{ runner.temp }}/fallow-vscode-targets
