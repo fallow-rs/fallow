@@ -208,3 +208,51 @@ fn a_shadowed_require_resolve_gets_no_site() {
         "the module require still gets a site"
     );
 }
+
+#[test]
+fn a_const_with_conditional_literals_credits_every_branch() {
+    let source = "const compiler = native ? 'native-pkg' : '@scope/wasm-pkg';\n\
+         export const url = import.meta.resolve(`${compiler}/package.json`);\n\
+         const fallback = process.env.X || 'or-pkg';\n\
+         const literalOr = 'left-pkg' || 'right-pkg';\n\
+         const nullish = 'first-pkg' ?? ('second-pkg');\n\
+         const nested = a ? 'outer-pkg' : b ? 'inner-pkg' : 'last-pkg';\n\
+         require.resolve(literalOr);\n\
+         require.resolve(`${nullish}/package.json`);\n\
+         require.resolve(nested);\n\
+         require.resolve(fallback);\n";
+    let mut credited = package_references(source);
+    credited.sort();
+    assert_eq!(
+        credited,
+        [
+            "@scope/wasm-pkg",
+            "first-pkg",
+            "inner-pkg",
+            "last-pkg",
+            "left-pkg",
+            "native-pkg",
+            "outer-pkg",
+            "right-pkg",
+            "second-pkg",
+        ],
+        "a branch that is not a string literal makes the value unknown"
+    );
+}
+
+#[test]
+fn an_inline_conditional_specifier_credits_every_branch() {
+    let source = "export const a = import.meta.resolve(`${native ? 'native-pkg' : 'wasm-pkg'}/package.json`);\n\
+         export const b = require.resolve(native ? 'cjs-a' : 'cjs-b');\n";
+    let mut credited = package_references(source);
+    credited.sort();
+    assert_eq!(credited, ["cjs-a", "cjs-b", "native-pkg", "wasm-pkg"]);
+}
+
+#[test]
+fn a_conditional_specifier_gets_no_site() {
+    let source = "const compiler = native ? 'native-pkg' : 'wasm-pkg';\n\
+         export const url = import.meta.resolve(`${compiler}/package.json`);\n\
+         export const b = require.resolve(native ? 'cjs-a' : 'cjs-b');\n";
+    assert!(package_resolve_sites(source).is_empty());
+}

@@ -183,6 +183,34 @@ fn package_name_from_specifier(specifier: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Every string value that `expr` can have, when each value is a string
+/// literal: a literal, or a `?:`, `||` or `??` expression whose branches are
+/// such values, as in `const c = native ? 'pkg' : '@scope/pkg-wasm'`.
+///
+/// The test of a `?:` expression does not matter. A branch with any other
+/// value makes the result unknown, so the function gives `None`.
+fn string_literal_alternatives(expr: &Expression<'_>) -> Option<Vec<String>> {
+    match expr.without_parentheses() {
+        Expression::StringLiteral(lit) => Some(vec![lit.value.to_string()]),
+        Expression::ConditionalExpression(cond) => {
+            let mut values = string_literal_alternatives(&cond.consequent)?;
+            values.extend(string_literal_alternatives(&cond.alternate)?);
+            Some(values)
+        }
+        Expression::LogicalExpression(logical)
+            if matches!(
+                logical.operator,
+                LogicalOperator::Or | LogicalOperator::Coalesce
+            ) =>
+        {
+            let mut values = string_literal_alternatives(&logical.left)?;
+            values.extend(string_literal_alternatives(&logical.right)?);
+            Some(values)
+        }
+        _ => None,
+    }
+}
+
 fn package_values_from_raw_values(values: &[String]) -> Vec<String> {
     values
         .iter()
@@ -268,11 +296,11 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_static_package_values(&mut self, name: &str, init: &Expression<'_>) {
+        if let Some(values) = string_literal_alternatives(init) {
+            self.static_string_bindings.insert(name.to_string(), values);
+            return;
+        }
         match init {
-            Expression::StringLiteral(lit) => {
-                self.static_string_bindings
-                    .insert(name.to_string(), lit.value.to_string());
-            }
             Expression::ArrayExpression(array) => {
                 let values: Vec<String> = array
                     .elements
@@ -448,7 +476,8 @@ impl ModuleInfoExtractor {
             Expression::StaticMemberExpression(member) => {
                 self.package_values_for_static_member(member)
             }
-            _ => Vec::new(),
+            _ => string_literal_alternatives(expr)
+                .map_or_else(Vec::new, |values| package_values_from_raw_values(&values)),
         }
     }
 
@@ -488,11 +517,7 @@ impl ModuleInfoExtractor {
 
         self.static_string_bindings
             .get(name)
-            .map_or_else(Vec::new, |value| {
-                package_from_resolution_specifier(value)
-                    .into_iter()
-                    .collect()
-            })
+            .map_or_else(Vec::new, |values| package_values_from_raw_values(values))
     }
 
     fn package_values_for_static_member(&self, member: &StaticMemberExpression<'_>) -> Vec<String> {
