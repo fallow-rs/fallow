@@ -2031,7 +2031,10 @@ fn write_napi_source_package(package_root: &Path) {
         package_root.join("package.json"),
         r#"{
   "name": "@scope/native",
-  "exports": { ".": "./index.js", "./manual": "./src/manual.js" },
+  "exports": {
+    ".": { "browser": "./browser.js", "default": "./index.js" },
+    "./manual": "./src/manual.js"
+  },
   "napi": {
     "binaryName": "native",
     "targets": ["x86_64-unknown-linux-gnu", "wasm32-wasip1-threads"]
@@ -2040,6 +2043,11 @@ fn write_napi_source_package(package_root: &Path) {
     )
     .expect("write package.json");
     fs::write(package_root.join("index.js"), NAPI_LOADER).expect("write loader");
+    fs::write(
+        package_root.join("browser.js"),
+        "export * from '@scope/native-wasm32-wasi'\n",
+    )
+    .expect("write browser entry");
     fs::write(
         package_root.join("wasi-worker-browser.mjs"),
         NAPI_WASI_WORKER,

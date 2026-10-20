@@ -38,6 +38,13 @@ const WASM_RUNTIME: &str = "@napi-rs/wasm-runtime";
 /// and a source repository usually ignores them in git.
 const GENERATED_WASI_LOADERS: &[&str] = &[".wasi.cjs", ".wasi-browser"];
 
+/// The browser entry that `napi build` writes for a `wasm32-wasi*` target. It
+/// has no header: its only content is a re-export of `<pkg>-wasm32-wasi`.
+const BROWSER_ENTRY: &str = "browser.js";
+
+/// The package suffix that the generated browser entry re-exports.
+const WASM32_WASI_SUFFIX: &str = "wasm32-wasi";
+
 const ALWAYS_USED: &[&str] = &[WASI_WORKERS];
 
 pub struct NapiRsPlugin;
@@ -87,8 +94,39 @@ impl Plugin for NapiRsPlugin {
                     [platform_prefix.clone(), format!("{WASM_RUNTIME}/")],
                 ));
         }
+        if is_generated_browser_entry(&root.join(BROWSER_ENTRY), base) {
+            result
+                .provided_dependencies
+                .push(ProvidedDependencyRule::new(
+                    BROWSER_ENTRY,
+                    [format!("{base}-{WASM32_WASI_SUFFIX}")],
+                    std::iter::empty::<String>(),
+                ));
+        }
         result
     }
+}
+
+/// Whether `path` holds only the one-line re-export that `napi build` writes
+/// to `browser.js`, so a hand-written browser entry stays checked.
+fn is_generated_browser_entry(path: &Path, base: &str) -> bool {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Some(specifier) = source
+        .trim()
+        .strip_prefix("export * from ")
+        .map(|rest| rest.trim_end_matches(';').trim())
+    else {
+        return false;
+    };
+    let expected = format!("{base}-{WASM32_WASI_SUFFIX}");
+    ['\'', '"'].iter().any(|quote| {
+        specifier
+            .strip_prefix(*quote)
+            .and_then(|rest| rest.strip_suffix(*quote))
+            == Some(expected.as_str())
+    })
 }
 
 /// The file names of the generated loaders in the package directory.
@@ -370,6 +408,28 @@ mod tests {
             .expect("write declarations");
 
         assert_eq!(generated_loaders(root), ["browser.cjs", "index.js"]);
+    }
+
+    #[test]
+    fn only_the_generated_browser_reexport_is_a_browser_entry() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let entry = dir.path().join(BROWSER_ENTRY);
+
+        std::fs::write(&entry, "export * from '@scope/native-wasm32-wasi'\n")
+            .expect("write browser entry");
+        assert!(is_generated_browser_entry(&entry, "@scope/native"));
+        assert!(!is_generated_browser_entry(&entry, "@scope/other"));
+
+        std::fs::write(&entry, "export * from \"@scope/native-wasm32-wasi\";\n")
+            .expect("write browser entry");
+        assert!(is_generated_browser_entry(&entry, "@scope/native"));
+
+        std::fs::write(
+            &entry,
+            "export * from '@scope/native-wasm32-wasi'\nexport const x = 1\n",
+        )
+        .expect("write hand-written entry");
+        assert!(!is_generated_browser_entry(&entry, "@scope/native"));
     }
 
     #[test]

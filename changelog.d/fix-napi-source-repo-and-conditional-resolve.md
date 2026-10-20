@@ -7,7 +7,9 @@
   `<package>-<platform>` packages and `@napi-rs/wasm-runtime` are no longer
   unlisted dependencies. The generated `./<binary>.wasi.cjs` and
   `./<binary>.wasi-browser.js` loaders are no longer unresolved imports.
-  `wasi-worker*.mjs` files are always used. Projects can remove the
+  A generated `browser.js` that only re-exports `<package>-wasm32-wasi` no
+  longer reports that package as unlisted. `wasi-worker*.mjs` files are
+  always used. Projects can remove the
   `ignorePatterns` and `ignoreDependencies` entries for these files.
 - **A resolve specifier from a conditional const credits each package.**
   `const c = native ? 'pkg' : '@scope/pkg-wasm'` followed by
