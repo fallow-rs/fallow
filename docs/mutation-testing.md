@@ -213,14 +213,17 @@ or relational mutant, so it adds little test-strength signal for its run time.
   first argument is a path, such as the route `app.delete("/items/:id",
   handler)`, does not count. A prepared statement run (`run`, `all`, `get`,
   `iterate`, `each`) counts when the receiver is a `.prepare(...)` call, such as
-  `db.prepare(INSERT_SQL).run(value)`, or a name or a `this` field that a
-  declarator, a class field or an assignment sets to one, such as
-  `insertStmt.run(value)` after `const insertStmt = db.prepare("INSERT ...")`,
-  or `this.insert.run(value)` after the class field `insert =
-  db.prepare("INSERT ...")`. A prepared statement whose static SQL text starts with `select` is a
-  read and does not count. The check matches the name in the same module only,
-  so a statement that a function gets as a parameter, or that the module
-  imports, does not count. In a module that loads a database client package
+  `db.prepare(INSERT_SQL).run(value)`, or a name or a property that the same
+  module sets to one. A declarator, an assignment, a class field (also a
+  `static` or a `#private` field) and an object literal property each set one.
+  Examples are `insertStmt.run(value)` after `const insertStmt =
+  db.prepare("INSERT ...")`, `this.insert.run(value)` after the class field
+  `insert = db.prepare("INSERT ...")`, and `statements.insert.run(value)` after
+  `const statements = { insert: db.prepare("INSERT ...") }`. A property matches
+  by its name only, whatever object holds it. A prepared statement whose static
+  SQL text starts with `select` is a read and does not count. The check matches
+  names in the same module only, so a statement that a function gets as a
+  parameter, or that the module imports, does not count. In a module that loads a database client package
   itself, every `run` and `exec` call counts too, except `exec` on a regular
   expression, such as `/(\d+)/.exec(text)`. A computed member with a string key,
   such as the callee `db["insert"]`, counts too. A tagged template, or a call

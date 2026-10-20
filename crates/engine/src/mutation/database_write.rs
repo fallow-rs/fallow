@@ -3,7 +3,8 @@
 
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, BindingPattern, CallExpression, Expression,
-    PropertyDefinition, TaggedTemplateExpression, VariableDeclarator,
+    MemberExpression, ObjectProperty, PropertyDefinition, PropertyKey, TaggedTemplateExpression,
+    VariableDeclarator,
 };
 use oxc_ast_visit::Visit;
 use rustc_hash::FxHashSet;
@@ -180,7 +181,12 @@ fn is_prepared_write(expression: &Expression<'_>) -> bool {
 }
 
 /// The receiver of a statement run: a name, such as `stmt` in `stmt.run()`,
-/// or a field of `this`, such as `insert` in `this.insert.run()`.
+/// or the last property of a member, such as `insert` in `this.insert.run()`
+/// or in `statements.insert.run()`. A private field keeps its `#`.
+///
+/// A field matches by property name only, whatever object holds it. A field
+/// with the same name on another object can then count as a write too. That
+/// error prunes a mutant and never runs one against a database.
 #[derive(PartialEq, Eq, Hash)]
 enum Receiver {
     Name(String),
@@ -191,12 +197,7 @@ impl Receiver {
     fn of(expression: &Expression<'_>) -> Option<Self> {
         match expression.without_parentheses() {
             Expression::Identifier(name) => Some(Self::Name(name.name.to_string())),
-            Expression::StaticMemberExpression(member)
-                if matches!(member.object, Expression::ThisExpression(_)) =>
-            {
-                Some(Self::Field(member.property.name.to_string()))
-            }
-            _ => None,
+            expression => expression.as_member_expression().and_then(Self::of_member),
         }
     }
 
@@ -205,12 +206,25 @@ impl Receiver {
             AssignmentTarget::AssignmentTargetIdentifier(name) => {
                 Some(Self::Name(name.name.to_string()))
             }
-            AssignmentTarget::StaticMemberExpression(member)
-                if matches!(member.object, Expression::ThisExpression(_)) =>
-            {
-                Some(Self::Field(member.property.name.to_string()))
+            target => target.as_member_expression().and_then(Self::of_member),
+        }
+    }
+
+    fn of_member(member: &MemberExpression<'_>) -> Option<Self> {
+        match member {
+            MemberExpression::PrivateFieldExpression(field) => {
+                Some(Self::Field(format!("#{}", field.field.name)))
             }
-            _ => None,
+            member => member
+                .static_property_name()
+                .map(|name| Self::Field(name.to_owned())),
+        }
+    }
+
+    fn of_key(key: &PropertyKey<'_>) -> Option<Self> {
+        match key {
+            PropertyKey::PrivateIdentifier(name) => Some(Self::Field(format!("#{}", name.name))),
+            key => key.static_name().map(|name| Self::Field(name.into_owned())),
         }
     }
 }
@@ -301,14 +315,22 @@ impl<'a> Visit<'a> for Writes {
     }
 
     fn visit_property_definition(&mut self, it: &PropertyDefinition<'a>) {
-        if let (Some(name), Some(value)) = (it.key.static_name(), &it.value)
-            && !it.r#static
+        if let Some(value) = &it.value
             && is_prepared_write(value)
+            && let Some(receiver) = Receiver::of_key(&it.key)
         {
-            self.prepared_receivers
-                .insert(Receiver::Field(name.to_string()));
+            self.prepared_receivers.insert(receiver);
         }
         oxc_ast_visit::walk::walk_property_definition(self, it);
+    }
+
+    fn visit_object_property(&mut self, it: &ObjectProperty<'a>) {
+        if is_prepared_write(&it.value)
+            && let Some(receiver) = Receiver::of_key(&it.key)
+        {
+            self.prepared_receivers.insert(receiver);
+        }
+        oxc_ast_visit::walk::walk_object_property(self, it);
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {

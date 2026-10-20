@@ -1007,6 +1007,21 @@ fn a_prepared_statement_in_a_class_field_or_an_assignment_is_pruned() {
 }
 
 #[test]
+fn a_prepared_statement_in_a_map_a_private_field_or_a_static_field_is_pruned() {
+    let plan = plan_all(&fixture("mutation-plan-orm-write"));
+    let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);
+    let functions = function_dispositions(&plan, "src/holders.ts");
+    for function in ["addMapped", "addPrivate", "addStatic"] {
+        assert_eq!(functions.get(function), Some(&pruned), "{function}");
+    }
+    assert_eq!(
+        functions.get("findMapped"),
+        Some(&PLANNED),
+        "a prepared `SELECT` in a statement map is not a write"
+    );
+}
+
+#[test]
 fn a_provenance_row_prunes_only_the_calls_of_its_import_source() {
     let plan = plan_all(&fixture("mutation-plan-provenance"));
     let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);

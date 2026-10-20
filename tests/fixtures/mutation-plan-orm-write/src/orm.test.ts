@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import { evict } from "./cache";
 import { cjsSave } from "./cjs.cjs";
 import { addComputed } from "./computed";
+import { addMapped, findMapped, PrivateRepository, StaticRepository } from "./holders";
 import { lazySave } from "./lazy";
 import { clearValues, insertPrepared, insertValue } from "./lite";
 import { addRecord } from "./mongo";
@@ -62,6 +63,13 @@ test("writers exist", () => {
 test("repository methods exist", () => {
   const repository = new Repository();
   for (const method of [repository.addField, repository.setField, repository.findField]) {
+    expect(typeof method).toBe("function");
+  }
+});
+
+test("statement holders exist", () => {
+  const repository = new PrivateRepository();
+  for (const method of [addMapped, findMapped, repository.addPrivate, StaticRepository.addStatic]) {
     expect(typeof method).toBe("function");
   }
 });
