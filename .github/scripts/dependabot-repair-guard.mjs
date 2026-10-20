@@ -8,7 +8,7 @@
 //
 // An accepted commit may merge without review only when every path is a
 // lockfile, a generated artifact or a snapshot, and every URL that the commit
-// adds to a lockfile points to the official registry. Any other change can
+// adds to a lockfile names the official registry in its exact form. Any other change can
 // alter what a build, a release or a policy test runs, so a maintainer
 // reviews it.
 //
@@ -38,20 +38,29 @@ const GENERATED_PATH =
   /(?:^|\/)(?:Cargo\.lock|package-lock\.json|pnpm-lock\.yaml)$|^crates\/cli\/viz-assets\/|^tests\/coverage-producer-corpus\/manifest\.json$/u;
 const AUTO_MERGE_PATH = new RegExp(`${GENERATED_PATH.source}|\\.snap$`, "u");
 const LOCKFILE_PATH = /(?:^|\/)(?:Cargo\.lock|package-lock\.json|pnpm-lock\.yaml)$/u;
-const URL = /\b(?:registry\+|git\+)?https?:\/\/[^\s"',]+/gu;
-const REGISTRY_URL =
-  /^(?:https:\/\/registry\.npmjs\.org\/|registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index$)/u;
+// A lockfile line that names where a package comes from. The match is wide on
+// purpose: any scheme, any case, and the specifiers that npm, pnpm and Cargo
+// accept for a source outside the registry.
+const SOURCE_HINT =
+  /:\/\/|\b(?:resolved|tarball|source|repo)\b|\b(?:git|file|link|github|directory|path|workspace|npm)[+:]/iu;
+// The only source lines that keep auto-merge.
+const REGISTRY_SOURCE_LINE = [
+  /^\s*"resolved": "https:\/\/registry\.npmjs\.org\/[^"\s]+\.tgz",?$/u,
+  /^source = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"$/u,
+  // npm copies the `funding` metadata of a package. npm never fetches it.
+  /^\s*"(?:url|funding)": "https:\/\/[^"\s]+",?$/u,
+];
 
 /**
  * Checks a repair commit.
  * @param {{
  *   commits: number,
  *   files: { path: string, added: number | null, deleted: number | null, mode: string }[],
- *   lockfileUrls?: string[],
+ *   lockfileLines?: string[],
  * }} input
  * @returns {{ ok: boolean, problems: string[], merge: "auto" | "review" }}
  */
-export const checkRepair = ({ commits, files, lockfileUrls = [] }) => {
+export const checkRepair = ({ commits, files, lockfileLines = [] }) => {
   const problems = [];
   if (commits !== 1) problems.push(`the patch has ${commits} commits, not 1`);
   for (const { path, added, mode } of files) {
@@ -69,8 +78,7 @@ export const checkRepair = ({ commits, files, lockfileUrls = [] }) => {
     problems.push(`${changed} hand-written lines changed, more than ${MAX_CHANGED_LINES}`);
   }
   const auto =
-    files.every(({ path }) => AUTO_MERGE_PATH.test(path)) &&
-    lockfileUrls.every((url) => REGISTRY_URL.test(url));
+    files.every(({ path }) => AUTO_MERGE_PATH.test(path)) && lockfileLines.every(isRegistryLine);
   const merge = auto ? "auto" : "review";
   return { ok: problems.length === 0, problems, merge };
 };
@@ -112,15 +120,30 @@ export const parseRawModes = (output) => {
 };
 
 /**
- * Lists the URLs on the lines that a diff adds.
+ * Tells if an added lockfile line keeps auto-merge: it names no source, or it
+ * names the npm or crates.io registry in its exact form.
+ * @param {string} line
+ * @returns {boolean}
+ */
+export const isRegistryLine = (line) =>
+  !SOURCE_HINT.test(line) || REGISTRY_SOURCE_LINE.some((pattern) => pattern.test(line));
+
+/**
+ * Lists the lines that a unified diff adds. A `+++` line counts as a file
+ * header only before the first hunk of its file.
  * @param {string} diff
  * @returns {string[]}
  */
-export const addedUrls = (diff) =>
-  diff
-    .split("\n")
-    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-    .flatMap((line) => line.match(URL) ?? []);
+export const addedLines = (diff) => {
+  const added = [];
+  let inHunk = false;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) inHunk = false;
+    else if (line.startsWith("@@")) inHunk = true;
+    else if (inHunk && line.startsWith("+")) added.push(line.slice(1));
+  }
+  return added;
+};
 
 const main = () => {
   const before = process.env.BEFORE;
@@ -131,11 +154,23 @@ const main = () => {
     (file) => ({ ...file, mode: modes.get(file.path) ?? "" }),
   );
   const lockfiles = files.map(({ path }) => path).filter((path) => LOCKFILE_PATH.test(path));
-  const lockfileUrls =
+  // Literal pathspecs, so a path with `*`, `:` or `[` names only itself.
+  const lockfileLines =
     lockfiles.length === 0
       ? []
-      : addedUrls(git("diff", "--unified=0", "--no-renames", before, "HEAD", "--", ...lockfiles));
-  const result = checkRepair({ commits, files, lockfileUrls });
+      : addedLines(
+          git(
+            "--literal-pathspecs",
+            "diff",
+            "--unified=0",
+            "--no-renames",
+            before,
+            "HEAD",
+            "--",
+            ...lockfiles,
+          ),
+        );
+  const result = checkRepair({ commits, files, lockfileLines });
   for (const problem of result.problems) console.log(problem);
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(process.env.GITHUB_OUTPUT, `merge=${result.merge}\n`);

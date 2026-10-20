@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  addedUrls,
+  addedLines,
   checkRepair,
   MAX_CHANGED_LINES,
   parseNumstat,
@@ -96,30 +96,43 @@ test("a change to code that a build runs is accepted but needs review", () => {
   assert.equal(checkRepair({ commits: 1, files: generated }).merge, "auto");
 });
 
-test("a lockfile URL outside the official registry needs review", () => {
+test("a lockfile source outside the exact registry form needs review", () => {
   const files = [file("package-lock.json")];
-  const npm = "https://registry.npmjs.org/acorn/-/acorn-8.19.0.tgz";
-  const crates = "registry+https://github.com/rust-lang/crates.io-index";
-  assert.equal(checkRepair({ commits: 1, files, lockfileUrls: [npm, crates] }).merge, "auto");
-  for (const url of [
-    "https://evil.example/acorn.tgz",
-    "git+https://github.com/x/y",
-    "http://registry.npmjs.org/a",
+  const ok = [
+    '      "resolved": "https://registry.npmjs.org/acorn/-/acorn-8.19.0.tgz",',
+    'source = "registry+https://github.com/rust-lang/crates.io-index"',
+    '      "integrity": "sha512-abc",',
+    'version = "1.2.3"',
+    '        "url": "https://github.com/sponsors/x"',
+  ];
+  assert.equal(checkRepair({ commits: 1, files, lockfileLines: ok }).merge, "auto");
+  for (const line of [
+    '      "resolved": "https://evil.example/acorn.tgz",',
+    '      "resolved": "git+ssh://git@github.com/x/y.git#abc",',
+    '      "resolved": "HTTPS://registry.npmjs.org/a/-/a-1.0.0.tgz",',
+    '      "resolved": "file:../vendor/a.tgz",',
+    "    version: link:../a",
+    "    resolution: {tarball: https://registry.npmjs.org/a/-/a-1.0.0.tgz}",
+    'source = "git+https://github.com/x/y?rev=abc#abc"',
+    '"a": "github:x/y"',
   ]) {
-    assert.equal(checkRepair({ commits: 1, files, lockfileUrls: [url] }).merge, "review", url);
+    assert.equal(checkRepair({ commits: 1, files, lockfileLines: [line] }).merge, "review", line);
   }
 });
 
-test("only added diff lines give URLs", () => {
+test("added lines come from hunks, so an added line that starts with ++ counts", () => {
   const diff = [
+    "diff --git a/package-lock.json b/package-lock.json",
+    "--- a/package-lock.json",
     "+++ b/package-lock.json",
+    "@@ -1 +1,2 @@",
     '-      "resolved": "https://registry.npmjs.org/old.tgz",',
     '+      "resolved": "https://registry.npmjs.org/new.tgz",',
-    '+source = "registry+https://github.com/rust-lang/crates.io-index"',
+    '+++"resolved": "git+ssh://x"',
   ].join("\n");
-  assert.deepEqual(addedUrls(diff), [
-    "https://registry.npmjs.org/new.tgz",
-    "registry+https://github.com/rust-lang/crates.io-index",
+  assert.deepEqual(addedLines(diff), [
+    '      "resolved": "https://registry.npmjs.org/new.tgz",',
+    '++"resolved": "git+ssh://x"',
   ]);
 });
 
