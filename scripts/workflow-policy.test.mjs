@@ -2958,3 +2958,38 @@ test("optional Marketplace publisher proof installs only the frozen CLI before A
     /sparse-checkout: \|\n\s+.github\/scripts\/marketplace-profile.mjs\n\s+.github\/publishers\/marketplace/u,
   );
 });
+
+// Each pull request job takes a runner slot from every other open pull
+// request. A new workflow with a pull request trigger must pass the "Rule for
+// new workflows" in docs/development/quality-gates.md before it joins this list.
+const PULL_REQUEST_WORKFLOWS = [
+  "bench-cli-instructions.yml",
+  "bench-type-aware.yml",
+  "bench.yml",
+  "ci.yml",
+  "codeql.yml",
+  "commitlint.yml",
+  "dependabot-auto-merge.yml",
+  "ecosystem.yml",
+  "pgo-validate.yml",
+  "protocol-parity.yml",
+  "review-electron.yml",
+  "signing-migration.yml",
+  "test-action.yml",
+];
+
+test("only reviewed workflows run on pull requests", () => {
+  const triggered = readdirSync(".github/workflows")
+    .filter((file) => /\.ya?ml$/u.test(file))
+    .filter((file) =>
+      /^ {2}pull_request(?:_target)?:/mu.test(readWorkflow(`.github/workflows/${file}`)),
+    )
+    .toSorted();
+  assert.deepEqual(
+    triggered,
+    PULL_REQUEST_WORKFLOWS,
+    "A workflow with a pull_request trigger must be a required check, or catch a bug " +
+      "that main cannot catch one commit later. Read the Rule for new workflows in " +
+      "docs/development/quality-gates.md, then update PULL_REQUEST_WORKFLOWS.",
+  );
+});
