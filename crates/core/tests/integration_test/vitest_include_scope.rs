@@ -54,3 +54,24 @@ fn vitest_configs_that_a_script_or_a_project_loads_keep_their_includes() {
          and a vite config that a `projects` entry names is not shadowed"
     );
 }
+
+#[test]
+fn vitest_root_and_dir_set_the_base_of_includes_and_setup_files() {
+    assert_eq!(
+        unused_files("vitest-root-and-dir"),
+        vec!["app/other/outside.check.ts", "app/src/other.ts"],
+        "`test.include` is relative to `test.dir` below `test.root`, and \
+         `setupFiles` is relative to `test.root`"
+    );
+}
+
+#[test]
+fn vitest_project_files_with_other_names_add_their_includes_and_setup_files() {
+    assert_eq!(
+        unused_files("vitest-named-project-files"),
+        vec!["packages/a/orphan.ts"],
+        "a project file is the root of its project, a project without an \
+         include runs the default include, and `.mts` and `.cts` test files \
+         are entries"
+    );
+}

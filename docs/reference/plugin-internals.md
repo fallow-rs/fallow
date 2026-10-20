@@ -402,6 +402,17 @@ against the package root. Both results add up. A `vite.config` file next to
 a `vitest.config` file is shadowed only when the `vitest.config` file does not
 name it: a `projects` entry, an `extends` path and an import all load it.
 
+The run directory is not always the base of the globs. The Vitest root is
+`test.root`, else the Vite `root`, against the run directory. `setupFiles`,
+`globalSetup` and a reporter path are relative to the Vitest root. The include
+globs are relative to `test.dir` below the Vitest root, else to the root. A
+config whose include directory is outside the plugin root adds no entries.
+An inline project in `test.projects` goes through `ProjectScope`: it merges
+its base config, gets its own `root` and `dir`, and runs the default include
+when it sets none. A project file with another name, such as
+`vitest.unit.config.ts`, is the root of its project: its includes and setup
+files are relative to its own directory.
+
 ## Entries that a source file declares
 
 Some tools name a bundle entry in an ordinary source file, not in a config

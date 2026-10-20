@@ -21,9 +21,8 @@ const ENABLERS: &[&str] = &["vitest"];
 const SCRIPT_CONFIG_BINARIES: &[&str] = &["vitest"];
 
 const ENTRY_PATTERNS: &[&str] = &[
-    "**/*.test.{ts,tsx,js,jsx}",
-    "**/*.spec.{ts,tsx,js,jsx}",
-    "**/__tests__/**/*.{ts,tsx,js,jsx}",
+    VITEST_DEFAULT_INCLUDE,
+    "**/__tests__/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
     VITEST_DEFAULT_BENCH_INCLUDE,
 ];
 
@@ -184,13 +183,9 @@ fn resolve_vitest_config(
         ));
 
     apply_vitest_aliases(&mut result, source, config_path, root);
-    // Vitest does not load a vite config that a vitest config shadows.
-    if !is_shadowed_vite_config(config_path) {
-        apply_vitest_includes(&mut result, source, config_path, root, run_dir);
-    }
-    add_vitest_setup_files(&mut result, source, config_path, root);
+    let dirs = VitestDirs::read(source, config_path, run_dir);
     // Vitest does not load a vite config that a vitest config shadows, so
-    // the JSX settings of that vite config apply to no test file.
+    // the includes and the JSX settings of that vite config apply to no file.
     if !is_shadowed_vite_config(config_path) {
         // The Vitest version matters only for inline projects, so the
         // disk reads run only for a config that names `projects`.
@@ -198,12 +193,28 @@ fn resolve_vitest_config(
             inherit_by_default: !source.contains("projects")
                 || vitest_inherits_by_default(config_path, root),
         };
+        apply_vitest_includes(&mut result, source, config_path, root, run_dir, &dirs);
+        add_inline_project_includes(
+            &mut result,
+            source,
+            config_path,
+            (root, project_root),
+            (run_dir, &dirs.root),
+            jsx,
+        );
         add_vitest_jsx_import_sources(&mut result, source, config_path, project_root, jsx);
-        add_vitest_project_config_files(&mut result, source, config_path, project_root, jsx);
+        add_vitest_project_config_files(
+            &mut result,
+            source,
+            config_path,
+            (root, project_root),
+            jsx,
+        );
     }
+    add_vitest_setup_files(&mut result, source, config_path, &dirs.root);
 
     add_vitest_environment_dependency(&mut result, source, config_path);
-    add_vitest_reporter_dependencies(&mut result, source, config_path, root, run_dir);
+    add_vitest_reporter_dependencies(&mut result, source, config_path, root, &dirs.root);
     add_vitest_coverage_dependency(&mut result, source, config_path);
     add_vitest_typecheck_dependency(&mut result, source, config_path);
     add_vitest_browser_dependency(&mut result, source, config_path);
@@ -243,37 +254,156 @@ fn apply_vitest_includes(
     config_path: &Path,
     root: &Path,
     run_dir: &Path,
+    dirs: &VitestDirs,
 ) {
     // Every result accumulates, so a replacing config keeps the patterns of
     // the configs below `root` that the registry merged before it.
     result.accumulate_config_entry_patterns = true;
-    let prefix = run_dir
-        .strip_prefix(root)
-        .map(config_parser::path_to_config_string)
-        .unwrap_or_default();
-    let root_includes =
+    let Some(includes) = push_config_includes(result, source, config_path, root, dirs) else {
+        return;
+    };
+    if !includes.is_empty() && dir_prefix(run_dir, root).is_some_and(|prefix| prefix.is_empty()) {
+        result.replace_entry_patterns = true;
+        if !includes.bench {
+            push_vitest_include_entries(
+                result,
+                &[VITEST_DEFAULT_BENCH_INCLUDE],
+                &includes.prefix,
+                root,
+            );
+        }
+    }
+}
+
+/// The directories of one Vitest config.
+struct VitestDirs {
+    /// The Vitest root: `test.root`, else the Vite `root`, against the
+    /// directory that Vitest runs in. `setupFiles` and reporter paths are
+    /// relative to it.
+    root: PathBuf,
+    /// `test.dir` against the root, else the root. The include globs are
+    /// relative to it.
+    include: PathBuf,
+}
+
+impl VitestDirs {
+    fn read(source: &str, config_path: &Path, run_dir: &Path) -> Self {
+        let value = |path: &[&str]| config_parser::extract_config_string(source, config_path, path);
+        let root = value(&["test", "root"])
+            .or_else(|| value(&["root"]))
+            .map_or_else(|| run_dir.to_path_buf(), |dir| lexical_join(run_dir, &dir));
+        let include =
+            value(&["test", "dir"]).map_or_else(|| root.clone(), |dir| lexical_join(&root, &dir));
+        Self { root, include }
+    }
+}
+
+/// What [`push_config_includes`] found in one config.
+struct ConfigIncludes {
+    /// The include directory relative to the plugin root.
+    prefix: String,
+    /// Whether the config sets `test.include`.
+    test: bool,
+    /// Whether the config sets `test.benchmark.include`.
+    bench: bool,
+}
+
+impl ConfigIncludes {
+    fn is_empty(&self) -> bool {
+        !self.test
+    }
+}
+
+/// Register the `test.include` and `test.benchmark.include` globs of one
+/// config below its include directory. `None` when that directory is
+/// outside `root`, because no entry pattern can reach those files.
+fn push_config_includes(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    dirs: &VitestDirs,
+) -> Option<ConfigIncludes> {
+    let prefix = dir_prefix(&dirs.include, root)?;
+    let test_includes =
         config_parser::extract_config_string_array(source, config_path, &["test", "include"]);
     let bench_includes = config_parser::extract_config_string_array(
         source,
         config_path,
         &["test", "benchmark", "include"],
     );
-    push_vitest_include_entries(result, &root_includes, &prefix, root);
+    push_vitest_include_entries(result, &test_includes, &prefix, root);
     push_vitest_include_entries(result, &bench_includes, &prefix, root);
-    if !root_includes.is_empty() && prefix.is_empty() {
-        result.replace_entry_patterns = true;
-        if bench_includes.is_empty() {
-            push_vitest_include_entries(result, &[VITEST_DEFAULT_BENCH_INCLUDE], &prefix, root);
+    Some(ConfigIncludes {
+        prefix,
+        test: !test_includes.is_empty(),
+        bench: !bench_includes.is_empty(),
+    })
+}
+
+/// `dir` relative to `root` as a glob prefix, or `None` outside `root`.
+fn dir_prefix(dir: &Path, root: &Path) -> Option<String> {
+    dir.strip_prefix(root)
+        .ok()
+        .map(config_parser::path_to_config_string)
+}
+
+/// `glob` below the directory `prefix`.
+fn prefixed_glob(prefix: &str, glob: &str) -> String {
+    if prefix.is_empty() {
+        glob.to_string()
+    } else {
+        format!("{prefix}/{glob}")
+    }
+}
+
+/// Register the include globs of each inline project in `test.projects`.
+///
+/// An inline project merges its base config as Vitest does, so it gets the
+/// includes, excludes, `root` and `dir` of that base. A project without an
+/// include runs the default include below its own directory. A `root` that
+/// the project inherits is relative to `run_dir`, as in the declaring
+/// config. A `root` of its own is relative to the root of the declaring
+/// config, `dirs.root`.
+fn add_inline_project_includes(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    (root, project_root): (&Path, &Path),
+    (run_dir, vitest_root): (&Path, &Path),
+    jsx: JsxContext,
+) {
+    let Some((scopes, base_root)) =
+        config_parser::extract_from_source(source, config_path, |program| {
+            let config = config_parser::find_config_object(program)?;
+            config_parser::property_object(config, "test")
+                .and_then(|test| config_parser::property_expr(test, "projects"))
+                .and_then(config_parser::array_expression)?;
+            let scopes = collect_project_scopes(config, config_path, project_root, jsx).0;
+            Some((scopes, ProjectScope::read(config).root))
+        })
+    else {
+        return;
+    };
+    for scope in scopes {
+        let base = if scope.root == base_root {
+            run_dir
+        } else {
+            vitest_root
+        };
+        let (Some(prefix), Some(groups)) = (dir_prefix(base, root), scope.glob_groups(base)) else {
+            continue;
+        };
+        for (includes, excludes) in groups {
+            let excludes: Vec<String> = excludes
+                .iter()
+                .map(|glob| prefixed_glob(&prefix, glob))
+                .collect();
+            result.entry_patterns.extend(includes.iter().map(|include| {
+                PathRule::new(prefixed_glob(&prefix, include)).with_excluded_globs(&excludes)
+            }));
         }
     }
-
-    let project_includes = config_parser::extract_config_array_nested_string_or_array(
-        source,
-        config_path,
-        &["test", "projects"],
-        &["test", "include"],
-    );
-    push_vitest_include_entries(result, &project_includes, &prefix, root);
 }
 
 /// The directory that Vitest runs in for `config_path`. Vitest finds a
@@ -886,15 +1016,17 @@ fn add_vitest_jsx_import_sources(
 /// Vitest loads such a file as a project config with its own root, and no
 /// import shows that use. The config patterns already find a file with a
 /// standard name, such as `vitest.config.ts`. A file with another name, such
-/// as `vitest.e2e.config.ts`, is read here: the file is credited and its JSX
-/// rules apply. A glob entry is expanded on disk. A glob with a brace group
-/// is not followed, because the glob matcher has no brace support. A file
-/// outside the project root is not read.
+/// as `vitest.e2e.config.ts`, is read here: the file is credited, its JSX
+/// rules apply, and its include globs and setup files count below its own
+/// directory, which is the root of that project. A glob entry is expanded
+/// on disk. A glob with a brace group is not followed, because the glob
+/// matcher has no brace support. A file outside the project root is not
+/// read.
 fn add_vitest_project_config_files(
     result: &mut PluginResult,
     source: &str,
     config_path: &Path,
-    project_root: &Path,
+    (root, project_root): (&Path, &Path),
     jsx: JsxContext,
 ) {
     let Some(config_dir) = config_path.parent() else {
@@ -917,11 +1049,28 @@ fn add_vitest_project_config_files(
                 continue;
             };
             add_vitest_jsx_import_sources(result, &project_source, &path, project_root, jsx);
+            add_project_file_includes(result, &project_source, &path, root);
             if !result.setup_files.contains(&path) {
                 result.setup_files.push(path);
             }
         }
     }
+}
+
+/// Register the include globs and the setup files of a project config file.
+/// Vitest uses the directory of the file as the project root. A project
+/// without `test.include` runs the default include below its directory.
+fn add_project_file_includes(result: &mut PluginResult, source: &str, path: &Path, root: &Path) {
+    let Some(project_dir) = path.parent() else {
+        return;
+    };
+    let dirs = VitestDirs::read(source, path, project_dir);
+    if let Some(includes) = push_config_includes(result, source, path, root, &dirs)
+        && includes.is_empty()
+    {
+        push_vitest_include_entries(result, &[VITEST_DEFAULT_INCLUDE], &includes.prefix, root);
+    }
+    add_vitest_setup_files(result, source, path, &dirs.root);
 }
 
 /// The files that one `test.projects` string entry names. A plain path gives
@@ -1009,11 +1158,13 @@ fn vitest_extglob(pattern: &str) -> String {
     out
 }
 
+/// Register `setupFiles` and `globalSetup` relative to the Vitest root of
+/// the config.
 fn add_vitest_setup_files(
     result: &mut PluginResult,
     source: &str,
     config_path: &Path,
-    root: &Path,
+    vitest_root: &Path,
 ) {
     let mut setup_files =
         config_parser::extract_config_string_or_array(source, config_path, &["test", "setupFiles"]);
@@ -1024,9 +1175,7 @@ fn add_vitest_setup_files(
         &["test", "setupFiles"],
     ));
     for f in &setup_files {
-        result
-            .setup_files
-            .push(root.join(f.trim_start_matches("./")));
+        result.setup_files.push(lexical_join(vitest_root, f));
     }
 
     let mut global_setup = config_parser::extract_config_string_or_array(
@@ -1041,9 +1190,7 @@ fn add_vitest_setup_files(
         &["test", "globalSetup"],
     ));
     for f in &global_setup {
-        result
-            .setup_files
-            .push(root.join(f.trim_start_matches("./")));
+        result.setup_files.push(lexical_join(vitest_root, f));
     }
 }
 
@@ -1086,7 +1233,7 @@ fn add_vitest_reporter_dependencies(
     source: &str,
     config_path: &Path,
     root: &Path,
-    run_dir: &Path,
+    vitest_root: &Path,
 ) {
     let reporters = config_parser::extract_config_nested_shallow_strings(
         source,
@@ -1100,7 +1247,7 @@ fn add_vitest_reporter_dependencies(
         }
         // Vitest imports a reporter path as a module, so the file is used.
         if is_path_source(reporter) {
-            let path = lexical_join(run_dir, reporter);
+            let path = lexical_join(vitest_root, reporter);
             if path.starts_with(root) && !result.setup_files.contains(&path) {
                 result.setup_files.push(path);
             }

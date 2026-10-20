@@ -1192,8 +1192,10 @@ fn nested_config_include_is_scoped_to_its_directory() {
         !result.replace_entry_patterns,
         "a config below the root must not replace the defaults of the project"
     );
+    // The inline project merges the root include, so that glob is also an
+    // entry of the project, with the project excludes.
     assert_eq!(
-        result.entry_patterns,
+        entry_globs(&result),
         vec!["fixtures/app/src/**/*.test.ts", "fixtures/app/unit.test.js"]
     );
 }
@@ -1781,4 +1783,112 @@ fn inline_project_extends_inside_the_root_is_read() {
         result.referenced_dependencies
     );
     assert_eq!(result.setup_files, vec![root.join("vite.base.config.ts")]);
+}
+
+fn entry_globs(result: &PluginResult) -> Vec<&str> {
+    let mut patterns: Vec<&str> = result
+        .entry_patterns
+        .iter()
+        .map(|rule| rule.pattern.as_str())
+        .collect();
+    patterns.sort_unstable();
+    patterns.dedup();
+    patterns
+}
+
+#[test]
+fn test_root_and_dir_prefix_the_includes() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r#"export default {
+            test: { root: "app", dir: "tests", include: ["**/*.check.ts"] },
+        };"#,
+    );
+    assert!(result.replace_entry_patterns);
+    assert_eq!(
+        entry_globs(&result),
+        vec![
+            "app/tests/**/*.check.ts",
+            "app/tests/**/*.{bench,benchmark}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"
+        ]
+    );
+}
+
+#[test]
+fn vite_root_is_the_vitest_root_and_the_base_of_setup_files() {
+    let result = resolve_at(
+        "/project/vite.config.ts",
+        r#"export default { root: "web", test: { setupFiles: ["./setup.ts"] } };"#,
+    );
+    assert!(
+        result
+            .setup_files
+            .contains(&PathBuf::from("/project/web/setup.ts")),
+        "{:?}",
+        result.setup_files
+    );
+}
+
+#[test]
+fn include_dir_outside_the_root_adds_no_entries() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r#"export default { test: { root: "..", include: ["**/*.test.ts"] } };"#,
+    );
+    assert!(!result.replace_entry_patterns);
+    assert!(result.entry_patterns.is_empty());
+}
+
+#[test]
+fn inline_project_root_and_default_include_scope_its_entries() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r#"export default {
+            test: {
+                projects: [
+                    { extends: false, test: { root: "pkg", include: ["spec/**/*.ts"] } },
+                    { extends: false, test: { root: "lib" } },
+                ],
+            },
+        };"#,
+    );
+    assert_eq!(
+        entry_globs(&result),
+        vec![
+            "lib/**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+            "pkg/spec/**/*.ts"
+        ]
+    );
+    let pkg = result
+        .entry_patterns
+        .iter()
+        .find(|rule| rule.pattern == "pkg/spec/**/*.ts")
+        .unwrap();
+    assert!(
+        pkg.exclude_globs
+            .contains(&"pkg/**/node_modules/**".to_string()),
+        "{:?}",
+        pkg.exclude_globs
+    );
+}
+
+#[test]
+fn inherited_root_applies_once_to_an_inline_project() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r#"export default {
+            root: "packages/a",
+            test: { projects: [{ test: { name: "u", include: ["spec/**/*.ck.ts"] } }] },
+        };"#,
+    );
+    assert_eq!(entry_globs(&result), vec!["packages/a/spec/**/*.ck.ts"]);
+}
+
+#[test]
+fn projects_that_are_not_an_array_literal_add_no_inline_entries() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        "export default { test: { projects: PROJECTS } };",
+    );
+    assert!(result.entry_patterns.is_empty());
 }
