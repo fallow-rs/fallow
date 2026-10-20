@@ -185,3 +185,9 @@ AI coding agents read instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules
 - **Local agent surface (advisory):** a Claude Code `SessionStart` hook scans the agent-instruction allowlist, including untracked and gitignored files that never reach a pull request. Hidden code points are reported; on the un-reviewed (untracked) files only, shell-exec injection shapes (`curl | sh`, `base64 -d | sh`, `eval`, `node -e`) are flagged as advisory warnings.
 
 This is defense-in-depth, not a trust boundary: it raises the cost of agent-context poisoning and surfaces the most common shapes, but a determined attacker who can write these files can also edit the hook. Agent-instruction files are untrusted by default; never run a pasted remediation without reading the patch, the URLs, and the package names first.
+
+## Acknowledgments
+
+Thanks to the people who reported vulnerabilities in fallow:
+
+- presendapp (https://github.com/presendapp) reported that the MCP setup snippet `npx fallow-mcp` could resolve to an unclaimed npm package name (GHSA-pp5v-xh6f-qgfx). Fixed in 3.32.0: the snippet now names the `fallow` package, and `fallow-mcp` is reserved on npm.
