@@ -60,7 +60,7 @@ const MINUTE = 60 * SECOND;
 // complete and unchanged this long, no further check comes, and the wait ends.
 const SETTLE_MS = 10 * MINUTE;
 // GitHub creates all push runs of a commit together, and a new run is pending.
-// So a complete set of runs is the full set. The short settle time catches a
+// So a complete set of runs contains all push runs. The short settle time catches a
 // run that a completed run starts, for example through workflow_run.
 export const COMMIT_SETTLE_MS = 2 * MINUTE;
 // A GitHub API outage of a few minutes must not stop the wait. After a failed

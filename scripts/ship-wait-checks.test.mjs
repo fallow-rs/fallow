@@ -221,8 +221,12 @@ test("a commit run that starts after the others complete restarts the settle tim
 
   const result = await waitCommit(script);
 
+  // Release completes at the fourth read (90 seconds). The settle time then
+  // ends at 210 seconds, the eighth read. Without the restart, it ends at
+  // 120 seconds, the fifth read.
   assert.equal(result.status, "settled");
   assert.equal(result.checks.length, 6);
+  assert.equal(script.reads(), 8);
 });
 
 test("pull request checks that stay complete for the settle window end the wait below the count", async () => {
