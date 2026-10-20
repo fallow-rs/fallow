@@ -305,7 +305,12 @@ Add the `ci:perf` label to a pull request that changes a hot path. The label eve
 without the label starts these workflows, but every job skips and uses no
 runner.
 
-On a schedule only: `Ecosystem (Full)`, `Hawk`, and `Release Validation`.
+On a schedule only: `Branch Coverage`, `Ecosystem (Full)`, `Hawk`, and
+`Release Validation`. `Branch Coverage` runs every week and with
+`workflow_dispatch`. It runs `cargo llvm-cov --branch` on the pinned nightly of
+`Fuzz Smoke`, because `--branch` needs a nightly compiler. It writes line and
+branch coverage to the job summary. It has no floor and does not gate a
+release.
 
 ### Prose-only main scheduling
 

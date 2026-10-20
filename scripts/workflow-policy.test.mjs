@@ -109,6 +109,32 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
   }
 });
 
+test("branch coverage reports weekly on the Fuzz Smoke nightly without gating releases", async () => {
+  const workflow = readWorkflow(".github/workflows/branch-coverage.yml");
+  const fuzzJob = indentedBlock(readWorkflow(".github/workflows/fuzz-smoke.yml"), "fuzz-smoke", 2);
+  const triggers = indentedBlock(workflow, "on", 0);
+  const job = indentedBlock(workflow, "branch-coverage", 2);
+  const { REQUIRED_WORKFLOWS } = await import("./verify-release-ci.mjs");
+  const fuzzNightly = fuzzJob.match(/toolchain: (nightly-\d{4}-\d{2}-\d{2})/)?.[1];
+
+  assert.ok(fuzzNightly, "Fuzz Smoke must pin a dated nightly");
+  assert.match(workflow, new RegExp(`^  NIGHTLY_TOOLCHAIN: ${fuzzNightly}$`, "m"));
+  assert.match(triggers, /^  schedule:\n    - cron: '20 4 \* \* 1'$/m);
+  assert.match(triggers, /^  workflow_dispatch:$/m);
+  assert.doesNotMatch(triggers, /^  (push|pull_request|pull_request_target):/m);
+  assert.ok(
+    !REQUIRED_WORKFLOWS.some(({ file }) => file === "branch-coverage.yml"),
+    "a report-only scheduled workflow must not gate releases",
+  );
+  assert.match(workflow, /^permissions: \{\}$/m);
+  assert.match(job, /permissions:\n      contents: read/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(job, /toolchain: \$\{\{ env\.NIGHTLY_TOOLCHAIN \}\}/);
+  assert.match(job, /cargo \+"\$NIGHTLY_TOOLCHAIN" llvm-cov --workspace --branch --lcov/);
+  assert.match(job, /\/\^BRF:\/[\s\S]*\/\^BRH:\/[\s\S]*GITHUB_STEP_SUMMARY/);
+  assert.doesNotMatch(job, /exit 1|FLOOR=/, "branch coverage only reports and has no floor");
+});
+
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);
