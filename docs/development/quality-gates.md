@@ -618,6 +618,9 @@ The step skips these files:
   header by hand, so review a new generator header like any other change.
 - Files in a `snapshots` or `__snapshots__` directory. Snapshot files
   (`.snap`) are not checked file types.
+- Test files. These are files in a `tests` or `test` directory, Rust files
+  named `tests.rs`, `*_tests.rs` or `*_test.rs`, and `*.test.mjs` or
+  `*.test.ts` files. A test file grows with each new test case.
 
 To fix a failure, move the new code to a new module, or remove lines from
 the file in the same change. To skip only this step for one commit, run

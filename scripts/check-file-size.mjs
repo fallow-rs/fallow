@@ -13,6 +13,9 @@ export const LINE_LIMIT = 2000;
 
 const CHECKED_EXTENSIONS = new Set([".rs", ".mjs", ".ts"]);
 const SNAPSHOT_DIRECTORIES = new Set(["snapshots", "__snapshots__"]);
+// Test files grow with each new test case, so the rule skips them.
+const TEST_DIRECTORIES = new Set(["tests", "test"]);
+const TEST_FILE = /(?:^tests\.rs|_tests?\.rs|\.test\.(?:mjs|ts))$/u;
 // The repository generators write one of two exact header lines in the first
 // lines of the file. A comment that only names the words does not match.
 const GENERATED_HEADER_LINES = 10;
@@ -40,12 +43,21 @@ export const countLines = (text) => {
 export const isGeneratedSource = (text) =>
   text.split("\n", GENERATED_HEADER_LINES).some((line) => GENERATED_HEADER.test(line));
 
-/** True for a file that the no-growth rule checks. */
+/** True for a file that the no-growth rule checks: not a snapshot and not a test file. */
 export const isCheckedPath = (path) => {
   if (!CHECKED_EXTENSIONS.has(extname(path).toLowerCase())) {
     return false;
   }
-  return !path.split("/").some((segment) => SNAPSHOT_DIRECTORIES.has(segment));
+  const segments = path.split("/");
+  const directories = segments.slice(0, -1);
+  if (
+    directories.some(
+      (segment) => SNAPSHOT_DIRECTORIES.has(segment) || TEST_DIRECTORIES.has(segment),
+    )
+  ) {
+    return false;
+  }
+  return !TEST_FILE.test(segments.at(-1));
 };
 
 /**

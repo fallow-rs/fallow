@@ -36,6 +36,18 @@ test("countLines matches wc -l and counts a last line without a newline", () => 
   assert.equal(countLines("a\n\nb\n"), 3);
 });
 
+test("isCheckedPath skips test files and test directories", () => {
+  assert.equal(isCheckedPath("crates/extract/src/visitor/tests.rs"), false);
+  assert.equal(isCheckedPath("crates/cli/src/audit_tests.rs"), false);
+  assert.equal(isCheckedPath("crates/cli/src/report/format_test.rs"), false);
+  assert.equal(isCheckedPath("crates/cli/tests/integration/health_tests.rs"), false);
+  assert.equal(isCheckedPath("crates/api/src/audit_run/tests/mod.rs"), false);
+  assert.equal(isCheckedPath("scripts/check-file-size.test.mjs"), false);
+  assert.equal(isCheckedPath("editors/vscode/test/audit-utils.test.ts"), false);
+  assert.equal(isCheckedPath("crates/engine/src/contest.rs"), true);
+  assert.equal(isCheckedPath("crates/engine/src/attestation.rs"), true);
+});
+
 test("isCheckedPath covers Rust, mjs and TypeScript but not snapshots", () => {
   assert.equal(isCheckedPath("crates/cli/src/main.rs"), true);
   assert.equal(isCheckedPath("scripts/tool.mjs"), true);
