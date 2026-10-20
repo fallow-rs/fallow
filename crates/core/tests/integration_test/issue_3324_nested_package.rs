@@ -245,15 +245,26 @@ fn metadata_only_nested_manifests_inherit_ancestor_declarations() {
     );
     write(
         &root.join("examples/demo/app/biz/Foo.ts"),
-        "import 'egg'; import '@repro/rootdep'; import 'biz'; import '@repro/missing';\n",
+        "import 'egg'; import '@repro/rootdep'; import 'biz'; import '@repro/missing'; import '../owned/Bar';\n",
+    );
+    write(
+        &root.join("examples/demo/app/owned/package.json"),
+        r#"{ "name": "owned", "dependencies": {} }"#,
+    );
+    write(
+        &root.join("examples/demo/app/owned/Bar.ts"),
+        "import 'egg';\n",
     );
     let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis succeeds");
     assert_eq!(
         unlisted_sites(&results, &root),
-        vec![(
-            "@repro/missing".into(),
-            "examples/demo/app/biz/Foo.ts".into()
-        )],
-        "a manifest that declares no dependencies does not stop the walk to ancestor manifests"
+        vec![
+            (
+                "@repro/missing".into(),
+                "examples/demo/app/biz/Foo.ts".into()
+            ),
+            ("egg".into(), "examples/demo/app/owned/Bar.ts".into()),
+        ],
+        "a manifest without a dependency field inherits ancestor declarations; an explicit empty field keeps the owner"
     );
 }
