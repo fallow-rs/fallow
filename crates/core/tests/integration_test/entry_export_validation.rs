@@ -191,6 +191,101 @@ fn postcss_config_default_export_is_framework_used_with_include_entry_exports() 
     );
 }
 
+fn config_default_credit_findings(include_entry_exports: bool) -> Vec<(String, String)> {
+    let root = fixture_path("config-default-export-credit");
+    let mut config = create_config(root);
+    config.include_entry_exports = include_entry_exports;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut findings: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            (
+                export
+                    .export
+                    .path
+                    .strip_prefix(&config.root)
+                    .unwrap_or(&export.export.path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                export.export.export_name.clone(),
+            )
+        })
+        .collect();
+    findings.sort();
+    findings
+}
+
+fn finding(path: &str, export: &str) -> (String, String) {
+    (path.to_owned(), export.to_owned())
+}
+
+#[test]
+fn config_file_default_export_is_used_with_include_entry_exports() {
+    // Issue #3691: a tool loads its config file and reads the default export.
+    // Every form of the default export gets the credit: an object, a
+    // defineConfig(...) call, an arrow function, an async function and
+    // `export { config as default }`. A config file of a workspace package
+    // gets the credit too. A named export of a config file stays reportable.
+    let findings = config_default_credit_findings(true);
+
+    for credited in [
+        "tailwind.config.js",
+        "playwright.config.js",
+        "jest.config.js",
+        "rollup.config.js",
+        "typedoc.config.js",
+        "graphql.config.js",
+        "gatsby-config.js",
+        "packages/web/uno.config.js",
+    ] {
+        assert!(
+            !findings.contains(&finding(credited, "default")),
+            "the default export of {credited} is read by its tool, found: {findings:?}"
+        );
+    }
+    assert!(
+        findings.contains(&finding("tailwind.config.js", "unusedHelper")),
+        "a named export of a config file stays reportable, found: {findings:?}"
+    );
+}
+
+#[test]
+fn opted_out_config_patterns_keep_default_export_reportable() {
+    // Gatsby reads named API exports from gatsby-node. `codegen*` also
+    // matches source files such as src/codegenUtils.js. Serverless and Vercel
+    // patterns match helper modules in any directory.
+    let findings = config_default_credit_findings(true);
+
+    for reported in [
+        "gatsby-node.js",
+        "codegen.js",
+        "src/codegenUtils.js",
+        "serverless.js",
+        "vercel.js",
+    ] {
+        assert!(
+            findings.contains(&finding(reported, "default")),
+            "the default export of {reported} gets no credit, found: {findings:?}"
+        );
+    }
+}
+
+#[test]
+fn config_default_credit_does_not_change_default_mode() {
+    // Without includeEntryExports a config file is an entry point, and fallow
+    // skips its exports. The credit must not make fallow analyse the file, so
+    // the unused named export of tailwind.config.js stays unreported.
+    let findings = config_default_credit_findings(false);
+
+    assert_eq!(
+        findings,
+        vec![finding("src/codegenUtils.js", "default")],
+        "default-mode output must not change"
+    );
+}
+
 #[test]
 fn storybook_exports_are_framework_used_with_include_entry_exports() {
     let root = fixture_path("storybook-include-entry-exports");

@@ -1,0 +1,9 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "devDependencies": {
+    "unocss": "^66.0.0"
+  }
+}

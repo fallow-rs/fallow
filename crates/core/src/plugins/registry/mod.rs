@@ -384,6 +384,11 @@ pub struct AggregatedPluginResult {
     pub always_used: Vec<(String, String)>,
     /// All used export rules from active plugins.
     pub used_exports: Vec<PluginUsedExportRule>,
+    /// One `default` export rule for each config pattern of an active plugin,
+    /// minus the patterns in the plugin's `config_default_export_opt_out`.
+    /// The unused-export analysis reads these rules only under
+    /// `includeEntryExports`, so they never change the default output.
+    pub config_default_exports: Vec<PluginUsedExportRule>,
     /// Class member rules contributed by active plugins that should never be
     /// flagged as unused. Extends the built-in Angular/React lifecycle allowlist
     /// with framework-invoked method names, optionally scoped by class heritage.
@@ -487,6 +492,16 @@ fn extend_unique(target: &mut Vec<String>, incoming: Vec<String>) {
     }
 }
 
+/// Append each incoming item that `target` does not hold yet. For the small
+/// lists whose items have no hash.
+fn push_missing<T: PartialEq>(target: &mut Vec<T>, incoming: Vec<T>) {
+    for item in incoming {
+        if !target.contains(&item) {
+            target.push(item);
+        }
+    }
+}
+
 /// Prefix a workspace-relative pattern so it matches from the monorepo root,
 /// unless it is already workspace-prefixed or project-root-relative (leading
 /// `/`, e.g. an angular.json path). Mirrors the pre-#444 inline closure.
@@ -530,6 +545,9 @@ impl AggregatedPluginResult {
         for rule in &mut self.used_exports {
             *rule = rule.prefixed(ws_prefix);
         }
+        for rule in &mut self.config_default_exports {
+            *rule = rule.prefixed(ws_prefix);
+        }
         for rule in &mut self.provided_dependencies {
             *rule = rule.prefixed(ws_prefix);
         }
@@ -564,6 +582,7 @@ impl AggregatedPluginResult {
             config_patterns,
             always_used,
             used_exports,
+            config_default_exports,
             used_class_members,
             framework_class_member_contracts,
             referenced_dependencies,
@@ -601,6 +620,7 @@ impl AggregatedPluginResult {
         self.config_patterns.extend(config_patterns);
         self.always_used.extend(always_used);
         self.used_exports.extend(used_exports);
+        self.config_default_exports.extend(config_default_exports);
         self.used_class_members.extend(used_class_members);
         for contract in framework_class_member_contracts {
             if !self.framework_class_member_contracts.contains(&contract) {
@@ -636,26 +656,10 @@ impl AggregatedPluginResult {
             .extend(framework_static_dir_mappings);
         self.provided_dependencies.extend(provided_dependencies);
         self.federation_sources.extend(federation_sources);
-        for rule in jsx_import_sources {
-            if !self.jsx_import_sources.contains(&rule) {
-                self.jsx_import_sources.push(rule);
-            }
-        }
-        for rule in jsx_package_credits {
-            if !self.jsx_package_credits.contains(&rule) {
-                self.jsx_package_credits.push(rule);
-            }
-        }
-        for dir in tsconfig_jsx_dirs {
-            if !self.tsconfig_jsx_dirs.contains(&dir) {
-                self.tsconfig_jsx_dirs.push(dir);
-            }
-        }
-        for diagnostic in config_diagnostics {
-            if !self.config_diagnostics.contains(&diagnostic) {
-                self.config_diagnostics.push(diagnostic);
-            }
-        }
+        push_missing(&mut self.jsx_import_sources, jsx_import_sources);
+        push_missing(&mut self.jsx_package_credits, jsx_package_credits);
+        push_missing(&mut self.tsconfig_jsx_dirs, tsconfig_jsx_dirs);
+        push_missing(&mut self.config_diagnostics, config_diagnostics);
     }
 }
 

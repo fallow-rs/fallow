@@ -14,6 +14,8 @@ const ENTRY_PATTERNS: &[&str] = &[
     "app.config.{ts,js}",
 ];
 
+const CONFIG_PATTERNS: &[&str] = &["metro.config.{ts,js}", "react-native.config.{ts,js}"];
+
 const ALWAYS_USED: &[&str] = &[
     "metro.config.{ts,js}",
     "react-native.config.{ts,js}",
@@ -33,6 +35,7 @@ define_plugin! {
     struct ReactNativePlugin => "react-native",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
 }

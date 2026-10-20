@@ -13,6 +13,8 @@ const ENTRY_PATTERNS: &[&str] = &[
     "**/*.spec.{ts,tsx,js,jsx}",
 ];
 
+const CONFIG_PATTERNS: &[&str] = &["ava.config.{js,cjs,mjs}"];
+
 const ALWAYS_USED: &[&str] = &["ava.config.{js,cjs,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["ava", "@ava/typescript"];
@@ -21,6 +23,7 @@ define_plugin! {
     struct AvaPlugin => "ava",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
 }

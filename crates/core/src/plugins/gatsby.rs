@@ -23,6 +23,14 @@ const CONFIG_PATTERNS: &[&str] = &[
     "gatsby-ssr.{ts,tsx,js,jsx}",
 ];
 
+/// Gatsby reads named API exports (`createPages`, `wrapPageElement`, ...) from
+/// these files, not a default export, so their default export gets no credit.
+const NAMED_API_CONFIG_PATTERNS: &[&str] = &[
+    "gatsby-node.{ts,js,mjs}",
+    "gatsby-browser.{ts,tsx,js,jsx}",
+    "gatsby-ssr.{ts,tsx,js,jsx}",
+];
+
 const ALWAYS_USED: &[&str] = &[
     "gatsby-config.{ts,js,mjs}",
     "gatsby-node.{ts,js,mjs}",
@@ -40,6 +48,7 @@ define_plugin! {
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
     config_patterns: CONFIG_PATTERNS,
+    config_default_export_opt_out: NAMED_API_CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     used_exports: [

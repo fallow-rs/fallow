@@ -84,6 +84,10 @@ impl Plugin for ServerlessFrameworkPlugin {
         CONFIG_PATTERNS
     }
 
+    fn config_default_export_opt_out(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
     fn always_used(&self) -> &'static [&'static str] {
         ALWAYS_USED
     }

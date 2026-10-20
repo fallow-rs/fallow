@@ -56,6 +56,27 @@ pub fn prepare_config_pattern(pat: &str) -> Cow<'_, str> {
     }
 }
 
+/// Credit the `default` export of each config file that `patterns` match.
+///
+/// The tool loads its config file and reads the default export, so the export
+/// counts as used under `includeEntryExports`. The patterns get the same
+/// `**/` prefix that config discovery adds, so a config file in a nested
+/// directory gets the credit too.
+fn push_config_default_exports<'a>(
+    pname: &str,
+    patterns: impl Iterator<Item = &'a str>,
+    result: &mut AggregatedPluginResult,
+) {
+    for pat in patterns {
+        result
+            .config_default_exports
+            .push(PluginUsedExportRule::new(
+                pname,
+                UsedExportRule::new(prepare_config_pattern(pat), ["default"]),
+            ));
+    }
+}
+
 /// Collect static patterns from a single plugin into the aggregated result.
 pub fn process_static_patterns(
     plugin: &dyn Plugin,
@@ -85,6 +106,16 @@ fn collect_static_plugin_rules(
     for pat in plugin.config_patterns() {
         result.config_patterns.push((*pat).to_string());
     }
+    let opt_out = plugin.config_default_export_opt_out();
+    push_config_default_exports(
+        pname,
+        plugin
+            .config_patterns()
+            .iter()
+            .copied()
+            .filter(|pat| !opt_out.contains(pat)),
+        result,
+    );
     for pat in plugin.always_used() {
         result
             .always_used
@@ -245,6 +276,11 @@ pub fn process_external_plugins(
                 );
             }
             result.config_patterns.extend(ext.config_patterns.clone());
+            push_config_default_exports(
+                &ext.name,
+                ext.config_patterns.iter().map(String::as_str),
+                result,
+            );
             result.always_used.extend(
                 ext.config_patterns
                     .iter()

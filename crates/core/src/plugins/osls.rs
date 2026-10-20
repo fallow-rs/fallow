@@ -15,6 +15,7 @@ define_plugin! {
     struct OslsPlugin => "osls",
     enablers: ENABLERS,
     config_patterns: CONFIG_PATTERNS,
+    config_default_export_opt_out: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     resolve_config(config_path, source, root) {

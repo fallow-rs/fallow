@@ -1,0 +1,18 @@
+{
+  "name": "config-default-export-credit",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "@graphql-codegen/cli": "^5.0.0",
+    "@playwright/test": "^1.50.0",
+    "gatsby": "^5.14.0",
+    "jest": "^30.0.0",
+    "rollup": "^4.30.0",
+    "serverless": "^4.4.0",
+    "tailwindcss": "^3.4.0",
+    "typedoc": "^0.28.0",
+    "vercel": "^41.0.0"
+  }
+}

@@ -3836,3 +3836,85 @@ fn script_config_file_symlink_outside_the_project_root_is_not_read() {
         result.referenced_dependencies
     );
 }
+
+fn config_default_patterns(result: &AggregatedPluginResult, plugin: &str) -> Vec<String> {
+    result
+        .config_default_exports
+        .iter()
+        .filter(|rule| rule.plugin_name == plugin)
+        .inspect(|rule| assert_eq!(rule.rule.exports, vec!["default".to_string()]))
+        .map(|rule| rule.rule.path.pattern.clone())
+        .collect()
+}
+
+#[test]
+fn config_default_export_opt_out_names_own_config_patterns() {
+    for plugin in builtin::create_builtin_plugins() {
+        for pattern in plugin.config_default_export_opt_out() {
+            assert!(
+                plugin.config_patterns().contains(pattern),
+                "plugin {} opts out of the default credit for {pattern}, which is not one of its config patterns",
+                plugin.name()
+            );
+        }
+    }
+}
+
+#[test]
+fn config_default_exports_follow_config_patterns_minus_opt_out() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["gatsby", "@graphql-codegen/cli", "tailwindcss"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert_eq!(
+        config_default_patterns(&result, "gatsby"),
+        vec!["**/gatsby-config.{ts,js,mjs}".to_string()]
+    );
+    assert_eq!(
+        config_default_patterns(&result, "graphql-codegen"),
+        vec!["**/graphql.config.{ts,js,cjs,mjs}".to_string()]
+    );
+    assert_eq!(
+        config_default_patterns(&result, "tailwind"),
+        vec!["**/tailwind.config.{ts,js,cjs,mjs}".to_string()]
+    );
+}
+
+#[test]
+fn external_plugin_config_patterns_get_default_export_credit() {
+    let registry = PluginRegistry::new(vec![make_external(
+        "acme",
+        &["acme"],
+        &["acme.config.ts", ".acme/settings.ts"],
+    )]);
+    let pkg = make_pkg(&["acme"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert_eq!(
+        config_default_patterns(&result, "acme"),
+        vec![
+            "**/acme.config.ts".to_string(),
+            ".acme/settings.ts".to_string()
+        ]
+    );
+}
+
+#[test]
+fn config_default_exports_get_workspace_prefix() {
+    let mut workspace = AggregatedPluginResult::default();
+    workspace
+        .config_default_exports
+        .push(plugin_used_export_rule(
+            "tailwind",
+            "**/tailwind.config.js",
+            &["default"],
+        ));
+    workspace.apply_workspace_prefix("packages/web");
+
+    let mut root = AggregatedPluginResult::default();
+    root.merge_into(workspace);
+    assert_eq!(
+        config_default_patterns(&root, "tailwind"),
+        vec!["packages/web/**/tailwind.config.js".to_string()]
+    );
+}

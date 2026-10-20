@@ -9,7 +9,14 @@ use super::{Plugin, PluginResult, config_parser};
 
 const ENABLERS: &[&str] = &["@graphql-codegen/cli"];
 
-const CONFIG_PATTERNS: &[&str] = &["codegen*.{ts,js,cjs,mjs}", "graphql.config.{ts,js,cjs,mjs}"];
+const CODEGEN_CONFIG_PATTERN: &str = "codegen*.{ts,js,cjs,mjs}";
+
+const CONFIG_PATTERNS: &[&str] = &[CODEGEN_CONFIG_PATTERN, "graphql.config.{ts,js,cjs,mjs}"];
+
+/// Config discovery matches `codegen*` in every directory, so it also matches
+/// source files such as `src/codegenUtils.ts`. Their default export gets no
+/// credit. `graphql.config.*` keeps the credit.
+const UNCREDITED_CONFIG_PATTERNS: &[&str] = &[CODEGEN_CONFIG_PATTERN];
 
 const ALWAYS_USED: &[&str] = &[
     "codegen*.{ts,js,cjs,mjs,yml,yaml}",
@@ -27,6 +34,7 @@ define_plugin! {
     struct GraphqlCodegenPlugin => "graphql-codegen",
     enablers: ENABLERS,
     config_patterns: CONFIG_PATTERNS,
+    config_default_export_opt_out: UNCREDITED_CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     resolve_config(config_path, source, _root) {

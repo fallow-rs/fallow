@@ -1095,94 +1095,6 @@ impl PathRule {
     }
 }
 
-/// A used-export rule bound to a file-pattern rule.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct UsedExportRule {
-    pub(crate) path: PathRule,
-    pub(crate) exports: Vec<String>,
-}
-
-impl UsedExportRule {
-    #[must_use]
-    pub(crate) fn new(
-        pattern: impl Into<String>,
-        exports: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        Self {
-            path: PathRule::new(pattern),
-            exports: exports.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    #[must_use]
-    fn from_static(pattern: &'static str, exports: &'static [&'static str]) -> Self {
-        Self::new(pattern, exports.iter().copied())
-    }
-
-    #[must_use]
-    fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.path = self.path.with_excluded_globs(patterns);
-        self
-    }
-
-    #[must_use]
-    fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.path = self.path.with_excluded_regexes(patterns);
-        self
-    }
-
-    #[must_use]
-    fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.path = self.path.with_excluded_segment_regexes(patterns);
-        self
-    }
-
-    #[must_use]
-    fn prefixed(&self, ws_prefix: &str) -> Self {
-        Self {
-            path: self.path.prefixed(ws_prefix),
-            exports: self.exports.clone(),
-        }
-    }
-}
-
-/// A used-export rule tagged with the plugin that contributed it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginUsedExportRule {
-    pub(crate) plugin_name: String,
-    pub(crate) rule: UsedExportRule,
-}
-
-impl PluginUsedExportRule {
-    #[must_use]
-    pub(crate) fn new(plugin_name: impl Into<String>, rule: UsedExportRule) -> Self {
-        Self {
-            plugin_name: plugin_name.into(),
-            rule,
-        }
-    }
-
-    #[must_use]
-    fn prefixed(&self, ws_prefix: &str) -> Self {
-        Self {
-            plugin_name: self.plugin_name.clone(),
-            rule: self.rule.prefixed(ws_prefix),
-        }
-    }
-}
-
 /// A file-scoped dependency provider rule contributed by a framework plugin.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProvidedDependencyRule {
@@ -1588,6 +1500,18 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Config patterns whose files do not get the `default` export credit.
+    ///
+    /// Under `includeEntryExports`, the `default` export of a file that one of
+    /// [`Self::config_patterns`] matches counts as used, because the tool loads
+    /// the config file and reads its default export. List a pattern here when
+    /// the tool reads named exports instead, or when the pattern also matches
+    /// ordinary source files. Each entry must be identical to an entry of
+    /// [`Self::config_patterns`].
+    fn config_default_export_opt_out(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Files that are always considered "used" when this plugin is active.
     fn always_used(&self) -> &'static [&'static str] {
         &[]
@@ -1885,6 +1809,7 @@ macro_rules! define_plugin {
         enablers: $enablers:expr
         $(, entry_patterns: $entry:expr)?
         $(, config_patterns: $config:expr)?
+        $(, config_default_export_opt_out: $config_opt_out:expr)?
         $(, always_used: $always:expr)?
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
@@ -1910,6 +1835,7 @@ macro_rules! define_plugin {
 
             $( fn entry_patterns(&self) -> &'static [&'static str] { $entry } )?
             $( fn config_patterns(&self) -> &'static [&'static str] { $config } )?
+            $( fn config_default_export_opt_out(&self) -> &'static [&'static str] { $config_opt_out } )?
             $( fn always_used(&self) -> &'static [&'static str] { $always } )?
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
@@ -1947,6 +1873,7 @@ macro_rules! define_plugin {
         enablers: $enablers:expr
         $(, entry_patterns: $entry:expr)?
         $(, config_patterns: $config:expr)?
+        $(, config_default_export_opt_out: $config_opt_out:expr)?
         $(, always_used: $always:expr)?
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
@@ -1975,6 +1902,7 @@ macro_rules! define_plugin {
 
             $( fn entry_patterns(&self) -> &'static [&'static str] { $entry } )?
             $( fn config_patterns(&self) -> &'static [&'static str] { $config } )?
+            $( fn config_default_export_opt_out(&self) -> &'static [&'static str] { $config_opt_out } )?
             $( fn always_used(&self) -> &'static [&'static str] { $always } )?
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
@@ -2024,6 +1952,7 @@ macro_rules! define_plugin {
         enablers: $enablers:expr
         $(, entry_patterns: $entry:expr)?
         $(, config_patterns: $config:expr)?
+        $(, config_default_export_opt_out: $config_opt_out:expr)?
         $(, always_used: $always:expr)?
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
@@ -2049,6 +1978,7 @@ macro_rules! define_plugin {
 
             $( fn entry_patterns(&self) -> &'static [&'static str] { $entry } )?
             $( fn config_patterns(&self) -> &'static [&'static str] { $config } )?
+            $( fn config_default_export_opt_out(&self) -> &'static [&'static str] { $config_opt_out } )?
             $( fn always_used(&self) -> &'static [&'static str] { $always } )?
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
@@ -2089,6 +2019,10 @@ mod serverless_framework;
 mod textlint;
 mod tooling;
 mod used_export_names;
+mod used_export_rule;
+
+pub(crate) use used_export_rule::ConfigDefaultCredit;
+pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};
 
 pub(crate) use module_federation::runtime_remotes;
 pub use registry::{
