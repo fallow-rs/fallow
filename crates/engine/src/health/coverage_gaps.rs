@@ -1,7 +1,7 @@
 use crate::{discover::FileId, source::ModuleInfo, suppress};
 use fallow_graph::graph::{ModuleGraph, ModuleNode, is_declaration_file_path};
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{ImportedName, SemanticFact};
 
 use crate::module_graph::StaticTestCoverage;
 
@@ -52,9 +52,9 @@ fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
 ///
 /// A declaration file qualifies. Other modules qualify when they export at
 /// least one name, every export and re-export is type-only, and they have no
-/// function, CommonJS export, side-effect import, dynamic import, or
-/// `require()` call. A module with no exports can run side effects, so it
-/// does not qualify.
+/// runtime statement or declaration, function, CommonJS export, side-effect
+/// import, dynamic import, or `require()` call. A module with no exports can
+/// run side effects, so it does not qualify.
 fn declares_only_types(node: &ModuleNode, module: &ModuleInfo) -> bool {
     if is_declaration_file_path(&node.path) {
         return true;
@@ -67,6 +67,9 @@ fn declares_only_types(node: &ModuleNode, module: &ModuleInfo) -> bool {
             .iter()
             .all(|re_export| re_export.is_type_only)
         && !module.has_cjs_exports
+        && !module
+            .semantic_facts
+            .contains(&SemanticFact::TopLevelRuntimeStatement)
         && module.complexity.is_empty()
         && module.dynamic_imports.is_empty()
         && module.dynamic_import_patterns.is_empty()

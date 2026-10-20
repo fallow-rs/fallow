@@ -397,9 +397,13 @@ above sees that case.
 Coverage gaps skip a module that declares only types
 (`declares_only_types` in `health/coverage_gaps.rs`): a declaration file, or
 a module with at least one export, only type-only exports and re-exports, and
-no function, CommonJS export, side-effect import, dynamic import, or
-`require()` call. Such a module is not a runtime file and is never an
-untested file. A module with no exports can run side effects, so it stays.
+no runtime statement or declaration, function, CommonJS export, side-effect
+import, dynamic import, or `require()` call. Extraction records additional
+top-level runtime expressions, `await`, and emitted declarations outside the
+import/export records as a cached semantic fact; erased types, ambient
+declarations, and type-only namespaces do not produce that fact. Such a
+type-only module is not a runtime file and is never an untested file. A module
+with no exports can run side effects, so it stays.
 
 ## Mock-aware test reachability
 

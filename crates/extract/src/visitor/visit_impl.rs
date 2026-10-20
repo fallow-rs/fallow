@@ -3752,6 +3752,15 @@ impl<'a> ModuleInfoExtractor {
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_program(&mut self, program: &Program<'a>) {
+        // Import and export records already classify their runtime surface.
+        // Capture only the additional statements that those records do not cover.
+        if program.body.iter().any(|statement| {
+            !statement.is_module_declaration()
+                && super::declarations::statement_is_instantiated(statement)
+        }) {
+            self.semantic_facts
+                .push(SemanticFact::TopLevelRuntimeStatement);
+        }
         // Capture file-level string directives (`"use client"`, `"use server"`)
         // for the security client-server-leak detector. `directive.directive` is
         // the cooked directive text without surrounding quotes.

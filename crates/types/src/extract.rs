@@ -2456,6 +2456,10 @@ pub enum SemanticFact {
     /// A local name that the extractor proved holds a Playwright test.
     /// Appended because bitcode encodes enum variants by ordinal.
     PlaywrightTestBinding(PlaywrightTestBindingFact),
+    /// A top-level statement or declaration emits runtime code beyond module
+    /// imports and exports, which have their own extraction records.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    TopLevelRuntimeStatement,
 }
 
 /// Deferred class provenance owned by the module declaring an object factory.
