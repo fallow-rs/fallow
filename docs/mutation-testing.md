@@ -659,6 +659,25 @@ test run.
   of the init request after these variables, so they win. The API sends an
   empty `options.env`.
 
+### Vitest module loading
+
+- A Vite plugin of the adapter serves the instrumented files to each
+  `import` that the Vite module runner handles. A script file gets its copy
+  in the `transform` hook, and a component file in the `load` hook.
+- A native `require`, for example through `createRequire(import.meta.url)`,
+  does not go through Vite. The setup file of the adapter registers a
+  synchronous module hook (`module.registerHooks`) in each worker, so that
+  load also gets the instrumented file. The hook replaces only the files of
+  the overlay, and it reports each served path in the test meta
+  (`fallowLoaded`). The adapter adds these paths to the loaded set, so
+  `unloaded_paths` stays correct.
+- The adapter gives the overlay to each project with `project.provide`. A
+  worker that runs more than one test file (`isolate: false`) registers the
+  hook once.
+- The hook needs Node 22.15 or later. On an older Node, and in browser mode,
+  a native `require` loads the original file, and the path stays in
+  `unloaded_paths`. A static `import` of the file is the workaround.
+
 ### `node:test` and `bun test`
 
 - Each dry run and each mutant run starts one test process for each test
