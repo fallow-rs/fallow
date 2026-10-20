@@ -37,7 +37,7 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
 /// `require`, so a nested scope that declares it does not shadow the module
 /// `require`. Another base, such as `createRequire(join(dir, 'x.json'))`,
 /// resolves from another directory and stays a shadow.
-pub(super) fn is_module_create_require_binding(declarator: &VariableDeclarator<'_>) -> bool {
+fn is_module_create_require_binding(declarator: &VariableDeclarator<'_>) -> bool {
     let BindingPattern::BindingIdentifier(id) = &declarator.id else {
         return false;
     };
@@ -60,6 +60,17 @@ pub(super) fn is_module_create_require_binding(declarator: &VariableDeclarator<'
         _ => false,
     };
     id.name == REQUIRE && callee_is_create_require && base_is_this_file
+}
+
+/// The declarators of `var` that a nested scope records as bindings. The
+/// `require` bindings that `is_module_create_require_binding` accepts are not
+/// in this list.
+pub(super) fn nested_scope_declarators<'b, 'a>(
+    var: &'b VariableDeclaration<'a>,
+) -> impl Iterator<Item = &'b VariableDeclarator<'a>> {
+    var.declarations
+        .iter()
+        .filter(|declarator| !is_module_create_require_binding(declarator))
 }
 
 /// Whether `expr` is `import.meta.resolve`. Code cannot rebind `import.meta`,
