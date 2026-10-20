@@ -38,10 +38,12 @@ const WASI_WORKERS: &str = "wasi-worker*.mjs";
 /// `<pkg>-wasm32-wasi` package declares it, not the source package.
 const WASM_RUNTIME: &str = "@napi-rs/wasm-runtime";
 
-/// The suffixes of the generated WASI loaders, `<binaryName>.wasi.cjs` and
-/// `<binaryName>.wasi-browser.js`. The build writes them next to the loader,
-/// and a source repository usually ignores them in git.
-const GENERATED_WASI_LOADERS: &[&str] = &[".wasi.cjs", ".wasi-browser"];
+/// The suffixes of the build artifacts that the generated loader requires:
+/// the native addons `<binaryName>.<platform>.node` and the WASI loaders
+/// `<binaryName>.wasi.cjs` and `<binaryName>.wasi-browser.js`. The build
+/// writes them next to the loader, and a source repository usually ignores
+/// them in git.
+const GENERATED_BUILD_ARTIFACTS: &[&str] = &[".node", ".wasi.cjs", ".wasi-browser"];
 
 /// The browser entry that `napi build` writes for a `wasm32-wasi*` target. It
 /// has no header: its only content is a re-export of `<pkg>-wasm32-wasi`.
@@ -70,7 +72,7 @@ impl Plugin for NapiRsPlugin {
     }
 
     fn generated_import_patterns(&self) -> &'static [&'static str] {
-        GENERATED_WASI_LOADERS
+        GENERATED_BUILD_ARTIFACTS
     }
 
     fn package_json_referenced_dependencies(&self, pkg: &PackageJson, _root: &Path) -> Vec<String> {

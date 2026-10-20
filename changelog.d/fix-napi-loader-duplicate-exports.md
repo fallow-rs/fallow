@@ -5,5 +5,6 @@
   header and the generated `browser.js` as support entry points. A
   hand-written wrapper that exports a class with the name of a binding is no
   longer a duplicate export, and an unused binding is no longer an unused
-  export. Projects can remove the `ignorePatterns` entry for the generated
-  `index.js`.
+  export. A `require` of a native addon `./<binary>.<platform>.node` is no
+  longer an unresolved import. Projects can remove the `ignorePatterns` entry
+  for the generated `index.js`.

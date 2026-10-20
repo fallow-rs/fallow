@@ -2157,6 +2157,11 @@ fn write_napi_wrapper_package(package_root: &Path) {
     )
     .expect("write loader");
     fs::write(
+        package_root.join("browser.js"),
+        "export * from '@scope/native-wasm32-wasi'\n",
+    )
+    .expect("write browser entry");
+    fs::write(
         package_root.join("js/index.js"),
         "export { Package } from './package.js'\n",
     )
@@ -2169,12 +2174,34 @@ fn write_napi_wrapper_package(package_root: &Path) {
     .expect("write wrapper");
 }
 
-fn duplicate_export_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
-    results
+fn assert_napi_wrapper_package_clean(results: &fallow_core::results::AnalysisResults) {
+    let duplicates: Vec<&str> = results
         .duplicate_exports
         .iter()
-        .map(|finding| finding.export.export_name.clone())
-        .collect()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    assert!(
+        duplicates.is_empty(),
+        "a wrapper may reuse a binding name of the generated loader, found: {duplicates:?}"
+    );
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "the native addons and WASI loaders are build artifacts, found: {unresolved:?}"
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused_files.is_empty(),
+        "the generated loader and browser.js are entry points, found: {unused_files:?}"
+    );
 }
 
 #[test]
@@ -2185,11 +2212,7 @@ fn napi_rs_generated_loader_is_not_a_duplicate_export_source() {
 
     let config = create_config(root.to_path_buf());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
-    assert!(
-        duplicate_export_names(&results).is_empty(),
-        "a wrapper may reuse a binding name of the generated loader, found: {:?}",
-        duplicate_export_names(&results)
-    );
+    assert_napi_wrapper_package_clean(&results);
 }
 
 #[test]
@@ -2208,9 +2231,5 @@ fn napi_rs_generated_loader_is_not_a_duplicate_export_source_in_workspaces() {
 
     let config = create_config(root.to_path_buf());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
-    assert!(
-        duplicate_export_names(&results).is_empty(),
-        "a wrapper may reuse a binding name of the generated loader, found: {:?}",
-        duplicate_export_names(&results)
-    );
+    assert_napi_wrapper_package_clean(&results);
 }
