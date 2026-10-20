@@ -939,6 +939,44 @@ fn static_mutants_run_last_with_a_reload_around_each_when_modules_stay_loaded() 
 }
 
 #[test]
+fn a_module_level_mutant_with_static_and_test_hits_runs_static_importer_tests() {
+    let dyn_test = "test/b.test.ts::dyn".to_owned();
+    let dry_test = dyn_test.clone();
+    let spawner = FakeSpawner::new(script(
+        move |_| {
+            let mut dry = standard_dry();
+            dry.tests.push(DryTest {
+                test_id: dry_test.clone(),
+                file: "test/b.test.ts".to_owned(),
+                duration_ms: Some(5.0),
+                status: TestStatus::Pass,
+            });
+            dry.hits.insert(dry_test.clone(), vec!["m0".to_owned()]);
+            dry.static_hits = vec!["m0".to_owned()];
+            dry
+        },
+        |_, run| {
+            if run.test_ids.contains(&tid("t1")) {
+                Ok(run_result(run, RunStatus::Killed, Some(&tid("t1"))))
+            } else {
+                Ok(run_result(run, RunStatus::Survived, None))
+            }
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m0"]), &config(1)).expect("run");
+    let runs = spawner.runs();
+    let mut test_ids = runs[0].1.test_ids.clone();
+    test_ids.sort();
+    assert_eq!(
+        test_ids,
+        vec![tid("t1"), tid("t2"), dyn_test],
+        "a module that loads at collection time and inside a test runs the tests of both files"
+    );
+    assert!(outcome.results["m0"].static_mutant);
+    assert_eq!(status(&outcome, "m0"), MutantStatus::Killed);
+}
+
+#[test]
 fn file_hits_cover_each_passing_test_of_the_file_without_per_test_attribution() {
     let caps = Capabilities {
         per_test_attribution: false,

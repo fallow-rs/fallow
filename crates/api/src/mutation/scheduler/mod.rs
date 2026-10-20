@@ -1180,13 +1180,7 @@ fn read_dry_run(
             }
         }
     }
-    let test_hit: FxHashSet<&String> = result.hits.values().flatten().collect();
-    let static_ids = result
-        .static_hits
-        .iter()
-        .filter(|id| !test_hit.contains(id))
-        .cloned()
-        .collect();
+    let static_ids = result.static_hits.iter().cloned().collect();
     Ok(DryRunFacts {
         passing,
         covering,
@@ -1197,8 +1191,10 @@ fn read_dry_run(
 }
 
 /// The covering tests of `mutant` from the dry run. A static mutant runs
-/// each passing test of the dry-run files that load its module. A static
-/// map miss has no static test file, so it runs each passing dry-run test.
+/// each passing test of the dry-run files that load its module, and also the
+/// tests that hit it at run time (for example through a dynamic `import()`).
+/// A static map miss has no static test file, so it runs each passing
+/// dry-run test.
 fn covering_tests(
     plan: &SchedulePlan,
     facts: &DryRunFacts,
@@ -1217,12 +1213,16 @@ fn covering_tests(
         .flatten()
         .filter(|file| dry_files.contains(file))
         .collect();
-    facts
+    let mut tests: BTreeSet<String> = facts
         .passing
         .iter()
         .filter(|(_, (file, _))| map_miss || files.contains(file))
         .map(|(test, _)| test.clone())
-        .collect()
+        .collect();
+    if let Some(runtime) = facts.covering.get(&mutant.id) {
+        tests.extend(runtime.iter().cloned());
+    }
+    tests
 }
 
 /// Widens `tests` to each passing test of their files. Without

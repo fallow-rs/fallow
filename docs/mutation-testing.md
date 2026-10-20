@@ -306,7 +306,9 @@ shows as `pending`.
   plan, also a mutant after the `--max-mutants` limit. A test covers a
   mutant when it hits the mutant, or when its file loads the module of a
   mutant that the module load hits. A static import path alone is not a
-  cover. A `pending` mutant that no dry-run test covers is `no_coverage`.
+  cover. When a module loads at collection time in one test file and inside
+  a test of another file (for example through a dynamic `import()`), the
+  mutant is static and runs the tests of both files. A `pending` mutant that no dry-run test covers is `no_coverage`.
   A run that `--max-mutants` caps therefore reports the coverage and the
   `no_coverage` mutants of the full run.
 - `no_coverage` never enters the score. A capped run of 200
