@@ -1237,6 +1237,7 @@ fn build_multi_node_cycle(
         .collect::<Vec<_>>()
         .join(" <-> ");
     tracing::warn!(
+        target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
         cycle_size = scc.len(),
         members = members.as_str(),
         "Re-export cycle detected: chain propagation may be incomplete \

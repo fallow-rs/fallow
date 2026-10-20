@@ -295,9 +295,8 @@ fn resolve_file_with_resolver_and_tsconfig_fallback(
     }
 }
 
-/// Emit a `tracing::warn!` the first time a given tsconfig error message is
-/// observed. The shared `Mutex<FxHashSet<String>>` in the resolver context
-/// dedupes across all parallel threads for the lifetime of one analysis run.
+/// Warn the first time a tsconfig error message is seen. The shared set in the
+/// resolver context dedupes across all threads for one analysis run.
 fn warn_once_tsconfig(ctx: &ResolveContext<'_>, err: &ResolveError) {
     let message = err.to_string();
     let should_warn = {
@@ -308,6 +307,7 @@ fn warn_once_tsconfig(ctx: &ResolveContext<'_>, err: &ResolveError) {
     };
     if should_warn {
         tracing::warn!(
+            target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
             "tsconfig chain not fully loaded: {message}. Falling back to resolver-less \
              resolution for the affected files. Relative imports, bare imports, and path \
              aliases declared in a discovered root or workspace tsconfig still resolve (fallow \

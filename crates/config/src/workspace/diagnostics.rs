@@ -25,6 +25,7 @@ use std::sync::{Mutex, OnceLock};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET;
 use fallow_types::path_util::display_relative;
 pub use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
@@ -244,7 +245,7 @@ pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic])
 
     for plan in plan_warnings(root, diagnostics) {
         if should_emit(plan.dedupe_key) {
-            tracing::warn!("fallow: {}", plan.message);
+            tracing::warn!(target: ANALYSIS_DIAGNOSTIC_LOG_TARGET, "fallow: {}", plan.message);
         }
     }
 }

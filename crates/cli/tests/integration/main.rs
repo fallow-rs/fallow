@@ -91,6 +91,7 @@ mod parse_error_gate_tests;
 mod peer_dependency_credit_tests;
 mod plugin_diagnostic_tests;
 mod production_workspace_tests;
+mod quiet_stderr_tests;
 mod reconcile_review_tests;
 mod release_publish_list;
 mod report_from_levels_tests;

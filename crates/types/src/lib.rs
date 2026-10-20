@@ -122,3 +122,11 @@ pub mod trace_usage;
 /// `workspace_diagnostics[]` keeps its typed JSON schema. The
 /// `schemars::JsonSchema` derive is gated on the `schema` feature.
 pub mod workspace;
+
+/// The `tracing` target of a warning that repeats a fact the JSON envelope
+/// carries, or that describes the quality of the analysis inputs.
+///
+/// `--quiet`, `--ci` and `FALLOW_QUIET` hide this target on stderr. An explicit
+/// `RUST_LOG` shows it again. Config-load warnings, such as an unknown rule
+/// key, do not use this target, so they stay visible in a quiet run.
+pub const ANALYSIS_DIAGNOSTIC_LOG_TARGET: &str = "fallow::analysis_diagnostic";

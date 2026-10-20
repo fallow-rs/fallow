@@ -1286,11 +1286,11 @@ fn try_load_analysis_graph_cache(
 
     if let Some(rejection) = store.manifest.classify_resolution_mismatch(&current) {
         // The level is the rejection's own judgement of whether the reader can
-        // do anything about it. Content drift is what a cache is for, so it
-        // stays off stderr and is read from doctor or the performance table
-        // instead; `describe()` already names the reason, so no field repeats it.
+        // act on it. Content drift is what a cache is for, so it stays off
+        // stderr; doctor and the performance table show it.
         if rejection.discarded_existing_work() {
             tracing::warn!(
+                target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
                 "Graph cache decoded but not reused: {}",
                 rejection.describe()
             );

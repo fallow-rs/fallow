@@ -61,7 +61,7 @@ pub fn warn_skipped_entry_summary(skipped_entries: &FxHashMap<String, usize>) {
         return;
     };
     if should_warn_skipped_entry(&message) {
-        tracing::warn!("{message}");
+        tracing::warn!(target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET, "{message}");
     }
 }
 
