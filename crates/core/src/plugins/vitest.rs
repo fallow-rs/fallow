@@ -253,7 +253,11 @@ fn vitest_run_dir(config_path: &Path, root: &Path) -> PathBuf {
     let discovered = config_path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("vitest.config.") || name.starts_with("vite.config."));
+        .and_then(|name| {
+            name.strip_prefix("vitest.config.")
+                .or_else(|| name.strip_prefix("vite.config."))
+        })
+        .is_some_and(|extension| VITEST_CONFIG_EXTENSIONS.contains(&extension));
     match config_path.parent() {
         Some(dir) if discovered && dir.starts_with(root) => dir.to_path_buf(),
         _ => root.to_path_buf(),
@@ -303,6 +307,9 @@ const DEFAULT_JSX_IMPORT_SOURCE: &str = "react";
 const VITEST_INHERIT_BY_DEFAULT_MAJOR: u64 = 5;
 
 /// The file names that make Vitest ignore a sibling `vite.config.*`.
+/// The extensions of the config files that Vitest finds without `--config`.
+const VITEST_CONFIG_EXTENSIONS: &[&str] = &["ts", "js", "mts", "mjs", "cts", "cjs"];
+
 const VITEST_CONFIG_NAMES: &[&str] = &[
     "vitest.config.ts",
     "vitest.config.js",
@@ -2343,6 +2350,19 @@ mod tests {
             result
                 .setup_files
                 .contains(&PathBuf::from("/project/scripts/ci-reporter.ts"))
+        );
+    }
+
+    #[test]
+    fn named_variant_config_below_the_root_resolves_globs_against_the_root() {
+        let result = resolve_at(
+            "/project/config/vitest.config.e2e.ts",
+            r#"export default { test: { include: ["e2e/**/*.test.ts"] } };"#,
+        );
+        assert!(result.replace_entry_patterns);
+        assert_eq!(
+            result.entry_patterns,
+            vec!["e2e/**/*.test.ts", VITEST_DEFAULT_BENCH_INCLUDE]
         );
     }
 
