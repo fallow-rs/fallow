@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_CANDIDATE_HEADER,
+  AUDIT_WORSENED_MIN_CLI_VERSION,
   auditGatingSuffix,
   auditScopeSummary,
   auditVerdictPresentation,
@@ -135,6 +136,37 @@ describe("buildAuditArgs", () => {
   it("appends --gate all when the gate is all", () => {
     const { args } = buildAuditArgs({ ...baseAuditArgsOptions, gate: "all" });
     expect(args).toEqual(["audit", "--format", "json", "--quiet", "--gate", "all"]);
+  });
+
+  it("does not append a worsened flag when the mode defers to the project config", () => {
+    expect(buildAuditArgs(baseAuditArgsOptions).args).not.toContain("--worsened");
+  });
+
+  it.each(["warn", "error", "off"] as const)("appends --worsened %s when set", (worsened) => {
+    const { args, skipped } = buildAuditArgs({ ...baseAuditArgsOptions, worsened });
+    expect(args).toEqual(["audit", "--format", "json", "--quiet", "--worsened", worsened]);
+    expect(skipped).toEqual([]);
+  });
+
+  it("appends --worsened for a CLI at the introducing version", () => {
+    const { args } = buildAuditArgs({
+      ...baseAuditArgsOptions,
+      worsened: "error",
+      cliVersion: AUDIT_WORSENED_MIN_CLI_VERSION,
+    });
+    expect(args).toContain("--worsened");
+  });
+
+  it("omits --worsened and reports the skip for a CLI that predates it", () => {
+    const { args, skipped } = buildAuditArgs({
+      ...baseAuditArgsOptions,
+      worsened: "error",
+      cliVersion: "3.34.1",
+    });
+    expect(args).not.toContain("--worsened");
+    expect(skipped).toEqual([
+      { flag: "--worsened", requires: AUDIT_WORSENED_MIN_CLI_VERSION, cliVersion: "3.34.1" },
+    ]);
   });
 
   it("forwards changedSince, workspace, production, and configPath with correct flag spelling", () => {

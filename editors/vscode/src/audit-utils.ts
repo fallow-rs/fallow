@@ -1,7 +1,15 @@
 import { escapeMarkdownText } from "./markdown-utils.js";
-import type { AuditGate, AuditOutput, AuditVerdict } from "./types.js";
+import type { AuditGate, AuditOutput, AuditVerdict, AuditWorsened } from "./types.js";
 import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
-import { appendCommonScopeArgs, type BuiltCliArgs } from "./cli-args-utils.js";
+import {
+  appendCommonScopeArgs,
+  compareVersions,
+  type BuiltCliArgs,
+  type SkippedCliCapability,
+} from "./cli-args-utils.js";
+
+/** `fallow audit --worsened` first ships after v3.34.1. */
+export const AUDIT_WORSENED_MIN_CLI_VERSION = "3.34.2";
 
 interface AuditArgsOptions {
   /**
@@ -14,6 +22,12 @@ interface AuditArgsOptions {
   readonly changedSince: string;
   readonly configPath: string;
   readonly gate: AuditGate;
+  /**
+   * Worsened-finding mode. A value forwards `--worsened <mode>` (version-gated);
+   * `undefined` forwards nothing, so the run defers to `audit.worsened` in the
+   * project config.
+   */
+  readonly worsened?: AuditWorsened;
   /**
    * Monorepo workspace scope (a package name). When non-empty, forwarded as
    * `--workspace <name>` so the audit verdict reflects only that package. NOT
@@ -33,7 +47,8 @@ interface AuditArgsOptions {
  * `audit` is the first positional (the subcommand selector) and must precede
  * every flag. The argv stays lean: only flags that shipped with the `audit`
  * command itself are emitted (`--format`, `--quiet`, `--changed-since`,
- * `--production`, `--config`, `--gate`). Type-aware options are gated against
+ * `--production`, `--config`, `--gate`), plus `--worsened` for a CLI that
+ * supports it. Type-aware options are gated against
  * the resolved binary, and unknown versions use the shared tolerant executor.
  * Audit owns its own sub-pass selection, so no `--skip` is passed. The
  * sidebar's `--dupes-*` tuning knobs are intentionally not forwarded.
@@ -45,7 +60,7 @@ interface AuditArgsOptions {
  */
 export const buildAuditArgs = (options: AuditArgsOptions): BuiltCliArgs => {
   const args = ["audit", "--format", "json", "--quiet"];
-  const skipped = [];
+  const skipped: SkippedCliCapability[] = [];
 
   appendCommonScopeArgs(args, options);
 
@@ -60,6 +75,15 @@ export const buildAuditArgs = (options: AuditArgsOptions): BuiltCliArgs => {
 
   if (options.gate === "all") {
     args.push("--gate", "all");
+  }
+
+  if (options.worsened !== undefined) {
+    const { cliVersion } = options;
+    if (cliVersion !== null && compareVersions(cliVersion, AUDIT_WORSENED_MIN_CLI_VERSION) < 0) {
+      skipped.push({ flag: "--worsened", requires: AUDIT_WORSENED_MIN_CLI_VERSION, cliVersion });
+    } else {
+      args.push("--worsened", options.worsened);
+    }
   }
 
   return { args, skipped };

@@ -7,6 +7,7 @@ import {
   getLspPath,
   getProductionOverride,
   getAuditGate,
+  getAuditWorsened,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
   getDuplicationIgnoreSymlinksOverride,
@@ -918,6 +919,7 @@ export const runAudit = async (
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       gate: getAuditGate(),
+      worsened: getAuditWorsened(),
       typeAware: getTypeAwareSettings(),
       cliVersion,
     });
