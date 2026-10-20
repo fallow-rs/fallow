@@ -372,6 +372,10 @@ pub struct AggregatedPluginResult {
     /// `accumulate_config_entry_patterns` adds to the config patterns and does
     /// not remove them.
     pub replaced_entry_plugins: FxHashSet<String>,
+    /// The `(plugin, pattern)` pairs that config files added. The first
+    /// replacing config of a plugin that sets
+    /// `accumulate_config_entry_patterns` keeps these patterns.
+    pub config_entry_patterns: FxHashSet<(String, String)>,
     /// Coverage role for each plugin contributing entry point patterns.
     pub entry_point_roles: rustc_hash::FxHashMap<String, EntryPointRole>,
     /// All config file patterns from active plugins.
@@ -555,6 +559,7 @@ impl AggregatedPluginResult {
             entry_patterns,
             // Only the config pass of one plugin run reads this field.
             replaced_entry_plugins: _,
+            config_entry_patterns: _,
             entry_point_roles,
             config_patterns,
             always_used,

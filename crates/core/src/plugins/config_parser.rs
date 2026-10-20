@@ -2874,26 +2874,7 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
         Expression::StringLiteral(s) => {
             values.push(s.value.to_string());
         }
-        Expression::ArrayExpression(arr) => {
-            for el in &arr.elements {
-                if let Some(inner) = el.as_expression() {
-                    match inner {
-                        Expression::StringLiteral(s) => {
-                            values.push(s.value.to_string());
-                        }
-                        Expression::ArrayExpression(sub_arr) => {
-                            if let Some(first) = sub_arr.elements.first()
-                                && let Some(first_expr) = first.as_expression()
-                                && let Some(s) = expression_to_string(first_expr)
-                            {
-                                values.push(s);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
+        Expression::ArrayExpression(arr) => collect_shallow_array_values(arr, &mut values),
         Expression::ObjectExpression(obj) => {
             for prop in &obj.properties {
                 if let ObjectPropertyKind::ObjectProperty(p) = prop {
@@ -2917,6 +2898,52 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
         _ => {}
     }
     values
+}
+
+/// Collect the strings and the first string of each tuple in an array. A
+/// spread of an array literal, also behind a condition such as
+/// `...(isCI ? ['a'] : [])`, adds the values of each branch.
+fn collect_shallow_array_values(arr: &ArrayExpression<'_>, values: &mut Vec<String>) {
+    for element in &arr.elements {
+        let inner = match element {
+            ArrayExpressionElement::SpreadElement(spread) => {
+                collect_spread_array_values(&spread.argument, values);
+                continue;
+            }
+            element => match element.as_expression() {
+                Some(expr) => expr.get_inner_expression(),
+                None => continue,
+            },
+        };
+        match inner {
+            Expression::StringLiteral(s) => values.push(s.value.to_string()),
+            Expression::ArrayExpression(sub_arr) => {
+                if let Some(first) = sub_arr.elements.first()
+                    && let Some(first_expr) = first.as_expression()
+                    && let Some(s) = expression_to_string(first_expr)
+                {
+                    values.push(s);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Collect the values of a spread argument that is an array literal or a
+/// condition with array literal branches.
+fn collect_spread_array_values(expr: &Expression<'_>, values: &mut Vec<String>) {
+    match expr.get_inner_expression() {
+        Expression::ArrayExpression(arr) => collect_shallow_array_values(arr, values),
+        Expression::ConditionalExpression(conditional) => {
+            collect_spread_array_values(&conditional.consequent, values);
+            collect_spread_array_values(&conditional.alternate, values);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_spread_array_values(&logical.right, values);
+        }
+        _ => {}
+    }
 }
 
 /// Collect top-level string values, plus a named string property from object entries.

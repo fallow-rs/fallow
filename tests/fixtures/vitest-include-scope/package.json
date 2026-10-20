@@ -1,0 +1,9 @@
+{
+  "name": "vitest-include-scope",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  }
+}

@@ -1448,6 +1448,39 @@ fn process_config_result_second_replacing_config_keeps_first_config_patterns() {
 }
 
 #[test]
+fn process_config_result_first_replacing_config_keeps_earlier_config_patterns() {
+    let mut aggregated = AggregatedPluginResult::default();
+    aggregated
+        .entry_patterns
+        .push((path_rule("**/*.test.ts"), "vitest".to_string()));
+
+    let nested = PluginResult {
+        entry_patterns: vec![path_rule("fixtures/app/src/**/*.test.ts")],
+        accumulate_config_entry_patterns: true,
+        ..Default::default()
+    };
+    process_config_result("vitest", nested, &mut aggregated, None).unwrap();
+    let root = PluginResult {
+        entry_patterns: vec![path_rule("test/**/*.test.ts")],
+        replace_entry_patterns: true,
+        accumulate_config_entry_patterns: true,
+        ..Default::default()
+    };
+    process_config_result("vitest", root, &mut aggregated, None).unwrap();
+
+    let patterns: Vec<&str> = aggregated
+        .entry_patterns
+        .iter()
+        .map(|(rule, _)| rule.pattern.as_str())
+        .collect();
+    assert_eq!(
+        patterns,
+        vec!["fixtures/app/src/**/*.test.ts", "test/**/*.test.ts"],
+        "the static default goes, and the pattern of the earlier config stays"
+    );
+}
+
+#[test]
 fn process_config_result_later_replacing_config_wins_without_accumulation() {
     let mut aggregated = AggregatedPluginResult::default();
     aggregated
@@ -2106,17 +2139,20 @@ test: {
             .any(|(p, _)| p == "tests/**/*.test.ts"),
         "config parsing should extract test.include patterns"
     );
-    let vitest_patterns: Vec<_> = result
+    let vitest_patterns: Vec<&str> = result
         .entry_patterns
         .iter()
         .filter(|(_, name)| name == "vitest")
+        .map(|(rule, _)| rule.pattern.as_str())
         .collect();
     assert_eq!(
-        vitest_patterns.len(),
-        1,
-        "test.include should replace static defaults, not add to them; found: {vitest_patterns:?}"
+        vitest_patterns,
+        vec![
+            "tests/**/*.test.ts",
+            "**/*.{bench,benchmark}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"
+        ],
+        "test.include replaces the static test defaults and keeps the bench default"
     );
-    assert_eq!(vitest_patterns[0].0, "tests/**/*.test.ts");
     assert!(
         !result.setup_files.is_empty(),
         "config parsing should extract setupFiles"

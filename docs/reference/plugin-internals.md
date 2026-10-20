@@ -374,6 +374,26 @@ without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto
 `always_used_files` itself, or the file it just consumed is reported as unused.
 
+## Config entry patterns that replace the defaults
+
+A `PluginResult` with `replace_entry_patterns` removes the static
+`entry_patterns()` of its plugin. Without `accumulate_config_entry_patterns`,
+the last replacing config of the plugin wins. With it, the first replacing
+config removes only the static defaults. The patterns that earlier configs
+added stay, also from a config that did not replace. The Jest, Playwright,
+Rstest, Jasmine and Vitest plugins accumulate.
+
+Vitest resolves `test.include` and a reporter path against the directory that
+it runs in. It finds a `vitest.config.*` or `vite.config.*` file in that
+directory, so for these names the plugin uses the directory of the config. A
+config with another name loads only through `--config` from a package script,
+so the plugin uses the `root` argument. The include globs of a config that
+runs below `root` get the prefix of that directory. Only a config that runs in
+`root` replaces the defaults. A config below `root`
+is often a fixture, and its `test.include` must not remove the test entries
+of the project. A replacing config keeps the bench files, because
+`test.benchmark.include` is a separate Vitest option with its own default.
+
 ## Entries that a source file declares
 
 Some tools name a bundle entry in an ordinary source file, not in a config

@@ -3001,6 +3001,7 @@ mod tests {
         crate::plugins::AggregatedPluginResult {
             entry_patterns: vec![],
             replaced_entry_plugins: FxHashSet::default(),
+            config_entry_patterns: FxHashSet::default(),
             config_patterns: vec![],
             always_used: vec![],
             used_exports: used_exports

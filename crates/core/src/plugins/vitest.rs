@@ -24,7 +24,7 @@ const ENTRY_PATTERNS: &[&str] = &[
     "**/*.test.{ts,tsx,js,jsx}",
     "**/*.spec.{ts,tsx,js,jsx}",
     "**/__tests__/**/*.{ts,tsx,js,jsx}",
-    "**/*.bench.{ts,tsx,js,jsx}",
+    VITEST_DEFAULT_BENCH_INCLUDE,
 ];
 
 const CONFIG_PATTERNS: &[&str] = &[
@@ -157,7 +157,10 @@ impl Plugin for VitestPlugin {
         );
 
         apply_vitest_aliases(&mut result, source, config_path, root);
-        apply_vitest_includes(&mut result, source, config_path);
+        // Vitest does not load a vite config that a vitest config shadows.
+        if !is_shadowed_vite_config(config_path) {
+            apply_vitest_includes(&mut result, source, config_path, root);
+        }
         add_vitest_setup_files(&mut result, source, config_path, root);
         // Vitest does not load a vite config that a vitest config shadows, so
         // the JSX settings of that vite config apply to no test file.
@@ -173,7 +176,7 @@ impl Plugin for VitestPlugin {
         }
 
         add_vitest_environment_dependency(&mut result, source, config_path);
-        add_vitest_reporter_dependencies(&mut result, source, config_path);
+        add_vitest_reporter_dependencies(&mut result, source, config_path, root);
         add_vitest_coverage_dependency(&mut result, source, config_path);
         add_vitest_typecheck_dependency(&mut result, source, config_path);
         add_vitest_browser_dependency(&mut result, source, config_path);
@@ -200,13 +203,37 @@ fn apply_vitest_aliases(result: &mut PluginResult, source: &str, config_path: &P
     test_alias::debug_unreachable_config(source, config_path);
 }
 
-fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &Path) {
+/// Register the `test.include`, `test.projects[].test.include` and
+/// `test.benchmark.include` globs of a config as entry patterns.
+///
+/// Vitest resolves the globs against the directory that it runs in. A config
+/// below `root` (a fixture or a package that is not a workspace) therefore
+/// gives patterns below its own directory, and only a config that runs in
+/// `root` replaces the default patterns. A replacing config keeps the bench
+/// files: `test.benchmark.include` is a separate option with its own default.
+fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &Path, root: &Path) {
+    // Every result accumulates, so a replacing config keeps the patterns of
+    // the configs below `root` that the registry merged before it.
+    result.accumulate_config_entry_patterns = true;
+    let prefix = vitest_run_dir(config_path, root)
+        .strip_prefix(root)
+        .map(config_parser::path_to_config_string)
+        .unwrap_or_default();
     let root_includes =
         config_parser::extract_config_string_array(source, config_path, &["test", "include"]);
-    if !root_includes.is_empty() {
+    let bench_includes = config_parser::extract_config_string_array(
+        source,
+        config_path,
+        &["test", "benchmark", "include"],
+    );
+    push_vitest_include_entries(result, &root_includes, &prefix, root);
+    push_vitest_include_entries(result, &bench_includes, &prefix, root);
+    if !root_includes.is_empty() && prefix.is_empty() {
         result.replace_entry_patterns = true;
+        if bench_includes.is_empty() {
+            push_vitest_include_entries(result, &[VITEST_DEFAULT_BENCH_INCLUDE], &prefix, root);
+        }
     }
-    push_vitest_include_entries(result, &root_includes);
 
     let project_includes = config_parser::extract_config_array_nested_string_or_array(
         source,
@@ -214,23 +241,55 @@ fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &
         &["test", "projects"],
         &["test", "include"],
     );
-    push_vitest_include_entries(result, &project_includes);
+    push_vitest_include_entries(result, &project_includes, &prefix, root);
 }
 
-/// Register each Vitest `test.include` glob as an entry pattern. The extglob
-/// groups of the glob go through the shared rewrite, so a group such as
-/// `@(test|spec)` matches the files that Vitest runs.
-fn push_vitest_include_entries(result: &mut PluginResult, includes: &[String]) {
-    result.entry_patterns.extend(
-        includes
-            .iter()
-            .map(|include| PathRule::from_extglob(&vitest_extglob(include))),
-    );
+/// The directory that Vitest runs in for `config_path`. Vitest finds a
+/// `vitest.config.*` or `vite.config.*` file in the directory that it runs
+/// in, so that directory is the directory of the config. A config with
+/// another name loads only through `--config`, from a package script that
+/// runs in `root`. A config outside `root` also gives `root`.
+fn vitest_run_dir(config_path: &Path, root: &Path) -> PathBuf {
+    let discovered = config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("vitest.config.") || name.starts_with("vite.config."));
+    match config_path.parent() {
+        Some(dir) if discovered && dir.starts_with(root) => dir.to_path_buf(),
+        _ => root.to_path_buf(),
+    }
+}
+
+/// Register each Vitest include glob as an entry pattern below `prefix`. The
+/// extglob groups of the glob go through the shared rewrite, so a group such
+/// as `@(test|spec)` matches the files that Vitest runs. A negated entry is
+/// an exclude for Vitest and stays as written.
+fn push_vitest_include_entries<S: AsRef<str>>(
+    result: &mut PluginResult,
+    includes: &[S],
+    prefix: &str,
+    root: &Path,
+) {
+    result
+        .entry_patterns
+        .extend(includes.iter().filter_map(|include| {
+            let include = include.as_ref();
+            let glob = if include.starts_with('!') {
+                vitest_extglob(include)
+            } else {
+                scoped_glob(prefix, include, root)?
+            };
+            Some(PathRule::from_extglob(&glob))
+        }));
 }
 
 /// The Vitest default `test.include`, `**/*.{test,spec}.?(c|m)[jt]s?(x)`, as
 /// brace groups that the glob matcher supports.
 const VITEST_DEFAULT_INCLUDE: &str = "**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}";
+
+/// The Vitest default `test.benchmark.include`,
+/// `**/*.{bench,benchmark}.?(c|m)[jt]s?(x)`, as brace groups.
+const VITEST_DEFAULT_BENCH_INCLUDE: &str = "**/*.{bench,benchmark}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}";
 
 /// The Vitest default `test.exclude`. A config `exclude` replaces it.
 const VITEST_DEFAULT_EXCLUDE: &[&str] = &["**/node_modules/**", "**/.git/**"];
@@ -896,7 +955,7 @@ fn is_vitest_config_name(name: &str) -> bool {
     })
 }
 
-/// Whether a JSX import source names a path, not a package.
+/// Whether a JSX import source or a reporter names a path, not a package.
 fn is_path_source(source: &str) -> bool {
     source.starts_with('.') || source.starts_with('/')
 }
@@ -996,18 +1055,33 @@ fn add_vitest_environment_dependency(result: &mut PluginResult, source: &str, co
     }
 }
 
-fn add_vitest_reporter_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
+fn add_vitest_reporter_dependencies(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+) {
     let reporters = config_parser::extract_config_nested_shallow_strings(
         source,
         config_path,
         &["test"],
         "reporters",
     );
+    let run_dir = vitest_run_dir(config_path, root);
     for reporter in &reporters {
-        if !BUILTIN_REPORTERS.contains(&reporter.as_str()) {
-            let dep = crate::resolve::extract_package_name(reporter);
-            result.referenced_dependencies.push(dep);
+        if BUILTIN_REPORTERS.contains(&reporter.as_str()) {
+            continue;
         }
+        // Vitest imports a reporter path as a module, so the file is used.
+        if is_path_source(reporter) {
+            let path = lexical_join(&run_dir, reporter);
+            if path.starts_with(root) && !result.setup_files.contains(&path) {
+                result.setup_files.push(path);
+            }
+            continue;
+        }
+        let dep = crate::resolve::extract_package_name(reporter);
+        result.referenced_dependencies.push(dep);
     }
 }
 
@@ -2164,7 +2238,193 @@ mod tests {
             result.replace_entry_patterns,
             "test.include should trigger replacement of static entry patterns"
         );
-        assert_eq!(result.entry_patterns, vec!["src/**/*.test.ts"]);
+        assert_eq!(
+            result.entry_patterns,
+            vec!["src/**/*.test.ts", VITEST_DEFAULT_BENCH_INCLUDE]
+        );
+    }
+
+    #[test]
+    fn test_include_keeps_the_default_bench_include() {
+        let result = resolve(r#"export default { test: { include: ["test/**/*.test.ts"] } };"#);
+        assert!(result.replace_entry_patterns);
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|rule| rule.pattern == VITEST_DEFAULT_BENCH_INCLUDE),
+            "a replacing test.include must keep the bench files: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn benchmark_include_replaces_the_default_bench_include() {
+        let result = resolve(
+            r#"export default {
+                test: {
+                    include: ["test/**/*.test.ts"],
+                    benchmark: { include: ["perf/**/*.perf.ts"] },
+                },
+            };"#,
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["test/**/*.test.ts", "perf/**/*.perf.ts"]
+        );
+    }
+
+    #[test]
+    fn benchmark_include_without_test_include_adds_entries() {
+        let result =
+            resolve(r#"export default { test: { benchmark: { include: ["perf/*.perf.ts"] } } };"#);
+        assert!(!result.replace_entry_patterns);
+        assert_eq!(result.entry_patterns, vec!["perf/*.perf.ts"]);
+    }
+
+    #[test]
+    fn default_bench_pattern_matches_benchmark_and_module_extensions() {
+        let glob = globset::Glob::new(VITEST_DEFAULT_BENCH_INCLUDE)
+            .unwrap()
+            .compile_matcher();
+        for path in [
+            "a.bench.ts",
+            "x/a.benchmark.mts",
+            "a.bench.cjs",
+            "a.benchmark.jsx",
+        ] {
+            assert!(glob.is_match(path), "{path}");
+        }
+        assert!(ENTRY_PATTERNS.contains(&VITEST_DEFAULT_BENCH_INCLUDE));
+    }
+
+    fn resolve_at(config: &str, source: &str) -> PluginResult {
+        VitestPlugin.resolve_config(Path::new(config), source, Path::new("/project"))
+    }
+
+    #[test]
+    fn nested_config_include_is_scoped_to_its_directory() {
+        let result = resolve_at(
+            "/project/fixtures/app/vite.config.ts",
+            r#"export default {
+                test: {
+                    include: ["./src/**/*.test.ts"],
+                    projects: [{ test: { include: ["unit.test.js"] } }],
+                },
+            };"#,
+        );
+        assert!(
+            !result.replace_entry_patterns,
+            "a config below the root must not replace the defaults of the project"
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["fixtures/app/src/**/*.test.ts", "fixtures/app/unit.test.js"]
+        );
+    }
+
+    #[test]
+    fn script_config_below_the_root_resolves_globs_against_the_root() {
+        let result = resolve_at(
+            "/project/config/vitest.ci.ts",
+            r#"export default {
+                test: {
+                    include: ["src/**/*.test.ts"],
+                    reporters: ["./scripts/ci-reporter.ts"],
+                },
+            };"#,
+        );
+        assert!(result.replace_entry_patterns);
+        assert_eq!(
+            result.entry_patterns,
+            vec!["src/**/*.test.ts", VITEST_DEFAULT_BENCH_INCLUDE]
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/scripts/ci-reporter.ts"))
+        );
+    }
+
+    #[test]
+    fn root_config_include_still_replaces() {
+        let result = resolve_at(
+            "/project/vitest.config.ts",
+            r#"export default { test: { include: ["src/**/*.test.ts"] } };"#,
+        );
+        assert!(result.replace_entry_patterns);
+        assert!(result.accumulate_config_entry_patterns);
+    }
+
+    #[test]
+    fn shadowed_vite_config_include_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("vitest.config.ts"), "export default {};").unwrap();
+        let vite = dir.path().join("vite.config.ts");
+        let result = VitestPlugin.resolve_config(
+            &vite,
+            r#"export default { test: { include: ["src/**/*.test.ts"] } };"#,
+            dir.path(),
+        );
+        assert!(!result.replace_entry_patterns);
+        assert!(result.entry_patterns.is_empty());
+    }
+
+    #[test]
+    fn path_reporter_is_a_file_not_a_dependency() {
+        let result = resolve_at(
+            "/project/vitest.config.ts",
+            r#"export default {
+                test: {
+                    reporters: ["default", "./scripts/ci-reporter.ts", ["../shared/r.ts", {}], "vitest-sonar-reporter"],
+                },
+            };"#,
+        );
+        assert_eq!(
+            result.referenced_dependencies,
+            vec!["vitest-sonar-reporter"]
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/scripts/ci-reporter.ts")),
+            "{:?}",
+            result.setup_files
+        );
+        assert!(
+            !result.setup_files.contains(&PathBuf::from("/shared/r.ts")),
+            "a reporter path outside the root credits no file"
+        );
+    }
+
+    #[test]
+    fn reporter_behind_a_conditional_spread_is_read() {
+        let result = resolve_at(
+            "/project/vitest.config.ts",
+            r#"const isCI = Boolean(process.env.CI);
+            const config = defineConfig({
+                test: {
+                    reporters: [
+                        "default",
+                        ...(isCI ? [["json", { outputFile: "r.json" }] as ["json", object]] : []),
+                        ...(process.env.REPORT === "1" ? ["./scripts/ci-reporter.ts"] : []),
+                        ...(isCI && ["vitest-sonar-reporter"]),
+                    ],
+                },
+            });
+            export default config;"#,
+        );
+        assert_eq!(
+            result.referenced_dependencies,
+            vec!["vitest-sonar-reporter"]
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/scripts/ci-reporter.ts")),
+            "{:?}",
+            result.setup_files
+        );
     }
 
     #[test]

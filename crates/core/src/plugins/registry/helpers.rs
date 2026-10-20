@@ -673,29 +673,54 @@ pub fn process_config_result(
     Ok(())
 }
 
+/// Merge the entry patterns of one config result, with the replace and
+/// accumulate semantics of the plugin.
+fn merge_entry_patterns(
+    pname: &str,
+    plugin_result: &mut PluginResult,
+    result: &mut AggregatedPluginResult,
+) {
+    if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
+        let first_replacement = result.replaced_entry_plugins.insert(pname.to_string());
+        if !plugin_result.accumulate_config_entry_patterns {
+            result.entry_patterns.retain(|(_, name)| name != pname);
+        } else if first_replacement {
+            // An earlier config of the plugin that did not replace (a Vitest
+            // config below the root) keeps its patterns. Only the static
+            // defaults go.
+            let config_patterns = &result.config_entry_patterns;
+            result.entry_patterns.retain(|(rule, name)| {
+                name != pname || config_patterns.contains(&(name.clone(), rule.pattern.clone()))
+            });
+        }
+    }
+    if plugin_result.accumulate_config_entry_patterns {
+        result.config_entry_patterns.extend(
+            plugin_result
+                .entry_patterns
+                .iter()
+                .map(|rule| (pname.to_string(), rule.pattern.clone())),
+        );
+    }
+    result.entry_patterns.extend(
+        std::mem::take(&mut plugin_result.entry_patterns)
+            .into_iter()
+            .map(|rule| (rule, pname.to_string())),
+    );
+}
+
 /// Merge a validated `PluginResult`'s payload fields into the aggregate, applying
 /// the per-plugin `replace_*` semantics for entry patterns, used-export rules,
 /// and path aliases.
 fn merge_plugin_result_fields(
     pname: &str,
-    plugin_result: PluginResult,
+    mut plugin_result: PluginResult,
     result: &mut AggregatedPluginResult,
 ) {
-    if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
-        let first_replacement = result.replaced_entry_plugins.insert(pname.to_string());
-        if first_replacement || !plugin_result.accumulate_config_entry_patterns {
-            result.entry_patterns.retain(|(_, name)| name != pname);
-        }
-    }
+    merge_entry_patterns(pname, &mut plugin_result, result);
     if plugin_result.replace_used_export_rules && !plugin_result.used_exports.is_empty() {
         result.used_exports.retain(|rule| rule.plugin_name != pname);
     }
-    result.entry_patterns.extend(
-        plugin_result
-            .entry_patterns
-            .into_iter()
-            .map(|rule| (rule, pname.to_string())),
-    );
     result.used_exports.extend(
         plugin_result
             .used_exports

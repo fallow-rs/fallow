@@ -674,6 +674,8 @@ mod type_only_namespace;
 mod typescript_content_mapper_plugin;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
+#[path = "integration_test/vitest_include_scope.rs"]
+mod vitest_include_scope;
 #[path = "integration_test/vitest_script_config_arg.rs"]
 mod vitest_script_config_arg;
 #[path = "integration_test/webpack_inline_loaders.rs"]
