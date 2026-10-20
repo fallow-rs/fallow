@@ -17,6 +17,7 @@
 //!   replaces the module with `vi.mock` does not reach it.
 //! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
+mod database_write;
 mod layout;
 mod plan;
 mod reach;

@@ -923,6 +923,35 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
         BTreeMap::from([("runTask".to_owned(), PLANNED)]),
         "`run` counts only in a module that loads a database package itself"
     );
+    assert_eq!(
+        function_dispositions(&default, "src/statements.ts").get("findStored"),
+        Some(&PLANNED),
+        "a prepared `SELECT` statement is not a write"
+    );
+    assert_eq!(
+        function_dispositions(&default, "src/statements.ts").get("countStored"),
+        Some(&PLANNED),
+        "a prepared `SELECT` in a tagged template is not a write"
+    );
+    assert_eq!(
+        function_dispositions(&default, "src/routes.ts"),
+        BTreeMap::from([
+            ("<top-level>".to_owned(), PLANNED),
+            ("delete".to_owned(), PLANNED),
+            ("pageCount".to_owned(), PLANNED),
+        ]),
+        "a route registration with a path is not a database delete"
+    );
+    assert_eq!(
+        function_dispositions(&default, "src/pattern.ts"),
+        BTreeMap::from([
+            ("<top-level>".to_owned(), PLANNED),
+            ("parseId".to_owned(), PLANNED),
+            ("parseStored".to_owned(), PLANNED),
+            ("parseWord".to_owned(), PLANNED),
+        ]),
+        "`exec` on a regular expression is not a statement run"
+    );
     for (file, function) in [
         ("src/cjs.cjs", "cjsSave"),
         ("src/lazy.ts", "lazySave"),
@@ -938,6 +967,8 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
         ("src/lite.ts", "insertPrepared"),
         ("src/pg.ts", "addRow"),
         ("src/computed.ts", "addComputed"),
+        ("src/statements.ts", "addStored"),
+        ("src/statements.ts", "addInline"),
     ] {
         assert_eq!(
             function_dispositions(&default, file).get(function),

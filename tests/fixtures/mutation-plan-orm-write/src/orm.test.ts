@@ -7,12 +7,15 @@ import { lazySave } from "./lazy";
 import { clearValues, insertPrepared, insertValue } from "./lite";
 import { addRecord } from "./mongo";
 import { addPerson } from "./person";
+import { parseId, parseStored, parseWord } from "./pattern";
 import { addRow } from "./pg";
 import { addUser, countUsers } from "./pgjs";
 import { clearAll, runAll } from "./prisma";
 import { removeRecord } from "./remove";
+import { pageCount } from "./routes";
 import { runTask } from "./runner";
 import { clamp, save } from "./save";
+import { addInline, addStored, countStored, findStored } from "./statements";
 import { insertRow } from "./typed";
 import { addValue } from "./vercel";
 
@@ -41,6 +44,14 @@ test("writers exist", () => {
     runTask,
     addRow,
     addComputed,
+    addStored,
+    addInline,
+    findStored,
+    countStored,
+    pageCount,
+    parseId,
+    parseWord,
+    parseStored,
   ]) {
     expect(typeof writer).toBe("function");
   }
