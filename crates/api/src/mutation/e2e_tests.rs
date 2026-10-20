@@ -432,12 +432,26 @@ mod end_to_end {
     use crate::mutation::MutationRunScope;
     use crate::run_mutation;
 
-    /// The companion package and its Vitest fixture, when `npm ci` ran in
-    /// `tools/mutation-runner`.
+    /// With this variable set to `1`, a missing runner dependency fails the
+    /// test instead of a skip. The CI job that installs the runner sets it.
+    const REQUIRED_ENV: &str = "FALLOW_MUTATION_E2E_REQUIRED";
+
+    /// Reports a missing runner dependency: a skip, or a failure when
+    /// `FALLOW_MUTATION_E2E_REQUIRED=1` is set.
     #[expect(
         clippy::print_stderr,
         reason = "a skipped end-to-end test says why it did not run"
     )]
+    fn skip(reason: &str) {
+        assert!(
+            std::env::var_os(REQUIRED_ENV).is_none_or(|value| value != "1"),
+            "{REQUIRED_ENV}=1 is set, but {reason}"
+        );
+        eprintln!("skipped: {reason}");
+    }
+
+    /// The companion package and its Vitest fixture, when `npm ci` ran in
+    /// `tools/mutation-runner`.
     fn companion_fixture() -> Option<PathBuf> {
         let package =
             Path::new(&std::env::var_os("CARGO_MANIFEST_DIR")?).join("../../tools/mutation-runner");
@@ -449,10 +463,10 @@ mod end_to_end {
             )
         });
         if !vitest.is_file() || node.is_none() {
-            eprintln!(
-                "skipped: the end-to-end mutation test needs `node` on PATH and `npm ci` in {}",
+            skip(&format!(
+                "the end-to-end mutation test needs `node` on PATH and `npm ci` in {}",
                 package.display()
-            );
+            ));
             return None;
         }
         Some(dunce::canonicalize(package).expect("package path"))
@@ -632,10 +646,6 @@ mod end_to_end {
 
     /// The companion package, when a runtime of `kind` is on `PATH` and
     /// reports a version that the manifest range of `runner` contains.
-    #[expect(
-        clippy::print_stderr,
-        reason = "a skipped end-to-end test says why it did not run"
-    )]
     fn child_runner_package(
         runner: &str,
         kind: crate::mutation::discovery::RuntimeKind,
@@ -651,10 +661,10 @@ mod end_to_end {
             .zip(range)
             .is_some_and(|(runtime, range)| range.contains(&runtime.version));
         if !supported {
-            eprintln!(
-                "skipped: the end-to-end {runner} test needs a supported `{}` on PATH",
+            skip(&format!(
+                "the end-to-end {runner} test needs a supported `{}` on PATH",
                 kind.name()
-            );
+            ));
             return None;
         }
         Some(dunce::canonicalize(package).expect("package path"))

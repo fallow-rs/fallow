@@ -100,8 +100,12 @@ npm ci --prefix tools/mutation-runner
 node --test tools/mutation-runner/test/*.test.mjs
 ```
 
-The `fallow-api` end-to-end mutation test also uses this install. Without it,
-the test prints a skip message and passes.
+The `fallow-api` end-to-end mutation tests in
+`crates/api/src/mutation/e2e_tests.rs` also use this install, and the bun-test
+end-to-end test needs `bun` on PATH. Without a dependency, each affected test
+prints a skip message and passes. Set `FALLOW_MUTATION_E2E_REQUIRED=1` to make
+these tests fail instead. The `Check` CI job installs the runner and Bun and
+sets this variable, so a broken install cannot pass in CI.
 
 The bun-test suite needs `bun` on PATH. Without it, the suite prints a skip
 message. Set `FALLOW_REQUIRE_BUN=1` to make the suite fail instead. The CI job

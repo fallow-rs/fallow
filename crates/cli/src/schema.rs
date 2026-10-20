@@ -1016,6 +1016,7 @@ mod tests {
         const EXCLUDED: &[(&str, &str)] = &[
             ("FALLOW_TEST_SIGNAL_HELPER", "test harness only"),
             ("FALLOW_STUB_MODE", "test harness only"),
+            ("FALLOW_MUTATION_E2E_REQUIRED", "test harness only"),
             (
                 "FALLOW_RAYON_STACK_PROBE_CHILD",
                 "internal child-process marker",

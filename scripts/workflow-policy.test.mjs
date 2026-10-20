@@ -1317,6 +1317,35 @@ test("CI runs the mutation runner tests at the declared runtime floors", () => {
   assert.match(indentedBlock(workflow, "ci-ok", 2), /mutation-runner-floor/u);
 });
 
+test("the check job runs the end-to-end mutation tests instead of a skip", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const checkJob = indentedBlock(workflow, "check", 2);
+  const rustPaths = listedPaths(indentedBlock(workflow, "rust", 12));
+  const install = checkJob.indexOf(
+    "npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts",
+  );
+  const bun = checkJob.indexOf("uses: oven-sh/setup-bun@");
+  const tests = checkJob.indexOf("name: Run tests");
+
+  assert.ok(install > 0, "the check job must install the mutation runner dependencies");
+  assert.ok(bun > 0, "the check job must install Bun for the bun-test end-to-end test");
+  assert.ok(install < tests && bun < tests, "the installs must come before the tests");
+  // Without the env var, a missing install skips each test and CI stays green.
+  assert.match(
+    checkJob,
+    /FALLOW_MUTATION_E2E_REQUIRED: '1'\n\s+run: cargo nextest run --profile ci --workspace/u,
+  );
+  for (const file of [
+    "tools/mutation-runner/src/companion.mjs",
+    "tools/mutation-runner/package.json",
+    "tools/mutation-runner/package-lock.json",
+    "tools/mutation-runner/test/fixtures/vitest-basic/vitest.config.mjs",
+    "crates/api/src/mutation/e2e_tests.rs",
+  ]) {
+    assert.ok(matchesListedPath(rustPaths, file), `the rust filter must include ${file}`);
+  }
+});
+
 test("mise.toml follows the tool versions that CI pins", () => {
   const mise = readFileSync("mise.toml", "utf8");
   const workflowDir = ".github/workflows";

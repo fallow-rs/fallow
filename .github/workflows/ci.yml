@@ -125,6 +125,9 @@ jobs:
               - 'editors/vscode/package.json'
               - 'tools/type-aware-sidecar/src/generated-protocol.mjs'
               - 'tools/mutation-runner/src/**'
+              - 'tools/mutation-runner/package.json'
+              - 'tools/mutation-runner/package-lock.json'
+              - 'tools/mutation-runner/test/fixtures/**'
               - 'scripts/generate-all.mjs'
               - 'scripts/generation-transaction.mjs'
               - 'scripts/contract-surfaces.mjs'
@@ -472,6 +475,16 @@ jobs:
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
+      # The end-to-end mutation tests in fallow-api run the companion against
+      # Vitest from this install, and the bun-test runner against Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.x'
+          no-cache: true
+
+      - name: Install mutation runner dependencies
+        run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
+
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest
@@ -482,6 +495,10 @@ jobs:
         # process, which spreads the large integration binaries over all
         # cores. It selects the same targets as `cargo test` with these flags;
         # neither runs doctests. The `ci` profile is in .config/nextest.toml.
+        # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
+        # the end-to-end mutation tests instead of a skip.
+        env:
+          FALLOW_MUTATION_E2E_REQUIRED: '1'
         run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples
 
       - name: Upload test report
