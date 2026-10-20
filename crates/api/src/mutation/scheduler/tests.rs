@@ -2157,6 +2157,7 @@ fn load_kill_job() -> Job {
         timeout_ms: 6000,
         setup_ms: 0,
         static_mutant: false,
+        test_files: vec!["test/a.test.ts".to_owned()],
         cache_key: None,
     }
 }
@@ -2273,4 +2274,127 @@ fn a_hanging_control_set_costs_one_control_run_for_each_load_kill_mutant_with_it
         .filter(|(_, run)| run.mutant_id.as_deref() != Some("m1"))
         .count();
     assert_eq!(mutant_runs, 2, "no retry of m2 or m3");
+}
+
+/// t1 in `test/a.test.ts` hits m1. t2 in `test/b.test.ts` hits nothing.
+/// `src/a.ts` (m1, m_a) loads at import time in `test/a.test.ts` only, and
+/// `src/b.ts` (m_b) in `test/b.test.ts` only.
+fn two_file_dry() -> DryRunResult {
+    DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            DryTest {
+                test_id: "test/b.test.ts::t2".to_owned(),
+                file: "test/b.test.ts".to_owned(),
+                duration_ms: Some(3.0),
+                status: TestStatus::Pass,
+            },
+        ],
+        hits: BTreeMap::from([(tid("t1"), vec!["m1".to_owned()])]),
+        static_hits: vec!["m_a".to_owned(), "m_b".to_owned()],
+        ..standard_dry()
+    }
+}
+
+fn two_file_plan(mutants: &[(&str, &str)]) -> SchedulePlan {
+    let mut plan = plan(&[]);
+    plan.mutants = mutants
+        .iter()
+        .map(|(id, file)| ScheduledMutant {
+            id: (*id).to_owned(),
+            file: (*file).to_owned(),
+        })
+        .collect();
+    plan.known_ids.extend(["m_a", "m_b"].map(str::to_owned));
+    plan.test_files = vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()];
+    plan.file_test_files = BTreeMap::from([
+        ("src/a.ts".to_owned(), vec!["test/a.test.ts".to_owned()]),
+        ("src/b.ts".to_owned(), vec!["test/b.test.ts".to_owned()]),
+    ]);
+    plan
+}
+
+fn dry_runs_of(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
+    spawner
+        .log
+        .lock()
+        .expect("log")
+        .iter()
+        .filter_map(|(index, request)| match request {
+            Request::DryRun { test_files } => Some((*index, test_files.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_companion_restarted_for_a_static_mutant_dry_runs_only_the_files_of_the_mutant() {
+    let caps = Capabilities {
+        fresh_modules_per_run: false,
+        ..VITEST_CAPS
+    };
+    let spawner = FakeSpawner::new(move |_, request| match request {
+        Request::Init(_) => Ok(ready(caps, "4.1.11")),
+        Request::DryRun { .. } => Ok(Response::DryRun(two_file_dry())),
+        Request::Run(run) => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        Request::Reload => Ok(Response::Reloaded(Reloaded {
+            method: ReloadMethod::RestartRequired,
+        })),
+        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+    });
+    let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts")]);
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m_a"), MutantStatus::Killed);
+    let both = vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()];
+    assert_eq!(
+        dry_runs_of(&spawner),
+        vec![(0, both), (1, vec!["test/a.test.ts".to_owned()])],
+        "the first companion dry-runs each file, the restarted one only the files of m_a"
+    );
+    let runs = spawner.runs();
+    assert_eq!(runs[1].0, 1);
+    assert_eq!(runs[1].1.test_ids, vec![tid("t1")]);
+}
+
+#[test]
+fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
+    // The reload restarts only the first companion. Later companions keep
+    // their narrow dry run, and a job with other test files needs a new one.
+    let caps = Capabilities {
+        fresh_modules_per_run: false,
+        ..VITEST_CAPS
+    };
+    let spawner = FakeSpawner::new(move |index, request| match request {
+        Request::Init(_) => Ok(ready(caps, "4.1.11")),
+        Request::DryRun { .. } => Ok(Response::DryRun(two_file_dry())),
+        Request::Run(run) => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        Request::Reload => Ok(Response::Reloaded(Reloaded {
+            method: if index == 0 {
+                ReloadMethod::RestartRequired
+            } else {
+                ReloadMethod::Invalidate
+            },
+        })),
+        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+    });
+    let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts"), ("m_b", "src/b.ts")]);
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    for id in ["m1", "m_a", "m_b"] {
+        assert_eq!(status(&outcome, id), MutantStatus::Killed, "{id}");
+    }
+    assert_eq!(
+        dry_runs_of(&spawner),
+        vec![
+            (
+                0,
+                vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()]
+            ),
+            (1, vec!["test/a.test.ts".to_owned()]),
+            (2, vec!["test/b.test.ts".to_owned()]),
+        ]
+    );
+    let runs = spawner.runs();
+    assert_eq!(runs[2].0, 2);
+    assert_eq!(runs[2].1.test_ids, vec!["test/b.test.ts::t2".to_owned()]);
 }

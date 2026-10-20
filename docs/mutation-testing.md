@@ -425,6 +425,13 @@ mutant. Their results decide no mutant status.
   affected mutants in `mutant_ids`. The mutant runs with its other covering
   tests. Only a mutant with no covering test left is `runtime_error`, and its
   `errors[]` entry names the mutant.
+- A static mutant needs a new companion before and after its run when the
+  runner keeps modules loaded between runs (Vitest with `isolate: false`).
+  After a reload of the worker gave `restart_required`, the companion that
+  starts for such a mutant dry-runs only the test files of its covering
+  tests. Each other companion dry-runs each test file of the run. A kept
+  companion with a narrow dry run restarts when a later job needs a test file
+  outside it.
 - The dry run of a restarted companion shares the host with the other
   workers. Its timeout is the first dry-run time times 2 times the worker
   count, and at least `--setup-timeout` (2 minutes by default). On a slow

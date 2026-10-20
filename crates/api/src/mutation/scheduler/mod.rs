@@ -265,11 +265,24 @@ struct Job {
     /// the watchdog waits for it (section 8).
     setup_ms: u64,
     static_mutant: bool,
+    /// The sorted test files of `tests`.
+    test_files: Vec<String>,
     /// The result cache key. `None` without a cache.
     cache_key: Option<String>,
 }
 
 impl Job {
+    /// The test files that a companion must dry-run for this job. `None`
+    /// means each file of the phase.
+    ///
+    /// A companion that runs a static mutant without fresh modules is
+    /// discarded after the job when its reload restarts it, so a dry run of
+    /// the other test files has no use (issue #3650).
+    fn dry_scope(&self, caps: Capabilities, restarts_on_reload: bool) -> Option<&[String]> {
+        let discarded = self.static_mutant && !caps.fresh_modules_per_run && restarts_on_reload;
+        (discarded && !self.test_files.is_empty()).then_some(self.test_files.as_slice())
+    }
+
     /// The watchdog wait: `timeout_ms`, the file setup time and the grace.
     fn watchdog_ms(&self) -> u64 {
         self.timeout_ms + self.setup_ms + WATCHDOG_GRACE_MS
@@ -626,6 +639,10 @@ struct Worker<'a> {
     dry_run_timeout: Duration,
     link: Option<Box<dyn CompanionLink>>,
     known_tests: FxHashSet<String>,
+    /// The test files of the dry run of `link`. `None` means `dry_files`.
+    loaded_files: Option<Vec<String>>,
+    /// A reload of a companion of this worker gave `restart_required`.
+    restarts_on_reload: bool,
     memo: &'a ControlMemo,
 }
 
@@ -649,6 +666,8 @@ impl<'a> Worker<'a> {
             dry_run_timeout,
             link: None,
             known_tests: FxHashSet::default(),
+            loaded_files: None,
+            restarts_on_reload: false,
             memo,
         }
     }
@@ -658,9 +677,22 @@ impl<'a> Worker<'a> {
             link.shutdown();
         }
         self.known_tests.clear();
+        self.loaded_files = None;
     }
 
-    fn ensure(&mut self) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
+    /// Gives a companion whose dry run covers `scope`, or each file of the
+    /// phase for `None`. A companion with a narrower dry run is replaced:
+    /// the protocol has no second dry run.
+    fn ensure(
+        &mut self,
+        scope: Option<&[String]>,
+    ) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
+        if let Some(loaded) = &self.loaded_files
+            && self.link.is_some()
+            && scope.is_none_or(|scope| scope.iter().any(|file| !loaded.contains(file)))
+        {
+            self.reset();
+        }
         if self.link.is_none() {
             let mut link = self.spawner.spawn().map_err(|failure| match failure {
                 SpawnFailure::Integrity(message) => {
@@ -700,7 +732,7 @@ impl<'a> Worker<'a> {
                 Err(error) => return Err(fault("init", &error)),
             }
             let request = Request::DryRun {
-                test_files: self.dry_files.to_vec(),
+                test_files: scope.unwrap_or(self.dry_files).to_vec(),
             };
             match link.request(&request, self.dry_run_timeout) {
                 Ok(Response::DryRun(result)) => {
@@ -720,6 +752,7 @@ impl<'a> Worker<'a> {
                 Err(error) => return Err(fault("dry run", &error)),
             }
             self.link = Some(link);
+            self.loaded_files = scope.map(<[String]>::to_vec);
         }
         self.link
             .as_mut()
@@ -732,7 +765,7 @@ impl<'a> Worker<'a> {
         if needs_reload && self.link.is_some() {
             self.reload();
         }
-        match self.ensure() {
+        match self.ensure(job.dry_scope(caps, self.restarts_on_reload)) {
             Ok(_) => {}
             Err(EnsureError::Fatal(error)) => return Err(error),
             Err(EnsureError::Fault(message, tail)) => {
@@ -920,7 +953,8 @@ impl<'a> Worker<'a> {
         if !caps.hot_switch && self.link.is_some() {
             self.reload();
         }
-        match self.ensure() {
+        // The control tests are a subset of the tests of `job`.
+        match self.ensure(job.dry_scope(caps, self.restarts_on_reload)) {
             Ok(_) => {}
             Err(EnsureError::Fatal(error)) => return Err(error),
             Err(EnsureError::Fault(message, _)) => {
@@ -994,6 +1028,10 @@ impl<'a> Worker<'a> {
         match link.request(&Request::Reload, self.config.runner_timeout) {
             Ok(Response::Reloaded(reloaded))
                 if reloaded.method != ReloadMethod::RestartRequired => {}
+            Ok(Response::Reloaded(_)) => {
+                self.restarts_on_reload = true;
+                self.reset();
+            }
             _ => self.reset(),
         }
     }
@@ -1340,15 +1378,13 @@ fn build_jobs(
         let total: f64 = tests.iter().map(|(duration, _)| duration).sum();
         let setup_ms = scaled_ms(facts.setup_of(&tests));
         let tests: Vec<String> = tests.into_iter().map(|(_, test)| test).collect();
-        let cache_key = cache.map(|cache| {
-            let mut test_files: Vec<String> = tests
-                .iter()
-                .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
-                .collect();
-            test_files.sort_unstable();
-            test_files.dedup();
-            cache.key(ready, mutant, &tests, &test_files)
-        });
+        let mut test_files: Vec<String> = tests
+            .iter()
+            .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
+            .collect();
+        test_files.sort_unstable();
+        test_files.dedup();
+        let cache_key = cache.map(|cache| cache.key(ready, mutant, &tests, &test_files));
         if let Some(cached) =
             cached_outcome(cache, cache_key.as_ref(), mutant, &tests, static_mutant)
         {
@@ -1361,6 +1397,7 @@ fn build_jobs(
             timeout_ms: timeout_ms(total),
             setup_ms,
             static_mutant,
+            test_files,
             cache_key,
         };
         if static_mutant {
