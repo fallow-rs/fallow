@@ -206,6 +206,37 @@ property, an optional chain (`items?.length`) and a computed access
 (`items["length"]`) keep each mutant. A type annotation is a type-level
 proof: a cast such as `as any` can pass another value.
 
+A conditional lookup in an array before `.filter(Boolean)` gives no `true`
+mutant for `negate-condition`. An example is
+`["base", align ? alignment[align] : ""].filter(Boolean)`. For a truthy
+`align`, the `true` mutant takes the same branch. For a falsy `align`, the
+mutant reads `alignment[align]`, which is `undefined`, and `filter(Boolean)`
+drops it as it drops `""`. The rule needs all of these conditions:
+
+- the conditional is a direct element of an array literal, and the array
+  literal is the receiver of a `.filter(Boolean)` call that is not optional,
+  with the global `Boolean`;
+- the test is a name with a local binding, and the consequent is `obj[test]`
+  or `obj?.[test]` with the same binding as its key;
+- the alternate is `""`, an empty template, `null`, the global `undefined`,
+  `false`, `0` or `0n`;
+- `obj` is a `const` that is not exported, has no redeclaration, and has an
+  object literal value, optionally with `as` or `satisfies`;
+- the object literal has only plain properties with name, string or number
+  keys, and no spread, getter, setter, method, computed key or `__proto__`
+  key;
+- no key is `undefined`, `null`, `false`, `0`, `NaN` or the empty string,
+  because a falsy key converts to one of these keys;
+- each use of `obj` is a member read, not an assignment target, a `delete`
+  operand or a callee.
+
+The `false` mutant does not change. A template literal, a `.join` without
+`.filter(Boolean)`, a `.filter((v) => v)` callback, a different key, a truthy
+alternate and a local `Boolean` binding keep the `true` mutant. A `with`
+statement or a direct `eval` call stops each proof in the file. A change to
+`Object.prototype` or `Array.prototype.filter` at run time can break the
+proof. The rule accepts this risk.
+
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has
 114119 mutants, and the operator adds 6473 mutants (5.7 %), 24 % of them on
