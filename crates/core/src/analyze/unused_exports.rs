@@ -24,7 +24,7 @@ use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
 #[path = "unused_exports_adapter.rs"]
 mod adapter;
-use adapter::is_aliased_import_wrapper;
+use adapter::aliased_import_adapters;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
@@ -1375,7 +1375,7 @@ fn evaluate_duplicate_export_group(
     // that re-exports or wraps the export of another group member is not an
     // independent origin.
     let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
-    let group_files: FxHashSet<FileId> = locations.iter().map(|e| e.file_id).collect();
+    let adapters = aliased_import_adapters(&locations, &name, graph);
     let independent_entries: Vec<ExportEntry> = locations
         .into_iter()
         .filter(|entry| {
@@ -1385,7 +1385,7 @@ fn evaluate_duplicate_export_group(
                 &module_indices,
                 dynamic_re_export_sources,
                 graph,
-            ) && !is_aliased_import_wrapper(entry, &name, &group_files, graph)
+            ) && !adapters.contains(&entry.file_id)
         })
         .collect();
 

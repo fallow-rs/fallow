@@ -117,3 +117,64 @@ fn duplicate_exports_type_only_aliased_wrapper() {
         "a type adapter that imports `Props` under an alias is not an independent origin"
     );
 }
+
+#[test]
+fn duplicate_exports_keep_mutual_aliased_imports() {
+    let graph = build_duplicate_graph(
+        &[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ],
+        &[(1, "helper", false), (2, "helper", false)],
+        &[
+            (0, 1, "helper", false),
+            (0, 2, "helper", false),
+            (1, 2, "helper", false),
+            (2, 1, "helper", false),
+        ],
+    );
+    let suppressions = SuppressionContext::empty();
+    let config = test_config();
+    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
+    assert_eq!(
+        result.len(),
+        1,
+        "two modules that import `helper` from each other have no origin to derive from"
+    );
+    assert_eq!(
+        duplicate_location_paths(&result[0]),
+        vec![PathBuf::from("/src/a.ts"), PathBuf::from("/src/b.ts")]
+    );
+}
+
+#[test]
+fn duplicate_exports_skip_adapter_cycle_that_reaches_origin() {
+    let graph = build_duplicate_graph(
+        &[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+            ("/src/core.ts", false),
+        ],
+        &[
+            (1, "helper", false),
+            (2, "helper", false),
+            (3, "helper", false),
+        ],
+        &[
+            (0, 1, "helper", false),
+            (0, 2, "helper", false),
+            (1, 2, "helper", false),
+            (2, 1, "helper", false),
+            (2, 3, "helper", false),
+        ],
+    );
+    let suppressions = SuppressionContext::empty();
+    let config = test_config();
+    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
+    assert!(
+        result.is_empty(),
+        "adapters whose links reach `core.ts` derive their export from it"
+    );
+}

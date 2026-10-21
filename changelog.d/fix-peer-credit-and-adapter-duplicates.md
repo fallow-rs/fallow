@@ -13,4 +13,5 @@
   adapter, for example `import { configureAuth as core } from "../ci/auth"`
   followed by `export function configureAuth()`. It derives its export from
   the source, as a re-export does. When a third module exports the same name
-  independently, the finding stays between the source and that module.
+  independently, the finding stays between the source and that module. Two
+  modules that import `X` from each other under aliases are still reported.
