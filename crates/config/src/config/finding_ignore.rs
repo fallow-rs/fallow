@@ -154,11 +154,12 @@ impl FindingIgnoreMatcher {
         if self.is_empty() {
             return false;
         }
-        let key = if path.is_absolute() {
-            let Ok(relative) = path.strip_prefix(root) else {
-                return false;
-            };
+        // Strip the root before the absolute check: a root such as `/project`
+        // is not absolute on Windows, and a path below it must still match.
+        let key = if let Ok(relative) = path.strip_prefix(root) {
             StableFileKey::from_relative(relative)
+        } else if path.is_absolute() {
+            return false;
         } else {
             StableFileKey::from_relative(path)
         };
@@ -247,6 +248,17 @@ mod tests {
         assert!(matcher.is_ignored_path(root, Path::new("test/fixtures/bad.js")));
         assert!(!matcher.is_ignored_path(root, &root.join("src/app.js")));
         assert!(!matcher.is_ignored_path(root, &base.join("elsewhere/test/fixtures/bad.js")));
+    }
+
+    #[test]
+    fn path_lookup_strips_a_root_that_is_not_absolute() {
+        let matcher = matcher(&["test/fixtures/**"]);
+        // `/project` has no drive prefix on Windows, so it is not absolute
+        // there. A path below it must still match relative to the root.
+        let root = Path::new("project");
+
+        assert!(matcher.is_ignored_path(root, &root.join("test/fixtures/bad.js")));
+        assert!(!matcher.is_ignored_path(root, &root.join("src/app.js")));
     }
 
     #[test]
