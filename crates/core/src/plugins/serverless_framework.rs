@@ -27,9 +27,8 @@ pub(super) const CONFIG_PATTERNS: &[&str] = &["serverless.{js,cjs,mjs,ts,cts,mts
 /// them.
 pub(super) const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
-/// Config discovery matches `serverless.*` in every directory, so only a root
-/// config file gets the `default` export credit. A helper module such as
-/// `src/lib/serverless.ts` stays reportable.
+/// Only a root config file gets the `default` export credit. A module such as
+/// `src/lib/serverless.ts` is not a service config and stays reportable.
 pub(super) const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] =
     &[("serverless.{js,cjs,mjs,ts,cts,mts}", &["default"])];
 
@@ -43,6 +42,9 @@ const SOURCE_EXTENSIONS: &[&str] = &[".js", ".mjs", ".cjs", ".ts", ".mts", ".cts
 
 /// The package that the esbuild build step needs.
 const ESBUILD_PACKAGE: &str = "esbuild";
+
+/// The manifest that marks a nested directory as a service directory.
+const PACKAGE_JSON: &str = "package.json";
 
 /// The start of a `${file(path):selector}` variable.
 const FILE_VARIABLE_PREFIX: &str = "${file(";
@@ -119,6 +121,9 @@ pub(super) fn resolve_serverless_config(
     root: &Path,
 ) -> PluginResult {
     let mut result = PluginResult::default();
+    if !is_yaml_config(config_path) && !is_service_directory(config_path, root) {
+        return result;
+    }
     let references = if is_yaml_config(config_path) {
         yaml_references(config_path, source, root)
     } else {
@@ -127,6 +132,20 @@ pub(super) fn resolve_serverless_config(
     };
     references.apply(config_path, root, &mut result);
     result
+}
+
+/// True when a config file sits in a directory that the framework can run as
+/// a service: the project or workspace root, or a directory with its own
+/// `package.json`.
+///
+/// The framework reads `serverless.*` from the service directory only. Config
+/// discovery also finds a module such as `src/lib/serverless.ts`, so a nested
+/// JS or TS file outside a service directory is an ordinary module. A nested
+/// `serverless.yml` is always a service config.
+fn is_service_directory(config_path: &Path, root: &Path) -> bool {
+    config_path
+        .parent()
+        .is_some_and(|dir| dir == root || dir.join(PACKAGE_JSON).is_file())
 }
 
 fn is_yaml_config(config_path: &Path) -> bool {
@@ -614,6 +633,27 @@ export default config;
                 "{dep} missing from {deps:?}"
             );
         }
+    }
+
+    #[test]
+    fn nested_script_config_outside_a_service_directory_gives_an_empty_result() {
+        let source = "export default { plugins: ['serverless-offline'], functions: { a: { handler: 'orphan.main' } } };";
+        let result = resolve("/project/src/lib/serverless.ts", source);
+        assert!(result.entry_patterns.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn nested_yaml_config_is_a_service_config() {
+        let result = resolve(
+            "/project/services/api/serverless.yml",
+            "plugins:\n  - serverless-offline\nfunctions:\n  a:\n    handler: handler.main\n",
+        );
+        assert_eq!(
+            entry_patterns(&result),
+            vec!["services/api/handler.{js,mjs,cjs,ts,mts,cts}"]
+        );
+        assert_eq!(result.referenced_dependencies, vec!["serverless-offline"]);
     }
 
     #[test]

@@ -74,3 +74,35 @@ fn serverless_handlers_plugins_and_esbuild_references_are_credited() {
         "unreferenced control dependency should still be reported, unused dev deps: {unused_dev_dependencies:?}"
     );
 }
+
+#[test]
+fn nested_script_config_is_a_service_config_only_in_a_service_directory() {
+    // The framework reads `serverless.*` from the service directory only. A
+    // nested `serverless.yml` and a `serverless.ts` next to a `package.json`
+    // are service configs. `src/lib/serverless.ts` is an ordinary module.
+    let root = fixture_path("serverless-nested-config");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_paths = unused_file_paths(&root, &results);
+    assert!(
+        unused_paths.contains(&"src/lib/orphan.ts".to_string()),
+        "a handler of a helper module is not an entry point, unused files: {unused_paths:?}"
+    );
+    for path in ["services/api/handler.ts", "services/web/handler.ts"] {
+        assert!(
+            !unused_paths.contains(&path.to_string()),
+            "{path} should be reachable through its service config, unused files: {unused_paths:?}"
+        );
+    }
+
+    let unused_dev_dependencies = unused_dev_dependency_names(&results);
+    assert!(
+        unused_dev_dependencies.contains(&"serverless-offline"),
+        "a plugin of a helper module is not credited, unused dev deps: {unused_dev_dependencies:?}"
+    );
+    assert!(
+        !unused_dev_dependencies.contains(&"serverless-esbuild"),
+        "a plugin of a nested serverless.yml is credited, unused dev deps: {unused_dev_dependencies:?}"
+    );
+}
