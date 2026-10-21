@@ -1743,6 +1743,158 @@ test("protocol v7 confirms complete closed-world absence of static class-member 
   }
 });
 
+test("protocol v7 confirms class members read through shorthand destructuring", () => {
+  const root = makeProject();
+  try {
+    const service = [
+      "export class Service {",
+      "  viaBinding(): void {}",
+      "  viaParameter(): void {}",
+      "  viaNested(): void {}",
+      "  viaLoop(): void {}",
+      "  viaAssignment(): void {}",
+      "  viaArrayPattern(): void {}",
+      "  viaLoopPattern(): void {}",
+      "  unused(): void {}",
+      "}",
+      "",
+    ].join("\n");
+    const consumer = [
+      'import { Service } from "./service";',
+      "const service = new Service();",
+      "const { viaBinding } = service;",
+      "viaBinding();",
+      "const run = ({ viaParameter }: Service): void => viaParameter();",
+      "run(service);",
+      "const { inner: { viaNested } } = { inner: service };",
+      "viaNested();",
+      "for (const { viaLoop } of [service]) viaLoop();",
+      "let viaAssignment: () => void;",
+      "({ viaAssignment } = service);",
+      "viaAssignment();",
+      "let viaArrayPattern: () => void;",
+      "[{ viaArrayPattern }] = [service];",
+      "let viaLoopPattern: () => void;",
+      "for ({ viaLoopPattern } of [service]) viaLoopPattern();",
+      "",
+    ].join("\n");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/service.ts", service);
+    write(root, "src/consumer.ts", consumer);
+    const names = [
+      "viaBinding",
+      "viaParameter",
+      "viaNested",
+      "viaLoop",
+      "viaAssignment",
+      "viaArrayPattern",
+      "viaLoopPattern",
+      "unused",
+    ];
+    const queries = names.map((name, id) => ({
+      id,
+      operation: "symbol-use",
+      framework_contracts: [],
+      symbol: symbolIdentity({
+        source: service,
+        marker: `${name}()`,
+        file: "src/service.ts",
+        namespace: "value",
+        declarationKind: "class_method",
+        exportedName: name,
+        owner: "Service",
+      }),
+    }));
+
+    const response = runSidecar(semanticRequest(root, queries));
+    const assertions = Object.fromEntries(
+      response.results.map((result) => [names[result.query_id], result.assertion]),
+    );
+    assert.deepEqual(assertions, {
+      viaBinding: "confirmed-used",
+      viaParameter: "confirmed-used",
+      viaNested: "confirmed-used",
+      viaLoop: "confirmed-used",
+      viaAssignment: "confirmed-used",
+      viaArrayPattern: "no-confirmed-use",
+      viaLoopPattern: "no-confirmed-use",
+      unused: "confirmed-no-static-references",
+    });
+    const bindingUse = response.results.find((result) => result.query_id === 0).evidence[0];
+    assert.equal(bindingUse.path, "src/consumer.ts");
+    assert.equal(bindingUse.line, utf8Position(consumer, "viaBinding }").line);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v7 confirms exports read through shorthand properties and destructuring", () => {
+  const root = makeProject();
+  try {
+    const source = [
+      "export const shorty = 1;",
+      "export const aliased = 2;",
+      "export const destructured = 3;",
+      "export const renamed = 4;",
+      "export const unused = 5;",
+      "",
+    ].join("\n");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/values.ts", source);
+    write(
+      root,
+      "src/consumer.ts",
+      [
+        'import { shorty, aliased as local, unused } from "./values";',
+        'import * as values from "./values";',
+        "export const bag = { shorty, local };",
+        "const { destructured } = values;",
+        "const { renamed: other } = values;",
+        "export const read = [destructured, other];",
+        "",
+      ].join("\n"),
+    );
+    const names = ["shorty", "aliased", "destructured", "renamed", "unused"];
+    const queries = names.map((name, id) => ({
+      id,
+      operation: "symbol-use",
+      framework_contracts: [],
+      symbol: symbolIdentity({
+        source,
+        marker: name,
+        file: "src/values.ts",
+        namespace: "value",
+        declarationKind: "export",
+        exportedName: name,
+      }),
+    }));
+
+    const response = runSidecar(semanticRequest(root, queries));
+    const assertions = Object.fromEntries(
+      response.results.map((result) => [names[result.query_id], result.assertion]),
+    );
+    assert.deepEqual(assertions, {
+      shorty: "confirmed-used",
+      aliased: "confirmed-used",
+      destructured: "confirmed-used",
+      renamed: "confirmed-used",
+      unused: "confirmed-no-static-references",
+    });
+    const shortyUse = response.results.find((result) => result.query_id === 0).evidence[0];
+    assert.deepEqual([shortyUse.path, shortyUse.line], ["src/consumer.ts", 3]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 preserves required interface, abstract, and inherited contracts", () => {
   const cases = [
     {

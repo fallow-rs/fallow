@@ -20,7 +20,6 @@ import {
   isImportTypeNode,
   isNamespaceImport,
   isPropertyAccessExpression,
-  isQualifiedName,
   isPrivateIdentifier,
   isSetAccessorDeclaration,
   isStringLiteralLikeNode,
@@ -51,6 +50,11 @@ import {
   symbolForDeclaration,
 } from "./semantic-identity.mjs";
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
+import {
+  qualifierExpression,
+  referenceValueSymbol,
+  shorthandReferenceSymbols,
+} from "./shorthand-references.mjs";
 import { matchingAliasEntries, matchingSymbolEntries, targetName } from "./symbol-targets.mjs";
 import { analyzeTypeCoupling } from "./type-coupling.mjs";
 
@@ -521,19 +525,8 @@ const moduleIdentityForSpecifier = (project, specifier) => {
 };
 
 const namespaceImportDeclaration = (project, node) => {
-  const parent = node.parent;
-  if (!parent) return undefined;
-  const namespace = isPropertyAccessExpression(parent)
-    ? parent.name === node
-      ? parent.expression
-      : undefined
-    : isElementAccessExpression(parent) && parent.argumentExpression === node
-      ? parent.expression
-      : isQualifiedName(parent) && parent.right === node
-        ? parent.left
-        : undefined;
-  if (!namespace) return undefined;
-  if (!isIdentifier(namespace)) return undefined;
+  const namespace = qualifierExpression(node);
+  if (!namespace || !isIdentifier(namespace)) return undefined;
   const symbol = project.checker.getSymbolAtLocation(namespace);
   return symbol?.declarations
     ?.map((declaration) => declaration.resolve(project))
@@ -541,7 +534,7 @@ const namespaceImportDeclaration = (project, node) => {
 };
 
 const localAliasModuleEdgeDeclaration = (project, node) => {
-  const symbol = project.checker.getSymbolAtLocation(node);
+  const symbol = referenceValueSymbol(project, node);
   return symbol?.declarations
     ?.map((declaration) => moduleEdgeDeclaration(declaration.resolve(project)))
     .find(Boolean);
@@ -623,11 +616,14 @@ const recordSymbolUncertainty = (state, entry, reasonCode) => {
 
 const isExactElementReference = (node) => isElementNameNode(node) && typeof node.text === "string";
 
-const recordStringDispatchedMemberAccess = (state, projectEntries, node) => {
-  if (!isStringLiteralLikeNode(node) || isExactElementReference(node)) return;
+const recordNameUncertainty = (state, projectEntries, node) =>
   (state.classMemberEntriesByName.get(node.text) ?? [])
     .filter((entry) => projectEntries.has(entry))
     .forEach((entry) => recordSymbolUncertainty(state, entry, "dynamic-member-access"));
+
+const recordStringDispatchedMemberAccess = (state, projectEntries, node) => {
+  if (!isStringLiteralLikeNode(node) || isExactElementReference(node)) return;
+  recordNameUncertainty(state, projectEntries, node);
 };
 
 const recordComputedMemberAccess = (state, project, entries, node) => {
@@ -723,11 +719,15 @@ const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImpor
     if (isElementReference(node, state.candidateNames)) nodes.push(node);
   });
   const symbols = project.checker.getSymbolAtLocation(nodes);
+  const references = shorthandReferenceSymbols(project, nodes, symbols, state);
+  references.unresolved.forEach((node) => recordNameUncertainty(state, projectEntries, node));
   nodes.forEach((node, index) => {
     const rawSymbol = symbols[index];
     referenceNamespaces(project, node, rawSymbol).forEach((namespace) => {
       const entries = new Set([
-        ...matchingAliasEntries(project, rawSymbol, namespace, state),
+        ...references.symbols[index].flatMap((symbol) => [
+          ...matchingAliasEntries(project, symbol, namespace, state),
+        ]),
         ...surfaceEntriesForNode(state, project, node, namespace),
       ]);
       entries.forEach((entry) => recordSymbolUse(root, state, project, entry, node, namespace));
