@@ -517,6 +517,18 @@ fn prefix_if_needed(pat: &str, ws_prefix: &str) -> String {
 }
 
 impl AggregatedPluginResult {
+    /// The entry patterns without exact repeats, in first-seen order.
+    ///
+    /// The project pass, each workspace pass, and each config file of a plugin
+    /// can seed the same rule for the same plugin. A repeat adds no match, so
+    /// the compiled glob set keeps one copy.
+    pub(crate) fn unique_entry_patterns(&self) -> impl Iterator<Item = &(PathRule, String)> {
+        let mut seen: FxHashSet<&(PathRule, String)> = FxHashSet::default();
+        self.entry_patterns
+            .iter()
+            .filter(move |entry| seen.insert(entry))
+    }
+
     /// Apply a workspace prefix to every path-bearing field in place.
     ///
     /// Workspace-package results are collected with patterns relative to the
@@ -1728,5 +1740,7 @@ fn script_activation_packages(
     .used_packages
 }
 
+#[cfg(test)]
+mod entry_pattern_tests;
 #[cfg(test)]
 mod tests;

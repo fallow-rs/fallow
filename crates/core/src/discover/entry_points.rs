@@ -1437,7 +1437,7 @@ fn build_plugin_glob_meta(
 ) -> (Option<globset::GlobSet>, Vec<CompiledEntryRule<'_>>) {
     let mut builder = globset::GlobSetBuilder::new();
     let mut glob_meta: Vec<CompiledEntryRule<'_>> = Vec::new();
-    for (rule, pname) in &plugin_result.entry_patterns {
+    for (rule, pname) in plugin_result.unique_entry_patterns() {
         if let Some((include, compiled)) = compile_entry_rule(rule, pname, plugin_result) {
             builder.add(include);
             glob_meta.push(compiled);

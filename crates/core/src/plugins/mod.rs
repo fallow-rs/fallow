@@ -906,7 +906,7 @@ fn has_source_extension(value: &str) -> bool {
 ///
 /// Exclusion regexes are matched against the project-relative path and should be
 /// anchored when generated dynamically so they can be safely workspace-prefixed.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct PathRule {
     pub pattern: String,
     pub exclude_globs: Vec<String>,

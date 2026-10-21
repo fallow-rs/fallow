@@ -717,4 +717,19 @@ mod tests {
             "unscoped workspace must not get .config traversed"
         );
     }
+
+    #[test]
+    fn plugin_glob_set_or_warn_returns_none_for_a_failed_build() {
+        let failed = globset::Glob::new("src/[").map(|_| globset::GlobSet::empty());
+        assert!(failed.is_err(), "an unclosed class must not compile");
+        assert!(plugin_glob_set_or_warn(failed).is_none());
+    }
+
+    #[test]
+    fn plugin_glob_set_or_warn_keeps_a_built_set() {
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("src/app.ts").expect("valid glob"));
+        let set = plugin_glob_set_or_warn(builder.build()).expect("set builds");
+        assert!(set.is_match("src/app.ts"));
+    }
 }
