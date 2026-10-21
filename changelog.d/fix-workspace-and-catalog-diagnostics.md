@@ -5,8 +5,13 @@
   `vite/packages/*` for a repository that CI clones into the workspace) now
   gets a diagnostic with the pattern and the declaring file. The packages in
   that directory can use catalog entries, so the run does not report
-  `unused-catalog-entries` while such a pattern exists. Unresolved catalog
-  references and empty catalog groups are still reported.
+  `unused-catalog-entries` while such a pattern exists. One such pattern turns
+  off this check for all catalogs, also when the directory does not exist yet
+  (for example `packages/*` in a template). The diagnostic is a stderr
+  warning with `degrades_analysis: true`. To get the check back, create the
+  directory before the run or remove the pattern. A directory that exists but
+  holds no package does not turn off the check. Unresolved catalog references
+  and empty catalog groups are still reported.
 - **New workspace diagnostic `nested-project-root`.** A directory with its own
   `package.json` and `pnpm-workspace.yaml` that no root workspace pattern
   declares is an independent pnpm project. Fallow now analyzes it as a
