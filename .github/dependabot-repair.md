@@ -7,7 +7,8 @@ file adds what is specific to fallow.
 
 ## Fallow rules
 
-1. Sign off the commit with `git commit -s`. CI checks the DCO sign-off.
+1. Add no sign-off or co-author lines. The App is the author of the commit,
+   and the DCO check does not run on Dependabot pull requests.
 2. The commit subject must pass commitlint: a conventional prefix and at most
    100 characters.
 3. Prefer the regeneration scripts of this repository over a hand edit of a
