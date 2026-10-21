@@ -123,9 +123,9 @@ pub(super) fn sorted_keys(keys: &FxHashSet<String>) -> Vec<String> {
 }
 
 /// Rehydrate an in-memory snapshot from its cached form. Returns `None` when
-/// the persisted type-aware identity no longer deserializes (treated as a
-/// cache miss so a stale payload can never masquerade as an identity-less
-/// base).
+/// the persisted type-aware identity no longer deserializes or a complexity
+/// row is invalid (treated as a cache miss so a stale payload can never
+/// masquerade as an identity-less base).
 pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<AuditKeySnapshot> {
     let type_aware_identity = match cached.type_aware_identity {
         Some(json) => Some(serde_json::from_str(&json).ok()?),
@@ -138,7 +138,7 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
             .syntactic_dead_code
             .map(|keys| keys.into_iter().collect()),
         dead_code: cached.dead_code.into_iter().collect(),
-        health: complexity_from_cached(cached.health),
+        health: complexity_from_cached(cached.health)?,
         styling: cached.styling.into_iter().collect(),
         dupes: cached.dupes.into_iter().collect(),
         boundary_edges: cached.boundary_edges.into_iter().collect(),
@@ -242,9 +242,22 @@ fn sorted_complexity(baseline: &ComplexityBaseline) -> Vec<CachedComplexityFindi
     rows
 }
 
-fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> ComplexityBaseline {
+/// Returns `None` for a row that no valid baseline can produce (no exceeded
+/// flag, or an unknown severity tier), so a corrupt cache entry is a cache
+/// miss instead of a panic.
+fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> Option<ComplexityBaseline> {
     let mut baseline = ComplexityBaseline::default();
     for row in rows {
+        let [cyclomatic, cognitive, crap] = row.exceeded;
+        if !(cyclomatic || cognitive || crap) {
+            return None;
+        }
+        let severity = match row.severity {
+            0 => FindingSeverity::Moderate,
+            1 => FindingSeverity::High,
+            2 => FindingSeverity::Critical,
+            _ => return None,
+        };
         baseline
             .entry(row.key)
             .or_default()
@@ -254,20 +267,12 @@ fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> ComplexityBasel
                 cognitive: row.cognitive,
                 crap: row.crap,
                 line_count: row.line_count,
-                exceeded: ExceededThreshold::from_bools(
-                    row.exceeded[0],
-                    row.exceeded[1],
-                    row.exceeded[2],
-                ),
-                severity: match row.severity {
-                    0 => FindingSeverity::Moderate,
-                    1 => FindingSeverity::High,
-                    _ => FindingSeverity::Critical,
-                },
+                exceeded: ExceededThreshold::from_bools(cyclomatic, cognitive, crap),
+                severity,
                 crap_estimated: row.crap_estimated,
             });
     }
-    baseline
+    Some(baseline)
 }
 
 fn sorted_branching(
@@ -703,4 +708,42 @@ pub(super) fn audit_base_snapshot_cache_key(
         hash: xxh3_64(&bytes),
         base_sha,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached_row(exceeded: [bool; 3], severity: u8) -> CachedComplexityFinding {
+        CachedComplexityFinding {
+            key: "complexity:src/a.ts:f".to_string(),
+            line: 3,
+            cyclomatic: 25,
+            cognitive: 4,
+            crap: None,
+            line_count: 40,
+            exceeded,
+            severity,
+            crap_estimated: false,
+        }
+    }
+
+    #[test]
+    fn complexity_row_without_exceeded_flag_is_a_cache_miss() {
+        assert!(complexity_from_cached(vec![cached_row([false, false, false], 1)]).is_none());
+    }
+
+    #[test]
+    fn complexity_row_with_unknown_severity_is_a_cache_miss() {
+        assert!(complexity_from_cached(vec![cached_row([true, false, false], 3)]).is_none());
+    }
+
+    #[test]
+    fn complexity_row_with_valid_fields_decodes() {
+        let baseline = complexity_from_cached(vec![cached_row([true, false, true], 2)])
+            .expect("a valid row decodes");
+        let metrics = &baseline["complexity:src/a.ts:f"][0];
+        assert_eq!(metrics.exceeded, ExceededThreshold::CyclomaticCrap);
+        assert_eq!(metrics.severity, FindingSeverity::Critical);
+    }
 }
