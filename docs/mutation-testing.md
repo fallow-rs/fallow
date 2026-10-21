@@ -615,6 +615,14 @@ mutant. Their results decide no mutant status.
   baseline failure. Its message says that the test fails in a mutant run
   with no active mutant but passed in the dry run of its whole file. A test
   that depends on another test of its file gives this result.
+- The message of a control-run failure keeps the first error of the test
+  after that reason: the error name and message on the first line, then the
+  stack frames of the project. The companion removes the frames of the
+  runner, Node and dependencies, makes paths relative to the project, and
+  removes color codes. The error is at most 4096 characters. The first line
+  of the message, with the assertion, also goes into the
+  `FALLOW_MUTATION_BASELINE_FAILED` error. A companion that sends no error
+  gives the reason only.
 - Each restarted companion runs its own dry run. A covering test that does
   not pass there is a baseline failure of that companion, with the ids of the
   affected mutants in `mutant_ids`. The mutant runs with its other covering

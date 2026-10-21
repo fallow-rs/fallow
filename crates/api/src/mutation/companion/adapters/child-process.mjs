@@ -9,10 +9,12 @@ import {
   attributeHits,
   byCodeUnit,
   dryRunResult,
+  errorDirectories,
   escapeRegExp,
   groupRequestedTests,
   hasRun,
   runResult,
+  testErrorText,
   toPosix,
   uniqueNames,
   validateDryRun,
@@ -154,9 +156,15 @@ const namePatternText = (parts) => parts.map(escapeRegExp).join(" ").replace(/\s
 const namePatternSource = (entries) =>
   `^(?:${[...new Set(entries.map((entry) => namePatternText(entry.parts)))].join("|")})$`;
 
-const runEntry = (test) =>
+const failedEntry = (test, directories) => {
+  const entry = { test_id: test.testId, status: "fail", failure_kind: test.failureKind };
+  const message = testErrorText(test.error, directories);
+  return message === null ? entry : { ...entry, message };
+};
+
+const runEntry = (test, directories) =>
   test.status === "fail"
-    ? { test_id: test.testId, status: "fail", failure_kind: test.failureKind }
+    ? failedEntry(test, directories)
     : { test_id: test.testId, status: "pass" };
 
 /** Gives a timeout failure for each requested test of a file with no result. */
@@ -168,10 +176,10 @@ const timedOutEntries = (entries, reported) => {
 };
 
 /** The report entries of one file in a run. */
-const runEntries = (result, entries, wanted) => {
+const runEntries = (result, entries, wanted, directories) => {
   const reported = result.tests.filter((test) => wanted.has(test.testId) && hasRun(test.status));
   const timedOut = result.timedOut ? timedOutEntries(entries, reported) : [];
-  return [...reported.map(runEntry), ...timedOut];
+  return [...reported.map((test) => runEntry(test, directories)), ...timedOut];
 };
 
 const hasFailure = (tests, errors) =>
@@ -227,7 +235,8 @@ const emptySummary = () => ({
  * for each test file. `runFile(file, options)` runs one file and gives
  * `{ tests, staticHits, loaded, shared, timedOut, errors, durationMs }`. Each
  * test has `testId`, `name`, `parts`, `line`, `durationMs`, `status`,
- * `failureKind` and `hits`. `shared` is true when a hit cannot name its test.
+ * `failureKind`, `error` (the first error of a failed test, or null) and
+ * `hits`. `shared` is true when a hit cannot name its test.
  * `timedOut` is true when the timeout stopped the whole file process, so a
  * requested test with no result timed out. The options are `mutantId` (null
  * in a dry run), `timeoutMs`, `pattern` (the source of a name pattern) and
@@ -257,6 +266,8 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
 
   // A run starts one process for each file, in file order. With `bail`, a
   // failure stops the run before the next file.
+  const directories = errorDirectories(init.root, init.run_dir);
+
   const run = async (request) => {
     validateRun(request);
     const requested = [...new Set(request.test_ids)];
@@ -271,7 +282,7 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
         pattern: namePatternSource(entries),
         bail: request.bail,
       });
-      tests.push(...runEntries(result, entries, wanted));
+      tests.push(...runEntries(result, entries, wanted, directories));
       errors.push(...result.errors);
       if (request.bail && hasFailure(tests, errors)) break;
     }

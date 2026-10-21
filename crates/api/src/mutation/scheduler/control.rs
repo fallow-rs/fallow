@@ -16,8 +16,37 @@ pub(super) struct ControlFault {
     pub(super) no_tests: bool,
     /// The requested tests that ran and failed. A failed test is a baseline
     /// failure of the run, not a fault of the run path.
-    pub(super) failed_tests: Vec<String>,
+    pub(super) failed_tests: Vec<FailedTest>,
     pub(super) detail: String,
+}
+
+/// A test that failed in a control run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FailedTest {
+    pub(super) test_id: String,
+    /// The error of the test from the companion. An older companion sends
+    /// none.
+    pub(super) error: Option<String>,
+}
+
+impl FailedTest {
+    /// The message of the baseline failure of this test: `reason`, then the
+    /// error of the test. The first line then has the reason and the first
+    /// line of the error, and the stack follows. With no error, the message
+    /// is `reason`.
+    pub(super) fn message(&self, reason: &str) -> String {
+        let Some(error) = self
+            .error
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        else {
+            return reason.to_owned();
+        };
+        let kept = &error[..error.floor_char_boundary(MAX_TEST_ERROR_BYTES)];
+        let ellipsis = if kept.len() < error.len() { "..." } else { "" };
+        format!("{reason}: {kept}{ellipsis}")
+    }
 }
 
 impl ControlFault {
@@ -54,16 +83,19 @@ pub(super) fn control_fault(tests: &[String], result: &RunResult) -> Option<Cont
         )));
     }
     let requested: FxHashSet<&str> = tests.iter().map(String::as_str).collect();
-    let failed_tests: Vec<String> = result
+    let failed_tests: Vec<FailedTest> = result
         .tests
         .iter()
         .filter(|test| test.status == TestStatus::Fail && requested.contains(test.test_id.as_str()))
-        .map(|test| test.test_id.clone())
+        .map(|test| FailedTest {
+            test_id: test.test_id.clone(),
+            error: test.message.clone(),
+        })
         .collect();
     if let Some(first) = failed_tests.first() {
         return Some(ControlFault {
             no_tests: false,
-            detail: format!("the test `{first}` failed"),
+            detail: format!("the test `{}` failed", first.test_id),
             failed_tests,
         });
     }
@@ -99,6 +131,11 @@ pub(super) const CONTROL_RUN_FAILURE: &str = "the test fails in a mutant run wit
 /// That run already has each passing test of the file, so a missing covering
 /// test is not the cause.
 pub(super) const CONFIRMATION_RUN_FAILURE: &str = "the test fails with no active mutant in a run of each test of its file that passed in the dry run, but passed in the dry run of its whole file; it can depend on a test of its file that failed or was skipped in the dry run, or it can be flaky";
+
+/// The longest test error that a baseline failure keeps, in bytes. The
+/// companion bounds the error too. This bound guards the pipe from the
+/// companion.
+const MAX_TEST_ERROR_BYTES: usize = 8 * 1024;
 
 /// The first line of `message`.
 pub(super) fn first_line(message: &str) -> &str {
@@ -161,7 +198,7 @@ pub(super) type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
 #[derive(Default)]
 pub(super) struct ControlMemo {
     entries: Mutex<FxHashMap<Vec<String>, ControlCell>>,
-    pub(super) failed_tests: Mutex<BTreeMap<String, &'static str>>,
+    pub(super) failed_tests: Mutex<BTreeMap<String, String>>,
 }
 
 impl ControlMemo {
@@ -182,11 +219,14 @@ impl ControlMemo {
         }
     }
 
-    /// Marks `tests` as failed. The first message of a test stays.
-    pub(super) fn mark_failed(&self, tests: &[String], message: &'static str) {
+    /// Marks `tests` as failed for `reason`. The first message of a test
+    /// stays.
+    pub(super) fn mark_failed(&self, tests: &[FailedTest], reason: &str) {
         if let Ok(mut failed) = self.failed_tests.lock() {
             for test in tests {
-                failed.entry(test.clone()).or_insert(message);
+                failed
+                    .entry(test.test_id.clone())
+                    .or_insert_with(|| test.message(reason));
             }
         }
     }
@@ -198,7 +238,7 @@ impl ControlMemo {
     }
 
     /// Each failed test with the message of its baseline failure.
-    pub(super) fn failed(&self) -> BTreeMap<String, &'static str> {
+    pub(super) fn failed(&self) -> BTreeMap<String, String> {
         self.failed_tests
             .lock()
             .map(|failed| failed.clone())

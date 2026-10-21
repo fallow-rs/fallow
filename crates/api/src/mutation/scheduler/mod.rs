@@ -28,7 +28,7 @@ mod retry_set;
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
-    ControlVerdict, control_fault, first_line, sorted_tests,
+    ControlVerdict, FailedTest, control_fault, first_line, sorted_tests,
 };
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
@@ -1916,16 +1916,16 @@ fn first_dry_run(
 
 /// Makes each test of `failed` a baseline failure that covers no mutant, the
 /// same as a test that fails in the dry run.
-fn drop_failed_tests(facts: &mut DryRunFacts, failed: &[String]) {
+fn drop_failed_tests(facts: &mut DryRunFacts, failed: &[FailedTest]) {
     for test in failed {
-        let file = facts.passing.remove(test).map(|(file, _)| file);
+        let file = facts.passing.remove(&test.test_id).map(|(file, _)| file);
         for tests in facts.covering.values_mut() {
-            tests.remove(test);
+            tests.remove(&test.test_id);
         }
         facts.baseline.push(BaselineFailure {
             file,
-            test_id: Some(test.clone()),
-            message: Some(CONTROL_RUN_FAILURE.to_owned()),
+            test_id: Some(test.test_id.clone()),
+            message: Some(test.message(CONTROL_RUN_FAILURE)),
             mutant_ids: Vec::new(),
         });
     }
@@ -1947,7 +1947,7 @@ fn note_control_failures(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, mem
         outcome.baseline_failures.push(BaselineFailure {
             file: facts.passing.get(&test).map(|(file, _)| file.clone()),
             test_id: Some(test),
-            message: Some(message.to_owned()),
+            message: Some(message),
             mutant_ids: Vec::new(),
         });
     }
@@ -1976,7 +1976,7 @@ fn self_check(
     jobs: &[Job],
     link: Box<dyn CompanionLink>,
     known: &FxHashSet<String>,
-) -> Result<(Box<dyn CompanionLink>, Vec<String>), ScheduleError> {
+) -> Result<(Box<dyn CompanionLink>, Vec<FailedTest>), ScheduleError> {
     let expired = reserve::expired(runner.config.deadline);
     let Some(job) = jobs.first().filter(|_| !expired) else {
         return Ok((link, Vec::new()));
