@@ -3,6 +3,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const BACKEND_ENV = "FALLOW_TYPE_AWARE_BACKEND";
+const DEFAULT_BACKEND = "typescript-go";
+
+/** The backend family that `FALLOW_TYPE_AWARE_BACKEND` selects for this run. */
+export const selectedBackend = (env = process.env) => env[BACKEND_ENV]?.trim() || DEFAULT_BACKEND;
+
 const hashJson = (value, suffix = "") =>
   createHash("sha256")
     .update(`${JSON.stringify(value)}${suffix}`)
@@ -92,7 +98,7 @@ const validEnvelope = (response, protocolVersion, isObject) =>
   response.protocol_version === protocolVersion &&
   response.operation === "semantic-queries" &&
   typeof response.sidecar_version === "string" &&
-  response.backend === "typescript-go" &&
+  response.backend === selectedBackend() &&
   typeof response.backend_version === "string" &&
   Array.isArray(response.results);
 
@@ -187,8 +193,6 @@ export const runExactSidecarRequest = ({
   return response;
 };
 
-const BACKEND_ENV = "FALLOW_TYPE_AWARE_BACKEND";
-const DEFAULT_BACKEND = "typescript-go";
 const ISOLATED_BACKEND_COMMANDS = new Set([
   "prepare",
   "focused",
@@ -217,8 +221,8 @@ export const minimalEnvironment = (sidecarBin, env = process.env) => {
  * through commands that keep their artifacts in that directory.
  */
 export const assertBackendIsolation = (options, defaultOutDir, env = process.env) => {
-  const backend = env[BACKEND_ENV]?.trim();
-  if (!backend || backend === DEFAULT_BACKEND) return;
+  const backend = selectedBackend(env);
+  if (backend === DEFAULT_BACKEND) return;
   const canonical = !options.outDirExplicit || resolve(options.outDir) === defaultOutDir;
   if (!ISOLATED_BACKEND_COMMANDS.has(options.command) || canonical) {
     throw new Error(

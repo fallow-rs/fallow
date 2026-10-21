@@ -36,7 +36,11 @@ import {
   validateSupplementalArtifactData,
   verifyLedgerData,
 } from "./type-aware-corpus.mjs";
-import { assertBackendIsolation, minimalEnvironment } from "./type-aware-corpus/runner.mjs";
+import {
+  assertBackendIsolation,
+  minimalEnvironment,
+  selectedBackend,
+} from "./type-aware-corpus/runner.mjs";
 import { renderSummaryMarkdown } from "./type-aware-corpus/summary.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -747,6 +751,11 @@ test("the child environment forwards only the allowed keys and the backend selec
     FALLOW_TYPE_AWARE_BACKEND: "tsrs",
     FALLOW_TYPE_AWARE_BIN: "/opt/sidecar",
   });
+});
+
+test("evidence expects the selected backend family in each sidecar response", () => {
+  assert.equal(selectedBackend({}), "typescript-go");
+  assert.equal(selectedBackend({ FALLOW_TYPE_AWARE_BACKEND: " tsrs " }), "tsrs");
 });
 
 test("a non-default backend never writes canonical or tracked artifacts", () => {
