@@ -247,7 +247,12 @@ for every export. Use it in these cases:
 These patterns are anchored. They get the workspace prefix, but no `**/`
 prefix, so they match only at the project root and at the root of each
 workspace package. Like the `default` credit, this credit applies only under
-`includeEntryExports`. External plugins have no anchored credit. The
+`includeEntryExports`. A `resolve_config` result can give the same credit
+for the files that a config names, with
+`PluginResult::push_entry_export_credit`. The Serverless plugin uses it for
+the export that each `handler` names. Do not use `push_used_export_rule` for
+this: a used-export rule also makes the matching entry file reportable
+without `includeEntryExports`. External plugins have no anchored credit. The
 `usedExports` field is the nearest option, but it also applies without
 `includeEntryExports`: fallow then analyses the exports of a matching entry
 file.
