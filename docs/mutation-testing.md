@@ -453,6 +453,19 @@ tests detect the mutant.
 - A retry starts only before the `--time-budget` deadline. A mutant that
   gets no retry keeps its first status, and the completion is `partial`
   (`time-budget`).
+- With `--time-budget`, the first pass keeps time free for the retries of
+  the survivors and timeouts that it found. Before each new mutant run, it
+  adds these parts to the current time: the estimated retry time of each
+  suspect (the measured run time, twice for a timeout, divided by
+  `--concurrency` or by the suspect count when that count is smaller), the
+  setup and dry-run time of the retry companions, and
+  twice the mean run time. When the sum reaches the deadline, the next
+  mutants stay `pending`. Thus a budgeted run confirms its survivors, the
+  result cache stores them, and a repeat run with the same budget continues
+  with the next mutants. A survivor that gets no retry is not stored, so a
+  repeat run does it again. The reserve uses measured run times, so the
+  first run of each worker starts without a reserve. A budget that is
+  shorter than one wave of runs can still end before any retry.
 - A run that started before the deadline continues until its watchdog
   fires, so the command can end after the deadline. For a mutant run, the
   overrun is at most `timeout_ms` plus the setup time plus 2 seconds. For
@@ -876,7 +889,9 @@ no test files.
 ## Result cache
 
 A run stores the result of each `killed` mutant and each `survived` mutant
-that a retry confirmed. The file is `<cache dir>/mutation/results.json`. A
+that a retry confirmed. A budgeted run keeps time for these retries (see the
+retry section), so a repeat run with the same `--time-budget` continues
+after the stored results. The file is `<cache dir>/mutation/results.json`. A
 later run uses a stored result when the key is equal, and does not run that
 mutant. The dry run always runs, because it gives the covering tests.
 

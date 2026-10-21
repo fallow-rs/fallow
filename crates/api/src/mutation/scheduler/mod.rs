@@ -20,6 +20,7 @@ use super::protocol::{
 };
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
+use reserve::PhaseDeadline;
 
 mod control;
 
@@ -896,11 +897,7 @@ impl<'a> Worker<'a> {
             Some(ControlVerdict::TimedOut(reason)) => return Ok(settled(reason.clone())),
             None => {}
         }
-        if self
-            .config
-            .deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
+        if reserve::expired(self.config.deadline) {
             return Ok(ControlCheck::NoTime);
         }
         let (outcome, ran) = self.control_run(tests, job, caps)?;
@@ -1446,7 +1443,7 @@ struct Phase<'a> {
     attempts: Mutex<Vec<(Job, Attempt)>>,
     fatal: Mutex<Option<ScheduleError>>,
     stop: AtomicBool,
-    deadline: Option<Instant>,
+    deadline: Option<PhaseDeadline>,
     caps: Capabilities,
     spawner: &'a dyn CompanionSpawner,
     config: &'a ScheduleConfig,
@@ -1488,14 +1485,13 @@ impl Phase<'_> {
             let Some(job) = self.jobs.lock().ok().and_then(|mut jobs| jobs.pop_front()) else {
                 break;
             };
-            if self
-                .deadline
-                .is_some_and(|deadline| Instant::now() >= deadline)
-            {
+            if self.deadline.as_ref().is_some_and(PhaseDeadline::passed) {
                 self.push(job, Attempt::decided(MutantStatus::Pending, None, None));
                 continue;
             }
-            match worker.run_with_retry(&job, self.caps) {
+            match PhaseDeadline::timed(self.deadline.as_ref(), || {
+                worker.run_with_retry(&job, self.caps)
+            }) {
                 Ok(attempt) => self.push(job, attempt),
                 Err(error) => {
                     self.stop.store(true, Ordering::SeqCst);
@@ -1534,7 +1530,7 @@ fn run_phase(
     runner: PhaseRunner<'_>,
     dry_files: &[String],
     jobs: Vec<Job>,
-    deadline: Option<Instant>,
+    deadline: Option<PhaseDeadline>,
     primary: Option<WarmLink>,
     event: fn(usize, usize) -> MutationProgress,
 ) -> Result<(Vec<(Job, Attempt)>, usize), ScheduleError> {
@@ -1878,7 +1874,7 @@ fn retry_suspects(
         runner,
         &retry_files,
         suspects,
-        runner.config.deadline,
+        runner.config.deadline.map(PhaseDeadline::retries),
         None,
         |done, total| MutationProgress::Retries { done, total },
     )?;
@@ -2014,10 +2010,7 @@ fn self_check(
     link: Box<dyn CompanionLink>,
     known: &FxHashSet<String>,
 ) -> Result<(Box<dyn CompanionLink>, Vec<String>), ScheduleError> {
-    let expired = runner
-        .config
-        .deadline
-        .is_some_and(|deadline| Instant::now() >= deadline);
+    let expired = reserve::expired(runner.config.deadline);
     let Some(job) = jobs.first().filter(|_| !expired) else {
         return Ok((link, Vec::new()));
     };
@@ -2217,7 +2210,7 @@ pub fn run_schedule_with_progress(
         runner,
         &dry_files,
         jobs,
-        config.deadline,
+        PhaseDeadline::first_pass(config, &outcome.timings),
         Some((link, known)),
         |done, total| MutationProgress::Mutants { done, total },
     )?;
@@ -2242,6 +2235,7 @@ pub fn run_schedule_with_progress(
     Ok(outcome)
 }
 
+mod reserve;
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 mod tests;
