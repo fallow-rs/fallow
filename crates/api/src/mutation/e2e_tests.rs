@@ -499,6 +499,75 @@ mod end_to_end {
         (project, root)
     }
 
+    /// A Vitest project where a test reads a value that an earlier test of
+    /// its file cached (issue #3670). The dry run attributes the hit of the
+    /// cache initializer only to the first test.
+    fn cached_value_project(package: &Path) -> (tempfile::TempDir, PathBuf) {
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        let files = [
+            (
+                "package.json",
+                r#"{"name":"cached-value","private":true,"type":"module"}"#,
+            ),
+            (
+                "vitest.config.mjs",
+                "export default { test: { include: [\"src/**/*.test.ts\"] } };\n",
+            ),
+            (
+                "src/catalog.ts",
+                "let cached: readonly string[] | undefined;\n\nexport const getCatalog = (): readonly string[] => {\n  if (cached) return cached;\n  cached = [\"North\"];\n  return cached;\n};\n",
+            ),
+            (
+                "src/catalog.test.ts",
+                "import { expect, it } from \"vitest\";\nimport { getCatalog } from \"./catalog\";\n\nit(\"lists one entry\", () => {\n  expect(getCatalog()).toHaveLength(1);\n});\n\nit(\"preserves the entry label\", () => {\n  expect(getCatalog()).toEqual([\"North\"]);\n});\n",
+            ),
+            (".gitignore", "node_modules\n"),
+        ];
+        for (file, contents) in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::write(&target, contents).expect("write");
+        }
+        fs::create_dir_all(root.join("node_modules")).expect("dir");
+        std::os::unix::fs::symlink(
+            package.join("node_modules/vitest"),
+            root.join("node_modules/vitest"),
+        )
+        .expect("symlink");
+        commit_all(&root);
+        (project, root)
+    }
+
+    #[test]
+    fn a_test_that_reads_a_cached_value_kills_the_mutant_of_its_initializer() {
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = cached_value_project(&package);
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/catalog.ts")]),
+        ))
+        .expect("the run completes");
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
+        let source = fs::read_to_string(root.join("src/catalog.ts")).expect("read");
+        let north = u32::try_from(source.find("\"North\"").expect("literal")).expect("offset");
+        let label = report
+            .mutants
+            .iter()
+            .find(|mutant| {
+                mutant.location.operator == "string-literal" && mutant.location.span.0 == north
+            })
+            .expect("the string-literal mutant of \"North\"");
+        assert_eq!(label.status, MutantStatus::Killed, "{label:#?}");
+        assert_eq!(
+            label.killed_by.as_deref(),
+            Some("src/catalog.test.ts::preserves the entry label"),
+            "{label:#?}"
+        );
+    }
+
     #[test]
     fn a_second_run_reuses_the_results_until_a_key_file_changes() {
         let Some(package) = companion_fixture() else {
@@ -623,8 +692,12 @@ mod end_to_end {
             positive
                 .iter()
                 .any(|mutant| mutant.status == MutantStatus::Survived
-                    && mutant.covering_tests
-                        == vec!["test/math.test.ts::positive without an assertion".to_owned()]),
+                    // The retry of a survivor runs each test of its file.
+                    && mutant.covering_tests.len() > 1
+                    && mutant
+                        .covering_tests
+                        .iter()
+                        .any(|test| test == "test/math.test.ts::positive without an assertion")),
             "a test with no assertion lets a mutant of isPositive survive: {positive:#?}"
         );
         let limit = report
@@ -718,8 +791,12 @@ mod end_to_end {
             positive
                 .iter()
                 .any(|mutant| mutant.status == MutantStatus::Survived
-                    && mutant.covering_tests
-                        == vec!["test/math.test.ts::positive without an assertion".to_owned()]),
+                    // The retry of a survivor runs each test of its file.
+                    && mutant.covering_tests.len() > 1
+                    && mutant
+                        .covering_tests
+                        .iter()
+                        .any(|test| test == "test/math.test.ts::positive without an assertion")),
             "a test with no assertion lets a mutant of isPositive survive: {positive:#?}"
         );
         let limit = report

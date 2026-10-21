@@ -21,6 +21,13 @@ use super::protocol::{
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
 
+mod control;
+
+use control::{
+    CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome, ControlVerdict, control_fault,
+    first_line, sorted_tests,
+};
+
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
 const WATCHDOG_GRACE_MS: u64 = 2000;
 /// The fixed part of `timeout_ms` (section 8, the Stryker default).
@@ -272,6 +279,16 @@ struct Job {
     test_files: Vec<String>,
     /// The result cache key. `None` without a cache.
     cache_key: Option<String>,
+    /// The tests and the timeout of the retry of a survivor, when the retry
+    /// runs more tests than the first run. A test can read a value that an
+    /// earlier test of its file cached, so the dry run attributes no hit to
+    /// it (issue #3670). `None` for a static mutant and for a run of whole
+    /// files.
+    confirmation: Option<(Vec<String>, u64)>,
+    /// The tests of the first run, for the retry of a survivor with a
+    /// confirmation set. A kill by a test outside this set is no
+    /// disagreement with the first run. Empty for each other job.
+    first_tests: Vec<String>,
 }
 
 impl Job {
@@ -298,6 +315,24 @@ impl Job {
         self.timeout_ms = self.timeout_ms.saturating_mul(2);
         self.setup_ms = self.setup_ms.saturating_mul(2);
         self
+    }
+
+    /// The job for the retry of a survivor: each test of the confirmation
+    /// set, when the job has one. The test files and the cache key stay the
+    /// same, because the set has only tests of the same files.
+    fn for_confirmation(mut self) -> Self {
+        if let Some((tests, timeout_ms)) = self.confirmation.take() {
+            self.first_tests = std::mem::replace(&mut self.tests, tests);
+            self.timeout_ms = timeout_ms;
+        }
+        self
+    }
+
+    /// True when `killed_by` is a test that the confirmation set added: the
+    /// first run did not execute it.
+    fn is_new_killer(&self, killed_by: Option<&String>) -> bool {
+        !self.first_tests.is_empty()
+            && killed_by.is_some_and(|test| !self.first_tests.contains(test))
     }
 }
 
@@ -492,180 +527,6 @@ fn attempt_record(attempt: &Attempt) -> MutantAttempt {
 /// so does a run path that executes no test at all.
 fn is_load_kill(result: &RunResult, status: MutantStatus, killed_by: Option<&String>) -> bool {
     status == MutantStatus::Killed && killed_by.is_none() && result.tests_executed == 0
-}
-
-/// Why a control run did not pass.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ControlFault {
-    /// The run executed no test: the run path is broken.
-    no_tests: bool,
-    /// The requested tests that ran and failed. A failed test is a baseline
-    /// failure of the run, not a fault of the run path.
-    failed_tests: Vec<String>,
-    detail: String,
-}
-
-impl ControlFault {
-    fn untrusted(detail: String) -> Self {
-        Self {
-            no_tests: false,
-            failed_tests: Vec::new(),
-            detail,
-        }
-    }
-}
-
-/// Checks the result of a control run of `tests` with no active mutant. Each
-/// requested test must run and pass, with no error.
-fn control_fault(tests: &[String], result: &RunResult) -> Option<ControlFault> {
-    let first_error = result
-        .unhandled_errors
-        .first()
-        .map(|error| format!("; first error: {}", first_line(&error.message)));
-    if result.tests_executed == 0 {
-        return Some(ControlFault {
-            no_tests: true,
-            failed_tests: Vec::new(),
-            detail: format!(
-                "0 of {} requested tests ran{}",
-                tests.len(),
-                first_error.unwrap_or_default()
-            ),
-        });
-    }
-    if let Some(id) = &result.mutant_id {
-        return Some(ControlFault::untrusted(format!(
-            "the run result names mutant `{id}`, expected none"
-        )));
-    }
-    let requested: FxHashSet<&str> = tests.iter().map(String::as_str).collect();
-    let failed_tests: Vec<String> = result
-        .tests
-        .iter()
-        .filter(|test| test.status == TestStatus::Fail && requested.contains(test.test_id.as_str()))
-        .map(|test| test.test_id.clone())
-        .collect();
-    if let Some(first) = failed_tests.first() {
-        return Some(ControlFault {
-            no_tests: false,
-            detail: format!("the test `{first}` failed"),
-            failed_tests,
-        });
-    }
-    if let Some(first_error) = first_error {
-        return Some(ControlFault::untrusted(format!(
-            "the run reported an error{first_error}"
-        )));
-    }
-    let passed: FxHashSet<&str> = result
-        .tests
-        .iter()
-        .filter(|test| test.status == TestStatus::Pass)
-        .map(|test| test.test_id.as_str())
-        .collect();
-    if result.status != RunStatus::Survived
-        || result.tests_executed != tests.len()
-        || tests.iter().any(|test| !passed.contains(test.as_str()))
-    {
-        return Some(ControlFault::untrusted(format!(
-            "{} of {} requested tests ran and passed",
-            passed.len(),
-            tests.len()
-        )));
-    }
-    None
-}
-
-/// The message of a test that fails in a control run. The dry run runs the
-/// whole test file, and a mutant run runs only the covering tests.
-const CONTROL_RUN_FAILURE: &str = "the test fails in a mutant run with no active mutant, but passed in the dry run of its whole file; it can depend on another test of its file";
-
-/// The first line of `message`.
-fn first_line(message: &str) -> &str {
-    message.lines().next().unwrap_or_default()
-}
-
-/// The result of a control run.
-enum ControlOutcome {
-    Passed,
-    Failed(ControlFault),
-    /// The companion did not give a run result.
-    Fault(String),
-    /// A test or the companion passed the timeout of the control run.
-    TimedOut(String),
-}
-
-/// `tests`, sorted.
-fn sorted_tests(tests: &[String]) -> Vec<&str> {
-    let mut sorted: Vec<&str> = tests.iter().map(String::as_str).collect();
-    sorted.sort_unstable();
-    sorted
-}
-
-/// The stored control result of one test set.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ControlVerdict {
-    /// The tests pass with no active mutant.
-    Passed,
-    /// A test failed with no active mutant.
-    Failed,
-    /// The control run timed out, with the reason. A later control run of
-    /// the same tests would wait as long again.
-    TimedOut(String),
-}
-
-/// The control result of one test set: `None` before a control run gave a
-/// result.
-type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
-
-/// The control result of each test set within one run. A mutant kill with
-/// no executed test needs a control run of its tests, and each test set gets
-/// at most one. A timeout is stored, so a hanging test set costs one control
-/// run. A fault of the companion is not stored, so a later mutant with the
-/// same tests runs the control again. The memo also keeps the tests
-/// that failed in a control run: each later mutant run leaves them out.
-#[derive(Default)]
-struct ControlMemo {
-    entries: Mutex<FxHashMap<Vec<String>, ControlCell>>,
-    failed_tests: Mutex<BTreeSet<String>>,
-}
-
-impl ControlMemo {
-    /// The cell of `tests`. A thread that holds the lock of the cell runs
-    /// the control, and each other thread with the same tests waits for it.
-    fn cell(&self, tests: &[String]) -> ControlCell {
-        let mut key = tests.to_vec();
-        key.sort_unstable();
-        let Ok(mut entries) = self.entries.lock() else {
-            return Arc::new(Mutex::new(None));
-        };
-        Arc::clone(entries.entry(key).or_default())
-    }
-
-    fn store(&self, tests: &[String], verdict: ControlVerdict) {
-        if let Ok(mut cell) = self.cell(tests).lock() {
-            *cell = Some(verdict);
-        }
-    }
-
-    fn mark_failed(&self, tests: &[String]) {
-        if let Ok(mut failed) = self.failed_tests.lock() {
-            failed.extend(tests.iter().cloned());
-        }
-    }
-
-    fn is_failed(&self, test: &str) -> bool {
-        self.failed_tests
-            .lock()
-            .is_ok_and(|failed| failed.contains(test))
-    }
-
-    fn failed(&self) -> BTreeSet<String> {
-        self.failed_tests
-            .lock()
-            .map(|failed| failed.clone())
-            .unwrap_or_default()
-    }
 }
 
 #[expect(
@@ -887,6 +748,9 @@ impl<'a> Worker<'a> {
         if load_kill {
             return self.confirm_load_kill(job, &tests, caps, attempt);
         }
+        if attempt.status == MutantStatus::Killed && job.is_new_killer(attempt.killed_by.as_ref()) {
+            return self.confirm_new_killer(job, &tests, caps, attempt);
+        }
         Ok(attempt)
     }
 
@@ -922,13 +786,8 @@ impl<'a> Worker<'a> {
             dropped.dedup();
             return Ok(Attempt::uncovered(dropped));
         }
-        let memo = self.memo;
-        let cell = memo.cell(&tests);
-        let Ok(mut known) = cell.lock() else {
-            return Ok(attempt);
-        };
         let dropped_tests = attempt.dropped_tests.clone();
-        let failed = |detail: &str| {
+        let failed = |detail: &str, settled: bool| {
             let mut failed = Attempt::runtime_error(
                 job,
                 format!(
@@ -937,15 +796,104 @@ impl<'a> Worker<'a> {
                 None,
             );
             failed.dropped_tests.clone_from(&dropped_tests);
-            failed.settled = true;
+            failed.settled = settled;
             failed
         };
-        match &*known {
-            Some(ControlVerdict::Passed) => return Ok(attempt),
-            Some(ControlVerdict::Failed) => {
-                return Ok(failed("an earlier control run of these tests failed"));
+        Ok(match self.check_control(&tests, job, caps)? {
+            ControlCheck::Passed => attempt,
+            ControlCheck::Failed { detail, settled } => failed(&detail, settled),
+            ControlCheck::NoTime => Attempt::decided(MutantStatus::Pending, None, None),
+        })
+    }
+
+    /// Keeps the kill of a survivor retry by a test that the first run did
+    /// not execute only when the retry tests pass in a control run with no
+    /// active mutant. A test can fail in a run of part of its file because
+    /// it depends on the order of the tests. When the control run does not
+    /// pass, the first run decides: the mutant stays `survived`, and the
+    /// tests that failed in the control run are baseline failures.
+    fn confirm_new_killer(
+        &mut self,
+        job: &Job,
+        tests: &[String],
+        caps: Capabilities,
+        attempt: Attempt,
+    ) -> Result<Attempt, ScheduleError> {
+        let survived = |worker: &Self, attempt: Attempt| {
+            let mut survived = Attempt::decided(MutantStatus::Survived, None, attempt.duration_ms);
+            survived.dropped_tests = attempt.dropped_tests;
+            survived.dropped_tests.extend(
+                job.tests
+                    .iter()
+                    .filter(|test| worker.memo.is_failed(test))
+                    .cloned(),
+            );
+            survived.dropped_tests.sort();
+            survived.dropped_tests.dedup();
+            survived.settled = true;
+            survived
+        };
+        // Another worker can mark the killer as failed after this mutant
+        // ran. A test that fails with no active mutant decides nothing.
+        if attempt
+            .killed_by
+            .as_ref()
+            .is_some_and(|killer| self.memo.is_failed(killer))
+        {
+            return Ok(survived(self, attempt));
+        }
+        let tests: Vec<String> = tests
+            .iter()
+            .filter(|test| !self.memo.is_failed(test))
+            .cloned()
+            .collect();
+        Ok(match self.check_control(&tests, job, caps)? {
+            ControlCheck::Passed => attempt,
+            ControlCheck::Failed { settled: true, .. } => survived(self, attempt),
+            ControlCheck::Failed {
+                detail,
+                settled: false,
+            } => {
+                let mut fault = Attempt::runtime_error(
+                    job,
+                    format!(
+                        "the run killed the mutant with a test that the first run did not execute, and the control run of the same tests gave no result: {detail}"
+                    ),
+                    None,
+                );
+                fault.dropped_tests = attempt.dropped_tests;
+                fault
             }
-            Some(ControlVerdict::TimedOut(reason)) => return Ok(failed(reason)),
+            ControlCheck::NoTime => Attempt::decided(MutantStatus::Pending, None, None),
+        })
+    }
+
+    /// The control evidence about `tests`. The memo gives each test set at
+    /// most one control run. After the time budget, a test set with no
+    /// stored result gives [`ControlCheck::NoTime`].
+    fn check_control(
+        &mut self,
+        tests: &[String],
+        job: &Job,
+        caps: Capabilities,
+    ) -> Result<ControlCheck, ScheduleError> {
+        let memo = self.memo;
+        let cell = memo.cell(tests);
+        let Ok(mut known) = cell.lock() else {
+            return Ok(ControlCheck::Passed);
+        };
+        let settled = |detail: String| ControlCheck::Failed {
+            detail,
+            settled: true,
+        };
+        match &*known {
+            Some(ControlVerdict::Passed) => return Ok(ControlCheck::Passed),
+            Some(ControlVerdict::Failed) => {
+                return Ok(settled(
+                    "an earlier control run of these tests failed".to_owned(),
+                ));
+            }
+            Some(ControlVerdict::TimedOut(reason)) => return Ok(settled(reason.clone())),
             None => {}
         }
         if self
@@ -953,41 +901,41 @@ impl<'a> Worker<'a> {
             .deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
-            return Ok(Attempt::decided(MutantStatus::Pending, None, None));
+            return Ok(ControlCheck::NoTime);
         }
-        let (outcome, ran) = self.control_run(&tests, job, caps)?;
+        let (outcome, ran) = self.control_run(tests, job, caps)?;
         // The result belongs to the set that ran. When the control run left
         // out a test that another worker marked meanwhile, the cell of this
         // set stays open.
         let mut remember = |verdict: ControlVerdict| {
-            if sorted_tests(&ran) == sorted_tests(&tests) {
+            if sorted_tests(&ran) == sorted_tests(tests) {
                 *known = Some(verdict);
             } else if !ran.is_empty() {
                 memo.store(&ran, verdict);
             }
         };
-        match outcome {
+        Ok(match outcome {
             ControlOutcome::Passed => {
                 remember(ControlVerdict::Passed);
-                Ok(attempt)
+                ControlCheck::Passed
             }
             ControlOutcome::Failed(fault) => {
                 remember(ControlVerdict::Failed);
-                Ok(failed(&fault.detail))
+                settled(fault.detail)
             }
             // A timeout is stored and settles the mutant: a retry or a later
             // mutant with the same tests would wait as long again.
             ControlOutcome::TimedOut(detail) => {
                 let reason = format!("the control run timed out ({detail})");
                 remember(ControlVerdict::TimedOut(reason.clone()));
-                Ok(failed(&reason))
+                settled(reason)
             }
             // A fault of the companion decides nothing, so the retry stays.
-            ControlOutcome::Fault(message) => Ok(Attempt {
+            ControlOutcome::Fault(message) => ControlCheck::Failed {
+                detail: message,
                 settled: false,
-                ..failed(&message)
-            }),
-        }
+            },
+        })
     }
 
     /// Runs `tests` with no active mutant through the run path of a mutant
@@ -1136,10 +1084,10 @@ struct DryRunFacts {
 
 impl DryRunFacts {
     /// The setup time of the distinct test files of `tests`.
-    fn setup_of(&self, tests: &[(f64, String)]) -> f64 {
+    fn setup_of(&self, tests: &[String]) -> f64 {
         let files: BTreeSet<&str> = tests
             .iter()
-            .filter_map(|(_, test)| self.passing.get(test).map(|(file, _)| file.as_str()))
+            .filter_map(|test| self.passing.get(test).map(|(file, _)| file.as_str()))
             .collect();
         files
             .into_iter()
@@ -1293,6 +1241,34 @@ fn whole_files(facts: &DryRunFacts, tests: &BTreeSet<String>) -> BTreeSet<String
         .collect()
 }
 
+/// `tests` in measured fastest-first order, with their total dry-run
+/// duration.
+fn fastest_first(facts: &DryRunFacts, tests: BTreeSet<String>) -> (Vec<String>, f64) {
+    let mut timed: Vec<(f64, String)> = tests
+        .into_iter()
+        .map(|test| (facts.passing.get(&test).map_or(0.0, |entry| entry.1), test))
+        .collect();
+    timed.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    let total = timed.iter().map(|(duration, _)| duration).sum();
+    (timed.into_iter().map(|(_, test)| test).collect(), total)
+}
+
+/// The tests and the timeout of the retry of a survivor: each passing test
+/// of the files of `tests`. A test can read a value that an earlier test of
+/// its file cached, so the dry run attributes no hit to it (issue #3670).
+/// `None` when the files have no other test.
+fn confirmation_tests(facts: &DryRunFacts, tests: &BTreeSet<String>) -> Option<(Vec<String>, u64)> {
+    let widened = whole_files(facts, tests);
+    (widened.len() > tests.len()).then(|| {
+        let (widened, total) = fastest_first(facts, widened);
+        (widened, timeout_ms(total))
+    })
+}
+
 /// The facts of the first companion that the jobs read.
 struct JobContext<'a> {
     dry_files: &'a [String],
@@ -1314,16 +1290,27 @@ fn static_map_miss_issue(mutant: &ScheduledMutant) -> ScheduleIssue {
     }
 }
 
-/// The stored result of `mutant` under `key`, with its covering `tests`.
+/// The stored result of `mutant` under `key`, with its covering `tests`. A
+/// survivor and a kill by a test of the confirmation set list the tests of
+/// their retry, the same as a fresh result.
 fn cached_outcome(
     cache: Option<&dyn ResultLookup>,
     key: Option<&String>,
     mutant: &ScheduledMutant,
-    tests: &[String],
+    (tests, confirmation): (&[String], Option<&[String]>),
     static_mutant: bool,
 ) -> Option<MutantOutcome> {
     let hit = cache?.get(&mutant.id, key?)?;
-    let mut covering_tests = tests.to_vec();
+    let retry_decided = hit.status == MutantStatus::Survived
+        || hit
+            .killed_by
+            .as_ref()
+            .is_some_and(|test| !tests.contains(test));
+    let listed = match confirmation {
+        Some(confirmation) if retry_decided => confirmation,
+        _ => tests,
+    };
+    let mut covering_tests = listed.to_vec();
     covering_tests.sort_unstable();
     Some(MutantOutcome {
         status: hit.status,
@@ -1420,18 +1407,11 @@ fn build_jobs(
         if map_miss {
             outcome.issues.push(static_map_miss_issue(mutant));
         }
-        let mut tests: Vec<(f64, String)> = tests
-            .into_iter()
-            .map(|test| (facts.passing.get(&test).map_or(0.0, |entry| entry.1), test))
-            .collect();
-        tests.sort_by(|left, right| {
-            left.0
-                .total_cmp(&right.0)
-                .then_with(|| left.1.cmp(&right.1))
-        });
-        let total: f64 = tests.iter().map(|(duration, _)| duration).sum();
+        let confirmation = (!static_mutant && caps.test_filter)
+            .then(|| confirmation_tests(facts, &tests))
+            .flatten();
+        let (tests, total) = fastest_first(facts, tests);
         let setup_ms = scaled_ms(facts.setup_of(&tests));
-        let tests: Vec<String> = tests.into_iter().map(|(_, test)| test).collect();
         let mut test_files: Vec<String> = tests
             .iter()
             .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
@@ -1439,8 +1419,12 @@ fn build_jobs(
         test_files.sort_unstable();
         test_files.dedup();
         let cache_key = cache.map(|cache| cache.key(ready, mutant, &tests, &test_files));
+        let listed = (
+            tests.as_slice(),
+            confirmation.as_ref().map(|(tests, _)| tests.as_slice()),
+        );
         if let Some(cached) =
-            cached_outcome(cache, cache_key.as_ref(), mutant, &tests, static_mutant)
+            cached_outcome(cache, cache_key.as_ref(), mutant, listed, static_mutant)
         {
             outcome.results.insert(mutant.id.clone(), cached);
             continue;
@@ -1453,6 +1437,8 @@ fn build_jobs(
             static_mutant,
             test_files,
             cache_key,
+            confirmation,
+            first_tests: Vec::new(),
         };
         if static_mutant {
             statics.push(job);
@@ -1862,7 +1848,7 @@ fn record_first_runs(
     let mut first_runs = FxHashMap::default();
     for (job, attempt) in attempts {
         let suspect = match attempt.status {
-            MutantStatus::Survived => Some(job.clone()),
+            MutantStatus::Survived => Some(job.clone().for_confirmation()),
             MutantStatus::Timeout => Some(job.clone().with_doubled_timeout()),
             _ => None,
         };
@@ -1910,7 +1896,17 @@ fn retry_suspects(
         }
         let first = outcome.results.get(&job.id);
         let first_status = first.map_or(MutantStatus::Survived, |first| first.status);
-        let status = retried_status(first_status, attempt.status);
+        // A kill by a test that the first run did not execute is no
+        // disagreement with the first run. The worker already confirmed it
+        // with a control run.
+        let status = if first_status == MutantStatus::Survived
+            && attempt.status == MutantStatus::Killed
+            && job.is_new_killer(attempt.killed_by.as_ref())
+        {
+            MutantStatus::Killed
+        } else {
+            retried_status(first_status, attempt.status)
+        };
         // A kill reports the run that killed the mutant. Each other status
         // keeps the first run, so a retry never shortens a timeout.
         let duration_ms = if status == MutantStatus::Killed {

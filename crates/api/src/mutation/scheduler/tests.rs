@@ -2356,6 +2356,8 @@ fn load_kill_job() -> Job {
         static_mutant: false,
         test_files: vec!["test/a.test.ts".to_owned()],
         cache_key: None,
+        confirmation: None,
+        first_tests: Vec::new(),
     }
 }
 
@@ -2594,4 +2596,111 @@ fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
     let runs = spawner.runs();
     assert_eq!(runs[2].0, 2);
     assert_eq!(runs[2].1.test_ids, vec!["test/b.test.ts::t2".to_owned()]);
+}
+
+/// m1 survives its first run with t1. The retry kills it only when it also
+/// runs t2, a test of the same file that the dry run did not attribute to m1
+/// (issue #3670: t2 reads a value that t1 cached).
+fn cached_value_run(index: usize, run: &RunRequest) -> Response {
+    if index > 0 && run.test_ids.contains(&tid("t2")) {
+        run_result(run, RunStatus::Killed, Some(&tid("t2")))
+    } else {
+        run_result(run, RunStatus::Survived, None)
+    }
+}
+
+#[test]
+fn a_survivor_retry_runs_each_test_of_its_files_and_a_kill_by_a_new_test_is_killed() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| Ok(cached_value_run(index, run)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    let result = &outcome.results["m1"];
+    assert_eq!(result.status, MutantStatus::Killed);
+    assert_eq!(result.killed_by, Some(tid("t2")));
+    assert!(result.retried);
+    assert_eq!(result.covering_tests, vec![tid("t1"), tid("t2")]);
+    let runs = spawner.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(
+        runs[0].1.test_ids,
+        vec![tid("t1")],
+        "the first run stays narrow"
+    );
+    assert_eq!(runs[1].1.test_ids, vec![tid("t1"), tid("t2")]);
+    let controls = spawner.controls();
+    assert_eq!(
+        controls.last().map(|(_, run)| run.test_ids.clone()),
+        Some(vec![tid("t1"), tid("t2")]),
+        "a kill by a new test needs a control run of the retry tests"
+    );
+}
+
+#[test]
+fn a_kill_by_a_new_test_that_fails_its_control_run_stays_survived() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| Ok(cached_value_run(index, run)),
+    ))
+    .with_control(|_, run| Ok(only_t1_passes_in_control(run)));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
+    assert!(
+        outcome
+            .baseline_failures
+            .iter()
+            .any(|failure| failure.test_id.as_deref() == Some(tid("t2").as_str())),
+        "the test that fails without a mutant is a baseline failure"
+    );
+}
+
+#[test]
+fn a_static_survivor_retry_keeps_its_tests() {
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            static_hits: vec!["m1".to_owned()],
+            hits: BTreeMap::new(),
+            ..standard_dry()
+        },
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
+    let runs = spawner.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].1.test_ids, runs[1].1.test_ids);
+}
+
+/// A cache that holds a kill of `m1` by t2, a test of the confirmation set.
+#[derive(Debug)]
+struct CachedNewKiller;
+
+impl ResultLookup for CachedNewKiller {
+    fn key(&self, _: &Ready, mutant: &ScheduledMutant, _: &[String], _: &[String]) -> String {
+        format!("key-{}", mutant.id)
+    }
+
+    fn get(&self, mutant_id: &str, _: &str) -> Option<CachedResult> {
+        (mutant_id == "m1").then(|| CachedResult {
+            status: MutantStatus::Killed,
+            killed_by: Some(tid("t2")),
+            duration_ms: Some(3),
+        })
+    }
+}
+
+#[test]
+fn a_cached_kill_by_a_confirmation_test_lists_the_tests_of_its_retry() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| Ok(cached_value_run(index, run)),
+    ));
+    let mut config = config(1);
+    config.cache = Some(Arc::new(CachedNewKiller) as Arc<dyn ResultLookup>);
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
+    let m1 = &outcome.results["m1"];
+    assert!(m1.cached);
+    assert_eq!(m1.killed_by, Some(tid("t2")));
+    assert_eq!(m1.covering_tests, vec![tid("t1"), tid("t2")]);
 }

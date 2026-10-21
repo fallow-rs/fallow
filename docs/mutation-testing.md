@@ -411,13 +411,32 @@ tests detect the mutant.
 | `survived` | `timeout` | `survived` |
 | `timeout` | `timeout` | `timeout` |
 | `timeout` | `killed` | `killed` |
+| `survived` | `killed` by a test that the first run did not execute | `killed` |
 | any | `runtime_error` | `runtime_error` |
 | any | other result | `flaky` |
 
 - A `survived` result with a `timeout` retry stays `survived`. The first
   run finished all tests with the mutant active. Host load alone can make
   the retry time out, so the timeout is no proof that the tests detect the
-  mutant. A `killed` retry of a survivor gives `flaky`.
+  mutant. A `killed` retry of a survivor gives `flaky` when a test of the
+  first run kills it.
+- The retry of a survivor runs each passing test of the files of its
+  covering tests, not only the covering tests (issue #3670). The per-test
+  hits of the dry run name only the tests that execute the mutated code. A
+  test can read a value that an earlier test of its file computed and
+  cached, so the dry run gives that test no hit. The first run stays
+  narrow, because most mutants are killed. A static mutant and a runner
+  without `test_filter` already run whole files, so their retry runs the
+  same tests.
+- A kill in the retry by a test that the first run did not execute is no
+  disagreement with the first run, so the status is `killed`. A test can
+  fail in a run of part of its file because it depends on the order of the
+  tests. Thus the scheduler keeps this kill only when the retry tests pass
+  in a control run with no active mutant (one control run for each test
+  set, the same memo as for a kill with no executed test). When the control
+  run fails, the first run decides: the mutant stays `survived`, and the
+  failed tests are baseline failures.
+- `covering_tests` of a retried survivor lists the tests of the retry.
 - The retry of a `timeout` waits twice as long. Host load often lasts into
   the retry, and a real infinite loop still times out.
 - A `killed` result gets no retry. In repeated runs under host load, no
@@ -857,7 +876,9 @@ The key hashes these parts:
 - the key format and the Fallow version;
 - the runner name, the runner version and the runtime version;
 - the mutant id, and the content of the mutated source file;
-- the covering test ids;
+- the covering test ids of the first run. The retry of a survivor adds
+  only tests of the same files, so the file digests below also cover the
+  tests of the retry;
 - the content of the covering test files, and of the files that they reach
   through static imports in the module graph (`MutationPlan::test_file_reach`).
   The run computes one digest for each test file and its reach, and each
