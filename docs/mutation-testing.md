@@ -456,8 +456,8 @@ tests detect the mutant.
 - With `--time-budget`, the first pass keeps time free for the retries of
   the survivors and timeouts that it found. Before each new mutant run, it
   adds these parts to the current time: the estimated retry time of each
-  suspect (the measured run time, twice for a timeout, divided by
-  `--concurrency` or by the suspect count when that count is smaller), the
+  suspect (the measured run time, divided by `--concurrency` or by the
+  suspect count when that count is smaller), the
   setup and dry-run time of the retry companions, and
   twice the mean run time. When the sum reaches the deadline, the next
   mutants stay `pending`. Thus a budgeted run confirms its survivors, the
@@ -466,6 +466,12 @@ tests detect the mutant.
   repeat run does it again. The reserve uses measured run times, so the
   first run of each worker starts without a reserve. A budget that is
   shorter than one wave of runs can still end before any retry.
+  For a survivor, the measured run time is scaled to its retry: the
+  dry-run time of each test of its files over the dry-run time of its
+  covering tests. A timeout reserves twice its run time. The control run
+  that confirms a kill by a new test is not in the reserve. When no time
+  is left for it, the retry gets no result and the mutant keeps its first
+  status.
 - A run that started before the deadline continues until its watchdog
   fires, so the command can end after the deadline. For a mutant run, the
   overrun is at most `timeout_ms` plus the setup time plus 2 seconds. For

@@ -9,5 +9,6 @@
   when the same tests pass in a control run with no active mutant. The first
   run of each mutant stays narrow. `covering_tests` still lists the tests
   that reached the mutant in the dry run, so `killed_by` can name a test
-  that is not in that list.
+  that is not in that list. With `--time-budget`, the time that the first
+  pass keeps free for a survivor retry grows with the tests of its files.
   (Closes [#3670](https://github.com/fallow-rs/fallow/issues/3670))

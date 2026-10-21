@@ -44,15 +44,17 @@ impl PhaseDeadline {
     }
 
     /// Runs one job and adds its wall time and status to the reserve, when
-    /// the phase has one.
+    /// the phase has one. `retry_weight` scales the retry of a survivor: its
+    /// retry can run more tests than the first run.
     pub(super) fn timed<E>(
         deadline: Option<&Self>,
+        retry_weight: f64,
         run: impl FnOnce() -> Result<Attempt, E>,
     ) -> Result<Attempt, E> {
         let started = Instant::now();
         let attempt = run()?;
         if let Some(reserve) = deadline.and_then(|deadline| deadline.reserve.as_ref()) {
-            reserve.note(attempt.status, started.elapsed());
+            reserve.note(attempt.status, started.elapsed(), retry_weight);
         }
         Ok(attempt)
     }
@@ -91,15 +93,15 @@ impl ConfirmationReserve {
         }
     }
 
-    /// Adds a finished first-pass job. A survivor reserves its run time for
-    /// its retry. A timeout reserves twice that time, because its retry gets
-    /// a doubled timeout.
-    fn note(&self, status: MutantStatus, wall: Duration) {
+    /// Adds a finished first-pass job. A survivor reserves its run time,
+    /// scaled by `retry_weight`, for its retry. A timeout reserves twice its
+    /// run time, because its retry gets a doubled timeout.
+    fn note(&self, status: MutantStatus, wall: Duration, retry_weight: f64) {
         let wall_ms = duration_ms(wall);
         self.run_ms.fetch_add(wall_ms, Ordering::SeqCst);
         self.runs.fetch_add(1, Ordering::SeqCst);
         let retry_ms = match status {
-            MutantStatus::Survived => wall_ms,
+            MutantStatus::Survived => scaled(wall_ms, retry_weight),
             MutantStatus::Timeout => wall_ms.saturating_mul(2),
             _ => return,
         };
@@ -131,6 +133,27 @@ impl ConfirmationReserve {
     }
 }
 
+/// `ms * weight`, rounded up. A weight below 1 or not finite counts as 1.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "a reserve estimate in milliseconds; the value is clamped first"
+)]
+fn scaled(ms: u64, weight: f64) -> u64 {
+    let weight = if weight.is_finite() {
+        weight.max(1.0)
+    } else {
+        1.0
+    };
+    let value = (ms as f64 * weight).ceil();
+    if value >= u64::MAX as f64 {
+        u64::MAX
+    } else {
+        value as u64
+    }
+}
+
 fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -148,26 +171,34 @@ mod tests {
     #[test]
     fn a_killed_mutant_reserves_only_the_mean_run_time() {
         let reserve = ConfirmationReserve::new(Duration::from_millis(500), 4);
-        reserve.note(MutantStatus::Killed, Duration::from_millis(100));
+        reserve.note(MutantStatus::Killed, Duration::from_millis(100), 1.0);
         assert_eq!(reserve.needed(), Duration::from_millis(200));
     }
 
     #[test]
     fn a_suspect_reserves_its_retry_and_the_companion_start() {
         let reserve = ConfirmationReserve::new(Duration::from_millis(500), 1);
-        reserve.note(MutantStatus::Survived, Duration::from_millis(100));
-        reserve.note(MutantStatus::Timeout, Duration::from_millis(100));
+        reserve.note(MutantStatus::Survived, Duration::from_millis(100), 1.0);
+        reserve.note(MutantStatus::Timeout, Duration::from_millis(100), 1.0);
         // 500 start + (100 + 2 * 100) retries + 2 * 100 mean.
         assert_eq!(reserve.needed(), Duration::from_millis(1000));
     }
 
     #[test]
+    fn a_survivor_reserves_its_retry_scaled_to_the_whole_file_tests() {
+        let reserve = ConfirmationReserve::new(Duration::ZERO, 1);
+        reserve.note(MutantStatus::Survived, Duration::from_millis(100), 10.0);
+        // 10 * 100 whole-file retry + 2 * 100 mean.
+        assert_eq!(reserve.needed(), Duration::from_millis(1200));
+    }
+
+    #[test]
     fn the_retries_share_no_more_workers_than_suspects() {
         let reserve = ConfirmationReserve::new(Duration::ZERO, 4);
-        reserve.note(MutantStatus::Survived, Duration::from_millis(400));
+        reserve.note(MutantStatus::Survived, Duration::from_millis(400), 1.0);
         // One suspect has one retry worker: 400 retry + 2 * 400 mean.
         assert_eq!(reserve.needed(), Duration::from_millis(1200));
-        reserve.note(MutantStatus::Survived, Duration::from_millis(400));
+        reserve.note(MutantStatus::Survived, Duration::from_millis(400), 1.0);
         // Two suspects share two workers: 400 retries + 2 * 400 mean.
         assert_eq!(reserve.needed(), Duration::from_millis(1200));
     }

@@ -21,8 +21,10 @@ use super::protocol::{
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
 use reserve::PhaseDeadline;
+use retry_set::{confirmation_tests, fastest_first, retry_weight, whole_files};
 
 mod control;
+mod retry_set;
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
@@ -290,6 +292,10 @@ struct Job {
     /// confirmation set. A kill by a test outside this set is no
     /// disagreement with the first run. Empty for each other job.
     first_tests: Vec<String>,
+    /// The dry-run time of the retry tests of a survivor over the time of
+    /// `tests`, at least 1. The time reserve of a budgeted first pass uses
+    /// it (issue #3665).
+    retry_weight: f64,
 }
 
 impl Job {
@@ -1228,49 +1234,6 @@ fn covering_tests(
     tests
 }
 
-/// Widens `tests` to each passing test of their files. Without
-/// `test_filter` the runner runs whole test files (`protocol.md` section 5).
-fn whole_files(facts: &DryRunFacts, tests: &BTreeSet<String>) -> BTreeSet<String> {
-    let files: FxHashSet<&String> = tests
-        .iter()
-        .filter_map(|test| facts.passing.get(test).map(|(file, _)| file))
-        .collect();
-    facts
-        .passing
-        .iter()
-        .filter(|(_, (file, _))| files.contains(file))
-        .map(|(test, _)| test.clone())
-        .collect()
-}
-
-/// `tests` in measured fastest-first order, with their total dry-run
-/// duration.
-fn fastest_first(facts: &DryRunFacts, tests: BTreeSet<String>) -> (Vec<String>, f64) {
-    let mut timed: Vec<(f64, String)> = tests
-        .into_iter()
-        .map(|test| (facts.passing.get(&test).map_or(0.0, |entry| entry.1), test))
-        .collect();
-    timed.sort_by(|left, right| {
-        left.0
-            .total_cmp(&right.0)
-            .then_with(|| left.1.cmp(&right.1))
-    });
-    let total = timed.iter().map(|(duration, _)| duration).sum();
-    (timed.into_iter().map(|(_, test)| test).collect(), total)
-}
-
-/// The tests and the timeout of the retry of a survivor: each passing test
-/// of the files of `tests`. A test can read a value that an earlier test of
-/// its file cached, so the dry run attributes no hit to it (issue #3670).
-/// `None` when the files have no other test.
-fn confirmation_tests(facts: &DryRunFacts, tests: &BTreeSet<String>) -> Option<(Vec<String>, u64)> {
-    let widened = whole_files(facts, tests);
-    (widened.len() > tests.len()).then(|| {
-        let (widened, total) = fastest_first(facts, widened);
-        (widened, timeout_ms(total))
-    })
-}
-
 /// The facts of the first companion that the jobs read.
 struct JobContext<'a> {
     dry_files: &'a [String],
@@ -1402,6 +1365,10 @@ fn build_jobs(
             .then(|| confirmation_tests(facts, &tests))
             .flatten();
         let (tests, total) = fastest_first(facts, tests);
+        let retry_weight = confirmation
+            .as_ref()
+            .map_or(1.0, |(_, retry_total)| retry_weight(*retry_total, total));
+        let confirmation = confirmation.map(|(set, _)| set);
         let setup_ms = scaled_ms(facts.setup_of(&tests));
         let mut test_files: Vec<String> = tests
             .iter()
@@ -1426,6 +1393,7 @@ fn build_jobs(
             cache_key,
             confirmation,
             first_tests: Vec::new(),
+            retry_weight,
         };
         if static_mutant {
             statics.push(job);
@@ -1489,7 +1457,7 @@ impl Phase<'_> {
                 self.push(job, Attempt::decided(MutantStatus::Pending, None, None));
                 continue;
             }
-            match PhaseDeadline::timed(self.deadline.as_ref(), || {
+            match PhaseDeadline::timed(self.deadline.as_ref(), job.retry_weight, || {
                 worker.run_with_retry(&job, self.caps)
             }) {
                 Ok(attempt) => self.push(job, attempt),
