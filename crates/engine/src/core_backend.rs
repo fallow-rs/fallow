@@ -210,6 +210,7 @@ pub fn peer_dependency_hosts(
     workspace_roots: &[&Path],
     ignore_patterns: &fallow_config::IgnorePatternSet,
     package_name: &str,
+    extra_seeds: &fallow_types::trace::PeerClosureSeeds,
 ) -> Vec<String> {
     fallow_core::analyze::peer_dependency_hosts(
         graph,
@@ -217,6 +218,7 @@ pub fn peer_dependency_hosts(
         workspace_roots,
         ignore_patterns,
         package_name,
+        extra_seeds,
     )
 }
 

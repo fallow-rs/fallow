@@ -1,0 +1,15 @@
+{
+  "name": "peer-of-plugin-referenced-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "eslint-plugin-host": "^1.0.0",
+    "host-peer": "^1.0.0"
+  }
+}

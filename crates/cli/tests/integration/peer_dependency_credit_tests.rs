@@ -309,3 +309,60 @@ fn script_runtime_hosts_protect_their_production_peers() {
         ]
     );
 }
+
+fn unused_dev_dependencies(fixture: &str) -> Vec<String> {
+    let output = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &["--format", "json", "--quiet", "--no-cache"],
+    ));
+    let mut unused: Vec<String> = output["unused_dev_dependencies"]
+        .as_array()
+        .expect("unused_dev_dependencies array")
+        .iter()
+        .map(|dep| {
+            dep["package_name"]
+                .as_str()
+                .expect("package_name")
+                .to_string()
+        })
+        .collect();
+    unused.sort_unstable();
+    unused
+}
+
+/// Only a package.json script runs `host-cli`, so no file imports it. Its
+/// required peer `req-peer` and its listed optional peer `peer-runtime` get
+/// credit. Its unlisted optional peer `unlisted-opt` is not turned on, so
+/// `deep-peer`, the peer of `unlisted-opt`, stays reported.
+#[test]
+fn a_peer_of_a_script_used_package_is_not_reported() {
+    assert_eq!(
+        unused_dev_dependencies("peer-of-script-used-host"),
+        vec!["deep-peer"]
+    );
+}
+
+#[test]
+fn the_trace_names_the_script_used_host() {
+    let credited = trace_in("peer-of-script-used-host", "req-peer");
+    assert_eq!(credited["is_used"], true, "{credited:#}");
+    assert_eq!(credited["peer_of"], json!(["host-cli"]), "{credited:#}");
+
+    let uncredited = trace_in("peer-of-script-used-host", "deep-peer");
+    assert_eq!(uncredited["is_used"], false, "{uncredited:#}");
+    assert!(uncredited.get("peer_of").is_none(), "{uncredited:#}");
+}
+
+/// `.eslintrc.json` names the plugin `host`, so the ESLint plugin credits
+/// `eslint-plugin-host`. No file imports it. Its required peer `host-peer`
+/// gets credit, and the trace names the plugin package.
+#[test]
+fn a_peer_of_a_plugin_referenced_package_is_not_reported() {
+    let fixture = "peer-of-plugin-referenced-host";
+    assert!(unused_dev_dependencies(fixture).is_empty());
+    assert_eq!(
+        trace_in(fixture, "host-peer")["peer_of"],
+        json!(["eslint-plugin-host"])
+    );
+}

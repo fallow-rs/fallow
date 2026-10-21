@@ -1,0 +1,16 @@
+{
+  "name": "peer-of-script-used-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "hostcli build"
+  },
+  "devDependencies": {
+    "deep-peer": "^1.0.0",
+    "host-cli": "^1.0.0",
+    "peer-runtime": "^1.0.0",
+    "req-peer": "^1.0.0"
+  }
+}

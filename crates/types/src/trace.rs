@@ -284,6 +284,50 @@ pub struct TraceProvenance {
     /// Root-relative file path, export name, and the plugin rule that marks
     /// the export as used.
     export_credits: FxHashMap<PathBuf, FxHashMap<String, Vec<PluginExportCredit>>>,
+    /// The packages that start the peer-dependency closure in addition to the
+    /// imported packages.
+    peer_seeds: PeerClosureSeeds,
+}
+
+/// The packages that start a peer-dependency closure although no file
+/// imports them: packages that a script runs and packages that a plugin
+/// credits.
+///
+/// The unused-dependency check and the dependency trace read the same seeds,
+/// so the trace names the same hosts that give peer credit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PeerClosureSeeds {
+    /// Seeds for every closure.
+    shared: FxHashSet<String>,
+    /// Seeds for the closure of one manifest, keyed by the absolute
+    /// `package.json` path.
+    by_manifest: FxHashMap<PathBuf, FxHashSet<String>>,
+}
+
+impl PeerClosureSeeds {
+    /// Seeds that every closure reads.
+    #[must_use]
+    pub fn from_shared(names: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            shared: names.into_iter().collect(),
+            by_manifest: FxHashMap::default(),
+        }
+    }
+
+    /// Record a seed for the closure of the manifest at `manifest`, an
+    /// absolute `package.json` path.
+    pub fn push_manifest_seed(&mut self, manifest: PathBuf, name: String) {
+        self.by_manifest.entry(manifest).or_default().insert(name);
+    }
+
+    /// The seeds of the closure for the manifest at `manifest`: the shared
+    /// seeds and the seeds of that manifest.
+    pub fn for_manifest<'a>(&'a self, manifest: &Path) -> impl Iterator<Item = &'a str> {
+        self.shared
+            .iter()
+            .chain(self.by_manifest.get(manifest).into_iter().flatten())
+            .map(String::as_str)
+    }
 }
 
 impl TraceProvenance {
@@ -386,6 +430,21 @@ impl TraceProvenance {
             .iter()
             .find(|(known, _)| known == name)
             .map(|(_, credit)| credit.clone())
+    }
+
+    /// Set the packages that start the peer-dependency closure in addition to
+    /// the imported packages.
+    #[must_use]
+    pub fn with_peer_seeds(mut self, seeds: PeerClosureSeeds) -> Self {
+        self.peer_seeds = seeds;
+        self
+    }
+
+    /// The packages that start the peer-dependency closure in addition to the
+    /// imported packages.
+    #[must_use]
+    pub const fn peer_seeds(&self) -> &PeerClosureSeeds {
+        &self.peer_seeds
     }
 }
 
