@@ -21,7 +21,7 @@ use oxc_ast::ast::{
     AccessorProperty, ArrowFunctionExpression, AssignmentExpression, AssignmentTarget,
     AssignmentTargetPropertyIdentifier, BinaryExpression, BindingIdentifier, BindingPattern,
     BooleanLiteral, CallExpression, ChainElement, ChainExpression, Class, ConditionalExpression,
-    Decorator, Directive, DoWhileStatement, ExportAllDeclaration, ExportDeclaration,
+    Declaration, Decorator, Directive, DoWhileStatement, ExportAllDeclaration, ExportDeclaration,
     ExportDefaultDeclaration, ExportFromDeclaration, ExportNamedDeclaration, Expression,
     ExpressionStatement, ForStatement, ForStatementInit, ForStatementLeft, FormalParameter,
     FormalParameterRest, Function, IdentifierReference, IfStatement, ImportDeclaration,
@@ -590,6 +590,8 @@ const FALSY_KEYS: [&str; 6] = ["undefined", "null", "false", "0", "", "NaN"];
 /// - `obj` is a `const` binding that is not exported and has no
 ///   redeclaration, and its initializer is an object literal, optionally in
 ///   parentheses, `as` or `satisfies`;
+/// - the declaration of `obj` ends before the conditional starts, so the
+///   mutant read of `obj` cannot run in its temporal dead zone;
 /// - the object literal has only plain properties with identifier, string
 ///   or number keys, no spread, no getter, setter or method, no `__proto__`
 ///   key and no key from `FALSY_KEYS`;
@@ -599,13 +601,19 @@ const FALSY_KEYS: [&str; 6] = ["undefined", "null", "false", "0", "", "NaN"];
 ///
 /// A `with` statement or a direct `eval` call cancels every proof. A change
 /// to `Object.prototype` or `Array.prototype.filter` at run time can break
-/// the proof. The rule accepts this risk.
+/// the proof. A call from the initializer of `obj` to a hoisted function
+/// that holds the conditional can still read `obj` in its temporal dead
+/// zone. The rule accepts these risks.
 struct FilteredLookups<'s, 'b> {
     semantic: &'s Semantic<'b>,
-    objects: BTreeSet<(u32, u32)>,
+    /// The binding span of each closed object, with the end of its
+    /// declarator.
+    objects: BTreeMap<(u32, u32), u32>,
     member_reads: BTreeSet<ReferenceId>,
     unsafe_reads: BTreeSet<ReferenceId>,
-    candidates: Vec<((u32, u32), SymbolId)>,
+    /// The test span, the conditional start and the object binding of each
+    /// qualifying element.
+    candidates: Vec<((u32, u32), u32, SymbolId)>,
     exported: bool,
     dynamic_scope: bool,
 }
@@ -614,7 +622,7 @@ impl<'s, 'b> FilteredLookups<'s, 'b> {
     fn tests(program: &Program<'_>, semantic: &'s Semantic<'b>) -> BTreeSet<(u32, u32)> {
         let mut lookups = Self {
             semantic,
-            objects: BTreeSet::new(),
+            objects: BTreeMap::new(),
             member_reads: BTreeSet::new(),
             unsafe_reads: BTreeSet::new(),
             candidates: Vec::new(),
@@ -628,8 +636,8 @@ impl<'s, 'b> FilteredLookups<'s, 'b> {
         lookups
             .candidates
             .iter()
-            .filter(|(_, object)| lookups.closed_object(*object))
-            .map(|(test, _)| *test)
+            .filter(|(_, start, object)| lookups.closed_object(*object, *start))
+            .map(|(test, _, _)| *test)
             .collect()
     }
 
@@ -644,11 +652,15 @@ impl<'s, 'b> FilteredLookups<'s, 'b> {
             if id.name == name && id.reference_id.get().is_some() && self.symbol(id).is_none())
     }
 
-    fn closed_object(&self, symbol: SymbolId) -> bool {
+    /// True when `symbol` is a closed object that is declared before
+    /// `conditional_start`.
+    fn closed_object(&self, symbol: SymbolId, conditional_start: u32) -> bool {
         let scoping = self.semantic.scoping();
-        if !self.objects.contains(&pair(scoping.symbol_span(symbol)))
-            || !scoping.symbol_redeclarations(symbol).is_empty()
-        {
+        let declared_before = self
+            .objects
+            .get(&pair(scoping.symbol_span(symbol)))
+            .is_some_and(|end| *end <= conditional_start);
+        if !declared_before || !scoping.symbol_redeclarations(symbol).is_empty() {
             return false;
         }
         scoping.get_resolved_reference_ids(symbol).iter().all(|id| {
@@ -754,7 +766,9 @@ fn is_closed_object_literal(init: &Expression<'_>) -> bool {
 
 impl<'a> Visit<'a> for FilteredLookups<'_, '_> {
     fn visit_export_declaration(&mut self, it: &ExportDeclaration<'a>) {
-        self.exported = true;
+        // Only the exported variable itself is public. A `const` in the body
+        // of an exported function is local.
+        self.exported = matches!(it.declaration, Declaration::VariableDeclaration(_));
         walk::walk_export_declaration(self, it);
         self.exported = false;
     }
@@ -768,7 +782,7 @@ impl<'a> Visit<'a> for FilteredLookups<'_, '_> {
                         .as_ref()
                         .is_some_and(is_closed_object_literal)
                 {
-                    self.objects.insert(pair(id.span));
+                    self.objects.insert(pair(id.span), declarator.span.end);
                 }
             }
         }
@@ -829,8 +843,11 @@ impl<'a> Visit<'a> for FilteredLookups<'_, '_> {
                     && let Expression::ConditionalExpression(conditional) =
                         element.without_parentheses()
                 {
-                    self.candidates
-                        .push((pair(conditional.test.span()), object));
+                    self.candidates.push((
+                        pair(conditional.test.span()),
+                        conditional.span.start,
+                        object,
+                    ));
                 }
             }
         }

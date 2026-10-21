@@ -222,6 +222,8 @@ drops it as it drops `""`. The rule needs all of these conditions:
   `false`, `0` or `0n`;
 - `obj` is a `const` that is not exported, has no redeclaration, and has an
   object literal value, optionally with `as` or `satisfies`;
+- the declaration of `obj` ends before the conditional starts, so the
+  mutant cannot read `obj` before its declaration runs;
 - the object literal has only plain properties with name, string or number
   keys, and no spread, getter, setter, method, computed key or `__proto__`
   key;
@@ -235,7 +237,9 @@ The `false` mutant does not change. A template literal, a `.join` without
 alternate and a local `Boolean` binding keep the `true` mutant. A `with`
 statement or a direct `eval` call stops each proof in the file. A change to
 `Object.prototype` or `Array.prototype.filter` at run time can break the
-proof. The rule accepts this risk.
+proof. A call from the value of `obj` to a hoisted function that holds the
+conditional can read `obj` before its declaration runs. The rule accepts these
+risks.
 
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has

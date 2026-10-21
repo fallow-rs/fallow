@@ -488,6 +488,20 @@ fn negate_condition_skips_the_true_mutant_of_an_optional_lookup_before_filter_bo
         (with_element("align ? alignment[align] : false"), PRUNED),
         (with_element("align ? alignment[align] : 0"), PRUNED),
         (with_element("align ? alignment[align] : ``"), PRUNED),
+        (
+            format!(
+                "export function classes(align?: \"left\") {{\n{ALIGNMENT}\nreturn {};\n}}",
+                filtered(LOOKUP)
+            ),
+            PRUNED,
+        ),
+        (
+            format!(
+                "export default function classes(align?: \"left\") {{\n{ALIGNMENT}\nreturn {};\n}}",
+                filtered(LOOKUP)
+            ),
+            PRUNED,
+        ),
     ];
     assert_negate_pairs(&cases);
 }
@@ -548,6 +562,13 @@ fn negate_condition_keeps_the_true_mutant_outside_a_closed_filter_boolean_lookup
         ),
         (with_object("let alignment = { left: \"l\" };"), BOTH),
         (with_object(&format!("export {ALIGNMENT}")), BOTH),
+        (
+            format!(
+                "export const classes = (align?: \"left\") => {};\nclasses();\n{ALIGNMENT}",
+                filtered(LOOKUP)
+            ),
+            BOTH,
+        ),
         (with_prefix("export { alignment };"), BOTH),
         (with_prefix("export default alignment;"), BOTH),
         (with_prefix("alignment.undefined = \"x\";"), BOTH),
