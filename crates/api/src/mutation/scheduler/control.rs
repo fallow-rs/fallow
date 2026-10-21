@@ -2,7 +2,7 @@
 //! no executed test, and a kill in a survivor retry by a test that the first
 //! run did not execute, need a control run of their tests.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -95,6 +95,11 @@ pub(super) fn control_fault(tests: &[String], result: &RunResult) -> Option<Cont
 /// whole test file, and a mutant run runs only the covering tests.
 pub(super) const CONTROL_RUN_FAILURE: &str = "the test fails in a mutant run with no active mutant, but passed in the dry run of its whole file; it can depend on another test of its file";
 
+/// The message of a test that fails in the control run of a survivor retry.
+/// That run already has each passing test of the file, so a missing covering
+/// test is not the cause.
+pub(super) const CONFIRMATION_RUN_FAILURE: &str = "the test fails with no active mutant in a run of each test of its file that passed in the dry run, but passed in the dry run of its whole file; it can depend on a test of its file that failed or was skipped in the dry run, or it can be flaky";
+
 /// The first line of `message`.
 pub(super) fn first_line(message: &str) -> &str {
     message.lines().next().unwrap_or_default()
@@ -151,11 +156,12 @@ pub(super) type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
 /// at most one. A timeout is stored, so a hanging test set costs one control
 /// run. A fault of the companion is not stored, so a later mutant with the
 /// same tests runs the control again. The memo also keeps the tests
-/// that failed in a control run: each later mutant run leaves them out.
+/// that failed in a control run, each with the message of its baseline
+/// failure: each later mutant run leaves them out.
 #[derive(Default)]
 pub(super) struct ControlMemo {
     entries: Mutex<FxHashMap<Vec<String>, ControlCell>>,
-    pub(super) failed_tests: Mutex<BTreeSet<String>>,
+    pub(super) failed_tests: Mutex<BTreeMap<String, &'static str>>,
 }
 
 impl ControlMemo {
@@ -176,19 +182,23 @@ impl ControlMemo {
         }
     }
 
-    pub(super) fn mark_failed(&self, tests: &[String]) {
+    /// Marks `tests` as failed. The first message of a test stays.
+    pub(super) fn mark_failed(&self, tests: &[String], message: &'static str) {
         if let Ok(mut failed) = self.failed_tests.lock() {
-            failed.extend(tests.iter().cloned());
+            for test in tests {
+                failed.entry(test.clone()).or_insert(message);
+            }
         }
     }
 
     pub(super) fn is_failed(&self, test: &str) -> bool {
         self.failed_tests
             .lock()
-            .is_ok_and(|failed| failed.contains(test))
+            .is_ok_and(|failed| failed.contains_key(test))
     }
 
-    pub(super) fn failed(&self) -> BTreeSet<String> {
+    /// Each failed test with the message of its baseline failure.
+    pub(super) fn failed(&self) -> BTreeMap<String, &'static str> {
         self.failed_tests
             .lock()
             .map(|failed| failed.clone())

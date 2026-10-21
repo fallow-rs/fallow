@@ -436,7 +436,10 @@ tests detect the mutant.
   set, the same memo as for a kill with no executed test). When the control
   run fails, the first run decides: the mutant stays `survived`, and the
   failed tests are baseline failures.
-- `covering_tests` of a retried survivor lists the tests of the retry.
+- `covering_tests` of a retried survivor stays the dry-run hits of the
+  first run. It names the tests that reached the mutant and need an
+  assertion. A kill by a test of the retry can thus name a `killed_by` test
+  that is not in `covering_tests`.
 - The retry of a `timeout` waits twice as long. Host load often lasts into
   the retry, and a real infinite loop still times out.
 - A `killed` result gets no retry. In repeated runs under host load, no

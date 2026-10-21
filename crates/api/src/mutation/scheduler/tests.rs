@@ -2375,7 +2375,7 @@ fn a_load_kill_control_keys_the_memo_on_the_tests_that_are_not_marked_failed() {
     let spawner = FakeSpawner::new(script(|_| standard_dry(), |_, run| Ok(load_failure(run))));
     let config = config(1);
     let memo = ControlMemo::default();
-    memo.mark_failed(&[tid("t2")]);
+    memo.mark_failed(&[tid("t2")], CONTROL_RUN_FAILURE);
     let dry_files = vec!["test/a.test.ts".to_owned()];
     let mut worker = Worker::new(&spawner, &config, &dry_files, Duration::from_secs(5), &memo);
     worker.link = Some(spawner.spawn().expect("link"));
@@ -2395,7 +2395,7 @@ fn a_load_kill_control_keys_the_memo_on_the_tests_that_are_not_marked_failed() {
     );
 
     // When each test is marked failed, the mutant has no covering test.
-    memo.mark_failed(&[tid("t1")]);
+    memo.mark_failed(&[tid("t1")], CONTROL_RUN_FAILURE);
     let attempt = Attempt::decided(MutantStatus::Killed, None, Some(4));
     let uncovered = worker
         .confirm_load_kill(&job, &job.tests, VITEST_CAPS, attempt)
@@ -2620,7 +2620,11 @@ fn a_survivor_retry_runs_each_test_of_its_files_and_a_kill_by_a_new_test_is_kill
     assert_eq!(result.status, MutantStatus::Killed);
     assert_eq!(result.killed_by, Some(tid("t2")));
     assert!(result.retried);
-    assert_eq!(result.covering_tests, vec![tid("t1"), tid("t2")]);
+    assert_eq!(
+        result.covering_tests,
+        vec![tid("t1")],
+        "covering_tests stays the dry-run hits, not the retry tests"
+    );
     let runs = spawner.runs();
     assert_eq!(runs.len(), 2);
     assert_eq!(
@@ -2650,8 +2654,12 @@ fn a_kill_by_a_new_test_that_fails_its_control_run_stays_survived() {
         outcome
             .baseline_failures
             .iter()
-            .any(|failure| failure.test_id.as_deref() == Some(tid("t2").as_str())),
-        "the test that fails without a mutant is a baseline failure"
+            .any(
+                |failure| failure.test_id.as_deref() == Some(tid("t2").as_str())
+                    && failure.message.as_deref() == Some(CONFIRMATION_RUN_FAILURE)
+            ),
+        "the test that fails without a mutant is a baseline failure, with the cause of a retry control run: {:#?}",
+        outcome.baseline_failures
     );
 }
 
@@ -2691,7 +2699,7 @@ impl ResultLookup for CachedNewKiller {
 }
 
 #[test]
-fn a_cached_kill_by_a_confirmation_test_lists_the_tests_of_its_retry() {
+fn a_cached_kill_by_a_confirmation_test_lists_the_dry_run_hits() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
         |index, run| Ok(cached_value_run(index, run)),
@@ -2702,5 +2710,5 @@ fn a_cached_kill_by_a_confirmation_test_lists_the_tests_of_its_retry() {
     let m1 = &outcome.results["m1"];
     assert!(m1.cached);
     assert_eq!(m1.killed_by, Some(tid("t2")));
-    assert_eq!(m1.covering_tests, vec![tid("t1"), tid("t2")]);
+    assert_eq!(m1.covering_tests, vec![tid("t1")]);
 }

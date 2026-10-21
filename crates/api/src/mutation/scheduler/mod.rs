@@ -24,8 +24,8 @@ use super::{MutationProgress, MutationProgressSink};
 mod control;
 
 use control::{
-    CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome, ControlVerdict, control_fault,
-    first_line, sorted_tests,
+    CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
+    ControlVerdict, control_fault, first_line, sorted_tests,
 };
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
@@ -1012,7 +1012,12 @@ impl<'a> Worker<'a> {
             ControlOutcome::Passed => {}
             // Failed tests are a fact about the tests. The companion stays.
             ControlOutcome::Failed(fault) if !fault.failed_tests.is_empty() => {
-                self.memo.mark_failed(&fault.failed_tests);
+                let message = if job.first_tests.is_empty() {
+                    CONTROL_RUN_FAILURE
+                } else {
+                    CONFIRMATION_RUN_FAILURE
+                };
+                self.memo.mark_failed(&fault.failed_tests, message);
             }
             ControlOutcome::Failed(_) | ControlOutcome::Fault(_) | ControlOutcome::TimedOut(_) => {
                 self.reset();
@@ -1290,27 +1295,16 @@ fn static_map_miss_issue(mutant: &ScheduledMutant) -> ScheduleIssue {
     }
 }
 
-/// The stored result of `mutant` under `key`, with its covering `tests`. A
-/// survivor and a kill by a test of the confirmation set list the tests of
-/// their retry, the same as a fresh result.
+/// The stored result of `mutant` under `key`, with its covering `tests`.
 fn cached_outcome(
     cache: Option<&dyn ResultLookup>,
     key: Option<&String>,
     mutant: &ScheduledMutant,
-    (tests, confirmation): (&[String], Option<&[String]>),
+    tests: &[String],
     static_mutant: bool,
 ) -> Option<MutantOutcome> {
     let hit = cache?.get(&mutant.id, key?)?;
-    let retry_decided = hit.status == MutantStatus::Survived
-        || hit
-            .killed_by
-            .as_ref()
-            .is_some_and(|test| !tests.contains(test));
-    let listed = match confirmation {
-        Some(confirmation) if retry_decided => confirmation,
-        _ => tests,
-    };
-    let mut covering_tests = listed.to_vec();
+    let mut covering_tests = tests.to_vec();
     covering_tests.sort_unstable();
     Some(MutantOutcome {
         status: hit.status,
@@ -1419,12 +1413,8 @@ fn build_jobs(
         test_files.sort_unstable();
         test_files.dedup();
         let cache_key = cache.map(|cache| cache.key(ready, mutant, &tests, &test_files));
-        let listed = (
-            tests.as_slice(),
-            confirmation.as_ref().map(|(tests, _)| tests.as_slice()),
-        );
         if let Some(cached) =
-            cached_outcome(cache, cache_key.as_ref(), mutant, listed, static_mutant)
+            cached_outcome(cache, cache_key.as_ref(), mutant, &tests, static_mutant)
         {
             outcome.results.insert(mutant.id.clone(), cached);
             continue;
@@ -1603,11 +1593,15 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
         note_restarted_baseline_failure(outcome, facts, test, &job.id);
     }
     // `job.tests` is in measured fastest-first order. The report must not
-    // depend on durations, so it lists the covering tests by id.
+    // depend on durations, so it lists the covering tests by id. A survivor
+    // retry runs more tests than the dry run attributes to the mutant, and
+    // `covering_tests` stays the dry-run hits of the first run.
     let mut covering_tests = if attempt.status == MutantStatus::NoCoverage {
         Vec::new()
-    } else {
+    } else if job.first_tests.is_empty() {
         job.tests
+    } else {
+        job.first_tests
     };
     covering_tests.sort_unstable();
     match job.cache_key {
@@ -1979,7 +1973,7 @@ fn drop_failed_tests(facts: &mut DryRunFacts, failed: &[String]) {
 /// Adds each test that failed in a control run during the mutant runs as a
 /// baseline failure. [`record`] then adds the mutants that ran without it.
 fn note_control_failures(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, memo: &ControlMemo) {
-    for test in memo.failed() {
+    for (test, message) in memo.failed() {
         if outcome
             .baseline_failures
             .iter()
@@ -1990,7 +1984,7 @@ fn note_control_failures(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, mem
         outcome.baseline_failures.push(BaselineFailure {
             file: facts.passing.get(&test).map(|(file, _)| file.clone()),
             test_id: Some(test),
-            message: Some(CONTROL_RUN_FAILURE.to_owned()),
+            message: Some(message.to_owned()),
             mutant_ids: Vec::new(),
         });
     }

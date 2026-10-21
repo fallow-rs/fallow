@@ -33313,7 +33313,7 @@
             "string",
             "null"
           ],
-          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field."
+          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field.\n\nThe retry of a survivor also runs the other tests of its test files,\nso this test can be absent from `covering_tests`."
         },
         "covering_tests": {
           "type": "array",

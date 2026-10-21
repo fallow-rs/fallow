@@ -692,12 +692,8 @@ mod end_to_end {
             positive
                 .iter()
                 .any(|mutant| mutant.status == MutantStatus::Survived
-                    // The retry of a survivor runs each test of its file.
-                    && mutant.covering_tests.len() > 1
-                    && mutant
-                        .covering_tests
-                        .iter()
-                        .any(|test| test == "test/math.test.ts::positive without an assertion")),
+                    && mutant.covering_tests
+                        == vec!["test/math.test.ts::positive without an assertion".to_owned()]),
             "a test with no assertion lets a mutant of isPositive survive: {positive:#?}"
         );
         let limit = report
@@ -791,12 +787,8 @@ mod end_to_end {
             positive
                 .iter()
                 .any(|mutant| mutant.status == MutantStatus::Survived
-                    // The retry of a survivor runs each test of its file.
-                    && mutant.covering_tests.len() > 1
-                    && mutant
-                        .covering_tests
-                        .iter()
-                        .any(|test| test == "test/math.test.ts::positive without an assertion")),
+                    && mutant.covering_tests
+                        == vec!["test/math.test.ts::positive without an assertion".to_owned()]),
             "a test with no assertion lets a mutant of isPositive survive: {positive:#?}"
         );
         let limit = report

@@ -20002,6 +20002,9 @@ prune_reason?: (string | null)
  * first failing test, and it runs the fastest covering test first, so a
  * second run on the same code can name another covering test. No
  * fingerprint or baseline comparison uses this field.
+ *
+ * The retry of a survivor also runs the other tests of its test files,
+ * so this test can be absent from `covering_tests`.
  */
 killed_by?: (string | null)
 /**
