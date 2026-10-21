@@ -78,8 +78,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The GitHub Action takes a `worsened` input. The GitLab template takes
   `FALLOW_AUDIT_WORSENED`. The MCP `audit` tool takes a `worsened` parameter.
-  A finding whose exceeded metric grew stays introduced and gates in both
-  modes, as before.
 
 - **Mutation JSON now shows the edit of each mutant.** Each mutant in the
   `mutation` report and the `mutation-plan` document has a `change` object,
