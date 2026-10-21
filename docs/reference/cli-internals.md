@@ -546,7 +546,11 @@ after every gate set the exit code.
   before the registry write and the stderr warning, so the envelope, the
   `parse-error` gate and the health note see the same set.
   `GraphConfidenceContext::for_run` skips a covered degraded module, and that
-  check records the pattern as matched.
+  check records the pattern as matched. The skip also applies to a reachable
+  module or an entry point, because fixtures that a `dynamicallyLoaded` glob
+  makes entry points are the common case. A covered file that is valid but
+  fails to parse can hide the import that credits another module, with no
+  caveat and no diagnostic.
 - A dead-code baseline records the install state of the saving run in
   `analysis_identity.node_modules` through `BaselineAnalysisIdentity` in
   `crates/engine/src/baseline/install_state.rs`. The key is not part of

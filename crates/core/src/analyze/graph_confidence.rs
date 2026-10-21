@@ -152,9 +152,15 @@ impl<'a> GraphConfidenceContext<'a> {
     /// workspace-diagnostic list, the ONLY record of a file that was never read:
     /// it has no `ModuleInfo` and no graph node to ask.
     ///
-    /// A degraded module that `ignoreFindings` covers is skipped. The user
-    /// marked that file as broken on purpose (for example a syntax-error test
-    /// fixture), so its partial parse must not caveat other findings.
+    /// A degraded module that `ignoreFindings` covers is skipped, also when it
+    /// is reachable or an entry point. The user marked that file as broken on
+    /// purpose (for example a syntax-error test fixture), and a file that does
+    /// not parse does not load at run time, so its lost import edges are not
+    /// real use. Fixtures that a `dynamicallyLoaded` glob makes entry points
+    /// are the common case, so a skip of unreachable modules only is too
+    /// narrow. The cost: a covered file that is valid but fails to parse (for
+    /// example new syntax the parser does not support yet) can hide the import
+    /// that credits another module, and no caveat or diagnostic shows it.
     pub(super) fn new(
         graph: &'a ModuleGraph,
         modules: &[ModuleInfo],
@@ -1105,12 +1111,39 @@ mod tests {
     }
 
     #[test]
-    fn a_degraded_module_that_ignore_findings_covers_flags_nothing() {
+    fn an_unreachable_degraded_module_that_ignore_findings_covers_flags_nothing() {
+        let graph = graph();
+        let mut results = with_unused_dependency(unused(&[ORPHAN]));
+        let ignores = FindingIgnoreMatcher::try_compile(&["src/helper.ts".to_owned()])
+            .expect("valid ignoreFindings pattern");
+
+        // `helper.ts` is unreachable, so its lost edges change no other
+        // verdict. Without the pattern, it still caveats the dependency.
+        GraphConfidenceContext::new(&graph, &modules([0, 2, 0]), &[], &ignores, Path::new(ROOT))
+            .annotate(&mut results);
+
+        assert!(
+            results.unused_files[0].reachability_caveats.is_empty(),
+            "a covered unreachable broken file must not caveat other findings"
+        );
+        assert!(
+            results.unused_dependencies[0]
+                .reachability_caveats
+                .is_empty(),
+            "a covered unreachable broken file must not caveat dependency findings"
+        );
+    }
+
+    #[test]
+    fn a_reachable_degraded_module_that_ignore_findings_covers_flags_nothing() {
         let graph = graph();
         let mut results = unused(&[HELPER, ORPHAN]);
         let ignores = FindingIgnoreMatcher::try_compile(&["src/index.ts".to_owned()])
             .expect("valid ignoreFindings pattern");
 
+        // The covered file is the entry point. A file that is broken on
+        // purpose does not load at run time, so the edges it lost are not
+        // real use.
         GraphConfidenceContext::new(&graph, &modules([3, 0, 0]), &[], &ignores, Path::new(ROOT))
             .annotate(&mut results);
 
@@ -1119,7 +1152,7 @@ mod tests {
                 .unused_files
                 .iter()
                 .all(|finding| finding.reachability_caveats.is_empty()),
-            "a broken file that ignoreFindings covers must not caveat other findings"
+            "a covered reachable broken file must not caveat other findings"
         );
     }
 
