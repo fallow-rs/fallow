@@ -3416,7 +3416,8 @@ fn audit_badge_format_exits_2() {
 
 /// `--max-crap` on audit must flow into the health sub-analysis so that a
 /// changed file with a high-complexity untested function triggers the
-/// failing verdict.
+/// failing verdict. The `all` gate is set because `new-only` does not fail on
+/// a CRAP score from estimated coverage alone.
 #[test]
 fn audit_max_crap_flag_fails_when_threshold_crossed() {
     let dir = create_audit_fixture("crap");
@@ -3429,6 +3430,8 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
         dir.path().to_str().unwrap(),
         "--base",
         "HEAD~1",
+        "--gate",
+        "all",
         "--max-crap",
         "1",
         "--format",
@@ -3569,6 +3572,8 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
         dir.path().to_str().unwrap(),
         "--base",
         "HEAD~1",
+        "--gate",
+        "all",
         "--max-crap",
         "10",
         "--format",
@@ -3577,7 +3582,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
     ]);
     assert_eq!(
         without_coverage.code, 1,
-        "static CRAP estimate should fail before Istanbul coverage is supplied. stderr: {}",
+        "under the all gate, the static CRAP estimate should fail before Istanbul coverage is supplied. stderr: {}",
         without_coverage.stderr
     );
 
@@ -4009,6 +4014,8 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
         dir.path().to_str().unwrap(),
         "--base",
         "HEAD~1",
+        "--gate",
+        "all",
         "--max-crap",
         "10",
         "--format",
@@ -4017,7 +4024,7 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     ]);
     assert_eq!(
         without_env.code, 1,
-        "static CRAP estimate should fail before FALLOW_COVERAGE is supplied. stderr: {}",
+        "under the all gate, the static CRAP estimate should fail before FALLOW_COVERAGE is supplied. stderr: {}",
         without_env.stderr
     );
 
@@ -4054,8 +4061,10 @@ fn write_health_config(dir: &std::path::Path, health: &str) {
     .unwrap();
 }
 
-/// Run `fallow audit --base HEAD~1 --max-crap 10 --format json --quiet` on
-/// `root` with extra arguments and path-typed env vars on the child process.
+/// Run `fallow audit --base HEAD~1 --gate all --max-crap 10 --format json
+/// --quiet` on `root` with extra arguments and path-typed env vars on the
+/// child process. The `all` gate lets a CRAP score from estimated coverage
+/// fail the run, which `new-only` does not do.
 fn run_gated_audit_with(
     root: &std::path::Path,
     extra_args: &[&str],
@@ -4067,6 +4076,8 @@ fn run_gated_audit_with(
         root.to_str().unwrap(),
         "--base",
         "HEAD~1",
+        "--gate",
+        "all",
         "--max-crap",
         "10",
         "--format",

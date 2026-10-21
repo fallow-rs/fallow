@@ -3573,7 +3573,7 @@
               "type": "null"
             }
           ],
-          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Absent in reports from older versions."
+          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Under `audit --gate new-only`, a finding that exceeds only CRAP\nfrom estimated coverage has `warn`. Absent in reports from older\nversions."
         },
         "crap": {
           "type": [
@@ -3681,7 +3681,7 @@
             "boolean",
             "null"
           ],
-          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, or when a metric that it exceeds has a higher\nvalue than in that base finding."
+          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, or when a metric that it exceeds has a higher\nvalue than in that base finding. A CRAP score from estimated coverage,\nor a CRAP score that the base finding does not have, is not a higher\nvalue."
         },
         "attribution": {
           "anyOf": [
@@ -12227,7 +12227,7 @@
               "type": "null"
             }
           ],
-          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Absent in reports from older versions."
+          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Under `audit --gate new-only`, a finding that exceeds only CRAP\nfrom estimated coverage has `warn`. Absent in reports from older\nversions."
         },
         "crap": {
           "type": [
@@ -34387,7 +34387,7 @@
         {
           "type": "string",
           "const": "introduced",
-          "description": "No base finding matches, or a metric that the finding exceeds grew."
+          "description": "No base finding matches, or a metric that the finding exceeds grew. A\nCRAP score from estimated coverage does not count as growth."
         },
         {
           "type": "string",

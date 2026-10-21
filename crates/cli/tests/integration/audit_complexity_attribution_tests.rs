@@ -343,3 +343,100 @@ fn adding_a_same_named_method_is_introduced() {
         result.findings
     );
 }
+
+/// A repository whose base commit has no complexity finding, with CRAP gated
+/// at 10. No test reaches `src/index.js`, so CRAP comes from estimated
+/// coverage.
+fn estimated_crap_fixture() -> TempDir {
+    let tmp = fixture("export const value = 1;\n");
+    fs::write(
+        tmp.path().join(".fallowrc.json"),
+        r#"{"entry": ["src/*.js"], "health": {"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 10, "maxUnitSize": 999999}}"#,
+    )
+    .unwrap();
+    commit_all(tmp.path(), "gate CRAP");
+    tmp
+}
+
+fn audit_format(dir: &Path, format: &str) -> crate::common::CommandOutput {
+    run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "new-only",
+        "--format",
+        format,
+        "--quiet",
+        "--no-cache",
+        "--no-css",
+    ])
+}
+
+/// The JSON finding of the function `name`.
+fn json_finding(json: &serde_json::Value, name: &str) -> serde_json::Value {
+    json["complexity"]["findings"]
+        .as_array()
+        .and_then(|findings| findings.iter().find(|item| item["name"] == name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no finding for {name}: {json:#}"))
+}
+
+#[test]
+fn new_function_over_estimated_crap_only_warns() {
+    let tmp = estimated_crap_fixture();
+    // Cyclomatic 7 and cognitive 6 stay under 15; CRAP at 0% is 56.
+    edit(tmp.path(), &hotspot("estimated", 6));
+
+    let output = audit_format(tmp.path(), "json");
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"], "warn", "{json:#}");
+    assert_eq!(json["attribution"]["complexity_introduced"], 1);
+    let finding = json_finding(&json, "estimated");
+    assert_eq!(finding["exceeded"], "crap");
+    assert_eq!(finding["coverage_source"], "estimated");
+    assert_eq!(finding["attribution"], "introduced");
+    assert_eq!(finding["effective_severity"], "warn", "{finding:#}");
+
+    let sarif = audit_format(tmp.path(), "sarif");
+    assert_eq!(sarif.code, 0, "stderr: {}", sarif.stderr);
+    let sarif = parse_json(&sarif);
+    let levels: Vec<&str> = sarif["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|run| run["results"].as_array().unwrap())
+        .filter(|result| {
+            result["ruleId"]
+                .as_str()
+                .is_some_and(|rule| rule.contains("crap"))
+        })
+        .filter_map(|result| result["level"].as_str())
+        .collect();
+    assert_eq!(levels, ["warning"], "{sarif:#}");
+}
+
+#[test]
+fn estimated_crap_does_not_hide_a_cognitive_finding() {
+    let tmp = estimated_crap_fixture();
+    // Also exceeds cyclomatic and cognitive, so it still gates.
+    edit(
+        tmp.path(),
+        &format!("{}{}", hotspot("estimated", 6), hotspot("tangled", 16)),
+    );
+
+    let output = audit_format(tmp.path(), "json");
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"], "fail");
+    assert_eq!(
+        json_finding(&json, "estimated")["effective_severity"],
+        "warn"
+    );
+    let tangled = json_finding(&json, "tangled");
+    assert_eq!(tangled["exceeded"], "all");
+    assert_eq!(tangled["effective_severity"], "error");
+}

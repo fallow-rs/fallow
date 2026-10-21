@@ -341,6 +341,17 @@ after every gate set the exit code.
   base is scored with the post-deletion map); coverage regressions belong to
   `rules.coverage-gaps` and health trends. The auto-detected map's content
   participates in the base-snapshot cache key exactly like `--coverage`.
+- New-only estimated CRAP: under `--gate new-only`, `audit_run::attribute`
+  calls `demote_estimated_crap_gates` (`crates/api/src/audit_complexity.rs`)
+  before the comparison. A complexity finding that exceeds only CRAP, with
+  `coverage_source` `estimated` or `estimated_component_inherited`, gets
+  `effective_severity: warn`. The finding stays in the report, and SARIF,
+  GitHub annotations and the verdict read the gate severity from that field.
+  A finding that also exceeds cyclomatic or cognitive complexity keeps the
+  severity of its rules. Measured coverage (`istanbul`) keeps the gate. In
+  `exceeded_metric_increased`, a CRAP score from estimated coverage does not
+  make a finding introduced, and a base finding without a CRAP score is not
+  growth. `--gate all` keeps the rule severity.
 - Audit coverage inputs (#2359) resolve through the same precedence as
   `fallow health` and bare `fallow`: `--coverage` / `--coverage-root`, then
   `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT`, then `health.coverage` /

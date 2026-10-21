@@ -442,7 +442,9 @@ pub struct ComplexityViolation {
     /// `overrides[].rules` entries: `error` fails the run, `warn` does not.
     /// The most severe rule of the kinds in `exceeded` wins. It is separate
     /// from the band in `severity`, which ranks the finding and does not gate
-    /// it. Absent in reports from older versions.
+    /// it. Under `audit --gate new-only`, a finding that exceeds only CRAP
+    /// from estimated coverage has `warn`. Absent in reports from older
+    /// versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_severity: Option<fallow_types::output_dead_code::EffectiveSeverity>,
     /// CRAP score (change risk anti-pattern), when coverage data exists.

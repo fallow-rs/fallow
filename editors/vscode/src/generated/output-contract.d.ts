@@ -8020,7 +8020,9 @@ severity: FindingSeverity
  * `overrides[].rules` entries: `error` fails the run, `warn` does not.
  * The most severe rule of the kinds in `exceeded` wins. It is separate
  * from the band in `severity`, which ranks the finding and does not gate
- * it. Absent in reports from older versions.
+ * it. Under `audit --gate new-only`, a finding that exceeds only CRAP
+ * from estimated coverage has `warn`. Absent in reports from older
+ * versions.
  */
 effective_severity?: (EffectiveSeverity | null)
 /**
@@ -8084,7 +8086,9 @@ actions: HealthFindingAction[]
  * Audit-mode flag indicating whether the finding is new versus the base
  * snapshot. A complexity finding is new when no base finding has the same
  * path and function name, or when a metric that it exceeds has a higher
- * value than in that base finding.
+ * value than in that base finding. A CRAP score from estimated coverage,
+ * or a CRAP score that the base finding does not have, is not a higher
+ * value.
  */
 introduced?: (boolean | null)
 /**

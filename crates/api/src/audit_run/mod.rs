@@ -442,6 +442,10 @@ pub fn run<B: AuditBackend>(
 
 /// Compare head analyses with a base snapshot, decide the verdict, and set
 /// the introduced flags on the dead-code and health findings.
+///
+/// Under the `new-only` gate, a complexity finding that exceeds only CRAP from
+/// estimated coverage gets the gate severity `warn` first, so it does not fail
+/// the verdict.
 pub fn attribute<A: AuditAnalyses>(
     analyses: &mut A,
     input: AuditAttributionInput<'_>,
@@ -460,6 +464,11 @@ pub fn attribute<A: AuditAnalyses>(
         skipped,
         inherited,
     } = base;
+    if matches!(gate, AuditGate::NewOnly)
+        && let Some(report) = analyses.health_report_mut()
+    {
+        crate::audit_complexity::demote_estimated_crap_gates(&mut report.findings);
+    }
     // The head keys that stand in for a skipped base are head paths already.
     if !skipped && let Some(snapshot) = base_snapshot.as_mut() {
         snapshot.remap_for_renames(renames, root);

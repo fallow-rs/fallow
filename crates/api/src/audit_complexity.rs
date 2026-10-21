@@ -14,10 +14,17 @@
 //! count must grow by a minimum (see [`line_count_grew`]). The
 //! `audit.worsened` setting decides how a worsened finding affects the
 //! verdict.
+//!
+//! A CRAP score from estimated coverage does not make a finding introduced.
+//! Under the `new-only` gate, a finding that exceeds only that CRAP score gets
+//! the gate severity `warn` (see [`demote_estimated_crap_gates`]).
 
 use std::path::Path;
 
-use fallow_output::{AuditFindingAttribution, WorsenedMetric, WorsenedMetricKind};
+use fallow_output::{
+    AuditFindingAttribution, CoverageSource, ExceededThreshold, WorsenedMetric, WorsenedMetricKind,
+};
+use fallow_types::output_dead_code::EffectiveSeverity;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::audit_keys::{health_finding_key, remap_key_for_renames};
@@ -225,7 +232,10 @@ fn sort_by_line(baseline: &mut ComplexityBaseline) {
 
 /// Whether `head` is worse than `base` in a metric that `head` exceeds.
 ///
-/// A CRAP score that the base finding does not have counts as an increase.
+/// CRAP compares only when both sides have a score, as in [`grown_metrics`]:
+/// a score that only the head finding has reflects the coverage input, not
+/// the code. A CRAP score from estimated coverage does not count, so it cannot
+/// make a finding introduced (see [`crap_is_estimated`]).
 fn exceeded_metric_increased(
     head: &fallow_output::ComplexityViolation,
     base: &ComplexityMetrics,
@@ -234,11 +244,42 @@ fn exceeded_metric_increased(
     (exceeded.includes_cyclomatic() && head.cyclomatic > base.cyclomatic)
         || (exceeded.includes_cognitive() && head.cognitive > base.cognitive)
         || (exceeded.includes_crap()
-            && match (head.crap, base.crap) {
-                (Some(head), Some(base)) => head > base,
-                (Some(_), None) => true,
-                (None, _) => false,
-            })
+            && !crap_is_estimated(head)
+            && matches!((head.crap, base.crap), (Some(head), Some(base)) if head > base))
+}
+
+/// Whether the CRAP score of the finding comes from estimated coverage, not
+/// from a measured coverage map (`--coverage` or runtime coverage).
+#[must_use]
+pub const fn crap_is_estimated(finding: &fallow_output::ComplexityViolation) -> bool {
+    matches!(
+        finding.coverage_source,
+        Some(CoverageSource::Estimated | CoverageSource::EstimatedComponentInherited)
+    )
+}
+
+/// Whether CRAP from estimated coverage is the only threshold that the
+/// finding exceeds.
+#[must_use]
+pub const fn exceeds_only_estimated_crap(finding: &fallow_output::ComplexityViolation) -> bool {
+    matches!(finding.exceeded, ExceededThreshold::Crap) && crap_is_estimated(finding)
+}
+
+/// Give the gate severity `warn` to each finding that exceeds only CRAP from
+/// estimated coverage, for the `new-only` gate.
+///
+/// The estimate comes from static test reachability, so it does not measure
+/// the change. The finding stays in the report, and the verdict reads `warn`
+/// for it. A finding that also exceeds cyclomatic or cognitive complexity
+/// keeps its gate severity. Measured coverage keeps the gate severity too.
+pub fn demote_estimated_crap_gates(findings: &mut [fallow_output::HealthFinding]) {
+    for finding in findings {
+        if exceeds_only_estimated_crap(finding)
+            && finding.effective_severity == Some(EffectiveSeverity::Error)
+        {
+            finding.violation.effective_severity = Some(EffectiveSeverity::Warn);
+        }
+    }
 }
 
 /// Classify each head complexity finding as introduced (`true`) or inherited
@@ -545,16 +586,93 @@ mod tests {
         );
     }
 
+    fn crap_finding(crap: Option<f64>, source: Option<CoverageSource>) -> HealthFinding {
+        let mut finding = finding("f", 1, 16, 5);
+        finding.violation.exceeded = ExceededThreshold::Crap;
+        finding.violation.crap = crap;
+        finding.violation.coverage_source = source;
+        finding.violation.effective_severity = Some(EffectiveSeverity::Error);
+        finding
+    }
+
     #[test]
-    fn crap_without_base_value_counts_as_increase() {
-        let mut head = finding("f", 1, 16, 5);
-        head.violation.exceeded = ExceededThreshold::Crap;
+    fn crap_without_base_value_is_not_an_increase() {
+        // A base without a CRAP score ran without that coverage input. The
+        // code did not grow.
+        let head = crap_finding(Some(50.0), Some(CoverageSource::Istanbul));
+        assert_eq!(
+            classify(vec![crap_finding(None, None)], std::slice::from_ref(&head)),
+            [false]
+        );
+        assert_eq!(
+            classify(
+                vec![crap_finding(Some(40.0), Some(CoverageSource::Istanbul))],
+                std::slice::from_ref(&head)
+            ),
+            [true]
+        );
+        assert_eq!(
+            classify(
+                vec![crap_finding(Some(60.0), Some(CoverageSource::Istanbul))],
+                &[head]
+            ),
+            [false]
+        );
+    }
+
+    #[test]
+    fn estimated_crap_growth_is_worsened_not_introduced() {
+        let estimated = Some(CoverageSource::Estimated);
+        let classes = attribution(
+            vec![crap_finding(Some(40.0), estimated)],
+            &[crap_finding(Some(50.0), estimated)],
+        );
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Crap, 40.0, 50.0)]
+        );
+        // A grown cognitive value of a finding that exceeds it still counts.
+        let mut base = crap_finding(Some(40.0), estimated);
+        base.violation.exceeded = ExceededThreshold::CognitiveCrap;
+        base.violation.cognitive = 20;
+        let mut head = base.clone();
+        head.violation.cognitive = 21;
         head.violation.crap = Some(50.0);
-        let mut base = finding("f", 1, 16, 5);
-        base.violation.exceeded = ExceededThreshold::Crap;
-        assert_eq!(classify(vec![base.clone()], &[head.clone()]), [true]);
-        base.violation.crap = Some(60.0);
-        assert_eq!(classify(vec![base], &[head]), [false]);
+        assert_eq!(classify(vec![base], &[head]), [true]);
+    }
+
+    #[test]
+    fn estimated_crap_only_findings_get_warn_gate_severity() {
+        let mut both = crap_finding(Some(50.0), Some(CoverageSource::Estimated));
+        both.violation.exceeded = ExceededThreshold::CognitiveCrap;
+        let mut warn_rule = crap_finding(Some(50.0), Some(CoverageSource::Estimated));
+        warn_rule.violation.effective_severity = Some(EffectiveSeverity::Warn);
+        let mut findings = [
+            crap_finding(Some(50.0), Some(CoverageSource::Estimated)),
+            crap_finding(
+                Some(50.0),
+                Some(CoverageSource::EstimatedComponentInherited),
+            ),
+            crap_finding(Some(50.0), Some(CoverageSource::Istanbul)),
+            both,
+            warn_rule,
+        ];
+        demote_estimated_crap_gates(&mut findings);
+        let severities: Vec<_> = findings
+            .iter()
+            .map(|finding| finding.effective_severity)
+            .collect();
+        assert_eq!(
+            severities,
+            [
+                Some(EffectiveSeverity::Warn),
+                Some(EffectiveSeverity::Warn),
+                Some(EffectiveSeverity::Error),
+                Some(EffectiveSeverity::Error),
+                Some(EffectiveSeverity::Warn),
+            ]
+        );
     }
 
     #[test]
