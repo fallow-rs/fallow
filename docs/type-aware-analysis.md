@@ -82,6 +82,19 @@ module `src/backend.mjs` keeps the 7.0 contract for the semantic code:
 The 7.1 AST also differs: a heritage clause holds a `TypeReference` with
 `typeName` instead of an `ExpressionWithTypeArguments` with `expression`.
 
+TypeScript 7.1.0-beta makes two more changes, and `src/backend.mjs` handles
+both:
+
+- The API moves from `typescript/unstable/sync` to `typescript/sync` (also
+  `ast/is` and `fs`). The sidecar imports the new path first and falls back to
+  `unstable/`, which TypeScript 7.0 and tsrs still use.
+- Compiler options move from `project.compilerOptions` to
+  `project.parsedCommandLine.options`. Read them through
+  `projectCompilerOptions`.
+
+The beta also drops the deprecated `openProject` request field. Use
+`openProjects`.
+
 When the default backend moves to TypeScript 7.1, port the semantic code to
 the 7.1 snapshot API and delete the 7.0 emulation in `src/backend.mjs` in the
 same change.

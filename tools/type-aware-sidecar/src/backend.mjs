@@ -6,9 +6,19 @@ import { selectBackend } from "./backend-selection.mjs";
 export const BACKEND = selectBackend();
 
 const { version: resolvedVersion } = await import(BACKEND.package);
-export const sync = await import(`${BACKEND.package}/unstable/sync`);
-export const ast = await import(`${BACKEND.package}/unstable/ast/is`);
-const { serverFS } = await import(`${BACKEND.package}/unstable/fs`);
+// TypeScript 7.1 serves the API at `typescript/sync`. TypeScript 7.0 and its
+// 7.1 dev builds serve it at `typescript/unstable/sync`.
+const importApi = async (subpath) => {
+  try {
+    return await import(`${BACKEND.package}/${subpath}`);
+  } catch (error) {
+    if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error;
+    return import(`${BACKEND.package}/unstable/${subpath}`);
+  }
+};
+export const sync = await importApi("sync");
+export const ast = await importApi("ast/is");
+const { serverFS } = await importApi("fs");
 
 if (resolvedVersion !== BACKEND.version) {
   throw new Error(
@@ -149,3 +159,10 @@ export const projectConfigFileName = (project) =>
  * TypeReference (`typeName`) in `implements` and interface `extends` clauses.
  */
 export const heritageTypeName = (heritageType) => heritageType.expression ?? heritageType.typeName;
+
+/**
+ * Compiler options of a project. TypeScript 7.1 beta moves them from
+ * `compilerOptions` to `parsedCommandLine.options`.
+ */
+export const projectCompilerOptions = (project) =>
+  project.compilerOptions ?? project.parsedCommandLine?.options ?? {};

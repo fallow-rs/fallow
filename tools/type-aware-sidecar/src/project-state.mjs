@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { ast, isInferredProject, projectConfigFileName, sync } from "./backend.mjs";
+import {
+  ast,
+  isInferredProject,
+  projectCompilerOptions,
+  projectConfigFileName,
+  sync,
+} from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
 import { projectSourceFiles, relativePath } from "./semantic-identity.mjs";
@@ -251,7 +257,7 @@ const configDocumentClosure = (root, configFileName, seen = new Set()) => {
 const effectiveProjectConfigHash = (root, project) => {
   const effective = {
     config: configPath(root, project),
-    compiler_options: normalizedConfigValue(root, project.compilerOptions),
+    compiler_options: normalizedConfigValue(root, projectCompilerOptions(project)),
     config_document: configDocumentClosure(root, projectConfigFileName(project)),
   };
   return `sha256:${createHash("sha256").update(JSON.stringify(effective)).digest("hex")}`;

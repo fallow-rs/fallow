@@ -47,7 +47,7 @@ const inspectProject = (files) => {
     );
     Object.entries(files).forEach(([fileName, contents]) => write(root, fileName, contents));
     const configFileName = path.join(root, "tsconfig.json");
-    snapshot = api.updateSnapshot({ openProject: configFileName });
+    snapshot = api.updateSnapshot({ openProjects: [configFileName] });
     const project = snapshot.getProject(configFileName);
     assert.ok(project, "expected TypeScript-Go to open the fixture project");
     const state = projectState(root, project, "explicit");

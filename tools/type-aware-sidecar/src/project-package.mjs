@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { projectConfigFileName } from "./backend.mjs";
+import { projectCompilerOptions, projectConfigFileName } from "./backend.mjs";
 
 const pathWithin = (root, candidate) =>
   candidate === root || candidate.startsWith(`${root}${path.sep}`);
@@ -27,4 +27,11 @@ export const projectPackage = (root, project) => {
     current = path.dirname(current);
   }
   return { root: normalizedRoot, json: {} };
+};
+
+/** The `compilerOptions.paths` targets that map the package name. */
+export const packagePathTargets = (project, packageJson) => {
+  const packageName = packageJson.name;
+  if (typeof packageName !== "string") return [];
+  return projectCompilerOptions(project).paths?.[packageName] ?? [];
 };

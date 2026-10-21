@@ -14,6 +14,7 @@ import {
   READ_FROM_DISK,
   createApi as createBackendApi,
   isInferredProject,
+  projectCompilerOptions,
   sync,
 } from "./backend.mjs";
 
@@ -33,7 +34,7 @@ const hasNoCheckPragma = (text) => NO_CHECK_PRAGMA.test(LEADING_COMMENTS.exec(te
 const isChecked = (project, absolutePath, text) => {
   if (hasNoCheckPragma(text)) return false;
   if (!JAVASCRIPT_EXTENSIONS.has(path.extname(absolutePath).toLowerCase())) return true;
-  return project.compilerOptions?.checkJs === true;
+  return projectCompilerOptions(project).checkJs === true;
 };
 
 const errorKey = (diagnostic) => `${diagnostic.code}\u0000${diagnostic.text}`;

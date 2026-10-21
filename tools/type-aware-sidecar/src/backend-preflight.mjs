@@ -10,7 +10,7 @@ const INSTALL_HINT =
 
 /**
  * Verify that module resolution hands the sidecar a typescript install that
- * provides the `typescript/unstable/sync` backend entry point.
+ * provides the `typescript` sync API backend entry point.
  *
  * The semantic modules import that entry point statically, so an incompatible
  * resolution (for example a typescript 6 hoisted into an ancestor
@@ -49,7 +49,7 @@ export const assertTypescriptBackendResolvable = (
   }
   throw new Error(
     `resolved typescript ${version} from ${path.dirname(manifestPath)}, which lacks the ` +
-      `typescript/unstable/sync backend; fallow-type-aware needs typescript ${BACKEND_VERSION}; ` +
+      `typescript sync API backend; fallow-type-aware needs typescript ${BACKEND_VERSION}; ` +
       INSTALL_HINT,
   );
 };

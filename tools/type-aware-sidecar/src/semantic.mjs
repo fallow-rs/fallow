@@ -5,7 +5,7 @@ import path from "node:path";
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
-import { projectPackage } from "./project-package.mjs";
+import { packagePathTargets, projectPackage } from "./project-package.mjs";
 import { projectResult, projectState } from "./project-state.mjs";
 import {
   declarationName,
@@ -1362,12 +1362,6 @@ const addPathEntry = (entries, sourceFiles, roots, target) => {
       addEntry(entries, sourceFiles.get(canonicalFileIdentity(candidate))),
     ),
   );
-};
-
-const packagePathTargets = (project, packageJson) => {
-  const packageName = packageJson.name;
-  if (typeof packageName !== "string") return [];
-  return project.compilerOptions.paths?.[packageName] ?? [];
 };
 
 const discoverEntryPoints = (root, project, requested) => {
