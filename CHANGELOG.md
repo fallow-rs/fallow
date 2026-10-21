@@ -148,6 +148,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.vite-hooks/` scripts are read like `package.json` scripts and hooks.
   A `vi.mock` call through `vite-plus/test` now counts as a Vitest mock.
 
+- **New workspace diagnostic `workspace-pattern-dir-missing`.** A positive
+  workspace pattern whose directory does not exist (for example `vite` and
+  `vite/packages/*` for a repository that CI clones into the workspace) now
+  gets a diagnostic with the pattern and the declaring file. The packages in
+  that directory can use catalog entries, so the run does not report
+  `unused-catalog-entries` while such a pattern exists. One such pattern turns
+  off this check for all catalogs, also when the directory does not exist yet
+  (for example `packages/*` in a template). The diagnostic is a stderr
+  warning with `degrades_analysis: true`. To get the check back, create the
+  directory before the run or remove the pattern. A directory that exists but
+  holds no package does not turn off the check. Unresolved catalog references
+  and empty catalog groups are still reported.
+- **New workspace diagnostic `nested-project-root`.** A directory with its own
+  `package.json` and `pnpm-workspace.yaml` that no root workspace pattern
+  declares is an independent pnpm project. Fallow now analyzes it as a
+  workspace and reports this information-only diagnostic.
+
 ### Changed
 
 - **The `fallow` skill shows the review loop that fallow checks.** One short
@@ -186,6 +203,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only in metrics that the finding does not exceed stays `inherited`, as
   before. The JSON fields do not change. Cached base snapshots of earlier
   versions are not reused.
+
+- **`fallow audit` no longer fails on a complexity finding in a test file.**
+  A long `it(...)` or `describe(...)` callback often exceeds the cognitive
+  threshold. Such a finding now has `effective_severity: warn` and the new
+  field `gate_exemption: "test-file"`. It stays in the report with its
+  attribution, and the verdict is at least `warn`, with exit code 0. This
+  applies to `--gate new-only` and `--gate all`. SARIF reports the finding at
+  level `warning` with `gate_exemption` in the property bag. The human,
+  markdown and compact views list these findings under "Test files, not
+  gated".
+
+  The shared test-path rule decides what a test file is: `*.test.*`,
+  `*.spec.*`, `*.e2e.*`, files below `__tests__/`, `test/`, `tests/` or `e2e/`,
+  mocks and fixtures. `fallow health` does not change: it still reports these
+  findings at the severity of their `complexity-*` rule.
+
+- **The GitHub Action requests the branded token only when it posts.** The
+  `Fallow branded token` step now runs only on a `pull_request` event with
+  `comment: true` or `review-comments: true`. Other runs do not request an
+  OIDC token. The `branded-token` input now defaults to `auto`. `auto` posts
+  as the Fallow app when the workflow grants `id-token: write`, and it falls
+  back to `github-token` without a log line when the permission is missing.
+  An explicit `branded-token: true` keeps one short fallback line. No line
+  asks the workflow for more permissions. `false` behaves as before.
 
 ### Fixed
 
@@ -613,6 +654,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coverage input, and the code did not grow. Such a finding is now `worsened`
   or `inherited`. A CRAP score from estimated coverage also no longer makes a
   matched finding introduced; it can make it `worsened`.
+
+- **A `package.json` with no name and no dependencies is not an undeclared
+  workspace.** A file such as `bench/package.json` with only
+  `{"type":"module"}` sets the module type of the scripts next to it. It no
+  longer gets `undeclared-workspace`.
+- **A nested independent pnpm project owns its files and dependencies.** Its
+  `package.json` now activates framework plugins and declares the dependencies
+  of its files, without a `workspaces.patterns` entry in the fallow config. Its
+  directories are not reported as undeclared workspaces, and its `catalog:`
+  references are not checked against the root catalog.
+- **pnpm overrides take precedence over a `catalog:` reference.** pnpm applies
+  an override before it resolves `catalog:`. A `package.json` reference to a
+  package that an override key with no version selector replaces (`vite`, or
+  `<consumer>>vite`) is no longer an unresolved catalog reference. A key with a
+  version selector (`vite@^5`) does not replace the reference, because pnpm
+  fails the install for it.
+- **`audit --gate new-only` does not gate a finding class that the base could
+  not check.** The base snapshot holds committed files only, so a gitignored
+  workspace member (for example a `vite/` clone that CI makes) is missing in
+  the base. The base then does not report unused catalog entries, and the head
+  reports them. These head findings are now inherited, not introduced, so they
+  no longer change the verdict. A new unused catalog entry in such a run is
+  also inherited. The audit base snapshot cache moves to version 16.
 
 ### Performance
 
