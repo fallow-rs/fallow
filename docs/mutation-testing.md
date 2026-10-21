@@ -467,10 +467,10 @@ tests detect the mutant.
   first run of each worker starts without a reserve. A budget that is
   shorter than one wave of runs can still end before any retry.
   For a survivor, the reserve adds to its measured run time the dry-run
-  time that the other tests of its files add to its retry. A timeout reserves twice its run time. The control run
-  that confirms a kill by a new test is not in the reserve. When no time
-  is left for it, the retry gets no result and the mutant keeps its first
-  status.
+  time that the other tests of its files add to its retry. A timeout
+  reserves twice its run time. The control run that confirms a kill by a
+  new test is not in the reserve. When no time is left for it, the retry
+  gets no result and the mutant keeps its first status.
 - A run that started before the deadline continues until its watchdog
   fires, so the command can end after the deadline. For a mutant run, the
   overrun is at most `timeout_ms` plus the setup time plus 2 seconds. For

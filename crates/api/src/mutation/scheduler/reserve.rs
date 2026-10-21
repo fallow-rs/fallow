@@ -46,7 +46,6 @@ impl PhaseDeadline {
     /// Runs one job and adds its wall time and status to the reserve, when
     /// the phase has one. `retry_extra_ms` is the extra time of the retry of
     /// a survivor: its retry can run more tests than the first run.
-    /// retry can run more tests than the first run.
     pub(super) fn timed<E>(
         deadline: Option<&Self>,
         retry_extra_ms: u64,
