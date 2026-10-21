@@ -847,8 +847,16 @@ export. Disabled-rule suppressions must not become stale merely because their
 detector did not run.
 
 Dependency credit must distinguish source, scripts, configuration, required
-installed peers, optional peers and runtime-provided built-ins. Dependency
-ignores suppress findings without fabricating resolution edges. Raw-specifier
+installed peers, optional peers and runtime-provided built-ins. The
+peer-dependency closure starts from the imported packages and also from the
+packages that a script runs, that a plugin config names, or that a plugin
+credits as tooling with evidence of use. Plugin tooling without evidence and
+catalogue tooling do not start a closure. The dependency trace reads the same
+seeds through `TraceProvenance::peer_seeds`, so `peer_of` names the same
+hosts. A duplicate-export group drops an aliased-import adapter: a module that
+imports `X` under another local name from a group member and declares its own
+`X` derives its export from that member, as a re-export chain member does.
+Dependency ignores suppress findings without fabricating resolution edges. Raw-specifier
 unresolved-import ignores are not filesystem globs. A relative import whose
 target is missing and ignored by a repository ignore file is build output, not
 an unresolved import; this check reads no global git excludes file and applies

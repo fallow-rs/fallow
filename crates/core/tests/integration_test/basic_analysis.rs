@@ -387,6 +387,25 @@ fn duplicate_exports_detected() {
     );
 }
 
+/// `src/gitlab/auth.ts` imports `configureAuth` under an alias from
+/// `src/ci/auth.ts` and exports its own `configureAuth`. `src/js/package.ts`
+/// imports `Package` under an alias, star-exports the same module and shadows
+/// `Package`. Both are adapters of the origin, not duplicates. The control
+/// pair in `src/control/` exports `format` independently and stays flagged.
+#[test]
+fn duplicate_export_adapter_wrapper_is_not_flagged() {
+    let root = fixture_path("duplicate-export-adapter-wrapper");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let dup_names: Vec<&str> = results
+        .duplicate_exports
+        .iter()
+        .map(|d| d.export.export_name.as_str())
+        .collect();
+    assert_eq!(dup_names, vec!["format"], "found: {dup_names:?}");
+}
+
 #[test]
 fn default_export_flagged_when_not_imported() {
     let root = fixture_path("default-export");
