@@ -9,7 +9,9 @@
 // pull_request workflow for a pull request that conflicts with its base, so
 // with --pr the wait also stops when GitHub reports a conflict. With
 // --commit and --follow-main, a cancelled run moves the wait to the newest
-// commit of origin/main when that commit contains the given commit.
+// commit of origin/main when that commit contains the given commit. With
+// --pr, a failed check that also fails on main gets its own exit code, so a
+// ship step can wait for the fix on main instead of a fix on the branch.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -52,6 +54,10 @@ const FOLLOW_REF = `${FOLLOW_REMOTE}/${FOLLOW_BRANCH}`;
 // CI run, so the --timeout budget usually stops the wait first.
 const MAX_FOLLOW_HOPS = 10;
 const GIT_NOT_ANCESTOR_EXIT = 1;
+// A failed check of a pull request is compared with the newest completed run
+// of the same check name on these newest commits of main. The newest commit
+// can still run, so older commits are a fallback.
+const MAIN_COMMIT_LIMIT = 10;
 const SHORT_SHA_LENGTH = 12;
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -127,7 +133,15 @@ Exit codes: 0 when all checks pass or skip, 1 when a check fails or is
 cancelled, or when --follow-main reaches the maximum count of moves, 2 for
 invalid input, failed reads for the full --error-window, a timeout, a failed read
 of ${FOLLOW_REF}, or an ${FOLLOW_REF} that does not contain the given commit,
-3 when the pull request conflicts with its base branch.`;
+3 when the pull request conflicts with its base branch, 4 when each failed
+check of the pull request also fails on ${FOLLOW_BRANCH} (--pr only).
+
+With --pr, the script compares each failed check with the newest completed
+run of the same check name on the newest ${MAIN_COMMIT_LIMIT} commits of ${FOLLOW_BRANCH}. A check that
+also fails on ${FOLLOW_BRANCH} gets the line "FAIL (also on ${FOLLOW_BRANCH} <sha>)". When all failed
+checks fail on ${FOLLOW_BRANCH} too, the exit code is 4: wait for the fix on ${FOLLOW_BRANCH}, merge
+${FOLLOW_BRANCH} into the branch, push, and wait again. A cancelled check, or a failed
+check that ${FOLLOW_BRANCH} does not have, keeps exit code 1.`;
 
 const formatSeconds = (ms) => {
   const seconds = Math.round(ms / SECOND);
@@ -667,23 +681,33 @@ const ghRunMetadataReader = () => {
 };
 
 /**
- * Turn the result of a `gh run list` run into `{ ok: true, checks }` or
- * `{ ok: false, error }`. Each workflow run becomes one check.
+ * Turn the result of a `gh` run with JSON output into `{ ok: true, data }` with the parsed
+ * JSON, or `{ ok: false, error }`.
  */
-export const parseGhRuns = ({ error, status, stdout, stderr }) => {
+const parseGhApi = ({ error, status, stdout, stderr }) => {
   if (error) {
     return { ok: false, error: error.message };
   }
   if (status !== 0) {
     return { ok: false, error: stderr.trim() || `gh exited with ${status}` };
   }
-  let runs;
   try {
-    runs = JSON.parse(stdout);
+    return { ok: true, data: JSON.parse(stdout) };
   } catch (parseError) {
     return { ok: false, error: `gh printed invalid JSON: ${parseError.message}` };
   }
-  const checks = runs.map(({ workflowName, status: runStatus, conclusion, url }) => ({
+};
+
+/**
+ * Turn the result of a `gh run list` run into `{ ok: true, checks }` or
+ * `{ ok: false, error }`. Each workflow run becomes one check.
+ */
+export const parseGhRuns = (result) => {
+  const read = parseGhApi(result);
+  if (!read.ok) {
+    return read;
+  }
+  const checks = read.data.map(({ workflowName, status: runStatus, conclusion, url }) => ({
     name: workflowName,
     bucket: runStatus === "completed" ? (RUN_BUCKETS.get(conclusion) ?? "fail") : "pending",
     link: url,
@@ -695,18 +719,9 @@ export const parseGhRuns = ({ error, status, stdout, stderr }) => {
  * Turn the result of a `gh pr view --json mergeable` run into
  * `{ ok: true, mergeable }` or `{ ok: false, error }`.
  */
-export const parseGhMergeable = ({ error, status, stdout, stderr }) => {
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-  if (status !== 0) {
-    return { ok: false, error: stderr.trim() || `gh exited with ${status}` };
-  }
-  try {
-    return { ok: true, mergeable: JSON.parse(stdout).mergeable };
-  } catch (parseError) {
-    return { ok: false, error: `gh printed invalid JSON: ${parseError.message}` };
-  }
+export const parseGhMergeable = (result) => {
+  const read = parseGhApi(result);
+  return read.ok ? { ok: true, mergeable: read.data.mergeable } : read;
 };
 
 /** Read the mergeable state of `pr` with `gh pr view`. */
@@ -926,6 +941,113 @@ const parseOptions = (argv) => {
   };
 };
 
+/** The SHAs of a `gh api .../commits` result, newest first. */
+const parseGhCommits = (result) => {
+  const read = parseGhApi(result);
+  if (!read.ok) {
+    return read;
+  }
+  const commits = read.data;
+  if (!Array.isArray(commits) || commits.some((commit) => !FULL_SHA_PATTERN.test(commit?.sha))) {
+    return { ok: false, error: "gh printed an invalid commit list" };
+  }
+  return { ok: true, shas: commits.map(({ sha }) => sha) };
+};
+
+/** The completed runs of `name` in a `gh api .../check-runs` result, as checks. */
+const parseGhCheckRuns = (result, name) => {
+  const read = parseGhApi(result);
+  if (!read.ok) {
+    return read;
+  }
+  const runs = read.data?.check_runs;
+  if (!Array.isArray(runs)) {
+    return { ok: false, error: "gh printed invalid check runs" };
+  }
+  const checks = runs
+    .filter((run) => run?.name === name && run.status === "completed")
+    .map(({ conclusion, html_url: link }) => ({
+      name,
+      bucket: RUN_BUCKETS.get(conclusion) ?? "fail",
+      link,
+    }));
+  return { ok: true, checks };
+};
+
+const ghApi = (endpoint) => spawnSync("gh", ["api", endpoint], { encoding: "utf8" });
+
+/**
+ * The readers of main for `compareWithMain`. Without --repo, gh fills in the
+ * `{owner}/{repo}` placeholder from the repository of the working directory.
+ */
+const ghMainReaders = ({ repo }, api = ghApi) => {
+  const base = `repos/${repo ?? "{owner}/{repo}"}`;
+  return {
+    readMainCommits: () =>
+      parseGhCommits(api(`${base}/commits?sha=${FOLLOW_BRANCH}&per_page=${MAIN_COMMIT_LIMIT}`)),
+    readMainChecks: (sha, name) =>
+      parseGhCheckRuns(
+        api(
+          `${base}/commits/${sha}/check-runs?check_name=${encodeURIComponent(name)}&filter=latest&per_page=100`,
+        ),
+        name,
+      ),
+  };
+};
+
+/**
+ * The newest of `shas` with a completed run of `name`, when all its completed
+ * runs of `name` fail, else null. Returns `{ ok: true, sha }` or
+ * `{ ok: false, error }`.
+ */
+const mainFailure = (name, shas, readMainChecks) => {
+  for (const sha of shas) {
+    const read = readMainChecks(sha, name);
+    if (!read.ok) {
+      return read;
+    }
+    if (read.checks.length > 0) {
+      return { ok: true, sha: read.checks.every(({ bucket }) => bucket === "fail") ? sha : null };
+    }
+  }
+  return { ok: true, sha: null };
+};
+
+/**
+ * Compare the failed checks of a failed pull request wait with main.
+ *
+ * `readMainCommits()` returns `{ ok: true, shas }`, newest first.
+ * `readMainChecks(sha, name)` returns the completed runs of `name` on `sha`
+ * as `{ ok: true, checks }`. A check with the bucket `fail` gets `main` (a
+ * SHA) when the same check fails on main. The result has the status
+ * `shared-with-main` when every failed or cancelled check has `main`. A
+ * failed read keeps the result and adds `mainError`.
+ */
+const compareWithMain = (result, { readMainCommits, readMainChecks }) => {
+  if (result.status !== "fail") {
+    return result;
+  }
+  const commits = readMainCommits();
+  if (!commits.ok) {
+    return { ...result, mainError: commits.error };
+  }
+  const checks = [];
+  for (const check of result.checks) {
+    const failure =
+      check.bucket === "fail"
+        ? mainFailure(check.name, commits.shas, readMainChecks)
+        : { ok: true, sha: null };
+    if (!failure.ok) {
+      return { ...result, mainError: failure.error };
+    }
+    checks.push(failure.sha === null ? check : { ...check, main: failure.sha });
+  }
+  const shared = checks
+    .filter(({ bucket }) => FAILED_BUCKETS.has(bucket))
+    .every(({ main }) => main !== undefined);
+  return { ...result, checks, status: shared ? "shared-with-main" : "fail" };
+};
+
 const EXIT_CODES = {
   pass: 0,
   settled: 0,
@@ -936,6 +1058,7 @@ const EXIT_CODES = {
   "head-error": 2,
   diverged: 2,
   conflict: 3,
+  "shared-with-main": 4,
 };
 
 /**
@@ -952,9 +1075,11 @@ export const reportChecks = (
     maxHops = MAX_FOLLOW_HOPS,
     readErrors = 0,
     errorMs = 0,
+    mainError = null,
   },
   { label, minChecks, settleMs = SETTLE_MS, commit = null, followMain: following = false },
   log = console.log,
+  warn = console.error,
 ) => {
   const summary = checks.length === 0 ? "no checks" : bucketSummary(checks);
   const settleMinutes = settleMs / MINUTE;
@@ -965,6 +1090,7 @@ export const reportChecks = (
         ? `${label}: all ${checks.length} runs passed, and no run started or changed for ${settleMinutes} minutes (${summary}).`
         : `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMinutes} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
+    "shared-with-main": `${label}: checks failed, and each failed check also fails on ${FOLLOW_BRANCH} (${summary}). Wait for the fix on ${FOLLOW_BRANCH}, merge ${FOLLOW_BRANCH} into the branch, push, and wait again.`,
     timeout:
       minChecks === null
         ? `${label}: timed out with ${checks.length} checks (${summary}).`
@@ -977,7 +1103,14 @@ export const reportChecks = (
   }[status];
   log(headline);
   for (const check of checks.filter(({ bucket }) => FAILED_BUCKETS.has(bucket))) {
-    log(`  ${check.bucket.toUpperCase()}: ${check.name} ${check.link ?? ""}`.trimEnd());
+    const also =
+      check.main === undefined ? "" : ` (also on ${FOLLOW_BRANCH} ${shortSha(check.main)})`;
+    log(`  ${check.bucket.toUpperCase()}${also}: ${check.name} ${check.link ?? ""}`.trimEnd());
+  }
+  if (mainError !== null) {
+    warn(
+      `Read of the ${FOLLOW_BRANCH} checks failed, so no check counts as shared with ${FOLLOW_BRANCH}: ${mainError}`,
+    );
   }
   if (!following && commit !== null && checks.some(({ bucket }) => bucket === "cancel")) {
     log(CANCELLED_COMMIT_HINT);
@@ -1026,7 +1159,7 @@ const main = async () => {
     readMergeable: ghMergeableReader(options),
     settleMs: SETTLE_MS,
   });
-  return reportChecks(result, options);
+  return reportChecks(compareWithMain(result, ghMainReaders(options)), options);
 };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
