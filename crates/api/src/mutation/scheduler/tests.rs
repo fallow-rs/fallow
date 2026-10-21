@@ -1365,6 +1365,42 @@ fn an_ended_time_budget_skips_the_timeout_retry_and_keeps_timeout() {
 }
 
 #[test]
+fn a_time_budget_keeps_time_to_confirm_the_survivors_of_the_first_pass() {
+    const IDS: [&str; 8] = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"];
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            hits: BTreeMap::from([(tid("t1"), IDS.iter().map(|id| (*id).to_owned()).collect())]),
+            ..standard_dry()
+        },
+        |_, run| {
+            std::thread::sleep(Duration::from_millis(100));
+            Ok(run_result(run, RunStatus::Survived, None))
+        },
+    ));
+    let mut config = config(1);
+    // Without a reserve, the first pass fills this budget with about six
+    // runs, and no survivor gets its confirmation.
+    config.deadline = Some(Instant::now() + Duration::from_millis(550));
+    let outcome = run_schedule(&spawner, &plan(&IDS), &config).expect("run");
+    assert!(
+        outcome.unretried.is_empty(),
+        "each survivor of the first pass gets its confirmation: {:?}",
+        outcome.unretried
+    );
+    let confirmed = IDS
+        .iter()
+        .filter(|id| outcome.results[**id].status == MutantStatus::Survived)
+        .inspect(|id| assert!(outcome.results[**id].retried, "{id} is confirmed"))
+        .count();
+    assert!(confirmed > 0, "the run confirms at least one survivor");
+    assert_eq!(
+        status(&outcome, "m8"),
+        MutantStatus::Pending,
+        "the tail of the plan stays pending"
+    );
+}
+
+#[test]
 fn a_dry_run_hit_on_a_statically_unreached_mutant_runs_it_and_reports_the_miss() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
