@@ -664,6 +664,8 @@ mod pkg_utils_plugin;
 mod railway_plugin;
 #[path = "integration_test/rstest_plugin.rs"]
 mod rstest_plugin;
+#[path = "integration_test/sanity_plugin.rs"]
+mod sanity_plugin;
 #[path = "integration_test/serverless_framework_plugin.rs"]
 mod serverless_framework_plugin;
 #[path = "integration_test/textlint_plugin.rs"]
