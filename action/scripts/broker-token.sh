@@ -22,14 +22,28 @@ record_outcome() {
 
 emit_fallback() {
   echo "fallow: posting unbranded via GITHUB_TOKEN ($1)" >&2
+  fallback_quietly "$1"
+}
+
+fallback_quietly() {
   echo "branded=false" >>"$GITHUB_OUTPUT"
   record_outcome false "$1"
   exit 0
 }
 
-[ "${BRANDED_TOKEN:-true}" = "false" ] && emit_fallback "branded token disabled"
-[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || emit_fallback "no id-token permission (add 'permissions: id-token: write')"
-[ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || emit_fallback "no id-token permission"
+# A missing id-token permission is the normal state of a workflow that never
+# asked for branded posting. Only an explicit `branded-token: true` names it,
+# and no line asks the workflow for more permissions.
+no_id_token() {
+  if [ "${BRANDED_TOKEN:-auto}" = "true" ]; then
+    emit_fallback "no id-token permission"
+  fi
+  fallback_quietly "no id-token permission"
+}
+
+[ "${BRANDED_TOKEN:-auto}" = "false" ] && emit_fallback "branded token disabled"
+[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || no_id_token
+[ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || no_id_token
 command -v jq >/dev/null 2>&1 || emit_fallback "jq unavailable"
 
 broker="${BROKER_URL:-https://api.fallow.cloud}"
