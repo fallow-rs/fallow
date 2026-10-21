@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use colored::Colorize as _;
+use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
@@ -538,11 +539,22 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         if named.is_some()
             && let Some(message) = message
         {
+            // The fixed reason of a control-run failure is longer than the
+            // line budget, so the test error gets a line of its own.
+            let (reason, error) =
+                split_control_run_failure(message).map_or((message, None), |(r, e)| (r, Some(e)));
             let _ = writeln!(
                 footer,
                 "  Message: {}",
-                shorten(&collapse(message), MAX_BASELINE_MESSAGE_CHARS)
+                shorten(&collapse(reason), MAX_BASELINE_MESSAGE_CHARS)
             );
+            if let Some(error) = error {
+                let _ = writeln!(
+                    footer,
+                    "  Error: {}",
+                    shorten(&collapse(error), MAX_BASELINE_MESSAGE_CHARS)
+                );
+            }
         }
     }
     for error in &report.errors {

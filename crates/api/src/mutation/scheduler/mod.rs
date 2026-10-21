@@ -23,7 +23,7 @@ use super::{MutationProgress, MutationProgressSink};
 use reserve::PhaseDeadline;
 use retry_set::{confirmation_tests, fastest_first, retry_extra_ms, whole_files};
 
-mod control;
+pub(super) mod control;
 mod retry_set;
 
 use control::{

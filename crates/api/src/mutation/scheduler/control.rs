@@ -137,6 +137,19 @@ pub(super) const CONFIRMATION_RUN_FAILURE: &str = "the test fails with no active
 /// companion.
 const MAX_TEST_ERROR_BYTES: usize = 8 * 1024;
 
+/// Splits the message of a control-run baseline failure into its fixed
+/// reason and the test error after it. Gives `None` for another message or
+/// for a reason with no test error.
+#[must_use]
+pub fn split_control_run_failure(message: &str) -> Option<(&str, &str)> {
+    [CONTROL_RUN_FAILURE, CONFIRMATION_RUN_FAILURE]
+        .into_iter()
+        .find_map(|reason| {
+            let error = message.strip_prefix(reason)?.strip_prefix(": ")?;
+            Some((reason, error))
+        })
+}
+
 /// The first line of `message`.
 pub(super) fn first_line(message: &str) -> &str {
     message.lines().next().unwrap_or_default()
@@ -243,5 +256,35 @@ impl ControlMemo {
             .lock()
             .map(|failed| failed.clone())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_control_run_failure_message_splits_into_its_reason_and_the_test_error() {
+        let error = "AssertionError: expected 1 to be 2\n    at test/a.test.ts:3:5";
+        let test = FailedTest {
+            test_id: "test/a.test.ts::adds".to_owned(),
+            error: Some(error.to_owned()),
+        };
+        for reason in [CONTROL_RUN_FAILURE, CONFIRMATION_RUN_FAILURE] {
+            let message = test.message(reason);
+            assert_eq!(split_control_run_failure(&message), Some((reason, error)));
+        }
+        let no_error = FailedTest {
+            error: None,
+            ..test
+        };
+        assert_eq!(
+            split_control_run_failure(&no_error.message(CONTROL_RUN_FAILURE)),
+            None
+        );
+        assert_eq!(
+            split_control_run_failure("Cannot find module './setup'"),
+            None
+        );
     }
 }
