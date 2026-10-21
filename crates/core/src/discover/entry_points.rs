@@ -161,7 +161,7 @@ impl EntryPointDiscovery {
 /// trying source extensions as fallback when the exact path doesn't exist.
 /// Also handles exports map targets in output directories (e.g., `./dist/utils.js`)
 /// by trying to map back to the source file (e.g., `./src/utils.ts`).
-fn resolve_entry_path_with_tracking(
+pub fn resolve_entry_path_with_tracking(
     base: &Path,
     entry: &str,
     canonical_root: &Path,

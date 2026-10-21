@@ -8280,7 +8280,7 @@
     ]
   },
   "plugins": {
-    "count": 145,
+    "count": 146,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8289,6 +8289,7 @@
       "remix",
       "astro",
       "browser-extension",
+      "github-action",
       "wxt",
       "angular",
       "react-router",

@@ -34,3 +34,32 @@ fn vitepress_docs_scaffold_is_discovered_and_strict() {
         "unused VitePress theme helper should still be reported, found: {unused_exports:?}"
     );
 }
+
+#[test]
+fn vitepress_nested_vite_block_credits_its_dependencies() {
+    let root = fixture_path("vitepress-nested-vite-block");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dependencies: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    for credited in [
+        "mermaid",
+        "nested-only",
+        "excluded-dep",
+        "ssr-dep",
+        "ssr-external-dep",
+    ] {
+        assert!(
+            !unused_dependencies.contains(&credited),
+            "{credited} is named in the VitePress vite block, unused: {unused_dependencies:?}"
+        );
+    }
+    assert!(
+        unused_dependencies.contains(&"really-unused"),
+        "the control dependency must stay unused, unused: {unused_dependencies:?}"
+    );
+}

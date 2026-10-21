@@ -105,6 +105,8 @@ mod framework_convention_coverage_router;
 mod framework_convention_coverage_vitepress;
 #[path = "integration_test/frameworks.rs"]
 mod frameworks;
+#[path = "integration_test/github_action_manifest_entries.rs"]
+mod github_action_manifest_entries;
 #[path = "integration_test/graph_cache_transparency.rs"]
 mod graph_cache_transparency;
 #[path = "integration_test/graphql_imports.rs"]

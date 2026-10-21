@@ -2092,9 +2092,8 @@ fn credit_config_value(
 ///
 /// Both runners accept the bare name and the package it resolves to, so
 /// `testEnvironment: "jest-environment-jsdom"` and `environment: "jsdom"` select
-/// the same environment. Matching the literal short name only meant the fully
-/// qualified form, which the Jest docs use and projects copy, was treated as a
-/// third-party environment and missed its optional-peer credit.
+/// the same environment. A match on the short name only missed the fully
+/// qualified form that the Jest docs use, so that form lost its credit.
 fn canonical_test_environment(environment: &str) -> &str {
     environment
         .strip_prefix("jest-environment-")
@@ -2138,6 +2137,7 @@ mod expo_router;
 mod firebase;
 mod fumadocs;
 mod gatsby;
+mod github_action;
 mod graphql_codegen;
 mod hardhat;
 mod husky;

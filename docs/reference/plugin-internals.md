@@ -473,6 +473,27 @@ Scout runner loads by name (`test/scout/**/*playwright.config.ts` and
 `AsyncPlugin` gets `setup`, `start` and `stop` as used class members, because the platform calls them on the
 object that a plugin entry returns.
 
+## GitHub Action manifests
+
+The `github-action` plugin reads `action.yml` and `action.yaml` in the package
+root. It activates only when `runs.using` starts with `node`, so a composite or
+Docker action, such as the Fallow action, changes nothing. The `runs.pre`,
+`runs.main` and `runs.post` values go through the package entry resolver
+(`resolve_entry_path_with_tracking`), the same resolver as a `package.json`
+`main` field. The tsconfig output map, the output-directory-to-`src/` map and
+the source index fallback then apply. The plugin collects the skipped paths,
+so a missing target writes no warning. An action in a nested directory, such
+as `.github/actions/<name>/action.yml`, is not read.
+
+## VitePress `vite` block
+
+The `vitepress` plugin parses `.vitepress/config.*` and
+`.vitepress/config/index.*`, also below `docs/`. The `vite` key of the config
+object is a Vite config: `vite::credit_dependency_lists` credits its
+`optimizeDeps` and `ssr` lists with the prefix `["vite"]`, and its
+`resolve.alias` entries become path aliases. Imports in `<script setup>` of a
+Markdown page are not read.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:
