@@ -322,7 +322,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The `default` export of `postcss.config.*` is no longer reported as an
   unused export under `includeEntryExports`.** PostCSS reads that export, as
   Vite reads the default export of `vite.config.*`, which fallow already
-  credited.
+  credited. Thanks [@osazemeu](https://github.com/osazemeu) for the patch in
+  [#3694](https://github.com/fallow-rs/fallow/pull/3694).
 
 - **A Vitest `test.include` no longer makes bench files unused.** The bench
   files are entry points again when a config sets `test.include`. Fallow now
