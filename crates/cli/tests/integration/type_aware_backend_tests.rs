@@ -23,7 +23,9 @@ const TSRS_TARGET: bool = cfg!(any(
 ));
 
 fn tsrs_installed() -> bool {
-    let mut manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut manifest = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
     manifest.pop();
     manifest.pop();
     manifest.push("tools/type-aware-sidecar/node_modules/tsrs/package.json");
