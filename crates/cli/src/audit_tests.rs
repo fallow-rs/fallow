@@ -2354,13 +2354,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
             .collect(),
         health: std::iter::once((
             "complexity:src/a.ts:f".to_string(),
-            vec![fallow_api::audit_keys::ComplexityMetrics {
-                line: 3,
-                cyclomatic: 17,
-                cognitive: 16,
-                crap: Some(42.5),
-                line_count: 12,
-            }],
+            vec![sample_complexity_metrics()],
         ))
         .collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
@@ -2776,13 +2770,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         dead_code: std::iter::once("dead:a".to_string()).collect(),
         health: std::iter::once((
             "complexity:src/a.ts:f".to_string(),
-            vec![fallow_api::audit_keys::ComplexityMetrics {
-                line: 3,
-                cyclomatic: 17,
-                cognitive: 16,
-                crap: Some(42.5),
-                line_count: 12,
-            }],
+            vec![sample_complexity_metrics()],
         ))
         .collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
@@ -4742,4 +4730,18 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         "the run exits 1 on this gate, so the envelope must state it: {}",
         json["gate_outcomes"]
     );
+}
+
+/// Base complexity values with every field set, for cache round trips.
+fn sample_complexity_metrics() -> fallow_api::audit_keys::ComplexityMetrics {
+    fallow_api::audit_keys::ComplexityMetrics {
+        line: 3,
+        cyclomatic: 17,
+        cognitive: 16,
+        crap: Some(42.5),
+        line_count: 12,
+        exceeded: fallow_output::ExceededThreshold::CognitiveCrap,
+        severity: fallow_output::FindingSeverity::High,
+        crap_estimated: true,
+    }
 }

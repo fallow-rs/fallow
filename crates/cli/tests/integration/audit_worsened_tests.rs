@@ -3,6 +3,8 @@
 //!
 //! A worsened finding matches its base finding, is not introduced, and has a
 //! strictly higher measured value (cyclomatic, cognitive, CRAP or line count).
+//! Growth of a metric that the base finding already exceeds is worsened, unless
+//! it moves the finding to a higher severity tier.
 //! `--worsened warn` (the default) gives a `warn` verdict for it. `--worsened
 //! error` and `audit.worsened: "error"` count it like an introduced finding.
 
@@ -233,12 +235,52 @@ fn new_function_stays_introduced() {
 }
 
 #[test]
-fn growth_of_an_exceeded_metric_stays_introduced_and_shows_values() {
+fn growth_of_an_exceeded_metric_in_the_same_tier_is_worsened() {
+    let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 22, 2), CONFIG);
+    let run = audit(tmp.path(), &[]);
+    let finding = run.finding("work");
+    assert_eq!(finding["attribution"], "worsened", "{:#}", run.json);
+    assert_eq!(finding["introduced"], false);
+    let cyclomatic = finding["worsened_metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|metric| metric["metric"] == "cyclomatic")
+        .expect("cyclomatic grew");
+    assert_eq!(cyclomatic["base"], 21);
+    assert_eq!(cyclomatic["head"], 23);
+    assert_eq!(run.worsened_count(), 1);
+    assert_eq!(run.verdict(), "warn");
+    assert_eq!(run.code, 0);
+    let strict = audit(tmp.path(), &["--worsened", "error"]);
+    assert_eq!(strict.verdict(), "fail", "{:#}", strict.json);
+    assert_eq!(strict.code, 1);
+}
+
+#[test]
+fn worsened_off_keeps_growth_of_an_exceeded_metric_visible() {
+    let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 22, 2), CONFIG);
+    let run = audit(tmp.path(), &["--worsened", "off"]);
+    assert_eq!(
+        run.finding("work")["attribution"],
+        "worsened",
+        "{:#}",
+        run.json
+    );
+    assert_eq!(run.worsened_count(), 1);
+    assert_eq!(run.verdict(), "warn");
+    assert_eq!(run.code, 0);
+}
+
+#[test]
+fn growth_of_an_exceeded_metric_into_a_higher_tier_is_introduced() {
+    // Cognitive 20 to 25 reaches the `high` tier.
     let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 25, 2), CONFIG);
     let run = audit(tmp.path(), &[]);
     let finding = run.finding("work");
     assert_eq!(finding["attribution"], "introduced", "{:#}", run.json);
     assert_eq!(finding["introduced"], true);
+    assert_eq!(finding["severity"], "high");
     let cyclomatic = finding["worsened_metrics"]
         .as_array()
         .unwrap()
@@ -248,11 +290,7 @@ fn growth_of_an_exceeded_metric_stays_introduced_and_shows_values() {
     assert_eq!(cyclomatic["base"], 21);
     assert_eq!(cyclomatic["head"], 26);
     assert_eq!(run.worsened_count(), 0);
-    assert_eq!(
-        run.verdict(),
-        "fail",
-        "the 3.33 rule still gates in warn mode"
-    );
+    assert_eq!(run.verdict(), "fail");
 }
 
 #[test]

@@ -3681,7 +3681,7 @@
             "boolean",
             "null"
           ],
-          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, or when a metric that it exceeds has a higher\nvalue than in that base finding. A CRAP score from estimated coverage,\nor a CRAP score that the base finding does not have, is not a higher\nvalue."
+          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, when a grown metric exceeds a threshold that\nthe base finding did not exceed, or when the growth of an exceeded\nmetric moves it to a higher severity tier. A CRAP score from estimated\ncoverage, or a CRAP score that the base finding does not have, is not\ngrowth."
         },
         "attribution": {
           "anyOf": [
@@ -34377,7 +34377,7 @@
         {
           "type": "string",
           "const": "off",
-          "description": "No finding is worsened: a grown inherited finding stays inherited and\ndoes not change the verdict. This is the behavior before `worsened`\nexisted."
+          "description": "Growth only in metrics that the finding does not exceed stays\ninherited. Growth of an exceeded metric stays worsened and gives at\nleast `warn`."
         }
       ],
       "description": "Value of `audit.worsened`: how a worsened complexity finding affects the\n`fallow audit` verdict."
@@ -34387,12 +34387,12 @@
         {
           "type": "string",
           "const": "introduced",
-          "description": "No base finding matches, or a metric that the finding exceeds grew. A\nCRAP score from estimated coverage does not count as growth."
+          "description": "No base finding matches, or a grown metric now exceeds a threshold\nthat the base finding did not exceed, or the growth of an exceeded\nmetric moved the finding to a higher severity tier. A CRAP score from\nestimated coverage does not count as growth."
         },
         {
           "type": "string",
           "const": "worsened",
-          "description": "A base finding matches and a measured metric grew, but no metric that\nthe finding exceeds grew."
+          "description": "A base finding matches and a measured metric grew, but the finding is\nnot introduced. Growth of an exceeded metric in the same severity tier\nis worsened."
         },
         {
           "type": "string",

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime};
 
+use fallow_output::{ExceededThreshold, FindingSeverity};
 use fallow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
 };
@@ -33,7 +34,9 @@ use crate::error::emit_error;
 /// snapshot from a run without `--brief` holds an empty set that a brief run
 /// would read as "every head export is new". Version 14 added the line count
 /// of each complexity entry, which the worsened-finding check compares.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 14;
+/// Version 15 added the exceeded flags, the severity tier and the coverage
+/// source of each complexity entry, which the new-only attribution compares.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 15;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -99,6 +102,10 @@ pub(super) struct CachedComplexityFinding {
     pub(super) cognitive: u16,
     pub(super) crap: Option<f64>,
     pub(super) line_count: u32,
+    pub(super) exceeded: [bool; 3],
+    /// 0 for moderate, 1 for high, 2 for critical.
+    pub(super) severity: u8,
+    pub(super) crap_estimated: bool,
 }
 
 /// One file's branching totals in the cached snapshot. A named struct rather
@@ -217,6 +224,17 @@ fn sorted_complexity(baseline: &ComplexityBaseline) -> Vec<CachedComplexityFindi
                 cognitive: metrics.cognitive,
                 crap: metrics.crap,
                 line_count: metrics.line_count,
+                exceeded: [
+                    metrics.exceeded.includes_cyclomatic(),
+                    metrics.exceeded.includes_cognitive(),
+                    metrics.exceeded.includes_crap(),
+                ],
+                severity: match metrics.severity {
+                    FindingSeverity::Moderate => 0,
+                    FindingSeverity::High => 1,
+                    FindingSeverity::Critical => 2,
+                },
+                crap_estimated: metrics.crap_estimated,
             })
         })
         .collect();
@@ -236,6 +254,17 @@ fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> ComplexityBasel
                 cognitive: row.cognitive,
                 crap: row.crap,
                 line_count: row.line_count,
+                exceeded: ExceededThreshold::from_bools(
+                    row.exceeded[0],
+                    row.exceeded[1],
+                    row.exceeded[2],
+                ),
+                severity: match row.severity {
+                    0 => FindingSeverity::Moderate,
+                    1 => FindingSeverity::High,
+                    _ => FindingSeverity::Critical,
+                },
+                crap_estimated: row.crap_estimated,
             });
     }
     baseline

@@ -1882,7 +1882,7 @@ pub enum Command {
         /// comments and blank lines in the function.
         /// warn (default): the verdict is at least warn, and the run does not
         /// fail. error: a worsened finding counts like an introduced finding.
-        /// off: no finding is worsened, and the verdict does not change.
+        /// off: only growth of an exceeded metric stays worsened (warn).
         /// Overrides `audit.worsened` in config. Has no effect with
         /// `--gate all`, which counts every finding.
         #[arg(long, value_enum)]

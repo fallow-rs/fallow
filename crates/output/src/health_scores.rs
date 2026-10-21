@@ -732,7 +732,7 @@ pub struct ComponentRollup {
 }
 
 /// Which complexity threshold was exceeded.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ExceededThreshold {

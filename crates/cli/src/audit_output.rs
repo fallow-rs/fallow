@@ -781,7 +781,7 @@ fn render_worsened_row(row: &WorsenedRow<'_>, output: OutputFormat, mode: AuditW
             let note = if row.worsened {
                 worsened_class_label(mode)
             } else {
-                "introduced: a metric that it exceeds grew"
+                "introduced: a new limit or a higher tier"
             };
             format!(
                 "  {}:{} {}  {}  ({note})",

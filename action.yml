@@ -277,7 +277,7 @@ inputs:
     description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'
     required: false
   worsened:
-    description: 'Audit effect of an inherited complexity finding that got worse under gate new-only: warn (default) gives at least a warn verdict, error counts it like an introduced finding, off reports no worsened finding.'
+    description: 'Audit effect of an inherited complexity finding that got worse under gate new-only: warn (default) gives at least a warn verdict, error counts it like an introduced finding, off reports only the growth of an exceeded metric as worsened.'
     required: false
   security-gate:
     description: 'Security regression gate: new fails on candidates introduced on changed lines, newly-reachable fails on existing candidates that became reachable from entry points.'

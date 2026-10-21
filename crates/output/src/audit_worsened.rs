@@ -6,11 +6,14 @@
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum AuditFindingAttribution {
-    /// No base finding matches, or a metric that the finding exceeds grew. A
-    /// CRAP score from estimated coverage does not count as growth.
+    /// No base finding matches, or a grown metric now exceeds a threshold
+    /// that the base finding did not exceed, or the growth of an exceeded
+    /// metric moved the finding to a higher severity tier. A CRAP score from
+    /// estimated coverage does not count as growth.
     Introduced,
-    /// A base finding matches and a measured metric grew, but no metric that
-    /// the finding exceeds grew.
+    /// A base finding matches and a measured metric grew, but the finding is
+    /// not introduced. Growth of an exceeded metric in the same severity tier
+    /// is worsened.
     Worsened,
     /// A base finding matches and no measured metric grew.
     Inherited,

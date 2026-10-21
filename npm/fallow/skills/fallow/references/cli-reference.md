@@ -1143,15 +1143,18 @@ A merge of the default branch brings in code that the default branch already has
 A complexity finding matches its base finding by file path and function name. The line and the exceeded category do not affect the match, and a renamed file keeps its match. A complexity finding is introduced in these cases:
 
 - No base finding matches it.
-- A metric that the head finding exceeds has a higher value than in the base finding.
+- The head finding exceeds a metric that the base finding did not exceed, and that metric grew.
+- A metric that the head finding exceeds grew, and the finding moved to a higher severity tier (`moderate`, `high`, `critical`).
+
+Growth of a metric that the base finding already exceeded, in the same severity tier, makes the finding `worsened`, not introduced.
 
 An unchanged or decreased metric keeps the finding inherited, also when the exceeded category changes (for example from `both` to `cyclomatic`). When one file has more than one finding with the same function name, each base finding matches at most one head finding. Head findings with unchanged metric values and an unchanged line count match first. Head findings with unchanged metric values match next. The other findings then match in line order.
 
-A matched finding that is not introduced is `worsened` when a measured value is higher than in the base finding. The measured values are cyclomatic, cognitive, CRAP (only when both sides have a score) and the line count of the function. The line count must grow by at least 5 lines. It includes comments and blank lines, so the minimum keeps a finding inherited after a short comment or a formatter rewrap. Each complexity finding carries `attribution` (`introduced`, `worsened` or `inherited`). When a value grew, it also carries `worsened_metrics` with the `metric`, the `base` value and the `head` value. An introduced finding whose exceeded metric grew also carries `worsened_metrics`. `attribution.worsened` gives the active mode. `attribution.complexity_worsened` counts the worsened findings, which are also in `complexity_inherited`. `--worsened` (config `audit.worsened`) decides their effect on the verdict:
+A matched finding that is not introduced is `worsened` when a measured value is higher than in the base finding. The measured values are cyclomatic, cognitive, CRAP (only when both sides have a score) and the line count of the function. The line count must grow by at least 5 lines. It includes comments and blank lines, so the minimum keeps a finding inherited after a short comment or a formatter rewrap. Each complexity finding carries `attribution` (`introduced`, `worsened` or `inherited`). When a value grew, it also carries `worsened_metrics` with the `metric`, the `base` value and the `head` value. An introduced finding that matched a base finding also carries `worsened_metrics`. `attribution.worsened` gives the active mode. `attribution.complexity_worsened` counts the worsened findings, which are also in `complexity_inherited`. `--worsened` (config `audit.worsened`) decides their effect on the verdict:
 
 - `warn` (default): a worsened finding makes the verdict at least `warn`. The exit code stays 0.
 - `error`: a worsened finding counts like an introduced finding, so its `complexity-*` rule decides the verdict.
-- `off`: no finding is worsened, and the verdict does not change.
+- `off`: growth only in metrics that the finding does not exceed stays inherited. Growth of an exceeded metric stays `worsened` and makes the verdict at least `warn`.
 
 ### JSON contract: which fields are severity-aware
 

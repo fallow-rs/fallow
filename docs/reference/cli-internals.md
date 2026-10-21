@@ -352,6 +352,24 @@ after every gate set the exit code.
   `exceeded_metric_increased`, a CRAP score from estimated coverage does not
   make a finding introduced, and a base finding without a CRAP score is not
   growth. `--gate all` keeps the rule severity.
+- New-only growth of an exceeded metric: `ComplexityClass::of_match`
+  (`crates/api/src/audit_complexity.rs`) makes a matched finding introduced
+  only in two cases. In the first case, the head finding exceeds a metric that
+  the base finding did not exceed, and that metric grew. In the second case,
+  a metric that the head finding exceeds grew, and the severity tier
+  (`moderate`, `high`, `critical`) is higher than in the base finding. Other
+  growth is `worsened`. `ComplexityMetrics` stores the exceeded flags, the
+  severity tier and the coverage source of the base finding from the base run.
+  Do not recompute them with the head thresholds, because a
+  `health.thresholdOverrides` change in the same PR would then make an old
+  finding introduced. The tiers use the fixed `DEFAULT_*_HIGH` and
+  `DEFAULT_*_CRITICAL` limits. CRAP takes part in the tier only when both sides
+  have a measured score. `audit.worsened: error` is the strict mode for teams
+  that want every growth to gate. `audit.worsened: off` clears growth only in
+  metrics that the finding does not exceed. Growth of an exceeded metric stays
+  `worsened` and gives at least `warn` (`clear_worsened_for_off`), because
+  before this rule it made the finding introduced. The audit base snapshot
+  cache is version 15.
 - Audit coverage inputs (#2359) resolve through the same precedence as
   `fallow health` and bare `fallow`: `--coverage` / `--coverage-root`, then
   `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT`, then `health.coverage` /
