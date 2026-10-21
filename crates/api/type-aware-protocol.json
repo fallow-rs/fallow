@@ -16,12 +16,12 @@
     "analyze",
     "shutdown"
   ],
-  "backends": [
-    {
-      "family": "typescript-go",
-      "package": "typescript",
-      "version": "7.0.2"
-    },
+  "backend": {
+    "family": "typescript-go",
+    "version": "7.0.2",
+    "package": "typescript"
+  },
+  "experimental_backends": [
     {
       "family": "tsrs",
       "package": "tsrs",

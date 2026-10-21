@@ -91,15 +91,15 @@ export const verifyPackagedTypeAware = async ({
 
   assertNoSymlinks(typeAwareRoot);
   const typescriptManifest = readPackage(join(typeAwareRoot, "node_modules", "typescript"));
-  if (typescriptManifest.version !== protocol.backends[0].version) {
+  if (typescriptManifest.version !== protocol.backend.version) {
     throw new Error(
-      `invalid packaged TypeScript version: expected ${protocol.backends[0].version}, found ${typescriptManifest.version}`,
+      `invalid packaged TypeScript version: expected ${protocol.backend.version}, found ${typescriptManifest.version}`,
     );
   }
   for (const { packageName } of TYPE_AWARE_BACKENDS) {
-    if (typescriptManifest.optionalDependencies?.[packageName] !== protocol.backends[0].version) {
+    if (typescriptManifest.optionalDependencies?.[packageName] !== protocol.backend.version) {
       throw new Error(
-        `packaged TypeScript does not pin ${packageName} to ${protocol.backends[0].version}`,
+        `packaged TypeScript does not pin ${packageName} to ${protocol.backend.version}`,
       );
     }
   }
@@ -121,7 +121,7 @@ export const verifyPackagedTypeAware = async ({
     const manifest = readPackage(packageDirectory);
     if (
       manifest.name !== packageName ||
-      manifest.version !== protocol.backends[0].version ||
+      manifest.version !== protocol.backend.version ||
       !manifest.os?.includes(os) ||
       !manifest.cpu?.includes(cpu)
     ) {

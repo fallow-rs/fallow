@@ -458,7 +458,7 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(sidecarPackage.version, workspaceVersion);
   assert.equal(sidecarLock.version, workspaceVersion);
   assert.equal(sidecarLock.packages[""].version, workspaceVersion);
-  const [defaultBackend, ...optionalBackends] = manifest.backends;
+  const { backend: defaultBackend, experimental_backends: optionalBackends } = manifest;
   assert.equal(defaultBackend.package, "typescript");
   assert.equal(sidecarPackage.dependencies.typescript, defaultBackend.version);
   for (const backend of optionalBackends) {

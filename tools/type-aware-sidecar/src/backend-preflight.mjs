@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import { selectBackend } from "./backend-selection.mjs";
-import { BACKEND_VERSION, DEFAULT_BACKEND_FAMILY } from "./generated-protocol.mjs";
+import { BACKEND_VERSION, BACKEND_FAMILY } from "./generated-protocol.mjs";
 
 const REQUIRED_MAJOR = Number.parseInt(BACKEND_VERSION, 10);
 const INSTALL_HINT =
@@ -32,7 +32,7 @@ export const assertTypescriptBackendResolvable = (
 ) => {
   const backend = selectBackend(env);
   const sidecarRequire = createRequire(resolveFrom);
-  if (backend.family !== DEFAULT_BACKEND_FAMILY) {
+  if (backend.family !== BACKEND_FAMILY) {
     assertPinnedBackendResolvable(sidecarRequire, backend);
     return;
   }

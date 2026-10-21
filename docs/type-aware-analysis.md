@@ -47,10 +47,19 @@ resolves an exact declaration identity. Name-only matches are never enough.
 
 `FALLOW_TYPE_AWARE_BACKEND=tsrs` selects [tsrs](https://github.com/oxc-project/tsrs),
 a Rust port of the TypeScript 7 checker. It serves the same `unstable/sync`
-API. The manifest lists each backend with its npm package and exact version.
-The first entry is the default. The native client and the sidecar both read
-the selection, and the client rejects a status or analysis response from a
-backend family or version that the selection does not pin.
+API. The manifest `backend` object is the default backend, and
+`experimental_backends` lists the opt-in backends, each with its npm package
+and exact version. The native client and the sidecar both read the selection,
+and the client rejects a status or analysis response from a backend family or
+version that the selection does not pin.
+
+An experimental backend refines findings, but its evidence never makes a fix
+eligible: guarded fixes need the corpus evidence of the default backend. The
+audit base-snapshot cache key includes the selection. The corpus runner
+forwards the selection, and it accepts a non-default backend only for
+`prepare`, `focused`, `discover`, `measure`, `evidence` and `verify-ledger`
+with a non-canonical `--out-dir`. The tracked evidence stays on the default
+backend.
 
 `tsrs` is an optional peer dependency of `fallow-type-aware`. Install the
 pinned version where the companion can resolve it:
@@ -72,6 +81,10 @@ module `src/backend.mjs` keeps the 7.0 contract for the semantic code:
 
 The 7.1 AST also differs: a heritage clause holds a `TypeReference` with
 `typeName` instead of an `ExpressionWithTypeArguments` with `expression`.
+
+When the default backend moves to TypeScript 7.1, port the semantic code to
+the 7.1 snapshot API and delete the 7.0 emulation in `src/backend.mjs` in the
+same change.
 
 The sidecar suite runs on both backends:
 

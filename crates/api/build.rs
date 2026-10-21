@@ -16,7 +16,8 @@ struct ProtocolManifest {
     mutant_typecheck_operation: String,
     query_operations: Vec<String>,
     session_envelope_types: Vec<String>,
-    backends: Vec<Backend>,
+    backend: Backend,
+    experimental_backends: Vec<Backend>,
     sidecar: Sidecar,
 }
 
@@ -111,21 +112,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if manifest.query_operations.is_empty() {
         return Err(invalid_manifest("query operations must not be empty").into());
     }
-    let Some(default_backend) = manifest.backends.first() else {
-        return Err(invalid_manifest("backends must not be empty").into());
-    };
-    let mut families: Vec<&str> = manifest
-        .backends
-        .iter()
-        .map(|b| b.family.as_str())
+    let backends: Vec<&Backend> = std::iter::once(&manifest.backend)
+        .chain(&manifest.experimental_backends)
         .collect();
+    let mut families: Vec<&str> = backends.iter().map(|b| b.family.as_str()).collect();
     families.sort_unstable();
     families.dedup();
-    if families.len() != manifest.backends.len() {
+    if families.len() != backends.len() {
         return Err(invalid_manifest("backend families must be unique").into());
     }
-    if manifest.backends.iter().any(|b| b.package.is_empty()) {
-        return Err(invalid_manifest("backend packages must not be empty").into());
+    if backends
+        .iter()
+        .any(|b| b.package.is_empty() || b.version.is_empty())
+    {
+        return Err(invalid_manifest("backend package and version must not be empty").into());
     }
     if manifest.sidecar.version_source != "workspace-package" {
         return Err(invalid_manifest("unsupported sidecar version source").into());
@@ -151,10 +151,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rust_string(&manifest.mutant_typecheck_operation),
         rust_string_slice(&manifest.query_operations),
         rust_string_slice(&manifest.session_envelope_types),
-        rust_string(&default_backend.family),
-        rust_string(&default_backend.version),
-        manifest
-            .backends
+        rust_string(&manifest.backend.family),
+        rust_string(&manifest.backend.version),
+        backends
             .iter()
             .map(|b| format!("({}, {})", rust_string(&b.family), rust_string(&b.version)))
             .collect::<Vec<_>>()

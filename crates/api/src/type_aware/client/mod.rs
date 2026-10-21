@@ -29,12 +29,12 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+use super::manifest::BACKEND_VERSION;
 use super::manifest::{
-    ANALYSIS_OPERATION as OPERATION, QUERY_OPERATIONS, SEMANTIC_SCHEMA_VERSION,
+    ANALYSIS_OPERATION as OPERATION, BACKEND_FAMILY, QUERY_OPERATIONS, SEMANTIC_SCHEMA_VERSION,
     WIRE_PROTOCOL_VERSION as PROTOCOL_VERSION, selected_backend,
 };
-#[cfg(test)]
-use super::manifest::{BACKEND_FAMILY, BACKEND_VERSION};
 use super::transport::{TypeAwareError, TypeAwareOutcome};
 use empty::empty_semantic_outcome;
 use queries::{build_dead_code_queries, query_supports_guarded_fix};

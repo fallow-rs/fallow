@@ -1,4 +1,4 @@
-import { BACKENDS, DEFAULT_BACKEND_FAMILY } from "./generated-protocol.mjs";
+import { BACKENDS, BACKEND_FAMILY } from "./generated-protocol.mjs";
 
 const BACKEND_ENV = "FALLOW_TYPE_AWARE_BACKEND";
 
@@ -10,7 +10,7 @@ const BACKEND_ENV = "FALLOW_TYPE_AWARE_BACKEND";
  * @returns {{ family: string, package: string, version: string }}
  */
 export const selectBackend = (env = process.env) => {
-  const requested = env[BACKEND_ENV]?.trim() || DEFAULT_BACKEND_FAMILY;
+  const requested = env[BACKEND_ENV]?.trim() || BACKEND_FAMILY;
   const backend = BACKENDS.find((candidate) => candidate.family === requested);
   if (backend) return backend;
   const known = BACKENDS.map((candidate) => candidate.family).join(", ");

@@ -187,7 +187,8 @@ export const generateTypeAwareProtocol = (stagingRoot) => {
     "mutant_typecheck_operation",
     "query_operations",
     "session_envelope_types",
-    "backends",
+    "backend",
+    "experimental_backends",
     "sidecar",
   ];
   if (
@@ -199,15 +200,16 @@ export const generateTypeAwareProtocol = (stagingRoot) => {
     manifest.query_operations.length === 0 ||
     !Array.isArray(manifest.session_envelope_types) ||
     manifest.session_envelope_types.length === 0 ||
-    !Array.isArray(manifest.backends) ||
-    manifest.backends.length === 0 ||
-    manifest.backends.some(
+    !Array.isArray(manifest.experimental_backends) ||
+    [manifest.backend, ...manifest.experimental_backends].some(
       (backend) =>
         typeof backend?.family !== "string" ||
         typeof backend.package !== "string" ||
         typeof backend.version !== "string",
     ) ||
-    new Set(manifest.backends.map((backend) => backend.family)).size !== manifest.backends.length ||
+    new Set([manifest.backend, ...manifest.experimental_backends].map((backend) => backend.family))
+      .size !==
+      manifest.experimental_backends.length + 1 ||
     manifest.sidecar?.version_source !== "workspace-package"
   ) {
     throw new Error("invalid type-aware protocol manifest");
@@ -227,8 +229,13 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({\n\
   mutant_typecheck_operation: ${string(manifest.mutant_typecheck_operation)},\n\
   query_operations: [${stringArray(manifest.query_operations)}],\n\
   session_envelope_types: [${stringArray(manifest.session_envelope_types)}],\n\
-  backends: [\n\
-${manifest.backends
+  backend: {\n\
+    family: ${string(manifest.backend.family)},\n\
+    version: ${string(manifest.backend.version)},\n\
+    package: ${string(manifest.backend.package)},\n\
+  },\n\
+  experimental_backends: [\n\
+${manifest.experimental_backends
   .map(
     (backend) =>
       `    {\n      family: ${string(backend.family)},\n      package: ${string(backend.package)},\n      version: ${string(backend.version)},\n    },\n`,
@@ -247,9 +254,12 @@ export const STATUS_OPERATION = TYPE_AWARE_PROTOCOL.status_operation;\n\
 export const MUTANT_TYPECHECK_OPERATION = TYPE_AWARE_PROTOCOL.mutant_typecheck_operation;\n\
 export const QUERY_OPERATIONS = Object.freeze(TYPE_AWARE_PROTOCOL.query_operations);\n\
 export const SESSION_ENVELOPE_TYPES = Object.freeze(TYPE_AWARE_PROTOCOL.session_envelope_types);\n\
-export const BACKENDS = Object.freeze(TYPE_AWARE_PROTOCOL.backends.map(Object.freeze));\n\
-export const DEFAULT_BACKEND_FAMILY = BACKENDS[0].family;\n\
-export const BACKEND_VERSION = BACKENDS[0].version;\n\
+export const BACKEND_FAMILY = TYPE_AWARE_PROTOCOL.backend.family;\n\
+export const BACKEND_VERSION = TYPE_AWARE_PROTOCOL.backend.version;\n\
+export const BACKENDS = Object.freeze([\n\
+  TYPE_AWARE_PROTOCOL.backend,\n\
+  ...TYPE_AWARE_PROTOCOL.experimental_backends,\n\
+]);\n\
 export const SIDECAR_PACKAGE = TYPE_AWARE_PROTOCOL.sidecar.package;\n`,
   );
 };

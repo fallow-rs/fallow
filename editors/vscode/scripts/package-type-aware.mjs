@@ -30,7 +30,7 @@ export const packageTypeAware = ({
   const protocol = JSON.parse(
     readFileSync(join(repoRoot, "crates", "api", "type-aware-protocol.json"), "utf8"),
   );
-  const backendVersion = protocol.backends[0].version;
+  const backendVersion = protocol.backend.version;
   const typescriptSource = join(extensionRoot, "node_modules", "typescript");
   const typescriptNodeModules = dirname(realpathSync(typescriptSource));
   const typescriptManifest = readPackage(typescriptSource);

@@ -662,6 +662,11 @@ pub(super) fn audit_base_snapshot_cache_key(
             .map(|p| p.to_string_lossy().to_string()),
         opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
     )
+    .type_aware_backend(
+        std::env::var("FALLOW_TYPE_AWARE_BACKEND")
+            .ok()
+            .filter(|backend| !backend.trim().is_empty()),
+    )
     .to_json_bytes()
     .map_err(|e| {
         emit_error(

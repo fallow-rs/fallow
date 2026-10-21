@@ -88,7 +88,7 @@ const main = () => {
   ).version;
   const backendVersion = JSON.parse(
     readFileSync(join(repoRoot, "crates", "api", "type-aware-protocol.json"), "utf8"),
-  ).backends[0].version;
+  ).backend.version;
 
   assertSmokePreconditions({ platform: process.platform, candidateBinary, platformPackage });
   accessSync(npmCli);

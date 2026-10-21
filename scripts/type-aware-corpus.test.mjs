@@ -36,6 +36,7 @@ import {
   validateSupplementalArtifactData,
   verifyLedgerData,
 } from "./type-aware-corpus.mjs";
+import { assertBackendIsolation, minimalEnvironment } from "./type-aware-corpus/runner.mjs";
 import { renderSummaryMarkdown } from "./type-aware-corpus/summary.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -731,6 +732,35 @@ test("corpus harness import does not require sidecar dependencies", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the child environment forwards only the allowed keys and the backend selection", () => {
+  const environment = minimalEnvironment("/opt/sidecar", {
+    PATH: "/bin",
+    FALLOW_TYPE_AWARE_BACKEND: "tsrs",
+    NODE_OPTIONS: "--inspect",
+  });
+  assert.deepEqual(environment, {
+    PATH: "/bin",
+    FALLOW_FORMAT: "json",
+    FALLOW_QUIET: "1",
+    FALLOW_TYPE_AWARE_BACKEND: "tsrs",
+    FALLOW_TYPE_AWARE_BIN: "/opt/sidecar",
+  });
+});
+
+test("a non-default backend never writes canonical or tracked artifacts", () => {
+  const canonicalDir = resolve(REPO_ROOT, "target/type-aware-corpus");
+  const tsrs = { FALLOW_TYPE_AWARE_BACKEND: "tsrs" };
+  const isolated = parseArgs(["evidence", "--out-dir", resolve(REPO_ROOT, "target/corpus-tsrs")]);
+  assert.doesNotThrow(() => assertBackendIsolation(isolated, canonicalDir, tsrs));
+  assert.throws(
+    () => assertBackendIsolation(parseArgs(["evidence"]), canonicalDir, tsrs),
+    /non-canonical --out-dir/u,
+  );
+  const tracked = parseArgs(["summarize", "--out-dir", resolve(REPO_ROOT, "target/corpus-tsrs")]);
+  assert.throws(() => assertBackendIsolation(tracked, canonicalDir, tsrs), /runs only/u);
+  assert.doesNotThrow(() => assertBackendIsolation(parseArgs(["summarize"]), canonicalDir, {}));
 });
 
 test("partial runs require an isolated non-canonical output directory", () => {

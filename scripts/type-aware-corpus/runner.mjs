@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const hashJson = (value, suffix = "") =>
@@ -185,4 +185,45 @@ export const runExactSidecarRequest = ({
   const response = parseSidecarResponse(stdout, dependencies.fail);
   validateResponse(response, request, dependencies);
   return response;
+};
+
+const BACKEND_ENV = "FALLOW_TYPE_AWARE_BACKEND";
+const DEFAULT_BACKEND = "typescript-go";
+const ISOLATED_BACKEND_COMMANDS = new Set([
+  "prepare",
+  "focused",
+  "discover",
+  "measure",
+  "evidence",
+  "verify-ledger",
+]);
+
+/** The child environment for Fallow and the sidecar, with the backend selection. */
+export const minimalEnvironment = (sidecarBin, env = process.env) => {
+  const environment = {};
+  for (const key of ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SYSTEMROOT", "ComSpec", "PATHEXT"]) {
+    if (env[key]) environment[key] = env[key];
+  }
+  environment.FALLOW_FORMAT = "json";
+  environment.FALLOW_QUIET = "1";
+  if (env[BACKEND_ENV]) environment[BACKEND_ENV] = env[BACKEND_ENV];
+  if (sidecarBin) environment.FALLOW_TYPE_AWARE_BIN = sidecarBin;
+  return environment;
+};
+
+/**
+ * The tracked evidence comes from the default backend. A run on another
+ * backend writes only to an explicit non-canonical output directory, and only
+ * through commands that keep their artifacts in that directory.
+ */
+export const assertBackendIsolation = (options, defaultOutDir, env = process.env) => {
+  const backend = env[BACKEND_ENV]?.trim();
+  if (!backend || backend === DEFAULT_BACKEND) return;
+  const canonical = !options.outDirExplicit || resolve(options.outDir) === defaultOutDir;
+  if (!ISOLATED_BACKEND_COMMANDS.has(options.command) || canonical) {
+    throw new Error(
+      `${BACKEND_ENV}=${backend} runs only ${[...ISOLATED_BACKEND_COMMANDS].join(", ")} ` +
+        "with a non-canonical --out-dir",
+    );
+  }
 };

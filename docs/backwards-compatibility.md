@@ -417,6 +417,11 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
   path.
 - **Pre-stable protocols**: development-only protocols before version 6 are
   rejected and are not part of the compatibility guarantee.
+- **Experimental backends**: the manifest `backend` object stays the default
+  backend. `experimental_backends` lists opt-in backends, and
+  `FALLOW_TYPE_AWARE_BACKEND` selects one of them. That variable, its values,
+  and the experimental backends are not part of the compatibility guarantee.
+  Their evidence never makes a fix eligible.
 
 ### Coverage inventory upload blob
 

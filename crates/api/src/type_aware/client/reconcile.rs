@@ -223,7 +223,9 @@ fn plan_response_results(
         let mut summary = query_summary(result);
         match target {
             QueryTarget::ClassMember(index) => {
-                let fix_supported = query_supports_guarded_fix(query);
+                // Guarded-fix evidence comes from the default backend only.
+                let fix_supported =
+                    query_supports_guarded_fix(query) && response.backend == BACKEND_FAMILY;
                 let decision = retain_non_crediting_evidence(
                     decode_candidate_decision(
                         root,
