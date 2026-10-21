@@ -135,8 +135,9 @@ impl DeadCodeBackendPrelude<'_> {
     pub fn trace_provenance(
         &self,
         modules: &[fallow_types::extract::ModuleInfo],
+        retain_graph: bool,
     ) -> fallow_types::trace::TraceProvenance {
-        self.inner.trace_provenance(modules)
+        self.inner.trace_provenance(modules, retain_graph)
     }
 
     /// The plugin stage's result, as the analysis sees it.

@@ -24627,6 +24627,13 @@
           },
           "description": "Re-export chains that pass through this export."
         },
+        "plugin_credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PluginExportCredit"
+          },
+          "description": "The framework plugin rules that mark this export as used. The\nframework calls or reads the export, so no import is necessary. A\ncredit sets `is_used` when the file is reachable. Absent when no\nplugin credits the export."
+        },
         "reason": {
           "type": "string",
           "description": "Human-readable reason summary."
@@ -24894,6 +24901,13 @@
             "$ref": "#/definitions/ExportReference"
           },
           "description": "Files that reference this export."
+        },
+        "plugin_credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PluginExportCredit"
+          },
+          "description": "The framework plugin rules that mark this export as used. Absent when\nno plugin credits the export."
         }
       },
       "required": [
@@ -34468,6 +34482,24 @@
         }
       ],
       "description": "Whether the project had a `node_modules` directory at a point in time.\n\nA dead-code baseline records this when it is saved, so a later run in a\ndifferent install state can say that its results can differ."
+    },
+    "PluginExportCredit": {
+      "type": "object",
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "description": "The plugin that gives the rule, for example `nextjs`."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "The project-relative file pattern of the rule."
+        }
+      },
+      "required": [
+        "plugin",
+        "pattern"
+      ],
+      "description": "A framework plugin rule that marks an export as used."
     }
   }
 }

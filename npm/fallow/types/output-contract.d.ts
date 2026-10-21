@@ -12243,6 +12243,13 @@ star_export_ambiguity?: (StarExportAmbiguity | null)
  */
 re_export_chains: ReExportChain[]
 /**
+ * The framework plugin rules that mark this export as used. The
+ * framework calls or reads the export, so no import is necessary. A
+ * credit sets `is_used` when the file is reachable. Absent when no
+ * plugin credits the export.
+ */
+plugin_credits?: PluginExportCredit[]
+/**
  * Human-readable reason summary.
  */
 reason: string
@@ -12333,6 +12340,19 @@ exported_as: string
  * Number of references on the barrel's re-exported symbol.
  */
 reference_count: number
+}
+/**
+ * A framework plugin rule that marks an export as used.
+ */
+export interface PluginExportCredit {
+/**
+ * The plugin that gives the rule, for example `nextjs`.
+ */
+plugin: string
+/**
+ * The project-relative file pattern of the rule.
+ */
+pattern: string
 }
 /**
  * Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
@@ -12453,6 +12473,11 @@ reference_count: number
  * Files that reference this export.
  */
 referenced_by: ExportReference[]
+/**
+ * The framework plugin rules that mark this export as used. Absent when
+ * no plugin credits the export.
+ */
+plugin_credits?: PluginExportCredit[]
 }
 /**
  * A re-export with source information.

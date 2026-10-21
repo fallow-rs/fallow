@@ -84,6 +84,13 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
     lines.push(format!("  File: {reachable}{entry}"));
     lines.push(format!("  Namespace: {}", namespace_name(trace.namespace)));
     lines.push(format!("  Reason: {}", trace.reason));
+    for credit in &trace.plugin_credits {
+        lines.push(format!(
+            "  Plugin credit: {} {}",
+            credit.plugin,
+            format!("({})", credit.pattern).dimmed()
+        ));
+    }
 
     if let Some(ambiguity) = &trace.star_export_ambiguity {
         lines.push(format!(
@@ -424,6 +431,10 @@ fn push_file_trace_exports(lines: &mut Vec<String>, trace: &FileTrace) {
     for export in &trace.exports {
         let used_indicator = if export.reference_count > 0 {
             format!("{} ref(s)", export.reference_count)
+                .green()
+                .to_string()
+        } else if let Some(credit) = export.plugin_credits.first().filter(|_| trace.is_reachable) {
+            format!("used by the {} plugin", credit.plugin)
                 .green()
                 .to_string()
         } else {
@@ -921,6 +932,7 @@ mod tests {
             direct_references_by_namespace: Vec::new(),
             star_export_ambiguity: None,
             re_export_chains: Vec::new(),
+            plugin_credits: Vec::new(),
             reason: "Used by 1 file(s)".to_string(),
             semantic,
         }
@@ -1072,6 +1084,7 @@ mod tests {
                 exported_as: "formatUser".to_string(),
                 reference_count: 2,
             }],
+            plugin_credits: Vec::new(),
             reason: "referenced from reachable code".to_string(),
             semantic: None,
         };
@@ -1122,6 +1135,7 @@ mod tests {
             }],
             star_export_ambiguity: None,
             re_export_chains: Vec::new(),
+            plugin_credits: Vec::new(),
             reason: "referenced from reachable code".to_string(),
             semantic: None,
         };
@@ -1196,6 +1210,33 @@ mod tests {
     }
 
     #[test]
+    fn file_trace_names_the_plugin_that_credits_an_export() {
+        let trace = FileTrace {
+            file: PathBuf::from("app/page.tsx"),
+            is_reachable: true,
+            is_entry_point: true,
+            exports: vec![TracedExport {
+                name: "default".to_string(),
+                is_type_only: false,
+                reference_count: 0,
+                referenced_by: Vec::new(),
+                plugin_credits: vec![fallow_types::trace::PluginExportCredit {
+                    plugin: "nextjs".to_string(),
+                    pattern: "app/**/page.{ts,tsx}".to_string(),
+                }],
+            }],
+            imports_from: Vec::new(),
+            imported_by: Vec::new(),
+            re_exports: Vec::new(),
+            sources: Vec::new(),
+        };
+
+        let rendered = plain(&build_file_trace_human_lines(&trace));
+
+        assert!(rendered.contains("export default [used by the nextjs plugin]"));
+    }
+
+    #[test]
     fn file_trace_renders_exports_imports_dependents_and_re_exports() {
         let trace = FileTrace {
             file: PathBuf::from("src/model.ts"),
@@ -1206,6 +1247,7 @@ mod tests {
                 is_type_only: true,
                 reference_count: 0,
                 referenced_by: Vec::new(),
+                plugin_credits: Vec::new(),
             }],
             imports_from: vec![PathBuf::from("src/db.ts")],
             imported_by: vec![PathBuf::from("src/app.ts")],

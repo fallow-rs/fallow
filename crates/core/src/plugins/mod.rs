@@ -421,71 +421,6 @@ pub const CONFIG_ONLY_EXPORT_NAMES: &[&str] = &[
     "viewport",
 ];
 
-/// Record each export that a plugin `used_exports` rule names for its file
-/// and that is in [`CONFIG_ONLY_EXPORT_NAMES`]. Only modules that declare such
-/// a name pay for the glob match.
-pub fn push_config_export_provenance(
-    provenance: &mut fallow_types::trace::TraceProvenance,
-    root: &Path,
-    files: &[crate::discover::DiscoveredFile],
-    modules: &[crate::extract::ModuleInfo],
-    plugin_result: &AggregatedPluginResult,
-) {
-    let rules: Vec<(CompiledPathRule, Vec<&str>)> = plugin_result
-        .used_exports
-        .iter()
-        .filter_map(|rule| {
-            let names: Vec<&str> = rule
-                .rule
-                .exports
-                .iter()
-                .map(String::as_str)
-                .filter(|name| CONFIG_ONLY_EXPORT_NAMES.contains(name))
-                .collect();
-            if names.is_empty() {
-                return None;
-            }
-            let compiled =
-                CompiledPathRule::for_used_export_rule(&rule.rule.path, "used_exports pattern")?;
-            Some((compiled, names))
-        })
-        .collect();
-    if rules.is_empty() {
-        return;
-    }
-    for module in modules {
-        let config_names: Vec<String> = module
-            .exports
-            .iter()
-            .filter_map(|export| match &export.name {
-                fallow_types::extract::ExportName::Named(name)
-                    if !export.is_type_only
-                        && CONFIG_ONLY_EXPORT_NAMES.contains(&name.as_str()) =>
-                {
-                    Some(name.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        if config_names.is_empty() {
-            continue;
-        }
-        let Some(file) = files.get(module.file_id.0 as usize) else {
-            continue;
-        };
-        let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
-        let relative_str = relative.to_string_lossy().replace('\\', "/");
-        for name in config_names {
-            if rules
-                .iter()
-                .any(|(rule, names)| names.contains(&name.as_str()) && rule.matches(&relative_str))
-            {
-                provenance.push_config_export(relative.to_path_buf(), name);
-            }
-        }
-    }
-}
-
 /// Record why the unused devDependency check credits each plugin tooling
 /// dependency, so `--trace-dependency` explains the credit instead of calling
 /// the dependency unused.
@@ -2026,6 +1961,7 @@ mod rstest;
 mod serverless_framework;
 mod textlint;
 mod tooling;
+mod trace_provenance;
 mod used_export_names;
 mod used_export_rule;
 
@@ -2040,6 +1976,7 @@ pub use tooling::types_package_target;
 pub(crate) use tooling::{
     cli_tooling_config_patterns, is_ambient_types_package, is_known_tooling_dependency,
 };
+pub use trace_provenance::{ExportCredits, build_trace_provenance};
 pub use used_export_names::UsedExportNames;
 
 fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {

@@ -930,29 +930,24 @@ fn handle_trace_side_effects(
     let trace_timings = data.trace_timings.as_ref();
     let trace_exit = data.trace_graph.as_ref().and_then(|graph| {
         crate::telemetry::note_graph_structure(graph);
-        output::handle_type_aware_trace_output(
-            graph,
-            opts.trace_opts,
-            config,
-            opts.explain,
-            opts.json_style,
+        output::handle_type_aware_trace_output(graph, opts, config, &data.trace_provenance).or_else(
+            || {
+                output::handle_trace_output(
+                    graph,
+                    opts.trace_opts,
+                    &config.root,
+                    config.output,
+                    opts.json_style,
+                    &output::TraceFacts {
+                        script_used_packages: &data.script_used_packages,
+                        provenance: &data.trace_provenance,
+                        workspaces: &data.workspaces,
+                        results: &data.results,
+                        ignore_patterns: &config.ignore_patterns,
+                    },
+                )
+            },
         )
-        .or_else(|| {
-            output::handle_trace_output(
-                graph,
-                opts.trace_opts,
-                &config.root,
-                config.output,
-                opts.json_style,
-                &output::TraceFacts {
-                    script_used_packages: &data.script_used_packages,
-                    provenance: &data.trace_provenance,
-                    workspaces: &data.workspaces,
-                    results: &data.results,
-                    ignore_patterns: &config.ignore_patterns,
-                },
-            )
-        })
     });
     // A trace view ends the command here, so a deferred report prints now.
     if let Some(timings) = trace_timings

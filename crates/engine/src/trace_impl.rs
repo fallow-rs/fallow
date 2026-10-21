@@ -222,11 +222,7 @@ fn collect_re_export_chains(
         .filter_map(|route| {
             let module = graph.modules.get(route.barrel_file().0 as usize)?;
             Some(ReExportChain {
-                barrel_file: module
-                    .path
-                    .strip_prefix(root)
-                    .unwrap_or(&module.path)
-                    .to_path_buf(),
+                barrel_file: relative_module_path(&module.path, root),
                 exported_as: route.exported_name().to_string(),
                 reference_count: graph
                     .effective_export_surface_references(
@@ -295,11 +291,7 @@ pub fn trace_export(
         let ambiguity = star_export_ambiguity?;
         let namespace = ambiguity.namespaces.first().copied().unwrap_or_default();
         return Some(ExportTrace {
-            file: module
-                .path
-                .strip_prefix(root)
-                .unwrap_or(&module.path)
-                .to_path_buf(),
+            file: relative_module_path(&module.path, root),
             export_name: export_name.to_string(),
             namespace,
             file_reachable: module.is_reachable(),
@@ -309,6 +301,7 @@ pub fn trace_export(
             direct_references_by_namespace: Vec::new(),
             star_export_ambiguity: Some(ambiguity),
             re_export_chains: Vec::new(),
+            plugin_credits: Vec::new(),
             reason: "Star re-export collision makes this name ambiguous".to_string(),
             semantic: None,
         });
@@ -328,11 +321,7 @@ pub fn trace_export(
     };
 
     Some(ExportTrace {
-        file: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        file: relative_module_path(&module.path, root),
         export_name: export_name.to_string(),
         namespace: match namespace {
             ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
@@ -345,9 +334,15 @@ pub fn trace_export(
         direct_references_by_namespace,
         star_export_ambiguity,
         re_export_chains,
+        plugin_credits: Vec::new(),
         reason,
         semantic: None,
     })
+}
+
+/// The root-relative path of a module, or the path as it is outside `root`.
+fn relative_module_path(path: &Path, root: &Path) -> PathBuf {
+    path.strip_prefix(root).unwrap_or(path).to_path_buf()
 }
 
 /// Distinct referencing files of one module export surface in one namespace.
@@ -487,13 +482,7 @@ fn trace_star_export_ambiguity(
         .iter()
         .flat_map(|collision| collision.contributors.iter())
         .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
-        .map(|module| {
-            module
-                .path
-                .strip_prefix(root)
-                .unwrap_or(&module.path)
-                .to_path_buf()
-        })
+        .map(|module| relative_module_path(&module.path, root))
         .collect();
     sources.sort();
     sources.dedup();
@@ -602,11 +591,7 @@ pub fn semantic_symbol_for_class_member(
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
     Some(SemanticSymbol {
-        path: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        path: relative_module_path(&module.path, root),
         namespace: SemanticNamespace::Value,
         declaration_kind: declaration_kind.to_string(),
         exported_name: member_name.to_string(),
@@ -683,11 +668,7 @@ pub fn semantic_symbol_for_exact_class_method(
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
     Ok(SemanticSymbol {
-        path: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        path: relative_module_path(&module.path, root),
         namespace: SemanticNamespace::Value,
         declaration_kind: "class_method".to_string(),
         exported_name: member_name.to_string(),
@@ -841,6 +822,7 @@ fn traced_exports(
                 is_type_only: e.is_type_only,
                 reference_count: referenced_by.len(),
                 referenced_by,
+                plugin_credits: Vec::new(),
             }
         })
         .collect()
@@ -915,11 +897,7 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
     let module = find_module(graph, root, file_path)?;
 
     Some(FileTrace {
-        file: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        file: relative_module_path(&module.path, root),
         is_reachable: module.is_reachable(),
         is_entry_point: module.is_entry_point(),
         exports: traced_exports(graph, root, module),
@@ -1006,11 +984,7 @@ fn package_importers(
         let Some(module) = graph.modules.get(fid.0 as usize) else {
             continue;
         };
-        let path = module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf();
+        let path = relative_module_path(&module.path, root);
         if type_only.get(&fid) == Some(&total) {
             type_only_imported_by.push(path.clone());
         }
@@ -3694,6 +3668,7 @@ mod tests {
                 exported_as: "foo".to_string(),
                 reference_count: 1,
             }],
+            plugin_credits: Vec::new(),
             reason: "ok".to_string(),
             semantic: None,
         };

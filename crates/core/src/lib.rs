@@ -735,24 +735,13 @@ impl<'a> AnalysisSession<'a> {
         );
         trace_pipeline_profile(&profile);
 
-        let mut trace_provenance = plugins::federation_trace_provenance(
+        let trace_provenance = plugins::build_trace_provenance(
             &self.config.root,
             self.files(),
-            &plugin_result.federation_sources,
-            &core.modules,
-        );
-        plugins::push_tooling_trace_credits(
-            &mut trace_provenance,
-            &self.config.root,
             self.workspaces(),
-            &plugin_result,
-        );
-        plugins::push_config_export_provenance(
-            &mut trace_provenance,
-            &self.config.root,
-            self.files(),
             &core.modules,
             &plugin_result,
+            plugins::ExportCredits::for_run(retain, self.config),
         );
         let mut output = assemble_full_output(
             core,
@@ -889,27 +878,16 @@ impl DeadCodeBackendPrelude<'_> {
     pub fn trace_provenance(
         &self,
         modules: &[extract::ModuleInfo],
+        retain_graph: bool,
     ) -> fallow_types::trace::TraceProvenance {
-        let mut provenance = plugins::federation_trace_provenance(
+        plugins::build_trace_provenance(
             &self.config.root,
             self.discovery.files(),
-            &self.plugin_result.federation_sources,
-            modules,
-        );
-        plugins::push_tooling_trace_credits(
-            &mut provenance,
-            &self.config.root,
             self.discovery.workspaces(),
-            &self.plugin_result,
-        );
-        plugins::push_config_export_provenance(
-            &mut provenance,
-            &self.config.root,
-            self.discovery.files(),
             modules,
             &self.plugin_result,
-        );
-        provenance
+            plugins::ExportCredits::for_run(retain_graph, self.config),
+        )
     }
 
     /// The plugin stage's result, after the workspace merge and the
