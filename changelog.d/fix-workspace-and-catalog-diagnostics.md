@@ -40,4 +40,4 @@
   the base. The base then does not report unused catalog entries, and the head
   reports them. These head findings are now inherited, not introduced, so they
   no longer change the verdict. A new unused catalog entry in such a run is
-  also inherited. The audit base snapshot cache moves to version 14.
+  also inherited. The audit base snapshot cache moves to version 16.
