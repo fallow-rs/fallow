@@ -19,6 +19,26 @@ pub enum AuditFindingAttribution {
     Inherited,
 }
 
+/// Audit-mode reason why a complexity finding does not gate the verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AuditGateExemption {
+    /// The finding is in a test file: a spec, a test directory, an end-to-end
+    /// suite, a mock or a fixture. Its gate severity is `warn`.
+    TestFile,
+}
+
+impl AuditGateExemption {
+    /// The JSON value, also used in compact output and SARIF properties.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::TestFile => "test-file",
+        }
+    }
+}
+
 /// A measured metric of a complexity finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

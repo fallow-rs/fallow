@@ -911,6 +911,10 @@ export type AuditFindingAttribution = ("introduced" | "worsened" | "inherited")
  */
 export type WorsenedMetricKind = ("cyclomatic" | "cognitive" | "crap" | "line_count")
 /**
+ * Audit-mode reason why a complexity finding does not gate the verdict.
+ */
+export type AuditGateExemption = "test-file"
+/**
  * Coverage model used for CRAP score computation.
  */
 export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
@@ -8106,6 +8110,12 @@ attribution?: (AuditFindingAttribution | null)
  * finding. Absent when no metric grew.
  */
 worsened_metrics?: WorsenedMetric[]
+/**
+ * Audit-mode reason why the finding does not gate the verdict. With
+ * `test-file`, the finding is in a test file and `effective_severity` is
+ * `warn`. Absent outside `audit`, and on a finding that gates.
+ */
+gate_exemption?: (AuditGateExemption | null)
 }
 /**
  * Per-component React hook profile derived from the cached `hook_uses` IR at

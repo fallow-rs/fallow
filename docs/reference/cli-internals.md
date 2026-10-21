@@ -352,6 +352,18 @@ after every gate set the exit code.
   `exceeded_metric_increased`, a CRAP score from estimated coverage does not
   make a finding introduced, and a base finding without a CRAP score is not
   growth. `--gate all` keeps the rule severity.
+- Audit test-file complexity: under every gate, `audit_run::attribute` calls
+  `exempt_test_file_gates` (`crates/api/src/audit_complexity.rs`) before the
+  comparison. It reuses `fallow_engine::test_paths::is_test_path` on the path
+  below the project root, so specs, test directories, end-to-end suites, mocks
+  and fixtures match. Each such finding gets `effective_severity: warn` and
+  `gate_exemption: test-file`. The attribution does not change. The finding
+  stays in the report. SARIF puts `gate_exemption` in the property bag at
+  level `warning`, CodeClimate appends a note to the description, and the
+  GitHub summary shows `warn (test file)`. The human, markdown and compact
+  views list the test-file findings that would otherwise take part in the
+  gate (`crates/cli/src/audit_complexity_notes.rs`). `fallow health` does not
+  call this function.
 - New-only growth of an exceeded metric: `ComplexityClass::of_match`
   (`crates/api/src/audit_complexity.rs`) makes a matched finding introduced
   only in two cases. In the first case, the head finding exceeds a metric that

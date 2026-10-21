@@ -134,8 +134,8 @@ pub use audit_walkthrough::{
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use audit_worsened::{
-    AuditFindingAttribution, WorsenedMetric, WorsenedMetricKind, describe_worsened_metrics,
-    format_metric_value,
+    AuditFindingAttribution, AuditGateExemption, WorsenedMetric, WorsenedMetricKind,
+    describe_worsened_metrics, format_metric_value,
 };
 pub use baseline_staleness::{
     BaselineScopeReasons, BaselineStaleness, BaselineStalenessAdvisory, ScopeReason,

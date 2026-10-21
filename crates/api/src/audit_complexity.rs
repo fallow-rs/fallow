@@ -27,13 +27,18 @@
 //! A CRAP score from estimated coverage does not make a finding introduced.
 //! Under the `new-only` gate, a finding that exceeds only that CRAP score gets
 //! the gate severity `warn` (see [`demote_estimated_crap_gates`]).
+//!
+//! Under every gate, a finding in a test file gets the gate severity `warn`
+//! and the gate exemption `test-file` (see [`exempt_test_file_gates`]). The
+//! attribution of the finding does not change.
 
 use std::path::Path;
 
 use fallow_output::{
-    AuditFindingAttribution, CoverageSource, DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH,
-    DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, ExceededThreshold, FindingSeverity,
-    WorsenedMetric, WorsenedMetricKind, compute_finding_severity,
+    AuditFindingAttribution, AuditGateExemption, CoverageSource, DEFAULT_COGNITIVE_CRITICAL,
+    DEFAULT_COGNITIVE_HIGH, DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH,
+    ExceededThreshold, FindingSeverity, WorsenedMetric, WorsenedMetricKind,
+    compute_finding_severity,
 };
 use fallow_types::output_dead_code::EffectiveSeverity;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -368,6 +373,23 @@ pub fn demote_estimated_crap_gates(findings: &mut [fallow_output::HealthFinding]
             && finding.effective_severity == Some(EffectiveSeverity::Error)
         {
             finding.violation.effective_severity = Some(EffectiveSeverity::Warn);
+        }
+    }
+}
+
+/// Give the gate severity `warn` to each finding in a test file, and mark it
+/// with [`AuditGateExemption::TestFile`].
+///
+/// The shared test-path classifier ([`fallow_engine::test_paths::is_test_path`])
+/// decides what a test file is: specs, test directories, end-to-end suites,
+/// mocks and fixtures. The finding stays in the report. `fallow health` does
+/// not call this, so it keeps the rule severity there.
+pub fn exempt_test_file_gates(findings: &mut [fallow_output::HealthFinding], root: &Path) {
+    for finding in findings {
+        let relative = finding.path.strip_prefix(root).unwrap_or(&finding.path);
+        if fallow_engine::test_paths::is_test_path(root, relative) {
+            finding.violation.effective_severity = Some(EffectiveSeverity::Warn);
+            finding.gate_exemption = Some(AuditGateExemption::TestFile);
         }
     }
 }
@@ -736,6 +758,38 @@ mod tests {
         // A grown cognitive value that reaches the next tier is introduced.
         head.violation.cognitive = 25;
         assert_eq!(classify(vec![base], &[head]), [true]);
+    }
+
+    #[test]
+    fn test_file_findings_get_warn_gate_severity_and_the_exemption() {
+        // The project itself lives below a `tests` directory. Only the path
+        // below the project root decides.
+        let project = root().join("tests").join("project");
+        let at = |relative: &str| {
+            let mut finding = finding("f", 1, 16, 5);
+            finding.violation.path = project.join(relative);
+            finding.violation.effective_severity = Some(EffectiveSeverity::Error);
+            finding
+        };
+        let mut findings = [
+            at("src/__tests__/app.js"),
+            at("src/app.spec.ts"),
+            at("src/app.test.tsx"),
+            at("src/__mocks__/api.js"),
+            at("src/app.js"),
+            at("src/latest.js"),
+        ];
+        exempt_test_file_gates(&mut findings, &project);
+        let marks: Vec<_> = findings
+            .iter()
+            .map(|finding| (finding.effective_severity, finding.gate_exemption))
+            .collect();
+        let exempt = (
+            Some(EffectiveSeverity::Warn),
+            Some(AuditGateExemption::TestFile),
+        );
+        let gated = (Some(EffectiveSeverity::Error), None);
+        assert_eq!(marks, [exempt, exempt, exempt, exempt, gated, gated]);
     }
 
     #[test]

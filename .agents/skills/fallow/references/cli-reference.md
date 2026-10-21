@@ -1156,6 +1156,8 @@ A matched finding that is not introduced is `worsened` when a measured value is 
 - `error`: a worsened finding counts like an introduced finding, so its `complexity-*` rule decides the verdict.
 - `off`: growth only in metrics that the finding does not exceed stays inherited. Growth of an exceeded metric stays `worsened` and makes the verdict at least `warn`.
 
+A complexity finding in a test file does not gate the audit verdict, under either gate. A test file is a spec (`*.test.*`, `*.spec.*`, `*.e2e.*`), a file below a test directory (`__tests__/`, `test/`, `tests/`, `e2e/`), a mock or a fixture. Such a finding has `effective_severity: warn` and `gate_exemption: "test-file"`, and it stays in the report with its attribution. It makes the verdict at least `warn`. `fallow health` still reports it at the severity of its rule.
+
 ### JSON contract: which fields are severity-aware
 
 | Field | Severity-aware? | What it counts |
