@@ -286,9 +286,11 @@ describe("node-test adapter with a test that starts a Node child process", () =>
         bail: true,
       });
       assert.equal(result.status, "killed", JSON.stringify(result));
-      assert.deepEqual(result.tests, [
-        { test_id: `${CLI_TEST}::${name}`, status: "fail", failure_kind: "assertion" },
-      ]);
+      assert.deepEqual(
+        result.tests.map(({ message: _message, ...rest }) => rest),
+        [{ test_id: `${CLI_TEST}::${name}`, status: "fail", failure_kind: "assertion" }],
+      );
+      assert.match(result.tests[0].message, /^AssertionError: /u);
     });
   }
 
