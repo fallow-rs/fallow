@@ -73,8 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `warn` (default): a worsened finding makes the verdict at least `warn`.
     The exit code stays 0.
   - `error`: a worsened finding counts like an introduced finding.
-  - `off`: no finding is worsened, and the verdict does not change. Use it to
-    keep the verdict of earlier versions.
+  - `off`: a finding is worsened only when a metric that it exceeds grew.
+    Growth only in other metrics stays `inherited`.
 
   The GitHub Action takes a `worsened` input. The GitLab template takes
   `FALLOW_AUDIT_WORSENED`. The MCP `audit` tool takes a `worsened` parameter.
