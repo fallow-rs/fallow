@@ -27,6 +27,7 @@ export type {
   AuditGate,
   AuditOutput,
   AuditVerdict,
+  AuditWorsened,
   BoundaryViolation,
   BoundaryViolationFinding,
   CheckOutput,

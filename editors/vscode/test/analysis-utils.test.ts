@@ -545,6 +545,22 @@ describe("planDegradation", () => {
     expect(plan.kind).toBe("retry");
   });
 
+  it("retries an audit run with --worsened and its value stripped for older CLIs", () => {
+    const plan = planDegradation("unexpected argument '--worsened' found", [
+      "audit",
+      "--format",
+      "json",
+      "--quiet",
+      "--worsened",
+      "error",
+    ]);
+    expect(plan).toEqual({
+      kind: "retry",
+      dropped: "--worsened",
+      args: ["audit", "--format", "json", "--quiet"],
+    });
+  });
+
   it("retries with complexity breakdown stripped for older CLIs", () => {
     const plan = planDegradation("unexpected argument '--complexity-breakdown' found", [
       "health",

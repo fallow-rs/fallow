@@ -1365,6 +1365,42 @@ fn an_ended_time_budget_skips_the_timeout_retry_and_keeps_timeout() {
 }
 
 #[test]
+fn a_time_budget_keeps_time_to_confirm_the_survivors_of_the_first_pass() {
+    const IDS: [&str; 8] = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"];
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            hits: BTreeMap::from([(tid("t1"), IDS.iter().map(|id| (*id).to_owned()).collect())]),
+            ..standard_dry()
+        },
+        |_, run| {
+            std::thread::sleep(Duration::from_millis(100));
+            Ok(run_result(run, RunStatus::Survived, None))
+        },
+    ));
+    let mut config = config(1);
+    // Without a reserve, the first pass fills this budget with about six
+    // runs, and no survivor gets its confirmation.
+    config.deadline = Some(Instant::now() + Duration::from_millis(550));
+    let outcome = run_schedule(&spawner, &plan(&IDS), &config).expect("run");
+    assert!(
+        outcome.unretried.is_empty(),
+        "each survivor of the first pass gets its confirmation: {:?}",
+        outcome.unretried
+    );
+    let confirmed = IDS
+        .iter()
+        .filter(|id| outcome.results[**id].status == MutantStatus::Survived)
+        .inspect(|id| assert!(outcome.results[**id].retried, "{id} is confirmed"))
+        .count();
+    assert!(confirmed > 0, "the run confirms at least one survivor");
+    assert_eq!(
+        status(&outcome, "m8"),
+        MutantStatus::Pending,
+        "the tail of the plan stays pending"
+    );
+}
+
+#[test]
 fn a_dry_run_hit_on_a_statically_unreached_mutant_runs_it_and_reports_the_miss() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
@@ -2356,6 +2392,9 @@ fn load_kill_job() -> Job {
         static_mutant: false,
         test_files: vec!["test/a.test.ts".to_owned()],
         cache_key: None,
+        confirmation: None,
+        first_tests: Vec::new(),
+        retry_extra_ms: 0,
     }
 }
 
@@ -2373,7 +2412,7 @@ fn a_load_kill_control_keys_the_memo_on_the_tests_that_are_not_marked_failed() {
     let spawner = FakeSpawner::new(script(|_| standard_dry(), |_, run| Ok(load_failure(run))));
     let config = config(1);
     let memo = ControlMemo::default();
-    memo.mark_failed(&[tid("t2")]);
+    memo.mark_failed(&[tid("t2")], CONTROL_RUN_FAILURE);
     let dry_files = vec!["test/a.test.ts".to_owned()];
     let mut worker = Worker::new(&spawner, &config, &dry_files, Duration::from_secs(5), &memo);
     worker.link = Some(spawner.spawn().expect("link"));
@@ -2393,7 +2432,7 @@ fn a_load_kill_control_keys_the_memo_on_the_tests_that_are_not_marked_failed() {
     );
 
     // When each test is marked failed, the mutant has no covering test.
-    memo.mark_failed(&[tid("t1")]);
+    memo.mark_failed(&[tid("t1")], CONTROL_RUN_FAILURE);
     let attempt = Attempt::decided(MutantStatus::Killed, None, Some(4));
     let uncovered = worker
         .confirm_load_kill(&job, &job.tests, VITEST_CAPS, attempt)
@@ -2594,4 +2633,128 @@ fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
     let runs = spawner.runs();
     assert_eq!(runs[2].0, 2);
     assert_eq!(runs[2].1.test_ids, vec!["test/b.test.ts::t2".to_owned()]);
+}
+
+/// m1 survives its first run with t1. The retry kills it only when it also
+/// runs t2, a test of the same file that the dry run did not attribute to m1
+/// (issue #3670: t2 reads a value that t1 cached).
+fn cached_value_run(index: usize, run: &RunRequest) -> Response {
+    if index > 0 && run.test_ids.contains(&tid("t2")) {
+        run_result(run, RunStatus::Killed, Some(&tid("t2")))
+    } else {
+        run_result(run, RunStatus::Survived, None)
+    }
+}
+
+#[test]
+fn a_survivor_retry_runs_each_test_of_its_files_and_a_kill_by_a_new_test_is_killed() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| Ok(cached_value_run(index, run)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    let result = &outcome.results["m1"];
+    assert_eq!(result.status, MutantStatus::Killed);
+    assert_eq!(result.killed_by, Some(tid("t2")));
+    assert!(result.retried);
+    assert_eq!(
+        result.covering_tests,
+        vec![tid("t1")],
+        "covering_tests stays the dry-run hits, not the retry tests"
+    );
+    let runs = spawner.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(
+        runs[0].1.test_ids,
+        vec![tid("t1")],
+        "the first run stays narrow"
+    );
+    assert_eq!(runs[1].1.test_ids, vec![tid("t1"), tid("t2")]);
+    let controls = spawner.controls();
+    assert_eq!(
+        controls.last().map(|(_, run)| run.test_ids.clone()),
+        Some(vec![tid("t1"), tid("t2")]),
+        "a kill by a new test needs a control run of the retry tests"
+    );
+}
+
+#[test]
+fn a_kill_by_a_new_test_that_fails_its_control_run_stays_survived() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| Ok(cached_value_run(index, run)),
+    ))
+    .with_control(|_, run| Ok(only_t1_passes_in_control(run)));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
+    assert!(
+        outcome
+            .baseline_failures
+            .iter()
+            .any(
+                |failure| failure.test_id.as_deref() == Some(tid("t2").as_str())
+                    && failure.message.as_deref() == Some(CONFIRMATION_RUN_FAILURE)
+            ),
+        "the test that fails without a mutant is a baseline failure, with the cause of a retry control run: {:#?}",
+        outcome.baseline_failures
+    );
+}
+
+#[test]
+fn a_static_survivor_retry_keeps_its_tests() {
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            static_hits: vec!["m1".to_owned()],
+            hits: BTreeMap::new(),
+            ..standard_dry()
+        },
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
+    let runs = spawner.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].1.test_ids, runs[1].1.test_ids);
+}
+
+/// A cache that holds a kill of `m1` by t2, a test of the confirmation set.
+#[derive(Debug)]
+struct CachedNewKiller;
+
+impl ResultLookup for CachedNewKiller {
+    fn key(&self, _: &Ready, mutant: &ScheduledMutant, _: &[String], _: &[String]) -> String {
+        format!("key-{}", mutant.id)
+    }
+
+    fn get(&self, mutant_id: &str, _: &str) -> Option<CachedResult> {
+        (mutant_id == "m1").then(|| CachedResult {
+            status: MutantStatus::Killed,
+            killed_by: Some(tid("t2")),
+            duration_ms: Some(3),
+        })
+    }
+}
+
+#[test]
+fn a_cached_kill_by_a_confirmation_test_lists_the_dry_run_hits() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| Ok(cached_value_run(index, run)),
+    ));
+    let mut config = config(1);
+    config.cache = Some(Arc::new(CachedNewKiller) as Arc<dyn ResultLookup>);
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
+    let m1 = &outcome.results["m1"];
+    assert!(m1.cached);
+    assert_eq!(m1.killed_by, Some(tid("t2")));
+    assert_eq!(m1.covering_tests, vec![tid("t1")]);
+}
+
+#[test]
+fn the_retry_extra_time_is_the_retry_time_minus_the_first_run_time() {
+    assert_eq!(retry_extra_ms(2000.0, 20.0), 1980);
+    // A retry never reserves less than the first run.
+    assert_eq!(retry_extra_ms(10.0, 20.0), 0);
+    assert_eq!(retry_extra_ms(500.5, 0.0), 501);
+    assert_eq!(retry_extra_ms(f64::NAN, 20.0), 0);
 }

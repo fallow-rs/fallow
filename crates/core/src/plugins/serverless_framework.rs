@@ -3,7 +3,8 @@
 //! The Serverless Framework reads `serverless.yml` (or a JS/TS config) and
 //! loads each function `handler` as a module. A handler such as
 //! `src/handler.main` names the export `main` of `src/handler.{js,ts}`. No
-//! import reaches these files, so the plugin makes them entry points.
+//! import reaches these files, so the plugin makes them entry points. The
+//! framework calls the named export, so the plugin also marks it as used.
 //!
 //! The framework also loads each name in `plugins` as a package or as a local
 //! module, and the esbuild build step loads each `inject` file. The plugin
@@ -27,6 +28,11 @@ pub(super) const CONFIG_PATTERNS: &[&str] = &["serverless.{js,cjs,mjs,ts,cts,mts
 /// them.
 pub(super) const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
+/// Only a root config file gets the `default` export credit. A module such as
+/// `src/lib/serverless.ts` is not a service config and stays reportable.
+pub(super) const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] =
+    &[("serverless.{js,cjs,mjs,ts,cts,mts}", &["default"])];
+
 const TOOLING_DEPENDENCIES: &[&str] = &["serverless"];
 
 /// Extensions that the framework tries for a handler without an extension.
@@ -37,6 +43,12 @@ const SOURCE_EXTENSIONS: &[&str] = &[".js", ".mjs", ".cjs", ".ts", ".mts", ".cts
 
 /// The package that the esbuild build step needs.
 const ESBUILD_PACKAGE: &str = "esbuild";
+
+/// The manifest that marks a nested directory as a service directory.
+const PACKAGE_JSON: &str = "package.json";
+
+/// The start of a `${...}` variable.
+const VARIABLE_START: &str = "${";
 
 /// The start of a `${file(path):selector}` variable.
 const FILE_VARIABLE_PREFIX: &str = "${file(";
@@ -88,6 +100,10 @@ impl Plugin for ServerlessFrameworkPlugin {
         CONFIG_PATTERNS
     }
 
+    fn config_file_exports(&self) -> &'static [(&'static str, &'static [&'static str])] {
+        CONFIG_FILE_EXPORTS
+    }
+
     fn always_used(&self) -> &'static [&'static str] {
         ALWAYS_USED
     }
@@ -109,6 +125,9 @@ pub(super) fn resolve_serverless_config(
     root: &Path,
 ) -> PluginResult {
     let mut result = PluginResult::default();
+    if !is_yaml_config(config_path) && !is_service_directory(config_path, root) {
+        return result;
+    }
     let references = if is_yaml_config(config_path) {
         yaml_references(config_path, source, root)
     } else {
@@ -117,6 +136,20 @@ pub(super) fn resolve_serverless_config(
     };
     references.apply(config_path, root, &mut result);
     result
+}
+
+/// True when a config file sits in a directory that the framework can run as
+/// a service: the project or workspace root, or a directory with its own
+/// `package.json`.
+///
+/// The framework reads `serverless.*` from the service directory only. Config
+/// discovery also finds a module such as `src/lib/serverless.ts`, so a nested
+/// JS or TS file outside a service directory is an ordinary module. A nested
+/// `serverless.yml` is always a service config.
+fn is_service_directory(config_path: &Path, root: &Path) -> bool {
+    config_path
+        .parent()
+        .is_some_and(|dir| dir == root || dir.join(PACKAGE_JSON).is_file())
 }
 
 fn is_yaml_config(config_path: &Path) -> bool {
@@ -138,9 +171,13 @@ struct References {
 impl References {
     fn apply(self, config_path: &Path, root: &Path, result: &mut PluginResult) {
         for handler in &self.handlers {
-            if let Some(pattern) = handler_entry_pattern(handler, config_path, root) {
-                result.push_entry_pattern(pattern);
+            let Some(pattern) = handler_entry_pattern(handler, config_path, root) else {
+                continue;
+            };
+            if let Some(export) = handler_export(handler) {
+                result.push_entry_export_credit(pattern.clone(), [export]);
             }
+            result.push_entry_pattern(pattern);
         }
         for plugin in &self.plugins {
             credit_plugin(plugin, config_path, root, result);
@@ -168,6 +205,19 @@ fn handler_module(handler: &str) -> Option<&str> {
     (!module.is_empty()).then_some(module)
 }
 
+/// The export name part of a handler value.
+///
+/// The framework calls this export of the handler module, so the export is
+/// used even when the analysis checks entry exports. A value with an
+/// unresolved `${...}` variable names no known export.
+fn handler_export(handler: &str) -> Option<&str> {
+    if handler.contains(VARIABLE_START) {
+        return None;
+    }
+    let (_module, export) = handler.trim().rsplit_once('.')?;
+    (!export.is_empty()).then_some(export)
+}
+
 /// The project-relative entry pattern for a handler value.
 ///
 /// A module path with a source extension is a file. A module path without one
@@ -190,7 +240,7 @@ fn handler_entry_pattern(handler: &str, config_path: &Path, root: &Path) -> Opti
 fn credit_plugin(plugin: &str, config_path: &Path, root: &Path, result: &mut PluginResult) {
     let plugin = plugin.trim();
     // An unresolved variable such as `${self:custom.plugin}` names no package.
-    if plugin.is_empty() || plugin.contains("${") {
+    if plugin.is_empty() || plugin.contains(VARIABLE_START) {
         return;
     }
     if plugin.starts_with('.') || Path::new(plugin).is_absolute() {
@@ -448,6 +498,14 @@ mod tests {
         );
         assert_eq!(handler_module("handler"), None);
         assert_eq!(handler_module(".main"), None);
+        assert_eq!(handler_export("src/handler.main"), Some("main"));
+        assert_eq!(
+            handler_export("function/handler.js.handler"),
+            Some("handler")
+        );
+        assert_eq!(handler_export("src/handler."), None);
+        assert_eq!(handler_export("handler"), None);
+        assert_eq!(handler_export("src/handler.${self:custom.name}"), None);
     }
 
     #[test]
@@ -461,6 +519,38 @@ mod tests {
         assert_eq!(
             handler_entry_pattern("function/handler.js.handler", &config, &root).as_deref(),
             Some("function/handler.js")
+        );
+    }
+
+    fn entry_export_credits(result: &PluginResult) -> Vec<(String, Vec<String>)> {
+        result
+            .entry_export_credits
+            .iter()
+            .map(|rule| (rule.path.pattern.clone(), rule.exports.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn handler_credits_the_export_that_it_names() {
+        let source = "functions:\n  hello:\n    handler: src/hello.main\n  bye:\n    handler: src/hello.bye\n  legacy:\n    handler: function/handler.js.handler\n  dynamic:\n    handler: src/dynamic.${self:custom.name}\n";
+        let result = resolve("/project/serverless.yml", source);
+        assert!(result.used_exports.is_empty());
+        assert_eq!(
+            entry_export_credits(&result),
+            vec![
+                (
+                    "src/hello.{js,mjs,cjs,ts,mts,cts}".to_string(),
+                    vec!["main".to_string()]
+                ),
+                (
+                    "src/hello.{js,mjs,cjs,ts,mts,cts}".to_string(),
+                    vec!["bye".to_string()]
+                ),
+                (
+                    "function/handler.js".to_string(),
+                    vec!["handler".to_string()]
+                ),
+            ]
         );
     }
 
@@ -604,6 +694,27 @@ export default config;
                 "{dep} missing from {deps:?}"
             );
         }
+    }
+
+    #[test]
+    fn nested_script_config_outside_a_service_directory_gives_an_empty_result() {
+        let source = "export default { plugins: ['serverless-offline'], functions: { a: { handler: 'orphan.main' } } };";
+        let result = resolve("/project/src/lib/serverless.ts", source);
+        assert!(result.entry_patterns.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn nested_yaml_config_is_a_service_config() {
+        let result = resolve(
+            "/project/services/api/serverless.yml",
+            "plugins:\n  - serverless-offline\nfunctions:\n  a:\n    handler: handler.main\n",
+        );
+        assert_eq!(
+            entry_patterns(&result),
+            vec!["services/api/handler.{js,mjs,cjs,ts,mts,cts}"]
+        );
+        assert_eq!(result.referenced_dependencies, vec!["serverless-offline"]);
     }
 
     #[test]

@@ -14,14 +14,19 @@ const CODEGEN_CONFIG_PATTERN: &str = "codegen*.{ts,js,cjs,mjs}";
 const CONFIG_PATTERNS: &[&str] = &[CODEGEN_CONFIG_PATTERN, "graphql.config.{ts,js,cjs,mjs}"];
 
 /// Config discovery matches `codegen*` in every directory, so it also matches
-/// source files such as `src/codegenUtils.ts`. Their default export gets no
-/// credit. `graphql.config.*` keeps the credit.
+/// source files such as `src/codegenUtils.ts`. These patterns get no
+/// unanchored `default` export credit. `graphql.config.*` keeps the credit.
 const UNCREDITED_CONFIG_PATTERNS: &[&str] = &[CODEGEN_CONFIG_PATTERN];
 
 const ALWAYS_USED: &[&str] = &[
     "codegen*.{ts,js,cjs,mjs,yml,yaml}",
     "graphql.config.{ts,js,cjs,mjs,yml,yaml}",
 ];
+
+/// Only a `codegen*` file at the project or workspace package root gets the
+/// `default` export credit. A root helper such as `codegenUtils.ts` gets it
+/// too, which is a small false-negative risk.
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[(CODEGEN_CONFIG_PATTERN, &["default"])];
 
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@graphql-codegen/cli",
@@ -35,6 +40,7 @@ define_plugin! {
     enablers: ENABLERS,
     config_patterns: CONFIG_PATTERNS,
     config_default_export_opt_out: UNCREDITED_CONFIG_PATTERNS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     resolve_config(config_path, source, _root) {

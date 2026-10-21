@@ -4,7 +4,9 @@
 //! `serverless.yml` config, so this plugin reuses the config reader of the
 //! `serverless-framework` plugin. Only the enabler package is different.
 
-use super::serverless_framework::{ALWAYS_USED, CONFIG_PATTERNS, resolve_serverless_config};
+use super::serverless_framework::{
+    ALWAYS_USED, CONFIG_FILE_EXPORTS, CONFIG_PATTERNS, resolve_serverless_config,
+};
 use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["osls"];
@@ -16,6 +18,7 @@ define_plugin! {
     enablers: ENABLERS,
     config_patterns: CONFIG_PATTERNS,
     config_default_export_opt_out: CONFIG_PATTERNS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     resolve_config(config_path, source, root) {

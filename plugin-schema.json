@@ -57,6 +57,14 @@
       },
       "default": []
     },
+    "configDefaultExportOptOut": {
+      "description": "Entries of `configPatterns` whose files do not get the `default`\nexport credit under `includeEntryExports`. Use it when the tool reads\nnamed exports, or when the pattern also matches ordinary source files.\nWrite each entry exactly as in `configPatterns`. Other entries have\nno effect.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "alwaysUsed": {
       "description": "Files that are always considered \"used\" when this plugin is active.",
       "type": "array",

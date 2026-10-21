@@ -28,6 +28,7 @@ import {
   symbolForDeclaration,
 } from "./semantic-identity.mjs";
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
+import { matchingAliasEntries, matchingSymbolEntries, targetName } from "./symbol-targets.mjs";
 import { analyzeTypeCoupling } from "./type-coupling.mjs";
 
 const { SignatureKind, SymbolFlags } = sync;
@@ -399,8 +400,11 @@ const symbolUseBatchState = (resolvedQueries, evidenceLimit) => {
     uncertaintiesByQuery: new Map(resolvedQueries.map(({ query }) => [query.id, new Set()])),
     declarationLocationsByQuery: new Map(resolvedQueries.map(({ query }) => [query.id, new Set()])),
     targetsByKey: new Map(),
+    targetNames: new Set(),
+    aliasEntriesByProject: new Map(),
     exportEntriesByModule: new Map(),
     exportEntriesByProject: new Map(),
+    exportedNames: new Set(),
     candidateNames: new Set(),
     classMemberEntries,
     classMemberEntriesByName: entriesByName(classMemberEntries),
@@ -415,6 +419,7 @@ const addSymbolTarget = (root, state, entry, declaration, namespace) => {
   state.declarationLocationsByQuery
     .get(entry.query.id)
     .add(locationKey(location(root, declaration.name ?? declaration)));
+  state.targetNames.add(targetName(declaration));
   const key = stableDeclarationKey(declaration, namespace);
   const targets = state.targetsByKey.get(key) ?? [];
   targets.push(entry);
@@ -425,6 +430,7 @@ const registerSymbolTargets = (root, state, entry) => {
   state.candidateNames.add(entry.query.symbol.localName);
   state.candidateNames.add(entry.query.symbol.exportedName);
   if (entry.query.symbol.declarationKind === "export") {
+    state.exportedNames.add(entry.query.symbol.exportedName);
     const moduleIdentity = canonicalFileIdentity(entry.query.symbol.absolutePath);
     const entries = state.exportEntriesByModule.get(moduleIdentity) ?? new Set();
     entries.add(entry);
@@ -448,45 +454,6 @@ const registerSymbolTargets = (root, state, entry) => {
     }
   });
   state.contractRelationsByQuery.set(entry.query.id, entry.resolved.contractRelations);
-};
-
-const matchingSymbolEntries = (project, symbol, namespace, targetsByKey) => {
-  const declarations = declarationsForSymbol(project, symbol);
-  const matchingLane = declarations.filter((declaration) =>
-    declarationNamespaces(declaration).has(namespace),
-  );
-  if (matchingLane.length > 0) {
-    return new Set(
-      matchingLane.flatMap(
-        (declaration) => targetsByKey.get(stableDeclarationKey(declaration, namespace)) ?? [],
-      ),
-    );
-  }
-  return new Set(
-    declarations.flatMap((declaration) =>
-      [...declarationNamespaces(declaration)].flatMap(
-        (declaredNamespace) =>
-          targetsByKey.get(stableDeclarationKey(declaration, declaredNamespace)) ?? [],
-      ),
-    ),
-  );
-};
-
-const matchingAliasEntries = (project, symbol, namespace, targetsByKey) => {
-  const entries = new Set();
-  const seen = new Set();
-  let current = symbol;
-  while (current && !seen.has(current)) {
-    seen.add(current);
-    matchingSymbolEntries(project, current, namespace, targetsByKey).forEach((entry) =>
-      entries.add(entry),
-    );
-    if ((current.flags & SymbolFlags.Alias) === 0) break;
-    const aliased = project.checker.getAliasedSymbol(current);
-    if (project.checker.isUnknownSymbol(aliased) || aliased === current) break;
-    current = aliased;
-  }
-  return entries;
 };
 
 const isDeclarationReference = (root, state, entry, node) => {
@@ -686,9 +653,7 @@ const recordComputedMemberAccess = (state, project, entries, node) => {
   const matched = new Set(
     receiverProperties
       .filter((property) => state.candidateNames.has(property.name))
-      .flatMap((property) => [
-        ...matchingSymbolEntries(project, property, "value", state.targetsByKey),
-      ]),
+      .flatMap((property) => [...matchingSymbolEntries(project, property, "value", state)]),
   );
   matched.forEach((entry) => recordSymbolUncertainty(state, entry, "dynamic-member-access"));
 };
@@ -709,22 +674,24 @@ const recordDynamicImportUncertainty = (state, project, node) => {
   );
 };
 
-const referenceNamespaces = (project, node, symbol) => {
+const referenceNamespaces = (project, node, rawSymbol) => {
   const alias = aliasNode(node);
   if (!alias || !isExportSpecifier(alias)) {
     return [isTypePosition(node) ? "type" : "value"];
   }
   if (alias.isTypeOnly || alias.parent?.parent?.isTypeOnly) return ["type"];
   const namespaces = new Set(
-    declarationsForSymbol(project, symbol).flatMap((declaration) => [
-      ...declarationNamespaces(declaration),
-    ]),
+    declarationsForSymbol(project, resolveAlias(project.checker, rawSymbol)).flatMap(
+      (declaration) => [...declarationNamespaces(declaration)],
+    ),
   );
   return namespaces.size > 0 ? [...namespaces] : [isTypePosition(node) ? "type" : "value"];
 };
 
 const surfaceEntriesForNode = (state, project, node, namespace) => {
-  if (moduleEdgeDeclaration(node)) return new Set();
+  // Resolving the referenced module costs checker round trips, so skip every
+  // identifier that cannot name an export query.
+  if (!state.exportedNames.has(node.text) || moduleEdgeDeclaration(node)) return new Set();
   const moduleIdentity = referencedModuleIdentity(project, node);
   if (!moduleIdentity) return new Set();
   const direct = [...(state.exportEntriesByModule.get(moduleIdentity) ?? [])].filter(
@@ -735,7 +702,7 @@ const surfaceEntriesForNode = (state, project, node, namespace) => {
   for (const entry of direct) {
     for (const { declaration } of entry.resolved.ownerContexts) {
       const symbol = resolveAlias(project.checker, symbolForDeclaration(project, declaration));
-      matchingSymbolEntries(project, symbol, namespace, state.targetsByKey).forEach((related) =>
+      matchingSymbolEntries(project, symbol, namespace, state).forEach((related) =>
         entries.add(related),
       );
     }
@@ -761,10 +728,9 @@ const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImpor
   const symbols = project.checker.getSymbolAtLocation(nodes);
   nodes.forEach((node, index) => {
     const rawSymbol = symbols[index];
-    const symbol = resolveAlias(project.checker, rawSymbol);
-    referenceNamespaces(project, node, symbol).forEach((namespace) => {
+    referenceNamespaces(project, node, rawSymbol).forEach((namespace) => {
       const entries = new Set([
-        ...matchingAliasEntries(project, rawSymbol, namespace, state.targetsByKey),
+        ...matchingAliasEntries(project, rawSymbol, namespace, state),
         ...surfaceEntriesForNode(state, project, node, namespace),
       ]);
       entries.forEach((entry) => recordSymbolUse(root, state, project, entry, node, namespace));

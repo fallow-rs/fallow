@@ -18,7 +18,7 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use crate::plugins::ConfigDefaultCredit;
+use crate::plugins::ConfigExportCredit;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
@@ -27,9 +27,6 @@ type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
 
 const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
-/// The export name that a tool reads from its config file.
-const DEFAULT_EXPORT: &str = "default";
-
 type UnusedExportModuleResult = (Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>);
 
 struct UnusedExportModuleContext<'a> {
@@ -37,7 +34,7 @@ struct UnusedExportModuleContext<'a> {
     config: &'a ResolvedConfig,
     ignore_matchers: &'a [CompiledIgnoreExportRule],
     plugin_matchers: &'a PluginMatchers<'a>,
-    config_default_credit: &'a ConfigDefaultCredit,
+    config_export_credit: &'a ConfigExportCredit<'a>,
     module_info_by_id: Option<&'a FxHashMap<FileId, &'a ModuleInfo>>,
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
@@ -425,8 +422,7 @@ pub fn find_unused_exports(
 
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
     let plugin_matchers = compile_plugin_matchers(plugin_result);
-    let config_default_credit =
-        ConfigDefaultCredit::new(plugin_result, config.include_entry_exports);
+    let config_export_credit = ConfigExportCredit::new(plugin_result, config.include_entry_exports);
     let module_info_by_id: Option<FxHashMap<FileId, &ModuleInfo>> =
         if config.ignore_exports_used_in_file.is_enabled() {
             Some(modules.iter().map(|m| (m.file_id, m)).collect())
@@ -440,7 +436,7 @@ pub fn find_unused_exports(
         config,
         ignore_matchers,
         plugin_matchers: &plugin_matchers,
-        config_default_credit: &config_default_credit,
+        config_export_credit: &config_export_credit,
         module_info_by_id: module_info_by_id.as_ref(),
         suppressions,
         line_offsets_by_file,
@@ -493,12 +489,13 @@ fn find_unused_exports_for_module(
         .map(|re| re.exported_name.as_str())
         .collect();
 
+    let config_credited_exports = config_credited_exports(module, ctx);
     let mut match_ctx = UnusedExportMatchContext {
         same_file_used_exports: &same_file_used_exports,
         re_export_names: &re_export_names,
         matching_ignore: &matching_ignore,
         matching_plugin: &matching_plugin,
-        config_default_credit: has_config_default_credit(module, ctx),
+        config_credited_exports: &config_credited_exports,
         stale_expected_unused: &mut stale_expected_unused,
     };
     let (unused_exports, unused_types) =
@@ -525,7 +522,7 @@ fn collect_module_unused_export_findings(
                 re_export_names: match_ctx.re_export_names,
                 matching_ignore: match_ctx.matching_ignore,
                 matching_plugin: match_ctx.matching_plugin,
-                config_default_credit: match_ctx.config_default_credit,
+                config_credited_exports: match_ctx.config_credited_exports,
                 stale_expected_unused: &mut *match_ctx.stale_expected_unused,
             },
         ) {
@@ -540,21 +537,17 @@ fn collect_module_unused_export_findings(
     (unused_exports, unused_types)
 }
 
-/// Whether `module` is a plugin config file with a `default` export to credit.
-/// `export { config as default }` keeps the name as a string, so compare by
-/// name and not by the `ExportName::Default` variant.
-fn has_config_default_credit(module: &ModuleNode, ctx: &UnusedExportModuleContext<'_>) -> bool {
-    if ctx.config_default_credit.is_empty()
-        || !module
-            .exports
-            .iter()
-            .any(|e| e.name.matches_str(DEFAULT_EXPORT))
-    {
-        return false;
+/// The export names that a tool reads from `module` as its config file.
+fn config_credited_exports<'a>(
+    module: &ModuleNode,
+    ctx: &UnusedExportModuleContext<'a>,
+) -> Vec<&'a [String]> {
+    if ctx.config_export_credit.is_empty() {
+        return Vec::new();
     }
     let relative_path = module.path.strip_prefix(&ctx.config.root);
     let file_str = relative_path.unwrap_or(&module.path).to_string_lossy();
-    ctx.config_default_credit.matches(file_str.as_ref())
+    ctx.config_export_credit.exports_for(file_str.as_ref())
 }
 
 fn same_file_used_exports(
@@ -576,7 +569,7 @@ struct UnusedExportMatchContext<'a> {
     re_export_names: &'a FxHashSet<&'a str>,
     matching_ignore: &'a [&'a [String]],
     matching_plugin: &'a [&'a [&'a str]],
-    config_default_credit: bool,
+    config_credited_exports: &'a [&'a [String]],
     stale_expected_unused: &'a mut Vec<StaleSuppression>,
 }
 
@@ -668,7 +661,7 @@ fn unused_export_candidate_is_skipped(
         return true;
     }
 
-    (match_ctx.config_default_credit && export_str == DEFAULT_EXPORT)
+    ConfigExportCredit::credits(match_ctx.config_credited_exports, export_str)
         || is_export_ignored(
             export_str,
             match_ctx.matching_ignore,

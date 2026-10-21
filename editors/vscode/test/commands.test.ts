@@ -101,6 +101,7 @@ vi.mock("../src/config.js", () => ({
   getTypeAwareSettings: () => mockTypeAwareSettings,
   getTypeAwareTimeoutSeconds: () => mockTypeAwareTimeoutSeconds,
   getAuditGate: () => "new-only",
+  getAuditWorsened: () => undefined,
   getDuplicationCrossLanguageOverride: () => undefined,
   getDuplicationIgnoreImportsOverride: () => undefined,
   getDuplicationIgnoreSymlinksOverride: () => undefined,

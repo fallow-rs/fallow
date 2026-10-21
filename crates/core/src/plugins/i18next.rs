@@ -25,6 +25,8 @@ const ALWAYS_USED: &[&str] = &[
     "src/locales/**/*.json",
 ];
 
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[("i18next.config.{js,ts,mjs}", &["default"])];
+
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "i18next",
     "react-i18next",
@@ -38,6 +40,7 @@ define_plugin! {
     struct I18nextPlugin => "i18next",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
 }

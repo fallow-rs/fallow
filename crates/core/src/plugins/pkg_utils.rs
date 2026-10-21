@@ -25,11 +25,17 @@ const ALWAYS_USED: &[&str] = &[
     "**/package.bundle.{ts,js,mts,mjs,cts,cjs}",
 ];
 
+/// `**/` also matches a file at the root, so one pattern covers the root and
+/// nested build configs.
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] =
+    &[("**/package.config.{ts,js,mts,mjs,cts,cjs}", &["default"])];
+
 const TOOLING_DEPENDENCIES: &[&str] = &["@sanity/pkg-utils"];
 
 define_plugin! {
     struct PkgUtilsPlugin => "pkg-utils",
     enablers: ENABLERS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
 }

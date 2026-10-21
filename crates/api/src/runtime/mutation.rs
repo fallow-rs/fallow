@@ -662,13 +662,21 @@ fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> Mutation
 }
 
 /// The `init` options of the runner. The `node:test` runner gets the module
-/// loading flags of the `node --test` command in the project scripts.
-fn init_options(runner: Runner, root: &Path) -> InitOptions {
+/// loading flags of the `node --test` command in the project scripts. The
+/// `node:test` and `bun:test` runners get the static test files, because
+/// their glob discovery does not go into dot directories. Vitest has its own
+/// include configuration.
+fn init_options(runner: Runner, root: &Path, static_test_files: &[String]) -> InitOptions {
     let node_args = match runner {
         Runner::NodeTest => node_test_args(root),
         Runner::Vitest | Runner::BunTest => Vec::new(),
     };
+    let extra_test_files = match runner {
+        Runner::NodeTest | Runner::BunTest => static_test_files.to_vec(),
+        Runner::Vitest => Vec::new(),
+    };
     InitOptions {
+        extra_test_files,
         node_args,
         ..InitOptions::default()
     }
@@ -737,7 +745,7 @@ fn execute(
             config_path: planned.runner_config.clone(),
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
-            options: init_options(runner, &root),
+            options: init_options(runner, &root, &plan.test_files),
         },
         runner: range.clone(),
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),
@@ -1222,5 +1230,18 @@ mod tests {
         let end = settle_worktree(None, |_| panic!("no end check without a start snapshot"));
         assert!(end.changed_paths.is_empty());
         assert!(end.check_error.is_none());
+    }
+
+    #[test]
+    fn the_glob_runners_get_the_static_test_files_and_vitest_does_not() {
+        let dir = tempfile::tempdir().expect("dir");
+        let files = vec![".github/tests/math.test.mjs".to_owned()];
+        for runner in [Runner::NodeTest, Runner::BunTest] {
+            let options = init_options(runner, dir.path(), &files);
+            assert_eq!(options.extra_test_files, files, "{runner:?}");
+            assert!(options.test_files.is_empty(), "{runner:?}");
+        }
+        let vitest = init_options(Runner::Vitest, dir.path(), &files);
+        assert!(vitest.extra_test_files.is_empty());
     }
 }

@@ -432,6 +432,173 @@ fn negate_condition_covers_plain_tests_only() {
     }
 }
 
+/// The object declaration of the `.filter(Boolean)` lookup fixtures.
+const ALIGNMENT: &str =
+    "const alignment = { left: \"text-left\", right: \"text-right\" } as const;";
+
+/// The conditional element of the `.filter(Boolean)` lookup fixtures.
+const LOOKUP: &str = "align ? alignment[align] : \"\"";
+
+/// A module with `prefix` and an exported function that returns `body`.
+fn lookup_fixture(prefix: &str, body: &str) -> String {
+    format!("{prefix}\nexport const classes = (align?: \"left\" | \"right\"): string => {body};")
+}
+
+/// An array with `element` before `.filter(Boolean)`.
+fn filtered(element: &str) -> String {
+    format!("[\"base\", {element}].filter(Boolean).join(\" \")")
+}
+
+/// Asserts the negate-condition pairs of each `(source, want)` case.
+fn assert_negate_pairs(cases: &[(String, &[(&str, &str)])]) {
+    for (source, want) in cases {
+        let result = run(source, TS);
+        assert_eq!(
+            pairs(&result, Operator::NegateCondition),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+const PRUNED: &[(&str, &str)] = &[("align", "false")];
+const BOTH: &[(&str, &str)] = &[("align", "false"), ("align", "true")];
+
+#[test]
+fn negate_condition_skips_the_true_mutant_of_an_optional_lookup_before_filter_boolean() {
+    let with_prefix =
+        |extra: &str| lookup_fixture(&format!("{ALIGNMENT}\n{extra}"), &filtered(LOOKUP));
+    let with_element = |element: &str| lookup_fixture(ALIGNMENT, &filtered(element));
+    let cases: Vec<(String, &[(&str, &str)])> = vec![
+        (with_element(LOOKUP), PRUNED),
+        (with_prefix("type Align = keyof typeof alignment;"), PRUNED),
+        (with_prefix("alignment.left.trim();"), PRUNED),
+        (
+            lookup_fixture(
+                "const alignment = ({ left: \"l\", 'right': \"r\", 1: \"one\" }) satisfies object;",
+                &filtered(LOOKUP),
+            ),
+            PRUNED,
+        ),
+        (
+            with_element("(align) ? (alignment?.[align]) : null"),
+            &[("(align)", "false")],
+        ),
+        (with_element("align ? alignment[align] : undefined"), PRUNED),
+        (with_element("align ? alignment[align] : false"), PRUNED),
+        (with_element("align ? alignment[align] : 0"), PRUNED),
+        (with_element("align ? alignment[align] : ``"), PRUNED),
+        (
+            format!(
+                "export function classes(align?: \"left\") {{\n{ALIGNMENT}\nreturn {};\n}}",
+                filtered(LOOKUP)
+            ),
+            PRUNED,
+        ),
+        (
+            format!(
+                "export default function classes(align?: \"left\") {{\n{ALIGNMENT}\nreturn {};\n}}",
+                filtered(LOOKUP)
+            ),
+            PRUNED,
+        ),
+    ];
+    assert_negate_pairs(&cases);
+}
+
+#[test]
+fn negate_condition_keeps_the_true_mutant_outside_a_closed_filter_boolean_lookup() {
+    let with_prefix =
+        |extra: &str| lookup_fixture(&format!("{ALIGNMENT}\n{extra}"), &filtered(LOOKUP));
+    let with_element = |element: &str| lookup_fixture(ALIGNMENT, &filtered(element));
+    let with_object = |object: &str| lookup_fixture(object, &filtered(LOOKUP));
+    let with_body = |body: String| lookup_fixture(ALIGNMENT, &body);
+    let cases: Vec<(String, &[(&str, &str)])> = vec![
+        (with_body(format!("`base ${{{LOOKUP}}}`")), BOTH),
+        (with_body(format!("[\"base\", {LOOKUP}].join(\" \")")), BOTH),
+        (
+            with_body(format!("[\"base\", {LOOKUP}].filter((v) => v)")),
+            BOTH,
+        ),
+        (
+            with_body(format!("[\"base\", {LOOKUP}]?.filter(Boolean)")),
+            BOTH,
+        ),
+        (
+            with_body(format!("[\"base\", ...[{LOOKUP}]].filter(Boolean)")),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", undefined: \"u\" };"),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", \"0\": \"z\" };"),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", 0: \"z\" };"),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", NaN: \"n\" };"),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", __proto__: null };"),
+            BOTH,
+        ),
+        (
+            with_object("const extra = {};\nconst alignment = { left: \"l\", ...extra };"),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", get right() { return \"r\"; } };"),
+            BOTH,
+        ),
+        (
+            with_object("const alignment = { left: \"l\", [key]: \"r\" };"),
+            BOTH,
+        ),
+        (with_object("let alignment = { left: \"l\" };"), BOTH),
+        (with_object(&format!("export {ALIGNMENT}")), BOTH),
+        (
+            format!(
+                "export const classes = (align?: \"left\") => {};\nclasses();\n{ALIGNMENT}",
+                filtered(LOOKUP)
+            ),
+            BOTH,
+        ),
+        (with_prefix("export { alignment };"), BOTH),
+        (with_prefix("export default alignment;"), BOTH),
+        (with_prefix("alignment.undefined = \"x\";"), BOTH),
+        (with_prefix("delete alignment.left;"), BOTH),
+        (with_prefix("alignment.reset();"), BOTH),
+        (with_prefix("alignment.left`tag`;"), BOTH),
+        (with_prefix("Object.assign(alignment, extra);"), BOTH),
+        (with_prefix("const Boolean = (v: unknown) => true;"), BOTH),
+        (with_prefix("eval(\"code\");"), BOTH),
+        (with_element("align ? alignment[other] : \"\""), BOTH),
+        (with_element("align ? alignment.left : \"\""), BOTH),
+        (with_element("align ? alignment[align] : \"none\""), BOTH),
+        (
+            lookup_fixture(
+                &format!("{ALIGNMENT}\nconst undefined = \"u\";"),
+                &filtered("align ? alignment[align] : undefined"),
+            ),
+            BOTH,
+        ),
+    ];
+    assert_negate_pairs(&cases);
+
+    let script = "const alignment = { left: \"l\" };\nwith (scope) {}\n\
+                  const classes = (align) => [\"base\", align ? alignment[align] : \"\"].filter(Boolean);";
+    assert_eq!(
+        pairs(&run(script, JS), Operator::NegateCondition),
+        expected(BOTH)
+    );
+}
+
 #[test]
 fn negate_condition_yields_to_boolean_literal_on_a_literal_test() {
     let result = run("if (true) { go(); }", JS);

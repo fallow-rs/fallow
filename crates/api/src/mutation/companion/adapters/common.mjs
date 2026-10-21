@@ -84,6 +84,10 @@ export const validateInit = (init) => {
     isOptional(options.test_files, isStringList),
     "options.test_files must be a list of paths",
   );
+  expectRequest(
+    isOptional(options.extra_test_files, isStringList),
+    "options.extra_test_files must be a list of paths",
+  );
   expectRequest(isOptional(options.env, isStringMap), "options.env must map names to strings");
   expectRequest(
     isOptional(options.node_args, isStringList),

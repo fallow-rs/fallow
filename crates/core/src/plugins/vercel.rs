@@ -33,6 +33,11 @@ const FUNCTION_EXPORTS: &[&str] = &[
 
 const ALWAYS_USED: &[&str] = &["vercel.{ts,js,mjs,cjs,mts}", VERCEL_JSON];
 
+/// `@vercel/config` merges the default export and every named export of
+/// `vercel.ts` into the project config. Only a root file gets the credit,
+/// because config discovery also matches helper modules named `vercel.*`.
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[("vercel.{ts,js,mjs,cjs,mts}", &["*"])];
+
 const TOOLING_DEPENDENCIES: &[&str] = &["vercel", "@vercel/config"];
 
 pub struct VercelPlugin;
@@ -73,6 +78,10 @@ impl Plugin for VercelPlugin {
 
     fn config_default_export_opt_out(&self) -> &'static [&'static str] {
         CONFIG_PATTERNS
+    }
+
+    fn config_file_exports(&self) -> &'static [(&'static str, &'static [&'static str])] {
+        CONFIG_FILE_EXPORTS
     }
 
     fn always_used(&self) -> &'static [&'static str] {
