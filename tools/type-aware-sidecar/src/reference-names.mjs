@@ -43,10 +43,25 @@ const statementAliasNames = (statement) => {
   return [];
 };
 
+// Default-library and external-library files sit below node_modules. The
+// path check skips them before the source file and its metadata, which each
+// cost a checker round trip.
+const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/u;
+
 const isOwnSourceFile = (project, sourceFile) =>
   Boolean(sourceFile) &&
   !project.program.isSourceFileDefaultLibrary(sourceFile) &&
   !project.program.isSourceFileFromExternalLibrary(sourceFile);
+
+const programAliasNames = (project) =>
+  project.program
+    .getSourceFileNames()
+    .filter((fileName) => !NODE_MODULES_SEGMENT.test(fileName))
+    .map((fileName) => project.program.getSourceFile(fileName))
+    .filter((sourceFile) => isOwnSourceFile(project, sourceFile))
+    .flatMap((sourceFile) => sourceFile.statements.flatMap(statementAliasNames))
+    .map((name) => name?.text)
+    .filter((text) => typeof text === "string");
 
 /**
  * Returns the identifier names that can reach a symbol-use target.
@@ -56,18 +71,5 @@ const isOwnSourceFile = (project, sourceFile) =>
  * the target names and the names that the alias declarations of the project
  * files declare, project declaration files included.
  */
-export const referenceNames = (projects, targetNames) => {
-  const names = new Set([...targetNames, "default"]);
-  const visited = new Set();
-  const ownSourceFiles = projects.flatMap((project) =>
-    project.program
-      .getSourceFileNames()
-      .filter((fileName) => !visited.has(fileName) && visited.add(fileName))
-      .map((fileName) => project.program.getSourceFile(fileName))
-      .filter((sourceFile) => isOwnSourceFile(project, sourceFile)),
-  );
-  ownSourceFiles
-    .flatMap((sourceFile) => sourceFile.statements.flatMap(statementAliasNames))
-    .forEach((name) => typeof name?.text === "string" && names.add(name.text));
-  return names;
-};
+export const referenceNames = (projects, targetNames) =>
+  new Set([...targetNames, "default", ...projects.flatMap(programAliasNames)]);
