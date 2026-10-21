@@ -870,6 +870,21 @@ fn gate_audits_the_session_tree_for_shell_forms() {
             "cd ../../wt-c | git commit".to_owned(),
             vec![a, c],
         ),
+        (
+            "quoted -c value with a space",
+            "git -c \"user.name=Jane Doe\" commit -m update".to_owned(),
+            vec![a],
+        ),
+        (
+            "escaped space in a -c value",
+            "git -c user.name=Jane\\ Doe commit -m x".to_owned(),
+            vec![a],
+        ),
+        (
+            "two -c options, the first quoted",
+            "git -c 'user.name=Jane Doe' -c core.x=y push".to_owned(),
+            vec![a],
+        ),
         ("expanded subcommand", "git $SUB".to_owned(), vec![a]),
         ("comment", "ls # git push".to_owned(), vec![a]),
     ];
