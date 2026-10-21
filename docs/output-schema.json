@@ -3700,6 +3700,17 @@
             "$ref": "#/definitions/WorsenedMetric"
           },
           "description": "Audit-mode list of the measured metrics that are higher than in the\nmatched base finding, with the base value and the head value. Present\non a worsened finding, and on an introduced finding that matches a base\nfinding. Absent when no metric grew."
+        },
+        "gate_exemption": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditGateExemption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Audit-mode reason why the finding does not gate the verdict. With\n`test-file`, the finding is in a test file and `effective_severity` is\n`warn`. Absent outside `audit`, and on a finding that gates."
         }
       },
       "required": [
@@ -34500,6 +34511,16 @@
         "pattern"
       ],
       "description": "A framework plugin rule that marks an export as used."
+    },
+    "AuditGateExemption": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "test-file",
+          "description": "The finding is in a test file: a spec, a test directory, an end-to-end\nsuite, a mock or a fixture. Its gate severity is `warn`."
+        }
+      ],
+      "description": "Audit-mode reason why a complexity finding does not gate the verdict."
     }
   }
 }
