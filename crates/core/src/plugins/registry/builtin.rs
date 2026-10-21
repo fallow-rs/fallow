@@ -45,8 +45,8 @@ use super::super::{
     turborepo::TurborepoPlugin, typedoc::TypedocPlugin, typeorm::TypeormPlugin,
     typescript::TypeScriptPlugin, typescript_content_mapper::TypescriptContentMapperPlugin,
     unocss::UnoCssPlugin, varlock::VarlockPlugin, velite::VelitePlugin, vercel::VercelPlugin,
-    vite::VitePlugin, vitepress::VitePressPlugin, vitest::VitestPlugin, vscode::VscodePlugin,
-    waku::WakuPlugin, webdriverio::WebdriverioPlugin, webpack::WebpackPlugin,
+    vite::VitePlugin, vite_plus::VitePlusPlugin, vitepress::VitePressPlugin, vitest::VitestPlugin,
+    vscode::VscodePlugin, waku::WakuPlugin, webdriverio::WebdriverioPlugin, webpack::WebpackPlugin,
     wrangler::WranglerPlugin, wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
 
@@ -144,6 +144,7 @@ fn add_build_and_test_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         ModuleFederationPlugin,
         TsupPlugin,
         TsdownPlugin,
+        VitePlusPlugin,
         PkgUtilsPlugin,
         ParcelPlugin,
         VitestPlugin,

@@ -2382,35 +2382,6 @@ fn collect_node_modules_roots<'a>(
     nm_roots
 }
 
-/// Scripts that the Nx `run-commands` targets of `<dir>/project.json` run, keyed
-/// `nx:<target>` so they never collide with a `package.json` script.
-#[expect(
-    clippy::disallowed_types,
-    reason = "joins the std HashMap of package.json scripts"
-)]
-fn nx_target_scripts(
-    dir: &std::path::Path,
-    project_root: &str,
-    production: bool,
-) -> std::collections::HashMap<String, String> {
-    let Ok(source) = std::fs::read_to_string(dir.join("project.json")) else {
-        return std::collections::HashMap::new();
-    };
-    let commands: std::collections::HashMap<String, String> =
-        scripts::nx_targets::run_commands_scripts(&source, project_root)
-            .into_iter()
-            .collect();
-    let commands = if production {
-        scripts::filter_production_scripts(&commands)
-    } else {
-        commands
-    };
-    commands
-        .into_iter()
-        .map(|(target, command)| (format!("nx:{target}"), command))
-        .collect()
-}
-
 /// Analyze the root package.json scripts and fold the results into the plugin result.
 fn analyze_root_scripts(
     config: &ResolvedConfig,
@@ -2426,7 +2397,11 @@ fn analyze_root_scripts(
     } else {
         pkg_scripts.clone()
     };
-    scripts_to_analyze.extend(nx_target_scripts(&config.root, "", config.production));
+    scripts_to_analyze.extend(scripts::config_task_scripts(
+        &config.root,
+        "",
+        config.production,
+    ));
     if scripts_to_analyze.is_empty() {
         return;
     }
@@ -2512,7 +2487,11 @@ fn analyze_one_workspace_scripts(
     } else {
         ws_scripts.clone()
     };
-    scripts_to_analyze.extend(nx_target_scripts(&ws.root, &ws_prefix, config.production));
+    scripts_to_analyze.extend(scripts::config_task_scripts(
+        &ws.root,
+        &ws_prefix,
+        config.production,
+    ));
     if scripts_to_analyze.is_empty() {
         return (
             used_packages,

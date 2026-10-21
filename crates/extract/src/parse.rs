@@ -1584,12 +1584,11 @@ pub struct ImportBindingUsage {
 
 /// Reference spans proving module-mock API provenance (issue #2068 / #2082).
 ///
-/// `mock_bindings` holds spans of references that resolve to a mock-API value
-/// binding: a named `vi` import from `vitest` (any local alias), a named
-/// `jest` import from `@jest/globals` (any local alias), or the unresolved
-/// `jest` global that the Jest test environment injects. `vitest_namespaces`
-/// holds spans of references to a `import * as ns from "vitest"` binding, so
-/// `ns.vi.mock(...)` can be proven through the namespace identifier.
+/// `mock_bindings` holds spans of references to a mock-API value binding under
+/// any local name: a `vi` import from `vitest` or `vite-plus/test`, a `jest`
+/// import from `@jest/globals`, or the `jest` global of the Jest environment.
+/// `vitest_namespaces` holds spans of references to an `import * as ns` of a
+/// Vitest module, so `ns.vi.mock(...)` is proven through the namespace.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct MockApiReferenceSpans {
     pub(crate) mock_bindings: rustc_hash::FxHashSet<Span>,
@@ -2168,12 +2167,13 @@ fn compute_mock_api_reference_spans(
         if import.is_type_only || import.local_name.is_empty() {
             continue;
         }
-        let is_vi_binding = import.source == "vitest"
-            && matches!(&import.imported_name, ImportedName::Named(name) if name == "vi");
+        let vitest = matches!(import.source.as_str(), "vitest" | "vite-plus/test");
+        let is_vi_binding =
+            vitest && matches!(&import.imported_name, ImportedName::Named(name) if name == "vi");
         let is_jest_binding = import.source == "@jest/globals"
             && matches!(&import.imported_name, ImportedName::Named(name) if name == "jest");
         let is_vitest_namespace =
-            import.source == "vitest" && matches!(&import.imported_name, ImportedName::Namespace);
+            vitest && matches!(&import.imported_name, ImportedName::Namespace);
 
         if is_vi_binding || is_jest_binding {
             collect_binding_spans(&import.local_name, &mut spans.mock_bindings);

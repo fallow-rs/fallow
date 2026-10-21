@@ -48,6 +48,9 @@ static BINARY_TO_PACKAGE: &[(&str, &[&str])] = &[
     ("oxnode", &["@oxc-node/cli"]),
     ("ut", &["utoo"]),
     ("utx", &["utoo"]),
+    ("vp", &["vite-plus"]),
+    ("vpr", &["vite-plus"]),
+    ("vpx", &["vite-plus"]),
 ];
 
 /// The packages that the static table maps `binary` to.

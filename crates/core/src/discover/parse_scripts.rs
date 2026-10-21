@@ -74,8 +74,6 @@ fn collect_script_file_refs(
     expansions: &mut usize,
     refs: &mut Vec<String>,
 ) {
-    const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
-
     if depth.substitutions < MAX_SUBSTITUTION_DEPTH {
         let inner = Depth {
             substitutions: depth.substitutions + 1,
@@ -163,6 +161,9 @@ fn collect_script_file_refs(
         if context.ignored.contains(cmd) || crate::scripts::is_task_runner(cmd) {
             continue;
         }
+        let Some((cmd, start)) = crate::scripts::vite_plus::scan_command(&tokens, start) else {
+            continue;
+        };
         if crate::scripts::is_file_target_tool(cmd) {
             refs.extend(
                 crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..])
@@ -172,17 +173,26 @@ fn collect_script_file_refs(
             continue;
         }
 
-        let (args, is_ref): (&[&str], fn(&str) -> bool) = if RUNNERS.contains(&cmd) {
-            (&tokens[start + 1..], looks_like_file_path)
-        } else {
-            (&tokens[start..], looks_like_script_file)
-        };
-        refs.extend(
-            args.iter()
-                .filter(|token| !token.starts_with('-') && is_ref(token))
-                .flat_map(|token| resolve(token)),
-        );
+        refs.extend(script_file_args(cmd, &tokens, start).flat_map(resolve));
     }
+}
+
+/// The arguments of the command `cmd` at `start` that name script files. A
+/// runner such as `node` takes any file path, another command a script file.
+fn script_file_args<'a>(
+    cmd: &str,
+    tokens: &'a [&'a str],
+    start: usize,
+) -> impl Iterator<Item = &'a str> {
+    const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
+    let (args, is_ref): (&[&str], fn(&str) -> bool) = if RUNNERS.contains(&cmd) {
+        (&tokens[start + 1..], looks_like_file_path)
+    } else {
+        (&tokens[start..], looks_like_script_file)
+    };
+    args.iter()
+        .copied()
+        .filter(move |token| !token.starts_with('-') && is_ref(token))
 }
 
 /// Check if a token looks like a file path argument (has a directory separator

@@ -13,12 +13,15 @@ mod borp;
 pub mod ci;
 #[cfg(test)]
 mod command_forms_tests;
+mod config_tasks;
+mod file_target_tools;
 mod flag_credits;
 pub mod hooks;
 mod node_test;
 pub mod nx_targets;
 mod resolve;
 mod shell;
+pub mod vite_plus;
 mod workspace_selection;
 
 #[expect(
@@ -31,6 +34,8 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+pub use config_tasks::config_task_scripts;
+use file_target_tools::file_target_tool;
 pub use resolve::{
     DependencyBinaries, build_bin_to_package_map, project_bin_map, resolve_binary_to_packages,
     resolve_known_dependency_binary,
@@ -58,156 +63,6 @@ const COMMAND_WRAPPERS: &[CommandWrapperSpec] = &[CommandWrapperSpec {
 
 /// Node.js runners whose first non-flag argument is a file path, not a binary name.
 const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
-
-/// A tool that reads its file arguments but never executes them: a formatter,
-/// linter, spell checker, or code-quality checker (issue #2954). Its positional
-/// arguments are not entry points. The tool itself still counts as a used
-/// dependency, and its `--config` argument still counts as a config file.
-struct FileTargetTool {
-    /// Binary names of the tool.
-    names: &'static [&'static str],
-    /// Flags whose value names a module that the tool loads and runs, such as
-    /// a custom formatter, plugin, or parser. A path value of such a flag stays
-    /// reachable.
-    loading_flags: &'static [&'static str],
-    /// Flags whose value names a directory of modules that the tool loads,
-    /// such as a rule directory. The source files directly in that directory
-    /// stay reachable.
-    directory_flags: &'static [&'static str],
-}
-
-/// Every [`FileTargetTool`], sorted by first name.
-const FILE_TARGET_TOOLS: &[FileTargetTool] = &[
-    FileTargetTool {
-        names: &["alex"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["biome", "rome"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["cspell"],
-        loading_flags: &["--reporter"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["depcruise", "dependency-cruiser"],
-        loading_flags: &["--webpack-config"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["dprint"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["editorconfig-checker", "eclint"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["ember-template-lint"],
-        loading_flags: &["--config-path"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["eslint", "eslint_d"],
-        loading_flags: &["-f", "--format", "--parser"],
-        directory_flags: &["--rulesdir"],
-    },
-    FileTargetTool {
-        names: &["htmlhint"],
-        loading_flags: &[],
-        directory_flags: &["--rulesdir"],
-    },
-    FileTargetTool {
-        names: &["jscpd"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["jshint"],
-        loading_flags: &["--reporter"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["madge"],
-        loading_flags: &["--webpack-config", "--require-config"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["markdownlint"],
-        loading_flags: &["-r", "--rules"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["markdownlint-cli2"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["markuplint"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["oxfmt", "oxlint"],
-        loading_flags: &[],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["prettier"],
-        loading_flags: &["--plugin"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["remark"],
-        loading_flags: &["-u", "--use", "-r", "--rc-path"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["secretlint"],
-        loading_flags: &["--secretlintrc"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["standard", "semistandard", "ts-standard"],
-        loading_flags: &["--parser"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["stylelint"],
-        loading_flags: &["--custom-formatter", "--custom-syntax"],
-        directory_flags: &[],
-    },
-    FileTargetTool {
-        names: &["textlint"],
-        loading_flags: &["-f", "--format", "--rule", "--plugin", "--preset"],
-        directory_flags: &["--rulesdir"],
-    },
-    FileTargetTool {
-        names: &["tslint"],
-        loading_flags: &[],
-        directory_flags: &["-r", "--rules-dir", "-s", "--formatters-dir"],
-    },
-    FileTargetTool {
-        names: &["xo"],
-        loading_flags: &["--reporter"],
-        directory_flags: &[],
-    },
-];
-
-/// Return the [`FileTargetTool`] that `binary` invokes. A path such as
-/// `./node_modules/.bin/eslint` resolves to its file name.
-fn file_target_tool(binary: &str) -> Option<&'static FileTargetTool> {
-    let name = tool_name(binary);
-    FILE_TARGET_TOOLS
-        .iter()
-        .find(|tool| tool.names.contains(&name))
-}
 
 /// Return `true` when a script bundles with every package left external:
 /// `bun build --packages=external` or `esbuild --packages=external`, also with
@@ -1379,9 +1234,10 @@ pub struct ScriptCommand {
     pub config_args: Vec<String>,
     /// File path arguments (positional args that look like file paths).
     pub file_args: Vec<String>,
-    /// The command that receives `file_args`. It differs from `binary` for a
-    /// command wrapper (`varlock run -- npx eslint` records `eslint`).
-    /// `ignoreCommandEntries` matches this name.
+    /// The command that receives `file_args` and `config_args`. It differs
+    /// from `binary` for a command wrapper (`varlock run -- npx eslint`
+    /// records `eslint`) and for a Vite+ subcommand (`vp test` records
+    /// `vitest`). `ignoreCommandEntries` matches this name.
     pub file_args_command: String,
     /// Packages this command names through a flag value rather than by
     /// importing them or invoking them as the binary.
@@ -1661,7 +1517,7 @@ fn accumulate_parsed_commands(
         result
             .binary_config_files
             .extend(cmd.config_args.iter().map(|path| BinaryConfigFile {
-                binary: cmd.binary.clone(),
+                binary: cmd.file_args_command.clone(),
                 path: path.clone(),
             }));
         result.config_files.extend(cmd.config_args);
@@ -2341,7 +2197,7 @@ fn package_manager_prefix<'a>(tokens: &[&'a str], idx: usize) -> Option<ManagerP
         "pnpm" => skip_pnpm_flags(tokens, idx + 1, &mut location),
         "npm" => skip_npm_flags(tokens, idx + 1, &mut location),
         "yarn" => skip_yarn_selection(tokens, idx + 1, &mut location),
-        "bun" => idx + 1,
+        "bun" | "vp" | vite_plus::VPR => idx + 1,
         _ => return None,
     };
     Some(ManagerPrefix {
@@ -2363,7 +2219,9 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
         return None;
     }
 
-    let (name_idx, explicit) = if matches!(subcmd, "run" | "run-script") {
+    let (name_idx, explicit) = if manager == vite_plus::VPR {
+        (vite_plus::skip_run_flags(tokens, next, &mut location), true)
+    } else if matches!(subcmd, "run" | "run-script") {
         let name_idx = match manager {
             "npm" => {
                 npm_run_location(tokens, next + 1, &mut location);
@@ -2372,6 +2230,7 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
             }
             "pnpm" => skip_pnpm_flags(tokens, next + 1, &mut location),
             "yarn" => skip_yarn_silent_flags(tokens, next + 1),
+            "vp" => vite_plus::skip_run_flags(tokens, next + 1, &mut location),
             _ => next + 1,
         };
         (name_idx, true)
@@ -2761,10 +2620,12 @@ enum SegmentOutcome {
 
 /// Return the first token of the child command for a known command wrapper.
 fn command_wrapper_child_index(tokens: &[&str], idx: usize) -> Option<usize> {
-    let wrapper = COMMAND_WRAPPERS.iter().find(|wrapper| {
+    let Some(wrapper) = COMMAND_WRAPPERS.iter().find(|wrapper| {
         tokens.get(idx) == Some(&wrapper.binary)
             && tokens.get(idx + 1..idx + 1 + wrapper.prefix.len()) == Some(wrapper.prefix)
-    })?;
+    }) else {
+        return vite_plus::exec_child_index(tokens, idx);
+    };
     let args_start = idx + 1 + wrapper.prefix.len();
     let separator = tokens[args_start..]
         .iter()
@@ -2875,14 +2736,18 @@ fn parse_command_segment(
         return outcomes;
     }
 
-    let (file_args, config_args) = binary_path_args(&binary, &tokens, idx);
+    let (args_command, (file_args, config_args)) = match vite_plus::subcommand_tool(&tokens, idx) {
+        Some((Some(tool), sub_idx)) => (tool.to_string(), binary_path_args(tool, &tokens, sub_idx)),
+        Some((None, _)) => (binary.clone(), (Vec::new(), Vec::new())),
+        None => (binary.clone(), binary_path_args(&binary, &tokens, idx)),
+    };
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     let production_runtime_host = command_runtime_host(&binary, &tokens[idx + 1..], &location);
     let test_file_args = node_test::test_file_args(&binary, &tokens[idx + 1..], &file_args);
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
         test_file_args: location.resolve_all(test_file_args, catalog),
-        file_args_command: binary.clone(),
+        file_args_command: args_command,
         binary,
         config_args: location.resolve_all(config_args, catalog),
         file_args: location.resolve_all(file_args, catalog),

@@ -52,35 +52,59 @@ define_plugin! {
             result.referenced_dependencies.push(dep);
         }
 
-        let js_plugins = config_parser::extract_config_shallow_strings_or_object_property(
-            source,
-            config_path,
-            "jsPlugins",
-            "specifier",
-        );
-        let override_js_plugins =
-            config_parser::extract_config_array_objects_shallow_strings_or_object_property(
-                source,
-                config_path,
-                "overrides",
-                "jsPlugins",
-                "specifier",
-            );
-        for specifier in js_plugins.into_iter().chain(override_js_plugins) {
-            credit_config_specifier(&mut result, config_path, root, &specifier);
-        }
-
+        credit_oxlint_config(&mut result, source, config_path, root, &[]);
         result.referenced_dependencies.extend(
             extract_ultracite_selected_js_plugin_dependencies(source, config_path),
         );
 
-        let extends = config_parser::extract_config_shallow_strings(source, config_path, "extends");
-        for entry in extends {
-            credit_config_specifier(&mut result, config_path, root, &entry);
-        }
-
         result
     }
+}
+
+/// Credit the plugin specifiers of an Oxlint config object: `jsPlugins`,
+/// `overrides[].jsPlugins` and `extends`. `base` is the property path of that
+/// object in the exported config. It is empty for an Oxlint config file and
+/// `["lint"]` for the `lint` block of a Vite+ config.
+pub(super) fn credit_oxlint_config(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    base: &[&str],
+) {
+    let specifiers = config_parser::extract_from_source(source, config_path, |program| {
+        let mut config = config_parser::find_config_object(program)?;
+        for key in base {
+            config = config_parser::property_object(config, key)?;
+        }
+        Some(oxlint_config_specifiers(config))
+    })
+    .unwrap_or_default();
+    for specifier in specifiers {
+        credit_config_specifier(result, config_path, root, &specifier);
+    }
+}
+
+fn oxlint_config_specifiers(config: &ObjectExpression<'_>) -> Vec<String> {
+    let js_plugins = |object: &ObjectExpression<'_>| {
+        config_parser::property_expr(object, "jsPlugins").map_or_else(Vec::new, |value| {
+            config_parser::collect_shallow_string_or_object_property_values(value, "specifier")
+        })
+    };
+    let mut specifiers = js_plugins(config);
+    if let Some(Expression::ArrayExpression(overrides)) =
+        config_parser::property_expr(config, "overrides")
+    {
+        for element in &overrides.elements {
+            if let Some(Expression::ObjectExpression(entry)) = element.as_expression() {
+                specifiers.extend(js_plugins(entry));
+            }
+        }
+    }
+    if let Some(extends) = config_parser::property_expr(config, "extends") {
+        specifiers.extend(config_parser::collect_shallow_string_values(extends));
+    }
+    specifiers
 }
 
 fn extract_ultracite_selected_js_plugin_dependencies(

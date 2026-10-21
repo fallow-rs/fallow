@@ -75,6 +75,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "tsup",
     "vercel",
     "vite",
+    "vite-plus",
     "vitepress",
     "waku",
     "webpack",
@@ -2169,6 +2170,7 @@ mod varlock;
 mod velite;
 mod vercel;
 mod vite;
+pub(crate) mod vite_plus;
 mod vitepress;
 mod vitest;
 mod vscode;

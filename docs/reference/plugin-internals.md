@@ -533,6 +533,33 @@ unused in this one.
 The plugin has no tooling dependencies. The Egg binaries (`egg-bin`,
 `egg-scripts`) are credited by the scripts that call them.
 
+## Vite+ config blocks
+
+Vite+ keeps the config of each tool that it bundles in `vite.config.*`.
+Each block goes to the code that reads the same tool elsewhere:
+
+- `test`: the Vitest plugin. A `vite-plus` dependency enables it.
+- `pack`: the Vite+ plugin. Each `entry` is a runtime entry point. `pack` is
+  one tsdown config or an array of them.
+- `lint`: the Vite+ plugin, with the Oxlint rules for `jsPlugins`,
+  `overrides[].jsPlugins` and `extends`.
+- `fmt`: nothing. The block holds formatter options only.
+- `staged`: the hook scanner, like a lint-staged config. It credits packages
+  only.
+- `run.tasks`: the script layer, keyed `vp:<task>`. A task with `cwd` gives
+  no command, because its paths resolve against another directory.
+
+The hook scanner and the task scripts read the first root `vite.config.*` of
+the project root and of each workspace root. A nested config in a fixture
+directory gives no command.
+
+`vp <subcommand>` credits `vite-plus`. The bundled tool decides how the
+arguments are read: `vp lint` and `vp fmt` take file targets that are not
+entry points, `vp test -c <file>` sends the file to the Vitest plugin, and
+`vp pack <file>` makes an entry point. `vp run <task>` and `vpr <task>` call a
+declared script. `vp exec`, `vp dlx` and `vpx` run their child command, as a
+command wrapper does.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:
