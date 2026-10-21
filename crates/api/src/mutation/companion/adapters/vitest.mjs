@@ -352,6 +352,21 @@ const createTimeoutControl = (projects) => {
   };
 };
 
+/**
+ * Sets the fail-fast value of a run on the root config and on each project.
+ * The root value controls the cancellation of the pool. A worker reads the
+ * serialized project config, and Vitest copies the root `bail` value into an
+ * inline project only when it creates the project. Each run sets the value
+ * again, so a run without bail never keeps the value of a mutant run.
+ */
+const setBail = (vitest, bail) => {
+  const value = bail ? 1 : 0;
+  vitest.config.bail = value;
+  for (const project of vitest.projects) {
+    project.config.bail = value;
+  }
+};
+
 const groupByFile = (specifications, root) => {
   const byFile = new Map();
   for (const specification of specifications) {
@@ -532,7 +547,7 @@ export const createAdapter = async (init) => {
   const runSpecifications = async (specifications, { mutantId, bail, timeoutMs = null }) => {
     provideActiveMutant(vitest, mutantId);
     setTimeouts(timeoutMs);
-    vitest.config.bail = bail ? 1 : 0;
+    setBail(vitest, bail);
     const result = await vitest.runTestSpecifications(specifications);
     return {
       testModules: modulesOfRun(result.testModules, specifications),
