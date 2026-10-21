@@ -324,16 +324,22 @@ describe("package.json audit verdict surface", () => {
     expect(entry?.when).not.toBe("false");
   });
 
-  it("contributes the audit gate, status-bar toggle, and run-on-save settings", () => {
+  it("contributes the audit gate, worsened, status-bar toggle, and run-on-save settings", () => {
     const properties = pkg.contributes.configuration.properties;
     for (const key of [
       "fallow.audit.gate",
+      "fallow.audit.worsened",
       "fallow.audit.statusBar.enabled",
       "fallow.audit.runOnSave",
     ]) {
       const prop = properties[key];
       expect(prop?.description ?? prop?.markdownDescription).toBeTruthy();
     }
+  });
+  it("defers the audit worsened mode to the project config by default", () => {
+    const prop = pkg.contributes.configuration.properties["fallow.audit.worsened"];
+    expect(prop?.default).toBe("auto");
+    expect(prop?.enum).toEqual(["auto", "warn", "error", "off"]);
   });
 });
 

@@ -98,6 +98,8 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         equivalent_labels: BTreeSet::new(),
         counted_loop_tests: BTreeSet::new(),
         known_arrays: ArrayBindings::known_array_references(program),
+        const_declaration: false,
+        const_initializer: false,
     };
     collector.visit_program(program);
     let mut sites: Vec<Site> = collector.sites.into_values().collect();
@@ -140,6 +142,13 @@ struct Collector<'s> {
     /// The identifier references that resolve to a binding that holds an
     /// array. See `ArrayBindings`.
     known_arrays: BTreeSet<ReferenceId>,
+    /// True while the visitor is in the declarators of a `const`
+    /// declaration.
+    const_declaration: bool,
+    /// True while the visitor is in the initializer of a `const` declarator.
+    /// With no function frame open, a fluent chain link there gives a
+    /// `removed-chain-link` mutant. See `chain_link`.
+    const_initializer: bool,
 }
 
 const fn pair(span: Span) -> (u32, u32) {
@@ -595,6 +604,20 @@ fn callee_without_wrappers<'e, 'a>(callee: &'e Expression<'a>) -> &'e Expression
     }
 }
 
+/// True when `expression` is part of an optional chain that has an optional
+/// link at this level or below. A wrapper around such a receiver would end
+/// the short circuit: `a?.b().c()` and `(a?.b()).c()` differ when `a` is
+/// nullish.
+fn has_optional_link(expression: &Expression<'_>) -> bool {
+    match expression {
+        Expression::CallExpression(call) => call.optional || has_optional_link(&call.callee),
+        Expression::TSNonNullExpression(inner) => has_optional_link(&inner.expression),
+        _ => expression
+            .as_member_expression()
+            .is_some_and(|member| member.optional() || has_optional_link(member.object())),
+    }
+}
+
 fn is_skipped_call(call: &CallExpression<'_>) -> bool {
     matches!(call.callee, Expression::Super(_))
         || is_logging_callee(&call.callee)
@@ -969,6 +992,45 @@ impl Collector<'_> {
         None
     }
 
+    /// Adds a `removed-chain-link` candidate when `call` is a link of a
+    /// fluent chain: `r.m(args)` with a static member `.m` and a receiver `r`
+    /// that is a call. The mutant removes `.m(args)`, so `z.number().int()`
+    /// becomes `z.number()`. The root call of a chain is not a link.
+    ///
+    /// The callee must be the member itself, without parentheses or a type
+    /// wrapper: the removed region ends at the end of the call, and a wrapper
+    /// around the member would lose its closing parenthesis.
+    fn chain_link(&mut self, call: &CallExpression<'_>) {
+        if call.optional {
+            return;
+        }
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return;
+        };
+        if member.optional || has_optional_link(&member.object) {
+            return;
+        }
+        let Expression::CallExpression(receiver) = callee_without_wrappers(&member.object) else {
+            return;
+        };
+        if is_skipped_call(receiver) {
+            return;
+        }
+        // The region starts at the dot, so whitespace and comments before
+        // the link stay and the mutant line is the line of the link.
+        let receiver_end = member.object.span().end;
+        let start = self
+            .find_token(receiver_end, member.property.span.start, ".")
+            .unwrap_or(receiver_end);
+        self.add(
+            call.span,
+            Operator::RemovedChainLink,
+            (start, call.span.end),
+            String::new(),
+            MutantChange::new(MutantChange::CALL, ""),
+        );
+    }
+
     fn logical_operand(&self, operand: &Expression<'_>) -> String {
         let text = self.text(operand.span().start, operand.span().end);
         if matches!(operand, Expression::LogicalExpression(_)) {
@@ -1043,7 +1105,10 @@ impl<'a> Visit<'a> for Collector<'_> {
 
     fn visit_variable_declaration(&mut self, it: &VariableDeclaration<'a>) {
         if !it.declare {
+            let outer = self.const_declaration;
+            self.const_declaration = it.kind == VariableDeclarationKind::Const;
             walk::walk_variable_declaration(self, it);
+            self.const_declaration = outer;
         }
     }
 
@@ -1055,7 +1120,10 @@ impl<'a> Visit<'a> for Collector<'_> {
                 .get_binding_identifier()
                 .map(|id| id.name.as_str().to_owned());
             self.set_pending(init, name, false);
+            let outer = self.const_initializer;
+            self.const_initializer = self.const_declaration;
             self.visit_expression(init);
+            self.const_initializer = outer;
         }
     }
 
@@ -1377,6 +1445,9 @@ impl<'a> Visit<'a> for Collector<'_> {
         }
         if let Expression::ChainExpression(chain) = callee_without_wrappers(&it.callee) {
             self.no_wrap.insert(pair(chain.span));
+        }
+        if self.const_initializer && self.frames.is_empty() {
+            self.chain_link(it);
         }
         walk::walk_call_expression(self, it);
     }

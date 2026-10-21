@@ -1,4 +1,5 @@
 import type { DuplicationMode, FallowCheckResult, FallowDupesResult } from "./types.js";
+import { AUDIT_WORSENED_MIN_CLI_VERSION } from "./audit-utils.js";
 import {
   appendTypeAwareArgs,
   TYPE_AWARE_MIN_CLI_VERSION,
@@ -47,6 +48,9 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   "--type-aware-project": TYPE_AWARE_MIN_CLI_VERSION,
   "--type-aware-require": TYPE_AWARE_MIN_CLI_VERSION,
   "--type-coupling": TYPE_AWARE_MIN_CLI_VERSION,
+  // Audit-only. Listed so `planDegradation` drops it when an unprobed CLI
+  // rejects it; the audit run then defers to the project config.
+  "--worsened": AUDIT_WORSENED_MIN_CLI_VERSION,
 };
 
 interface AnalysisArgsOptions {

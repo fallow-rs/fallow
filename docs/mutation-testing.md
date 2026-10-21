@@ -100,6 +100,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `string-literal` | a string becomes empty, an empty string becomes `"fallow"` |
 | `optional-chaining` | `a?.b` becomes `a.b` |
 | `regex-literal` | one pattern token changes |
+| `removed-chain-link` | `r.m(args)` becomes `r` in a fluent chain of a module-level `const` |
 
 The `regex-literal` operator gives one mutant for each of these tokens of a
 regular expression literal:
@@ -117,6 +118,36 @@ projects (date-fns, zod, vue core, SvelteKit, reka-ui, runed), without tests.
 Each of its 7971 regex mutants compiled with `new RegExp`. Most literals give
 one mutant. Locale data with many patterns gives many: date-fns has 6723 regex
 mutants, 6555 of them in its locale files.
+
+The `removed-chain-link` operator removes one link of a fluent call chain.
+For `export const quantitySchema = z.number().int().positive();` it gives
+two mutants: one without `.int()` and one without `.positive()`. A schema of
+this type has no literal or operator, so the other operators give no mutant
+for it. A link is a call `r.m(args)` that meets all of these conditions:
+
+- the call is in the initializer of a `const` declarator, at any depth
+  through arguments, object literals and array literals;
+- no function encloses the declaration. A `const` in a function body or an
+  arrow function gives no mutant;
+- the callee is a static member `.m` without parentheses or a type wrapper;
+- the receiver `r` is a call, also behind parentheses or a type wrapper. The
+  root call of a chain, such as `z.number()`, is not a link;
+- no link of the receiver chain is optional (`?.`), and the call itself is
+  not optional. A wrapper around such a receiver ends the short circuit;
+- the receiver is not a logging call or a `require` call.
+
+The removed region starts at the dot of the link, so whitespace and comments
+before the link stay. A `let` or `var` declaration, an assignment and a call
+statement give no mutant. A call statement gets the `removed-call` mutant.
+
+A plan on five public projects measured the volume. The operator adds 72
+mutants to the 28150 of zod, 10 to the 26204 of vue core, 4 to the 36215 of
+date-fns, 1 to the 13820 of vscode-languageserver-node, and none to the 672
+of pathe. The side-effect rules prune 71 of these 87 mutants. Most of the
+other mutants remove an array method such as `.filter()`, `.map()` or
+`.join()`, or a schema method such as `.transform()`. A link that only adds
+metadata, such as `.describe()` in zod, gives an equivalent mutant. Mark it
+with an `equivalent` verdict.
 
 A `case` label of a `switch` gives no `string-literal` or `boolean-literal`
 mutant when the mutant is equivalent. The rule needs all of these conditions:
@@ -990,7 +1021,8 @@ source text.
   `void 0`, `""`, `''`, `"fallow"`, `'fallow'`), or a regular expression token
   (`^`, `$`, `[`, `[^`, or a class escape such as `\d`).
 - A side that is project code is a placeholder. A `negate-condition` test is
-  `<condition>`. A `removed-call` statement is `<call>`. A `return-value`
+  `<condition>`. A `removed-call` statement is `<call>`, and a
+  `removed-chain-link` link is `<call>` with an empty `to`. A `return-value`
   argument and a relational expression that becomes `true` or `false` are
   `<expression>`. A non-empty `string-literal` is `<string>`.
 - An empty side means that the edit removes the token, for example

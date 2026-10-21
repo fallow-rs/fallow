@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { clampMinLines, clampMinOccurrences } from "./duplication-utils.js";
 import type {
   AuditGate,
+  AuditWorsened,
   DiagnosticSeveritySetting,
   DuplicationMode,
   IssueTypeConfig,
@@ -193,6 +194,17 @@ export const getCoverageTop = (): number => getConfig().get<number>("coverage.to
  * `all` fails on every finding in changed files.
  */
 export const getAuditGate = (): AuditGate => getConfig().get<AuditGate>("audit.gate", "new-only");
+
+/**
+ * How a worsened complexity finding affects the audit verdict. Mirrors
+ * `fallow audit --worsened`. `undefined` (`"auto"`, the default, or unset)
+ * defers to `audit.worsened` in the project config. Uses the inspect-based
+ * override pattern so an unset editor value never overrides project config.
+ */
+export const getAuditWorsened = (): AuditWorsened | undefined => {
+  const value = getConfiguredValue<string>("audit.worsened");
+  return value === "warn" || value === "error" || value === "off" ? value : undefined;
+};
 
 /**
  * Whether the audit verdict status-bar item is created. Default on; creating an

@@ -1,0 +1,8 @@
+{
+  "name": "vitest-root-and-dir",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitest": "^5.0.0"
+  }
+}

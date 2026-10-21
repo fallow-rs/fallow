@@ -2133,3 +2133,103 @@ fn napi_rs_source_package_credits_generated_code_in_workspaces() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     assert_napi_source_package_credited(&results);
 }
+
+/// Write a napi-rs package whose public entry is a wrapper that imports the
+/// generated loader and exports a class with the same name as a binding.
+fn write_napi_wrapper_package(package_root: &Path) {
+    fs::create_dir_all(package_root.join("js")).expect("create js dir");
+    fs::write(
+        package_root.join("package.json"),
+        r#"{
+  "name": "@scope/native",
+  "type": "module",
+  "exports": { ".": "./js/index.js" },
+  "napi": {
+    "binaryName": "native",
+    "targets": ["x86_64-unknown-linux-gnu"]
+  }
+}"#,
+    )
+    .expect("write package.json");
+    fs::write(
+        package_root.join("index.js"),
+        format!("{NAPI_LOADER}module.exports.Package = nativeBinding.Package\n"),
+    )
+    .expect("write loader");
+    fs::write(
+        package_root.join("browser.js"),
+        "export * from '@scope/native-wasm32-wasi'\n",
+    )
+    .expect("write browser entry");
+    fs::write(
+        package_root.join("js/index.js"),
+        "export { Package } from './package.js'\n",
+    )
+    .expect("write entry");
+    fs::write(
+        package_root.join("js/package.js"),
+        "import binding from '../index.js'\n\
+         export class Package extends binding.Package {}\n",
+    )
+    .expect("write wrapper");
+}
+
+fn assert_napi_wrapper_package_clean(results: &fallow_core::results::AnalysisResults) {
+    let duplicates: Vec<&str> = results
+        .duplicate_exports
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    assert!(
+        duplicates.is_empty(),
+        "a wrapper may reuse a binding name of the generated loader, found: {duplicates:?}"
+    );
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "the native addons and WASI loaders are build artifacts, found: {unresolved:?}"
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused_files.is_empty(),
+        "the generated loader and browser.js are entry points, found: {unused_files:?}"
+    );
+}
+
+#[test]
+fn napi_rs_generated_loader_is_not_a_duplicate_export_source() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    write_napi_wrapper_package(root);
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert_napi_wrapper_package_clean(&results);
+}
+
+#[test]
+fn napi_rs_generated_loader_is_not_a_duplicate_export_source_in_workspaces() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    write_napi_wrapper_package(&root.join("packages/native"));
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert_napi_wrapper_package_clean(&results);
+}

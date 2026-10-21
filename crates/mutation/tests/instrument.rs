@@ -543,6 +543,9 @@ const it = gen(3);
 out.push(it.next().value, it.next(7).value);
 class K { static size = 2 + 3; check(x) { return x >= K.size ? "big" : "small"; } }
 out.push(new K().check(4), new K().check(5));
+class Bag { constructor() { this.v = []; } add(x) { this.v.push(x); return this; } }
+const bag = new Bag().add(1).add(2).add(3);
+out.push(bag.v.join(""));
 const flag = !(obj.base === 10) || maybe.missing?.x;
 out.push(flag ?? null, -obj.base);
 const run = async (v) => (await v) * 2;

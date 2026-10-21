@@ -35,11 +35,14 @@ pub enum Operator {
     /// removed, a character class is negated, or a class escape gets the
     /// opposite case.
     RegexLiteral,
+    /// One call link of a fluent chain in a module-level `const`
+    /// initializer is removed: `r.m(args)` becomes `r`, when `r` is a call.
+    RemovedChainLink,
 }
 
 impl Operator {
     /// Every operator, in a stable order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::ArithmeticOperator,
         Self::RelationalOperator,
         Self::LogicalOperator,
@@ -52,6 +55,7 @@ impl Operator {
         Self::StringLiteral,
         Self::OptionalChaining,
         Self::RegexLiteral,
+        Self::RemovedChainLink,
     ];
 
     /// The stable kebab-case name of the operator.
@@ -69,6 +73,7 @@ impl Operator {
             Self::StringLiteral => "string-literal",
             Self::OptionalChaining => "optional-chaining",
             Self::RegexLiteral => "regex-literal",
+            Self::RemovedChainLink => "removed-chain-link",
         }
     }
 

@@ -28,6 +28,7 @@ vi.mock("../src/config.js", () => ({
   getAutoDownload: () => false,
   getProductionOverride: () => undefined,
   getAuditGate: () => "new-only",
+  getAuditWorsened: () => undefined,
   getDuplicationCrossLanguageOverride: () => undefined,
   getDuplicationIgnoreImportsOverride: () => undefined,
   getDuplicationIgnoreSymlinksOverride: () => undefined,
