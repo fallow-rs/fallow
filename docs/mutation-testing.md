@@ -436,6 +436,12 @@ tests detect the mutant.
   set, the same memo as for a kill with no executed test). When the control
   run fails, the first run decides: the mutant stays `survived`, and the
   failed tests are baseline failures.
+- The retry of a survivor stops at the first failing test, and that test
+  decides the status. The companion runs the tests of each file in file
+  order, so a new test can fail before a test of the first run. The result
+  is then `killed`, also when the test of the first run would fail too.
+  Before, such a pair of runs was `flaky`. The control run still guards the
+  kill, and the mutant fails a test in both cases.
 - `covering_tests` of a retried survivor stays the dry-run hits of the
   first run. It names the tests that reached the mutant and need an
   assertion. A kill by a test of the retry can thus name a `killed_by` test
