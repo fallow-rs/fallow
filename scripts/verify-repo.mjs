@@ -8,6 +8,10 @@ import { assertLocalResolution } from "./assert-local-resolution.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// The ref that CI compares a pull request with. A checkout without it, for
+// example a fork clone with another remote name, skips the steps that need it.
+const BASE_REF = "origin/main";
+
 const FAST_COMMANDS = [
   {
     label: "Knowledge architecture",
@@ -18,6 +22,13 @@ const FAST_COMMANDS = [
     label: "Agent adapter drift",
     command: "npm",
     args: ["run", "check:agent-adapters"],
+  },
+  {
+    // CI runs the same rule in the "JS Lint and Format" job.
+    label: "Large file growth",
+    command: "node",
+    args: ["scripts/check-file-size.mjs", "--base", BASE_REF],
+    requiresRef: BASE_REF,
   },
   {
     label: "Rust formatting",
@@ -259,7 +270,8 @@ export const parseArgs = (args) => {
 export const helpText = () => `Usage: node scripts/verify-repo.mjs [--fast | --full]
 
 Canonical local repository verification:
-  --fast  Knowledge routing, adapter drift, formatting, linting, generated
+  --fast  Knowledge routing, adapter drift, large file growth against
+          origin/main, formatting, linting, generated
           contracts, crate boundaries, and the conformance fixtures (default)
   --full  Fast checks plus repository script tests, npm wrapper tests, workspace
           tests, the duplication accuracy floor, benchmark compilation, rustdoc,
@@ -291,6 +303,13 @@ const defaultRunCommand = ({ command, args, env = {} }) => {
   return result.status ?? 1;
 };
 
+const defaultHasRef = (ref) =>
+  spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+    cwd: ROOT,
+    shell: false,
+    stdio: "ignore",
+  }).status === 0;
+
 const formatCommand = ({ command, args }) =>
   [command, ...args].map((part) => JSON.stringify(part)).join(" ");
 
@@ -300,6 +319,7 @@ export const runVerification = (
     runCommand = defaultRunCommand,
     write = (message) => process.stdout.write(message),
     assertInstall = assertLocalResolution,
+    hasRef = defaultHasRef,
   } = {},
 ) => {
   const commands = commandsForMode(mode);
@@ -315,6 +335,13 @@ export const runVerification = (
   }
 
   for (const command of commands) {
+    if (command.requiresRef !== undefined && !hasRef(command.requiresRef)) {
+      write(
+        `\n[verify] ${command.label}: skipped, because ${command.requiresRef} does not exist. ` +
+          "Run `git fetch origin main` to run this step.\n",
+      );
+      continue;
+    }
     write(`\n[verify] ${command.label}: ${formatCommand(command)}\n`);
     const exitCode = runCommand(command);
     if (exitCode !== 0) {
