@@ -12988,7 +12988,7 @@
             "error_count",
             "panicked"
           ],
-          "description": "A source file was read but parsed with diagnostics, so the module\nextracted from it may be missing imports, exports, or references after\nthe first error. Analysis proceeds with the partial module, which is why\nthis is reported: an import the parser never saw credits nothing, and its\ntarget can surface as a confident `unused-file` or `unused-export`\nfinding with a `delete-file` or `remove-export` action on it.\n\nRecorded by the parse stage, alongside `source-read-failure`, and never\nused to withhold a finding. oxc reports recoverable errors for valid\nsyntax newer than the parser as well as for genuinely broken files, so\ngating findings on this would mute real results project-wide instead of\njust the affected file."
+          "description": "A source file was read but parsed with diagnostics, so the module\nextracted from it may be missing imports, exports, or references after\nthe first error. Analysis proceeds with the partial module, which is why\nthis is reported: an import the parser never saw credits nothing, and its\ntarget can surface as a confident `unused-file` or `unused-export`\nfinding with a `delete-file` or `remove-export` action on it.\n\nRecorded by the parse stage, alongside `source-read-failure`, and never\nused to withhold a finding. oxc reports recoverable errors for valid\nsyntax newer than the parser as well as for genuinely broken files, so\ngating findings on this would mute real results project-wide instead of\njust the affected file.\n\nA file that `ignoreFindings` covers is not reported. The user marked it\nas broken on purpose, so its partial parse also adds no caveat to other\nfindings and does not count for the parse-error gate."
         },
         {
           "type": "object",
@@ -13437,6 +13437,29 @@
             "pattern"
           ],
           "description": "A pattern in `ignoreFindings` matched no finding of the dead-code run,\nso the entry had no effect in this run. The usual cause is a typo in\nthe path.\n\nThe pattern is compared with every finding the analysis produced,\nbefore issue-type filters and scope filters, so a filtered run does not\nmake a pattern look unused. `path` is the project root.\n\nNot a degraded run, for the same reason as\n[`Self::IgnoreDependenciesGlobUnmatched`]."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "baseline_node_modules": {
+              "description": "The install state when the baseline was saved.",
+              "$ref": "#/definitions/NodeModulesState"
+            },
+            "run_node_modules": {
+              "description": "The install state of this run.",
+              "$ref": "#/definitions/NodeModulesState"
+            },
+            "kind": {
+              "type": "string",
+              "const": "baseline-install-state-mismatch"
+            }
+          },
+          "required": [
+            "kind",
+            "baseline_node_modules",
+            "run_node_modules"
+          ],
+          "description": "The dead-code baseline was saved in a different install state than\nthis run: one of the two runs had `node_modules` and the other did not.\nFindings that need installed packages (dependency, unlisted,\nunresolved-import and script-binary findings) can differ, so the run\ncan report baseline findings as new. `path` is the baseline file.\n\nOnly a baseline that records its install state can report this. A\nlegacy baseline has no record, so the state is unknown."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -34430,6 +34453,21 @@
         "to"
       ],
       "description": "The edit of a mutant, without project text.\n\nEach side is an operator token (for example `??` or `<=`), a fixed literal\n(`true`, `undefined`, `\"\"`, `\"fallow\"`, `void 0`), a regular expression\ntoken (`^`, `$`, `[`, `[^`, `\\d`), or a placeholder for a side that is\nproject code: `<condition>`, `<call>`, `<expression>` or `<string>`. An\nempty side means that the edit removes the token."
+    },
+    "NodeModulesState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "present",
+          "description": "`node_modules` existed, or the project legitimately runs without it."
+        },
+        {
+          "type": "string",
+          "const": "missing",
+          "description": "`node_modules` did not exist."
+        }
+      ],
+      "description": "Whether the project had a `node_modules` directory at a point in time.\n\nA dead-code baseline records this when it is saved, so a later run in a\ndifferent install state can say that its results can differ."
     }
   }
 }
