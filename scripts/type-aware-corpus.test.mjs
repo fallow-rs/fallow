@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -829,6 +837,25 @@ test("fixture dependency provenance records approved ancestor node_modules", () 
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixture dependency provenance follows a symlinked artifact directory", () => {
+  const workspace = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-workspace-"));
+  const external = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-external-"));
+  try {
+    mkdirSync(resolve(workspace, "node_modules"), { recursive: true });
+    mkdirSync(resolve(external, "corpus/fixture"), { recursive: true });
+    symlinkSync(external, resolve(workspace, "target"));
+    const fixture = resolve(workspace, "target/corpus/fixture");
+
+    assert.throws(
+      () => fixtureDependencyEnvironment(fixture, "fixture", workspace),
+      /real path is outside the approved dependency root/,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
   }
 });
 
