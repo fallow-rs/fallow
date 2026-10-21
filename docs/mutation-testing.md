@@ -894,6 +894,16 @@ test run.
 - With `bail`, a run stops the test process at the first failure. Node 22
   applies the run timeout to the whole test file process. A requested test
   with no result after that timeout counts as a timeout.
+- The `node:test` preload adds `--import` of
+  `runtime/node-subprocess-preload.mjs` to `NODE_OPTIONS` of the test
+  process. So a Node process that a test starts (`spawn`, `exec`,
+  `execFile` or `fork`) also loads the instrumented files with the active
+  mutant. The URL of that import carries the overlay path and the mutant
+  id, so the test environment has no `FALLOW_MUTATION_*` variable. The hits
+  of such a child process do not count as coverage, so a mutant that only a
+  child process reaches stays `no_coverage`. A child that is not Node (for
+  example `bun`), or a child that gets an environment without
+  `NODE_OPTIONS`, loads the original files.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
 - Neither runtime can load a Vue, Svelte or Astro component file. The
