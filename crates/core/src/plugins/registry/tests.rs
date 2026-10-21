@@ -17,6 +17,7 @@ fn make_external(name: &str, enablers: &[&str], config_patterns: &[&str]) -> Ext
         entry_point_role: fallow_config::EntryPointRole::Support,
         manifest_entries: Vec::new(),
         config_patterns: config_patterns.iter().map(|s| (*s).to_string()).collect(),
+        config_default_export_opt_out: Vec::new(),
         always_used: Vec::new(),
         tooling_dependencies: Vec::new(),
         used_exports: Vec::new(),
@@ -442,6 +443,7 @@ fn external_plugin_detected_by_enablers() {
         enablers: vec!["my-framework".to_string()],
         entry_points: vec!["src/routes/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec!["my.config.ts".to_string()],
         tooling_dependencies: vec!["my-framework-cli".to_string()],
         used_exports: vec![],
@@ -475,6 +477,7 @@ fn external_plugin_not_detected_when_dep_missing() {
         enablers: vec!["my-framework".to_string()],
         entry_points: vec!["src/routes/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -503,6 +506,7 @@ fn external_plugin_prefix_enabler() {
         enablers: vec!["@custom/".to_string()],
         entry_points: vec!["custom/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -527,6 +531,7 @@ fn external_plugin_detection_dependency() {
         enablers: vec![],
         entry_points: vec!["special/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -562,6 +567,7 @@ fn external_plugin_detection_any_combinator() {
         enablers: vec![],
         entry_points: vec!["any/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -593,6 +599,7 @@ fn external_plugin_detection_all_combinator_fails_partial() {
         enablers: vec![],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -615,6 +622,7 @@ fn external_plugin_used_exports_aggregated() {
         enablers: vec!["ue-dep".to_string()],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![ExternalUsedExport {
@@ -643,6 +651,7 @@ fn external_plugin_without_enablers_or_detection_stays_inactive() {
         enablers: vec![],
         entry_points: vec!["orphan/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -835,6 +844,7 @@ fn external_plugin_detection_overrides_enablers() {
         enablers: vec!["pkg-y".to_string()],
         entry_points: vec!["src/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -862,6 +872,7 @@ fn external_plugin_detection_overrides_enablers_positive() {
         enablers: vec!["pkg-y".to_string()],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -887,6 +898,7 @@ fn external_plugin_config_patterns_added_to_always_used() {
         enablers: vec!["cfg-dep".to_string()],
         entry_points: vec![],
         config_patterns: vec!["my-tool.config.ts".to_string()],
+        config_default_export_opt_out: vec![],
         always_used: vec!["setup.ts".to_string()],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -928,6 +940,7 @@ fn external_plugin_detection_all_combinator_succeeds() {
         enablers: vec![],
         entry_points: vec!["all/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -969,6 +982,7 @@ fn external_plugin_nested_any_inside_all() {
         enablers: vec![],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -1006,6 +1020,7 @@ fn external_plugin_detection_file_exists_against_discovered() {
         enablers: vec![],
         entry_points: vec!["special/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -1034,6 +1049,7 @@ fn external_plugin_detection_file_exists_no_match() {
         enablers: vec![],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -1731,6 +1747,7 @@ fn multiple_external_plugins_independently_activated() {
         enablers: vec!["dep-a".to_string()],
         entry_points: vec!["a/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -1745,6 +1762,7 @@ fn multiple_external_plugins_independently_activated() {
         enablers: vec!["dep-b".to_string()],
         entry_points: vec!["b/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -1770,6 +1788,7 @@ fn external_plugin_multiple_used_exports() {
         enablers: vec!["multi-dep".to_string()],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![
@@ -2065,6 +2084,7 @@ fn process_external_plugins_prefix_enabler_requires_slash() {
         enablers: vec!["@org/".to_string()],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -2090,6 +2110,7 @@ fn process_external_plugins_prefix_enabler_matches_scoped() {
         enablers: vec!["@org/".to_string()],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -2259,6 +2280,7 @@ fn external_plugin_detection_all_with_file_and_dep() {
         enablers: vec![],
         entry_points: vec!["src/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -2294,6 +2316,7 @@ fn external_plugin_detection_all_dep_and_file_missing_file() {
         enablers: vec![],
         entry_points: vec![],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -2704,6 +2727,7 @@ fn process_external_plugins_detection_dependency() {
         enablers: vec![],
         entry_points: vec!["src/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -2734,6 +2758,7 @@ fn process_external_plugins_detection_not_matched() {
         enablers: vec![],
         entry_points: vec!["src/**/*.ts".to_string()],
         config_patterns: vec![],
+        config_default_export_opt_out: vec![],
         always_used: vec![],
         tooling_dependencies: vec![],
         used_exports: vec![],
@@ -3839,7 +3864,7 @@ fn script_config_file_symlink_outside_the_project_root_is_not_read() {
 
 fn config_default_patterns(result: &AggregatedPluginResult, plugin: &str) -> Vec<String> {
     result
-        .config_default_exports
+        .config_export_credits
         .iter()
         .filter(|rule| rule.plugin_name == plugin)
         .inspect(|rule| assert_eq!(rule.rule.exports, vec!["default".to_string()]))
@@ -3861,7 +3886,7 @@ fn config_default_export_opt_out_names_own_config_patterns() {
 }
 
 #[test]
-fn config_default_exports_follow_config_patterns_minus_opt_out() {
+fn config_export_credits_follow_config_patterns_and_anchored_files() {
     let registry = PluginRegistry::default();
     let pkg = make_pkg(&["gatsby", "@graphql-codegen/cli", "tailwindcss"]);
     let result = registry.run(&pkg, Path::new("/project"), &[]);
@@ -3872,7 +3897,10 @@ fn config_default_exports_follow_config_patterns_minus_opt_out() {
     );
     assert_eq!(
         config_default_patterns(&result, "graphql-codegen"),
-        vec!["**/graphql.config.{ts,js,cjs,mjs}".to_string()]
+        vec![
+            "**/graphql.config.{ts,js,cjs,mjs}".to_string(),
+            "codegen*.{ts,js,cjs,mjs}".to_string()
+        ]
     );
     assert_eq!(
         config_default_patterns(&result, "tailwind"),
@@ -3900,10 +3928,10 @@ fn external_plugin_config_patterns_get_default_export_credit() {
 }
 
 #[test]
-fn config_default_exports_get_workspace_prefix() {
+fn config_export_credits_get_workspace_prefix() {
     let mut workspace = AggregatedPluginResult::default();
     workspace
-        .config_default_exports
+        .config_export_credits
         .push(plugin_used_export_rule(
             "tailwind",
             "**/tailwind.config.js",
@@ -3916,5 +3944,88 @@ fn config_default_exports_get_workspace_prefix() {
     assert_eq!(
         config_default_patterns(&root, "tailwind"),
         vec!["packages/web/**/tailwind.config.js".to_string()]
+    );
+}
+
+fn config_export_credits(
+    result: &AggregatedPluginResult,
+    plugin: &str,
+) -> Vec<(String, Vec<String>)> {
+    result
+        .config_export_credits
+        .iter()
+        .filter(|rule| rule.plugin_name == plugin)
+        .map(|rule| (rule.rule.path.pattern.clone(), rule.rule.exports.clone()))
+        .collect()
+}
+
+#[test]
+fn config_file_exports_are_anchored_and_keep_export_names() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["@cucumber/cucumber", "@vercel/config", "@capacitor/cli"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert_eq!(
+        config_export_credits(&result, "cucumber"),
+        vec![
+            (
+                "cucumber.{js,cjs,mjs,ts}".to_string(),
+                vec!["*".to_string()]
+            ),
+            (
+                "cucumber.config.{js,cjs,mjs,ts}".to_string(),
+                vec!["*".to_string()]
+            ),
+        ]
+    );
+    assert_eq!(
+        config_export_credits(&result, "vercel"),
+        vec![(
+            "vercel.{ts,js,mjs,cjs,mts}".to_string(),
+            vec!["*".to_string()]
+        )]
+    );
+    assert_eq!(
+        config_export_credits(&result, "capacitor"),
+        vec![(
+            "capacitor.config.{ts,js}".to_string(),
+            vec!["default".to_string()]
+        )]
+    );
+}
+
+#[test]
+fn external_plugin_opt_out_removes_default_export_credit() {
+    let mut plugin = make_external("acme", &["acme"], &["acme.config.ts", "acme-*.ts"]);
+    plugin.config_default_export_opt_out = vec!["acme-*.ts".to_string()];
+    let registry = PluginRegistry::new(vec![plugin]);
+    let pkg = make_pkg(&["acme"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert_eq!(
+        config_default_patterns(&result, "acme"),
+        vec!["**/acme.config.ts".to_string()]
+    );
+    assert!(
+        result.config_patterns.contains(&"acme-*.ts".to_string()),
+        "an opted-out pattern stays a config pattern"
+    );
+}
+
+#[test]
+fn anchored_config_file_exports_get_workspace_prefix() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["@capacitor/cli"]);
+    let mut workspace = registry.run(&pkg, Path::new("/project/packages/mobile"), &[]);
+    workspace.apply_workspace_prefix("packages/mobile");
+
+    let mut root = AggregatedPluginResult::default();
+    root.merge_into(workspace);
+    assert_eq!(
+        config_export_credits(&root, "capacitor"),
+        vec![(
+            "packages/mobile/capacitor.config.{ts,js}".to_string(),
+            vec!["default".to_string()]
+        )]
     );
 }

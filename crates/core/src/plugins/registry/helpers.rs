@@ -68,12 +68,10 @@ fn push_config_default_exports<'a>(
     result: &mut AggregatedPluginResult,
 ) {
     for pat in patterns {
-        result
-            .config_default_exports
-            .push(PluginUsedExportRule::new(
-                pname,
-                UsedExportRule::new(prepare_config_pattern(pat), ["default"]),
-            ));
+        result.config_export_credits.push(PluginUsedExportRule::new(
+            pname,
+            UsedExportRule::new(prepare_config_pattern(pat), ["default"]),
+        ));
     }
 }
 
@@ -116,6 +114,12 @@ fn collect_static_plugin_rules(
             .filter(|pat| !opt_out.contains(pat)),
         result,
     );
+    for (pat, exports) in plugin.config_file_exports() {
+        result.config_export_credits.push(PluginUsedExportRule::new(
+            pname,
+            UsedExportRule::from_static(pat, exports),
+        ));
+    }
     for pat in plugin.always_used() {
         result
             .always_used
@@ -278,7 +282,10 @@ pub fn process_external_plugins(
             result.config_patterns.extend(ext.config_patterns.clone());
             push_config_default_exports(
                 &ext.name,
-                ext.config_patterns.iter().map(String::as_str),
+                ext.config_patterns
+                    .iter()
+                    .filter(|pat| !ext.config_default_export_opt_out.contains(pat))
+                    .map(String::as_str),
                 result,
             );
             result.always_used.extend(

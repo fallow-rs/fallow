@@ -22,6 +22,8 @@ const ENTRY_PATTERNS: &[&str] = &[
 
 const ALWAYS_USED: &[&str] = &["remix.config.{ts,js,mjs}"];
 
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[("remix.config.{ts,js,mjs}", &["default"])];
+
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@remix-run/dev",
     "@remix-run/node",
@@ -59,6 +61,7 @@ define_plugin! {
     struct RemixPlugin => "remix",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     discovery_hidden_dirs: BUNDLE_BOUNDARY_DIRS,

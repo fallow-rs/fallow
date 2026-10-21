@@ -35,6 +35,11 @@ const ALWAYS_USED: &[&str] = &[
 
 const CONFIG_PATTERNS: &[&str] = &["electron.vite.config.{ts,js,mjs}"];
 
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[
+    ("forge.config.{ts,js,cjs}", &["default"]),
+    ("electron-builder.{js,cjs,ts}", &["default"]),
+];
+
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "electron",
     "electron-builder",
@@ -229,6 +234,7 @@ define_plugin! {
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
     config_patterns: CONFIG_PATTERNS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     resolve_config(config_path, source, root) {

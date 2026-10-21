@@ -27,6 +27,12 @@ pub(super) const CONFIG_PATTERNS: &[&str] = &["serverless.{js,cjs,mjs,ts,cts,mts
 /// them.
 pub(super) const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
+/// Config discovery matches `serverless.*` in every directory, so only a root
+/// config file gets the `default` export credit. A helper module such as
+/// `src/lib/serverless.ts` stays reportable.
+pub(super) const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] =
+    &[("serverless.{js,cjs,mjs,ts,cts,mts}", &["default"])];
+
 const TOOLING_DEPENDENCIES: &[&str] = &["serverless"];
 
 /// Extensions that the framework tries for a handler without an extension.
@@ -86,6 +92,10 @@ impl Plugin for ServerlessFrameworkPlugin {
 
     fn config_default_export_opt_out(&self) -> &'static [&'static str] {
         CONFIG_PATTERNS
+    }
+
+    fn config_file_exports(&self) -> &'static [(&'static str, &'static [&'static str])] {
+        CONFIG_FILE_EXPORTS
     }
 
     fn always_used(&self) -> &'static [&'static str] {

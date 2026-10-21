@@ -384,11 +384,13 @@ pub struct AggregatedPluginResult {
     pub always_used: Vec<(String, String)>,
     /// All used export rules from active plugins.
     pub used_exports: Vec<PluginUsedExportRule>,
-    /// One `default` export rule for each config pattern of an active plugin,
-    /// minus the patterns in the plugin's `config_default_export_opt_out`.
-    /// The unused-export analysis reads these rules only under
+    /// The config-file export credit of each active plugin: one `default`
+    /// rule for each config pattern minus the plugin's
+    /// `config_default_export_opt_out`, plus the anchored
+    /// `config_file_exports` rules with their own export names. The
+    /// unused-export analysis reads these rules only under
     /// `includeEntryExports`, so they never change the default output.
-    pub config_default_exports: Vec<PluginUsedExportRule>,
+    pub config_export_credits: Vec<PluginUsedExportRule>,
     /// Class member rules contributed by active plugins that should never be
     /// flagged as unused. Extends the built-in Angular/React lifecycle allowlist
     /// with framework-invoked method names, optionally scoped by class heritage.
@@ -545,7 +547,7 @@ impl AggregatedPluginResult {
         for rule in &mut self.used_exports {
             *rule = rule.prefixed(ws_prefix);
         }
-        for rule in &mut self.config_default_exports {
+        for rule in &mut self.config_export_credits {
             *rule = rule.prefixed(ws_prefix);
         }
         for rule in &mut self.provided_dependencies {
@@ -582,7 +584,7 @@ impl AggregatedPluginResult {
             config_patterns,
             always_used,
             used_exports,
-            config_default_exports,
+            config_export_credits,
             used_class_members,
             framework_class_member_contracts,
             referenced_dependencies,
@@ -620,7 +622,7 @@ impl AggregatedPluginResult {
         self.config_patterns.extend(config_patterns);
         self.always_used.extend(always_used);
         self.used_exports.extend(used_exports);
-        self.config_default_exports.extend(config_default_exports);
+        self.config_export_credits.extend(config_export_credits);
         self.used_class_members.extend(used_class_members);
         for contract in framework_class_member_contracts {
             if !self.framework_class_member_contracts.contains(&contract) {

@@ -6,7 +6,7 @@ plugin activation.
 ## Ownership
 
 - `crates/core/src/plugins/`: built-in framework and tool behavior.
-- `crates/config/src/external_plugin.rs`: external plugin schema and loading.
+- `crates/config/src/external_plugin/`: external plugin schema and loading.
 - `crates/config/src/config/`: plugin configuration and resolution.
 - `crates/core/src/plugins/registry/`: built-in registry and activation
   predicates.

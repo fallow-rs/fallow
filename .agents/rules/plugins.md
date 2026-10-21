@@ -1,7 +1,7 @@
 ---
 paths:
   - "crates/core/src/plugins/**"
-  - "crates/config/src/external_plugin.rs"
+  - "crates/config/src/external_plugin/**"
 ---
 
 # Plugin system

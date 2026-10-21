@@ -91,36 +91,39 @@ impl PluginUsedExportRule {
     }
 }
 
-/// The `default` export credit for the config files of active plugins.
+/// The export credit for the config files of active plugins.
 ///
-/// A tool loads its config file and reads the default export. Under
-/// `includeEntryExports`, the `default` export of a file that a config pattern
-/// of an active plugin matches therefore counts as used.
+/// A tool loads its config file and reads some of its exports. Under
+/// `includeEntryExports`, these exports count as used. The rules come from the
+/// config patterns of each active plugin (the `default` export) and from the
+/// anchored `config_file_exports` of each plugin (the export names that the
+/// tool reads, or `*` for every export).
 ///
 /// The credit has its own matcher set. Without `includeEntryExports`, fallow
 /// skips an entry point as a whole, and the plugin `used_exports` matchers
 /// decide whether to analyse it. This credit never feeds that decision, so
 /// output without `includeEntryExports` does not change.
-pub struct ConfigDefaultCredit {
-    matchers: Vec<CompiledPathRule>,
+pub struct ConfigExportCredit<'a> {
+    matchers: Vec<(CompiledPathRule, &'a [String])>,
 }
 
-impl ConfigDefaultCredit {
+impl<'a> ConfigExportCredit<'a> {
     /// Compile the credit. It is empty unless `include_entry_exports` is on.
     pub fn new(
-        plugin_result: Option<&AggregatedPluginResult>,
+        plugin_result: Option<&'a AggregatedPluginResult>,
         include_entry_exports: bool,
     ) -> Self {
         let matchers = plugin_result
             .filter(|_| include_entry_exports)
             .map(|pr| {
-                pr.config_default_exports
+                pr.config_export_credits
                     .iter()
                     .filter_map(|rule| {
                         CompiledPathRule::for_used_export_rule(
                             &rule.rule.path,
-                            "config default export pattern",
+                            "config export credit pattern",
                         )
+                        .map(|matcher| (matcher, rule.rule.exports.as_slice()))
                     })
                     .collect()
             })
@@ -133,8 +136,22 @@ impl ConfigDefaultCredit {
         self.matchers.is_empty()
     }
 
-    /// Whether a config pattern matches the project-relative `path`.
-    pub fn matches(&self, path: &str) -> bool {
-        self.matchers.iter().any(|rule| rule.matches(path))
+    /// The credited export names of each rule that matches the
+    /// project-relative `path`.
+    pub fn exports_for(&self, path: &str) -> Vec<&'a [String]> {
+        self.matchers
+            .iter()
+            .filter(|(matcher, _)| matcher.matches(path))
+            .map(|(_, exports)| *exports)
+            .collect()
+    }
+
+    /// Whether the export lists from [`Self::exports_for`] credit
+    /// `export_name`. The comparison is by name, so
+    /// `export { config as default }` matches `default`.
+    pub fn credits(credited: &[&[String]], export_name: &str) -> bool {
+        credited
+            .iter()
+            .any(|exports| exports.iter().any(|e| e == "*" || e == export_name))
     }
 }

@@ -18,6 +18,11 @@ const ALWAYS_USED: &[&str] = &[
     "svgr.config.{js,cjs,mjs,ts}",
 ];
 
+const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[
+    ("svgr.config.{js,cjs,mjs,ts}", &["default"]),
+    (".svgrrc.js", &["default"]),
+];
+
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@svgr/core",
     "@svgr/cli",
@@ -29,6 +34,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 define_plugin! {
     struct SvgrPlugin => "svgr",
     enablers: ENABLERS,
+    config_file_exports: CONFIG_FILE_EXPORTS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
 }

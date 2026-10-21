@@ -54,6 +54,7 @@ fallow plugin-schema
 | `entryPointRole` | string | Reachability role for entry points: runtime, test, or support |
 | `manifestEntries` | object[] | Entry points derived from framework manifest files |
 | `configPatterns` | string[] | Glob patterns for config files (marked always-used) |
+| `configDefaultExportOptOut` | string[] | Config patterns whose files do not get the `default` export credit |
 | `alwaysUsed` | string[] | Glob patterns for files always considered used |
 | `toolingDependencies` | string[] | Packages used via CLI, not source imports |
 | `usedExports` | object[] | Exports always considered used in matching files |
@@ -218,8 +219,38 @@ trait method). Use it when the tool reads named exports (Gatsby
 `gatsby-node`), or when the pattern also matches ordinary source files
 (GraphQL Codegen `codegen*`, Serverless `serverless.*`, Vercel `vercel.*`).
 Each opt-out entry must be identical to an entry of `config_patterns`.
-External plugins have no opt-out: leave a pattern out of `configPatterns` and
-list it in `alwaysUsed` instead.
+
+An external plugin uses `configDefaultExportOptOut` for the same purpose.
+Write each entry exactly as in `configPatterns`. Other entries have no
+effect. The opted-out file stays a config file and an always-used file.
+
+```jsonc
+{
+  "configPatterns": ["my-framework.config.ts", "my-framework-*.ts"],
+  "configDefaultExportOptOut": ["my-framework-*.ts"]
+}
+```
+
+A built-in plugin can also credit the exports of a config file with
+`config_file_exports` (a `define_plugin!` field and a `Plugin` trait method).
+Each entry is a pattern and the export names that the tool reads, or `"*"`
+for every export. Use it in these cases:
+
+- The tool config file is only in `always_used` (Capacitor
+  `capacitor.config.ts`, SVGO `svgo.config.js`).
+- The tool reads named exports (cucumber-js reads each named export of
+  `cucumber.js` as a profile).
+- The config pattern also matches ordinary source files, so only the file at
+  the root can get the credit (GraphQL Codegen `codegen*`, Serverless
+  `serverless.*`, Vercel `vercel.*`).
+
+These patterns are anchored. They get the workspace prefix, but no `**/`
+prefix, so they match only at the project root and at the root of each
+workspace package. Like the `default` credit, this credit applies only under
+`includeEntryExports`. External plugins have no anchored credit. The
+`usedExports` field is the nearest option, but it also applies without
+`includeEntryExports`: fallow then analyses the exports of a matching entry
+file.
 
 ### `alwaysUsed`
 

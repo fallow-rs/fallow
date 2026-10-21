@@ -5881,8 +5881,7 @@ thresholdOverrides = [
 
     #[test]
     fn validate_user_globs_framework_plugin_invalid_entry_glob() {
-        use crate::ExternalPluginDef;
-        use crate::external_plugin::EntryPointRole;
+        use crate::{ExternalPluginDef, external_plugin::EntryPointRole};
         let config = FallowConfig {
             framework: vec![ExternalPluginDef {
                 schema: None,
@@ -5893,6 +5892,7 @@ thresholdOverrides = [
                 entry_point_role: EntryPointRole::Support,
                 manifest_entries: vec![],
                 config_patterns: vec![],
+                config_default_export_opt_out: vec![],
                 always_used: vec![],
                 tooling_dependencies: vec![],
                 used_exports: vec![],

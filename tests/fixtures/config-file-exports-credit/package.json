@@ -1,0 +1,26 @@
+{
+  "name": "config-file-exports-credit",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@cucumber/cucumber": "^12.0.0",
+    "@electron-forge/cli": "^7.0.0",
+    "@graphql-codegen/cli": "^5.0.0",
+    "@remix-run/node": "^2.16.0",
+    "@sanity/pkg-utils": "^7.0.0",
+    "@svgr/cli": "^8.0.0",
+    "@vercel/config": "^0.1.0",
+    "cspell": "^9.0.0",
+    "electron-builder": "^26.0.0",
+    "i18next": "^25.0.0",
+    "kysely-ctl": "^0.12.0",
+    "nitropack": "^2.11.0",
+    "openapi-typescript": "^7.0.0",
+    "sanity": "^4.0.0",
+    "serverless": "^4.4.0",
+    "svgo": "^4.0.0",
+    "vitepress": "^1.6.0"
+  }
+}
