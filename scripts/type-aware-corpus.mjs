@@ -54,8 +54,9 @@ import {
   validateManifest as validateCorpusManifest,
 } from "./type-aware-corpus/config.mjs";
 import {
+  assertArtifactDirectoryInWorkspace,
   DEPENDENCY_DIRECTORY_NAMES,
-  fixtureDependencyEnvironment as resolveFixtureDependencyEnvironment,
+  fixtureDependencyEnvironment,
 } from "./type-aware-corpus/dependencies.mjs";
 import { WIRE_PROTOCOL_VERSION } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
 import { cargoFallowBin } from "./cargo-target.mjs";
@@ -326,9 +327,6 @@ export const assertNoFixtureDependencyDirectories = (root, projectId, ignoredPat
 const existingDirectory = (path) => (existsSync(path) ? statSync(path).isDirectory() : false);
 const existingFile = (path) => (existsSync(path) ? statSync(path).isFile() : false);
 
-export const fixtureDependencyEnvironment = (root, projectId, approvedDependencyRoot = REPO_ROOT) =>
-  resolveFixtureDependencyEnvironment(root, projectId, approvedDependencyRoot);
-
 const sourceFixtureRoot = (project) => {
   const root = resolve(REPO_ROOT, project.fixture);
   const relativeToRepo = relative(REPO_ROOT, root);
@@ -404,6 +402,7 @@ const prepareProject = (project, outDir) => {
 };
 
 const prepare = (projects, outDir) => {
+  assertArtifactDirectoryInWorkspace(outDir);
   const prepared = projects.map((project) => prepareProject(project, outDir));
   writeJson(resolve(outDir, "fixtures.json"), { schema_version: 1, projects: prepared });
   return prepared;
