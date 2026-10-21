@@ -208,8 +208,15 @@ Config discovery adds a `**/` prefix to a pattern that has no `/`, does not
 start with a dot and names only source extensions (`.ts`, `.js` and similar).
 The credit uses the same prefix, so `my-framework.config.ts` also matches
 `src/my-framework.config.ts`. A pattern such as `.my-frameworkrc.js` gets no
-prefix and matches only at the project root and at the root of each workspace
-package.
+prefix and gets the credit only at the project root and at the root of each
+workspace package.
+
+The prefix rule controls the credit, not the full config discovery. For a
+built-in plugin, config discovery also probes a pattern without the prefix in
+every ancestor directory of a source file. So `resolve_config` can receive a
+nested file that the tool never reads. When the tool reads its config from one
+directory only, return an empty result for a nested file in `resolve_config`.
+The Serverless plugin does this for a nested `serverless.ts`.
 Keep config patterns specific: a broad pattern such as `config*.ts` also
 gives the credit to source files such as `src/configUtils.ts`.
 
