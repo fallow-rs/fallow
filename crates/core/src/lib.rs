@@ -888,7 +888,6 @@ impl DeadCodeBackendPrelude<'_> {
             &self.plugin_result,
             plugins::ExportCredits::for_run(retain_graph, self.config),
         )
-        .with_peer_seeds(analyze::peer_closure_seeds(&self.plugin_result))
     }
 
     /// The plugin stage's result, after the workspace merge and the

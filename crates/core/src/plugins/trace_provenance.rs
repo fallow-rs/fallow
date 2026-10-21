@@ -39,7 +39,8 @@ impl ExportCredits {
     }
 }
 
-/// Collect the trace provenance of one analysis.
+/// Collect the trace provenance of one analysis, with the seeds of the
+/// peer-dependency closures.
 #[must_use]
 pub fn build_trace_provenance(
     root: &Path,
@@ -66,7 +67,7 @@ pub fn build_trace_provenance(
             include_entry_exports,
         );
     }
-    provenance
+    provenance.with_peer_seeds(crate::analyze::peer_closure_seeds(plugin_result))
 }
 
 /// Record each export that a plugin rule marks as used.
