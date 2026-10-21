@@ -3191,7 +3191,7 @@ pub enum AuditWorsenedArg {
     Warn,
     /// A worsened finding counts like an introduced finding.
     Error,
-    /// No finding is worsened, and the verdict does not change.
+    /// Only growth of an exceeded metric is worsened (warn).
     Off,
 }
 
