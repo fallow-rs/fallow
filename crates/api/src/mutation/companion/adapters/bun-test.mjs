@@ -88,11 +88,15 @@ const junitCase = (suites, attributes) => ({
   durationMs: secondsToMs(attributes.time),
   status: "pass",
   failureKind: null,
+  error: null,
 });
 
 const markFailed = (testCase, attributes) => {
   testCase.status = "fail";
   testCase.failureKind = failureKind(attributes.type);
+  if (attributes.message !== undefined) {
+    testCase.error = { name: attributes.type, message: attributes.message };
+  }
 };
 
 const markSkipped = (testCase, attributes) => {

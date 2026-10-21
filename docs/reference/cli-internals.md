@@ -341,6 +341,47 @@ after every gate set the exit code.
   base is scored with the post-deletion map); coverage regressions belong to
   `rules.coverage-gaps` and health trends. The auto-detected map's content
   participates in the base-snapshot cache key exactly like `--coverage`.
+- New-only estimated CRAP: under `--gate new-only`, `audit_run::attribute`
+  calls `demote_estimated_crap_gates` (`crates/api/src/audit_complexity.rs`)
+  before the comparison. A complexity finding that exceeds only CRAP, with
+  `coverage_source` `estimated` or `estimated_component_inherited`, gets
+  `effective_severity: warn`. The finding stays in the report, and SARIF,
+  GitHub annotations and the verdict read the gate severity from that field.
+  A finding that also exceeds cyclomatic or cognitive complexity keeps the
+  severity of its rules. Measured coverage (`istanbul`) keeps the gate. In
+  `exceeded_metric_increased`, a CRAP score from estimated coverage does not
+  make a finding introduced, and a base finding without a CRAP score is not
+  growth. `--gate all` keeps the rule severity.
+- Audit test-file complexity: under every gate, `audit_run::attribute` calls
+  `exempt_test_file_gates` (`crates/api/src/audit_complexity.rs`) before the
+  comparison. It reuses `fallow_engine::test_paths::is_test_path` on the path
+  below the project root, so specs, test directories, end-to-end suites, mocks
+  and fixtures match. Each such finding gets `effective_severity: warn` and
+  `gate_exemption: test-file`. The attribution does not change. The finding
+  stays in the report. SARIF puts `gate_exemption` in the property bag at
+  level `warning`, CodeClimate appends a note to the description, and the
+  GitHub summary shows `warn (test file)`. The human, markdown and compact
+  views list the test-file findings that would otherwise take part in the
+  gate (`crates/cli/src/audit_complexity_notes.rs`). `fallow health` does not
+  call this function.
+- New-only growth of an exceeded metric: `ComplexityClass::of_match`
+  (`crates/api/src/audit_complexity.rs`) makes a matched finding introduced
+  only in two cases. In the first case, the head finding exceeds a metric that
+  the base finding did not exceed, and that metric grew. In the second case,
+  a metric that the head finding exceeds grew, and the severity tier
+  (`moderate`, `high`, `critical`) is higher than in the base finding. Other
+  growth is `worsened`. `ComplexityMetrics` stores the exceeded flags, the
+  severity tier and the coverage source of the base finding from the base run.
+  Do not recompute them with the head thresholds, because a
+  `health.thresholdOverrides` change in the same PR would then make an old
+  finding introduced. The tiers use the fixed `DEFAULT_*_HIGH` and
+  `DEFAULT_*_CRITICAL` limits. CRAP takes part in the tier only when both sides
+  have a measured score. `audit.worsened: error` is the strict mode for teams
+  that want every growth to gate. `audit.worsened: off` clears growth only in
+  metrics that the finding does not exceed. Growth of an exceeded metric stays
+  `worsened` and gives at least `warn` (`clear_worsened_for_off`), because
+  before this rule it made the finding introduced. The audit base snapshot
+  cache is version 15.
 - Audit coverage inputs (#2359) resolve through the same precedence as
   `fallow health` and bare `fallow`: `--coverage` / `--coverage-root`, then
   `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT`, then `health.coverage` /
@@ -487,6 +528,19 @@ after every gate set the exit code.
   it. The rule applies to the head run and to the base snapshot
   (`scope_dependency_findings` in `crates/api/src/audit_run/scope.rs`).
   `--changed-since` on the other commands keeps every dependency finding.
+- Audit unprovable classes: a run does not report a dead-code class that it
+  cannot prove. Today this is `unused_catalog_entries` while a workspace
+  pattern directory is missing. The base snapshot is a checkout of committed
+  files, so a gitignored workspace member (a cloned sub-repository) is missing
+  there and present in the head. The base records these classes as
+  `AuditKeySnapshot::unprovable_dead_code`, from
+  `fallow_engine::unprovable::unprovable_dead_code_collections`. It reads the
+  same config predicate that skips the detector
+  (`has_missing_workspace_pattern_dirs`). `attribute` adds the head keys of those
+  classes to the base key sets, so the verdict, the attribution counts and the
+  `introduced` flags read them as inherited. An inherited base adds its
+  classes to the set. A real new finding of such a class is also inherited in
+  that run; the head run cannot tell it apart.
 - Narrowing requests report their own fate (issues #2687, #2688). Two channels
   can be asked for and refused: `--changed-since` and the opt-in shared diff.
   Both widen the report rather than failing the run, so the fact travels on the
@@ -532,6 +586,34 @@ after every gate set the exit code.
   not read a `GlobSet` match index as a rule index, because last-match-wins
   compares rule indexes. The globs use `literal_separator`, so `docs/*`
   matches the direct children of `docs` only.
+
+- A stderr warning that repeats a `workspace_diagnostics[]` entry, or that
+  describes the analysis inputs, uses the tracing target
+  `fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET` (`fallow::analysis_diagnostic`).
+  `build_tracing_filter` in `crates/cli/src/cli_startup.rs` turns that target
+  off when the run is quiet (`--quiet`, `--ci` or `FALLOW_QUIET`) and
+  `RUST_LOG` is not set. Use the target for a new warning of this type. Do not
+  use it for a config-load warning, such as an unknown rule key, because a
+  quiet run must still show those.
+- `ignoreFindings` also covers parse degradations.
+  `record_source_parse_degradations` drops the degradation of a covered file
+  before the registry write and the stderr warning, so the envelope, the
+  `parse-error` gate and the health note see the same set.
+  `GraphConfidenceContext::for_run` skips a covered degraded module, and that
+  check records the pattern as matched. The skip also applies to a reachable
+  module or an entry point, because fixtures that a `dynamicallyLoaded` glob
+  makes entry points are the common case. A covered file that is valid but
+  fails to parse can hide the import that credits another module, with no
+  caveat and no diagnostic.
+- A dead-code baseline records the install state of the saving run in
+  `analysis_identity.node_modules` through `BaselineAnalysisIdentity` in
+  `crates/engine/src/baseline/install_state.rs`. The key is not part of
+  `SemanticAnalysisIdentity`, so a difference never stops the comparison. On
+  load, `check/baseline_notes.rs` prints the mismatch also under `--quiet` and
+  stores the `baseline-install-state-mismatch` diagnostic on
+  `LoadedBaselineStaleness::install_state`. `complete_check_execution` merges
+  it into `workspace_diagnostics`. The programmatic API adds the same
+  diagnostic in `apply_baseline`.
 
 ## Health grouping stage order
 

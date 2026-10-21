@@ -646,15 +646,7 @@ pub fn filter_configured_ignored_findings(results: &mut AnalysisResults, config:
     }
 
     results.remove_ignored_dead_code_findings(|path| {
-        let key = if path.is_absolute() {
-            let Ok(relative) = path.strip_prefix(&config.root) else {
-                return false;
-            };
-            StableFileKey::from_relative(relative)
-        } else {
-            StableFileKey::from_relative(path)
-        };
-        config.ignore_findings.is_ignored(key.as_str())
+        config.ignore_findings.is_ignored_path(&config.root, path)
     });
 }
 

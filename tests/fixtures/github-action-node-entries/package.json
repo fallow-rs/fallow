@@ -1,0 +1,6 @@
+{
+  "name": "github-action-node-entries",
+  "private": true,
+  "type": "module",
+  "dependencies": {}
+}

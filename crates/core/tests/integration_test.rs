@@ -71,6 +71,8 @@ mod dynamic_import_then;
 mod dynamic_imports;
 #[path = "integration_test/effect_dead_code.rs"]
 mod effect_dead_code;
+#[path = "integration_test/egg_framework_plugin.rs"]
+mod egg_framework_plugin;
 #[path = "integration_test/entry_load_closure.rs"]
 mod entry_load_closure;
 #[path = "integration_test/entry_output_mapping.rs"]
@@ -105,6 +107,8 @@ mod framework_convention_coverage_router;
 mod framework_convention_coverage_vitepress;
 #[path = "integration_test/frameworks.rs"]
 mod frameworks;
+#[path = "integration_test/github_action_manifest_entries.rs"]
+mod github_action_manifest_entries;
 #[path = "integration_test/graph_cache_transparency.rs"]
 mod graph_cache_transparency;
 #[path = "integration_test/graphql_imports.rs"]
@@ -248,6 +252,8 @@ mod node_test_bare_default_patterns;
 mod non_loading_edges;
 #[path = "integration_test/pnpm_package_json_overrides_version.rs"]
 mod pnpm_package_json_overrides_version;
+#[path = "integration_test/pnpm_workspace_layout_diagnostics.rs"]
+mod pnpm_workspace_layout_diagnostics;
 #[path = "integration_test/pnpm_workspace_overrides_precedence.rs"]
 mod pnpm_workspace_overrides_precedence;
 #[path = "integration_test/policy_violations.rs"]
@@ -339,6 +345,8 @@ mod workspace_internal_deps;
 
 #[path = "integration_test/ci_bun_file_runner.rs"]
 mod ci_bun_file_runner;
+#[path = "integration_test/ci_working_directory.rs"]
+mod ci_working_directory;
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
 #[path = "integration_test/issue_1441_factory_return_member.rs"]
@@ -674,6 +682,8 @@ mod textlint_plugin;
 mod type_only_namespace;
 #[path = "integration_test/typescript_content_mapper_plugin.rs"]
 mod typescript_content_mapper_plugin;
+#[path = "integration_test/vite_plus_plugin.rs"]
+mod vite_plus_plugin;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
 #[path = "integration_test/vitest_include_scope.rs"]

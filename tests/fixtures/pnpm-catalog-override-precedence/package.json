@@ -1,0 +1,9 @@
+{
+  "name": "override-root",
+  "private": true,
+  "devDependencies": {
+    "rolldown": "catalog:",
+    "tool": "catalog:",
+    "vite": "catalog:"
+  }
+}

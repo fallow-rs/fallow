@@ -1,0 +1,8 @@
+name: Composite action
+description: A composite action whose steps run shell commands
+runs:
+  using: composite
+  main: src/run.ts
+  steps:
+    - run: echo hello
+      shell: bash

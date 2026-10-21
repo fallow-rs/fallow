@@ -2,6 +2,13 @@
 
 use super::common::{create_config, fixture_path};
 
+/// Fixture, config file and main entry for each config file extension that
+/// Sanity Studio loads and that has its own fixture.
+const STUDIOS: &[(&str, &str, &str)] = &[
+    ("sanity-config-tsx", "sanity.config.tsx", "src/index.ts"),
+    ("sanity-config-jsx", "sanity.config.jsx", "src/index.js"),
+];
+
 fn relative(root: &std::path::Path, path: &std::path::Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -9,8 +16,8 @@ fn relative(root: &std::path::Path, path: &std::path::Path) -> String {
         .replace('\\', "/")
 }
 
-fn analyze(include_entry_exports: bool) -> (Vec<String>, Vec<(String, String)>) {
-    let root = fixture_path("sanity-config-tsx");
+fn analyze(fixture: &str, include_entry_exports: bool) -> (Vec<String>, Vec<(String, String)>) {
+    let root = fixture_path(fixture);
     let mut config = create_config(root.clone());
     config.include_entry_exports = include_entry_exports;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -36,37 +43,41 @@ fn analyze(include_entry_exports: bool) -> (Vec<String>, Vec<(String, String)>) 
 }
 
 #[test]
-fn sanity_config_tsx_is_an_entry_point() {
-    // Sanity Studio loads sanity.config.{ts,tsx,js,jsx}. The .tsx config
-    // file and the modules it imports are used.
-    let (unused_files, unused_exports) = analyze(false);
+fn sanity_config_tsx_and_jsx_are_entry_points() {
+    // Sanity Studio loads sanity.config.{ts,tsx,js,jsx}. The config file and
+    // the modules it imports are used.
+    for &(fixture, config_file, _) in STUDIOS {
+        let (unused_files, unused_exports) = analyze(fixture, false);
 
-    assert!(
-        unused_files.is_empty(),
-        "sanity.config.tsx and its imports are used, unused files: {unused_files:?}"
-    );
-    assert!(
-        unused_exports.is_empty(),
-        "fallow skips the exports of an entry point, unused exports: {unused_exports:?}"
-    );
+        assert!(
+            unused_files.is_empty(),
+            "{config_file} and its imports are used, unused files: {unused_files:?}"
+        );
+        assert!(
+            unused_exports.is_empty(),
+            "fallow skips the exports of {config_file}, unused exports: {unused_exports:?}"
+        );
+    }
 }
 
 #[test]
-fn sanity_config_tsx_default_export_is_used_with_include_entry_exports() {
-    // Sanity Studio reads the default export of sanity.config.tsx. A named
+fn sanity_config_tsx_and_jsx_default_export_is_used_with_include_entry_exports() {
+    // Sanity Studio reads the default export of the config file. A named
     // export that Sanity does not read stays reportable.
-    let (unused_files, unused_exports) = analyze(true);
+    for &(fixture, config_file, main) in STUDIOS {
+        let (unused_files, unused_exports) = analyze(fixture, true);
 
-    assert!(
-        unused_files.is_empty(),
-        "sanity.config.tsx and its imports are used, unused files: {unused_files:?}"
-    );
-    assert_eq!(
-        unused_exports,
-        vec![
-            ("sanity.config.tsx".to_owned(), "unusedHelper".to_owned()),
-            ("src/index.ts".to_owned(), "main".to_owned()),
-        ],
-        "only the default export of sanity.config.tsx gets the credit"
-    );
+        assert!(
+            unused_files.is_empty(),
+            "{config_file} and its imports are used, unused files: {unused_files:?}"
+        );
+        assert_eq!(
+            unused_exports,
+            vec![
+                (config_file.to_owned(), "unusedHelper".to_owned()),
+                (main.to_owned(), "main".to_owned()),
+            ],
+            "only the default export of {config_file} gets the credit"
+        );
+    }
 }

@@ -1,0 +1,9 @@
+name: Build
+description: Build the native addon
+runs:
+  using: composite
+  steps:
+    - run: pnpm exec napi build --release
+      shell: bash
+    - run: node ${{ github.action_path }}/run.ts
+      shell: bash

@@ -116,6 +116,21 @@ pub fn dir_has_package_manifest(dir: &Path) -> bool {
     dir.join("package.json").is_file() || dir_has_deno_json(dir)
 }
 
+/// Whether the manifest in `dir` declares a package.
+///
+/// A `package.json` with no `name` and no dependency field (for example
+/// `{"type":"module"}`, which only sets the module type of the scripts next to
+/// it) declares no package. A Deno config, or a `package.json` that does not
+/// parse, counts as a package, so the caller still reports the directory.
+pub(super) fn manifest_declares_package(dir: &Path) -> bool {
+    if dir_has_deno_json(dir) {
+        return true;
+    }
+    PackageJson::load(&dir.join("package.json")).map_or(true, |pkg| {
+        pkg.name.is_some() || !pkg.all_dependency_names().is_empty()
+    })
+}
+
 /// Load package identity for a workspace member directory.
 ///
 /// Prefers `package.json` when present (npm / bridge layouts), while still

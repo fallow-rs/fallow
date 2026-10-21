@@ -15,7 +15,8 @@ use super::{PathRule, Plugin, PluginResult};
 
 pub struct VitestPlugin;
 
-const ENABLERS: &[&str] = &["vitest"];
+/// Vite+ bundles Vitest and runs it as `vp test`.
+const ENABLERS: &[&str] = &["vitest", "vite-plus"];
 
 /// Binaries that read a `--config` / `-c` file as a vitest config.
 const SCRIPT_CONFIG_BINARIES: &[&str] = &["vitest"];

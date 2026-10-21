@@ -1,0 +1,5 @@
+{
+  "name": "relative-package-root-dot-dot",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

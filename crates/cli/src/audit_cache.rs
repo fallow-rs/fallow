@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime};
 
+use fallow_output::{ExceededThreshold, FindingSeverity};
 use fallow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
 };
@@ -33,7 +34,10 @@ use crate::error::emit_error;
 /// snapshot from a run without `--brief` holds an empty set that a brief run
 /// would read as "every head export is new". Version 14 added the line count
 /// of each complexity entry, which the worsened-finding check compares.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 14;
+/// Version 15 added the exceeded flags, the severity tier and the coverage
+/// source of each complexity entry, which the new-only attribution compares.
+/// Version 16 added the dead-code collections that the base could not prove.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 16;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -68,6 +72,8 @@ pub(super) struct CachedAuditKeySnapshot {
     /// syntactic sets on both sides even on a warm cache.
     pub(super) syntactic_dead_code: Option<Vec<String>>,
     pub(super) dead_code: Vec<String>,
+    /// Dead-code collections that the base could not prove, sorted.
+    pub(super) unprovable_dead_code: Vec<String>,
     /// Base complexity findings, sorted by key and line.
     pub(super) health: Vec<CachedComplexityFinding>,
     pub(super) styling: Vec<String>,
@@ -99,6 +105,10 @@ pub(super) struct CachedComplexityFinding {
     pub(super) cognitive: u16,
     pub(super) crap: Option<f64>,
     pub(super) line_count: u32,
+    pub(super) exceeded: [bool; 3],
+    /// 0 for moderate, 1 for high, 2 for critical.
+    pub(super) severity: u8,
+    pub(super) crap_estimated: bool,
 }
 
 /// One file's branching totals in the cached snapshot. A named struct rather
@@ -116,9 +126,9 @@ pub(super) fn sorted_keys(keys: &FxHashSet<String>) -> Vec<String> {
 }
 
 /// Rehydrate an in-memory snapshot from its cached form. Returns `None` when
-/// the persisted type-aware identity no longer deserializes (treated as a
-/// cache miss so a stale payload can never masquerade as an identity-less
-/// base).
+/// the persisted type-aware identity no longer deserializes or a complexity
+/// row is invalid (treated as a cache miss so a stale payload can never
+/// masquerade as an identity-less base).
 pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<AuditKeySnapshot> {
     let type_aware_identity = match cached.type_aware_identity {
         Some(json) => Some(serde_json::from_str(&json).ok()?),
@@ -131,7 +141,8 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
             .syntactic_dead_code
             .map(|keys| keys.into_iter().collect()),
         dead_code: cached.dead_code.into_iter().collect(),
-        health: complexity_from_cached(cached.health),
+        unprovable_dead_code: cached.unprovable_dead_code.into_iter().collect(),
+        health: complexity_from_cached(cached.health)?,
         styling: cached.styling.into_iter().collect(),
         dupes: cached.dupes.into_iter().collect(),
         boundary_edges: cached.boundary_edges.into_iter().collect(),
@@ -181,6 +192,7 @@ pub(super) fn cached_from_snapshot(
         type_aware_gap_signature: snapshot.type_aware_gap_signature.clone(),
         syntactic_dead_code: snapshot.syntactic_dead_code.as_ref().map(sorted_keys),
         dead_code: sorted_keys(&snapshot.dead_code),
+        unprovable_dead_code: sorted_keys(&snapshot.unprovable_dead_code),
         health: sorted_complexity(&snapshot.health),
         styling: sorted_keys(&snapshot.styling),
         dupes: sorted_keys(&snapshot.dupes),
@@ -217,6 +229,17 @@ fn sorted_complexity(baseline: &ComplexityBaseline) -> Vec<CachedComplexityFindi
                 cognitive: metrics.cognitive,
                 crap: metrics.crap,
                 line_count: metrics.line_count,
+                exceeded: [
+                    metrics.exceeded.includes_cyclomatic(),
+                    metrics.exceeded.includes_cognitive(),
+                    metrics.exceeded.includes_crap(),
+                ],
+                severity: match metrics.severity {
+                    FindingSeverity::Moderate => 0,
+                    FindingSeverity::High => 1,
+                    FindingSeverity::Critical => 2,
+                },
+                crap_estimated: metrics.crap_estimated,
             })
         })
         .collect();
@@ -224,9 +247,22 @@ fn sorted_complexity(baseline: &ComplexityBaseline) -> Vec<CachedComplexityFindi
     rows
 }
 
-fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> ComplexityBaseline {
+/// Returns `None` for a row that no valid baseline can produce (no exceeded
+/// flag, or an unknown severity tier), so a corrupt cache entry is a cache
+/// miss instead of a panic.
+fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> Option<ComplexityBaseline> {
     let mut baseline = ComplexityBaseline::default();
     for row in rows {
+        let [cyclomatic, cognitive, crap] = row.exceeded;
+        if !(cyclomatic || cognitive || crap) {
+            return None;
+        }
+        let severity = match row.severity {
+            0 => FindingSeverity::Moderate,
+            1 => FindingSeverity::High,
+            2 => FindingSeverity::Critical,
+            _ => return None,
+        };
         baseline
             .entry(row.key)
             .or_default()
@@ -236,9 +272,12 @@ fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> ComplexityBasel
                 cognitive: row.cognitive,
                 crap: row.crap,
                 line_count: row.line_count,
+                exceeded: ExceededThreshold::from_bools(cyclomatic, cognitive, crap),
+                severity,
+                crap_estimated: row.crap_estimated,
             });
     }
-    baseline
+    Some(baseline)
 }
 
 fn sorted_branching(
@@ -674,4 +713,42 @@ pub(super) fn audit_base_snapshot_cache_key(
         hash: xxh3_64(&bytes),
         base_sha,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached_row(exceeded: [bool; 3], severity: u8) -> CachedComplexityFinding {
+        CachedComplexityFinding {
+            key: "complexity:src/a.ts:f".to_string(),
+            line: 3,
+            cyclomatic: 25,
+            cognitive: 4,
+            crap: None,
+            line_count: 40,
+            exceeded,
+            severity,
+            crap_estimated: false,
+        }
+    }
+
+    #[test]
+    fn complexity_row_without_exceeded_flag_is_a_cache_miss() {
+        assert!(complexity_from_cached(vec![cached_row([false, false, false], 1)]).is_none());
+    }
+
+    #[test]
+    fn complexity_row_with_unknown_severity_is_a_cache_miss() {
+        assert!(complexity_from_cached(vec![cached_row([true, false, false], 3)]).is_none());
+    }
+
+    #[test]
+    fn complexity_row_with_valid_fields_decodes() {
+        let baseline = complexity_from_cached(vec![cached_row([true, false, true], 2)])
+            .expect("a valid row decodes");
+        let metrics = &baseline["complexity:src/a.ts:f"][0];
+        assert_eq!(metrics.exceeded, ExceededThreshold::CyclomaticCrap);
+        assert_eq!(metrics.severity, FindingSeverity::Critical);
+    }
 }

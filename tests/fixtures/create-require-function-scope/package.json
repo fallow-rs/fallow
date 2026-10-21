@@ -1,0 +1,13 @@
+{
+  "name": "create-require-function-scope",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "pkg-a": "1.0.0",
+    "pkg-b": "1.0.0",
+    "pkg-c": "1.0.0",
+    "pkg-d": "1.0.0",
+    "pkg-e": "1.0.0"
+  }
+}

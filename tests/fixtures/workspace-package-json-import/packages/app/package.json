@@ -1,0 +1,9 @@
+{
+  "name": "@fx/app",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@fx/blocked": "workspace:*",
+    "@fx/lib": "workspace:*",
+    "@fx/plain": "workspace:*"
+  }
+}

@@ -157,6 +157,40 @@ const CONFIG_PATTERNS: &[&str] = &[
     "vite.config.*.{ts,js,mts,mjs}",
 ];
 
+/// The dependency lists of a Vite config, as key paths below the config root.
+const DEPENDENCY_LIST_KEYS: &[&[&str]] = &[
+    &["optimizeDeps", "include"],
+    &["optimizeDeps", "exclude"],
+    &["ssr", "external"],
+    &["ssr", "noExternal"],
+];
+
+/// Credit the packages in the `optimizeDeps` and `ssr` lists of a Vite config.
+///
+/// `prefix` is the key path of the Vite config object inside the file: empty
+/// for `vite.config.*`, and `["vite"]` for the `vite` block of a `VitePress`
+/// config. An `optimizeDeps` entry can name a nested dependency as
+/// `'parent > child'`. Vite resolves `child` from `parent`, so the entry
+/// credits `parent`.
+pub(super) fn credit_dependency_lists(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &std::path::Path,
+    prefix: &[&str],
+) {
+    for keys in DEPENDENCY_LIST_KEYS {
+        let path: Vec<&str> = prefix.iter().chain(keys.iter()).copied().collect();
+        for spec in config_parser::extract_config_string_array(source, config_path, &path) {
+            let parent = spec.split('>').next().unwrap_or(&spec).trim();
+            if !parent.is_empty() {
+                result
+                    .referenced_dependencies
+                    .push(crate::resolve::extract_package_name(parent));
+            }
+        }
+    }
+}
+
 define_plugin!(
     struct VitePlugin => "vite",
     enablers: &["vite", "rolldown-vite"],
@@ -226,43 +260,7 @@ define_plugin!(
         // value is a path only and never names a package.
         result.extend_entry_paths(lib_entry);
 
-        let optimize_include = config_parser::extract_config_string_array(
-            source,
-            config_path,
-            &["optimizeDeps", "include"],
-        );
-        for dep in &optimize_include {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(dep));
-        }
-
-        let optimize_exclude = config_parser::extract_config_string_array(
-            source,
-            config_path,
-            &["optimizeDeps", "exclude"],
-        );
-        for dep in &optimize_exclude {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(dep));
-        }
-
-        let ssr_external =
-            config_parser::extract_config_string_array(source, config_path, &["ssr", "external"]);
-        for dep in &ssr_external {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(dep));
-        }
-
-        let ssr_no_external =
-            config_parser::extract_config_string_array(source, config_path, &["ssr", "noExternal"]);
-        for dep in &ssr_no_external {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(dep));
-        }
+        credit_dependency_lists(&mut result, source, config_path, &[]);
 
         add_css_implementation_dependency(&mut result, source, config_path);
 
@@ -336,6 +334,25 @@ mod tests {
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"react".to_string()));
         assert!(deps.contains(&"@my/heavy-dep".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_credits_the_parent_of_a_nested_optimize_deps_entry() {
+        let deps = resolve_vite_deps(
+            r"
+            export default {
+                optimizeDeps: {
+                    include: ['mermaid > @braintree/sanitize-url', '@scope/ui > dayjs'],
+                },
+            };
+            ",
+        );
+        assert!(deps.contains(&"mermaid".to_string()), "{deps:?}");
+        assert!(deps.contains(&"@scope/ui".to_string()), "{deps:?}");
+        assert!(
+            !deps.iter().any(|dep| dep.contains('>') || dep == "dayjs"),
+            "{deps:?}"
+        );
     }
 
     fn resolve_vite_deps(source: &str) -> Vec<String> {

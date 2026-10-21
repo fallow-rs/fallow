@@ -1,0 +1,10 @@
+{
+  "name": "layout-root",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "devDependencies": {
+    "lodash": "catalog:",
+    "vite": "catalog:"
+  }
+}

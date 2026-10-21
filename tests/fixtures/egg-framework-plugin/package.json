@@ -1,0 +1,5 @@
+{
+  "name": "egg-framework-fixture",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

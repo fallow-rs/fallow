@@ -1,0 +1,16 @@
+{
+  "name": "vitepress-nested-vite-block",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mermaid": "^11.0.0",
+    "nested-only": "^1.0.0",
+    "excluded-dep": "^1.0.0",
+    "ssr-dep": "^1.0.0",
+    "ssr-external-dep": "^1.0.0",
+    "really-unused": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0"
+  }
+}

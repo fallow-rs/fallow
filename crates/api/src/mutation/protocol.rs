@@ -185,6 +185,10 @@ pub struct RunTest {
     /// companion leaves it out.
     #[serde(default)]
     pub failure_kind: Option<String>,
+    /// The first error of a failed test: its message and the stack frames
+    /// of the project, bounded in size. An older companion leaves it out.
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -372,6 +376,25 @@ mod tests {
         assert_eq!(result.tests_executed, 1);
         assert_eq!(result.tests[0].status, TestStatus::Fail);
         assert_eq!(result.tests[0].failure_kind.as_deref(), Some("assertion"));
+        assert_eq!(
+            result.tests[0].message, None,
+            "an older companion sends no message"
+        );
+    }
+
+    #[test]
+    fn a_run_result_keeps_the_error_of_a_failed_test() {
+        let line = RUN_RESULT.replace(
+            r#""failure_kind":"assertion""#,
+            r#""failure_kind":"assertion","message":"AssertionError: expected 1 to be 2""#,
+        );
+        let Response::Run(result) = decode_response(&line, 1, 3, "run_result").unwrap() else {
+            panic!("expected a run result");
+        };
+        assert_eq!(
+            result.tests[0].message.as_deref(),
+            Some("AssertionError: expected 1 to be 2")
+        );
     }
 
     #[test]

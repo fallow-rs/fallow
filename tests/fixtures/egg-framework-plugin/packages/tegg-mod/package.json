@@ -1,0 +1,6 @@
+{
+  "name": "tegg-mod",
+  "private": true,
+  "eggModule": { "name": "teggMod" },
+  "dependencies": { "@eggjs/tegg": "^4.0.0" }
+}

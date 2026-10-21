@@ -192,7 +192,9 @@ const main = () => {
     assertSemanticReport(result, backendVersion);
     process.stdout.write("Windows npm candidate completed the pinned Preact semantic smoke.\n");
   } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
+    // Windows can keep fallow.exe locked for a moment after the process exits,
+    // so the cleanup retries on EBUSY instead of failing a passed smoke.
+    rmSync(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 };
 

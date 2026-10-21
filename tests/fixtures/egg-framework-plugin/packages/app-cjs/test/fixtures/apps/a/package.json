@@ -1,0 +1,1 @@
+{ "name": "fixture-a", "dependencies": { "@eggjs/redis": "workspace:*" } }

@@ -15,6 +15,8 @@ node_modules/
 !tests/fixtures/node-modules-bin-path/node_modules/
 !tests/fixtures/optional-peer-of-used-dependency/node_modules/
 !tests/fixtures/peer-chain-through-ignored-workspace/node_modules/
+!tests/fixtures/peer-of-plugin-referenced-host/node_modules/
+!tests/fixtures/peer-of-script-used-host/node_modules/
 !tests/fixtures/peer-chain-through-root-peer/node_modules/
 !tests/fixtures/peer-chain-through-required-peer/node_modules/
 !tests/fixtures/peer-chain-through-unlisted-peer/node_modules/

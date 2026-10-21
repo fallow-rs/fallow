@@ -15,7 +15,6 @@ import {
   isGetAccessorDeclaration,
   isIdentifier,
   isImportDeclaration,
-  isImportClause,
   isImportSpecifier,
   isImportTypeNode,
   isNamespaceImport,
@@ -50,6 +49,7 @@ import {
   symbolForDeclaration,
 } from "./semantic-identity.mjs";
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
+import { isJavaScriptFile, referenceNames } from "./reference-names.mjs";
 import {
   qualifierExpression,
   referenceValueSymbol,
@@ -357,15 +357,10 @@ const semanticUse = (root, node, namespace) => {
   };
 };
 
-const isDefaultImportReference = (node) => isImportClause(node.parent) && node.parent.name === node;
-
 const candidateNameMatches = (candidateNames, name) => !candidateNames || candidateNames.has(name);
 
-const isIdentifierReference = (node, candidateNames, includeDefaultImports) => {
-  if (!isIdentifier(node)) return false;
-  if (candidateNameMatches(candidateNames, node.text)) return true;
-  return includeDefaultImports && isDefaultImportReference(node);
-};
+const isIdentifierReference = (node, names) =>
+  isIdentifier(node) && candidateNameMatches(names, node.text);
 
 const isElementNameNode = (node) =>
   isStringLiteralLikeNode(node) &&
@@ -703,7 +698,7 @@ const surfaceEntriesForNode = (state, project, node, namespace) => {
   return entries;
 };
 
-const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImports) => {
+const scanSymbolUseFile = (root, state, project, sourceFile, names) => {
   const projectEntries = classMemberEntrySetForProject(state, project);
   const nodes = [];
   visit(sourceFile, (node) => {
@@ -712,7 +707,7 @@ const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImpor
       recordStringDispatchedMemberAccess(state, projectEntries, node);
       recordComputedMemberAccess(state, project, projectEntries, node);
     }
-    if (isIdentifierReference(node, undefined, includeDefaultImports)) {
+    if (isIdentifierReference(node, isJavaScriptFile(sourceFile) ? undefined : names)) {
       nodes.push(node);
       return;
     }
@@ -735,7 +730,7 @@ const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImpor
   });
 };
 
-const scanSymbolUseProjects = (root, state, projects, includeDefaultImports) => {
+const scanSymbolUseProjects = (root, state, projects, names) => {
   const scannedFiles = new Set();
   let sourceScanCount = 0;
   for (const project of projects) {
@@ -744,7 +739,7 @@ const scanSymbolUseProjects = (root, state, projects, includeDefaultImports) => 
       if (scannedFiles.has(fileIdentity)) continue;
       scannedFiles.add(fileIdentity);
       sourceScanCount += 1;
-      scanSymbolUseFile(root, state, project, sourceFile, includeDefaultImports);
+      scanSymbolUseFile(root, state, project, sourceFile, names);
     }
   }
   return sourceScanCount;
@@ -753,10 +748,8 @@ const scanSymbolUseProjects = (root, state, projects, includeDefaultImports) => 
 const batchSymbolUseEvidence = (root, resolvedQueries, scanProjects, evidenceLimit) => {
   const state = symbolUseBatchState(resolvedQueries, evidenceLimit);
   resolvedQueries.forEach((entry) => registerSymbolTargets(root, state, entry));
-  const includeDefaultImports = resolvedQueries.some(
-    ({ query }) => query.symbol.exportedName === "default",
-  );
-  const sourceScanCount = scanSymbolUseProjects(root, state, scanProjects, includeDefaultImports);
+  const names = referenceNames(scanProjects, [...state.candidateNames, ...state.targetNames]);
+  const sourceScanCount = scanSymbolUseProjects(root, state, scanProjects, names);
   return {
     evidenceByQuery: state.evidenceByQuery,
     totalByQuery: state.totalByQuery,

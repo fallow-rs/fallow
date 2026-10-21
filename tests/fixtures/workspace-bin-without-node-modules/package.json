@@ -1,0 +1,11 @@
+{
+  "name": "workspace-bin-without-node-modules",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "tool": "my-tool run"
+  },
+  "devDependencies": {
+    "@scope/tool": "workspace:*"
+  }
+}

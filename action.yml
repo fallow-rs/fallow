@@ -84,9 +84,9 @@ inputs:
     required: false
     default: ${{ github.token }}
   branded-token:
-    description: 'Post PR comments and reviews as the Fallow app (branded) when the workflow grants `permissions: id-token: write`. Set to false to always post with github-token. Falls back to github-token automatically when id-token is unavailable.'
+    description: 'Post PR comments and reviews as the Fallow app (branded) when the workflow grants `permissions: id-token: write`. The action requests the branded token only when `comment` or `review-comments` is true. `auto` (default) falls back to github-token silently when id-token is unavailable. `true` does the same, but logs one notice for the fallback. `false` always posts with github-token.'
     required: false
-    default: 'true'
+    default: 'auto'
   broker-url:
     description: 'Base URL of the Fallow token broker used to mint the branded app token. Defaults to Fallow Cloud.'
     required: false
@@ -277,7 +277,7 @@ inputs:
     description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'
     required: false
   worsened:
-    description: 'Audit effect of an inherited complexity finding that got worse under gate new-only: warn (default) gives at least a warn verdict, error counts it like an introduced finding, off reports no worsened finding.'
+    description: 'Audit effect of an inherited complexity finding that got worse under gate new-only: warn (default) gives at least a warn verdict, error counts it like an introduced finding, off reports only the growth of an exceeded metric as worsened.'
     required: false
   security-gate:
     description: 'Security regression gate: new fails on candidates introduced on changed lines, newly-reachable fails on existing candidates that became reachable from entry points.'
@@ -415,6 +415,11 @@ runs:
 
     - name: Fallow branded token
       id: fallow-token
+      if: >-
+        github.event_name == 'pull_request' &&
+        inputs.command != 'security' &&
+        (inputs.comment == 'true' ||
+          (inputs.review-comments == 'true' && inputs.command != 'fix'))
       shell: bash
       env:
         BRANDED_TOKEN: ${{ inputs.branded-token }}

@@ -1,0 +1,32 @@
+name: CI
+on: push
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run a web script
+        working-directory: packages/web
+        run: node scripts/direct.js
+      - run: node "$GITHUB_WORKSPACE"/ci/quoted.ts
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - run: node scripts/default.ts
+  ecosystem:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [one, two]
+    steps:
+      - working-directory: ecosystem-ci/${{ matrix.project }}
+        run: |
+          node ../patch.ts
+          node ./inner.ts
+      - working-directory: ${{ runner.temp }}/project
+        run: |
+          node ./verify.ts
+          node $GITHUB_WORKSPACE/scripts/anchored.ts

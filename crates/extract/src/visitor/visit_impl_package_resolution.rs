@@ -29,6 +29,50 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     object.name == REQUIRE && member.property.name == "resolve"
 }
 
+/// Whether `declarator` is `require = createRequire(import.meta.url)` or
+/// `require = createRequire(__filename)`, also through a member such as
+/// `module.createRequire`.
+///
+/// This `require` resolves from the file itself, the same as the module
+/// `require`, so a nested scope that declares it does not shadow the module
+/// `require`. Another base, such as `createRequire(join(dir, 'x.json'))`,
+/// resolves from another directory and stays a shadow.
+fn is_module_create_require_binding(declarator: &VariableDeclarator<'_>) -> bool {
+    let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+        return false;
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return false;
+    };
+    let callee_is_create_require = match &call.callee {
+        Expression::Identifier(callee) => callee.name == "createRequire",
+        Expression::StaticMemberExpression(member) => member.property.name == "createRequire",
+        _ => false,
+    };
+    let [argument] = call.arguments.as_slice() else {
+        return false;
+    };
+    let base_is_this_file = match argument {
+        Argument::StaticMemberExpression(member) => {
+            matches!(member.object, Expression::ImportMeta(_)) && member.property.name == "url"
+        }
+        Argument::Identifier(base) => base.name == "__filename",
+        _ => false,
+    };
+    id.name == REQUIRE && callee_is_create_require && base_is_this_file
+}
+
+/// The declarators of `var` that a nested scope records as bindings. The
+/// `require` bindings that `is_module_create_require_binding` accepts are not
+/// in this list.
+pub(super) fn nested_scope_declarators<'b, 'a>(
+    var: &'b VariableDeclaration<'a>,
+) -> impl Iterator<Item = &'b VariableDeclarator<'a>> {
+    var.declarations
+        .iter()
+        .filter(|declarator| !is_module_create_require_binding(declarator))
+}
+
 /// Whether `expr` is `import.meta.resolve`. Code cannot rebind `import.meta`,
 /// so no shadow check applies.
 fn is_import_meta_resolve_callee(expr: &Expression<'_>) -> bool {
@@ -289,8 +333,10 @@ impl ModuleInfoExtractor {
     /// A parameter or a declaration named `require` in a nested scope, such
     /// as `function f(require) { require.resolve('./x') }`, is some other
     /// function, so its calls reference nothing. A module-level
-    /// `const require = createRequire(import.meta.url)` stays the module
-    /// `require`: it resolves relative to the same file.
+    /// `const require = createRequire(...)` stays the module `require`: it
+    /// resolves relative to the same file. In a nested scope, only the
+    /// bindings that `is_module_create_require_binding` accepts stay the
+    /// module `require`; the scope does not record them as a shadow.
     fn is_module_require_resolve(&self, callee: &Expression<'_>) -> bool {
         is_require_resolve_callee(callee) && !self.nested_scope_shadows(REQUIRE)
     }

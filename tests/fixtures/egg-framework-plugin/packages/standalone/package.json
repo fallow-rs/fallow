@@ -1,0 +1,6 @@
+{
+  "name": "standalone",
+  "private": true,
+  "main": "main.ts",
+  "dependencies": { "@eggjs/tegg": "^4.0.0" }
+}

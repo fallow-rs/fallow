@@ -89,7 +89,7 @@ pub fn fallback_failure_reason_for(
 }
 
 pub fn start_telemetry_run(cli: &Cli, fmt: &FormatConfig) -> TelemetryRun {
-    setup_tracing();
+    setup_tracing(fmt.quiet);
     let run = TelemetryRun {
         workflow: telemetry_workflow_for_command(cli.command.as_ref(), fmt.output),
         output: fmt.output,

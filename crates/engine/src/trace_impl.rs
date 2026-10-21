@@ -4,8 +4,8 @@ use fallow_types::discover::FileId;
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
-    ImportPathTraceSchemaVersion, NamespacedExportReferences, ReExportChain, SearchGapReason,
-    ToolingCredit, TracedCloneGroup, TracedExport, TracedReExport,
+    ImportPathTraceSchemaVersion, NamespacedExportReferences, PeerClosureSeeds, ReExportChain,
+    SearchGapReason, ToolingCredit, TracedCloneGroup, TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -222,11 +222,7 @@ fn collect_re_export_chains(
         .filter_map(|route| {
             let module = graph.modules.get(route.barrel_file().0 as usize)?;
             Some(ReExportChain {
-                barrel_file: module
-                    .path
-                    .strip_prefix(root)
-                    .unwrap_or(&module.path)
-                    .to_path_buf(),
+                barrel_file: relative_module_path(&module.path, root),
                 exported_as: route.exported_name().to_string(),
                 reference_count: graph
                     .effective_export_surface_references(
@@ -295,11 +291,7 @@ pub fn trace_export(
         let ambiguity = star_export_ambiguity?;
         let namespace = ambiguity.namespaces.first().copied().unwrap_or_default();
         return Some(ExportTrace {
-            file: module
-                .path
-                .strip_prefix(root)
-                .unwrap_or(&module.path)
-                .to_path_buf(),
+            file: relative_module_path(&module.path, root),
             export_name: export_name.to_string(),
             namespace,
             file_reachable: module.is_reachable(),
@@ -309,6 +301,7 @@ pub fn trace_export(
             direct_references_by_namespace: Vec::new(),
             star_export_ambiguity: Some(ambiguity),
             re_export_chains: Vec::new(),
+            plugin_credits: Vec::new(),
             reason: "Star re-export collision makes this name ambiguous".to_string(),
             semantic: None,
         });
@@ -328,11 +321,7 @@ pub fn trace_export(
     };
 
     Some(ExportTrace {
-        file: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        file: relative_module_path(&module.path, root),
         export_name: export_name.to_string(),
         namespace: match namespace {
             ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
@@ -345,9 +334,15 @@ pub fn trace_export(
         direct_references_by_namespace,
         star_export_ambiguity,
         re_export_chains,
+        plugin_credits: Vec::new(),
         reason,
         semantic: None,
     })
+}
+
+/// The root-relative path of a module, or the path as it is outside `root`.
+fn relative_module_path(path: &Path, root: &Path) -> PathBuf {
+    path.strip_prefix(root).unwrap_or(path).to_path_buf()
 }
 
 /// Distinct referencing files of one module export surface in one namespace.
@@ -487,13 +482,7 @@ fn trace_star_export_ambiguity(
         .iter()
         .flat_map(|collision| collision.contributors.iter())
         .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
-        .map(|module| {
-            module
-                .path
-                .strip_prefix(root)
-                .unwrap_or(&module.path)
-                .to_path_buf()
-        })
+        .map(|module| relative_module_path(&module.path, root))
         .collect();
     sources.sort();
     sources.dedup();
@@ -602,11 +591,7 @@ pub fn semantic_symbol_for_class_member(
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
     Some(SemanticSymbol {
-        path: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        path: relative_module_path(&module.path, root),
         namespace: SemanticNamespace::Value,
         declaration_kind: declaration_kind.to_string(),
         exported_name: member_name.to_string(),
@@ -683,11 +668,7 @@ pub fn semantic_symbol_for_exact_class_method(
     let offsets = fallow_types::extract::compute_line_offsets(&source);
     let (line, col) = fallow_types::extract::byte_offset_to_line_col(&offsets, member.span.start);
     Ok(SemanticSymbol {
-        path: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        path: relative_module_path(&module.path, root),
         namespace: SemanticNamespace::Value,
         declaration_kind: "class_method".to_string(),
         exported_name: member_name.to_string(),
@@ -841,6 +822,7 @@ fn traced_exports(
                 is_type_only: e.is_type_only,
                 reference_count: referenced_by.len(),
                 referenced_by,
+                plugin_credits: Vec::new(),
             }
         })
         .collect()
@@ -915,11 +897,7 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
     let module = find_module(graph, root, file_path)?;
 
     Some(FileTrace {
-        file: module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf(),
+        file: relative_module_path(&module.path, root),
         is_reachable: module.is_reachable(),
         is_entry_point: module.is_entry_point(),
         exports: traced_exports(graph, root, module),
@@ -928,6 +906,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
         re_exports: traced_re_exports(graph, root, module),
         sources: Vec::new(),
     })
+}
+
+/// The packages that the dependency trace credits although no file imports
+/// them.
+pub struct DependencyCredit<'a> {
+    /// The packages that scripts, CI configs and git hooks run.
+    pub script_used_packages: &'a FxHashSet<String>,
+    /// The packages that start the peer-dependency closures in addition to
+    /// the imported packages.
+    pub peer_seeds: &'a PeerClosureSeeds,
 }
 
 /// Trace where a dependency is used.
@@ -946,18 +934,19 @@ pub fn trace_dependency(
     workspace_roots: &[&Path],
     ignore_patterns: &fallow_config::IgnorePatternSet,
     package_name: &str,
-    script_used_packages: &FxHashSet<String>,
+    credit: &DependencyCredit<'_>,
 ) -> DependencyTrace {
     let (imported_by, type_only_imported_by) = package_importers(graph, root, package_name);
 
     let import_count = imported_by.len();
-    let used_in_scripts = script_used_packages.contains(package_name);
+    let used_in_scripts = credit.script_used_packages.contains(package_name);
     let peer_of = crate::core_backend::peer_dependency_hosts(
         graph,
         root,
         workspace_roots,
         ignore_patterns,
         package_name,
+        credit.peer_seeds,
     );
     let mut trace = DependencyTrace {
         package_name: package_name.to_string(),
@@ -1006,11 +995,7 @@ fn package_importers(
         let Some(module) = graph.modules.get(fid.0 as usize) else {
             continue;
         };
-        let path = module
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&module.path)
-            .to_path_buf();
+        let path = relative_module_path(&module.path, root);
         if type_only.get(&fid) == Some(&total) {
             type_only_imported_by.push(path.clone());
         }
@@ -1474,6 +1459,10 @@ fn relativize_instance(inst: &CloneInstance, root: &Path) -> CloneInstance {
         ..inst.clone()
     }
 }
+
+#[cfg(test)]
+#[path = "trace_impl_dependency_tests.rs"]
+mod dependency_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3229,126 +3218,6 @@ mod tests {
     }
 
     #[test]
-    fn trace_dependency_used() {
-        let files = vec![DiscoveredFile {
-            id: FileId(0),
-            path: PathBuf::from("/project/src/app.ts"),
-            size_bytes: 100,
-        }];
-        let entry_points = vec![EntryPoint {
-            path: PathBuf::from("/project/src/app.ts"),
-            source: EntryPointSource::PackageJsonMain,
-        }];
-        let resolved_modules = vec![ResolvedModule {
-            file_id: FileId(0),
-            path: PathBuf::from("/project/src/app.ts"),
-            resolved_imports: vec![ResolvedImport {
-                info: ImportInfo {
-                    source: "lodash".to_string(),
-                    imported_name: ImportedName::Named("get".to_string()),
-                    local_name: "get".to_string(),
-                    is_type_only: false,
-                    is_type_only_star: false,
-                    from_style: false,
-                    span: oxc_span::Span::new(0, 10),
-                    source_span: oxc_span::Span::default(),
-                },
-                target: ResolveResult::NpmPackage("lodash".to_string()),
-            }],
-            ..Default::default()
-        }];
-
-        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
-        let root = Path::new("/project");
-
-        let trace = trace_dependency(
-            &graph,
-            root,
-            &[],
-            &fallow_config::IgnorePatternSet::empty(),
-            "lodash",
-            &FxHashSet::default(),
-        );
-        assert!(trace.is_used);
-        assert!(!trace.used_in_scripts);
-        assert_eq!(trace.import_count, 1);
-        assert_eq!(trace.imported_by[0], PathBuf::from("src/app.ts"));
-    }
-
-    #[test]
-    fn trace_dependency_unused() {
-        let files = vec![DiscoveredFile {
-            id: FileId(0),
-            path: PathBuf::from("/project/src/app.ts"),
-            size_bytes: 100,
-        }];
-        let entry_points = vec![EntryPoint {
-            path: PathBuf::from("/project/src/app.ts"),
-            source: EntryPointSource::PackageJsonMain,
-        }];
-        let resolved_modules = vec![ResolvedModule {
-            file_id: FileId(0),
-            path: PathBuf::from("/project/src/app.ts"),
-            ..Default::default()
-        }];
-
-        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
-        let root = Path::new("/project");
-
-        let trace = trace_dependency(
-            &graph,
-            root,
-            &[],
-            &fallow_config::IgnorePatternSet::empty(),
-            "nonexistent-pkg",
-            &FxHashSet::default(),
-        );
-        assert!(!trace.is_used);
-        assert!(!trace.used_in_scripts);
-        assert_eq!(trace.import_count, 0);
-        assert!(trace.imported_by.is_empty());
-    }
-
-    #[test]
-    fn trace_dependency_used_only_in_scripts() {
-        let files = vec![DiscoveredFile {
-            id: FileId(0),
-            path: PathBuf::from("/project/src/app.ts"),
-            size_bytes: 100,
-        }];
-        let entry_points = vec![EntryPoint {
-            path: PathBuf::from("/project/src/app.ts"),
-            source: EntryPointSource::PackageJsonMain,
-        }];
-        let resolved_modules = vec![ResolvedModule {
-            file_id: FileId(0),
-            path: PathBuf::from("/project/src/app.ts"),
-            ..Default::default()
-        }];
-
-        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
-        let root = Path::new("/project");
-        let mut script_used = FxHashSet::default();
-        script_used.insert("microbundle".to_string());
-
-        let trace = trace_dependency(
-            &graph,
-            root,
-            &[],
-            &fallow_config::IgnorePatternSet::empty(),
-            "microbundle",
-            &script_used,
-        );
-        assert!(
-            trace.is_used,
-            "is_used must be true when the package is referenced from package.json scripts"
-        );
-        assert!(trace.used_in_scripts);
-        assert_eq!(trace.import_count, 0);
-        assert!(trace.imported_by.is_empty());
-    }
-
-    #[test]
     fn trace_clone_finds_matching_group() {
         use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
         let report = DuplicationReport {
@@ -3694,6 +3563,7 @@ mod tests {
                 exported_as: "foo".to_string(),
                 reference_count: 1,
             }],
+            plugin_credits: Vec::new(),
             reason: "ok".to_string(),
             semantic: None,
         };

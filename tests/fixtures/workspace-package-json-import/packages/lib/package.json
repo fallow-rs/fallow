@@ -1,0 +1,8 @@
+{
+  "name": "@fx/lib",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  }
+}

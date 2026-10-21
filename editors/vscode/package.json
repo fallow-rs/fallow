@@ -672,9 +672,9 @@
             "Use `audit.worsened` from the project config. Without a config value, the CLI uses `warn`. This is the default.",
             "A worsened finding makes the verdict at least warn. The exit code stays 0.",
             "A worsened finding counts like an introduced finding and fails the verdict.",
-            "No finding is worsened, and the verdict does not change."
+            "Only growth of an exceeded metric is worsened, and it makes the verdict at least warn. Other growth stays inherited."
           ],
-          "markdownDescription": "How an inherited complexity finding that got worse affects the audit verdict shown in the editor. `auto` uses the project config. `warn` makes the verdict at least warn, `error` counts the finding like an introduced finding, and `off` turns the check off. Mirrors `fallow audit --worsened`. Needs Fallow 3.34.2 or newer."
+          "markdownDescription": "How an inherited complexity finding that got worse affects the audit verdict shown in the editor. `auto` uses the project config. `warn` makes the verdict at least warn, `error` counts the finding like an introduced finding, and `off` reports only growth of an exceeded metric as worsened. Mirrors `fallow audit --worsened`. Needs Fallow 3.34.2 or newer."
         },
         "fallow.audit.statusBar.enabled": {
           "type": "boolean",
