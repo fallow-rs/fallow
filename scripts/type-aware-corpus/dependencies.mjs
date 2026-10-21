@@ -35,7 +35,7 @@ const assertRealPathInside = (label, path, realApproved) => {
   const real = realPath(path);
   if (real.startsWith(`${realApproved}${sep}`)) return real;
   throw new Error(
-    `${label} ${resolve(path)} resolves to ${real}, outside the approved dependency root ${realApproved}. TypeScript then cannot find the workspace type declarations. Replace a symlinked target directory with a real directory, or disable the build cache wrapper that creates the symlink.`,
+    `${label} ${resolve(path)} resolves to ${real}, outside the approved dependency root ${realApproved}. TypeScript then cannot find the workspace type declarations. Use an --out-dir inside the workspace. Replace a symlinked target directory with a real directory, or disable the build cache wrapper that creates the symlink.`,
   );
 };
 
