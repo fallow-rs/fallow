@@ -236,6 +236,11 @@ pub struct PluginResult {
     replace_used_export_rules: bool,
     /// Additional export-usage rules discovered from config.
     used_exports: Vec<UsedExportRule>,
+    /// Exports that the tool reads from the files a config names. These rules
+    /// join the config-file export credit, so they count only under
+    /// `includeEntryExports`. Unlike `used_exports`, they never make an entry
+    /// point reportable when `includeEntryExports` is off.
+    entry_export_credits: Vec<UsedExportRule>,
     /// Class member rules that should never be flagged as unused. Contributed
     /// by plugins that know their framework invokes these methods at runtime
     /// and may scope suppression via `extends` / `implements` constraints when
@@ -843,15 +848,6 @@ impl PluginResult {
         self.push_entry_pattern(format!("{base}/index.{REQUEST_EXTENSIONS}"));
     }
 
-    fn push_used_export_rule(
-        &mut self,
-        pattern: impl Into<String>,
-        exports: impl IntoIterator<Item = impl Into<String>>,
-    ) {
-        self.used_exports
-            .push(UsedExportRule::new(pattern, exports));
-    }
-
     /// Whether this result contributes nothing, which lets the registry skip a
     /// config file entirely.
     ///
@@ -863,6 +859,7 @@ impl PluginResult {
         self.config_diagnostics.is_empty()
             && self.entry_patterns.is_empty()
             && self.used_exports.is_empty()
+            && self.entry_export_credits.is_empty()
             && self.used_class_members.is_empty()
             && self.referenced_dependencies.is_empty()
             && self.package_referenced_dependencies.is_empty()

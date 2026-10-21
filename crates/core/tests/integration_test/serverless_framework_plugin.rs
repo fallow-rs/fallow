@@ -76,6 +76,66 @@ fn serverless_handlers_plugins_and_esbuild_references_are_credited() {
 }
 
 #[test]
+fn serverless_handler_exports_are_credited_under_include_entry_exports() {
+    // A handler such as `src/users.main` names the export `main`. The
+    // framework calls that export, so it is used even when entry exports are
+    // checked.
+    let root = fixture_path("serverless-framework-plugin");
+    let mut config = create_config(root.clone());
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            let path = finding
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&finding.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (path, finding.export.export_name.clone())
+        })
+        .collect();
+    for (path, name) in [
+        ("function/handler.js", "handler"),
+        ("function-2/function2.ts", "handler"),
+        ("src/hello.js", "handler"),
+        ("src/users.ts", "main"),
+    ] {
+        assert!(
+            !unused_exports.contains(&(path.to_string(), name.to_string())),
+            "{name} in {path} is a handler export, unused exports: {unused_exports:?}"
+        );
+    }
+    assert!(
+        unused_exports.contains(&("src/users.ts".to_string(), "helper".to_string())),
+        "an export that no handler names should still report, unused exports: {unused_exports:?}"
+    );
+}
+
+#[test]
+fn serverless_handler_files_keep_their_default_entry_point_skip() {
+    // Without `includeEntryExports`, a handler file is an entry point, so none
+    // of its exports report. The handler credit must not change that.
+    let root = fixture_path("serverless-framework-plugin");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    assert!(
+        !names.contains(&"helper"),
+        "an entry point export should not report by default, unused exports: {names:?}"
+    );
+}
+
+#[test]
 fn nested_script_config_is_a_service_config_only_in_a_service_directory() {
     // The framework reads `serverless.*` from the service directory only. A
     // nested `serverless.yml` and a `serverless.ts` next to a `package.json`

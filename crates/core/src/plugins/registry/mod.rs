@@ -387,7 +387,8 @@ pub struct AggregatedPluginResult {
     /// The config-file export credit of each active plugin: one `default`
     /// rule for each config pattern minus the plugin's
     /// `config_default_export_opt_out`, plus the anchored
-    /// `config_file_exports` rules with their own export names. The
+    /// `config_file_exports` rules with their own export names, plus the
+    /// entry export credits that config results give. The
     /// unused-export analysis reads these rules only under
     /// `includeEntryExports`, so they never change the default output.
     pub config_export_credits: Vec<PluginUsedExportRule>,
