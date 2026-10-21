@@ -16,6 +16,7 @@ use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
 use fallow_output::GateName;
 
+mod baseline_notes;
 #[expect(
     clippy::redundant_pub_crate,
     reason = "reused by crate::security; check is crate-private so pub(crate) is the minimal widening that exposes filtering crate-wide"
@@ -929,29 +930,24 @@ fn handle_trace_side_effects(
     let trace_timings = data.trace_timings.as_ref();
     let trace_exit = data.trace_graph.as_ref().and_then(|graph| {
         crate::telemetry::note_graph_structure(graph);
-        output::handle_type_aware_trace_output(
-            graph,
-            opts.trace_opts,
-            config,
-            opts.explain,
-            opts.json_style,
+        output::handle_type_aware_trace_output(graph, opts, config, &data.trace_provenance).or_else(
+            || {
+                output::handle_trace_output(
+                    graph,
+                    opts.trace_opts,
+                    &config.root,
+                    config.output,
+                    opts.json_style,
+                    &output::TraceFacts {
+                        script_used_packages: &data.script_used_packages,
+                        provenance: &data.trace_provenance,
+                        workspaces: &data.workspaces,
+                        results: &data.results,
+                        ignore_patterns: &config.ignore_patterns,
+                    },
+                )
+            },
         )
-        .or_else(|| {
-            output::handle_trace_output(
-                graph,
-                opts.trace_opts,
-                &config.root,
-                config.output,
-                opts.json_style,
-                &output::TraceFacts {
-                    script_used_packages: &data.script_used_packages,
-                    provenance: &data.trace_provenance,
-                    workspaces: &data.workspaces,
-                    results: &data.results,
-                    ignore_patterns: &config.ignore_patterns,
-                },
-            )
-        })
     });
     // A trace view ends the command here, so a deferred report prints now.
     if let Some(timings) = trace_timings
@@ -1184,7 +1180,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     let reports_dependencies = opts.filters.reports_dependency_findings() && opts.file.is_empty();
     let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
         workspace_diagnostics,
-        fallow_engine::dead_code::config_pattern_diagnostics(&config, reports_dependencies),
+        baseline_notes::run_notes(&config, reports_dependencies, baseline_staleness.as_ref()),
     );
 
     if let Some(sarif_path) = opts.sarif_file {
@@ -2275,7 +2271,8 @@ fn save_baseline_file(
     }
     let baseline_data =
         BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone())
-            .with_scope_reasons(io.scope_reasons);
+            .with_scope_reasons(io.scope_reasons)
+            .with_node_modules(fallow_config::node_modules_state(io.root));
     let mut json = serde_json::to_string_pretty(&baseline_data)
         .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
     json.push('\n');
@@ -2320,42 +2317,6 @@ fn save_baseline_file(
     Ok(())
 }
 
-/// A baseline saved from a narrowed run holds only part of the findings. A
-/// wider run that loads it reports the findings outside the saved scope as
-/// new, so the run says why before the report does.
-///
-/// Printed regardless of `--quiet`, like the note for a baseline of another
-/// format: no report states this fact, and `--ci` implies `--quiet`.
-fn warn_about_a_narrower_saved_baseline(
-    content: &str,
-    baseline_path: &std::path::Path,
-    io: &BaselineIo<'_>,
-) {
-    let current: Vec<&str> = io
-        .scope_reasons
-        .iter()
-        .map(fallow_output::ScopeReason::as_str)
-        .collect();
-    let wider: Vec<String> = fallow_engine::baseline::saved_scope_reasons(content)
-        .into_iter()
-        .filter(|reason| !current.contains(&reason.as_str()))
-        .collect();
-    if wider.is_empty() {
-        return;
-    }
-    let remedy = if wider.iter().any(|reason| reason == "package-baselines") {
-        " Save it again with --no-package-baselines to cover the whole project."
-    } else {
-        " Save it again from a run without that narrowing to cover the whole project."
-    };
-    eprintln!(
-        "Warning: the baseline {} was saved from a run narrowed by {}, so it lists only part of \
-         the findings. This run is wider and can report old findings as new.{remedy}",
-        baseline_path.display(),
-        wider.join(", "),
-    );
-}
-
 /// Load a baseline file, filter out matched issues, and return this run's view
 /// of the loaded baseline.
 ///
@@ -2373,7 +2334,9 @@ fn load_and_compare_baseline(
 
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
-    warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
+    baseline_notes::warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
+    let install_state =
+        baseline_notes::warn_about_another_install_state(&content, baseline_path, io);
     let outcome = apply_dead_code_baseline(
         results,
         &content,
@@ -2462,6 +2425,7 @@ fn load_and_compare_baseline(
         unrecognised_format,
         saved_by,
         legacy_keys,
+        install_state,
     })
 }
 

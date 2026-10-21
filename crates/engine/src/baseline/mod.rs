@@ -112,8 +112,10 @@ macro_rules! with_baseline_fields {
     };
 }
 
+mod install_state;
 mod prune;
 
+pub use install_state::{install_state_diagnostic, saved_node_modules_state};
 pub use prune::{
     BaselinePrune, BaselinePruneRefusal, PrunedEntry, prune_dead_code_baseline,
     prune_dupes_baseline, prune_health_baseline,
@@ -548,11 +550,10 @@ pub struct BaselineData {
     /// from turning a loadable file into a parse error.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     kind: Option<BaselineKind>,
-    /// Compatibility identity for the analysis that produced this baseline.
-    /// Legacy baselines deserialize as syntactic and are never silently
-    /// compared with type-aware output.
+    /// Analysis identity plus install state; legacy files read as syntactic,
+    /// never silently compared with type-aware output.
     #[serde(default)]
-    analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
+    analysis_identity: install_state::BaselineAnalysisIdentity,
     /// The key scheme of the entries: [`BASELINE_KEY_SCHEME`] for canonical,
     /// count-matched keys, absent for a legacy baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -731,8 +732,7 @@ impl BaselineData {
         "unused_dev_dependencies",
     ];
 
-    /// Build baseline keys from analysis results under the syntactic analysis
-    /// identity (the default for runs without semantic analysis).
+    /// Build baseline keys from analysis results under the syntactic identity.
     pub fn from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
         Self::from_results_with_identity(
             results,
@@ -757,7 +757,7 @@ impl BaselineData {
             ($($field:ident),* $(,)?) => {
                 Self {
                     kind: Some(BaselineKind::DeadCode),
-                    analysis_identity,
+                    analysis_identity: analysis_identity.into(),
                     identity: Some(BASELINE_KEY_SCHEME.to_owned()),
                     scope_reasons: Vec::new(),
                     $($field: canonical_keys(&results.$field, &paths),)*
@@ -793,7 +793,7 @@ impl BaselineData {
 
         Self {
             kind: Some(BaselineKind::DeadCode),
-            analysis_identity,
+            analysis_identity: analysis_identity.into(),
             identity: None,
             scope_reasons: Vec::new(),
             unused_files: file_exports.unused_files,
@@ -851,7 +851,7 @@ impl BaselineData {
     /// The analysis identity this baseline was captured under.
     #[must_use]
     pub const fn analysis_identity(&self) -> &fallow_types::semantic::SemanticAnalysisIdentity {
-        &self.analysis_identity
+        &self.analysis_identity.semantic
     }
 
     /// Total number of entries across all categories.
@@ -3832,7 +3832,7 @@ mod tests {
     fn filter_keeps_new_issues_not_in_baseline() {
         let baseline = BaselineData {
             kind: None,
-            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            analysis_identity: install_state::BaselineAnalysisIdentity::default(),
             scope_reasons: Vec::new(),
             identity: None,
             unused_files: vec!["src/old.ts".to_string()],
@@ -3908,7 +3908,7 @@ mod tests {
     fn filter_with_empty_baseline_keeps_all() {
         let baseline = BaselineData {
             kind: None,
-            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            analysis_identity: install_state::BaselineAnalysisIdentity::default(),
             scope_reasons: Vec::new(),
             identity: None,
             unused_files: vec![],
@@ -3971,7 +3971,7 @@ mod tests {
     fn filter_new_exports_by_file_and_name() {
         let baseline = BaselineData {
             kind: None,
-            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            analysis_identity: install_state::BaselineAnalysisIdentity::default(),
             scope_reasons: Vec::new(),
             identity: None,
             unused_files: vec![],

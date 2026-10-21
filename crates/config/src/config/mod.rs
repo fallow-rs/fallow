@@ -336,7 +336,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
 
-    /// An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A single `*` stays within one path segment; use `**` to match across directories.
+    /// An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A matching file that parses with errors reports no `source-parse-degraded` diagnostic, and its partial parse does not mark other findings as incomplete; use this only for files that are broken on purpose, such as syntax-error test fixtures. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_findings: Vec<String>,
 
@@ -732,7 +732,7 @@ pub struct AuditConfig {
     #[serde(default, skip_serializing_if = "AuditGate::is_default")]
     pub gate: AuditGate,
 
-    /// Selects how a worsened complexity finding affects the `fallow audit` verdict under `gate: new-only`. A worsened finding was already in the base snapshot, and a measured value is higher now. Any growth of cyclomatic, cognitive or CRAP counts. The line count must grow by at least 5 lines, and it includes comments and blank lines. `warn` (default) makes the verdict at least `warn` and does not fail the run. `error` counts a worsened finding like an introduced finding. `off` reports no worsened finding and keeps the verdict as it was before this setting existed. A finding whose exceeded metric grew is introduced in both modes. The `--worsened` CLI flag overrides this.
+    /// Selects how a worsened complexity finding affects the `fallow audit` verdict under `gate: new-only`. A worsened finding was already in the base snapshot, and a measured value is higher now. Any growth of cyclomatic, cognitive or CRAP counts. The line count must grow by at least 5 lines, and it includes comments and blank lines. `warn` (default) makes the verdict at least `warn` and does not fail the run. `error` counts a worsened finding like an introduced finding. `off` reports only the growth of a metric that the finding exceeds as worsened, which gives at least `warn`. A finding whose exceeded metric grew is worsened when it stays in its severity tier (`moderate`, `high`, `critical`), and introduced when it moves to a higher tier or exceeds a metric that the base finding did not exceed. The `--worsened` CLI flag overrides this.
     #[serde(default, skip_serializing_if = "AuditWorsened::is_default")]
     pub worsened: AuditWorsened,
 
@@ -827,9 +827,9 @@ pub enum AuditWorsened {
     Warn,
     /// A worsened finding counts like an introduced finding.
     Error,
-    /// No finding is worsened: a grown inherited finding stays inherited and
-    /// does not change the verdict. This is the behavior before `worsened`
-    /// existed.
+    /// Growth only in metrics that the finding does not exceed stays
+    /// inherited. Growth of an exceeded metric stays worsened and gives at
+    /// least `warn`.
     Off,
 }
 

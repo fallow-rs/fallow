@@ -22,6 +22,10 @@ use crate::plugins::ConfigExportCredit;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
+#[path = "unused_exports_adapter.rs"]
+mod adapter;
+use adapter::aliased_import_adapters;
+
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
 
@@ -1367,9 +1371,11 @@ fn evaluate_duplicate_export_group(
         return None;
     }
 
-    // Strip re-export chain members: a module that re-exports from another
-    // group member is not an independent origin.
+    // Strip re-export chain members and aliased-import adapters: a module
+    // that re-exports or wraps the export of another group member is not an
+    // independent origin.
     let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
+    let adapters = aliased_import_adapters(&locations, &name, graph);
     let independent_entries: Vec<ExportEntry> = locations
         .into_iter()
         .filter(|entry| {
@@ -1379,7 +1385,7 @@ fn evaluate_duplicate_export_group(
                 &module_indices,
                 dynamic_re_export_sources,
                 graph,
-            )
+            ) && !adapters.contains(&entry.file_id)
         })
         .collect();
 
@@ -1681,6 +1687,10 @@ pub(super) fn reference_location(
 }
 
 #[cfg(test)]
+#[path = "unused_exports_adapter_tests.rs"]
+mod adapter_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -1750,7 +1760,7 @@ mod tests {
     }
 
     /// Build a default ResolvedConfig for tests.
-    fn test_config() -> ResolvedConfig {
+    pub(super) fn test_config() -> ResolvedConfig {
         fallow_config::FallowConfig::default().resolve(
             PathBuf::from("/tmp/test"),
             fallow_config::OutputFormat::Human,
@@ -1956,7 +1966,7 @@ mod tests {
         clippy::cast_possible_truncation,
         reason = "test file counts are trivially small"
     )]
-    fn build_duplicate_graph(
+    pub(super) fn build_duplicate_graph(
         file_specs: &[(&str, bool)],
         exports: &[(usize, &str, bool)],
         imports: &[(usize, usize, &str, bool)],
@@ -2447,28 +2457,6 @@ mod tests {
         assert!(
             result.is_empty(),
             "unrelated leaf files should not be flagged as duplicates"
-        );
-    }
-
-    #[test]
-    fn duplicate_exports_direct_import_still_flagged() {
-        let graph = build_duplicate_graph(
-            &[
-                ("/src/entry.ts", true),
-                ("/src/a.ts", false),
-                ("/src/b.ts", false),
-            ],
-            &[(1, "helper", false), (2, "helper", false)],
-            &[(0, 1, "helper", false), (1, 2, "helper", false)],
-        );
-        let suppressions = SuppressionContext::empty();
-        let config = test_config();
-        let result =
-            find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
-        assert_eq!(
-            result.len(),
-            1,
-            "directly connected files should still be flagged"
         );
     }
 

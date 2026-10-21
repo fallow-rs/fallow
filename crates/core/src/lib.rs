@@ -735,24 +735,13 @@ impl<'a> AnalysisSession<'a> {
         );
         trace_pipeline_profile(&profile);
 
-        let mut trace_provenance = plugins::federation_trace_provenance(
+        let trace_provenance = plugins::build_trace_provenance(
             &self.config.root,
             self.files(),
-            &plugin_result.federation_sources,
-            &core.modules,
-        );
-        plugins::push_tooling_trace_credits(
-            &mut trace_provenance,
-            &self.config.root,
             self.workspaces(),
-            &plugin_result,
-        );
-        plugins::push_config_export_provenance(
-            &mut trace_provenance,
-            &self.config.root,
-            self.files(),
             &core.modules,
             &plugin_result,
+            plugins::ExportCredits::for_run(retain, self.config),
         );
         let mut output = assemble_full_output(
             core,
@@ -889,27 +878,16 @@ impl DeadCodeBackendPrelude<'_> {
     pub fn trace_provenance(
         &self,
         modules: &[extract::ModuleInfo],
+        retain_graph: bool,
     ) -> fallow_types::trace::TraceProvenance {
-        let mut provenance = plugins::federation_trace_provenance(
+        plugins::build_trace_provenance(
             &self.config.root,
             self.discovery.files(),
-            &self.plugin_result.federation_sources,
-            modules,
-        );
-        plugins::push_tooling_trace_credits(
-            &mut provenance,
-            &self.config.root,
             self.discovery.workspaces(),
-            &self.plugin_result,
-        );
-        plugins::push_config_export_provenance(
-            &mut provenance,
-            &self.config.root,
-            self.discovery.files(),
             modules,
             &self.plugin_result,
-        );
-        provenance
+            plugins::ExportCredits::for_run(retain_graph, self.config),
+        )
     }
 
     /// The plugin stage's result, after the workspace merge and the
@@ -1286,11 +1264,11 @@ fn try_load_analysis_graph_cache(
 
     if let Some(rejection) = store.manifest.classify_resolution_mismatch(&current) {
         // The level is the rejection's own judgement of whether the reader can
-        // do anything about it. Content drift is what a cache is for, so it
-        // stays off stderr and is read from doctor or the performance table
-        // instead; `describe()` already names the reason, so no field repeats it.
+        // act on it. Content drift is what a cache is for, so it stays off
+        // stderr; doctor and the performance table show it.
         if rejection.discarded_existing_work() {
             tracing::warn!(
+                target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
                 "Graph cache decoded but not reused: {}",
                 rejection.describe()
             );
@@ -1663,10 +1641,8 @@ fn parse_analysis_modules(
         &config.flags.patterns(),
     );
     let _ = fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
-    let _ = fallow_config::record_source_parse_degradations(
-        &config.root,
-        &parse_result.parse_degradations,
-    );
+    let _ =
+        fallow_config::record_source_parse_degradations(config, &parse_result.parse_degradations);
     let modules = parse_result.modules;
     let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     let cache_ms = update_parse_cache_if_enabled(
@@ -2290,9 +2266,9 @@ fn analyze_all_scripts(
     let workspace_packages =
         discover::collect_workspace_packages(&config.root, root_pkg, workspace_pkgs);
     let all_scripts = collect_all_scripts(root_pkg, workspace_pkgs, &workspace_packages);
-
     let nm_roots = collect_node_modules_roots(config, workspaces);
-    let bin_map = scripts::build_bin_to_package_map(&nm_roots, &all_dep_names);
+    let ws_manifests = workspace_pkgs.iter().map(|(_, pkg)| pkg);
+    let bin_map = scripts::project_bin_map(&nm_roots, &all_dep_names, ws_manifests, &all_dep_set);
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let deps = ScriptDependencyContext {
         bin_map: &bin_map,
@@ -2406,35 +2382,6 @@ fn collect_node_modules_roots<'a>(
     nm_roots
 }
 
-/// Scripts that the Nx `run-commands` targets of `<dir>/project.json` run, keyed
-/// `nx:<target>` so they never collide with a `package.json` script.
-#[expect(
-    clippy::disallowed_types,
-    reason = "joins the std HashMap of package.json scripts"
-)]
-fn nx_target_scripts(
-    dir: &std::path::Path,
-    project_root: &str,
-    production: bool,
-) -> std::collections::HashMap<String, String> {
-    let Ok(source) = std::fs::read_to_string(dir.join("project.json")) else {
-        return std::collections::HashMap::new();
-    };
-    let commands: std::collections::HashMap<String, String> =
-        scripts::nx_targets::run_commands_scripts(&source, project_root)
-            .into_iter()
-            .collect();
-    let commands = if production {
-        scripts::filter_production_scripts(&commands)
-    } else {
-        commands
-    };
-    commands
-        .into_iter()
-        .map(|(target, command)| (format!("nx:{target}"), command))
-        .collect()
-}
-
 /// Analyze the root package.json scripts and fold the results into the plugin result.
 fn analyze_root_scripts(
     config: &ResolvedConfig,
@@ -2450,7 +2397,11 @@ fn analyze_root_scripts(
     } else {
         pkg_scripts.clone()
     };
-    scripts_to_analyze.extend(nx_target_scripts(&config.root, "", config.production));
+    scripts_to_analyze.extend(scripts::config_task_scripts(
+        &config.root,
+        "",
+        config.production,
+    ));
     if scripts_to_analyze.is_empty() {
         return;
     }
@@ -2536,7 +2487,11 @@ fn analyze_one_workspace_scripts(
     } else {
         ws_scripts.clone()
     };
-    scripts_to_analyze.extend(nx_target_scripts(&ws.root, &ws_prefix, config.production));
+    scripts_to_analyze.extend(scripts::config_task_scripts(
+        &ws.root,
+        &ws_prefix,
+        config.production,
+    ));
     if scripts_to_analyze.is_empty() {
         return (
             used_packages,

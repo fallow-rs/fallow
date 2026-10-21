@@ -183,6 +183,16 @@ pub struct PackageJson {
         deserialize_with = "deserialize_optional_string_lenient"
     )]
     pub package_manager: Option<String>,
+    /// The Egg.js `egg` block (for example `framework` and `tscompiler`),
+    /// kept raw so that an unexpected shape does not fail manifest parsing.
+    #[serde(default)]
+    pub egg: Option<serde_json::Value>,
+    /// The Egg.js `eggPlugin` block of a plugin package, kept raw.
+    #[serde(default, rename = "eggPlugin")]
+    pub egg_plugin: Option<serde_json::Value>,
+    /// The tegg `eggModule` block of a module package, kept raw.
+    #[serde(default, rename = "eggModule")]
+    pub egg_module: Option<serde_json::Value>,
 }
 
 impl PackageJson {

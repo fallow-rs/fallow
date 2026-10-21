@@ -8281,7 +8281,7 @@
     ]
   },
   "plugins": {
-    "count": 145,
+    "count": 148,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8290,6 +8290,7 @@
       "remix",
       "astro",
       "browser-extension",
+      "github-action",
       "wxt",
       "angular",
       "react-router",
@@ -8304,6 +8305,7 @@
       "nestjs-trpc",
       "nest-commander",
       "adonis",
+      "egg",
       "docusaurus",
       "gatsby",
       "sveltekit",
@@ -8342,6 +8344,7 @@
       "module-federation",
       "tsup",
       "tsdown",
+      "vite-plus",
       "pkg-utils",
       "parcel",
       "vitest",

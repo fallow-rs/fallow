@@ -8,6 +8,7 @@ const FILE = "test/math.test.ts";
 const FAULTS = "test/faults.test.ts";
 const CONCURRENT = "test/concurrent.test.ts";
 const id = (name, file = FILE) => `${file}::${name}`;
+const withoutMessage = ({ message: _message, ...entry }) => entry;
 
 /**
  * The protocol tests of an adapter that starts one test process for each
@@ -133,11 +134,20 @@ export const childRunnerSuite = ({
       assert.equal(result.mutant_id, "m1");
       assert.equal(result.status, "killed");
       assert.equal(result.killed_by, id("add > adds numbers"));
-      assert.deepEqual(result.tests[0], {
+      assert.deepEqual(withoutMessage(result.tests[0]), {
         test_id: id("add > adds numbers"),
         status: "fail",
         failure_kind: "assertion",
       });
+    });
+
+    test("a failed test carries its assertion, relative to the project", async () => {
+      const result = await run("m1", [id("add > adds numbers")]);
+      const { message } = result.tests[0];
+      assert.match(message, /^AssertionError: /u, message);
+      assert.match(message, /5/u, message);
+      assert.ok(!message.includes(project.root), message);
+      assert.ok(!message.includes(project.runDir), message);
     });
 
     test("a mutant that no test detects survives, and the run selects only the requested test", async () => {
@@ -199,9 +209,10 @@ export const childRunnerSuite = ({
       assert.equal(faults.type, "dry_run_result", JSON.stringify(faults));
       const result = await run("m6", [id("shouts", FAULTS)]);
       assert.equal(result.status, "killed", JSON.stringify(result));
-      assert.deepEqual(result.tests, [
+      assert.deepEqual(result.tests.map(withoutMessage), [
         { test_id: id("shouts", FAULTS), status: "fail", failure_kind: "error" },
       ]);
+      assert.match(result.tests[0].message, /^TypeError: /u);
     });
 
     test("a slow mutant times out at timeout_ms", async () => {
@@ -209,7 +220,7 @@ export const childRunnerSuite = ({
       const result = await run("m5", [id("pauses", FAULTS)], 500);
       assert.equal(result.status, "timeout", JSON.stringify(result));
       assert.equal(result.killed_by, null);
-      assert.deepEqual(result.tests, [
+      assert.deepEqual(result.tests.map(withoutMessage), [
         { test_id: id("pauses", FAULTS), status: "fail", failure_kind: "timeout" },
       ]);
       assert.ok(performance.now() - started < 10_000, "the run waited for the slow test");

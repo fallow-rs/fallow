@@ -1,8 +1,9 @@
 //! Git hook command scanner for dependency usage detection.
 //!
 //! Reads the commands that git hook managers and staged-file task runners
-//! run: husky hook scripts, lefthook configs, and simple-git-hooks and
-//! lint-staged configs, in package.json or in their own files. A package these
+//! run: husky and Vite+ hook scripts, lefthook configs, simple-git-hooks and
+//! lint-staged configs (in package.json or in their own files), and the
+//! `staged` block of a Vite+ config. A package these
 //! commands invoke is used, the same way a package.json script or a CI
 //! workflow step makes it used.
 //!
@@ -14,6 +15,9 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context};
+
+/// The hook script directories: husky, and Vite+ (`vp config`).
+const HOOK_SCRIPT_DIRS: &[&str] = &[".husky", ".vite-hooks"];
 
 const LEFTHOOK_FILES: &[&str] = &[
     "lefthook.yml",
@@ -84,7 +88,10 @@ pub fn analyze_hook_files(root: &Path, context: &HookContext<'_>) -> FxHashSet<S
 /// Gather every hook and staged-file command string under `root`.
 fn collect_hook_commands(root: &Path) -> Vec<String> {
     let mut commands = Vec::new();
-    collect_husky_commands(root, &mut commands);
+    for dir in HOOK_SCRIPT_DIRS {
+        collect_hook_script_commands(&root.join(dir), &mut commands);
+    }
+    commands.extend(super::vite_plus::staged_commands(root));
 
     for name in LEFTHOOK_FILES {
         if let Ok(content) = std::fs::read_to_string(root.join(name)) {
@@ -131,10 +138,11 @@ fn collect_hook_commands(root: &Path) -> Vec<String> {
     commands
 }
 
-/// Read the hook scripts directly inside `.husky/`. The `_` directory holds
-/// husky's own runtime and is skipped with every other directory.
-fn collect_husky_commands(root: &Path, commands: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(root.join(".husky")) else {
+/// Read the hook scripts directly inside a hook directory such as `.husky/`.
+/// The `_` directory holds the runtime of the hook manager and is skipped
+/// with every other directory.
+fn collect_hook_script_commands(dir: &Path, commands: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let mut paths: Vec<_> = entries

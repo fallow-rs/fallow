@@ -229,6 +229,10 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
                 fallow_output::describe_worsened_metrics(&finding.worsened_metrics)
             );
         }
+        if finding.gate_exemption == Some(fallow_output::AuditGateExemption::TestFile) {
+            issue.description =
+                format!("{} (test file: audit does not gate it)", issue.description);
+        }
         issues.push(issue);
     }
     for finding in &report.styling_findings {

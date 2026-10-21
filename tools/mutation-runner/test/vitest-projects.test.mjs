@@ -170,3 +170,65 @@ for (const { packageName, version } of VITEST_MAJORS) {
     }
   });
 }
+
+for (const { packageName, version } of VITEST_MAJORS) {
+  test(`vitest ${version}: an inline project stops at the first failure when bail is set`, async () => {
+    const fixture = createFixtureProject({ packageName });
+    const companion = startCompanion();
+    const file = "bail/three.test.ts";
+    const testIds = ["first", "second", "third"].map((name) => `${file}::${name}`);
+    let nextId = 1;
+    const request = (message) => companion.request({ v: 1, id: nextId++, ...message });
+    try {
+      const ready = await request({
+        type: "init",
+        root: fixture.root,
+        runner: "vitest",
+        config_path: "vitest.inline-bail.config.mjs",
+        run_dir: fixture.runDir,
+        path_map: fixture.pathMap,
+        options: {},
+      });
+      assert.equal(ready.type, "ready", JSON.stringify(ready));
+      const dryRun = await request({ type: "dry_run", test_files: [file] });
+      assert.deepEqual(
+        dryRun.tests.map((entry) => entry.test_id),
+        testIds,
+        JSON.stringify(dryRun),
+      );
+
+      const killed = await request({
+        type: "run",
+        mutant_id: "m1",
+        test_ids: testIds,
+        timeout_ms: 10_000,
+        bail: true,
+      });
+      assert.equal(killed.status, "killed", JSON.stringify(killed));
+      assert.equal(killed.killed_by, testIds[0]);
+      assert.equal(killed.tests_executed, 1);
+      assert.deepEqual(
+        killed.tests.map((entry) => entry.test_id),
+        [testIds[0]],
+      );
+
+      // A later run without bail runs the full selection, so the fail-fast
+      // value of the mutant run does not leak into a control run.
+      const control = await request({
+        type: "run",
+        mutant_id: null,
+        test_ids: testIds,
+        timeout_ms: 10_000,
+        bail: false,
+      });
+      assert.equal(control.status, "survived", JSON.stringify(control));
+      assert.deepEqual(
+        control.tests,
+        testIds.map((test_id) => ({ test_id, status: "pass" })),
+      );
+    } finally {
+      companion.stop();
+      fixture.cleanup();
+    }
+  });
+}

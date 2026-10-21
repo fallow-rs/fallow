@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+  - vite
+  - vite/packages/*
+catalog:
+  chalk: ^5.3.0
+  lodash: ^4.17.21
+  only-in-vite: ^1.0.0
+overrides:
+  vite: workspace:@demo/core@*

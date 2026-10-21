@@ -17,6 +17,14 @@ use super::types::{
     SOURCE_EXTS,
 };
 
+#[path = "fallbacks_relative_package_root.rs"]
+mod relative_package_root;
+#[path = "fallbacks_workspace_package_asset.rs"]
+mod workspace_package_asset;
+
+pub(super) use relative_package_root::try_relative_package_root_source_fallback;
+use workspace_package_asset::{exports_target_asset, workspace_package_asset};
+
 /// Return the post-prefix remainder when `specifier` matches the alias `prefix`
 /// at a path boundary, else `None`.
 ///
@@ -662,38 +670,6 @@ pub(super) fn installed_workspace_package_target(
     (installed == workspace_root).then_some(package_name)
 }
 
-/// Resolve a relative import that lands on a known package root whose built
-/// entry points are absent but whose package metadata points at source files.
-pub(super) fn try_relative_package_root_source_fallback(
-    ctx: &ResolveContext<'_>,
-    from_file: &Path,
-    specifier: &str,
-) -> Option<ResolveResult> {
-    if !specifier.starts_with("./") && !specifier.starts_with("../") {
-        return None;
-    }
-
-    let from_dir = from_file.parent()?;
-    let candidate = from_dir.join(specifier);
-    let normalized_candidate = normalize_path_lexically(&candidate);
-    #[cfg(not(miri))]
-    let canonical_candidate = ctx.canonicalize_cache.get(&candidate);
-    #[cfg(miri)]
-    let canonical_candidate: Option<PathBuf> = None;
-
-    ctx.package_manifests.iter().find_map(|manifest| {
-        let matches_manifest = candidate == manifest.root
-            || normalized_candidate == manifest.root
-            || canonical_candidate
-                .as_deref()
-                .is_some_and(|canonical| canonical == manifest.canonical_root);
-        matches_manifest
-            .then(|| try_source_subpath(ctx, manifest, Path::new("")))
-            .flatten()
-            .map(ResolveResult::InternalModule)
-    })
-}
-
 /// Resolve a relative import into a TypeScript output directory to its source.
 ///
 /// A script or a test can import the emitted file (`../lib/types/a.js`) of a
@@ -1215,15 +1191,20 @@ fn try_manifest_workspace_resolution(
     if let Some(exports) = manifest.package_json.exports.as_ref() {
         return match package_map_target(exports, &export_key(subpath), ctx.condition_names) {
             PackageMapTarget::Targets(targets) => {
-                match resolve_package_map_targets(ctx, manifest, &targets, Some(source_subpath)) {
-                    Some(file_id) => ManifestWorkspaceResolution::Resolved(
+                if let Some(file_id) =
+                    resolve_package_map_targets(ctx, manifest, &targets, Some(source_subpath))
+                {
+                    return ManifestWorkspaceResolution::Resolved(
                         ResolveResult::InternalPackageModule {
                             file_id,
                             package_name: pkg_name.to_string(),
                         },
-                    ),
-                    None => ManifestWorkspaceResolution::Continue,
+                    );
                 }
+                exports_target_asset(manifest, &targets, pkg_name).map_or(
+                    ManifestWorkspaceResolution::Continue,
+                    ManifestWorkspaceResolution::Resolved,
+                )
             }
             PackageMapTarget::NoMatch | PackageMapTarget::Blocked => {
                 ManifestWorkspaceResolution::Blocked
@@ -1345,7 +1326,7 @@ fn resolve_workspace_self_reference(
             });
         }
     }
-    None
+    workspace_package_asset(resolved_path, &package_name)
 }
 
 /// Convert a `DynamicImportPattern` to a glob string for file matching.
@@ -1386,7 +1367,7 @@ mod tests {
     use fallow_types::extract::ModuleLoadMechanism;
     use rustc_hash::FxHashSet;
 
-    fn with_package_map_ctx(
+    pub(super) fn with_package_map_ctx(
         root: PathBuf,
         name: Option<&str>,
         package_json: fallow_config::PackageJson,
@@ -2049,33 +2030,6 @@ mod tests {
                 assert!(matches!(
                     result,
                     Some(ResolveResult::InternalModule(FileId(7)))
-                ));
-            },
-        );
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn relative_package_root_source_fallback_uses_package_source_entry() {
-        let root = PathBuf::from("/project");
-        let source_path = root.join("custom/entry.js");
-        with_package_map_ctx(
-            root,
-            Some("pkg"),
-            fallow_config::PackageJson {
-                source: Some("custom/entry.js".to_string()),
-                ..Default::default()
-            },
-            &[(source_path, FileId(11))],
-            |ctx, _, root| {
-                let result = try_relative_package_root_source_fallback(
-                    ctx,
-                    &root.join("test/shared/exports.test.js"),
-                    "../../",
-                );
-                assert!(matches!(
-                    result,
-                    Some(ResolveResult::InternalModule(FileId(11)))
                 ));
             },
         );
@@ -3243,37 +3197,6 @@ mod tests {
             assert!(
                 result.is_none(),
                 "already-partial filename should short-circuit to None"
-            );
-        });
-    }
-
-    // --- try_workspace_package_fallback: bare-specifier guard (lines 967-968) ---
-
-    #[test]
-    fn try_workspace_package_fallback_rejects_relative_specifier() {
-        // Relative specifiers (starting with "./" or "../") are not bare specifiers
-        // and must return None without touching any manifest.
-        let root = PathBuf::from("/project");
-        let pj = fallow_config::PackageJson::default();
-        with_package_map_ctx(root, None, pj, &[], |ctx, _manifest, _r| {
-            let result = try_workspace_package_fallback(ctx, "./local/module", false);
-            assert!(
-                result.is_none(),
-                "relative specifier should return None from workspace fallback"
-            );
-        });
-    }
-
-    #[test]
-    fn try_workspace_package_fallback_rejects_absolute_path() {
-        // Absolute paths are not bare specifiers either.
-        let root = PathBuf::from("/project");
-        let pj = fallow_config::PackageJson::default();
-        with_package_map_ctx(root, None, pj, &[], |ctx, _manifest, _r| {
-            let result = try_workspace_package_fallback(ctx, "/absolute/path", false);
-            assert!(
-                result.is_none(),
-                "absolute path should return None from workspace fallback"
             );
         });
     }

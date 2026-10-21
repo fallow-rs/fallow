@@ -51,8 +51,11 @@ pub struct HealthFinding {
     pub actions: Vec<HealthFindingAction>,
     /// Audit-mode flag indicating whether the finding is new versus the base
     /// snapshot. A complexity finding is new when no base finding has the same
-    /// path and function name, or when a metric that it exceeds has a higher
-    /// value than in that base finding.
+    /// path and function name, when a grown metric exceeds a threshold that
+    /// the base finding did not exceed, or when the growth of an exceeded
+    /// metric moves it to a higher severity tier. A CRAP score from estimated
+    /// coverage, or a CRAP score that the base finding does not have, is not
+    /// growth.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<bool>,
     /// Audit-mode class of the finding against the base snapshot:
@@ -67,6 +70,11 @@ pub struct HealthFinding {
     /// finding. Absent when no metric grew.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub worsened_metrics: Vec<crate::WorsenedMetric>,
+    /// Audit-mode reason why the finding does not gate the verdict. With
+    /// `test-file`, the finding is in a test file and `effective_severity` is
+    /// `warn`. Absent outside `audit`, and on a finding that gates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_exemption: Option<crate::AuditGateExemption>,
 }
 
 impl Deref for HealthFinding {
@@ -86,6 +94,7 @@ impl From<ComplexityViolation> for HealthFinding {
             introduced: None,
             attribution: None,
             worsened_metrics: Vec::new(),
+            gate_exemption: None,
         }
     }
 }
@@ -108,6 +117,7 @@ impl HealthFinding {
             introduced,
             attribution: None,
             worsened_metrics: Vec::new(),
+            gate_exemption: None,
         }
     }
 
@@ -122,6 +132,7 @@ impl HealthFinding {
             introduced: None,
             attribution: None,
             worsened_metrics: Vec::new(),
+            gate_exemption: None,
         }
     }
 }

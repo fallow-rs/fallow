@@ -225,6 +225,8 @@ test("the CLI verifies same-repository issue URLs per deferred item", () => {
   const rejected = runWithIssueResponses(body, responses);
   assert.equal(rejected.status, 1, rejected.stderr);
   assert.match(rejected.stderr, /Regex aliases/u);
+  assert.match(rejected.stderr, /edit the pull request description\. The edit starts a new run/u);
+  assert.match(rejected.stderr, /a re-run keeps the old description/u);
   assert.doesNotMatch(rejected.stderr, /Parser support/u);
   const accepted = runWithIssueResponses(
     body.replace(

@@ -58,6 +58,12 @@ pub struct ExportTrace {
     pub star_export_ambiguity: Option<StarExportAmbiguity>,
     /// Re-export chains that pass through this export.
     pub re_export_chains: Vec<ReExportChain>,
+    /// The framework plugin rules that mark this export as used. The
+    /// framework calls or reads the export, so no import is necessary. A
+    /// credit sets `is_used` when the file is reachable. Absent when no
+    /// plugin credits the export.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_credits: Vec<PluginExportCredit>,
     /// Human-readable reason summary.
     pub reason: String,
     /// Exact checker-backed references when type-aware tracing is enabled.
@@ -275,6 +281,53 @@ pub struct TraceProvenance {
     /// Root-relative file path and an export name that a framework plugin
     /// reads as configuration, such as the Next.js `dynamic` segment option.
     config_exports: FxHashMap<PathBuf, FxHashSet<String>>,
+    /// Root-relative file path, export name, and the plugin rule that marks
+    /// the export as used.
+    export_credits: FxHashMap<PathBuf, FxHashMap<String, Vec<PluginExportCredit>>>,
+    /// The packages that start the peer-dependency closure in addition to the
+    /// imported packages.
+    peer_seeds: PeerClosureSeeds,
+}
+
+/// The packages that start a peer-dependency closure although no file
+/// imports them: packages that a script runs and packages that a plugin
+/// credits.
+///
+/// The unused-dependency check and the dependency trace read the same seeds,
+/// so the trace names the same hosts that give peer credit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PeerClosureSeeds {
+    /// Seeds for every closure.
+    shared: FxHashSet<String>,
+    /// Seeds for the closure of one manifest, keyed by the absolute
+    /// `package.json` path.
+    by_manifest: FxHashMap<PathBuf, FxHashSet<String>>,
+}
+
+impl PeerClosureSeeds {
+    /// Seeds that every closure reads.
+    #[must_use]
+    pub fn from_shared(names: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            shared: names.into_iter().collect(),
+            by_manifest: FxHashMap::default(),
+        }
+    }
+
+    /// Record a seed for the closure of the manifest at `manifest`, an
+    /// absolute `package.json` path.
+    pub fn push_manifest_seed(&mut self, manifest: PathBuf, name: String) {
+        self.by_manifest.entry(manifest).or_default().insert(name);
+    }
+
+    /// The seeds of the closure for the manifest at `manifest`: the shared
+    /// seeds and the seeds of that manifest.
+    pub fn for_manifest<'a>(&'a self, manifest: &Path) -> impl Iterator<Item = &'a str> {
+        self.shared
+            .iter()
+            .chain(self.by_manifest.get(manifest).into_iter().flatten())
+            .map(String::as_str)
+    }
 }
 
 impl TraceProvenance {
@@ -291,6 +344,33 @@ impl TraceProvenance {
         self.config_exports
             .get(file)
             .is_some_and(|names| names.contains(name))
+    }
+
+    /// Record the plugin rules that mark exports of the root-relative `file`
+    /// as used, as pairs of an export name and a credit.
+    pub fn push_export_credits(
+        &mut self,
+        file: PathBuf,
+        credits: impl IntoIterator<Item = (String, PluginExportCredit)>,
+    ) {
+        let by_name = self.export_credits.entry(file).or_default();
+        for (name, credit) in credits {
+            let known = by_name.entry(name).or_default();
+            if !known.contains(&credit) {
+                known.push(credit);
+            }
+        }
+    }
+
+    /// The plugin rules that mark the export `name` of the root-relative
+    /// `file` as used.
+    #[must_use]
+    pub fn export_credits(&self, file: &Path, name: &str) -> Vec<PluginExportCredit> {
+        self.export_credits
+            .get(file)
+            .and_then(|by_name| by_name.get(name))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Record that `source` names the root-relative `file`.
@@ -350,6 +430,21 @@ impl TraceProvenance {
             .iter()
             .find(|(known, _)| known == name)
             .map(|(_, credit)| credit.clone())
+    }
+
+    /// Set the packages that start the peer-dependency closure in addition to
+    /// the imported packages.
+    #[must_use]
+    pub fn with_peer_seeds(mut self, seeds: PeerClosureSeeds) -> Self {
+        self.peer_seeds = seeds;
+        self
+    }
+
+    /// The packages that start the peer-dependency closure in addition to the
+    /// imported packages.
+    #[must_use]
+    pub const fn peer_seeds(&self) -> &PeerClosureSeeds {
+        &self.peer_seeds
     }
 }
 
@@ -427,6 +522,57 @@ pub struct TracedExport {
     pub reference_count: usize,
     /// Files that reference this export.
     pub referenced_by: Vec<ExportReference>,
+    /// The framework plugin rules that mark this export as used. Absent when
+    /// no plugin credits the export.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_credits: Vec<PluginExportCredit>,
+}
+
+/// A framework plugin rule that marks an export as used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PluginExportCredit {
+    /// The plugin that gives the rule, for example `nextjs`.
+    pub plugin: String,
+    /// The project-relative file pattern of the rule.
+    pub pattern: String,
+}
+
+impl ExportTrace {
+    /// Add the plugin credits that `provenance` records for the traced export.
+    ///
+    /// The analysis does not report a credited export of a reachable file,
+    /// so the trace then marks the export as used. A star re-export
+    /// collision keeps its abstention.
+    pub fn apply_plugin_credits(&mut self, provenance: &TraceProvenance) {
+        let credits = provenance.export_credits(&self.file, &self.export_name);
+        if credits.is_empty() {
+            return;
+        }
+        if self.file_reachable && !self.is_used && self.star_export_ambiguity.is_none() {
+            let mut plugins: Vec<&str> = Vec::new();
+            for credit in &credits {
+                if !plugins.contains(&credit.plugin.as_str()) {
+                    plugins.push(&credit.plugin);
+                }
+            }
+            self.is_used = true;
+            self.reason = format!(
+                "Used by the framework: the {} plugin marks this export as used",
+                plugins.join(", ")
+            );
+        }
+        self.plugin_credits = credits;
+    }
+}
+
+impl FileTrace {
+    /// Add the plugin credits that `provenance` records for each export.
+    pub fn apply_plugin_credits(&mut self, provenance: &TraceProvenance) {
+        for export in &mut self.exports {
+            export.plugin_credits = provenance.export_credits(&self.file, &export.name);
+        }
+    }
 }
 
 /// A re-export with source information.
@@ -833,4 +979,81 @@ pub struct TracedCloneGroup {
     /// Best-effort name for the extracted function. Advisory only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unreferenced_trace(file_reachable: bool) -> ExportTrace {
+        ExportTrace {
+            file: PathBuf::from("app/page.tsx"),
+            export_name: "default".to_string(),
+            namespace: SemanticNamespace::Value,
+            file_reachable,
+            is_entry_point: true,
+            is_used: false,
+            direct_references: Vec::new(),
+            direct_references_by_namespace: Vec::new(),
+            star_export_ambiguity: None,
+            re_export_chains: Vec::new(),
+            plugin_credits: Vec::new(),
+            reason: "No references".to_string(),
+            semantic: None,
+        }
+    }
+
+    fn page_provenance() -> TraceProvenance {
+        let mut provenance = TraceProvenance::default();
+        let credit = PluginExportCredit {
+            plugin: "nextjs".to_string(),
+            pattern: "app/**/page.tsx".to_string(),
+        };
+        provenance.push_export_credits(
+            PathBuf::from("app/page.tsx"),
+            [
+                ("default".to_string(), credit.clone()),
+                ("default".to_string(), credit),
+            ],
+        );
+        provenance
+    }
+
+    #[test]
+    fn a_plugin_credit_marks_an_export_of_a_reachable_file_as_used() {
+        let mut trace = unreferenced_trace(true);
+        trace.apply_plugin_credits(&page_provenance());
+        assert!(trace.is_used);
+        assert_eq!(trace.plugin_credits.len(), 1);
+        assert!(trace.reason.contains("nextjs"), "{}", trace.reason);
+    }
+
+    #[test]
+    fn a_plugin_credit_does_not_mark_an_unreachable_file_as_used() {
+        let mut trace = unreferenced_trace(false);
+        trace.apply_plugin_credits(&page_provenance());
+        assert!(!trace.is_used);
+        assert_eq!(trace.plugin_credits.len(), 1);
+        assert_eq!(trace.reason, "No references");
+    }
+
+    #[test]
+    fn a_star_export_collision_keeps_its_abstention() {
+        let mut trace = unreferenced_trace(true);
+        trace.star_export_ambiguity = Some(StarExportAmbiguity {
+            sources: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
+            namespaces: vec![SemanticNamespace::Value],
+        });
+        trace.apply_plugin_credits(&page_provenance());
+        assert!(!trace.is_used);
+    }
+
+    #[test]
+    fn an_export_without_a_credit_keeps_its_trace() {
+        let mut trace = unreferenced_trace(true);
+        trace.export_name = "helper".to_string();
+        trace.apply_plugin_credits(&page_provenance());
+        assert!(!trace.is_used);
+        assert!(trace.plugin_credits.is_empty());
+    }
 }

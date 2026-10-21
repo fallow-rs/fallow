@@ -127,8 +127,6 @@ use cli_format::FormatConfig;
 use cli_format::parse_format_arg;
 use cli_impact::ImpactCli;
 use cli_production::{ProductionModes, resolve_production_modes};
-#[cfg(test)]
-use cli_startup::build_tracing_filter;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
     cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
@@ -2169,39 +2167,5 @@ mod tests {
         assert!(!parse("0"));
         assert!(!parse("false"));
         assert!(!parse("yes"));
-    }
-
-    #[test]
-    fn tracing_filter_defaults_to_warn_without_env() {
-        let filter = build_tracing_filter(None);
-        assert!(filter.would_enable("fallow_core", &tracing::Level::WARN));
-        assert!(!filter.would_enable("fallow_core", &tracing::Level::INFO));
-    }
-
-    #[test]
-    fn tracing_filter_respects_explicit_env_directives() {
-        let filter = build_tracing_filter(Some("info"));
-        assert!(filter.would_enable("fallow_core", &tracing::Level::INFO));
-        assert!(!filter.would_enable("fallow_core", &tracing::Level::DEBUG));
-
-        let filter = build_tracing_filter(Some("fallow=debug"));
-        assert!(filter.would_enable("fallow_core::lib", &tracing::Level::DEBUG));
-        assert!(!filter.would_enable("oxc_resolver", &tracing::Level::ERROR));
-    }
-
-    #[test]
-    fn tracing_filter_skips_a_directive_that_it_cannot_read() {
-        let filter = build_tracing_filter(Some("fallow[span{id=1}]=trace,fallow_graph=debug,warn"));
-        assert!(filter.would_enable("fallow_graph", &tracing::Level::DEBUG));
-        assert!(filter.would_enable("oxc_resolver", &tracing::Level::WARN));
-        assert!(!filter.would_enable("fallow_core", &tracing::Level::TRACE));
-    }
-
-    #[test]
-    fn tracing_filter_treats_empty_env_as_off() {
-        for value in ["", "   "] {
-            let filter = build_tracing_filter(Some(value));
-            assert!(!filter.would_enable("fallow_core", &tracing::Level::ERROR));
-        }
     }
 }

@@ -768,3 +768,59 @@ fn workspace_declaration_exports_with_dotted_names_resolve_to_source() {
         );
     }
 }
+
+/// A `<workspace-package>/package.json` import names a file that discovery
+/// does not collect. Without `node_modules`, the import must still credit the
+/// workspace dependency, the same as an installed workspace package. An
+/// `exports` map without a `./package.json` key blocks the import, as in Node.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn workspace_package_json_import_credits_the_workspace_dependency() {
+    let root = fixture_path("workspace-package-json-import");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|i| i.import.specifier.as_str())
+        .collect();
+    assert_eq!(
+        unresolved,
+        ["@fx/blocked/package.json"],
+        "only the subpath that the exports map blocks stays unresolved"
+    );
+
+    let unused_deps: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    for credited in ["@fx/lib", "@fx/plain"] {
+        assert!(
+            !unused_deps.contains(&credited),
+            "{credited} is imported through its package.json, got: {unused_deps:?}"
+        );
+    }
+}
+
+/// `require('..')` from a package subdirectory names the package root. When
+/// `main` points at build output that is not on disk, the import uses the
+/// source entry, the same as `require('../')`.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn relative_package_root_dot_dot_resolves_to_the_source_entry() {
+    let root = fixture_path("relative-package-root-dot-dot");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|i| i.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "require('..') must resolve to the package source, got: {unresolved:?}"
+    );
+}

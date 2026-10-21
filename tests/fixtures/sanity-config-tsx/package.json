@@ -1,0 +1,10 @@
+{
+  "name": "sanity-config-tsx",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "^19.0.0",
+    "sanity": "^4.0.0"
+  }
+}

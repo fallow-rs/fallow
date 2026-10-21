@@ -1780,7 +1780,7 @@ impl ModuleInfoExtractor {
                             .map(|id| id.name.to_string()),
                     );
                 }
-                for declarator in &var.declarations {
+                for declarator in nested_scope_declarators(var) {
                     self.record_nested_declaration_names(declarator.id.get_binding_identifiers());
                 }
             }

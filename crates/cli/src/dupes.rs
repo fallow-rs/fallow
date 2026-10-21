@@ -711,6 +711,7 @@ fn apply_duplication_baseline(
         unrecognised_format,
         saved_by,
         legacy_keys,
+        install_state: None,
     }))
 }
 
@@ -725,9 +726,8 @@ fn apply_duplication_baseline(
 /// set, which selects the focused analysis, and production mode, which drops
 /// test, story and dev files at discovery.
 ///
-/// The changed-file set is reported as `changed-files` rather than as the flag
-/// that produced it, because by this point the flag is gone. `change_scoped` is
-/// derived from the returned set, so the two cannot disagree.
+/// The changed-file set is reported as `changed-files`, because the flag is gone
+/// by this point. `change_scoped` derives from the returned set.
 fn duplication_comparison_scope_reasons(
     config: &ResolvedConfig,
     effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,

@@ -57,6 +57,10 @@ pub struct LoadedBaselineStaleness {
     /// without `identity`, or a `dupes` baseline with keys from the shared
     /// empty-sequence bucket of issue #3290. Always false for `health`.
     pub legacy_keys: bool,
+    /// The `baseline-install-state-mismatch` diagnostic, when the dead-code
+    /// baseline was saved in another install state than this run. Always
+    /// `None` for `dupes` and `health`.
+    pub install_state: Option<fallow_types::workspace::WorkspaceDiagnostic>,
 }
 
 /// The `baseline_staleness.format` value of a legacy dead-code baseline.

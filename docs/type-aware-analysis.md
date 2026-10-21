@@ -421,8 +421,14 @@ The corpus uses clean worktrees at exact public refs and does not create or
 reuse fixture-local `node_modules`. TypeScript dependency resolution is pinned
 to the Fallow workspace ancestor, recorded with hashes of its `package-lock.json`
 and installed package manifests and type declarations. Any other ancestor
-dependency root is rejected. Published dependency paths explicitly use the
-Fallow workspace root as their base. Discovery records the
+dependency root is rejected. The real path of the artifact directory and of
+each prepared fixture must be inside the Fallow workspace. A symlinked `target`
+directory, for example from a build cache wrapper, is rejected: replace it with
+a real directory before the run. The supplemental Vitest fixture always uses
+`target/type-aware-corpus`, so `--out-dir` does not avoid this check. A
+workspace without installed dependencies also fails: run `npm ci` first.
+Published dependency paths explicitly use the Fallow workspace root as their
+base. Discovery records the
 manifest, release binary, full sidecar runtime, TypeScript installation,
 platform, fixture commits, and dependency provenance. Partial runs must use a
 separate output directory, so they cannot overwrite canonical publication

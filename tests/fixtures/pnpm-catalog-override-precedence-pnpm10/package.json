@@ -1,0 +1,17 @@
+{
+  "name": "override-root",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "devDependencies": {
+    "rolldown": "catalog:",
+    "tool": "catalog:",
+    "vite": "catalog:"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "^5.4.0",
+      "rolldown@^1": "^1.0.0",
+      "override-root>tool": "^1.0.0"
+    }
+  }
+}

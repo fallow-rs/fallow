@@ -160,6 +160,13 @@ const nodeArgs = (root, args = []) =>
 
 const testFailureKind = (status, data) => (status === "fail" ? failureKind(errorOf(data)) : null);
 
+/** The error that failed a test: the cause of the test failure. */
+const testError = (status, data) => {
+  if (status !== "fail") return null;
+  const error = errorOf(data);
+  return error.cause ?? error;
+};
+
 /** Builds the entry of one test result. `names` holds the names of its suites. */
 const testEntry = (names, type, data) => {
   const status = resultStatus(type, data);
@@ -170,6 +177,7 @@ const testEntry = (names, type, data) => {
     durationMs: orNull(detailsOf(data).duration_ms),
     status,
     failureKind: testFailureKind(status, data),
+    error: testError(status, data),
     hits: [],
   };
 };

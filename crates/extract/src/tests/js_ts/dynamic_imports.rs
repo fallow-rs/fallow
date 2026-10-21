@@ -412,6 +412,27 @@ fn vitest_replacement_factory_records_typed_target() {
 }
 
 #[test]
+fn vite_plus_test_replacement_factory_records_typed_target() {
+    for source in [
+        r#"
+        import { vi } from "vite-plus/test";
+        vi.mock("./services/api", () => ({ request: vi.fn() }));
+        "#,
+        r#"
+        import * as test from "vite-plus/test";
+        test.vi.mock("./services/api", () => ({ request: test.vi.fn() }));
+        "#,
+    ] {
+        let info = parse_source(source);
+        assert_eq!(
+            replaced_module_targets(&info),
+            vec!["./services/api"],
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn vitest_replacement_import_provenance_is_order_independent() {
     let info = parse_source(
         r#"

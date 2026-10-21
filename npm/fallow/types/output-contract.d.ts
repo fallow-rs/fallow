@@ -583,6 +583,14 @@ pattern: string
 kind: "workspace-glob-outside-root"
 } | {
 /**
+ * The workspace pattern, as written in the file.
+ */
+pattern: string
+kind: "workspace-pattern-dir-missing"
+} | {
+kind: "nested-project-root"
+} | {
+/**
  * JSONC parse error text.
  */
 error: string
@@ -811,12 +819,23 @@ kind: "ignore-dependencies-glob-unmatched"
  */
 pattern: string
 kind: "ignore-findings-pattern-unmatched"
+} | {
+baseline_node_modules: NodeModulesState
+run_node_modules: NodeModulesState
+kind: "baseline-install-state-mismatch"
 })
 /**
  * Why the declared pnpm version ignores the `overrides` section of
  * `pnpm-workspace.yaml`.
  */
 export type PnpmWorkspaceOverridesIgnoredCause = ("package-json-overrides" | "pnpm-version")
+/**
+ * Whether the project had a `node_modules` directory at a point in time.
+ *
+ * A dead-code baseline records this when it is saved, so a later run in a
+ * different install state can say that its results can differ.
+ */
+export type NodeModulesState = ("present" | "missing")
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
  * emitted by the legacy `build_clone_group_actions` walker.
@@ -899,6 +918,10 @@ export type AuditFindingAttribution = ("introduced" | "worsened" | "inherited")
  * A measured metric of a complexity finding.
  */
 export type WorsenedMetricKind = ("cyclomatic" | "cognitive" | "crap" | "line_count")
+/**
+ * Audit-mode reason why a complexity finding does not gate the verdict.
+ */
+export type AuditGateExemption = "test-file"
 /**
  * Coverage model used for CRAP score computation.
  */
@@ -3402,7 +3425,8 @@ _meta?: (Meta | null)
  *
  * - workspace discovery, at config load: `undeclared-workspace`,
  *   `malformed-package-json`, `glob-matched-no-package-json`,
- *   `workspace-glob-outside-root`, `malformed-tsconfig`,
+ *   `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,
+ *   `nested-project-root`, `malformed-tsconfig`,
  *   `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
@@ -8009,7 +8033,9 @@ severity: FindingSeverity
  * `overrides[].rules` entries: `error` fails the run, `warn` does not.
  * The most severe rule of the kinds in `exceeded` wins. It is separate
  * from the band in `severity`, which ranks the finding and does not gate
- * it. Absent in reports from older versions.
+ * it. Under `audit --gate new-only`, a finding that exceeds only CRAP
+ * from estimated coverage has `warn`. Absent in reports from older
+ * versions.
  */
 effective_severity?: (EffectiveSeverity | null)
 /**
@@ -8072,8 +8098,11 @@ actions: HealthFindingAction[]
 /**
  * Audit-mode flag indicating whether the finding is new versus the base
  * snapshot. A complexity finding is new when no base finding has the same
- * path and function name, or when a metric that it exceeds has a higher
- * value than in that base finding.
+ * path and function name, when a grown metric exceeds a threshold that
+ * the base finding did not exceed, or when the growth of an exceeded
+ * metric moves it to a higher severity tier. A CRAP score from estimated
+ * coverage, or a CRAP score that the base finding does not have, is not
+ * growth.
  */
 introduced?: (boolean | null)
 /**
@@ -8090,6 +8119,12 @@ attribution?: (AuditFindingAttribution | null)
  * finding. Absent when no metric grew.
  */
 worsened_metrics?: WorsenedMetric[]
+/**
+ * Audit-mode reason why the finding does not gate the verdict. With
+ * `test-file`, the finding is in a test file and `effective_severity` is
+ * `warn`. Absent outside `audit`, and on a finding that gates.
+ */
+gate_exemption?: (AuditGateExemption | null)
 }
 /**
  * Per-component React hook profile derived from the cached `hook_uses` IR at
@@ -12232,6 +12267,13 @@ star_export_ambiguity?: (StarExportAmbiguity | null)
  */
 re_export_chains: ReExportChain[]
 /**
+ * The framework plugin rules that mark this export as used. The
+ * framework calls or reads the export, so no import is necessary. A
+ * credit sets `is_used` when the file is reachable. Absent when no
+ * plugin credits the export.
+ */
+plugin_credits?: PluginExportCredit[]
+/**
  * Human-readable reason summary.
  */
 reason: string
@@ -12322,6 +12364,19 @@ exported_as: string
  * Number of references on the barrel's re-exported symbol.
  */
 reference_count: number
+}
+/**
+ * A framework plugin rule that marks an export as used.
+ */
+export interface PluginExportCredit {
+/**
+ * The plugin that gives the rule, for example `nextjs`.
+ */
+plugin: string
+/**
+ * The project-relative file pattern of the rule.
+ */
+pattern: string
 }
 /**
  * Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
@@ -12442,6 +12497,11 @@ reference_count: number
  * Files that reference this export.
  */
 referenced_by: ExportReference[]
+/**
+ * The framework plugin rules that mark this export as used. Absent when
+ * no plugin credits the export.
+ */
+plugin_credits?: PluginExportCredit[]
 }
 /**
  * A re-export with source information.
@@ -16703,7 +16763,8 @@ _meta?: (Meta | null)
  *
  * - workspace discovery, at config load: `undeclared-workspace`,
  *   `malformed-package-json`, `glob-matched-no-package-json`,
- *   `workspace-glob-outside-root`, `malformed-tsconfig`,
+ *   `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,
+ *   `nested-project-root`, `malformed-tsconfig`,
  *   `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,

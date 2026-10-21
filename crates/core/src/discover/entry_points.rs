@@ -61,7 +61,7 @@ pub fn warn_skipped_entry_summary(skipped_entries: &FxHashMap<String, usize>) {
         return;
     };
     if should_warn_skipped_entry(&message) {
-        tracing::warn!("{message}");
+        tracing::warn!(target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET, "{message}");
     }
 }
 
@@ -161,7 +161,7 @@ impl EntryPointDiscovery {
 /// trying source extensions as fallback when the exact path doesn't exist.
 /// Also handles exports map targets in output directories (e.g., `./dist/utils.js`)
 /// by trying to map back to the source file (e.g., `./src/utils.ts`).
-fn resolve_entry_path_with_tracking(
+pub fn resolve_entry_path_with_tracking(
     base: &Path,
     entry: &str,
     canonical_root: &Path,
@@ -1437,7 +1437,7 @@ fn build_plugin_glob_meta(
 ) -> (Option<globset::GlobSet>, Vec<CompiledEntryRule<'_>>) {
     let mut builder = globset::GlobSetBuilder::new();
     let mut glob_meta: Vec<CompiledEntryRule<'_>> = Vec::new();
-    for (rule, pname) in &plugin_result.entry_patterns {
+    for (rule, pname) in plugin_result.unique_entry_patterns() {
         if let Some((include, compiled)) = compile_entry_rule(rule, pname, plugin_result) {
             builder.add(include);
             glob_meta.push(compiled);
@@ -1463,7 +1463,7 @@ fn build_plugin_glob_meta(
             }
         }
     }
-    (builder.build().ok(), glob_meta)
+    (super::plugin_glob_set_or_warn(builder.build()), glob_meta)
 }
 
 /// Match each file against the compiled plugin glob set, categorizing hits by role.

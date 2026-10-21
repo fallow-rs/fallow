@@ -139,41 +139,6 @@ pub(crate) fn extract_config_shallow_strings_or_object_property(
     .unwrap_or_default()
 }
 
-/// Extract top-level string values of `key` from each object element of the
-/// `array_key` array, including object entries that hold `object_property`.
-///
-/// Useful for configs like:
-/// - `overrides: [{ files: ["*.ts"], jsPlugins: ["pkg", { specifier: "pkg2" }] }]`
-#[must_use]
-pub(crate) fn extract_config_array_objects_shallow_strings_or_object_property(
-    source: &str,
-    path: &Path,
-    array_key: &str,
-    key: &str,
-    object_property: &str,
-) -> Vec<String> {
-    extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let prop = find_property(obj, array_key)?;
-        let Expression::ArrayExpression(arr) = &prop.value else {
-            return None;
-        };
-        let values = arr
-            .elements
-            .iter()
-            .filter_map(|element| match element.as_expression() {
-                Some(Expression::ObjectExpression(element_obj)) => find_property(element_obj, key),
-                _ => None,
-            })
-            .flat_map(|inner| {
-                collect_shallow_string_or_object_property_values(&inner.value, object_property)
-            })
-            .collect();
-        Some(values)
-    })
-    .unwrap_or_default()
-}
-
 /// Extract shallow strings from an array property inside a nested object path.
 #[must_use]
 pub(crate) fn extract_config_nested_shallow_strings(
@@ -2868,7 +2833,7 @@ fn expression_to_string_array(expr: &Expression) -> Vec<String> {
 ///
 /// For arrays, extracts direct string elements and the first string element of sub-arrays
 /// (to handle `["pkg-name", { options }]` tuples). Does NOT recurse into objects.
-fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
+pub(crate) fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
     let mut values = Vec::new();
     match expr {
         Expression::StringLiteral(s) => {
@@ -2947,7 +2912,7 @@ fn collect_spread_array_values(expr: &Expression<'_>, values: &mut Vec<String>) 
 }
 
 /// Collect top-level string values, plus a named string property from object entries.
-fn collect_shallow_string_or_object_property_values(
+pub(crate) fn collect_shallow_string_or_object_property_values(
     expr: &Expression,
     object_property: &str,
 ) -> Vec<String> {

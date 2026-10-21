@@ -11,10 +11,10 @@ const ENTRY_PATTERNS: &[&str] = &[
     "sanity/**/*.{ts,tsx,js,jsx}",
 ];
 
-const ALWAYS_USED: &[&str] = &["sanity.config.{ts,js}", "sanity.cli.{ts,js}"];
+const ALWAYS_USED: &[&str] = &["sanity.config.{ts,tsx,js,jsx}", "sanity.cli.{ts,js}"];
 
 const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[
-    ("sanity.config.{ts,js}", &["default"]),
+    ("sanity.config.{ts,tsx,js,jsx}", &["default"]),
     ("sanity.cli.{ts,js}", &["default"]),
 ];
 

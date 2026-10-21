@@ -1,0 +1,5 @@
+{
+  "name": "workspace-package-json-import",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

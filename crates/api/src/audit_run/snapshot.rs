@@ -6,11 +6,12 @@ use std::path::Path;
 use fallow_engine::changed_files::RenamedFile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::AuditAnalysesView;
+use super::{AuditAnalysesView, DeadCodeView};
 use crate::AuditProgrammaticKeySnapshot;
 use crate::audit_keys::{
-    ComplexityBaseline, complexity_baseline, complexity_baseline_keys, dead_code_keys,
-    relative_key_path, remap_complexity_baseline_for_renames, remap_keys_for_renames, styling_keys,
+    ComplexityBaseline, complexity_baseline, complexity_baseline_keys, dead_code_audit_ledger,
+    dead_code_keys, relative_key_path, remap_complexity_baseline_for_renames,
+    remap_keys_for_renames, styling_keys,
 };
 use crate::review_deltas::{boundary_edge_keys, cycle_keys};
 
@@ -33,6 +34,11 @@ pub struct AuditKeySnapshot {
     pub syntactic_dead_code: Option<FxHashSet<String>>,
     /// Dead-code keys.
     pub dead_code: FxHashSet<String>,
+    /// Dead-code collections, by JSON key, that this side did not report
+    /// because it could not prove their findings (see
+    /// [`fallow_engine::unprovable::unprovable_dead_code_collections`]). A
+    /// head finding of such a collection is inherited.
+    pub unprovable_dead_code: FxHashSet<String>,
     /// Complexity findings by identity key, with their metric values. The
     /// new-only gate compares the metric values of matched findings.
     pub health: ComplexityBaseline,
@@ -74,6 +80,11 @@ impl AuditKeySnapshot {
                 .map_or_else(Vec::new, type_aware_gap_signature);
             snapshot.syntactic_dead_code = dead_code.syntactic_keys.cloned();
             snapshot.dead_code = dead_code_keys(dead_code.results, dead_code.root);
+            snapshot.unprovable_dead_code =
+                fallow_engine::unprovable::unprovable_dead_code_collections(dead_code.config)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect();
             snapshot.boundary_edges = boundary_edge_keys(&dead_code.results.boundary_violations);
             snapshot.cycles = cycle_keys(&dead_code.results.circular_dependencies, dead_code.root);
             snapshot.public_api = dead_code.public_api.cloned().unwrap_or_default();
@@ -126,6 +137,8 @@ impl AuditKeySnapshot {
         {
             self.dead_code.extend(inherited.dead_code);
         }
+        self.unprovable_dead_code
+            .extend(inherited.unprovable_dead_code);
         self.styling.extend(inherited.styling);
         self.dupes.extend(inherited.dupes);
         self.boundary_edges.extend(inherited.boundary_edges);
@@ -133,6 +146,32 @@ impl AuditKeySnapshot {
         self.public_api.extend(inherited.public_api);
         self.inherited_health.push(inherited.health);
         self.inherited_health.extend(inherited.inherited_health);
+    }
+
+    /// Treat the head findings of each collection that this side could not
+    /// prove as inherited.
+    ///
+    /// The base snapshot is a checkout of committed files. A gitignored
+    /// workspace member (a cloned sub-repository) is missing there, so the
+    /// base does not report a class that the head reports. The keys of those
+    /// head findings join the dead-code key sets, so every surface that
+    /// compares keys (verdict, attribution counts, `introduced` flags) reads
+    /// them as inherited.
+    pub fn inherit_unprovable_dead_code(&mut self, head: &DeadCodeView<'_>) {
+        if self.unprovable_dead_code.is_empty() {
+            return;
+        }
+        let ledger = dead_code_audit_ledger(head.results, head.root, head.config, None);
+        let keys: Vec<String> = ledger
+            .records()
+            .iter()
+            .filter(|record| self.unprovable_dead_code.contains(record.collection))
+            .map(|record| record.stable_key.clone())
+            .collect();
+        if let Some(syntactic) = self.syntactic_dead_code.as_mut() {
+            syntactic.extend(keys.iter().cloned());
+        }
+        self.dead_code.extend(keys);
     }
 
     /// Relocate the keys of renamed files onto their head paths.

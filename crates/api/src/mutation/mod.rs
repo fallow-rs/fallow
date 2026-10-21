@@ -31,6 +31,7 @@ use std::time::Duration;
 pub use fallow_engine::mutation::Operator;
 pub use last_report::{last_mutation_report_path, save_last_mutation_report};
 pub use report::baseline_blocked_run_error;
+pub use scheduler::control::split_control_run_failure;
 pub use verdicts::{MAX_VERDICT_INPUT_BYTES, apply_mutation_verdicts, validate_mutation_verdicts};
 
 use crate::AnalysisOptions;

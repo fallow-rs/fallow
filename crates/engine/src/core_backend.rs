@@ -135,8 +135,9 @@ impl DeadCodeBackendPrelude<'_> {
     pub fn trace_provenance(
         &self,
         modules: &[fallow_types::extract::ModuleInfo],
+        retain_graph: bool,
     ) -> fallow_types::trace::TraceProvenance {
-        self.inner.trace_provenance(modules)
+        self.inner.trace_provenance(modules, retain_graph)
     }
 
     /// The plugin stage's result, as the analysis sees it.
@@ -209,6 +210,7 @@ pub fn peer_dependency_hosts(
     workspace_roots: &[&Path],
     ignore_patterns: &fallow_config::IgnorePatternSet,
     package_name: &str,
+    extra_seeds: &fallow_types::trace::PeerClosureSeeds,
 ) -> Vec<String> {
     fallow_core::analyze::peer_dependency_hosts(
         graph,
@@ -216,6 +218,7 @@ pub fn peer_dependency_hosts(
         workspace_roots,
         ignore_patterns,
         package_name,
+        extra_seeds,
     )
 }
 

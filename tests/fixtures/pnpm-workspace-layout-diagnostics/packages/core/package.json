@@ -1,0 +1,8 @@
+{
+  "name": "@demo/core",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "chalk": "catalog:"
+  }
+}

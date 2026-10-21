@@ -1,0 +1,13 @@
+{
+  "name": "vite-plus-enabler",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp test"
+  },
+  "devDependencies": {
+    "vite-plus": "1.0.0"
+  }
+}

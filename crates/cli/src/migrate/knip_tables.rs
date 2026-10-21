@@ -163,6 +163,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "flue",
     "fumadocs",
     "gatsby",
+    "github-action",
     "graphql-codegen",
     "hardhat",
     "husky",
@@ -239,6 +240,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "varlock",
     "vercel",
     "vite",
+    "vite-plus",
     "vitepress",
     "vitest",
     "webdriver-io",
@@ -266,7 +268,6 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
     "execa",
     "expressive-code",
     "fast",
-    "github-action",
     "github-actions",
     "glob",
     "i18next-parser",
@@ -328,7 +329,6 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
     "vite-plugin-pages",
     "vite-plugin-pwa",
     "vite-plugin-vue-layouts-next",
-    "vite-plus",
     "vite-pwa-assets-generator",
     "vue",
     "wireit",
@@ -677,6 +677,7 @@ mod tests {
             "turbo",
             "typescript-content-mapper",
             "varlock",
+            "vite-plus",
         ];
         for name in expected {
             assert!(

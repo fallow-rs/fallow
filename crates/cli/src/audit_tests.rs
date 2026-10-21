@@ -2352,15 +2352,10 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         dead_code: ["dead:a".to_string(), "dead:b".to_string()]
             .into_iter()
             .collect(),
+        unprovable_dead_code: std::iter::once("unused_catalog_entries".to_string()).collect(),
         health: std::iter::once((
             "complexity:src/a.ts:f".to_string(),
-            vec![fallow_api::audit_keys::ComplexityMetrics {
-                line: 3,
-                cyclomatic: 17,
-                cognitive: 16,
-                crap: Some(42.5),
-                line_count: 12,
-            }],
+            vec![sample_complexity_metrics()],
         ))
         .collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
@@ -2419,6 +2414,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     );
     assert_eq!(decoded.syntactic_dead_code, snapshot.syntactic_dead_code);
     assert_eq!(decoded.dead_code, snapshot.dead_code);
+    assert_eq!(decoded.unprovable_dead_code, snapshot.unprovable_dead_code);
     assert_eq!(
         decoded.dupe_groups, snapshot.dupe_groups,
         "clone instance locations survive the cache round trip"
@@ -2774,15 +2770,10 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         type_aware_gap_signature: Vec::new(),
         syntactic_dead_code: None,
         dead_code: std::iter::once("dead:a".to_string()).collect(),
+        unprovable_dead_code: FxHashSet::default(),
         health: std::iter::once((
             "complexity:src/a.ts:f".to_string(),
-            vec![fallow_api::audit_keys::ComplexityMetrics {
-                line: 3,
-                cyclomatic: 17,
-                cognitive: 16,
-                crap: Some(42.5),
-                line_count: 12,
-            }],
+            vec![sample_complexity_metrics()],
         ))
         .collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
@@ -2875,6 +2866,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         type_aware_gap_signature: Vec::new(),
         syntactic_dead_code: None,
         dead_code: vec!["dead:a".to_string()],
+        unprovable_dead_code: vec![],
         health: vec![],
         styling: vec![],
         dupes: vec![],
@@ -4742,4 +4734,18 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         "the run exits 1 on this gate, so the envelope must state it: {}",
         json["gate_outcomes"]
     );
+}
+
+/// Base complexity values with every field set, for cache round trips.
+fn sample_complexity_metrics() -> fallow_api::audit_keys::ComplexityMetrics {
+    fallow_api::audit_keys::ComplexityMetrics {
+        line: 3,
+        cyclomatic: 17,
+        cognitive: 16,
+        crap: Some(42.5),
+        line_count: 12,
+        exceeded: fallow_output::ExceededThreshold::CognitiveCrap,
+        severity: fallow_output::FindingSeverity::High,
+        crap_estimated: true,
+    }
 }

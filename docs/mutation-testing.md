@@ -615,6 +615,16 @@ mutant. Their results decide no mutant status.
   baseline failure. Its message says that the test fails in a mutant run
   with no active mutant but passed in the dry run of its whole file. A test
   that depends on another test of its file gives this result.
+- The message of a control-run failure keeps the first error of the test
+  after that reason: the error name and message on the first line, then the
+  stack frames of the project. The companion removes the frames of the
+  runner, Node and dependencies, makes paths relative to the project, and
+  removes color codes. The companion cuts the error at 4096 UTF-16 code
+  units, and fallow keeps at most 8 KiB of it. The first line of the
+  message, with the assertion, also goes into the
+  `FALLOW_MUTATION_BASELINE_FAILED` error. The human footer shows the
+  reason on the `Message:` line and the first line of the error on the
+  `Error:` line. A companion that sends no error gives the reason only.
 - Each restarted companion runs its own dry run. A covering test that does
   not pass there is a baseline failure of that companion, with the ids of the
   affected mutants in `mutant_ids`. The mutant runs with its other covering
@@ -894,6 +904,16 @@ test run.
 - With `bail`, a run stops the test process at the first failure. Node 22
   applies the run timeout to the whole test file process. A requested test
   with no result after that timeout counts as a timeout.
+- The `node:test` preload adds `--import` of
+  `runtime/node-subprocess-preload.mjs` to `NODE_OPTIONS` of the test
+  process. So a Node process that a test starts (`spawn`, `exec`,
+  `execFile` or `fork`) also loads the instrumented files with the active
+  mutant. The URL of that import carries the overlay path and the mutant
+  id, so the test environment has no `FALLOW_MUTATION_*` variable. The hits
+  of such a child process do not count as coverage, so a mutant that only a
+  child process reaches stays `no_coverage`. A child that is not Node (for
+  example `bun`), or a child that gets an environment without
+  `NODE_OPTIONS`, loads the original files.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
 - Neither runtime can load a Vue, Svelte or Astro component file. The

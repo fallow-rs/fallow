@@ -43,7 +43,9 @@ pub const COMPANION_FILES: &[EmbeddedFile] = embedded!(
     "runtime/child-hooks.mjs",
     "runtime/child.mjs",
     "runtime/global.mjs",
+    "runtime/node-subprocess-preload.mjs",
     "runtime/node-test-preload.mjs",
+    "runtime/overlay-hook.mjs",
     "runtime/vitest-setup.mjs",
 );
 
