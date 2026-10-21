@@ -11,6 +11,12 @@ pub struct InitOptions {
     /// The test files that the adapter selects. Empty selects every file.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub test_files: Vec<String>,
+    /// The test files of the static map, as root-relative paths. A runner
+    /// that discovers its test files with glob patterns adds each file that
+    /// its default patterns match outside a dot directory. The patterns do
+    /// not match a path in a dot directory, such as `.github/`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extra_test_files: Vec<String>,
     /// Extra environment variables for the runner.
     pub env: BTreeMap<String, String>,
     /// The Node flags for each test process of the `node:test` runner. A

@@ -395,6 +395,14 @@ shows as `pending`.
   completion is `partial` (`test-files-not-discovered`). A survivor or a
   `no_coverage` mutant that such a file reaches is then not proof of a
   test gap.
+- The `node-test` and `bun-test` adapters find test files with the default
+  patterns of the runner. These glob patterns do not go into a dot
+  directory, such as `.github/`. Fallow therefore sends the static test files
+  in `init.options.extra_test_files`. The adapter adds each file that exists,
+  is not in `node_modules` or `.git`, and matches a default pattern when its
+  directory names have no leading dot. A static test file that the adapter
+  does not add stays a `test-files-not-discovered` error. The Vitest adapter
+  does not get this list, because Vitest has its own `include` setting.
 - A `partial` completion does not change the exit code. The run exits `0`,
   or `1` when the score is under `--min-score`, or `2` when baseline
   failures leave each mutant without a test result (see Exit codes).

@@ -1,6 +1,6 @@
 import { existsSync, globSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, matchesGlob, resolve } from "node:path";
 
 import { CompanionError } from "../protocol.mjs";
 import {
@@ -51,14 +51,47 @@ const assertTestFilesExist = (root, files) => {
 };
 
 /**
+ * Removes the leading dots of each directory segment, so that a default
+ * pattern with `**` also matches a path in a dot directory. The file name
+ * stays as it is.
+ */
+const withoutDirectoryDots = (path) => {
+  const parts = path.split("/");
+  const name = parts.pop();
+  return [...parts.map((part) => part.replace(/^\.+/u, "")), name].join("/");
+};
+
+const isInsideRoot = (path) => !isAbsolute(path) && !path.split("/").includes("..");
+
+/**
+ * Gives the extra test files that the runner can run: each file is a
+ * relative path inside the root, exists, is not in `node_modules` or `.git`,
+ * and matches a default pattern when its directories are not dot
+ * directories. Glob discovery does not go into dot directories, so a mapped
+ * test file there is not discovered.
+ */
+const acceptedExtraFiles = (root, extras, patterns) =>
+  extras
+    .map(toPosix)
+    .filter(
+      (path) =>
+        isInsideRoot(path) &&
+        !inSkippedDirectory(path) &&
+        patterns.some((pattern) => matchesGlob(withoutDirectoryDots(path), pattern)) &&
+        existsSync(resolve(root, path)),
+    );
+
+/**
  * Gives the test files of `init`: the `options.test_files` list when it is
- * not empty, otherwise the files that the default patterns match. A listed
- * file that does not exist is an error.
+ * not empty. Otherwise it gives the files that the default patterns match,
+ * together with the accepted `options.extra_test_files`. A listed file that
+ * does not exist is an error. An extra file that is not accepted is dropped.
  */
 export const initTestFiles = (root, init, patterns) => {
   const listed = listedTestFiles(init);
-  if (listed.length === 0) return discoverTestFiles(root, patterns);
-  return assertTestFilesExist(root, sortedPaths(listed));
+  if (listed.length > 0) return assertTestFilesExist(root, sortedPaths(listed));
+  const extras = acceptedExtraFiles(root, init.options?.extra_test_files ?? [], patterns);
+  return sortedPaths([...discoverTestFiles(root, patterns), ...extras]);
 };
 
 /**

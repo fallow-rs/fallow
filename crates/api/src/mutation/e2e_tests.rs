@@ -856,6 +856,64 @@ mod end_to_end {
         );
     }
 
+    /// The acceptance case of #3678: a mapped test file in a dot directory
+    /// runs, although the default patterns of `node --test` skip it.
+    #[test]
+    fn a_node_test_run_runs_a_mapped_test_file_in_a_dot_directory() {
+        use crate::mutation::discovery::RuntimeKind;
+        if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        let files = [
+            (
+                "package.json",
+                r#"{"name":"p","private":true,"type":"module","scripts":{"test":"node --test .github/tests/math.test.mjs"}}"#,
+            ),
+            (
+                ".fallowrc.json",
+                r#"{"entry":["src/math.mjs",".github/tests/*.test.mjs"],"mutation":{"runner":"node-test"}}"#,
+            ),
+            ("src/math.mjs", "export const add = (a, b) => a + b;\n"),
+            (
+                ".github/tests/math.test.mjs",
+                "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { add } from \"../../src/math.mjs\";\ntest(\"adds exactly\", () => assert.equal(add(2, 2), 4));\n",
+            ),
+        ];
+        for (file, text) in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::write(target, text).expect("write");
+        }
+        commit_all(&root);
+
+        let report =
+            run_mutation(&options(&root, MutationRunScope::All)).expect("the run completes");
+
+        assert!(
+            report
+                .errors
+                .iter()
+                .all(|error| error.code != "test-files-not-discovered"),
+            "{:#?}",
+            report.errors
+        );
+        let add = report
+            .mutants
+            .iter()
+            .find(|mutant| {
+                mutant.location.file == "src/math.mjs"
+                    && mutant
+                        .location
+                        .change
+                        .as_ref()
+                        .is_some_and(|change| change.from == "+" && change.to == "-")
+            })
+            .unwrap_or_else(|| panic!("no `+` to `-` mutant: {:#?}", report.mutants));
+        assert_eq!(add.status, MutantStatus::Killed, "{add:#?}");
+    }
+
     #[test]
     fn a_test_that_writes_to_the_root_is_reported_as_a_worktree_change() {
         use crate::mutation::discovery::RuntimeKind;

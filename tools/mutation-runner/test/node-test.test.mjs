@@ -6,6 +6,7 @@ import { after, afterEach, before, describe, test } from "node:test";
 
 import { childRunnerSuite } from "./support/child-runner-suite.mjs";
 import { startCompanion } from "./support/companion-process.mjs";
+import { mappedTestFilesSuite } from "./support/mapped-test-files-suite.mjs";
 import { readMutationConstant } from "./support/vitest-fixture.mjs";
 
 childRunnerSuite({
@@ -152,4 +153,11 @@ describe("node-test adapter with the Node flags of the test script", () => {
     assert.equal(ready.type, "error", JSON.stringify(ready));
     assert.equal(ready.error.code, "bad-request");
   });
+});
+
+mappedTestFilesSuite({
+  runner: "node-test",
+  runtime: process.execPath,
+  testImport: 'import assert from "node:assert/strict";\nimport { test } from "node:test";',
+  assertion: "assert.equal(add(2, 2), 4)",
 });

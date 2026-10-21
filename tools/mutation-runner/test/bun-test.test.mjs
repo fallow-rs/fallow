@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 import { childRunnerSuite } from "./support/child-runner-suite.mjs";
+import { mappedTestFilesSuite } from "./support/mapped-test-files-suite.mjs";
 
 // The suite needs `bun` on PATH. Without it the suite is skipped, unless
 // `FALLOW_REQUIRE_BUN=1` is set. A CI job that installs Bun sets it, so that
@@ -20,5 +21,13 @@ childRunnerSuite({
   runtime: "bun",
   runnerVersion: bunVersion,
   testFiles: ["test/concurrent.test.ts", "test/faults.test.ts", "test/math.test.ts"],
+  skip: bunVersion === null,
+});
+
+mappedTestFilesSuite({
+  runner: "bun-test",
+  runtime: "bun",
+  testImport: 'import { expect, test } from "bun:test";',
+  assertion: "expect(add(2, 2)).toBe(4)",
   skip: bunVersion === null,
 });
