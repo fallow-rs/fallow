@@ -28,7 +28,9 @@ pub(super) fn missing_dir_patterns<'a>(
 /// exist, the condition of the `workspace-pattern-dir-missing` diagnostic.
 ///
 /// The catalog analysis reads this to skip the unused-catalog-entries check,
-/// because the packages in that directory can consume catalog entries.
+/// because the packages in that directory can consume catalog entries. The
+/// audit reads it on the base run to treat those head findings as inherited
+/// (`fallow_engine::unprovable`).
 /// Discovery and the catalog analysis share one predicate, so the
 /// diagnostic and the skip cannot disagree. A root manifest that does not
 /// parse gives `false`; discovery reports it.

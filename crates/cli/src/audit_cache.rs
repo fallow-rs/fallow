@@ -36,7 +36,8 @@ use crate::error::emit_error;
 /// of each complexity entry, which the worsened-finding check compares.
 /// Version 15 added the exceeded flags, the severity tier and the coverage
 /// source of each complexity entry, which the new-only attribution compares.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 15;
+/// Version 16 added the dead-code collections that the base could not prove.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 16;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -71,6 +72,8 @@ pub(super) struct CachedAuditKeySnapshot {
     /// syntactic sets on both sides even on a warm cache.
     pub(super) syntactic_dead_code: Option<Vec<String>>,
     pub(super) dead_code: Vec<String>,
+    /// Dead-code collections that the base could not prove, sorted.
+    pub(super) unprovable_dead_code: Vec<String>,
     /// Base complexity findings, sorted by key and line.
     pub(super) health: Vec<CachedComplexityFinding>,
     pub(super) styling: Vec<String>,
@@ -138,6 +141,7 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
             .syntactic_dead_code
             .map(|keys| keys.into_iter().collect()),
         dead_code: cached.dead_code.into_iter().collect(),
+        unprovable_dead_code: cached.unprovable_dead_code.into_iter().collect(),
         health: complexity_from_cached(cached.health)?,
         styling: cached.styling.into_iter().collect(),
         dupes: cached.dupes.into_iter().collect(),
@@ -188,6 +192,7 @@ pub(super) fn cached_from_snapshot(
         type_aware_gap_signature: snapshot.type_aware_gap_signature.clone(),
         syntactic_dead_code: snapshot.syntactic_dead_code.as_ref().map(sorted_keys),
         dead_code: sorted_keys(&snapshot.dead_code),
+        unprovable_dead_code: sorted_keys(&snapshot.unprovable_dead_code),
         health: sorted_complexity(&snapshot.health),
         styling: sorted_keys(&snapshot.styling),
         dupes: sorted_keys(&snapshot.dupes),

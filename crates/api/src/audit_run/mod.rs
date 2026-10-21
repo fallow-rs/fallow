@@ -479,6 +479,9 @@ pub fn attribute<A: AuditAnalyses>(
         for inherited in inherited {
             snapshot.absorb_inherited(inherited);
         }
+        if let Some(dead_code) = analyses.view().dead_code.as_ref() {
+            snapshot.inherit_unprovable_dead_code(dead_code);
+        }
     }
     let degrade_reason = {
         let view = analyses.view();

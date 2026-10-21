@@ -528,6 +528,19 @@ after every gate set the exit code.
   it. The rule applies to the head run and to the base snapshot
   (`scope_dependency_findings` in `crates/api/src/audit_run/scope.rs`).
   `--changed-since` on the other commands keeps every dependency finding.
+- Audit unprovable classes: a run does not report a dead-code class that it
+  cannot prove. Today this is `unused_catalog_entries` while a workspace
+  pattern directory is missing. The base snapshot is a checkout of committed
+  files, so a gitignored workspace member (a cloned sub-repository) is missing
+  there and present in the head. The base records these classes as
+  `AuditKeySnapshot::unprovable_dead_code`, from
+  `fallow_engine::unprovable::unprovable_dead_code_collections`. It reads the
+  same config predicate that skips the detector
+  (`has_missing_workspace_pattern_dirs`). `attribute` adds the head keys of those
+  classes to the base key sets, so the verdict, the attribution counts and the
+  `introduced` flags read them as inherited. An inherited base adds its
+  classes to the set. A real new finding of such a class is also inherited in
+  that run; the head run cannot tell it apart.
 - Narrowing requests report their own fate (issues #2687, #2688). Two channels
   can be asked for and refused: `--changed-since` and the opt-in shared diff.
   Both widen the report rather than failing the run, so the fact travels on the

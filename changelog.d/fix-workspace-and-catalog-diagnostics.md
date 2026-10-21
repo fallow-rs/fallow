@@ -34,3 +34,10 @@
   `<consumer>>vite`) is no longer an unresolved catalog reference. A key with a
   version selector (`vite@^5`) does not replace the reference, because pnpm
   fails the install for it.
+- **`audit --gate new-only` does not gate a finding class that the base could
+  not check.** The base snapshot holds committed files only, so a gitignored
+  workspace member (for example a `vite/` clone that CI makes) is missing in
+  the base. The base then does not report unused catalog entries, and the head
+  reports them. These head findings are now inherited, not introduced, so they
+  no longer change the verdict. A new unused catalog entry in such a run is
+  also inherited. The audit base snapshot cache moves to version 14.
