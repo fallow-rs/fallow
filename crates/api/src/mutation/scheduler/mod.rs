@@ -21,7 +21,7 @@ use super::protocol::{
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
 use reserve::PhaseDeadline;
-use retry_set::{confirmation_tests, fastest_first, retry_weight, whole_files};
+use retry_set::{confirmation_tests, fastest_first, retry_extra_ms, whole_files};
 
 mod control;
 mod retry_set;
@@ -292,10 +292,9 @@ struct Job {
     /// confirmation set. A kill by a test outside this set is no
     /// disagreement with the first run. Empty for each other job.
     first_tests: Vec<String>,
-    /// The dry-run time of the retry tests of a survivor over the time of
-    /// `tests`, at least 1. The time reserve of a budgeted first pass uses
-    /// it (issue #3665).
-    retry_weight: f64,
+    /// The dry-run time that the retry tests of a survivor add to `tests`.
+    /// The time reserve of a budgeted first pass uses it (issue #3665).
+    retry_extra_ms: u64,
 }
 
 impl Job {
@@ -1365,9 +1364,9 @@ fn build_jobs(
             .then(|| confirmation_tests(facts, &tests))
             .flatten();
         let (tests, total) = fastest_first(facts, tests);
-        let retry_weight = confirmation
+        let retry_extra_ms = confirmation
             .as_ref()
-            .map_or(1.0, |(_, retry_total)| retry_weight(*retry_total, total));
+            .map_or(0, |(_, retry_total)| retry_extra_ms(*retry_total, total));
         let confirmation = confirmation.map(|(set, _)| set);
         let setup_ms = scaled_ms(facts.setup_of(&tests));
         let mut test_files: Vec<String> = tests
@@ -1393,7 +1392,7 @@ fn build_jobs(
             cache_key,
             confirmation,
             first_tests: Vec::new(),
-            retry_weight,
+            retry_extra_ms,
         };
         if static_mutant {
             statics.push(job);
@@ -1457,7 +1456,7 @@ impl Phase<'_> {
                 self.push(job, Attempt::decided(MutantStatus::Pending, None, None));
                 continue;
             }
-            match PhaseDeadline::timed(self.deadline.as_ref(), job.retry_weight, || {
+            match PhaseDeadline::timed(self.deadline.as_ref(), job.retry_extra_ms, || {
                 worker.run_with_retry(&job, self.caps)
             }) {
                 Ok(attempt) => self.push(job, attempt),

@@ -42,8 +42,8 @@ pub(super) fn fastest_first(facts: &DryRunFacts, tests: BTreeSet<String>) -> (Ve
 /// The tests and the timeout of the retry of a survivor: each passing test
 /// of the files of `tests`. A test can read a value that an earlier test of
 /// its file cached, so the dry run attributes no hit to it (issue #3670).
-/// `None` when the files have no other test.
-/// Also gives the dry-run time of the retry tests.
+/// `None` when the files have no other test. The last value is the dry-run
+/// time of the retry tests.
 pub(super) fn confirmation_tests(
     facts: &DryRunFacts,
     tests: &BTreeSet<String>,
@@ -55,12 +55,15 @@ pub(super) fn confirmation_tests(
     })
 }
 
-/// The dry-run time of the retry tests over the time of the first-run
-/// tests, at least 1. A first run with no measured time gives 1.
-pub(super) fn retry_weight(retry_total: f64, first_total: f64) -> f64 {
-    if first_total > 0.0 && retry_total.is_finite() {
-        (retry_total / first_total).max(1.0)
-    } else {
-        1.0
-    }
+/// The dry-run time that the retry tests add to the first-run tests, in
+/// whole milliseconds, rounded up. The fixed cost of a run is in the
+/// measured first run already, so only the difference counts.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a reserve estimate in milliseconds; the value is clamped first"
+)]
+pub(super) fn retry_extra_ms(retry_total: f64, first_total: f64) -> u64 {
+    let extra = (retry_total - first_total).max(0.0).ceil();
+    if extra.is_finite() { extra as u64 } else { 0 }
 }

@@ -2394,7 +2394,7 @@ fn load_kill_job() -> Job {
         cache_key: None,
         confirmation: None,
         first_tests: Vec::new(),
-        retry_weight: 1.0,
+        retry_extra_ms: 0,
     }
 }
 
@@ -2751,10 +2751,10 @@ fn a_cached_kill_by_a_confirmation_test_lists_the_dry_run_hits() {
 }
 
 #[test]
-fn the_retry_weight_is_the_retry_time_over_the_first_run_time() {
-    assert!((retry_weight(2000.0, 20.0) - 100.0).abs() < f64::EPSILON);
+fn the_retry_extra_time_is_the_retry_time_minus_the_first_run_time() {
+    assert_eq!(retry_extra_ms(2000.0, 20.0), 1980);
     // A retry never reserves less than the first run.
-    assert!((retry_weight(10.0, 20.0) - 1.0).abs() < f64::EPSILON);
-    // A first run with no measured time gives 1.
-    assert!((retry_weight(500.0, 0.0) - 1.0).abs() < f64::EPSILON);
+    assert_eq!(retry_extra_ms(10.0, 20.0), 0);
+    assert_eq!(retry_extra_ms(500.5, 0.0), 501);
+    assert_eq!(retry_extra_ms(f64::NAN, 20.0), 0);
 }

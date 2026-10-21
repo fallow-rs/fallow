@@ -466,9 +466,8 @@ tests detect the mutant.
   repeat run does it again. The reserve uses measured run times, so the
   first run of each worker starts without a reserve. A budget that is
   shorter than one wave of runs can still end before any retry.
-  For a survivor, the measured run time is scaled to its retry: the
-  dry-run time of each test of its files over the dry-run time of its
-  covering tests. A timeout reserves twice its run time. The control run
+  For a survivor, the reserve adds to its measured run time the dry-run
+  time that the other tests of its files add to its retry. A timeout reserves twice its run time. The control run
   that confirms a kill by a new test is not in the reserve. When no time
   is left for it, the retry gets no result and the mutant keeps its first
   status.
