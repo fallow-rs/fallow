@@ -7,6 +7,7 @@ use oxc_span::GetSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::MemberAccess;
+use crate::js_text::JsText;
 use fallow_types::extract::{MemberInfo, MemberKind};
 
 use super::{
@@ -77,13 +78,13 @@ fn setup_store_members_read_in_body(args: &[Argument<'_>]) -> Vec<String> {
         else {
             continue;
         };
-        if key.starts_with('$') {
+        if key.as_js_str().starts_with('$') {
             continue;
         }
         keys_by_local
             .entry(local.name.as_str())
             .or_default()
-            .push(key.to_string());
+            .push(key.text().into_owned());
     }
     if keys_by_local.is_empty() {
         return Vec::new();
@@ -150,7 +151,7 @@ fn harvest_option_store(obj: &ObjectExpression<'_>) -> Vec<MemberInfo> {
         let Some(section) = prop.key.static_name() else {
             continue;
         };
-        match section.as_ref() {
+        match &*section.text() {
             "state" => {
                 if let Some(state_obj) = state_returned_object(&prop.value) {
                     collect_store_member_keys(state_obj, &mut members);
@@ -209,11 +210,11 @@ fn collect_store_member_keys(obj: &ObjectExpression<'_>, members: &mut Vec<Membe
         let Some(name) = prop.key.static_name() else {
             continue;
         };
-        if name.starts_with('$') {
+        if name.as_js_str().starts_with('$') {
             continue;
         }
         members.push(MemberInfo {
-            name: name.to_string(),
+            name: name.text().into_owned(),
             kind: MemberKind::StoreMember,
             span: prop.key.span(),
             has_decorator: false,
@@ -469,7 +470,7 @@ impl ModuleInfoExtractor {
             };
             self.member_accesses.push(MemberAccess {
                 object: object_name.to_string(),
-                member: member.to_string(),
+                member: member.text().into_owned(),
             });
         }
     }

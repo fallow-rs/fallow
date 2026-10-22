@@ -19,12 +19,12 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{AutoImportKind, AutoImportRule};
+use fallow_extract::JsText;
 use fallow_types::discover::FileId;
 use fallow_types::extract::ExportName;
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, PropertyKey, PropertyKind};
 
-use super::config_parser;
-use super::{Plugin, PluginResult, has_glob_syntax};
+use super::{Plugin, PluginResult, config_parser, has_glob_syntax};
 
 const ENABLERS: &[&str] = &["nuxt"];
 
@@ -1809,7 +1809,7 @@ fn nested_surface_overrides(obj: &ObjectExpression<'_>) -> Option<SurfaceKeys> {
                 found.imports |= keys.imports;
             }
             found
-        } else if ENVIRONMENT_OVERRIDE_KEYS.contains(&name) {
+        } else if ENVIRONMENT_OVERRIDE_KEYS.contains(&&*name) {
             override_surfaces(&property.value)?
         } else {
             continue;
@@ -1859,7 +1859,7 @@ fn hook_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
             return None;
         };
         let name = static_key_name(&property.key)?;
-        let namespace = name.split(':').next().unwrap_or(name);
+        let namespace = name.split(':').next().unwrap_or(&name);
         found.components |= namespace == "components";
         found.imports |= namespace == "imports";
     }
@@ -1867,10 +1867,10 @@ fn hook_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
 }
 
 /// The name of a static identifier or string literal key.
-fn static_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<&'a str> {
+fn static_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<std::borrow::Cow<'a, str>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
-        PropertyKey::StringLiteral(literal) => Some(literal.value.as_str()),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.as_str().into()),
+        PropertyKey::StringLiteral(literal) => Some(literal.value.text()),
         _ => None,
     }
 }

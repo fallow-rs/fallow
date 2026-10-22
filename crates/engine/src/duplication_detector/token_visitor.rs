@@ -3,6 +3,7 @@
 //! The `TokenExtractor` walks an Oxc AST and emits a `Vec<SourceToken>` suitable
 //! for suffix-array based clone detection.
 
+use fallow_extract::JsText;
 use oxc_ast::ast::*;
 use oxc_ast::match_expression;
 use oxc_ast_visit::Visit;
@@ -351,7 +352,10 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_string_literal(&mut self, lit: &StringLiteral<'a>) {
-        self.push(TokenKind::StringLiteral(lit.value.to_string()), lit.span);
+        self.push(
+            TokenKind::StringLiteral(lit.value.text().into_owned()),
+            lit.span,
+        );
     }
 
     fn visit_numeric_literal(&mut self, lit: &NumericLiteral<'a>) {
@@ -649,7 +653,7 @@ impl<'a> Visit<'a> for TokenExtractor {
         walk::walk_import_declaration(self, decl);
         self.push_keyword(KeywordType::From, decl.span);
         self.push(
-            TokenKind::StringLiteral(decl.source.value.to_string()),
+            TokenKind::StringLiteral(decl.source.value.text().into_owned()),
             decl.source.span,
         );
     }
@@ -694,7 +698,7 @@ impl<'a> Visit<'a> for TokenExtractor {
         self.push_keyword(KeywordType::Export, decl.span);
         self.push_keyword(KeywordType::From, decl.span);
         self.push(
-            TokenKind::StringLiteral(decl.source.value.to_string()),
+            TokenKind::StringLiteral(decl.source.value.text().into_owned()),
             decl.source.span,
         );
     }

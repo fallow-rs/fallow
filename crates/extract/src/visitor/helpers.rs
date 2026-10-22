@@ -9,6 +9,7 @@ use rustc_hash::FxHashMap;
 
 #[path = "helpers_heritage_names.rs"]
 mod heritage_names;
+use crate::js_text::JsText;
 use crate::{MemberInfo, MemberKind};
 use fallow_types::extract::{AngularInputMember, AngularOutputMember};
 use heritage_names::{extract_static_expression_name, extract_type_name};
@@ -114,7 +115,7 @@ fn extract_decorator_metadata(
         let Some(key_name) = p.key.static_name() else {
             continue;
         };
-        apply_decorator_property(&mut acc, key_name.as_ref(), p, is_component);
+        apply_decorator_property(&mut acc, &key_name.text(), p, is_component);
     }
 
     acc.has_data().then(|| acc.into_metadata(decorator.span()))
@@ -130,25 +131,25 @@ fn apply_decorator_property(
     match key_name {
         "selector" if is_component => {
             if let Expression::StringLiteral(lit) = &p.value {
-                acc.selector = Some(lit.value.to_string());
+                acc.selector = Some(lit.value.text().into_owned());
             }
         }
         "templateUrl" => {
             if let Expression::StringLiteral(lit) = &p.value {
-                acc.template_url = Some(lit.value.to_string());
+                acc.template_url = Some(lit.value.text().into_owned());
             }
         }
         "template" => apply_inline_template(acc, p),
         "styleUrl" => {
             if let Expression::StringLiteral(lit) = &p.value {
-                acc.style_urls.push(lit.value.to_string());
+                acc.style_urls.push(lit.value.text().into_owned());
             }
         }
         "styleUrls" => {
             if let Expression::ArrayExpression(arr) = &p.value {
                 for elem in &arr.elements {
                     if let ArrayExpressionElement::StringLiteral(lit) = elem {
-                        acc.style_urls.push(lit.value.to_string());
+                        acc.style_urls.push(lit.value.text().into_owned());
                     }
                 }
             }
@@ -174,7 +175,7 @@ fn apply_inline_template(
     p: &oxc_ast::ast::ObjectProperty<'_>,
 ) {
     if let Expression::StringLiteral(lit) = &p.value {
-        acc.inline_template = Some(lit.value.to_string());
+        acc.inline_template = Some(lit.value.text().into_owned());
         acc.inline_template_offset = Some(lit.span.start.saturating_add(1));
     } else if let Expression::TemplateLiteral(tpl) = &p.value
         && tpl.expressions.is_empty()
@@ -183,9 +184,8 @@ fn apply_inline_template(
         let source = quasi
             .value
             .cooked
-            .as_ref()
-            .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str())
-            .to_string();
+            .map_or_else(|| quasi.value.raw.as_str().into(), JsText::text)
+            .into_owned();
         acc.inline_template = Some(source);
         acc.inline_template_offset = Some(p.value.span().start.saturating_add(1));
     }
@@ -197,7 +197,7 @@ fn extract_host_member_refs(host_obj: &oxc_ast::ast::ObjectExpression<'_>, refs:
             continue;
         };
         if let Expression::StringLiteral(lit) = &p.value {
-            extract_identifiers_from_host_expr(&lit.value, refs);
+            extract_identifiers_from_host_expr(&lit.value.text(), refs);
         }
     }
 }
@@ -211,7 +211,7 @@ fn extract_query_members(value: &Expression<'_>, members: &mut Vec<String>) {
             continue;
         };
         if let Some(name) = p.key.static_name() {
-            let name = name.to_string();
+            let name = name.text().into_owned();
             if !name.is_empty() {
                 members.push(name);
             }
@@ -227,13 +227,8 @@ fn extract_input_output_members(value: &Expression<'_>, members: &mut Vec<String
         let ArrayExpressionElement::StringLiteral(lit) = elem else {
             continue;
         };
-        let member = lit
-            .value
-            .as_ref()
-            .split(':')
-            .next()
-            .unwrap_or_default()
-            .trim();
+        let text = lit.value.text();
+        let member = text.split(':').next().unwrap_or_default().trim();
         if !member.is_empty() {
             members.push(member.to_string());
         }
@@ -393,7 +388,7 @@ pub(super) fn lit_custom_element_tag(class: &Class<'_>) -> Option<String> {
             return None;
         }
         match call.arguments.first()? {
-            Argument::StringLiteral(lit) => Some(lit.value.to_string()),
+            Argument::StringLiteral(lit) => Some(lit.value.text().into_owned()),
             _ => None,
         }
     })
@@ -414,7 +409,7 @@ pub fn extract_custom_elements_define(
         return None;
     }
     let tag = match call.arguments.first()? {
-        Argument::StringLiteral(lit) => lit.value.to_string(),
+        Argument::StringLiteral(lit) => lit.value.text().into_owned(),
         _ => return None,
     };
     let class_name = match call.arguments.get(1)? {
@@ -455,7 +450,7 @@ pub(super) fn extract_custom_element_tag_reference(
     let Argument::StringLiteral(lit) = call.arguments.first()? else {
         return None;
     };
-    let tag = lit.value.as_str();
+    let tag = &*lit.value.text();
     tag.contains('-').then(|| tag.to_string())
 }
 
@@ -917,7 +912,7 @@ pub(super) fn collect_component_field_array_types(class: &Class<'_>) -> FxHashMa
         if let Some(element_type) =
             infer_array_binding_element_type(prop.type_annotation.as_deref(), prop.value.as_ref())
         {
-            field_types.insert(name.to_string(), element_type);
+            field_types.insert(name.text().into_owned(), element_type);
         }
     }
     field_types
@@ -1023,7 +1018,7 @@ fn build_method_member(
     method: &oxc_ast::ast::MethodDefinition<'_>,
     class_name: Option<&str>,
 ) -> Option<MemberInfo> {
-    let name_str = method.key.static_name()?.to_string();
+    let name_str = method.key.static_name()?.text().into_owned();
     if name_str == "constructor"
         || matches!(method.key, PropertyKey::PrivateIdentifier(_))
         || matches!(
@@ -1081,7 +1076,7 @@ fn build_property_member(
         .map(|d| decorator_path(&d.expression))
         .collect();
     Some(MemberInfo {
-        name: name.to_string(),
+        name: name.text().into_owned(),
         kind: MemberKind::ClassProperty,
         span: prop.span,
         has_decorator,
@@ -1125,7 +1120,7 @@ pub fn extract_angular_inputs_outputs(
         if let Some(role) = angular_decorator_member_role(prop) {
             match role {
                 AngularMemberRole::Input => inputs.push(AngularInputMember {
-                    name: name.to_string(),
+                    name: name.text().into_owned(),
                     span_start,
                 }),
                 // Only an `@Output()` initialized by `new EventEmitter(...)` emits
@@ -1136,7 +1131,7 @@ pub fn extract_angular_inputs_outputs(
                 AngularMemberRole::Output => {
                     if output_is_event_emitter(prop.value.as_ref()) {
                         outputs.push(AngularOutputMember {
-                            name: name.to_string(),
+                            name: name.text().into_owned(),
                             span_start,
                         });
                     }
@@ -1154,11 +1149,11 @@ pub fn extract_angular_inputs_outputs(
         {
             match signal_name {
                 "input" | "model" => inputs.push(AngularInputMember {
-                    name: name.to_string(),
+                    name: name.text().into_owned(),
                     span_start,
                 }),
                 "output" | "outputFromObservable" => outputs.push(AngularOutputMember {
-                    name: name.to_string(),
+                    name: name.text().into_owned(),
                     span_start,
                 }),
                 _ => {}
@@ -1337,9 +1332,9 @@ pub(super) fn collect_nested_type_bindings(
                     continue;
                 };
                 let path = if let Some(prefix) = prefix {
-                    format!("{prefix}.{property_name}")
+                    format!("{prefix}.{}", property_name.text())
                 } else {
-                    property_name.to_string()
+                    property_name.text().into_owned()
                 };
                 let Some(type_annotation) = prop.type_annotation.as_deref() else {
                     continue;
@@ -1546,7 +1541,12 @@ pub fn extract_class_generic_instance_bindings(class: &Class<'_>) -> Vec<(String
                     let Some(type_annotation) = method.value.return_type.as_deref() else {
                         continue;
                     };
-                    push_generic_binding(&name, type_annotation, &param_indices, &mut bindings);
+                    push_generic_binding(
+                        &name.text(),
+                        type_annotation,
+                        &param_indices,
+                        &mut bindings,
+                    );
                 }
             }
             ClassElement::PropertyDefinition(prop) => {
@@ -1559,7 +1559,7 @@ pub fn extract_class_generic_instance_bindings(class: &Class<'_>) -> Vec<(String
                 let Some(type_annotation) = prop.type_annotation.as_deref() else {
                     continue;
                 };
-                push_generic_binding(&name, type_annotation, &param_indices, &mut bindings);
+                push_generic_binding(&name.text(), type_annotation, &param_indices, &mut bindings);
             }
             _ => {}
         }
@@ -1653,9 +1653,9 @@ fn collect_getter_binding(
         return;
     };
     if let Some(origin) = resolve_origin(&type_annotation.type_annotation) {
-        origins.insert(name.to_string(), origin);
+        origins.insert(name.text().into_owned(), origin);
     }
-    bindings.push((name.to_string(), resolved));
+    bindings.push((name.text().into_owned(), resolved));
 }
 
 /// Push an instance binding for a non-private property: typed annotation first,
@@ -1678,7 +1678,7 @@ fn collect_property_binding<F>(
         && let Some(type_name) = extract_type_annotation_name(type_annotation)
     {
         if let Some(resolved) = resolve(type_name) {
-            bindings.push((name.to_string(), resolved));
+            bindings.push((name.text().into_owned(), resolved));
         }
         return;
     }
@@ -1686,13 +1686,13 @@ fn collect_property_binding<F>(
         && let Expression::Identifier(callee) = &new_expr.callee
         && !is_builtin_constructor(callee.name.as_str())
     {
-        bindings.push((name.to_string(), callee.name.to_string()));
+        bindings.push((name.text().into_owned(), callee.name.to_string()));
         return;
     }
     if let Some(Expression::CallExpression(call)) = &prop.value
         && let Some(type_name) = extract_angular_inject_target(call, is_named_import_from)
     {
-        bindings.push((name.to_string(), type_name));
+        bindings.push((name.text().into_owned(), type_name));
     }
 }
 
@@ -1884,7 +1884,7 @@ pub(super) fn extract_concat_parts(
 
 fn extract_leading_string(expr: &Expression<'_>) -> Option<String> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::BinaryExpression(bin)
             if bin.operator == oxc_ast::ast::BinaryOperator::Addition =>
         {
@@ -1897,7 +1897,7 @@ fn extract_leading_string(expr: &Expression<'_>) -> Option<String> {
 fn extract_trailing_string(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::StringLiteral(lit) => {
-            let s = lit.value.to_string();
+            let s = lit.value.text().into_owned();
             if s.is_empty() { None } else { Some(s) }
         }
         _ => None,

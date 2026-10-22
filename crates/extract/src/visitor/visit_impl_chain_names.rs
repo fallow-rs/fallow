@@ -1,11 +1,14 @@
 //! Dotted names of static member chains for visitor extraction.
 
+use std::borrow::Cow;
+
 #[allow(clippy::wildcard_imports, reason = "many AST node variants used")]
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
 use super::super::{ModuleInfoExtractor, SemanticFact};
 use super::visit_source_paths::join_member_path;
+use crate::js_text::JsText;
 use crate::{FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, MemberAccess};
 
 /// The most links a recorded receiver name holds (`a` plus 64 `.b`).
@@ -20,7 +23,7 @@ pub(super) const MAX_RECORDED_CHAIN_LINKS: usize = 64;
 
 /// One link of a member chain name, recorded from the outermost link inward.
 enum ChainLink<'b> {
-    Property(&'b str),
+    Property(Cow<'b, str>),
     PrivateField(&'b str),
     Call,
 }
@@ -49,11 +52,11 @@ pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String>
             Expression::Identifier(obj) => break obj.name.as_str(),
             Expression::ThisExpression(_) => break "this",
             Expression::StaticMemberExpression(member) => {
-                links.push(ChainLink::Property(member.property.name.as_str()));
+                links.push(ChainLink::Property(member.property.name.as_str().into()));
                 current = &member.object;
             }
             Expression::ComputedMemberExpression(member) => {
-                links.push(ChainLink::Property(member.static_property_name()?.as_str()));
+                links.push(ChainLink::Property(member.static_property_name()?.text()));
                 current = &member.object;
             }
             // `#`-private field receiver (`this.#dep`): oxc's `PrivateIdentifier.name`
@@ -78,7 +81,7 @@ pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String>
                     current = &call.callee;
                 }
                 ChainElement::StaticMemberExpression(member) => {
-                    links.push(ChainLink::Property(member.property.name.as_str()));
+                    links.push(ChainLink::Property(member.property.name.as_str().into()));
                     current = &member.object;
                 }
                 _ => return None,

@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectExpression, ObjectPropertyKind};
 use rustc_hash::FxHashSet;
 
@@ -219,7 +220,7 @@ fn object_keys(obj: &ObjectExpression<'_>, skip_disabled: bool) -> Vec<ModuleKey
                 return None;
             }
             if let Some(name) = prop.key.static_name() {
-                return Some(ModuleKey::Name(name.to_string()));
+                return Some(ModuleKey::Name(name.text().into_owned()));
             }
             let expr = prop.key.as_expression()?;
             config_parser::expression_to_path_string(expr).map(ModuleKey::Path)

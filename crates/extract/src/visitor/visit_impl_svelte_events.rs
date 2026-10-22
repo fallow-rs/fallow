@@ -9,6 +9,7 @@ use oxc_ast::ast::*;
 use fallow_types::extract::DispatchedEvent;
 
 use super::{ModuleInfoExtractor, ROUTE_LOADER_DATA_OBJECT};
+use crate::js_text::JsText;
 
 impl ModuleInfoExtractor {
     /// Track the load-data detector's two call-argument exceptions.
@@ -80,7 +81,7 @@ impl ModuleInfoExtractor {
         match expr.arguments.first() {
             Some(Argument::StringLiteral(lit)) => {
                 self.svelte_dispatched_events.push(DispatchedEvent {
-                    name: lit.value.to_string(),
+                    name: lit.value.text().into_owned(),
                     span_start: expr.span.start,
                 });
             }

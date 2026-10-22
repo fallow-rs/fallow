@@ -35,6 +35,7 @@
 //! only on a file that imports `alchemy` or an `alchemy/*` subpath, so a
 //! `main` key of an unrelated object is not read.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -43,6 +44,8 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
+
+use crate::js_text::JsText;
 
 /// The package whose resources this pass reads.
 const ALCHEMY_PACKAGE: &str = "alchemy";
@@ -144,7 +147,7 @@ fn platform_exports(program: &Program<'_>) -> Vec<String> {
 }
 
 fn imports_alchemy(program: &Program<'_>) -> bool {
-    import_declarations(program).any(|import| is_alchemy_source(import.source.value.as_str()))
+    import_declarations(program).any(|import| is_alchemy_source(&import.source.value.text()))
 }
 
 fn import_declarations<'b, 'a>(
@@ -168,7 +171,7 @@ fn is_alchemy_source(source: &str) -> bool {
 fn platform_bindings<'a>(program: &Program<'a>) -> Vec<&'a str> {
     import_declarations(program)
         .filter(|import| {
-            let source = import.source.value.as_str();
+            let source = &*import.source.value.text();
             is_alchemy_source(source) || PLATFORM_CLASS_SOURCES.contains(&source)
         })
         .flat_map(|import| import.specifiers.iter().flatten())
@@ -224,7 +227,8 @@ impl MainCollector {
         if let Some(path) = file_relative_path(main) {
             return Some(path);
         }
-        let raw = relative_target(string_value(main)?)?;
+        let value = string_value(main)?;
+        let raw = relative_target(&value)?;
         match property_value(object, "rootDir") {
             Some(root_dir) => file_relative_dir(root_dir).map(|base| join(&base, raw)),
             None => self.is_stack_file.then(|| join(".", raw)),
@@ -244,19 +248,19 @@ fn property_value<'b, 'a>(
         if property.computed || property.kind != PropertyKind::Init {
             return None;
         }
-        (property.key.static_name().as_deref() == Some(key)).then_some(&property.value)
+        (property.key.static_name().is_some_and(|name| name == key)).then_some(&property.value)
     })
 }
 
 /// A string literal, or a template literal without expressions.
-fn string_value<'b>(expression: &'b Expression<'_>) -> Option<&'b str> {
+fn string_value<'b>(expression: &'b Expression<'_>) -> Option<Cow<'b, str>> {
     match expression.without_parentheses() {
-        Expression::StringLiteral(literal) => Some(literal.value.as_str()),
+        Expression::StringLiteral(literal) => Some(literal.value.text()),
         Expression::TemplateLiteral(template) if template.expressions.is_empty() => template
             .quasis
             .first()
-            .and_then(|quasi| quasi.value.cooked.as_ref())
-            .map(|cooked| cooked.as_str()),
+            .and_then(|quasi| quasi.value.cooked)
+            .map(JsText::text),
         _ => None,
     }
 }
@@ -293,7 +297,7 @@ fn new_url_path(expression: &Expression<'_>) -> Option<String> {
     if callee.name != "URL" || !is_file_url(base.as_expression()?) {
         return None;
     }
-    relative_target(string_value(target.as_expression()?)?).map(|target| join(".", target))
+    relative_target(&string_value(target.as_expression()?)?).map(|target| join(".", target))
 }
 
 /// `fileURLToPath(new URL("./x.ts", import.meta.url))`.
@@ -320,7 +324,8 @@ fn template_dir_path(template: &TemplateLiteral<'_>) -> Option<String> {
     if !is_dir_name(expression) || !head.value.raw.is_empty() {
         return None;
     }
-    let target = tail.value.cooked.as_ref()?.as_str().strip_prefix('/')?;
+    let cooked = tail.value.cooked?.text();
+    let target = cooked.strip_prefix('/')?;
     relative_target(target).map(|target| join(".", target))
 }
 
@@ -342,8 +347,8 @@ fn path_join_call(call: &CallExpression<'_>) -> Option<String> {
     }
     let mut path = String::from(".");
     for argument in rest {
-        let segment = relative_target(string_value(argument.as_expression()?)?)?;
-        path = join(&path, segment);
+        let value = string_value(argument.as_expression()?)?;
+        path = join(&path, relative_target(&value)?);
     }
     Some(path)
 }

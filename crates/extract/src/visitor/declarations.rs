@@ -9,6 +9,7 @@ use oxc_ast::ast::{
     TSModuleReference, TSNamespaceDeclaration, TSNamespaceDeclarationBody, VariableDeclarator,
 };
 
+use crate::js_text::JsText;
 use crate::{
     ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo, SemanticFact,
     StringEnumMemberValueFact, VisibilityTag,
@@ -37,7 +38,7 @@ impl ModuleInfoExtractor {
             let member_name = match &member.id {
                 TSEnumMemberName::Identifier(id) => id.name.to_string(),
                 TSEnumMemberName::String(name) | TSEnumMemberName::ComputedString(name) => {
-                    name.value.to_string()
+                    name.value.text().into_owned()
                 }
                 TSEnumMemberName::ComputedTemplateString(_) => continue,
             };
@@ -46,7 +47,7 @@ impl ModuleInfoExtractor {
                     StringEnumMemberValueFact {
                         enum_name: enumd.id.name.to_string(),
                         member_name,
-                        value: value.value.to_string(),
+                        value: value.value.text().into_owned(),
                     },
                 ));
         }
@@ -112,7 +113,7 @@ impl ModuleInfoExtractor {
             }
             Declaration::TSExternalModuleDeclaration(module) => {
                 self.extract_module_declaration_export(
-                    module.id.value.to_string(),
+                    module.id.value.text().into_owned(),
                     module.id.span,
                     module.declare || is_type_only,
                 );
@@ -212,7 +213,7 @@ impl ModuleInfoExtractor {
                 let name = match &member.id {
                     TSEnumMemberName::Identifier(id) => id.name.to_string(),
                     TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
-                        s.value.to_string()
+                        s.value.text().into_owned()
                     }
                     TSEnumMemberName::ComputedTemplateString(_) => return None,
                 };
@@ -374,7 +375,7 @@ impl ModuleInfoExtractor {
                 self.push_namespace_member(namespace.id.name.to_string(), namespace.id.span);
             }
             Declaration::TSExternalModuleDeclaration(module) => {
-                self.push_namespace_member(module.id.value.to_string(), module.id.span);
+                self.push_namespace_member(module.id.value.text().into_owned(), module.id.span);
             }
             Declaration::TSImportEqualsDeclaration(import_equals) => {
                 self.record_exported_import_equals(import_equals);
@@ -481,7 +482,7 @@ impl ModuleInfoExtractor {
         self.record_namespace_binding_name(local.clone());
         self.import_equals_bindings.push(local.clone());
         self.require_calls.push(RequireCallInfo {
-            source: reference.expression.value.to_string(),
+            source: reference.expression.value.text().into_owned(),
             // The `require('./y')` reference, matching the call span a
             // `const X = require('./y')` declaration records.
             span: reference.span,
@@ -554,7 +555,7 @@ impl ModuleInfoExtractor {
                     if let Some(name) = prop.key.static_name() {
                         self.member_accesses.push(MemberAccess {
                             object: ident_name.to_string(),
-                            member: name.to_string(),
+                            member: name.text().into_owned(),
                         });
                     }
                 }

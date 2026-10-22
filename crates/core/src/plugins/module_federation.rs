@@ -19,14 +19,14 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{
     Argument, CallExpression, Expression, NewExpression, ObjectExpression, ObjectPropertyKind,
     Program, PropertyKey,
 };
 use oxc_ast_visit::{Visit, walk};
 
-use super::config_parser;
-use super::{Plugin, PluginResult, ProvidedDependencyRule};
+use super::{Plugin, PluginResult, ProvidedDependencyRule, config_parser};
 
 const ENABLERS: &[&str] = &[
     "@module-federation/enhanced",
@@ -441,7 +441,7 @@ impl RelativeSpecifierCollector {
 impl<'a> Visit<'a> for RelativeSpecifierCollector {
     fn visit_import_declaration(&mut self, declaration: &oxc_ast::ast::ImportDeclaration<'a>) {
         if !declaration.import_kind.is_type() {
-            self.push(declaration.source.value.as_str());
+            self.push(&declaration.source.value.text());
         }
     }
 
@@ -1277,7 +1277,7 @@ fn federation_callee_name<'a>(callee: &'a Expression<'a>) -> Option<&'a str> {
         Expression::StaticMemberExpression(member) => member.property.name.as_str(),
         Expression::ComputedMemberExpression(member) => match unwrap_expression(&member.expression)
         {
-            Expression::StringLiteral(literal) => literal.value.as_str(),
+            Expression::StringLiteral(literal) => literal.value.as_str()?,
             _ => return None,
         },
         _ => return None,
@@ -1300,7 +1300,7 @@ fn unwrap_expression<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
 fn property_key_name(key: &PropertyKey<'_>) -> Option<String> {
     match key {
         PropertyKey::StaticIdentifier(identifier) => Some(identifier.name.to_string()),
-        PropertyKey::StringLiteral(literal) => Some(literal.value.to_string()),
+        PropertyKey::StringLiteral(literal) => Some(literal.value.text().into_owned()),
         _ => None,
     }
 }

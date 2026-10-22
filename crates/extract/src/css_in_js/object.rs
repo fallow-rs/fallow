@@ -85,9 +85,11 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_semantic::{ReferenceId, Scoping, SemanticBuilder};
 use oxc_span::{GetSpan, SourceType};
+use oxc_str::JSStr;
 use rustc_hash::FxHashMap;
 
 use super::shared::{WRAPPER, count_newlines};
+use crate::js_text::JsText;
 
 /// CSS property names (camelCase) whose numeric values are UNITLESS: a bare
 /// number is the value, not a `px` length. Mirrors React's well-known unitless
@@ -257,7 +259,7 @@ fn has_recognized_value_import(program: &Program<'_>) -> bool {
             return false;
         };
         !declaration.import_kind.is_type()
-            && module_library(declaration.source.value.as_str()).is_some()
+            && module_library(&declaration.source.value.text()).is_some()
             && declaration.specifiers.as_ref().is_some_and(|specifiers| {
                 specifiers.iter().any(|specifier| {
                     !matches!(
@@ -281,7 +283,7 @@ struct ObjectStyleCollector<'a> {
     /// Resolved reference -> the value of its immutable string binding. This is
     /// used for StyleX computed condition keys without confusing a shadowed
     /// binding with a same-named module constant.
-    const_strings: FxHashMap<ReferenceId, (u32, &'a str)>,
+    const_strings: FxHashMap<ReferenceId, (u32, JSStr<'a>)>,
     buckets: Vec<Bucket>,
 }
 
@@ -307,7 +309,7 @@ impl<'a> ObjectStyleCollector<'a> {
             if decl.import_kind.is_type() {
                 continue;
             }
-            let Some(lib) = module_library(decl.source.value.as_str()) else {
+            let Some(lib) = module_library(&decl.source.value.text()) else {
                 continue;
             };
             let Some(specifiers) = &decl.specifiers else {
@@ -530,7 +532,7 @@ impl<'a> Visit<'a> for ObjectStyleCollector<'a> {
 
 struct ConstStringCollector<'a, 's, 'm> {
     scoping: &'s Scoping,
-    values: &'m mut FxHashMap<ReferenceId, (u32, &'a str)>,
+    values: &'m mut FxHashMap<ReferenceId, (u32, JSStr<'a>)>,
 }
 
 impl<'a> Visit<'a> for ConstStringCollector<'a, '_, '_> {
@@ -555,9 +557,7 @@ impl<'a> Visit<'a> for ConstStringCollector<'a, '_, '_> {
                         .get_resolved_reference_ids(symbol_id)
                         .iter()
                         .copied()
-                        .map(|reference_id| {
-                            (reference_id, (declarator.span.start, value.value.as_str()))
-                        }),
+                        .map(|reference_id| (reference_id, (declarator.span.start, value.value))),
                 );
             }
         }
@@ -646,7 +646,7 @@ fn object_expression<'a: 'b, 'b>(
 /// The string-literal argument at `index`, if present.
 fn string_arg(args: &[Argument<'_>], index: usize) -> Option<String> {
     match args.get(index)?.as_expression()?.get_inner_expression() {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         _ => None,
     }
 }
@@ -660,7 +660,7 @@ fn string_arg(args: &[Argument<'_>], index: usize) -> Option<String> {
 /// `dropped`.
 struct ObjectSerializationContext<'maps, 'ast> {
     stylex: bool,
-    const_strings: &'maps FxHashMap<ReferenceId, (u32, &'ast str)>,
+    const_strings: &'maps FxHashMap<ReferenceId, (u32, JSStr<'ast>)>,
     before: u32,
 }
 
@@ -789,19 +789,19 @@ fn is_static_stylex_condition(
         return property
             .key
             .static_name()
-            .is_some_and(|key| is_stylex_condition(&key));
+            .is_some_and(|key| is_stylex_condition(&key.text()));
     }
     let Some(expression) = property.key.as_expression() else {
         return false;
     };
     match expression.get_inner_expression() {
-        Expression::StringLiteral(value) => is_stylex_condition(value.value.as_str()),
+        Expression::StringLiteral(value) => is_stylex_condition(&value.value.text()),
         Expression::Identifier(id) => id
             .reference_id
             .get()
             .and_then(|reference_id| context.const_strings.get(&reference_id))
             .is_some_and(|(declaration_start, condition)| {
-                *declaration_start < context.before && is_stylex_condition(condition)
+                *declaration_start < context.before && is_stylex_condition(&condition.text())
             }),
         _ => false,
     }
@@ -851,8 +851,8 @@ fn serialize_value(key: &str, value: &Expression<'_>) -> Option<String> {
 fn static_value(key: &str, value: &Expression<'_>) -> Option<String> {
     match value.get_inner_expression() {
         Expression::StringLiteral(lit) => {
-            let text = lit.value.as_str().trim();
-            (!text.is_empty()).then(|| text.to_string())
+            let text = lit.value.text().trim().to_owned();
+            (!text.is_empty()).then_some(text)
         }
         Expression::NumericLiteral(num) => Some(render_number(key, num)),
         Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::UnaryNegation => {
@@ -900,7 +900,7 @@ fn is_unitless(key: &str) -> bool {
 /// The static name of an object-property key (string literal or identifier), or
 /// `None` for a computed / dynamic key.
 fn static_key(key: &PropertyKey<'_>) -> Option<String> {
-    key.static_name().map(|name| name.to_string())
+    key.static_name().map(|name| name.text().into_owned())
 }
 
 /// Convert a camelCase CSS property name to kebab-case. A leading uppercase

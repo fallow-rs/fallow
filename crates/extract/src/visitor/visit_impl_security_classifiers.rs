@@ -6,6 +6,7 @@ use oxc_ast::ast::{
 use fallow_types::extract::{SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty};
 
 use super::{ModuleInfoExtractor, flatten_callee_path, unwrap_parens, unwrap_static_expr};
+use crate::js_text::JsText;
 
 pub(super) fn risky_redos_fragment(pattern: &str) -> Option<String> {
     let mut cursor = 0;
@@ -385,7 +386,9 @@ pub(super) fn classify_url_shape(
 
 pub(super) fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
     match unwrap_static_expr(expr) {
-        Expression::StringLiteral(lit) => Some(SinkLiteralValue::String(lit.value.to_string())),
+        Expression::StringLiteral(lit) => {
+            Some(SinkLiteralValue::String(lit.value.text().into_owned()))
+        }
         Expression::NumericLiteral(lit) if lit.value.is_finite() && lit.value.fract() == 0.0 => {
             #[expect(
                 clippy::cast_possible_truncation,
@@ -415,12 +418,12 @@ pub(super) fn static_sink_literal_to_string(value: &SinkLiteralValue) -> String 
 
 pub(super) fn static_string_literal_value(expr: &Expression<'_>) -> Option<String> {
     match unwrap_static_expr(expr) {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() && tpl.quasis.len() == 1 => {
             tpl.quasis
                 .first()
-                .and_then(|quasi| quasi.value.cooked.as_ref())
-                .map(ToString::to_string)
+                .and_then(|quasi| quasi.value.cooked)
+                .map(|cooked| cooked.text().into_owned())
         }
         _ => None,
     }
@@ -455,7 +458,7 @@ pub(super) fn object_key_metadata(expr: &Expression<'_>) -> ObjectKeyMetadata {
             complete = false;
             continue;
         };
-        let key = key.to_string();
+        let key = key.text().into_owned();
         if !keys.iter().any(|existing| existing == &key) {
             keys.push(key);
         }
@@ -472,7 +475,7 @@ fn append_static_url_prefix(
 ) -> bool {
     match unwrap_static_expr(expr) {
         Expression::StringLiteral(lit) => {
-            prefix.push_str(lit.value.as_str());
+            prefix.push_str(&lit.value.text());
             true
         }
         Expression::Identifier(_) => {
@@ -489,7 +492,7 @@ fn append_static_url_prefix(
                     prefix.clear();
                     return false;
                 };
-                prefix.push_str(cooked.as_str());
+                prefix.push_str(&cooked.text());
                 if let Some(expression) = template.expressions.get(index)
                     && !append_static_url_prefix(expression, extractor, prefix)
                 {
@@ -550,9 +553,9 @@ fn collect_object_literal_properties(
             continue;
         };
         let key = if prefix.is_empty() {
-            key.to_string()
+            key.text().into_owned()
         } else {
-            format!("{prefix}.{key}")
+            format!("{prefix}.{}", key.text())
         };
         if let Some(value) = sink_literal_value(&prop.value) {
             properties.push(SinkObjectProperty { key, value });

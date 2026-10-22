@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::Path;
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, ImportDeclaration, ObjectExpression,
     VariableDeclaration,
@@ -214,7 +215,7 @@ impl<'a> Visit<'a> for WuchaleVitePluginCollector<'_> {
                         let Some(exported) = prop.key.static_name() else {
                             continue;
                         };
-                        if VITE_PLUGIN_EXPORTS.contains(&exported.as_ref())
+                        if VITE_PLUGIN_EXPORTS.contains(&&*exported.text())
                             && let BindingPattern::BindingIdentifier(identifier) = &prop.value
                         {
                             push_unique(&mut self.callable_names, identifier.name.to_string());
@@ -283,7 +284,7 @@ fn require_call_source(call: &CallExpression<'_>) -> Option<String> {
     }
     call.arguments.first().and_then(|arg| {
         if let Argument::StringLiteral(source) = arg {
-            Some(source.value.to_string())
+            Some(source.value.text().into_owned())
         } else {
             None
         }

@@ -15,6 +15,7 @@
 //! function registers nothing. In a Vue or Svelte file, the `<script>` blocks
 //! are read together, so an import in one block covers a call in another.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -29,6 +30,8 @@ use oxc_span::SourceType;
 use rustc_hash::FxHashMap;
 
 use fallow_types::extract::{FederationRuntimeCall, FederationRuntimeRemoteFact, SemanticFact};
+
+use crate::js_text::JsText;
 
 /// Packages whose runtime API registers and loads remotes.
 const RUNTIME_PACKAGES: &[&str] = &[
@@ -131,7 +134,7 @@ impl RuntimeBindings {
                 continue;
             };
             if import.import_kind.is_type()
-                || !RUNTIME_PACKAGES.contains(&import.source.value.as_str())
+                || !RUNTIME_PACKAGES.contains(&&*import.source.value.text())
             {
                 continue;
             }
@@ -303,7 +306,7 @@ fn registered_remotes(argument: &Expression<'_>) -> Option<Vec<String>> {
             let Some(key) = static_key(&property.key) else {
                 continue;
             };
-            if !REMOTE_NAME_KEYS.contains(&key) {
+            if !REMOTE_NAME_KEYS.contains(&&*key) {
                 continue;
             }
             let remote = static_string(&property.value).filter(|name| is_remote_name(name))?;
@@ -330,7 +333,7 @@ fn option_remotes(argument: &Expression<'_>) -> Option<Vec<String>> {
         let ObjectPropertyKind::ObjectProperty(property) = property else {
             return None;
         };
-        if static_key(&property.key) == Some("remotes") {
+        if static_key(&property.key).as_deref() == Some("remotes") {
             remotes = registered_remotes(&property.value)?;
         }
     }
@@ -366,22 +369,22 @@ fn is_remote_name(name: &str) -> bool {
         && !name.chars().any(char::is_whitespace)
 }
 
-fn static_key<'k>(key: &'k PropertyKey<'_>) -> Option<&'k str> {
+fn static_key<'k>(key: &'k PropertyKey<'_>) -> Option<Cow<'k, str>> {
     match key {
-        PropertyKey::StaticIdentifier(identifier) => Some(identifier.name.as_str()),
-        PropertyKey::StringLiteral(literal) => Some(literal.value.as_str()),
+        PropertyKey::StaticIdentifier(identifier) => Some(identifier.name.as_str().into()),
+        PropertyKey::StringLiteral(literal) => Some(literal.value.text()),
         _ => None,
     }
 }
 
 fn static_string(expr: &Expression<'_>) -> Option<String> {
     match expr.without_parentheses() {
-        Expression::StringLiteral(literal) => Some(literal.value.to_string()),
+        Expression::StringLiteral(literal) => Some(literal.value.text().into_owned()),
         Expression::TemplateLiteral(template) if template.expressions.is_empty() => template
             .quasis
             .first()
-            .and_then(|quasi| quasi.value.cooked.as_ref())
-            .map(ToString::to_string),
+            .and_then(|quasi| quasi.value.cooked)
+            .map(|cooked| cooked.text().into_owned()),
         _ => None,
     }
 }

@@ -11,6 +11,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use fallow_extract::JsText;
 use rustc_hash::FxHashSet;
 
 use super::config_parser;
@@ -355,7 +356,7 @@ fn collect_tsconfig_plugin_name(
             && object_property_key_is(&p.key, "name")
             && let Expression::StringLiteral(s) = &p.value
         {
-            let dep = crate::resolve::extract_package_name(&s.value);
+            let dep = crate::resolve::extract_package_name(&s.value.text());
             result.referenced_dependencies.push(dep);
         }
     }
@@ -394,7 +395,7 @@ fn parse_tsconfig_references(source: &str, path: &Path, root: &Path, result: &mu
                                         _ => false,
                                     };
                                     if is_path && let Expression::StringLiteral(s) = &rp.value {
-                                        let ref_path = s.value.to_string();
+                                        let ref_path = s.value.text().into_owned();
                                         let ref_target =
                                             root.join(ref_path.trim_start_matches("./"));
                                         let tsconfig_path = if ref_target

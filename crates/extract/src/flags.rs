@@ -12,11 +12,11 @@
 
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
-use oxc_ast_visit::Visit;
-use oxc_ast_visit::walk;
+use oxc_ast_visit::{Visit, walk};
 use oxc_span::ContentEq;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::js_text::JsText;
 use fallow_types::extract::{
     FlagConstant, FlagConstantRead, FlagDefinition, FlagKeyRegistry, FlagPatterns,
     FlagRegistryFacts, FlagRegistryRead, FlagSiteFacts, FlagUse, FlagUseKind,
@@ -520,7 +520,7 @@ impl<'a> FlagVisitor<'a> {
                 Statement::ImportDeclaration(decl) => {
                     self.collect_vercel_flags_import(decl);
                     self.collect_named_imports(decl);
-                    if imports_values(decl) && is_flag_source(decl.source.value.as_str()) {
+                    if imports_values(decl) && is_flag_source(&decl.source.value.text()) {
                         self.has_flag_import = true;
                     }
                 }
@@ -549,7 +549,7 @@ impl<'a> FlagVisitor<'a> {
     }
 
     fn collect_vercel_flags_import(&mut self, decl: &ImportDeclaration<'_>) {
-        if !is_vercel_flags_source(decl.source.value.as_str()) || decl.import_kind.is_type() {
+        if !is_vercel_flags_source(&decl.source.value.text()) || decl.import_kind.is_type() {
             return;
         }
 
@@ -714,7 +714,7 @@ impl<'a> FlagVisitor<'a> {
                 let name = match &member.id {
                     TSEnumMemberName::Identifier(id) => id.name.to_string(),
                     TSEnumMemberName::String(name) | TSEnumMemberName::ComputedString(name) => {
-                        name.value.to_string()
+                        name.value.text().into_owned()
                     }
                     TSEnumMemberName::ComputedTemplateString(_) => return None,
                 };
@@ -1057,7 +1057,7 @@ fn import_equals_flag_source(decl: &TSImportEqualsDeclaration<'_>) -> bool {
     let TSModuleReference::ExternalModuleReference(reference) = &decl.module_reference else {
         return false;
     };
-    is_flag_source(reference.expression.value.as_str())
+    is_flag_source(&reference.expression.value.text())
 }
 
 /// Whether a declaration requires a flag SDK or a flag module, as in
@@ -1067,12 +1067,12 @@ fn requires_flag_source(decl: &VariableDeclaration<'_>) -> bool {
         .iter()
         .filter_map(|declarator| declarator.init.as_ref())
         .filter_map(required_source)
-        .any(is_flag_source)
+        .any(|source| is_flag_source(&source))
 }
 
 /// The source of `require('x')`, also through a member access such as
 /// `require('x').init`.
-fn required_source<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
+fn required_source<'b>(expr: &'b Expression<'_>) -> Option<std::borrow::Cow<'b, str>> {
     let call = match unwrap_value(expr) {
         Expression::CallExpression(call) => call,
         Expression::StaticMemberExpression(member) => match unwrap_value(&member.object) {
@@ -1088,7 +1088,7 @@ fn required_source<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
         return None;
     }
     match call.arguments.first() {
-        Some(Argument::StringLiteral(source)) => Some(source.value.as_str()),
+        Some(Argument::StringLiteral(source)) => Some(source.value.text()),
         _ => None,
     }
 }
@@ -1264,7 +1264,7 @@ fn as_const_object_members(init: &Expression<'_>) -> Option<Vec<(String, String)
             if property.computed {
                 return None;
             }
-            let name = property.key.static_name()?.to_string();
+            let name = property.key.static_name()?.text().into_owned();
             Some((name, string_value(&property.value)?))
         })
         .collect();
@@ -1275,12 +1275,12 @@ fn as_const_object_members(init: &Expression<'_>) -> Option<Vec<(String, String)
 /// substitutions.
 fn string_value(expr: &Expression<'_>) -> Option<String> {
     match unwrap_value(expr) {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::TemplateLiteral(template) if template.expressions.is_empty() => template
             .quasis
             .first()
-            .and_then(|quasi| quasi.value.cooked.as_ref())
-            .map(ToString::to_string),
+            .and_then(|quasi| quasi.value.cooked)
+            .map(|cooked| cooked.text().into_owned()),
         _ => None,
     }
 }
@@ -1325,7 +1325,7 @@ fn extract_env_name<'b>(expr: &'b StaticMemberExpression<'_>) -> Option<&'b str>
 fn extract_string_arg(args: &[Argument<'_>], index: usize) -> Option<String> {
     args.get(index).and_then(|arg| {
         if let Argument::StringLiteral(lit) = arg {
-            Some(lit.value.to_string())
+            Some(lit.value.text().into_owned())
         } else {
             None
         }
@@ -1336,7 +1336,7 @@ fn extract_string_arg(args: &[Argument<'_>], index: usize) -> Option<String> {
 /// of a registry (`FLAGS.X` or `FLAGS['X']`).
 fn extract_flag_name_arg(args: &[Argument<'_>], index: usize) -> Option<FlagNameArg> {
     match args.get(index)? {
-        Argument::StringLiteral(lit) => Some(FlagNameArg::Literal(lit.value.to_string())),
+        Argument::StringLiteral(lit) => Some(FlagNameArg::Literal(lit.value.text().into_owned())),
         Argument::StaticMemberExpression(member) => {
             let Expression::Identifier(object) = &member.object else {
                 return None;
@@ -1354,7 +1354,7 @@ fn extract_flag_name_arg(args: &[Argument<'_>], index: usize) -> Option<FlagName
             };
             Some(FlagNameArg::RegistryMember {
                 registry: object.name.to_string(),
-                member: key.value.to_string(),
+                member: key.value.text().into_owned(),
             })
         }
         _ => None,
@@ -1378,10 +1378,10 @@ fn extract_object_string_property_arg(
         if prop
             .key
             .static_name()
-            .is_some_and(|key| key.as_ref() == property_name)
+            .is_some_and(|key| key == property_name)
             && let Expression::StringLiteral(lit) = &prop.value
         {
-            return Some(lit.value.to_string());
+            return Some(lit.value.text().into_owned());
         }
     }
 

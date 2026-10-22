@@ -13,6 +13,7 @@ use super::super::{
 };
 use super::unwrap_static_expr;
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
+use crate::js_text::JsText;
 
 pub(in crate::visitor) const MAX_PROJECTION_VALUES: usize = 8192;
 const MAX_PROJECTED_ACCESSES: usize = 8192;
@@ -90,7 +91,7 @@ impl ModuleInfoExtractor {
                 };
                 if let Some(key) = property.key.static_name()
                     && let Some(annotation) = &property.type_annotation
-                    && let Some(path) = projection_property_path(name, &key)
+                    && let Some(path) = projection_property_path(name, &key.text())
                 {
                     self.record_projection_contract(&path, span, &annotation.type_annotation);
                 }
@@ -318,8 +319,8 @@ impl ModuleInfoExtractor {
                     let Some(key) = property.key.static_name() else {
                         continue;
                     };
-                    if let Some(path) = projection_property_path(name, &key)
-                        && seen.insert(key.to_string())
+                    if let Some(path) = projection_property_path(name, &key.text())
+                        && seen.insert(key.text().into_owned())
                         && property.kind == oxc_ast::ast::PropertyKind::Init
                     {
                         self.record_projection_source(&path, span, &property.value);
@@ -939,7 +940,7 @@ impl ModuleInfoExtractor {
         let Some((parent, _)) = self.projected_value(&member.object) else {
             return false;
         };
-        let key = member.static_property_name();
+        let key = member.static_property_name().map(JsText::text);
         // A named object slot and an index into the homogeneous array are distinct.
         let property = if self.projection_value_view(parent).array_element.is_some() {
             None

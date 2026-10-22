@@ -13,6 +13,7 @@ use super::{
     extract_arrow_return_expr, extract_function_body_final_return_expr, flatten_callee_path,
     is_dompurify_source, static_string_literal_value, unwrap_parens, unwrap_static_expr,
 };
+use crate::js_text::JsText;
 
 fn statement_exits_current_flow(stmt: &Statement<'_>) -> bool {
     match stmt {
@@ -40,7 +41,7 @@ fn path_relative_starts_with_parent<'b>(expr: &'b Expression<'_>) -> Option<&'b 
     let Some(Argument::StringLiteral(prefix)) = call.arguments.first() else {
         return None;
     };
-    if prefix.value.as_str() != ".." {
+    if prefix.value != ".." {
         return None;
     }
     Some(relative.name.as_str())
@@ -160,7 +161,7 @@ fn replace_pattern(arg: &Argument<'_>) -> Option<String> {
 
 fn argument_static_string(arg: &Argument<'_>) -> Option<String> {
     match arg {
-        Argument::StringLiteral(lit) => Some(lit.value.to_string()),
+        Argument::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         _ => arg.as_expression().and_then(static_string_literal_value),
     }
 }

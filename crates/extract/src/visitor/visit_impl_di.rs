@@ -3,6 +3,7 @@
 #[allow(clippy::wildcard_imports, reason = "many DI visitor AST types used")]
 use oxc_ast::ast::*;
 
+use crate::js_text::JsText;
 use fallow_types::extract::{DiFramework, DiKeySite, DiRole};
 
 use super::{
@@ -130,7 +131,7 @@ impl ModuleInfoExtractor {
             let ObjectPropertyKind::ObjectProperty(p) = prop else {
                 continue;
             };
-            if p.key.static_name().as_deref() == Some("providers")
+            if p.key.static_name().is_some_and(|name| name == "providers")
                 && let Expression::ArrayExpression(arr) = &p.value
                 && arr
                     .elements
@@ -148,7 +149,7 @@ impl ModuleInfoExtractor {
             let ObjectPropertyKind::ObjectProperty(p) = prop else {
                 continue;
             };
-            if p.key.static_name().as_deref() != Some("provide") {
+            if !p.key.static_name().is_some_and(|name| name == "provide") {
                 continue;
             }
             match &p.value {
@@ -207,7 +208,7 @@ impl ModuleInfoExtractor {
         let Some(key) = prop.key.static_name() else {
             return;
         };
-        match key.as_ref() {
+        match &*key.text() {
             "component" => {
                 if let Expression::Identifier(ident) = &prop.value {
                     self.angular_entry_component_refs

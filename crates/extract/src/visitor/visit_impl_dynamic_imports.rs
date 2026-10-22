@@ -1,6 +1,7 @@
 //! Dynamic import capture helpers for the visitor implementation.
 
 use super::*;
+use crate::js_text::JsText;
 use crate::visitor::{
     LoaderImport, LocalImportLoader, collect_loader_imports, collect_returned_imports,
 };
@@ -62,20 +63,21 @@ impl<'a> ModuleInfoExtractor {
             match first_arg {
                 Argument::StringLiteral(lit) => {
                     self.push_relative_dynamic_import_pattern(
-                        lit.value.to_string(),
+                        lit.value.text().into_owned(),
                         &[],
                         expr.span,
                     );
                 }
                 Argument::ArrayExpression(arr) => {
-                    let entries: Vec<&str> = arr
+                    let texts: Vec<std::borrow::Cow<'_, str>> = arr
                         .elements
                         .iter()
                         .filter_map(|elem| match elem {
-                            ArrayExpressionElement::StringLiteral(lit) => Some(lit.value.as_str()),
+                            ArrayExpressionElement::StringLiteral(lit) => Some(lit.value.text()),
                             _ => None,
                         })
                         .collect();
+                    let entries: Vec<&str> = texts.iter().map(|text| &**text).collect();
                     let excludes = import_meta_glob_excludes(&entries);
                     for entry in entries {
                         if !entry.starts_with('!') {
@@ -99,7 +101,7 @@ impl<'a> ModuleInfoExtractor {
             && obj.name == "require"
             && let Some(Argument::StringLiteral(dir_lit)) = expr.arguments.first()
         {
-            let dir = escape_glob_literal(&dir_lit.value);
+            let dir = escape_glob_literal(&dir_lit.value.text());
             if dir.starts_with("./") || dir.starts_with("../") {
                 let recursive = expr
                     .arguments
@@ -312,7 +314,7 @@ impl<'a> ModuleInfoExtractor {
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => Some("default".into()),
                     _ => None,
                 };
-                let contract = match (decl.source.value.as_str(), imported.as_deref(), specifier) {
+                let contract = match (&*decl.source.value.text(), imported.as_deref(), specifier) {
                     ("react", Some("lazy"), _) | ("vue", Some("defineAsyncComponent"), _) => {
                         Some(ComponentLoaderImport::Function)
                     }
@@ -657,7 +659,7 @@ impl<'a> ModuleInfoExtractor {
             let ObjectPropertyKind::ObjectProperty(prop) = prop else {
                 return false;
             };
-            prop.key.static_name().as_deref() == Some("ssr")
+            prop.key.static_name().is_some_and(|name| name == "ssr")
                 && matches!(&prop.value, Expression::BooleanLiteral(lit) if !lit.value)
         })
     }
@@ -800,7 +802,7 @@ fn is_eager_glob_options(argument: &Argument<'_>) -> bool {
         matches!(
             property,
             ObjectPropertyKind::ObjectProperty(property)
-                if property.key.static_name().as_deref() == Some("eager")
+                if property.key.static_name().is_some_and(|name| name == "eager")
                     && matches!(&property.value, Expression::BooleanLiteral(value) if value.value)
         )
     })

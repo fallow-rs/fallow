@@ -2,11 +2,14 @@
     clippy::wildcard_imports,
     reason = "package-resolution helpers use many AST node shapes"
 )]
+use std::borrow::Cow;
+
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::DynamicImportInfo;
+use crate::js_text::JsText;
 use fallow_types::extract::ImportLoadKind;
 
 use super::super::ModuleInfoExtractor;
@@ -83,14 +86,14 @@ fn is_import_meta_resolve_callee(expr: &Expression<'_>) -> bool {
 }
 
 /// The value of a string literal or of a template literal without expressions.
-fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
+fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<Cow<'a, str>> {
     match argument {
-        Argument::StringLiteral(lit) => Some(lit.value.as_str()),
+        Argument::StringLiteral(lit) => Some(lit.value.text()),
         Argument::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
             .quasis
             .first()
-            .and_then(|quasi| quasi.value.cooked.as_ref())
-            .map(|cooked| cooked.as_str()),
+            .and_then(|quasi| quasi.value.cooked)
+            .map(JsText::text),
         _ => None,
     }
 }
@@ -235,7 +238,7 @@ fn package_name_from_specifier(specifier: &str) -> Option<String> {
 /// value makes the result unknown, so the function gives `None`.
 fn string_literal_alternatives(expr: &Expression<'_>) -> Option<Vec<String>> {
     match expr.without_parentheses() {
-        Expression::StringLiteral(lit) => Some(vec![lit.value.to_string()]),
+        Expression::StringLiteral(lit) => Some(vec![lit.value.text().into_owned()]),
         Expression::ConditionalExpression(cond) => {
             let mut values = string_literal_alternatives(&cond.consequent)?;
             values.extend(string_literal_alternatives(&cond.alternate)?);
@@ -284,9 +287,9 @@ fn collect_static_object_string_property_values(
         match &prop.value {
             Expression::StringLiteral(lit) => {
                 values
-                    .entry(key_name.to_string())
+                    .entry(key_name.text().into_owned())
                     .or_default()
-                    .push(lit.value.to_string());
+                    .push(lit.value.text().into_owned());
             }
             Expression::ObjectExpression(child) => {
                 collect_static_object_string_property_values(child, values);
@@ -352,7 +355,9 @@ impl ModuleInfoExtractor {
                     .elements
                     .iter()
                     .filter_map(|element| match element {
-                        ArrayExpressionElement::StringLiteral(lit) => Some(lit.value.to_string()),
+                        ArrayExpressionElement::StringLiteral(lit) => {
+                            Some(lit.value.text().into_owned())
+                        }
                         _ => None,
                     })
                     .collect();
@@ -411,7 +416,7 @@ impl ModuleInfoExtractor {
             .arguments
             .first()
             .and_then(static_string_argument)
-            .and_then(package_root_from_resolution_specifier)
+            .and_then(|specifier| package_root_from_resolution_specifier(&specifier))
         else {
             return;
         };
@@ -463,7 +468,7 @@ impl ModuleInfoExtractor {
         if !self.is_module_file || self.ambient_module_depth > 0 || decl.body.is_none() {
             return;
         }
-        let specifier = decl.id.value.as_str();
+        let specifier = &*decl.id.value.text();
         if specifier.contains('*') || !is_package_resolution_specifier(specifier) {
             return;
         }
@@ -498,7 +503,7 @@ impl ModuleInfoExtractor {
 
     fn package_references_from_argument(&self, arg: &Argument<'_>) -> Vec<String> {
         match arg {
-            Argument::StringLiteral(lit) => package_from_resolution_specifier(lit.value.as_str())
+            Argument::StringLiteral(lit) => package_from_resolution_specifier(&lit.value.text())
                 .into_iter()
                 .collect(),
             Argument::TemplateLiteral(tpl) => self.package_references_from_template(tpl),
@@ -514,7 +519,7 @@ impl ModuleInfoExtractor {
 
     fn package_references_from_expression(&self, expr: &Expression<'_>) -> Vec<String> {
         match expr {
-            Expression::StringLiteral(lit) => package_from_resolution_specifier(lit.value.as_str())
+            Expression::StringLiteral(lit) => package_from_resolution_specifier(&lit.value.text())
                 .into_iter()
                 .collect(),
             Expression::TemplateLiteral(tpl) => self.package_references_from_template(tpl),
@@ -732,9 +737,10 @@ fn call_joins_node_modules_with_param(
     call: &CallExpression<'_>,
     params: &FxHashSet<String>,
 ) -> bool {
-    let has_node_modules = call.arguments.iter().any(
-        |arg| matches!(arg, Argument::StringLiteral(lit) if lit.value.as_str() == "node_modules"),
-    );
+    let has_node_modules = call
+        .arguments
+        .iter()
+        .any(|arg| matches!(arg, Argument::StringLiteral(lit) if lit.value == "node_modules"));
     has_node_modules
         && call
             .arguments

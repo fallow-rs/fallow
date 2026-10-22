@@ -26,6 +26,7 @@ use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 
 use crate::function_body::BodyRef;
+use crate::js_text::JsText;
 
 #[derive(Debug, Clone, Copy)]
 struct ReviewMetadata {
@@ -351,7 +352,7 @@ impl<'a> ExtractionBuilder<'a> {
                 continue;
             };
             self.retain_function(
-                &format!("{class_name}.{method_name}"),
+                &format!("{class_name}.{}", method_name.text()),
                 SimilarCodeFunctionKind::ClassMethod,
                 method.span,
                 ReviewMetadata::for_function(&method.value, self.syntax_reliable),
@@ -385,7 +386,7 @@ impl<'a> ExtractionBuilder<'a> {
                 continue;
             };
             self.retain_function(
-                &format!("{binding_name}.{method_name}"),
+                &format!("{binding_name}.{}", method_name.text()),
                 SimilarCodeFunctionKind::ObjectMethod,
                 property.span,
                 ReviewMetadata::for_function(function, self.syntax_reliable),

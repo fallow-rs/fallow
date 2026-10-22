@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use fallow_extract::JsText;
+
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
@@ -129,7 +131,7 @@ fn extract_gatsby_plugin_resolves(source: &str, path: &Path, result: &mut Plugin
                             _ => false,
                         };
                         if is_resolve && let Expression::StringLiteral(s) = &p.value {
-                            let dep = crate::resolve::extract_package_name(&s.value);
+                            let dep = crate::resolve::extract_package_name(&s.value.text());
                             result.referenced_dependencies.push(dep);
                         }
                     }

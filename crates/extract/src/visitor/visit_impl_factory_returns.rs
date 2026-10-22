@@ -11,6 +11,7 @@ use super::super::{FactoryAssignedValue, ObjectPropValueRef};
 use super::visit_source_paths::join_member_path;
 use super::{new_expression_class_name, unwrap_static_expr};
 use crate::function_body::BodyRef;
+use crate::js_text::JsText;
 
 #[derive(Clone, Copy)]
 pub(super) struct FactoryReturnFunctionInput<'site, 'ast> {
@@ -476,9 +477,9 @@ fn flatten_object_shape(
             continue; // computed key: skip
         };
         let path = if prefix.is_empty() {
-            key.to_string()
+            key.text().into_owned()
         } else {
-            format!("{prefix}.{key}")
+            format!("{prefix}.{}", key.text())
         };
         let value = unwrap_static_expr(&property.value);
         match value {

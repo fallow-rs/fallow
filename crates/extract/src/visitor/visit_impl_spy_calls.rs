@@ -8,6 +8,7 @@
 use oxc_ast::ast::*;
 
 use super::super::ModuleInfoExtractor;
+use crate::js_text::JsText;
 
 /// The role of a binding that names a test-framework spy API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,12 +57,12 @@ fn imported_spy_api(source: &str, imported: &str) -> Option<SpyApi> {
 /// without substitutions.
 fn static_spy_member(argument: &Argument<'_>) -> Option<String> {
     match argument {
-        Argument::StringLiteral(value) => Some(value.value.to_string()),
+        Argument::StringLiteral(value) => Some(value.value.text().into_owned()),
         Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
             .quasis
             .first()
-            .and_then(|quasi| quasi.value.cooked.as_ref())
-            .map(ToString::to_string),
+            .and_then(|quasi| quasi.value.cooked)
+            .map(|cooked| cooked.text().into_owned()),
         _ => None,
     }
 }
@@ -85,7 +86,7 @@ impl ModuleInfoExtractor {
                                 if !decl.import_kind.is_type() && !named.import_kind.is_type() =>
                             {
                                 imported_spy_api(
-                                    decl.source.value.as_str(),
+                                    &decl.source.value.text(),
                                     named.imported.name().as_str(),
                                 )
                             }

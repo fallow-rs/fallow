@@ -15,6 +15,8 @@ use fallow_types::extract::{
     ComponentReference, ImportInfo,
 };
 
+use crate::js_text::JsText;
+
 #[derive(Clone)]
 struct PropShape {
     name: String,
@@ -1112,12 +1114,13 @@ impl ContractCollector<'_, '_> {
             && tag.value.contains('-')
             && tag
                 .value
+                .text()
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         {
             self.facts
                 .escapes
-                .push(ComponentReference::Selector(tag.value.to_string()));
+                .push(ComponentReference::Selector(tag.value.text().into_owned()));
             return;
         }
         self.facts
@@ -1167,7 +1170,7 @@ fn static_key(key: &PropertyKey<'_>, computed: bool) -> Option<String> {
     }
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-        PropertyKey::StringLiteral(value) => Some(value.value.to_string()),
+        PropertyKey::StringLiteral(value) => Some(value.value.text().into_owned()),
         _ => None,
     }
 }

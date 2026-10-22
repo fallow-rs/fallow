@@ -17,6 +17,7 @@ use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::visit_factory_returns::object_literal_from_return;
 use super::visit_projections::MAX_PROJECTION_VALUES;
 use crate::function_body::BodyRef;
+use crate::js_text::JsText;
 
 /// Whether the module can produce a captured callback proof: a `new` expression
 /// and a synchronous callback whose single return is a bare identifier, in a
@@ -150,18 +151,18 @@ fn property_observations(
             return None;
         };
         let key = property.key.static_name()?;
-        if key.is_empty()
-            || key.contains('.')
-            || !keys.insert(key.to_string())
+        if key.as_js_str().is_empty()
+            || key.as_js_str().contains('.')
+            || !keys.insert(key.text().into_owned())
             || property.method
             || out.len() >= MAX_PROJECTION_VALUES
         {
             return None;
         }
         let path = if prefix.is_empty() {
-            key.to_string()
+            key.text().into_owned()
         } else {
-            format!("{prefix}.{key}")
+            format!("{prefix}.{}", key.text())
         };
         match unwrap_static_expr(&property.value) {
             Expression::ObjectExpression(nested) => property_observations(nested, &path, out)?,

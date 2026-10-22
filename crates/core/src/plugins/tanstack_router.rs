@@ -4,10 +4,10 @@
 //! Parses `tsr.config.json` to support custom route directories, generated
 //! route-tree locations, and virtual route config.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
+use fallow_extract::JsText;
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, ImportDeclaration, ObjectExpression,
     Program, Statement, VariableDeclaration,
@@ -430,7 +430,7 @@ fn add_virtual_route_config_file(config: &mut VirtualRouteConfig, root: &Path, c
     push_unique(&mut config.config_files, config_file.to_string());
 
     let file_path = root.join(config_file);
-    let Ok(source) = fs::read_to_string(&file_path) else {
+    let Ok(source) = std::fs::read_to_string(&file_path) else {
         return;
     };
     let base_dir = Path::new(config_file)
@@ -636,7 +636,7 @@ struct RouterPluginCallCollector<'a> {
 
 impl<'a> Visit<'a> for RouterPluginCallCollector<'a> {
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
-        let Some(kind) = import_plugin_kind(decl.source.value.as_str()) else {
+        let Some(kind) = import_plugin_kind(&decl.source.value.text()) else {
             return;
         };
 
@@ -703,7 +703,7 @@ impl<'a> Visit<'a> for RouterPluginCallCollector<'a> {
                         if prop
                             .key
                             .static_name()
-                            .is_some_and(|name| router_plugin_call_name(kind, &name))
+                            .is_some_and(|name| router_plugin_call_name(kind, &name.text()))
                             && let BindingPattern::BindingIdentifier(identifier) = &prop.value
                         {
                             push_unique_kind(
@@ -888,13 +888,13 @@ impl<'a> Visit<'a> for VirtualRouteCallCollector {
                         let Some(helper) = prop.key.static_name() else {
                             continue;
                         };
-                        if is_virtual_route_helper(&helper)
+                        if is_virtual_route_helper(&helper.text())
                             && let BindingPattern::BindingIdentifier(identifier) = &prop.value
                         {
                             push_unique_pair(
                                 &mut self.helper_bindings,
                                 identifier.name.to_string(),
-                                helper.to_string(),
+                                helper.text().into_owned(),
                             );
                         }
                     }
@@ -942,7 +942,7 @@ fn string_arg(call: &CallExpression<'_>, index: usize) -> Option<String> {
     call.arguments
         .get(index)
         .and_then(|argument| match argument {
-            Argument::StringLiteral(value) => Some(value.value.to_string()),
+            Argument::StringLiteral(value) => Some(value.value.text().into_owned()),
             Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
                 .quasis
                 .first()

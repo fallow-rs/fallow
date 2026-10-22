@@ -1,6 +1,9 @@
 //! Database write calls that the side-effect prune treats as sinks in a
 //! module with database reach.
 
+use std::borrow::Cow;
+
+use fallow_extract::JsText;
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, BindingPattern, CallExpression, Expression,
     MemberExpression, ObjectProperty, PropertyDefinition, PropertyKey, TaggedTemplateExpression,
@@ -124,18 +127,18 @@ fn is_sql_write(text: &str) -> bool {
         .any(|write| write.eq_ignore_ascii_case(verb))
 }
 
-fn first_static_text<'b>(call: &'b CallExpression<'_>) -> Option<&'b str> {
+fn first_static_text<'b>(call: &'b CallExpression<'_>) -> Option<Cow<'b, str>> {
     match call.arguments.first() {
-        Some(Argument::StringLiteral(literal)) => Some(literal.value.as_str()),
+        Some(Argument::StringLiteral(literal)) => Some(literal.value.text()),
         Some(Argument::TemplateLiteral(template)) => template
             .quasis
             .first()
-            .map(|quasi| quasi.value.raw.as_str()),
+            .map(|quasi| quasi.value.raw.as_str().into()),
         Some(Argument::TaggedTemplateExpression(tagged)) => tagged
             .quasi
             .quasis
             .first()
-            .map(|quasi| quasi.value.raw.as_str()),
+            .map(|quasi| quasi.value.raw.as_str().into()),
         _ => None,
     }
 }
@@ -177,7 +180,7 @@ fn is_prepared_write(expression: &Expression<'_>) -> bool {
         .is_some_and(|name| name == PREPARE_METHOD);
     is_prepare
         && !first_static_text(call)
-            .is_some_and(|text| sql_verb(text).eq_ignore_ascii_case(SQL_READ_VERB))
+            .is_some_and(|text| sql_verb(&text).eq_ignore_ascii_case(SQL_READ_VERB))
 }
 
 /// The receiver of a statement run: a name, such as `stmt` in `stmt.run()`,
@@ -217,14 +220,16 @@ impl Receiver {
             }
             member => member
                 .static_property_name()
-                .map(|name| Self::Field(name.to_owned())),
+                .map(|name| Self::Field(name.text().into_owned())),
         }
     }
 
     fn of_key(key: &PropertyKey<'_>) -> Option<Self> {
         match key {
             PropertyKey::PrivateIdentifier(name) => Some(Self::Field(format!("#{}", name.name))),
-            key => key.static_name().map(|name| Self::Field(name.into_owned())),
+            key => key
+                .static_name()
+                .map(|name| Self::Field(name.text().into_owned())),
         }
     }
 }
@@ -252,18 +257,18 @@ impl Writes {
         let Some(member) = call.callee.as_member_expression() else {
             return;
         };
-        let Some(name) = member.static_property_name() else {
+        let Some(name) = member.static_property_name().map(JsText::text) else {
             return;
         };
         let object = member.object().without_parentheses();
         let start = call.span.start;
-        if DATABASE_WRITE_METHODS.contains(&name)
+        if DATABASE_WRITE_METHODS.contains(&&*name)
             && !is_runtime_receiver(object)
             && !is_route_path(call)
         {
             self.starts.push(start);
         }
-        if PREPARED_RUN_METHODS.contains(&name) {
+        if PREPARED_RUN_METHODS.contains(&&*name) {
             if is_prepared_write(object) {
                 self.starts.push(start);
             } else if let Some(receiver) = Receiver::of(object) {
@@ -274,7 +279,7 @@ impl Writes {
                 });
             }
         }
-        if self.direct && STATEMENT_RUN_METHODS.contains(&name) && !is_regex(object) {
+        if self.direct && STATEMENT_RUN_METHODS.contains(&&*name) && !is_regex(object) {
             match object {
                 Expression::Identifier(receiver) => self.named_runs.push(NamedRun {
                     start,
@@ -344,7 +349,7 @@ impl<'a> Visit<'a> for Writes {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         self.check_member_call(it);
-        if first_static_text(it).is_some_and(is_sql_write) {
+        if first_static_text(it).is_some_and(|text| is_sql_write(&text)) {
             self.starts.push(it.span.start);
         }
         oxc_ast_visit::walk::walk_call_expression(self, it);
@@ -353,8 +358,8 @@ impl<'a> Visit<'a> for Writes {
     fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {
         let write_tag = it.tag.as_member_expression().is_some_and(|member| {
             member.static_property_name().is_some_and(|name| {
-                DATABASE_WRITE_METHODS.contains(&name)
-                    || (self.direct && STATEMENT_RUN_METHODS.contains(&name))
+                DATABASE_WRITE_METHODS.contains(&&*name.text())
+                    || (self.direct && STATEMENT_RUN_METHODS.contains(&&*name.text()))
             }) && !is_runtime_receiver(member.object())
         });
         let sql_write = it

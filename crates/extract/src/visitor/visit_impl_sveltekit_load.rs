@@ -6,6 +6,7 @@ use oxc_ast::ast::{
 };
 use oxc_span::GetSpan;
 
+use crate::js_text::JsText;
 use crate::visitor::RouteLoadHarvestMode;
 
 use super::{
@@ -179,7 +180,7 @@ fn harvest_load_return_keys(
                 };
                 let span = prop.key.span();
                 keys.push(fallow_types::extract::LoadReturnKey {
-                    name: name.to_string(),
+                    name: name.text().into_owned(),
                     span_start: span.start,
                     span_end: span.end,
                 });

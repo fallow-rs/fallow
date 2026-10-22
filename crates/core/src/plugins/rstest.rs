@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind};
 
 use super::config_parser;
@@ -242,7 +243,7 @@ fn read_aliases(obj: &ObjectExpression<'_>) -> Vec<(String, Vec<String>)> {
             ObjectPropertyKind::SpreadProperty(_) => None,
         })
         .filter_map(|property| {
-            let name = property.key.static_name()?.into_owned();
+            let name = property.key.static_name()?.text().into_owned();
             let targets = config_parser::expression_to_string_or_array(&property.value);
             (!targets.is_empty()).then_some((name, targets))
         })

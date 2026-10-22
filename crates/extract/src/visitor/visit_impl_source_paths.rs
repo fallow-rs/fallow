@@ -45,18 +45,18 @@ pub(super) fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
 /// `root.p1.p2...` from the properties of a member chain, outermost first.
 pub(in crate::visitor) fn join_member_path(
     root: &str,
-    properties_outermost_first: &[&str],
+    properties_outermost_first: &[impl AsRef<str>],
 ) -> String {
     let len = root.len()
         + properties_outermost_first
             .iter()
-            .map(|property| property.len() + 1)
+            .map(|property| property.as_ref().len() + 1)
             .sum::<usize>();
     let mut path = String::with_capacity(len);
     path.push_str(root);
     for property in properties_outermost_first.iter().rev() {
         path.push('.');
-        path.push_str(property);
+        path.push_str(property.as_ref());
     }
     path
 }

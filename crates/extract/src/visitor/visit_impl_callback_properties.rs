@@ -12,6 +12,7 @@ use super::super::{
 };
 use super::unwrap_static_expr;
 use crate::function_body::BodyRef;
+use crate::js_text::JsText;
 
 impl ModuleInfoExtractor {
     pub(super) fn prepare_callback_property_observations(
@@ -121,7 +122,8 @@ impl ModuleInfoExtractor {
                         return None;
                     };
                     let key = property.key.static_name()?;
-                    if !keys.insert(key.to_string()) || property.kind != PropertyKind::Init {
+                    if !keys.insert(key.text().into_owned()) || property.kind != PropertyKind::Init
+                    {
                         return None;
                     }
                     if key == "get" {

@@ -15,6 +15,7 @@ use crate::{
     DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
     ModuleLoadMechanism, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
     RequiredTypeMemberFact, SemanticFact, VisibilityTag,
+    js_text::{JsText, static_name_text},
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
@@ -742,7 +743,7 @@ impl ModuleInfoExtractor {
                         PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
                         _ => None,
                     },
-                    |name| Some(name.to_string()),
+                    |name| Some(name.text().into_owned()),
                 );
                 if let Some(name) = name
                     && let Some(annotation) = prop.type_annotation.as_deref()
@@ -963,7 +964,7 @@ impl ModuleInfoExtractor {
             let TSSignature::TSPropertySignature(prop) = member else {
                 continue;
             };
-            let Some(property_name) = prop.key.static_name() else {
+            let Some(property_name) = prop.key.static_name().map(static_name_text) else {
                 continue;
             };
             let Some(property_type) = prop.type_annotation.as_deref() else {
@@ -1148,7 +1149,7 @@ impl ModuleInfoExtractor {
             && !self.handled_require_spans.contains(&expr.span)
         {
             self.require_calls.push(RequireCallInfo {
-                source: lit.value.to_string(),
+                source: lit.value.text().into_owned(),
                 span: expr.span,
                 source_span: lit.span,
                 destructured_names: Vec::new(),
@@ -1216,7 +1217,7 @@ impl ModuleInfoExtractor {
                                 let local = default.local.name.to_string();
                                 self.default_import_locals.insert(local.clone());
                                 if crate::template_expression_scan::is_css_module_source(
-                                    decl.source.value.as_str(),
+                                    &decl.source.value.text(),
                                 ) {
                                     self.namespace_import_locals.insert(local);
                                 }
@@ -1227,7 +1228,7 @@ impl ModuleInfoExtractor {
                                 let local = named.local.name.to_string();
                                 self.default_import_locals.insert(local.clone());
                                 if crate::template_expression_scan::is_css_module_source(
-                                    decl.source.value.as_str(),
+                                    &decl.source.value.text(),
                                 ) {
                                     self.namespace_import_locals.insert(local);
                                 }
@@ -1701,7 +1702,7 @@ impl ModuleInfoExtractor {
                 self.semantic_facts.push(SemanticFact::RequiredTypeMember(
                     RequiredTypeMemberFact {
                         type_name: type_name.to_string(),
-                        member: member.to_string(),
+                        member: member.text().into_owned(),
                     },
                 ));
             }
@@ -1724,7 +1725,7 @@ impl ModuleInfoExtractor {
             let Some(property_name) = prop.key.static_name() else {
                 continue;
             };
-            props.push((property_name.to_string(), prop.span.start));
+            props.push((property_name.text().into_owned(), prop.span.start));
         }
         if !props.is_empty() {
             self.react_object_type_props
@@ -2121,8 +2122,8 @@ impl<'a> ModuleInfoExtractor {
     fn record_misplaced_directive_statement(&mut self, stmt: &ExpressionStatement<'a>) {
         if let Expression::StringLiteral(lit) = &stmt.expression {
             let is_server = match lit.value.as_str() {
-                "use server" => Some(true),
-                "use client" => Some(false),
+                Some("use server") => Some(true),
+                Some("use client") => Some(false),
                 _ => None,
             };
             if let Some(is_server) = is_server {
@@ -2534,7 +2535,7 @@ impl<'a> ModuleInfoExtractor {
                 self.has_unharvestable_load = true;
             }
             self.re_exports.push(ReExportInfo {
-                source: source.value.to_string(),
+                source: source.value.text().into_owned(),
                 imported_name: spec.local.name().to_string(),
                 exported_name: spec.exported.name().to_string(),
                 is_type_only: is_type_only || spec.export_kind.is_type(),
@@ -2874,7 +2875,7 @@ impl<'a> ModuleInfoExtractor {
                     };
                     self.member_accesses.push(MemberAccess {
                         object: ROUTE_LOADER_DATA_OBJECT.to_string(),
-                        member: name.to_string(),
+                        member: name.text().into_owned(),
                     });
                 }
             }
@@ -2993,9 +2994,9 @@ impl<'a> ModuleInfoExtractor {
         }
 
         if let Some((call, source)) = try_extract_require(init) {
-            self.record_dompurify_require_binding(declarator, source);
-            self.record_child_process_require_binding(declarator, source);
-            self.handle_require_declaration(declarator, call, source);
+            self.record_dompurify_require_binding(declarator, &source);
+            self.record_child_process_require_binding(declarator, &source);
+            self.handle_require_declaration(declarator, call, &source);
             return;
         }
 
@@ -3370,7 +3371,7 @@ impl<'a> ModuleInfoExtractor {
                         if let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(property) = property
                             && let Some(name) = property.key.static_name()
                         {
-                            self.push_cjs_named_export(name.to_string(), property.span);
+                            self.push_cjs_named_export(name.text().into_owned(), property.span);
                         }
                     }
                 }
@@ -3434,7 +3435,7 @@ impl<'a> ModuleInfoExtractor {
             }
             AssignmentTarget::ComputedMemberExpression(member) => {
                 if let Some(path) = static_member_object_name(&member.object) {
-                    if let Some(key) = member.static_property_name() {
+                    if let Some(key) = member.static_property_name().map(JsText::text) {
                         self.invalidate_direct_binding_path(&format!("{path}.{key}"), false);
                     } else {
                         self.invalidate_direct_binding_path(&path, true);
@@ -3774,7 +3775,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
                 _ => None,
             },
-            |name| Some(name.to_string()),
+            |name| Some(name.text().into_owned()),
         );
 
         if let Some(name) = member_key.as_deref() {
@@ -3830,7 +3831,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some(name) = prop.key.static_name()
             && let Some(value) = prop.value.as_ref()
         {
-            self.capture_hardcoded_secret_literal_sink(name.as_ref(), value, prop.span);
+            self.capture_hardcoded_secret_literal_sink(&name.text(), value, prop.span);
         }
 
         walk::walk_property_definition(self, prop);
@@ -4066,7 +4067,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
-        let source = decl.source.value.to_string();
+        let source = decl.source.value.text().into_owned();
         let is_type_only = decl.import_kind.is_type();
 
         let source_span = decl.source.span;
@@ -4219,7 +4220,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             let source = &decl.source;
             if decl.specifiers.is_empty() {
                 self.imports.push(ImportInfo {
-                    source: source.value.to_string(),
+                    source: source.value.text().into_owned(),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: true,
@@ -4231,7 +4232,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             } else {
                 for spec in &decl.specifiers {
                     self.imports.push(ImportInfo {
-                        source: source.value.to_string(),
+                        source: source.value.text().into_owned(),
                         imported_name: ImportedName::Named(spec.local.name().to_string()),
                         local_name: String::new(),
                         is_type_only: true,
@@ -4395,7 +4396,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // names with every value meaning erased, so the graph credits that
         // surface in the type namespace alone instead of in both.
         if self.ambient_module_depth > 0 {
-            let source = decl.source.value.to_string();
+            let source = decl.source.value.text().into_owned();
             let is_type_only_star = decl.export_kind.is_type();
             self.imports.push(ImportInfo {
                 source: source.clone(),
@@ -4429,7 +4430,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .map_or_else(|| "*".to_string(), |e| e.name().to_string());
 
         self.re_exports.push(ReExportInfo {
-            source: decl.source.value.to_string(),
+            source: decl.source.value.text().into_owned(),
             imported_name: "*".to_string(),
             exported_name,
             is_type_only: decl.export_kind.is_type(),
@@ -4540,7 +4541,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         if let Some(name) = prop.key.static_name() {
-            self.capture_hardcoded_secret_literal_sink(name.as_ref(), &prop.value, prop.span);
+            self.capture_hardcoded_secret_literal_sink(&name.text(), &prop.value, prop.span);
         }
 
         self.record_angular_entry_component_refs(prop);
@@ -4742,7 +4743,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_string_literal(&mut self, lit: &StringLiteral<'a>) {
-        self.record_bin_path_references(lit.value.as_str());
+        self.record_bin_path_references(&lit.value.text());
         walk::walk_string_literal(self, lit);
     }
 
@@ -4815,7 +4816,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     /// `TSImportType` node has no extractor, so the referenced files end up
     /// flagged as `unused-files`. See issues #396 and #397.
     fn visit_ts_import_type(&mut self, node: &oxc_ast::ast::TSImportType<'a>) {
-        let source = node.source.value.to_string();
+        let source = node.source.value.text().into_owned();
         let source_span = node.source.span;
 
         let imported_name = node.qualifier.as_ref().map_or_else(
@@ -4938,7 +4939,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 if let Some(object_name) = static_member_object_name(&member.object) {
                     if let Some(property_name) = member.static_property_name() {
                         self.record_direct_object_binding_assignment(
-                            &format!("{object_name}.{property_name}"),
+                            &format!("{object_name}.{}", property_name.text()),
                             &expr.right,
                             is_plain_assignment,
                         );
@@ -4973,7 +4974,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 if !self.invalidate_projected_computed_property(member)
                     && let Some(path) = static_member_object_name(&member.object)
                 {
-                    match member.static_property_name() {
+                    match member.static_property_name().map(JsText::text) {
                         Some(key) => {
                             self.invalidate_direct_binding_path(&format!("{path}.{key}"), false);
                         }
@@ -5023,7 +5024,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         match member.static_property_name() {
                             Some(key) => {
                                 self.invalidate_direct_binding_path(
-                                    &format!("{path}.{key}"),
+                                    &format!("{path}.{}", key.text()),
                                     false,
                                 );
                             }
@@ -5127,10 +5128,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         if let Some(member) = expr.static_property_name() {
-            self.record_subclass_member_access(&expr.object, member.as_str());
+            self.record_subclass_member_access(&expr.object, &member.text());
         }
         if let Some(member) = expr.static_property_name() {
-            self.record_awaited_dynamic_import_member(&expr.object, member.as_str());
+            self.record_awaited_dynamic_import_member(&expr.object, &member.text());
         }
         if let Expression::StaticMemberExpression(key) = &expr.expression
             && let Expression::Identifier(key_object) = &key.object
@@ -5152,13 +5153,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             {
                 self.member_accesses.push(MemberAccess {
                     object: ROUTE_LOADER_DATA_OBJECT.to_string(),
-                    member: lit.value.to_string(),
+                    member: lit.value.text().into_owned(),
                 });
             }
             if let Expression::StringLiteral(lit) = &expr.expression
                 && !shadowed
             {
-                self.push_receiver_member_access(obj.name.to_string(), lit.value.to_string());
+                self.push_receiver_member_access(obj.name.to_string(), lit.value.text().into());
                 self.mark_structured_namespace_reference(obj);
             } else if !shadowed {
                 self.record_whole_object_identifier_use(obj.name.as_str());
@@ -5396,15 +5397,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 let text = quasi
                     .value
                     .cooked
-                    .as_ref()
-                    .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
-                for raw in crate::html::collect_asset_refs(text) {
+                    .map_or_else(|| quasi.value.raw.as_str().into(), JsText::text);
+                for raw in crate::html::collect_asset_refs(&text) {
                     self.push_html_template_asset_import(&raw);
                 }
                 // Record custom-element tags rendered in the template
                 // (`<x-foo>`), feeding the Lit `unrendered-component` arm's
                 // project-wide rendered-tag union.
-                for tag in crate::html::collect_custom_element_tags(text) {
+                for tag in crate::html::collect_custom_element_tags(&text) {
                     self.used_custom_element_tags.insert(tag);
                 }
             }
@@ -5428,8 +5428,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 let text = quasi
                     .value
                     .cooked
-                    .as_ref()
-                    .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
+                    .map_or_else(|| quasi.value.raw.as_str().into(), JsText::text);
                 if text.ends_with('<') || text.ends_with("</") {
                     self.semantic_facts
                         .push(SemanticFact::DynamicCustomElementRender(
@@ -6075,7 +6074,7 @@ fn subclass_receiver_reference<'a, 'b>(
         Expression::ComputedMemberExpression(member) => {
             let name = member.static_property_name()?;
             let (reference, mut path) = subclass_receiver_reference(&member.object)?;
-            path.push(name.to_string());
+            path.push(name.text().into_owned());
             Some((reference, path))
         }
         _ => None,

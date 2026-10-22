@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{BindingPattern, Expression, ImportDeclarationSpecifier, Program, Statement};
 
 use super::config_parser;
@@ -210,22 +211,22 @@ fn walk_rule(rule: &oxc_ast::ast::ObjectExpression, result: &mut PluginResult) {
         let ObjectPropertyKind::ObjectProperty(p) = prop else {
             continue;
         };
-        let key_name = match &p.key {
-            PropertyKey::StaticIdentifier(id) => id.name.as_str(),
-            PropertyKey::StringLiteral(s) => s.value.as_str(),
+        let key_name: std::borrow::Cow<'_, str> = match &p.key {
+            PropertyKey::StaticIdentifier(id) => id.name.as_str().into(),
+            PropertyKey::StringLiteral(s) => s.value.text(),
             _ => continue,
         };
 
-        match key_name {
+        match &*key_name {
             "loader" => {
                 if let Expression::StringLiteral(s) = &p.value {
-                    let dep = crate::resolve::extract_package_name(&s.value);
+                    let dep = crate::resolve::extract_package_name(&s.value.text());
                     result.referenced_dependencies.push(dep);
                 }
             }
             "use" => match &p.value {
                 Expression::StringLiteral(s) => {
-                    let dep = crate::resolve::extract_package_name(&s.value);
+                    let dep = crate::resolve::extract_package_name(&s.value.text());
                     result.referenced_dependencies.push(dep);
                 }
                 Expression::ArrayExpression(arr) => {
@@ -233,14 +234,15 @@ fn walk_rule(rule: &oxc_ast::ast::ObjectExpression, result: &mut PluginResult) {
                         if let Some(expr) = use_el.as_expression() {
                             match expr {
                                 Expression::StringLiteral(s) => {
-                                    let dep = crate::resolve::extract_package_name(&s.value);
+                                    let dep = crate::resolve::extract_package_name(&s.value.text());
                                     result.referenced_dependencies.push(dep);
                                 }
                                 Expression::ObjectExpression(use_obj) => {
                                     if let Some(loader_prop) = find_obj_prop(use_obj, "loader")
                                         && let Expression::StringLiteral(s) = &loader_prop.value
                                     {
-                                        let dep = crate::resolve::extract_package_name(&s.value);
+                                        let dep =
+                                            crate::resolve::extract_package_name(&s.value.text());
                                         result.referenced_dependencies.push(dep);
                                     }
                                 }

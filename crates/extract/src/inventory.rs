@@ -49,6 +49,8 @@ use oxc_semantic::ScopeFlags;
 use oxc_span::{SourceType, Span};
 use rustc_hash::FxHashMap;
 
+use crate::js_text::JsText;
+
 /// A single static-inventory entry for one function.
 ///
 /// `name` is beacon-compatible (see the module docs for the naming rule).
@@ -325,7 +327,7 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
             self.pending_name = Some(accessor_label(
                 matches!(method.kind, MethodDefinitionKind::Get),
                 matches!(method.kind, MethodDefinitionKind::Set),
-                &name,
+                &name.text(),
             ));
         }
         walk::walk_method_definition(self, method);
@@ -365,7 +367,7 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
                 accessor_label(
                     matches!(prop.kind, PropertyKind::Get),
                     matches!(prop.kind, PropertyKind::Set),
-                    &name,
+                    &name.text(),
                 )
             })
         } else {
@@ -459,7 +461,7 @@ fn assignment_target_name(target: &AssignmentTarget<'_>) -> Option<String> {
     match target {
         AssignmentTarget::StaticMemberExpression(member) => Some(member.property.name.to_string()),
         AssignmentTarget::ComputedMemberExpression(member) => match &member.expression {
-            Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+            Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
             _ => None,
         },
         _ => None,
@@ -476,7 +478,7 @@ fn callee_name(callee: &Expression<'_>) -> Option<String> {
         Expression::Identifier(ident) => Some(ident.name.to_string()),
         Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
         Expression::ComputedMemberExpression(member) => match &member.expression {
-            Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+            Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
             _ => None,
         },
         // A parenthesized callee (`(foo)(cb)`, `(a.b)(cb)`) unwraps to its inner

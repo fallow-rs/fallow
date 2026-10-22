@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{Expression, ObjectExpression};
 
 use super::{PackageSelector, RunLocation};
@@ -207,7 +208,7 @@ pub fn task_commands(dir: &Path) -> Vec<(String, String)> {
                 .iter()
                 .filter_map(|property| property.as_property())
                 .filter_map(|property| {
-                    let name = property.key.static_name()?.to_string();
+                    let name = property.key.static_name()?.text().into_owned();
                     let command = task_command(&property.value)?;
                     Some((name, command))
                 })

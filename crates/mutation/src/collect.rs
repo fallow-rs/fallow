@@ -195,7 +195,12 @@ enum LabelValue<'a> {
 
 fn label_value<'a>(test: &Expression<'a>) -> Option<LabelValue<'a>> {
     match test {
-        Expression::StringLiteral(it) => Some(LabelValue::String(it.value.as_str())),
+        // A label with a lone surrogate equals no string that a mutant gives.
+        Expression::StringLiteral(it) => Some(
+            it.value
+                .as_str()
+                .map_or(LabelValue::Other, LabelValue::String),
+        ),
         Expression::BooleanLiteral(it) => Some(LabelValue::Boolean(it.value)),
         Expression::NumericLiteral(_) | Expression::NullLiteral(_) => Some(LabelValue::Other),
         _ => None,
@@ -754,7 +759,11 @@ fn is_closed_object_literal(init: &Expression<'_>) -> bool {
         }
         let key = match &property.key {
             PropertyKey::StaticIdentifier(name) => name.name.as_str(),
-            PropertyKey::StringLiteral(literal) => literal.value.as_str(),
+            // A key with a lone surrogate is not `__proto__` or a falsy key.
+            PropertyKey::StringLiteral(literal) => match literal.value.as_str() {
+                Some(key) => key,
+                None => return true,
+            },
             PropertyKey::NumericLiteral(literal) => {
                 return literal.value != 0.0 && !literal.value.is_nan();
             }
@@ -887,7 +896,8 @@ fn is_zero(expression: &Expression<'_>) -> bool {
 }
 
 fn key_name(key: &PropertyKey<'_>) -> Option<String> {
-    key.static_name().map(|name| name.into_owned())
+    key.static_name()
+        .and_then(|name| name.as_js_str().as_str().map(str::to_owned))
 }
 
 /// `console.*` and `debug(...)` calls. The collector skips the full call:

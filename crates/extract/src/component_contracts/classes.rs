@@ -1,5 +1,6 @@
 //! Decorator, signal, reactive property and typed Glimmer argument contracts.
 use super::*;
+use crate::js_text::JsText;
 
 impl ContractCollector<'_, '_> {
     pub(super) fn vue_options_props(&mut self, object: &ObjectExpression<'_>) {
@@ -161,7 +162,7 @@ impl ContractCollector<'_, '_> {
                 found = true;
                 if let Some(argument) = call.arguments.first().and_then(Argument::as_expression) {
                     if let Expression::StringLiteral(alias) = argument {
-                        name = alias.value.to_string();
+                        name = alias.value.text().into_owned();
                     } else {
                         read_input_options(
                             argument,
@@ -242,7 +243,7 @@ impl ContractCollector<'_, '_> {
                     self.facts.external_templates.push(
                         fallow_types::extract::ComponentExternalTemplate {
                             component_span: id.span.start,
-                            source: url.value.to_string(),
+                            source: url.value.text().into_owned(),
                         },
                     );
                 }
@@ -350,7 +351,7 @@ impl ContractCollector<'_, '_> {
                 if static_key(&option.key, option.computed).as_deref() == Some("attribute") {
                     match &option.value {
                         Expression::StringLiteral(alias) => {
-                            aliases.push(alias.value.to_ascii_lowercase());
+                            aliases.push(alias.value.text().to_ascii_lowercase());
                         }
                         Expression::BooleanLiteral(value) if !value.value => {
                             attribute_disabled = true;
@@ -518,7 +519,7 @@ fn read_input_options(
         match static_key(&option.key, option.computed).as_deref() {
             Some("alias") => {
                 if let Expression::StringLiteral(alias) = &option.value {
-                    *name = alias.value.to_string();
+                    *name = alias.value.text().into_owned();
                 } else {
                     *incomplete = true;
                 }
@@ -580,7 +581,7 @@ fn angular_metadata<'s>(
                 }
                 Some("hostDirectives") => incomplete = true,
                 Some("selector") => {
-                    incomplete |= !matches!(&property.value, Expression::StringLiteral(value) if value.value.split(',').all(|selector| selector.trim().bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')));
+                    incomplete |= !matches!(&property.value, Expression::StringLiteral(value) if value.value.text().split(',').all(|selector| selector.trim().bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')));
                 }
                 _ => {}
             }

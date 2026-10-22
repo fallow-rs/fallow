@@ -8,6 +8,7 @@ use std::path::{Component, PathBuf};
 
 use crate::MemberAccess;
 use crate::function_body::BodyRef;
+use crate::js_text::JsText;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
@@ -213,12 +214,12 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
                 self.members
                     .entry(param)
                     .or_default()
-                    .insert(property.value.to_string());
+                    .insert(property.value.text().into_owned());
             } else {
                 self.property_members
                     .entry(param)
                     .or_default()
-                    .insert((property_path, property.value.to_string()));
+                    .insert((property_path, property.value.text().into_owned()));
             }
         }
         walk::walk_computed_member_expression(self, expr);
@@ -297,13 +298,13 @@ use super::super::MockObjectProvenance;
 
 pub(super) fn mock_static_target_source(call: &CallExpression<'_>) -> Option<String> {
     call.arguments.first().and_then(|argument| match argument {
-        Argument::StringLiteral(value) => Some(value.value.to_string()),
+        Argument::StringLiteral(value) => Some(value.value.text().into_owned()),
         Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
             .quasis
             .first()
             .map(|quasi| quasi.value.raw.to_string()),
         Argument::ImportExpression(value) => match &value.source {
-            Expression::StringLiteral(source) => Some(source.value.to_string()),
+            Expression::StringLiteral(source) => Some(source.value.text().into_owned()),
             _ => None,
         },
         _ => None,
@@ -436,7 +437,7 @@ fn collect_pino_transport_object_targets(obj: &ObjectExpression<'_>, out: &mut V
         let ObjectPropertyKind::ObjectProperty(prop) = prop else {
             continue;
         };
-        match prop.key.static_name().as_deref() {
+        match prop.key.static_name().as_ref().map(JsText::text).as_deref() {
             Some(PINO_TARGET_KEY) => record_pino_target_value(&prop.value, out),
             Some(PINO_TARGETS_KEY) => record_pino_targets_array(&prop.value, out),
             _ => {}
@@ -446,7 +447,7 @@ fn collect_pino_transport_object_targets(obj: &ObjectExpression<'_>, out: &mut V
 
 fn record_pino_target_value(expr: &Expression<'_>, out: &mut Vec<String>) {
     if let Expression::StringLiteral(lit) = unwrap_static_expr(expr) {
-        record_pino_target(lit.value.as_str(), out);
+        record_pino_target(&lit.value.text(), out);
     }
 }
 
@@ -615,7 +616,7 @@ impl<'a> Visit<'a> for MockFactoryProofVisitor {
     fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
         if member
             .static_property_name()
-            .is_some_and(|name| is_original_loader_property(&name))
+            .is_some_and(|name| is_original_loader_property(&name.text()))
         {
             self.unsafe_escape = true;
             return;
@@ -629,7 +630,7 @@ impl<'a> Visit<'a> for MockFactoryProofVisitor {
                 property
                     .key
                     .static_name()
-                    .is_some_and(|name| is_original_loader_property(&name))
+                    .is_some_and(|name| is_original_loader_property(&name.text()))
             })
         {
             self.unsafe_escape = true;
@@ -695,7 +696,7 @@ pub(super) fn is_value_returning_memo_callee(callee: &Expression<'_>) -> bool {
 /// Specifier source string from the first argument of `register(...)`.
 pub(super) fn node_module_register_specifier(call: &CallExpression<'_>) -> Option<String> {
     match call.arguments.first()? {
-        Argument::StringLiteral(value) => Some(value.value.to_string()),
+        Argument::StringLiteral(value) => Some(value.value.text().into_owned()),
         Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
             .quasis
             .first()
@@ -739,7 +740,7 @@ pub(super) fn new_url_import_source(expr: &NewExpression<'_>) -> Option<String> 
         && (path_lit.value.starts_with("./") || path_lit.value.starts_with("../"))
         && !path_lit.value.ends_with('/')
     {
-        Some(path_lit.value.to_string())
+        Some(path_lit.value.text().into_owned())
     } else {
         None
     }
@@ -1183,7 +1184,7 @@ pub(super) fn collect_object_type_property_types(
         };
         if let Some(type_name) = extract_type_annotation_name(type_annotation) {
             properties.insert(
-                property_name.to_string(),
+                property_name.text().into_owned(),
                 super::super::TypePropertyTarget {
                     name: type_name,
                     reference_span: super::super::helpers::extract_type_reference_origin(
@@ -1215,9 +1216,9 @@ fn collect_object_pattern_bindings(
             continue;
         };
         let next_path = if path_prefix.is_empty() {
-            fixture_name.to_string()
+            fixture_name.text().into_owned()
         } else {
-            format!("{path_prefix}.{fixture_name}")
+            format!("{path_prefix}.{}", fixture_name.text())
         };
         match &prop.value {
             BindingPattern::ObjectPattern(inner) => {
@@ -1461,9 +1462,9 @@ fn collect_fixture_type_binding_from_member(
         return;
     };
     let next_path = if path_prefix.is_empty() {
-        fixture_name.to_string()
+        fixture_name.text().into_owned()
     } else {
-        format!("{path_prefix}.{fixture_name}")
+        format!("{path_prefix}.{}", fixture_name.text())
     };
     if let Some((alias_name, _)) = fixture_type_reference_name(&type_annotation.type_annotation)
         && aliases.contains_key(alias_name.as_str())
@@ -1520,7 +1521,7 @@ fn fixture_indexed_access_type_name(ty: &TSType<'_>) -> Option<String> {
     if index.value.is_empty() || index.value.contains('"') {
         return None;
     }
-    Some(format!("{}[\"{}\"]", object.name, index.value))
+    Some(format!("{}[\"{}\"]", object.name, index.value.text()))
 }
 
 fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Span)> {

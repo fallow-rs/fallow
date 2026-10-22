@@ -16,7 +16,6 @@ use oxc_ast::ast::{
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::suppress::ParsedSuppressions;
 use crate::{
     AngularTemplateMemberAccessFact, ClassThisMemberAccessFact, ClassThisWholeObjectUseFact,
     ComputedEnumKeyUseFact, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
@@ -27,6 +26,7 @@ use crate::{
     ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
     TypedPropertyMemberAccessFact, VisibilityTag,
 };
+use crate::{js_text::JsText, suppress::ParsedSuppressions};
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
     ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
@@ -1543,20 +1543,20 @@ impl ModuleInfoExtractor {
             return;
         }
         let name = match call.arguments.first().and_then(|arg| arg.as_expression()) {
-            Some(Expression::StringLiteral(lit)) => lit.value.as_str(),
+            Some(Expression::StringLiteral(lit)) => lit.value.text(),
             Some(Expression::TemplateLiteral(lit)) if lit.expressions.is_empty() => {
                 match lit
                     .quasis
                     .first()
                     .and_then(|quasi| quasi.value.cooked.as_ref())
                 {
-                    Some(cooked) => cooked.as_str(),
+                    Some(cooked) => cooked.text(),
                     None => return,
                 }
             }
             _ => return,
         };
-        if let Some(candidate) = crate::og_image::template_candidate(name) {
+        if let Some(candidate) = crate::og_image::template_candidate(&name) {
             self.og_image_template_candidates.push(candidate);
         }
     }
@@ -4081,7 +4081,7 @@ fn destructured_factory_keys(obj_pat: &ObjectPattern<'_>) -> Option<Vec<String>>
     obj_pat
         .properties
         .iter()
-        .map(|prop| prop.key.static_name().map(|name| name.to_string()))
+        .map(|prop| prop.key.static_name().map(|name| name.text().into_owned()))
         .collect()
 }
 
@@ -4098,7 +4098,7 @@ pub(super) fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<Str
     obj_pat
         .properties
         .iter()
-        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
+        .filter_map(|prop| prop.key.static_name().map(|n| n.text().into_owned()))
         .collect()
 }
 
@@ -4165,7 +4165,7 @@ pub(crate) fn extend_whole_object_uses(info: &mut ModuleInfo, extra: Vec<String>
 
 fn try_extract_require<'a, 'b>(
     init: &'b Expression<'a>,
-) -> Option<(&'b CallExpression<'a>, &'b str)> {
+) -> Option<(&'b CallExpression<'a>, std::borrow::Cow<'b, str>)> {
     let Expression::CallExpression(call) = init else {
         return None;
     };
@@ -4178,7 +4178,7 @@ fn try_extract_require<'a, 'b>(
     let Some(Argument::StringLiteral(lit)) = call.arguments.first() else {
         return None;
     };
-    Some((call, &lit.value))
+    Some((call, lit.value.text()))
 }
 
 /// Collect every statically-resolvable module specifier from a dynamic
@@ -4193,7 +4193,7 @@ fn try_extract_require<'a, 'b>(
 fn collect_static_import_specifiers(source: &Expression<'_>, out: &mut Vec<String>) {
     match source {
         Expression::StringLiteral(lit) => {
-            let value = lit.value.to_string();
+            let value = lit.value.text().into_owned();
             if !out.contains(&value) {
                 out.push(value);
             }
@@ -4226,7 +4226,7 @@ fn try_extract_property_callback_import<'a, 'b>(
 ) -> Option<(&'b ImportExpression<'a>, Vec<String>)> {
     let property_name = prop.key.static_name()?;
     if !matches!(
-        property_name.as_ref(),
+        &*property_name.text(),
         "component" | "loadChildren" | "loadComponent"
     ) {
         return None;
@@ -4337,7 +4337,7 @@ pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String
         return None;
     }
     let source = match call.arguments.first()?.as_expression()? {
-        Expression::StringLiteral(lit) => lit.value.to_string(),
+        Expression::StringLiteral(lit) => lit.value.text().into_owned(),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             tpl.quasis.first()?.value.raw.to_string()
         }

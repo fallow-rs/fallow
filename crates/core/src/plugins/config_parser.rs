@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_extract::visitor::extract_import_from_callable;
+use fallow_extract::{JsText, visitor::extract_import_from_callable};
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
@@ -23,7 +23,7 @@ pub(crate) fn extract_imports(source: &str, path: &Path) -> Vec<String> {
         let mut sources = Vec::new();
         for stmt in &program.body {
             if let Statement::ImportDeclaration(decl) = stmt {
-                sources.push(decl.source.value.to_string());
+                sources.push(decl.source.value.text().into_owned());
             }
         }
         Some(sources)
@@ -39,7 +39,7 @@ pub(crate) fn extract_imports_and_requires(source: &str, path: &Path) -> Vec<Str
         for stmt in &program.body {
             match stmt {
                 Statement::ImportDeclaration(decl) => {
-                    sources.push(decl.source.value.to_string());
+                    sources.push(decl.source.value.text().into_owned());
                 }
                 Statement::ExpressionStatement(expr) => {
                     if let Expression::CallExpression(call) = &expr.expression
@@ -1993,7 +1993,7 @@ fn get_nested_command_from_object(obj: &ObjectExpression, path: &[&str]) -> Opti
 /// Convert an expression to a string if it's a string literal.
 pub(crate) fn expression_to_string(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::StringLiteral(s) => Some(s.value.to_string()),
+        Expression::StringLiteral(s) => Some(s.value.text().into_owned()),
         Expression::TemplateLiteral(t) if t.expressions.is_empty() => {
             t.quasis.first().map(|q| q.value.raw.to_string())
         }
@@ -2004,7 +2004,7 @@ pub(crate) fn expression_to_string(expr: &Expression) -> Option<String> {
 /// Convert an expression to a shell command when static command tokens are recoverable.
 fn expression_to_command(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::StringLiteral(s) => Some(s.value.to_string()),
+        Expression::StringLiteral(s) => Some(s.value.text().into_owned()),
         Expression::TemplateLiteral(template) => template_literal_to_command(template),
         Expression::ParenthesizedExpression(paren) => expression_to_command(&paren.expression),
         Expression::TSAsExpression(ts_as) => expression_to_command(&ts_as.expression),
@@ -2327,7 +2327,7 @@ fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(
             alias_replacement_kinded(&ts_sat.expression, scope)
         }
         Expression::StringLiteral(s) => {
-            let value = s.value.to_string();
+            let value = s.value.text().into_owned();
             let is_bare =
                 !value.starts_with("./") && !value.starts_with("../") && !value.starts_with('/');
             Some((value, is_bare))
@@ -2602,7 +2602,7 @@ pub(crate) fn find_relative_import_binding(
         let Statement::ImportDeclaration(decl) = stmt else {
             continue;
         };
-        let specifier = decl.source.value.as_str();
+        let specifier = &*decl.source.value.text();
         if !is_relative_specifier(specifier) {
             continue;
         }
@@ -2823,7 +2823,7 @@ pub(crate) fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
     let mut values = Vec::new();
     match expr {
         Expression::StringLiteral(s) => {
-            values.push(s.value.to_string());
+            values.push(s.value.text().into_owned());
         }
         Expression::ArrayExpression(arr) => collect_shallow_array_values(arr, &mut values),
         Expression::ObjectExpression(obj) => {
@@ -2831,7 +2831,7 @@ pub(crate) fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
                 if let ObjectPropertyKind::ObjectProperty(p) = prop {
                     match &p.value {
                         Expression::StringLiteral(s) => {
-                            values.push(s.value.to_string());
+                            values.push(s.value.text().into_owned());
                         }
                         Expression::ArrayExpression(sub_arr) => {
                             if let Some(first) = sub_arr.elements.first()
@@ -2867,7 +2867,7 @@ fn collect_shallow_array_values(arr: &ArrayExpression<'_>, values: &mut Vec<Stri
             },
         };
         match inner {
-            Expression::StringLiteral(s) => values.push(s.value.to_string()),
+            Expression::StringLiteral(s) => values.push(s.value.text().into_owned()),
             Expression::ArrayExpression(sub_arr) => {
                 if let Some(first) = sub_arr.elements.first()
                     && let Some(first_expr) = first.as_expression()
@@ -2945,7 +2945,7 @@ fn shallow_string_or_object_property(expr: &Expression, object_property: &str) -
 fn collect_all_string_values(expr: &Expression, values: &mut Vec<String>) {
     match expr {
         Expression::StringLiteral(s) => {
-            values.push(s.value.to_string());
+            values.push(s.value.text().into_owned());
         }
         Expression::ArrayExpression(arr) => {
             for el in &arr.elements {
@@ -2969,7 +2969,7 @@ fn collect_all_string_values(expr: &Expression, values: &mut Vec<String>) {
 fn property_key_to_string(key: &PropertyKey) -> Option<String> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-        PropertyKey::StringLiteral(s) => Some(s.value.to_string()),
+        PropertyKey::StringLiteral(s) => Some(s.value.text().into_owned()),
         _ => None,
     }
 }
@@ -3057,7 +3057,7 @@ pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
 
 fn string_or_array_in(expr: &Expression, scope: PathScope<'_>) -> Vec<String> {
     match expr {
-        Expression::StringLiteral(s) => vec![s.value.to_string()],
+        Expression::StringLiteral(s) => vec![s.value.text().into_owned()],
         Expression::TemplateLiteral(t) if t.expressions.is_empty() => t
             .quasis
             .first()
@@ -3144,7 +3144,7 @@ pub(crate) fn is_require_call(call: &CallExpression) -> bool {
 pub(crate) fn get_require_source(call: &CallExpression) -> Option<String> {
     call.arguments.first().and_then(|arg| {
         if let Argument::StringLiteral(s) = arg {
-            Some(s.value.to_string())
+            Some(s.value.text().into_owned())
         } else {
             None
         }

@@ -21,6 +21,7 @@ use fallow_types::extract::{
 
 use super::{ModuleInfoExtractor, PendingComponentArrow, PendingTypedReactProps};
 use crate::function_body::BodyRef;
+use crate::js_text::JsText;
 
 impl ModuleInfoExtractor {
     /// Pre-scan a variable declaration for named arrow / function-expression
@@ -585,7 +586,7 @@ fn harvest_destructured_props(pattern: &BindingPattern<'_>) -> Option<Vec<Harves
     for prop in &obj.properties {
         let key_name = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::StringLiteral(s) => s.value.to_string(),
+            PropertyKey::StringLiteral(s) => s.value.text().into_owned(),
             _ => return None,
         };
         let local = binding_pattern_local_name(&prop.value)?;
@@ -789,7 +790,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypedPropsVisitor<'_, '_> {
         {
             for prop in &pattern.properties {
                 if let Some(key) = prop.key.static_name() {
-                    self.member_uses.insert(key.to_string());
+                    self.member_uses.insert(key.text().into_owned());
                 }
             }
             self.accounted_refs += 1;

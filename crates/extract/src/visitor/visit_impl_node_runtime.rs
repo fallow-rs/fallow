@@ -4,6 +4,7 @@
 )]
 use oxc_ast::ast::*;
 
+use crate::js_text::JsText;
 use crate::{DynamicImportInfo, ImportedName};
 use fallow_types::extract::ImportLoadKind;
 
@@ -231,7 +232,7 @@ impl ModuleInfoExtractor {
 
     fn child_process_fork_sources_from_expression(&self, expr: &Expression<'_>) -> Vec<String> {
         match expr {
-            Expression::StringLiteral(lit) => local_fork_source(&lit.value)
+            Expression::StringLiteral(lit) => local_fork_source(&lit.value.text())
                 .into_iter()
                 .collect::<Vec<_>>(),
             Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
@@ -292,7 +293,7 @@ impl ModuleInfoExtractor {
         let Some(Argument::StringLiteral(relative)) = call.arguments.get(1) else {
             return Vec::new();
         };
-        normalize_module_file_relative_path(&relative.value)
+        normalize_module_file_relative_path(&relative.value.text())
             .and_then(|source| local_fork_source(&source))
             .into_iter()
             .collect()

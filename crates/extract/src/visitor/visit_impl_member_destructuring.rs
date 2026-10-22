@@ -13,6 +13,7 @@ use std::borrow::Cow;
 use super::super::{BindingTarget, ModuleInfoExtractor};
 use super::{static_member_object_name, unwrap_static_expr};
 use crate::MemberAccess;
+use crate::js_text::static_name_text;
 use crate::visitor::helpers::extract_type_reference_name;
 
 impl<'a> ModuleInfoExtractor {
@@ -286,7 +287,7 @@ impl<'a> ModuleInfoExtractor {
                     let TSSignature::TSPropertySignature(signature) = member else {
                         return None;
                     };
-                    (signature.key.static_name().as_deref() == Some(key.as_ref()))
+                    (signature.key.static_name().as_ref() == Some(&key))
                         .then_some(signature.type_annotation.as_deref())
                         .flatten()
                 }) else {
@@ -316,7 +317,7 @@ impl<'a> ModuleInfoExtractor {
         let keys: Vec<_> = pattern
             .properties
             .iter()
-            .map(|property| property.key.static_name())
+            .map(|property| property.key.static_name().map(static_name_text))
             .collect();
         self.credit_destructured_class_members(&class_name, None, &keys, pattern.rest.is_some());
     }
@@ -393,7 +394,7 @@ impl<'b, 'a> DestructureObject<'b, 'a> {
                         _ => None,
                     };
                     DestructureEntry {
-                        key: property.key.static_name(),
+                        key: property.key.static_name().map(static_name_text),
                         nested,
                         default: nested.and(default),
                     }
@@ -424,7 +425,7 @@ impl<'b, 'a> DestructureObject<'b, 'a> {
                             _ => None,
                         };
                         DestructureEntry {
-                            key: property.name.static_name(),
+                            key: property.name.static_name().map(static_name_text),
                             nested,
                             default: nested.and(default),
                         }
@@ -447,7 +448,7 @@ fn object_literal_property_value<'b, 'a>(
         let ObjectPropertyKind::ObjectProperty(property) = property else {
             return None;
         };
-        if property.key.static_name().as_deref() != Some(key) {
+        if !property.key.static_name().is_some_and(|name| name == key) {
             return None;
         }
         match property.kind {

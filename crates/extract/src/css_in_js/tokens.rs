@@ -66,6 +66,7 @@ use oxc_span::{GetSpan, SourceType, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::object::{Lib, module_library};
+use crate::js_text::JsText;
 
 const PANDA_CONFIG_BINDING: &str = "pandaConfig";
 
@@ -283,7 +284,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
                 continue;
             };
             if decl.import_kind.is_type()
-                || module_library(decl.source.value.as_str()) != Some(Lib::StyleX)
+                || module_library(&decl.source.value.text()) != Some(Lib::StyleX)
             {
                 continue;
             }
@@ -830,7 +831,7 @@ impl<'a> Visit<'a> for PandaTokenCallCollector<'a, '_> {
         if callee.name.as_str() == self.alias
             && let Some(Argument::StringLiteral(lit)) = call.arguments.first()
         {
-            let token_path = lit.value.as_str();
+            let token_path = &*lit.value.text();
             if self.leaf_paths.contains(token_path) {
                 let line = self.lines.line_at(call.span().start);
                 self.hits.push(TokenConsumerHit {
@@ -863,7 +864,7 @@ impl<'a> PandaStyleValueCollector<'a, '_> {
     fn record_expression(&mut self, expr: &Expression<'a>) {
         match expr {
             Expression::StringLiteral(lit) => {
-                let token_path = lit.value.as_str();
+                let token_path = &*lit.value.text();
                 if self.leaf_paths.contains(token_path) {
                     let line = self.lines.line_at(lit.span().start);
                     self.hits.push(TokenConsumerHit {
@@ -1490,7 +1491,7 @@ fn resolve_static_stylex_object_property<'a>(
                         visiting,
                     )?
                 } else {
-                    property.key.static_name()?.to_string()
+                    property.key.static_name()?.text().into_owned()
                 };
                 if key == wanted {
                     return Some(ResolvedStyleXStaticMember {
@@ -2677,7 +2678,7 @@ fn is_stylex_type_helper(name: &str) -> bool {
 /// dynamic key that cannot be resolved without executing code.
 fn static_computed_key(expr: &Expression<'_>) -> Option<String> {
     match unwrap_transparent_expression(expr) {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::NumericLiteral(lit) => Some(format_numeric_token(lit)),
         Expression::TemplateLiteral(template) if template.expressions.is_empty() => template
             .quasis
@@ -2881,7 +2882,7 @@ struct TokenDefCollector<'a> {
     /// Every resolved reference to a top-level immutable object literal.
     const_object_references: FxHashMap<ReferenceId, SymbolId>,
     /// Top-level constant condition names used by computed StyleX condition keys.
-    const_strings: FxHashMap<ReferenceId, (u32, &'a str)>,
+    const_strings: FxHashMap<ReferenceId, (u32, oxc_str::JSStr<'a>)>,
     nested_depth: u32,
     collecting_mutations: bool,
     defs: Vec<CssInJsTokenDef>,
@@ -2913,7 +2914,7 @@ impl<'a> TokenDefCollector<'a> {
             if decl.import_kind.is_type() {
                 continue;
             }
-            let Some(lib) = module_library(decl.source.value.as_str()) else {
+            let Some(lib) = module_library(&decl.source.value.text()) else {
                 continue;
             };
             let Some(specifiers) = &decl.specifiers else {
@@ -2980,7 +2981,7 @@ impl<'a> TokenDefCollector<'a> {
                                 .iter()
                                 .copied()
                                 .map(|reference_id| {
-                                    (reference_id, (declaration_start, value.value.as_str()))
+                                    (reference_id, (declaration_start, value.value))
                                 }),
                         );
                     }
@@ -3171,7 +3172,7 @@ impl<'a> TokenDefCollector<'a> {
 
 struct StyleXTokenContext<'maps, 'ast> {
     imports: &'maps FxHashMap<&'ast str, (Lib, &'ast str)>,
-    const_strings: &'maps FxHashMap<ReferenceId, (u32, &'ast str)>,
+    const_strings: &'maps FxHashMap<ReferenceId, (u32, oxc_str::JSStr<'ast>)>,
     before: u32,
 }
 
@@ -3191,9 +3192,9 @@ fn collect_stylex_token_object(
             return false;
         };
         let path = if prefix.is_empty() {
-            key.to_string()
+            key.text().into_owned()
         } else {
-            format!("{prefix}.{key}")
+            format!("{prefix}.{}", key.text())
         };
         let line = lines.line_at(prop.key.span().start);
         match shape {
@@ -3227,7 +3228,7 @@ fn collect_stylex_token_object(
 
 fn is_stylex_conditional_object(
     obj: &ObjectExpression<'_>,
-    const_strings: &FxHashMap<ReferenceId, (u32, &str)>,
+    const_strings: &FxHashMap<ReferenceId, (u32, oxc_str::JSStr<'_>)>,
     before: u32,
 ) -> bool {
     let mut has_default = false;
@@ -3248,7 +3249,7 @@ fn is_stylex_conditional_object(
                     if *declaration_start >= before {
                         return false;
                     }
-                    (*condition).to_string()
+                    condition.text().into_owned()
                 }
                 Some(expression) => {
                     let Some(condition) = static_computed_key(expression) else {
@@ -3262,7 +3263,7 @@ fn is_stylex_conditional_object(
             let Some(key) = prop.key.static_name() else {
                 return false;
             };
-            key.to_string()
+            key.text().into_owned()
         };
         if key == "default" {
             has_default = true;
@@ -3282,7 +3283,7 @@ fn stylex_static_token_value(
             let ObjectPropertyKind::ObjectProperty(prop) = prop else {
                 return None;
             };
-            (prop.key.static_name().as_deref() == Some("default"))
+            (prop.key.static_name().is_some_and(|name| name == "default"))
                 .then(|| stylex_static_token_value(&prop.value, imports))
                 .flatten()
         }),
@@ -3352,9 +3353,9 @@ fn collect_token_leaves(
             continue;
         };
         let path = if prefix.is_empty() {
-            key.to_string()
+            key.text().into_owned()
         } else {
-            format!("{prefix}.{key}")
+            format!("{prefix}.{}", key.text())
         };
         match &prop.value {
             Expression::ObjectExpression(nested)
@@ -3388,7 +3389,7 @@ fn object_static_property_value(obj: &ObjectExpression<'_>, wanted: &str) -> Opt
         let ObjectPropertyKind::ObjectProperty(prop) = prop else {
             return None;
         };
-        (prop.key.static_name().as_deref() == Some(wanted))
+        (prop.key.static_name().is_some_and(|name| name == wanted))
             .then(|| static_token_value(&prop.value))
             .flatten()
     })
@@ -3397,8 +3398,7 @@ fn object_static_property_value(obj: &ObjectExpression<'_>, wanted: &str) -> Opt
 fn static_token_value(value: &Expression<'_>) -> Option<String> {
     match value {
         Expression::StringLiteral(lit) => {
-            let text = lit.value.as_str().trim();
-            (!text.is_empty()).then(|| text.to_string())
+            Some(lit.value.text().trim().to_owned()).filter(|text| !text.is_empty())
         }
         Expression::NumericLiteral(num) => Some(format_numeric_token(num)),
         Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::UnaryNegation => {
@@ -3442,7 +3442,7 @@ fn object_static_property_object<'a>(
         let ObjectPropertyKind::ObjectProperty(prop) = prop else {
             return None;
         };
-        if prop.key.static_name().as_deref() == Some(wanted)
+        if prop.key.static_name().is_some_and(|name| name == wanted)
             && let Expression::ObjectExpression(value) = &prop.value
         {
             Some(&**value)

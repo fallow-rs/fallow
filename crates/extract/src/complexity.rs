@@ -45,7 +45,7 @@ use fallow_types::extract::{
     ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
 };
 
-use crate::complexity_names;
+use crate::{complexity_names, js_text::JsText};
 
 /// Per-function state on the scope stack.
 struct FunctionFrame {
@@ -703,7 +703,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         // `static_name` has no answer for a private key, so `#work` would fall
         // through to `<anonymous>` and read as an unnamed unit in every report.
         if let Some(name) = method.key.static_name() {
-            self.pending_identity = Some(FunctionIdentity::public(name.to_string()));
+            self.pending_identity = Some(FunctionIdentity::public(name.text().into_owned()));
         } else if let PropertyKey::PrivateIdentifier(private) = &method.key {
             self.pending_identity = Some(FunctionIdentity::private(format!("#{}", private.name)));
         }
@@ -721,7 +721,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
 
     fn visit_property_definition(&mut self, prop: &PropertyDefinition<'ast>) {
         if let Some(name) = prop.key.static_name() {
-            self.pending_identity = Some(FunctionIdentity::public(name.to_string()));
+            self.pending_identity = Some(FunctionIdentity::public(name.text().into_owned()));
         } else if let PropertyKey::PrivateIdentifier(private) = &prop.key {
             self.pending_identity = Some(FunctionIdentity::private(format!("#{}", private.name)));
         }
@@ -731,7 +731,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
 
     fn visit_object_property(&mut self, prop: &ObjectProperty<'ast>) {
         if let Some(name) = prop.key.static_name() {
-            self.pending_identity = Some(FunctionIdentity::public(name.to_string()));
+            self.pending_identity = Some(FunctionIdentity::public(name.text().into_owned()));
         }
         walk::walk_object_property(self, prop);
         self.pending_identity = None;

@@ -13,6 +13,8 @@
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 
+use crate::js_text::JsText;
+
 /// Maximum number of characters of a string literal that a context name keeps.
 /// A longer literal (a test title, most of all) is cut and ends with
 /// [`CUT_LITERAL_SUFFIX`].
@@ -126,12 +128,12 @@ fn has_generator_argument(call: &CallExpression<'_>) -> bool {
 /// substitutions. A character that breaks a one-line name becomes a space.
 fn argument_literal(argument: &Argument<'_>) -> Option<String> {
     let raw = match argument {
-        Argument::StringLiteral(literal) => literal.value.as_str(),
+        Argument::StringLiteral(literal) => literal.value.text(),
         Argument::TemplateLiteral(template) if template.expressions.is_empty() => template
             .quasis
             .first()
-            .and_then(|quasi| quasi.value.cooked.as_ref())
-            .map(|cooked| cooked.as_str())?,
+            .and_then(|quasi| quasi.value.cooked)
+            .map(JsText::text)?,
         _ => return None,
     };
     Some(

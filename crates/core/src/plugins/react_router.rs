@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{
     CallExpression, ExportDefaultDeclarationKind, Expression, ObjectExpression, Program, Statement,
 };
@@ -414,7 +415,7 @@ fn nth_argument_string(call: &CallExpression<'_>, index: usize) -> Option<String
 
 fn expression_string(expr: &Expression<'_>) -> Option<String> {
     match strip_wrappers(expr) {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             tpl.quasis.first().map(|quasi| quasi.value.raw.to_string())
         }

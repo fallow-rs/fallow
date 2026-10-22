@@ -2,6 +2,7 @@
 
 use super::scanners::{is_html_tag_start, scan_curly_section, scan_html_tag};
 use super::shared::{ParsedAttr, kebab_to_camel_case, parse_tag_attrs};
+use crate::js_text::JsText;
 use fallow_types::extract::{
     ComponentContractFacts, ComponentFramework, ComponentInvocation, ComponentReference, ImportInfo,
 };
@@ -250,7 +251,7 @@ fn literal_object_keys(object: &oxc_ast::ast::ObjectExpression<'_>) -> Option<Ve
                 }
                 match &property.key {
                     PropertyKey::StaticIdentifier(name) => keys.push(name.name.to_string()),
-                    PropertyKey::StringLiteral(name) => keys.push(name.value.to_string()),
+                    PropertyKey::StringLiteral(name) => keys.push(name.value.text().into_owned()),
                     _ => return None,
                 }
             }

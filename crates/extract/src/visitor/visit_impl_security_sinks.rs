@@ -15,6 +15,7 @@ use super::{
     object_key_metadata, object_literal_properties, should_capture_hardcoded_secret_literal,
     sink_literal_value, static_string_literal_value, unwrap_parens, unwrap_static_expr,
 };
+use crate::js_text::JsText;
 
 struct ArgSinkSiteInput<'site, 'ast> {
     callee_path: &'site str,
@@ -305,7 +306,7 @@ fn collect_arg_source_paths(expr: &Expression<'_>) -> Vec<String> {
 /// variable) or absent. A dynamic destination is the higher-signal exfil case.
 fn call_url_arg_literal(expr: &CallExpression<'_>) -> Option<String> {
     match expr.arguments.first()?.as_expression()? {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             tpl.quasis.first().map(|q| q.value.raw.to_string())
         }

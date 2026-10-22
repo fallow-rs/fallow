@@ -6,6 +6,7 @@ use oxc_ast_visit::Visit;
 use oxc_semantic::ScopeFlags;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::js_text::JsText;
 use fallow_types::extract::{SanitizerScope, SinkLiteralValue};
 
 use super::super::helpers::{array_element_type_from_type, map_value_type_from_type};
@@ -398,7 +399,7 @@ impl ModuleInfoExtractor {
             Expression::TemplateLiteral(template) => {
                 let mut value = String::new();
                 for (index, quasi) in template.quasis.iter().enumerate() {
-                    value.push_str(quasi.value.cooked.as_ref()?);
+                    value.push_str(&quasi.value.cooked?.text());
                     if let Some(expression) = template.expressions.get(index) {
                         value.push_str(&static_sink_literal_to_string(
                             &self.static_sink_literal_value(expression)?,

@@ -12,12 +12,12 @@ use super::super::{
     LoopUpdateAccess, LoopUpdateObservations, MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES,
     PendingBindingValue, PendingSubclassMemberAccess, SubclassAccessProof,
 };
-
 use super::super::{
     BindingTarget, ExportName, ExportedObjectInstancePropertyFact, ModuleInfoExtractor,
     ObjectBindingCandidate, SemanticFact,
 };
 use super::visit_source_paths::join_member_path;
+use crate::js_text::JsText;
 
 /// Per-module breadth cap on recorded object-binding targets (issue #1843
 /// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
@@ -1327,7 +1327,7 @@ impl ModuleInfoExtractor {
             };
             self.record_direct_object_binding_pattern(
                 &property.value,
-                &format!("{source_path}.{property_name}"),
+                &format!("{source_path}.{}", property_name.text()),
             );
         }
     }
@@ -1397,7 +1397,7 @@ impl ModuleInfoExtractor {
                             let ObjectPropertyKind::ObjectProperty(candidate) = candidate else {
                                 return None;
                             };
-                            (candidate.key.static_name().as_deref() == Some(property_name.as_ref()))
+                            (candidate.key.static_name().as_ref() == Some(&property_name))
                                 .then_some(&candidate.value)
                         }) else {
                             continue;
@@ -1940,8 +1940,8 @@ impl ModuleInfoExtractor {
                 seen_keys.clear();
                 continue;
             };
-            let binding_path = format!("{object_path}.{key_name}");
-            if !seen_keys.insert(key_name.to_string()) {
+            let binding_path = format!("{object_path}.{}", key_name.text());
+            if !seen_keys.insert(key_name.text().into_owned()) {
                 self.remove_direct_targets_preserving_barrier(&binding_path, scope);
             }
             self.invalidate_direct_binding_proof(&binding_path, false);
@@ -2086,7 +2086,7 @@ impl ModuleInfoExtractor {
                 continue;
             };
 
-            let binding_path = format!("{object_path}.{key_name}");
+            let binding_path = format!("{object_path}.{}", key_name.text());
             match &prop.value {
                 // Per-module breadth cap (issue #1843 follow-up): the guard stops
                 // recording once at capacity so a pathological object literal
@@ -2146,17 +2146,17 @@ impl ModuleInfoExtractor {
 }
 
 fn direct_object_binding_expression_path(mut expression: &Expression<'_>) -> Option<String> {
-    let mut properties = Vec::new();
+    let mut properties: Vec<std::borrow::Cow<'_, str>> = Vec::new();
     let root = loop {
         crate::cost::walk_step();
         expression = match expression {
             Expression::Identifier(identifier) => break identifier.name.as_str(),
             Expression::StaticMemberExpression(member) => {
-                properties.push(member.property.name.as_str());
+                properties.push(std::borrow::Cow::Borrowed(member.property.name.as_str()));
                 &member.object
             }
             Expression::ComputedMemberExpression(member) => {
-                properties.push(member.static_property_name()?.as_str());
+                properties.push(member.static_property_name()?.text());
                 &member.object
             }
             Expression::ParenthesizedExpression(parenthesized) => &parenthesized.expression,

@@ -17,6 +17,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use fallow_extract::JsText;
 use oxc_ast::ast::{Expression, ObjectProperty, PropertyKey};
 use oxc_ast_visit::{Visit, walk};
 
@@ -511,9 +512,9 @@ impl<'a> Visit<'a> for PackageValueCollector {
         };
         if is_package_key
             && let Expression::StringLiteral(literal) = &property.value
-            && config_parser::is_package_specifier(&literal.value)
+            && config_parser::is_package_specifier(&literal.value.text())
         {
-            let name = literal.value.to_string();
+            let name = literal.value.text().into_owned();
             if !self.packages.contains(&name) {
                 self.packages.push(name);
             }

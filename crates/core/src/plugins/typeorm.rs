@@ -4,6 +4,7 @@
 //! Reads the `migrations` globs of a `DataSource` config, because `TypeORM`
 //! loads the matching files at runtime without an import.
 
+use fallow_extract::JsText;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 
@@ -210,7 +211,7 @@ fn collect_glob_values(expression: &Expression<'_>, depth: usize, values: &mut V
         return;
     }
     match unwrap_type_wrappers(expression) {
-        Expression::StringLiteral(literal) => values.push(literal.value.to_string()),
+        Expression::StringLiteral(literal) => values.push(literal.value.text().into_owned()),
         Expression::TemplateLiteral(template) => {
             if let Some(value) = template_glob(template) {
                 values.push(value);

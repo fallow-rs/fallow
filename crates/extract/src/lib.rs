@@ -40,6 +40,7 @@ pub(crate) mod graphql;
 pub(crate) mod html;
 pub(crate) mod iconify;
 pub mod inventory;
+pub mod js_text;
 mod jsdoc_attach;
 mod jsdoc_deprecated;
 pub mod mdx;
@@ -111,6 +112,7 @@ pub use css_in_js::{
 };
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
+pub use js_text::JsText;
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
 pub use nesting::{
     MAX_NESTING_DEPTH, exceeds_nesting_limit, parse_bounded, parse_bounded_or_default,

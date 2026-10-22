@@ -2,6 +2,7 @@
 
 use super::visit_helpers::*;
 use super::*;
+use crate::js_text::JsText;
 use crate::{SemanticFact, TypeAliasSurfaceTargetFact};
 
 impl ModuleInfoExtractor {
@@ -61,7 +62,7 @@ impl ModuleInfoExtractor {
         match ty {
             TSType::TSLiteralType(literal) => {
                 if let TSLiteral::StringLiteral(value) = &literal.literal {
-                    values.push(value.value.to_string());
+                    values.push(value.value.text().into_owned());
                 }
             }
             TSType::TSUnionType(union) => {

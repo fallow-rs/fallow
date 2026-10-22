@@ -12,6 +12,8 @@
 //! (`FooService.layer`). Import aliases resolve to the imported name, so the
 //! analyze layer can join keys across modules by name.
 
+use std::borrow::Cow;
+
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, CallExpression, Class, ClassElement,
@@ -26,6 +28,8 @@ use fallow_types::extract::{
     EffectCaughtTag, EffectFacts, EffectLayer, EffectTaggedError, ExportInfo, ExportName,
     ImportInfo, ImportedName,
 };
+
+use crate::js_text::JsText;
 
 /// `Layer` functions that return an `Effect` or a runtime, not a layer.
 const NON_LAYER_FUNCTIONS: &[&str] = &[
@@ -568,14 +572,14 @@ impl<'s, 'a> Collector<'s, 'a> {
             match node.kind() {
                 AstKind::CallExpression(call) => self.inspect_call(call),
                 AstKind::ObjectProperty(property) => {
-                    if property_key_name(&property.key) == Some("_tag")
+                    if property_key_name(&property.key).as_deref() == Some("_tag")
                         && let Some(tag) = literal_or_first_string_argument(&property.value)
                     {
                         self.literal_tags.insert(tag);
                     }
                 }
                 AstKind::PropertyDefinition(property) => {
-                    if property_key_name(&property.key) == Some("_tag")
+                    if property_key_name(&property.key).as_deref() == Some("_tag")
                         && let Some(tag) = property
                             .value
                             .as_ref()
@@ -614,14 +618,14 @@ impl<'s, 'a> Collector<'s, 'a> {
             };
             match expression.without_parentheses() {
                 Expression::StringLiteral(literal) => self.caught_tags.push(EffectCaughtTag {
-                    tag: literal.value.to_string(),
+                    tag: literal.value.text().into_owned(),
                     span_start: literal.span.start + 1,
                 }),
                 Expression::ArrayExpression(array) => {
                     for element in &array.elements {
                         if let ArrayExpressionElement::StringLiteral(literal) = element {
                             self.caught_tags.push(EffectCaughtTag {
-                                tag: literal.value.to_string(),
+                                tag: literal.value.text().into_owned(),
                                 span_start: literal.span.start + 1,
                             });
                         }
@@ -691,14 +695,14 @@ fn tagged_error_tag(super_class: &Expression<'_>) -> Option<String> {
 
 fn first_string_argument(call: &CallExpression<'_>) -> Option<String> {
     match call.arguments.first()? {
-        Argument::StringLiteral(literal) => Some(literal.value.to_string()),
+        Argument::StringLiteral(literal) => Some(literal.value.text().into_owned()),
         _ => None,
     }
 }
 
 fn literal_or_first_string_argument(expression: &Expression<'_>) -> Option<String> {
     match unwrap_type_wrappers(expression) {
-        Expression::StringLiteral(literal) => Some(literal.value.to_string()),
+        Expression::StringLiteral(literal) => Some(literal.value.text().into_owned()),
         Expression::CallExpression(call) => first_string_argument(call),
         _ => None,
     }
@@ -718,10 +722,10 @@ fn unwrap_type_wrappers<'e, 'a>(expression: &'e Expression<'a>) -> &'e Expressio
     }
 }
 
-fn property_key_name<'k>(key: &'k PropertyKey<'_>) -> Option<&'k str> {
+fn property_key_name<'k>(key: &'k PropertyKey<'_>) -> Option<Cow<'k, str>> {
     match key {
-        PropertyKey::StaticIdentifier(identifier) => Some(identifier.name.as_str()),
-        PropertyKey::StringLiteral(literal) => Some(literal.value.as_str()),
+        PropertyKey::StaticIdentifier(identifier) => Some(identifier.name.as_str().into()),
+        PropertyKey::StringLiteral(literal) => Some(literal.value.text()),
         _ => None,
     }
 }
