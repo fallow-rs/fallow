@@ -508,10 +508,16 @@ accuracy metrics.
 The summary reports two yields. `confirmation_yield` is the share of all
 candidates that are correctly confirmed as used. The gated
 `checked_confirmation_yield` excludes candidates that the sidecar does not
-resolve because of `blocking-diagnostics`. The corpus does not install fixture
-dependencies, so a project that imports a package or type definition outside
-the Fallow workspace cannot type-check. These candidates measure the fixture
-environment, not semantic ability. A ratio that excludes them rises when more
+resolve because of `blocking-diagnostics`. Blocking diagnostics have two
+causes in the corpus:
+
+- Missing dependencies. The corpus does not install fixture dependencies, so a
+  project that imports a package or type definition outside the Fallow
+  workspace cannot type-check.
+- TypeScript 7 configuration incompatibility, for example
+  `moduleResolution=node10` or `baseUrl`, which TypeScript 7 removed.
+
+These candidates measure the fixture environment, not semantic ability. A ratio that excludes them rises when more
 projects block, so two more gates apply:
 
 - `maximum_blocking_diagnostics_share` bounds the share of blocked candidates.

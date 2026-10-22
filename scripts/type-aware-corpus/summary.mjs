@@ -63,8 +63,9 @@ export const typeAwareResolutionCounts = (projects) =>
 
 /**
  * Splits the confirmation yield by type evidence. `confirmation_yield` keeps its meaning over all
- * candidates. Candidates in a program with blocking diagnostics measure the fixture environment
- * (for example dependencies that the corpus does not install), not semantic ability, so the gated
+ * candidates. Candidates in a program with blocking diagnostics (missing dependencies, which the
+ * corpus does not install, or TypeScript 7 configuration incompatibility) measure the fixture
+ * environment, not semantic ability, so the gated
  * `checked_confirmation_yield` excludes them. Separate gates bound their share and require a
  * minimum count of checked candidates, so the ratio cannot rise because more projects block.
  */
@@ -72,6 +73,7 @@ export const typeEvidenceCoverage = (correctConfirmedCount, candidateCount, coun
   const checkedCandidateCount = candidateCount - counts.blockingDiagnosticsCount;
   const noTypeEvidenceCount = counts.abstainedCount + counts.unresolvedCount;
   return {
+    correct_confirmed_count: correctConfirmedCount,
     confirmation_yield: safeRatio(correctConfirmedCount, candidateCount),
     checked_candidate_count: checkedCandidateCount,
     checked_confirmation_yield: safeRatio(correctConfirmedCount, checkedCandidateCount),
@@ -137,7 +139,7 @@ export const renderSummaryMarkdown = (summary) =>
     "",
     `- Candidates: ${summary.accuracy.candidate_count}`,
     `- Confirmation precision: ${display(summary.accuracy.confirmation_precision)}`,
-    `- Confirmed as used: ${summary.accuracy.truth_counts.used} of ${summary.accuracy.candidate_count} candidates (confirmation yield ${display(summary.accuracy.confirmation_yield)})`,
+    `- Confirmed as used: ${summary.accuracy.correct_confirmed_count} of ${summary.accuracy.candidate_count} candidates (confirmation yield ${display(summary.accuracy.confirmation_yield)})`,
     `- Checked confirmation yield (gate): ${display(summary.accuracy.checked_confirmation_yield)} over ${summary.accuracy.checked_candidate_count} checked candidates`,
     `- Contract-preserved false positives: ${summary.accuracy.contract_preserved_count}`,
     `- Combined safe-resolution yield: ${display(summary.accuracy.safe_resolution_yield)}`,
@@ -153,7 +155,7 @@ export const renderSummaryMarkdown = (summary) =>
     "",
     "No corpus-wide recall is claimed. Indeterminate candidates are excluded from adjudicated accuracy metrics.",
     "",
-    "The corpus does not install fixture dependencies. Candidates in a program that does not type-check have no type evidence and are excluded from the checked confirmation yield:",
+    "Blocking diagnostics come from missing dependencies, which the corpus does not install, and from TypeScript 7 configuration incompatibility. Candidates in a program with blocking diagnostics have no type evidence and are excluded from the checked confirmation yield:",
     "",
     ...(summary.accuracy.blocked_projects ?? []).map(blockedProjectLine),
     "",

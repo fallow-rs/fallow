@@ -1202,6 +1202,7 @@ test("checked confirmation yield excludes candidates behind blocking diagnostics
       blockingDiagnosticsCount: 237,
     }),
     {
+      correct_confirmed_count: 127,
       confirmation_yield: 0.248047,
       checked_candidate_count: 275,
       checked_confirmation_yield: 0.461818,
@@ -1309,7 +1310,8 @@ test("summary reports bounded evidence without claiming corpus-wide recall", () 
     gate: { go: true },
     accuracy: {
       candidate_count: 10,
-      truth_counts: { used: 3 },
+      truth_counts: { used: 4 },
+      correct_confirmed_count: 3,
       confirmation_precision: 1,
       confirmation_yield: 0.3,
       checked_candidate_count: 6,
