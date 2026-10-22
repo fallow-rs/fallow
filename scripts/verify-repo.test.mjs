@@ -43,6 +43,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "check:cargo-features"]],
   ["npm", ["run", "check:crate-boundaries"]],
   ["npm", ["run", "check:miri-cfg"]],
+  ["npm", ["run", "check:parse-sites"]],
   ["npm", ["run", "check:emitted-versions"]],
   ["npm", ["run", "check:conformance-fixtures"]],
   ["node", ["--test", "scripts/workflow-policy.test.mjs"]],
