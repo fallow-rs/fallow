@@ -47,7 +47,7 @@ pub use config_writer::*;
 pub use external_plugin::*;
 pub use fixability::*;
 pub use rule_pack::*;
-pub use source_walk::*;
+pub use source_walk::{source_walk_builder, source_walked_workspaces};
 pub use workspace::*;
 
 use std::path::{Path, PathBuf};

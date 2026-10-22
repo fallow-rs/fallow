@@ -144,6 +144,10 @@ pub struct AuditCacheKeyPayload {
     pub health_baseline: Option<String>,
     /// Duplication baseline path.
     pub dupes_baseline: Option<String>,
+    /// Experimental type-aware backend selection. The default backend leaves
+    /// it out, so the key bytes of a default run do not change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_aware_backend: Option<String>,
 }
 
 /// Builder for audit base-snapshot cache keys.
@@ -193,6 +197,7 @@ impl AuditCacheKeyBuilder {
                 dead_code_baseline: None,
                 health_baseline: None,
                 dupes_baseline: None,
+                type_aware_backend: None,
             },
         }
     }
@@ -294,6 +299,13 @@ impl AuditCacheKeyBuilder {
         self.payload.dead_code_baseline = dead_code;
         self.payload.health_baseline = health;
         self.payload.dupes_baseline = dupes;
+        self
+    }
+
+    /// Set the type-aware backend selection.
+    #[must_use]
+    pub fn type_aware_backend(mut self, backend: Option<String>) -> Self {
+        self.payload.type_aware_backend = backend;
         self
     }
 
@@ -425,6 +437,20 @@ mod tests {
         assert_ne!(all, build(true, false, true, "all"));
         assert_ne!(all, build(true, true, false, "all"));
         assert_ne!(all, build(true, true, true, "exclude"));
+    }
+
+    #[test]
+    fn audit_cache_key_bytes_include_only_a_selected_type_aware_backend() {
+        let build = |backend: Option<&str>| {
+            AuditCacheKeyBuilder::new(1, "1.0.0", "base", config(), Vec::new(), context())
+                .type_aware_backend(backend.map(str::to_string))
+                .to_json_bytes()
+                .expect("payload should serialize")
+        };
+
+        let default = build(None);
+        assert!(!String::from_utf8_lossy(&default).contains("type_aware_backend"));
+        assert_ne!(default, build(Some("tsrs")));
     }
 
     #[test]

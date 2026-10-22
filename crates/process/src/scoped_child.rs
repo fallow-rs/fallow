@@ -487,6 +487,13 @@ mod tests {
     fn run_windows_job_object_helper(root: &std::path::Path) {
         use std::time::{Duration, Instant};
 
+        // TerminateJobObject only starts termination. On a loaded CI runner the
+        // kernel can need several seconds before the leader handle signals. The
+        // scripts ping for about 29 seconds, so a bound well below that still
+        // proves that termination, not a natural exit, ended the wait.
+        const TERMINATION_BOUND: Duration = Duration::from_secs(10);
+        const STARTUP_BOUND: Duration = Duration::from_secs(10);
+
         let mut command = Command::new("cmd.exe");
         command
             .args(["/D", "/S", "/C", "call leader.cmd"])
@@ -499,7 +506,7 @@ mod tests {
             .process_tree_terminator()
             .expect("Windows process-tree terminator");
         let ready = root.join("descendant-ready");
-        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        let ready_deadline = Instant::now() + STARTUP_BOUND;
         while !ready.exists() && Instant::now() < ready_deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -514,18 +521,20 @@ mod tests {
             !status.success(),
             "terminated job leader exited successfully"
         );
+        let waited = started.elapsed();
         assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "wait remained blocked after Job Object termination"
+            waited < TERMINATION_BOUND,
+            "wait remained blocked for {waited:?} after Job Object termination"
         );
 
-        let exit_deadline = Instant::now() + Duration::from_secs(2);
+        let exit_deadline = Instant::now() + TERMINATION_BOUND;
         while terminator.is_alive() && Instant::now() < exit_deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(
             !terminator.is_alive(),
-            "job descendants survived termination"
+            "job descendants survived termination for {:?}",
+            started.elapsed()
         );
     }
 }

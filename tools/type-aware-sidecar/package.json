@@ -23,6 +23,14 @@
   "dependencies": {
     "typescript": "7.0.2"
   },
+  "peerDependencies": {
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929"
+  },
+  "peerDependenciesMeta": {
+    "tsrs": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=20"
   },
@@ -33,6 +41,7 @@
   "devDependencies": {
     "@codspeed/tinybench-plugin": "5.7.1",
     "tinybench": "6.1.2",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "zod": "4.4.3"
   }
 }

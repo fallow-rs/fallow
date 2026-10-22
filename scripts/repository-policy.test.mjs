@@ -458,12 +458,20 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(sidecarPackage.version, workspaceVersion);
   assert.equal(sidecarLock.version, workspaceVersion);
   assert.equal(sidecarLock.packages[""].version, workspaceVersion);
-  assert.equal(sidecarPackage.dependencies.typescript, manifest.backend.version);
-  assert.equal(vscodePackage.devDependencies.typescript, manifest.backend.version);
+  const { backend: defaultBackend, experimental_backends: optionalBackends } = manifest;
+  assert.equal(defaultBackend.package, "typescript");
+  assert.equal(sidecarPackage.dependencies.typescript, defaultBackend.version);
+  for (const backend of optionalBackends) {
+    assert.equal(sidecarPackage.peerDependencies[backend.package], backend.version);
+    assert.equal(sidecarPackage.peerDependenciesMeta[backend.package].optional, true);
+    assert.equal(sidecarPackage.devDependencies[backend.package], backend.version);
+    assert.equal(sidecarLock.packages[`node_modules/${backend.package}`].version, backend.version);
+  }
+  assert.equal(vscodePackage.devDependencies.typescript, defaultBackend.version);
   assert.match(vscodePackage.scripts.prepackage, /scripts\/copy-license\.mjs/u);
   assert.match(vscodePackage.scripts["verify:vsix"], /verify-packaged-type-aware\.mjs/u);
-  assert.equal(sidecarLock.packages[""].dependencies.typescript, manifest.backend.version);
-  assert.equal(sidecarLock.packages["node_modules/typescript"].version, manifest.backend.version);
+  assert.equal(sidecarLock.packages[""].dependencies.typescript, defaultBackend.version);
+  assert.equal(sidecarLock.packages["node_modules/typescript"].version, defaultBackend.version);
   assert.deepEqual(sidecarPackage.bin, {
     "fallow-type-aware": "fallow-type-aware.mjs",
   });

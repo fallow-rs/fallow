@@ -701,7 +701,7 @@ pub(super) fn namespace_is_instantiated(namespace: &TSNamespaceDeclaration<'_>) 
     }
 }
 
-fn statement_is_instantiated(statement: &Statement<'_>) -> bool {
+pub(super) fn statement_is_instantiated(statement: &Statement<'_>) -> bool {
     match statement {
         Statement::EmptyStatement(_) => false,
         Statement::ExportDeclaration(export) => {

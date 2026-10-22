@@ -282,3 +282,46 @@ fn combined_run_still_fails_closed_under_require_complete() {
         output.stdout
     );
 }
+
+/// An unknown backend selection is an input error. The run must name the known
+/// families before it looks for a companion, so a missing companion does not
+/// hide the cause.
+#[test]
+fn unknown_backend_selection_fails_before_companion_lookup() {
+    let root = fixture_path(FIXTURE);
+    let missing = root.join("missing-type-aware-companion");
+    let missing_arg = missing.to_string_lossy().to_string();
+    let root_arg = root.to_string_lossy().to_string();
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root_arg.as_str(),
+            "--type-aware",
+            "--type-aware-require",
+            "complete",
+            "--unused-exports",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[
+            ("FALLOW_TYPE_AWARE_BIN", &missing_arg),
+            ("FALLOW_TYPE_AWARE_BACKEND", "tsc"),
+        ],
+    );
+
+    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
+    assert!(
+        output.stdout.contains(
+            "unknown FALLOW_TYPE_AWARE_BACKEND value `tsc`; expected one of: typescript-go, tsrs"
+        ),
+        "stdout: {}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("missing-type-aware-companion"),
+        "stdout: {}",
+        output.stdout
+    );
+}

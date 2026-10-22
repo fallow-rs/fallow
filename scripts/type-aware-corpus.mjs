@@ -22,6 +22,8 @@ import {
   checkerEvidenceRequest as createCheckerEvidenceRequest,
   digestSet,
   normalizedEvidenceResponseDigest,
+  assertBackendIsolation,
+  minimalEnvironment,
   requestDigest,
   runExactSidecarRequest as executeExactSidecarRequest,
 } from "./type-aware-corpus/runner.mjs";
@@ -275,9 +277,8 @@ export const validatePartialOutput = (options) => {
     new Set(["prepare", "discover", "measure"]).has(options.command),
     [!options.outDirExplicit, resolve(options.outDir) === DEFAULT_OUT_DIR].some(Boolean),
   ].every(Boolean);
-  if (partialCanonicalRun) {
-    fail("partial corpus runs require a non-canonical --out-dir");
-  }
+  if (partialCanonicalRun) fail("partial corpus runs require a non-canonical --out-dir");
+  assertBackendIsolation(options, DEFAULT_OUT_DIR);
 };
 
 const ensureFile = (path, description) => {
@@ -409,17 +410,6 @@ const prepare = (projects, outDir) => {
 };
 
 const projectRoot = (project, outDir) => validatePreparedFixture(project, outDir).root;
-
-const minimalEnvironment = (sidecarBin) => {
-  const environment = {};
-  for (const key of ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SYSTEMROOT", "ComSpec", "PATHEXT"]) {
-    if (process.env[key]) environment[key] = process.env[key];
-  }
-  environment.FALLOW_FORMAT = "json";
-  environment.FALLOW_QUIET = "1";
-  if (sidecarBin) environment.FALLOW_TYPE_AWARE_BIN = sidecarBin;
-  return environment;
-};
 
 const processTreeIndexes = (rows) => {
   const children = new Map();
@@ -937,6 +927,7 @@ const compactTypeAwareMetadata = (metadata) => {
   return {
     protocol_version: metadata.protocol_version,
     sidecar_version: metadata.sidecar_version,
+    backend: metadata.backend,
     backend_version: metadata.backend_version,
     candidate_count: metadata.candidate_count,
     confirmed_used_count: metadata.confirmed_used_count,

@@ -33,6 +33,7 @@ mod tests;
 mod types;
 mod upgrades;
 mod work;
+mod workspace_alias;
 
 pub use auto_imports::{UnreadableAutoImportRead, unreadable_auto_import_reads};
 pub use fallbacks::extract_package_name_from_node_modules_path;
@@ -597,12 +598,12 @@ fn collect_missing_export_targets(
         })
         .filter(|specifier| seen.insert(specifier))
         .filter_map(|specifier| {
-            fallbacks::missing_package_export_paths(ctx, specifier).map(|paths| {
-                MissingExportTarget {
+            let aliased = workspace_alias::aliased_specifier(ctx, &module.path, specifier);
+            fallbacks::missing_package_export_paths(ctx, aliased.as_deref().unwrap_or(specifier))
+                .map(|paths| MissingExportTarget {
                     specifier: specifier.to_string(),
                     paths,
-                }
-            })
+                })
         })
         .collect();
     targets.sort_unstable_by(|left, right| left.specifier.cmp(&right.specifier));

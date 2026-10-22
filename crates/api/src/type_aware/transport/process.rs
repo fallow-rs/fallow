@@ -86,6 +86,7 @@ where
 }
 
 pub(super) fn sidecar_command(sidecar: &Path, root: &Path) -> Result<Command, String> {
+    selected_backend()?;
     #[cfg(windows)]
     let script = non_empty_env(SIDECAR_SCRIPT_ENV).map(PathBuf::from);
     #[cfg(not(windows))]
@@ -150,6 +151,9 @@ fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
     let path = std::env::var_os("PATH").and_then(|value| sanitize_search_path(root, &value));
     command.env_clear();
     command.envs(values);
+    if let Ok((family, _)) = selected_backend() {
+        command.env(BACKEND_ENV, family);
+    }
     if let Some(path) = path {
         command.env("PATH", path);
     }

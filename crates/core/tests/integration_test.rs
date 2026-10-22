@@ -59,6 +59,8 @@ mod dependencies;
 mod deprecated_exports;
 #[path = "integration_test/directory_resolution.rs"]
 mod directory_resolution;
+#[path = "integration_test/dotenv_plugin.rs"]
+mod dotenv_plugin;
 #[path = "integration_test/duplicate_prop_shape.rs"]
 mod duplicate_prop_shape;
 #[path = "integration_test/dynamic_import_glob_excludes.rs"]
@@ -624,6 +626,8 @@ mod nestjs_trpc_interfaces;
 mod external_override_class_members;
 #[path = "integration_test/flue_plugin.rs"]
 mod flue_plugin;
+#[path = "integration_test/gitignored_workspace_members.rs"]
+mod gitignored_workspace_members;
 #[path = "integration_test/issue_2752_nuxt_components_scope.rs"]
 mod issue_2752_nuxt_components_scope;
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]

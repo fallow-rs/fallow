@@ -402,9 +402,13 @@ above sees that case.
 Coverage gaps skip a module that declares only types
 (`declares_only_types` in `health/coverage_gaps.rs`): a declaration file, or
 a module with at least one export, only type-only exports and re-exports, and
-no function, CommonJS export, side-effect import, dynamic import, or
-`require()` call. Such a module is not a runtime file and is never an
-untested file. A module with no exports can run side effects, so it stays.
+no runtime statement or declaration, function, CommonJS export, side-effect
+import, dynamic import, or `require()` call. Extraction records additional
+top-level runtime expressions, `await`, and emitted declarations outside the
+import/export records as a cached semantic fact; erased types, ambient
+declarations, and type-only namespaces do not produce that fact. Such a
+type-only module is not a runtime file and is never an untested file. A module
+with no exports can run side effects, so it stays.
 
 ## Mock-aware test reachability
 
@@ -554,6 +558,24 @@ segment makes no entry point, but `../x.ts` can pop one. A workspace anchor
 always resolves. A workspace package directory resolves script calls with the
 scripts of that package. Composite actions under `.github/actions/` and the
 root `action.yml` are CI files too.
+
+Three CI forms name a script outside a plain `run:` value
+(`crates/core/src/scripts/ci_references.rs` and `ci.rs`):
+
+- A command that is only `${{ matrix.<path> }}` becomes the values of that
+  key path in the `matrix:` block of the same job, directly or under
+  `include:`: a plain scalar, each line of a block scalar, or each item of a
+  block sequence. A key under `exclude:` gives nothing. The values keep the
+  `working-directory` of the step.
+- The `script:` input of an `actions/github-script` step names a file through
+  `${process.env.GITHUB_WORKSPACE}/`, `${{ github.workspace }}/`, or
+  `require('./...')`, which resolves from the workspace. A relative `import()`
+  resolves from the action bundle, so it makes no entry point. A line that
+  starts a JavaScript comment is not read. In a composite
+  action, `${{ github.action_path }}/` resolves from the action directory.
+- A step `env` entry whose whole value is a workspace anchor
+  (`NAME: ${{ github.action_path }}`) replaces `$NAME` and `${NAME}` in the
+  commands of that step. Job and workflow `env` entries are not read.
 
 The bin map also holds the `bin` fields of the declared workspace packages
 (`add_workspace_binaries`), so a workspace binary credits its package without
@@ -765,7 +787,7 @@ workspace declaration. Fallow also skips a target that source discovery does
 not walk. The first check (`is_skipped_link_target`) skips a path with a
 hidden, `node_modules`, `build`, `dist` or `coverage` segment (the
 `is_skip_listed_dir` list), or a path that `ignorePatterns` matches. The second
-check (`link_targets_reached_by_source_walk`) walks from the root to the
+check (`dirs_reached_by_source_walk` in `crates/config/src/source_walk.rs`) walks from the root to the
 targets with `source_walk_builder`, the ignore-file settings of source
 discovery, and skips each target that the walk does not reach. Thus a target
 under a gitignored directory is skipped, also when a nested `.gitignore`,
@@ -787,6 +809,14 @@ the spec is the only declaration of the workspace
 Removing that entry removes the package from the analysis, and its files then
 become unused files. When source 1 or source 2 also declares the target, the
 entry is an ordinary dependency and the pass reports it when no code uses it.
+
+A declared workspace member under a gitignored directory stays a workspace, so
+imports and catalog references still reach its manifest. CI often clones an
+upstream repository into such a directory before the install. Source discovery
+does not read the files of that member, so the run cannot prove that its
+dependencies are unused. The unused-dependency pass skips each member that the
+source walk does not reach (`source_walked_workspaces`). This agrees with the
+audit base snapshot, which does not hold the gitignored member.
 
 ## The plugin stage as a diagnostic stage
 
@@ -842,7 +872,12 @@ non-source file on disk, such as `<pkg>/package.json`, credits the package
 without `node_modules` (`workspace_package_asset`). An `exports` map that does
 not list the subpath still blocks the import. A relative package root import
 (`require('..')`, `require('.')`) uses the package source entry when `main`
-names build output that is not on disk, the same as `require('../')`.
+names build output that is not on disk, the same as `require('../')`. A
+dependency alias `"vite": "workspace:@scope/core@*"` in the nearest manifest of
+the importer sends the workspace fallback for `vite/<subpath>` to the package
+`@scope/core`, also when another workspace member has the name `vite`
+(`crates/graph/src/resolve/workspace_alias.rs`). The result keeps `vite` as the
+package name, because the importer declares the alias.
 
 Style resolution is distinct from JavaScript resolution. Preserve scoped npm
 specifier identity, SCSS partial and directory-index lookup, configured include

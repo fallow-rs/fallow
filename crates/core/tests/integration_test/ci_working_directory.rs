@@ -1,6 +1,8 @@
 //! A GitHub Actions step resolves its file arguments in its
 //! `working-directory`, and a workspace anchor such as `$GITHUB_WORKSPACE/`
 //! resolves from the project root. Composite actions count as CI files.
+//! Matrix values that a step runs, `actions/github-script` bodies, and step
+//! `env` aliases of `${{ github.action_path }}` also name scripts.
 
 use super::common::{create_config, fixture_path};
 
@@ -37,6 +39,40 @@ fn ci_file_arguments_resolve_in_the_working_directory() {
                 .iter()
                 .any(|p| p.ends_with(file) && !p.ends_with(&format!("web/{file}"))),
             "{file} is relative to another working directory and must stay unused. Got: {paths:?}"
+        );
+    }
+}
+
+/// A CI file can name a script outside a `run:` value: a matrix value that a
+/// step runs, an `actions/github-script` body, or a step `env` variable that
+/// holds `${{ github.action_path }}`.
+#[test]
+fn ci_scripts_named_outside_run_values_are_entries() {
+    let root = fixture_path("ci-working-directory");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let paths = unused_file_paths(&results);
+
+    for file in [
+        "ecosystem-ci/matrix-command.ts",
+        "scripts/matrix-list.ts",
+        ".github/scripts/imported.mjs",
+        ".github/scripts/required.js",
+        ".github/actions/setup/prepare.mjs",
+    ] {
+        assert!(
+            !paths.iter().any(|p| p.ends_with(file)),
+            "{file} runs from a CI file and must be an entry. Got: {paths:?}"
+        );
+    }
+    for file in [
+        "scripts/matrix-unrelated.ts",
+        ".github/scripts/relative-import.mjs",
+        ".github/actions/setup/unaliased.mjs",
+    ] {
+        assert!(
+            paths.iter().any(|p| p.ends_with(file)),
+            "{file} is not run by a CI step and must stay unused. Got: {paths:?}"
         );
     }
 }

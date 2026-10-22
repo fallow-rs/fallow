@@ -1,0 +1,17 @@
+{
+  "name": "dotenv-plugin-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dotenv-cli": "dotenv -e .env.ci -- node src/index.js",
+    "dotenvx": "dotenvx run -- node src/index.js"
+  },
+  "devDependencies": {
+    "dotenv-cli": "1.0.0",
+    "@dotenvx/dotenvx": "1.0.0",
+    "unused-control": "1.0.0"
+  },
+  "dependencies": {
+    "dotenv": "1.0.0"
+  }
+}

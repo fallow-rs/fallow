@@ -2134,6 +2134,70 @@ fn napi_rs_source_package_credits_generated_code_in_workspaces() {
     assert_napi_source_package_credited(&results);
 }
 
+/// `napi build --cwd binding --js index.cjs` writes the loader to a
+/// subdirectory, and `--package-json-path ../package.json` keeps the `napi`
+/// config in the package manifest.
+#[test]
+fn napi_rs_loader_in_a_subdirectory_credits_platform_packages() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("binding")).expect("create binding dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "@scope/native",
+  "main": "./src/index.js",
+  "napi": {
+    "binaryName": "native",
+    "targets": ["x86_64-unknown-linux-gnu", "wasm32-wasip1-threads"]
+  }
+}"#,
+    )
+    .expect("write package.json");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(
+        root.join("src/index.js"),
+        "export { binding } from '../binding/index.js'\n",
+    )
+    .expect("write entry");
+    fs::write(
+        root.join("binding/index.js"),
+        "export * from './index.cjs'\n",
+    )
+    .expect("write wrapper");
+    fs::write(root.join("binding/index.cjs"), NAPI_LOADER).expect("write loader");
+    fs::write(root.join("binding/wasi-worker.mjs"), NAPI_WASI_WORKER).expect("write wasi worker");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    for generated in [
+        "@scope/native-linux-x64-gnu",
+        "@scope/native-wasm32-wasi",
+        "@napi-rs/wasm-runtime",
+    ] {
+        assert!(
+            !unlisted.contains(&generated),
+            "{generated} comes from the generated loader in binding/, found: {unlisted:?}"
+        );
+    }
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("binding/wasi-worker.mjs")),
+        "the generated WASI worker next to the loader is used by the runtime, found: {unused_files:?}"
+    );
+}
+
 /// Write a napi-rs package whose public entry is a wrapper that imports the
 /// generated loader and exports a class with the same name as a binding.
 fn write_napi_wrapper_package(package_root: &Path) {

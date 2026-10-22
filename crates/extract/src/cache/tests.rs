@@ -1,6 +1,7 @@
 //! Tests for the incremental parse cache.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use oxc_span::Span;
 
@@ -17,6 +18,32 @@ fn empty_cached_module() -> CachedModule {
     CachedModule {
         last_seen_secs: 0,
         ..module_to_cached_from_parts(&ModuleInfo::empty(FileId(0)), 0, 0)
+    }
+}
+
+#[test]
+fn cache_roundtrip_preserves_top_level_runtime_statement_facts() {
+    for (source, has_runtime_statement) in [
+        ("console.log('init'); export type A = string;", true),
+        ("await Promise.resolve(); export type A = string;", true),
+        (
+            "declare const value: string; export type A = string;",
+            false,
+        ),
+    ] {
+        let module = parse_from_content(FileId(0), Path::new("src/module.ts"), source);
+        let cached = module_to_cached_from_parts(&module, 10, 20);
+        let encoded = bitcode::encode(&cached);
+        let decoded: CachedModule = bitcode::decode(&encoded).expect("decode cached module");
+        let restored = cached_to_module(&decoded, FileId(0));
+        assert_eq!(restored.semantic_facts, module.semantic_facts);
+        assert_eq!(
+            restored
+                .semantic_facts
+                .contains(&SemanticFact::TopLevelRuntimeStatement),
+            has_runtime_statement,
+            "cached classification must match the source: {source}"
+        );
     }
 }
 
@@ -163,7 +190,7 @@ fn cache_roundtrip_preserves_computed_enum_key_facts() {
 
 #[test]
 fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
-    let module = parse_from_content(
+    let mut module = parse_from_content(
         FileId(7),
         Path::new("src/security.ts"),
         "client[method](req.body.name);",
@@ -171,6 +198,9 @@ fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
     assert_eq!(module.security_sinks_skipped, 1);
     assert_eq!(module.security_unresolved_callee_sites.len(), 1);
 
+    // Exercise diagnostics without optional semantic facts; the runtime-statement
+    // fact must not become a prerequisite for preserving these diagnostics.
+    module.semantic_facts = Arc::default();
     let cached = module_to_cached_from_parts(&module, 10, 20);
     assert!(cached.semantic_facts.is_none());
     let restored = cached_to_module(&cached, FileId(7));

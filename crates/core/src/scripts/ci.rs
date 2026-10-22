@@ -10,9 +10,13 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+#[path = "ci_references.rs"]
+mod references;
+
 use super::{
     IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
 };
+use references::{expand_matrix_runs, github_script_files};
 
 /// Result of scanning CI config files: package names used by CI tooling AND
 /// project-relative file paths referenced as command-line arguments.
@@ -122,7 +126,7 @@ fn extract_ci_signals_in(
     analysis: &mut CiAnalysis,
 ) {
     let mut groups: Vec<(Vec<Segment>, Vec<String>)> = Vec::new();
-    for step in extract_ci_steps(content) {
+    for step in expand_matrix_runs(content, extract_ci_steps(content)) {
         let dir = step
             .working_directory
             .as_deref()
@@ -167,6 +171,9 @@ fn extract_ci_signals_in(
             .test_entry_files
             .extend(parsed.test_entry_files.into_iter().filter_map(resolve));
     }
+    analysis
+        .entry_files
+        .extend(github_script_files(content, action_dir));
 }
 
 /// The run steps of the composite actions in `.github/actions/<name>/` and
@@ -252,7 +259,7 @@ fn parse_working_directory(raw: &str) -> Vec<Segment> {
     dir
 }
 
-fn unquote(value: &str) -> &str {
+pub(super) fn unquote(value: &str) -> &str {
     ['"', '\'']
         .iter()
         .find_map(|quote| {
@@ -473,6 +480,8 @@ pub(super) struct CiCommand {
     /// The raw `working-directory` value of the step, or of the innermost
     /// `defaults.run` that applies. `None` for the project root.
     pub(super) working_directory: Option<String>,
+    /// The zero-based line of the CI file that holds the command.
+    pub(super) line: usize,
 }
 
 /// Extract the shell commands of a CI file with their working directories.
@@ -482,7 +491,7 @@ pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
     let mut multiline_run = MultilineRunState::default();
     let mut scope = WorkingDirectoryScope::default();
 
-    for line in content.lines() {
+    for (line_index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
 
         if should_skip_ci_line(trimmed) {
@@ -492,7 +501,7 @@ pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
         let default_dir = scope.default_dir();
         if push_multiline_run_command(
             line,
-            trimmed,
+            line_index,
             &mut multiline_run,
             &mut commands,
             default_dir,
@@ -510,13 +519,14 @@ pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
                 commands.push(CiCommand {
                     text: rest.to_string(),
                     working_directory: default_dir,
+                    line: line_index,
                 });
                 multiline_run.start(run_key_column(line, trimmed), true);
             }
             continue;
         }
 
-        push_yaml_list_command(trimmed, &mut commands, default_dir);
+        push_yaml_list_command(trimmed, line_index, &mut commands, default_dir);
     }
 
     scope.close_step(&mut commands);
@@ -540,6 +550,11 @@ struct OpenStep {
     /// The index of the first command of the step.
     first_command: usize,
     working_directory: Option<String>,
+    /// The key column of the step `env:` while its entries are read.
+    env_column: Option<usize>,
+    /// Step `env` variables whose whole value is a workspace anchor
+    /// (`NAME: ${{ github.action_path }}`), with that anchor.
+    anchor_aliases: Vec<(String, String)>,
 }
 
 struct PendingDefaults {
@@ -579,10 +594,15 @@ impl WorkingDirectoryScope {
                 column,
                 first_command: commands.len(),
                 working_directory: None,
+                env_column: None,
+                anchor_aliases: Vec::new(),
             });
         }
 
         let key = item.unwrap_or(trimmed);
+        if let Some(step) = &mut self.step {
+            step.observe_env(column, indent, key);
+        }
         if let Some(value) = strip_yaml_key(key, "working-directory") {
             self.set_working_directory(column, indent, value.trim());
         }
@@ -631,11 +651,88 @@ impl WorkingDirectoryScope {
         let Some(step) = self.step.take() else {
             return;
         };
-        if let Some(dir) = step.working_directory {
-            for command in commands.iter_mut().skip(step.first_command) {
+        for command in commands.iter_mut().skip(step.first_command) {
+            if let Some(dir) = &step.working_directory {
                 command.working_directory = Some(dir.clone());
             }
+            for (name, anchor) in &step.anchor_aliases {
+                if let Cow::Owned(text) = substitute_variable(&command.text, name, anchor) {
+                    command.text = text;
+                }
+            }
         }
+    }
+}
+
+impl OpenStep {
+    /// Record the entries of the step `env:` whose value is a workspace
+    /// anchor, so `"$NAME/x.mjs"` in the step resolves like the anchor.
+    fn observe_env(&mut self, column: usize, indent: usize, key: &str) {
+        if self
+            .env_column
+            .is_some_and(|env_column| indent <= env_column)
+        {
+            self.env_column = None;
+        }
+        if column == self.column && strip_yaml_comment(key) == "env:" {
+            self.env_column = Some(column);
+            return;
+        }
+        if self.env_column.is_none() {
+            return;
+        }
+        let Some((name, value)) = key.split_once(':') else {
+            return;
+        };
+        let value = unquote(strip_yaml_comment(value).trim());
+        if anchor_target(value).is_some() {
+            self.anchor_aliases
+                .push((name.trim().to_string(), value.to_string()));
+        }
+    }
+}
+
+/// `text` without a trailing ` # comment`.
+fn strip_yaml_comment(text: &str) -> &str {
+    text.split_once(" #")
+        .map_or(text, |(value, _)| value)
+        .trim_end()
+}
+
+/// Replace each `$name` and `${name}` in `command` with `value`.
+fn substitute_variable<'a>(command: &'a str, name: &str, value: &str) -> Cow<'a, str> {
+    let braced = format!("${{{name}}}");
+    let plain = format!("${name}");
+    let mut out = String::with_capacity(command.len());
+    let mut changed = false;
+    let mut index = 0;
+    while index < command.len() {
+        let rest = &command[index..];
+        let matched = if rest.starts_with(&braced) {
+            Some(braced.len())
+        } else if rest.starts_with(&plain)
+            && !rest[plain.len()..].starts_with(|ch: char| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            Some(plain.len())
+        } else {
+            None
+        };
+        if let Some(len) = matched {
+            out.push_str(value);
+            index += len;
+            changed = true;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    if changed {
+        Cow::Owned(out)
+    } else {
+        Cow::Borrowed(command)
     }
 }
 
@@ -664,7 +761,7 @@ impl MultilineRunState {
 }
 
 /// Column of the `run` key itself, past any leading `- ` list indicator.
-fn run_key_column(line: &str, trimmed: &str) -> usize {
+pub(super) fn run_key_column(line: &str, trimmed: &str) -> usize {
     let base = line.len() - line.trim_start().len();
     match trimmed.strip_prefix("- ") {
         Some(rest) => base + 2 + (rest.len() - rest.trim_start().len()),
@@ -672,13 +769,13 @@ fn run_key_column(line: &str, trimmed: &str) -> usize {
     }
 }
 
-fn should_skip_ci_line(trimmed: &str) -> bool {
+pub(super) fn should_skip_ci_line(trimmed: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with('#')
 }
 
 fn push_multiline_run_command(
     line: &str,
-    trimmed: &str,
+    line_index: usize,
     state: &mut MultilineRunState,
     commands: &mut Vec<CiCommand>,
     working_directory: Option<String>,
@@ -687,6 +784,7 @@ fn push_multiline_run_command(
         return false;
     }
 
+    let trimmed = line.trim();
     let indent = line.len() - line.trim_start().len();
     if indent > state.indent && !trimmed.is_empty() {
         if state.folding {
@@ -698,6 +796,7 @@ fn push_multiline_run_command(
             commands.push(CiCommand {
                 text: trimmed.to_string(),
                 working_directory,
+                line: line_index,
             });
         }
         return true;
@@ -723,7 +822,7 @@ fn yaml_run_value(trimmed: &str) -> Option<&str> {
 /// chomping indicator (`-`, `+`) and an explicit indentation indicator (`1`-`9`),
 /// in either order, matching the YAML block header grammar. A header carrying a
 /// trailing comment is still not recognized.
-fn is_multiline_run_marker(value: &str) -> bool {
+pub(super) fn is_multiline_run_marker(value: &str) -> bool {
     let mut chars = value.chars();
     if !matches!(chars.next(), Some('|' | '>')) {
         return false;
@@ -743,6 +842,7 @@ fn is_multiline_run_marker(value: &str) -> bool {
 
 fn push_yaml_list_command(
     trimmed: &str,
+    line_index: usize,
     commands: &mut Vec<CiCommand>,
     working_directory: Option<String>,
 ) {
@@ -758,20 +858,21 @@ fn push_yaml_list_command(
         commands.push(CiCommand {
             text: rest.to_string(),
             working_directory,
+            line: line_index,
         });
     }
 }
 
 /// Strip a YAML key prefix from a line, returning the value part.
 /// Handles `key: value` and `key:` (empty value).
-fn strip_yaml_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+pub(super) fn strip_yaml_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let rest = line.strip_prefix(key)?;
     let rest = rest.strip_prefix(':')?;
     Some(rest)
 }
 
 /// Check if a string looks like a YAML mapping (key: value) rather than a shell command.
-fn is_yaml_mapping(s: &str) -> bool {
+pub(super) fn is_yaml_mapping(s: &str) -> bool {
     if let Some(first_word) = s.split_whitespace().next()
         && first_word.ends_with(':')
         && !first_word.starts_with("http")
@@ -1718,6 +1819,29 @@ runs:
         assert_eq!(
             parse_working_directory("${{ format('{0}/x', inputs.dir) }}/y"),
             [Segment::Expression, Segment::Name("y".into())]
+        );
+    }
+
+    #[test]
+    fn step_env_anchor_aliases_replace_their_variables() {
+        let content = "\
+steps:
+  - run: node \"$ACTION_PATH/prepare.mjs\" \"${ACTION_PATH}/b.mjs\" $ACTION_PATHS/c.mjs
+    env: # step values
+      ACTION_PATH: ${{ github.action_path }} # the action
+      OTHER: ${{ github.action_path }}/sub
+  - run: node \"$ACTION_PATH/next.mjs\"
+";
+        let texts: Vec<String> = extract_ci_steps(content)
+            .into_iter()
+            .map(|command| command.text)
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "node \"${{ github.action_path }}/prepare.mjs\" \"${{ github.action_path }}/b.mjs\" $ACTION_PATHS/c.mjs",
+                "node \"$ACTION_PATH/next.mjs\""
+            ]
         );
     }
 }

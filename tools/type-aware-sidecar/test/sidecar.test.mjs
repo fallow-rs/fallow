@@ -14,18 +14,13 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { API } from "typescript/unstable/sync";
+import { BACKEND, createApi } from "../src/backend.mjs";
 
 import { createSemanticResponse, parseRequest } from "../src/protocol.mjs";
 import { analyzeSemanticQueries, createSemanticSession } from "../src/semantic.mjs";
 import { readAll } from "../src/cli.mjs";
 import { canonicalFileIdentity } from "../src/file-identity.mjs";
-import {
-  ANALYSIS_OPERATION,
-  BACKEND_FAMILY,
-  BACKEND_VERSION,
-  WIRE_PROTOCOL_VERSION,
-} from "../src/generated-protocol.mjs";
+import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sidecarPackage = JSON.parse(readFileSync(path.join(sidecarRoot, "package.json"), "utf8"));
@@ -42,8 +37,8 @@ test("status reports protocol and backend without a project request", () => {
   assert.deepEqual(JSON.parse(result.stdout), {
     package_version: sidecarVersion,
     protocol_version: WIRE_PROTOCOL_VERSION,
-    backend_family: BACKEND_FAMILY,
-    backend_version: BACKEND_VERSION,
+    backend_family: BACKEND.family,
+    backend_version: BACKEND.version,
   });
 });
 
@@ -1743,6 +1738,171 @@ test("protocol v7 confirms complete closed-world absence of static class-member 
   }
 });
 
+test("protocol v7 confirms class members read through shorthand destructuring", () => {
+  const root = makeProject();
+  try {
+    const service = [
+      "export class Service {",
+      "  viaBinding(): void {}",
+      "  viaParameter(): void {}",
+      "  viaNested(): void {}",
+      "  viaLoop(): void {}",
+      "  viaAssignment(): void {}",
+      "  viaRenamedAssignment(): void {}",
+      "  viaDefaultedPattern(): void {}",
+      "  viaArrayPattern(): void {}",
+      "  viaLoopPattern(): void {}",
+      "  unused(): void {}",
+      "}",
+      "",
+    ].join("\n");
+    const consumer = [
+      'import { Service } from "./service";',
+      "const service = new Service();",
+      "const { viaBinding } = service;",
+      "viaBinding();",
+      "const run = ({ viaParameter }: Service): void => viaParameter();",
+      "run(service);",
+      "const { inner: { viaNested } } = { inner: service };",
+      "viaNested();",
+      "for (const { viaLoop } of [service]) viaLoop();",
+      "let viaAssignment: () => void;",
+      "({ viaAssignment } = service);",
+      "viaAssignment();",
+      "let renamed: () => void;",
+      "({ viaRenamedAssignment: renamed } = service);",
+      "renamed();",
+      "class Other { viaDefaultedPattern(): void {} }",
+      "let viaDefaultedPattern: () => void;",
+      "({ inner: { viaDefaultedPattern } = new Other() } = { inner: service });",
+      "viaDefaultedPattern();",
+      "let viaArrayPattern: () => void;",
+      "[{ viaArrayPattern }] = [service];",
+      "let viaLoopPattern: () => void;",
+      "for ({ viaLoopPattern } of [service]) viaLoopPattern();",
+      "",
+    ].join("\n");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/service.ts", service);
+    write(root, "src/consumer.ts", consumer);
+    const names = [
+      "viaBinding",
+      "viaParameter",
+      "viaNested",
+      "viaLoop",
+      "viaAssignment",
+      "viaRenamedAssignment",
+      "viaDefaultedPattern",
+      "viaArrayPattern",
+      "viaLoopPattern",
+      "unused",
+    ];
+    const queries = names.map((name, id) => ({
+      id,
+      operation: "symbol-use",
+      framework_contracts: [],
+      symbol: symbolIdentity({
+        source: service,
+        marker: `${name}()`,
+        file: "src/service.ts",
+        namespace: "value",
+        declarationKind: "class_method",
+        exportedName: name,
+        owner: "Service",
+      }),
+    }));
+
+    const response = runSidecar(semanticRequest(root, queries));
+    const assertions = Object.fromEntries(
+      response.results.map((result) => [names[result.query_id], result.assertion]),
+    );
+    assert.deepEqual(assertions, {
+      viaBinding: "confirmed-used",
+      viaParameter: "confirmed-used",
+      viaNested: "confirmed-used",
+      viaLoop: "confirmed-used",
+      viaAssignment: "confirmed-used",
+      viaRenamedAssignment: "confirmed-used",
+      viaDefaultedPattern: "no-confirmed-use",
+      viaArrayPattern: "no-confirmed-use",
+      viaLoopPattern: "no-confirmed-use",
+      unused: "confirmed-no-static-references",
+    });
+    const bindingUse = response.results.find((result) => result.query_id === 0).evidence[0];
+    assert.equal(bindingUse.path, "src/consumer.ts");
+    assert.equal(bindingUse.line, utf8Position(consumer, "viaBinding }").line);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v7 confirms exports read through shorthand properties and destructuring", () => {
+  const root = makeProject();
+  try {
+    const source = [
+      "export const shorty = 1;",
+      "export const aliased = 2;",
+      "export const destructured = 3;",
+      "export const renamed = 4;",
+      "export const unused = 5;",
+      "",
+    ].join("\n");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/values.ts", source);
+    write(
+      root,
+      "src/consumer.ts",
+      [
+        'import { shorty, aliased as local, unused } from "./values";',
+        'import * as values from "./values";',
+        "export const bag = { shorty, local };",
+        "const { destructured } = values;",
+        "const { renamed: other } = values;",
+        "export const read = [destructured, other];",
+        "",
+      ].join("\n"),
+    );
+    const names = ["shorty", "aliased", "destructured", "renamed", "unused"];
+    const queries = names.map((name, id) => ({
+      id,
+      operation: "symbol-use",
+      framework_contracts: [],
+      symbol: symbolIdentity({
+        source,
+        marker: name,
+        file: "src/values.ts",
+        namespace: "value",
+        declarationKind: "export",
+        exportedName: name,
+      }),
+    }));
+
+    const response = runSidecar(semanticRequest(root, queries));
+    const assertions = Object.fromEntries(
+      response.results.map((result) => [names[result.query_id], result.assertion]),
+    );
+    assert.deepEqual(assertions, {
+      shorty: "confirmed-used",
+      aliased: "confirmed-used",
+      destructured: "confirmed-used",
+      renamed: "confirmed-used",
+      unused: "confirmed-no-static-references",
+    });
+    const shortyUse = response.results.find((result) => result.query_id === 0).evidence[0];
+    assert.deepEqual([shortyUse.path, shortyUse.line], ["src/consumer.ts", 3]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 preserves required interface, abstract, and inherited contracts", () => {
   const cases = [
     {
@@ -2844,7 +3004,7 @@ test("returns provenance for an empty semantic request", () => {
   assert.equal(response.protocol_version, 7);
   assert.equal(response.operation, "semantic-queries");
   assert.equal(response.sidecar_version, sidecarVersion);
-  assert.equal(response.backend, "typescript-go");
+  assert.equal(response.backend, BACKEND.family);
   assert.deepEqual(response.selected_tsconfigs, []);
   assert.deepEqual(response.projects, []);
   assert.deepEqual(response.results, []);
@@ -2885,7 +3045,7 @@ test("persistent semantic session invalidates changed source without stale refer
     const snapshots = [];
     const session = createSemanticSession(root, {
       createApi: (cwd) => {
-        const api = new API({ cwd });
+        const api = createApi({ cwd });
         return {
           updateSnapshot: (params) => {
             const snapshot = api.updateSnapshot(params);
@@ -3177,5 +3337,40 @@ test("unknown external framework package provenance abstains", () => {
     assert.equal(response.results[0].data.closed_world_eligible, false);
   } finally {
     rmSync(monorepo, { recursive: true, force: true });
+  }
+});
+
+test("a query for a deleted file does not fail the other queries in the request", () => {
+  const root = makeProject();
+  try {
+    write(root, "tsconfig.json", JSON.stringify({ include: ["src/**/*.ts"] }));
+    write(root, "src/a.ts", "export const a = 1;\n");
+    const symbol = (file) => ({
+      path: file,
+      namespace: "value",
+      declaration_kind: "variable",
+      exported_name: "a",
+      local_name: "a",
+      line: 1,
+      col: 13,
+    });
+    const parsed = parseRequest(
+      semanticRequest(root, [
+        { id: 0, operation: "symbol-use", symbol: symbol("src/a.ts"), framework_contracts: [] },
+        {
+          id: 1,
+          operation: "symbol-use",
+          symbol: symbol("src/deleted.ts"),
+          framework_contracts: [],
+        },
+      ]),
+    );
+    const { results } = analyzeSemanticQueries(parsed);
+    assert.deepEqual(
+      results.map((result) => result.assertion),
+      ["confirmed-no-static-references", "no-confirmed-use"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

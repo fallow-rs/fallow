@@ -5635,6 +5635,125 @@ assert_contains "$(grep -A1 '^  command:' "$DIR/../../action.yml")" "architectur
 
 rm -rf "$ARCH_WORK"
 
+echo ""
+echo "=== Shallow clone merge base for changed-since ==="
+
+# A pull_request job checks out the merge commit at depth 1 by default. The CLI
+# diffs against merge-base(base, HEAD), so analyze.sh must fetch enough history
+# for that merge base. The fake fallow fails like the real CLI without one.
+MB_TMP=$(mktemp -d)
+mkdir -p "$MB_TMP/bin"
+cat > "$MB_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+base=""
+prev=""
+for arg in "$@"; do
+  [ "$prev" = "--changed-since" ] && base=$arg
+  prev=$arg
+done
+case "$*" in
+  *audit*) ;;
+  *) printf '{"total_issues":0}\n'; exit 0 ;;
+esac
+if [ -n "$base" ] && ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+  printf '{"error":true,"message":"could not determine changed files for base ref %s: no merge base","exit_code":2}\n' "$base"
+  exit 2
+fi
+printf '%s\n' '{"command":"audit","verdict":"pass","attribution":{"gate":"new-only","dead_code_introduced":0,"dead_code_inherited":0,"complexity_introduced":0,"complexity_inherited":0,"duplication_introduced":0,"duplication_inherited":0},"summary":{"dead_code_issues":0,"dead_code_has_errors":false,"complexity_findings":0,"max_cyclomatic":null,"duplication_clone_groups":0}}'
+SH
+chmod +x "$MB_TMP/bin/fallow"
+
+mb_git() {
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+    git -c user.email=test@example.com -c user.name=test -c commit.gpgsign=false \
+      -c merge.gpgsign=false -c core.hooksPath=/dev/null "$@"
+}
+
+# History: main has five commits, a PR branch adds two, main adds one more,
+# and the PR merge commit joins the two tips (first parent: the base tip).
+mb_git init -q -b main "$MB_TMP/src"
+for i in 1 2 3 4 5; do
+  echo "$i" > "$MB_TMP/src/f$i.ts"
+  mb_git -C "$MB_TMP/src" add . && mb_git -C "$MB_TMP/src" commit -qm "main $i"
+done
+mb_git -C "$MB_TMP/src" switch -qc feature
+for i in 1 2; do
+  echo "$i" > "$MB_TMP/src/pr$i.ts"
+  mb_git -C "$MB_TMP/src" add . && mb_git -C "$MB_TMP/src" commit -qm "pr $i"
+done
+mb_git -C "$MB_TMP/src" switch -q main
+echo "base" > "$MB_TMP/src/base.ts"
+mb_git -C "$MB_TMP/src" add . && mb_git -C "$MB_TMP/src" commit -qm "main base"
+MB_BASE=$(mb_git -C "$MB_TMP/src" rev-parse main)
+MB_HEAD=$(mb_git -C "$MB_TMP/src" rev-parse feature)
+mb_git -C "$MB_TMP/src" merge -q --no-ff feature -m "merge pr"
+MB_MERGE=$(mb_git -C "$MB_TMP/src" rev-parse HEAD)
+mb_git -C "$MB_TMP/src" reset -q --hard "$MB_BASE"
+mb_git -C "$MB_TMP/src" update-ref refs/pull/1/merge "$MB_MERGE"
+mb_git clone -q --bare "$MB_TMP/src" "$MB_TMP/remote.git"
+# A bare clone copies only branches and tags. Keep the merge commit on a ref,
+# as GitHub does, so a fetch by its SHA works with every git version.
+mb_git -C "$MB_TMP/remote.git" update-ref refs/pull/1/merge "$MB_MERGE"
+
+# Make a depth-1 checkout of one commit, like actions/checkout does.
+mb_checkout() {
+  local dir=$1 sha=$2
+  mb_git init -q "$dir"
+  mb_git -C "$dir" remote add origin "file://$MB_TMP/remote.git"
+  mb_git -C "$dir" fetch -q --no-tags --depth=1 origin "$sha"
+  mb_git -C "$dir" checkout -q "$sha"
+}
+
+run_merge_base_case() {
+  local dir=$1
+  (
+    cd "$dir" || exit 1
+    env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+      PATH="$MB_TMP/bin:$PATH" \
+      GITHUB_OUTPUT="$dir.output" \
+      GITHUB_ENV="$dir.env" \
+      INPUT_ROOT="." \
+      INPUT_COMMAND="audit" \
+      INPUT_FORMAT="json" \
+      INPUT_AUTO_CHANGED_SINCE="true" \
+      EVENT_NAME="pull_request" \
+      PR_BASE_SHA="$MB_BASE" \
+      bash "$DIR/../scripts/analyze.sh"
+  ) 2>&1
+}
+
+mb_checkout "$MB_TMP/merge" "$MB_MERGE"
+# The file runs under errexit here, and the case can exit non-zero.
+set +e
+OUT=$(run_merge_base_case "$MB_TMP/merge")
+cmd_status=$?
+set -e
+if [ "$cmd_status" -eq 0 ]; then
+  pass "merge base: depth-1 merge commit checkout runs audit"
+else
+  fail "merge base: depth-1 merge commit checkout runs audit" "exit $cmd_status, output: $OUT"
+fi
+assert_not_contains "$OUT" "no merge base" "merge base: merge commit checkout gets a merge base"
+if [ "$(mb_git -C "$MB_TMP/merge" merge-base "$MB_BASE" HEAD 2>/dev/null)" = "$MB_BASE" ]; then
+  pass "merge base: merge commit parents give the PR base as merge base"
+else
+  fail "merge base: merge commit parents give the PR base as merge base" "merge base not found"
+fi
+
+mb_checkout "$MB_TMP/head" "$MB_HEAD"
+set +e
+OUT=$(run_merge_base_case "$MB_TMP/head")
+cmd_status=$?
+set -e
+if [ "$cmd_status" -eq 0 ]; then
+  pass "merge base: depth-1 PR head checkout deepens to a merge base"
+else
+  fail "merge base: depth-1 PR head checkout deepens to a merge base" "exit $cmd_status, output: $OUT"
+fi
+assert_not_contains "$OUT" "no merge base" "merge base: PR head checkout gets a merge base"
+
+rm -rf "$MB_TMP"
+
 # --- Summary ---
 
 echo ""

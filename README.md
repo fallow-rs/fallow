@@ -191,6 +191,8 @@ fallow:
   extends: .fallow
 ```
 
+`fetch-depth: 0` is the recommended setup. A default shallow checkout also works for `command: audit`: the Action fetches the commits that it needs to find the merge base.
+
 To start in report-only mode, add `fail-on-issues: false`. Remove it when the team is ready for a gate. With `command: audit`, a pull request fails only on findings that it introduces. Without `command: audit`, the Action runs the full pipeline, and any finding fails the job (`fail-on-issues` defaults to true). In a pull request, the Action scopes the analysis to the changed files, so its output can differ from a full local run.
 
 The Action installs the fallow version that the project's `package.json` names. Pin an exact version there to use the same version in CI and on your machine. It can post a PR comment and inline review comments, and it can upload SARIF to GitHub Code Scanning. Other output formats are CodeClimate, GitHub annotations, and Markdown. The GitLab template URL names a release tag, because GitLab includes a file from a fixed ref. The [CI guide](https://fallow.tools/docs/integrations/ci/) covers inputs, permissions, and a staged rollout.

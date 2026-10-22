@@ -1,0 +1,11 @@
+name: Setup
+description: Prepare the cache
+runs:
+  using: composite
+  steps:
+    - run: node "$SETUP_ACTION_PATH/prepare.mjs"
+      shell: bash
+      env:
+        SETUP_ACTION_PATH: ${{ github.action_path }}
+    - run: node "$UNALIASED_PATH/unaliased.mjs"
+      shell: bash

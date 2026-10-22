@@ -43,6 +43,75 @@ JavaScript constants keep the native client, sidecar, corpus, and editor bundle
 on that single contract. Fallow only changes a finding when the checker
 resolves an exact declaration identity. Name-only matches are never enough.
 
+### Experimental tsrs backend
+
+`FALLOW_TYPE_AWARE_BACKEND=tsrs` selects [tsrs](https://github.com/oxc-project/tsrs),
+a Rust port of the TypeScript 7 checker. It serves the same `unstable/sync`
+API. The manifest `backend` object is the default backend, and
+`experimental_backends` lists the opt-in backends, each with its npm package
+and exact version. The native client and the sidecar both read the selection,
+and the client rejects a status or analysis response from a backend family or
+version that the selection does not pin.
+
+An experimental backend refines findings, but its evidence never makes a fix
+eligible: guarded fixes need the corpus evidence of the default backend. The
+audit base-snapshot cache key includes the selection. The corpus runner
+forwards the selection, and it accepts a non-default backend only for
+`prepare`, `focused`, `discover`, `measure`, `evidence` and `verify-ledger`
+with a non-canonical `--out-dir`. The tracked evidence stays on the default
+backend.
+
+`tsrs` is an optional peer dependency of `fallow-type-aware`. Install the
+pinned version where the companion can resolve it:
+
+```bash
+npm install --save-dev tsrs@0.18.0-ts7.1.0-dev.20260929
+FALLOW_TYPE_AWARE_BACKEND=tsrs npx fallow type-aware status
+```
+
+tsrs follows TypeScript 7.1, and the 7.1 API differs from 7.0. The sidecar
+module `src/backend.mjs` keeps the 7.0 contract for the semantic code:
+
+- `updateSnapshot(changes)` derives each snapshot from the newest one, and a
+  disposed snapshot stays alive while it is the newest.
+- 7.0 `fileChanges` become 7.1 `fileNotifications`, and every update sets
+  `ensurePrograms`, so programs reflect the changed files.
+- `getProject(configFileName)` falls back to `getConfiguredProject`.
+- A `readFile` callback returns `serverFS.useOS` to read from disk.
+
+The 7.1 AST also differs: a heritage clause holds a `TypeReference` with
+`typeName` instead of an `ExpressionWithTypeArguments` with `expression`.
+
+TypeScript 7.1.0-beta makes two more changes, and `src/backend.mjs` handles
+both:
+
+- The API moves from `typescript/unstable/sync` to `typescript/sync` (also
+  `ast/is` and `fs`). The sidecar imports the new path first and falls back to
+  `unstable/`, which TypeScript 7.0 and tsrs still use.
+- Compiler options move from `project.compilerOptions` to
+  `project.parsedCommandLine.options`. Read them through
+  `projectCompilerOptions`.
+
+The beta also drops the deprecated `openProject` request field. Use
+`openProjects`.
+
+When the default backend moves to TypeScript 7.1, port the semantic code to
+the 7.1 snapshot API and delete the 7.0 emulation in `src/backend.mjs` in the
+same change.
+
+The sidecar suite runs on both backends:
+
+```bash
+node --test tools/type-aware-sidecar/test/*.test.mjs
+FALLOW_TYPE_AWARE_BACKEND=tsrs node --test tools/type-aware-sidecar/test/*.test.mjs
+```
+
+tsrs has no Windows or macOS x64 binaries, and the backend stays opt-in while
+tsrs is a 0.x release. The VS Code extension bundles only the default backend,
+so the tsrs backend needs an npm or CLI install. Fallow reads the selection
+once per process and rejects an unknown or non-Unicode value before it starts
+the companion.
+
 ## Ownership boundary with tsc and Oxlint
 
 Type-aware Fallow does not emit TypeScript compiler diagnostics or general

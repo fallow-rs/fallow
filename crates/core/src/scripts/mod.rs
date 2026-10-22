@@ -13,6 +13,7 @@ mod borp;
 pub mod ci;
 #[cfg(test)]
 mod command_forms_tests;
+mod command_wrappers;
 mod config_tasks;
 mod file_target_tools;
 mod flag_credits;
@@ -34,6 +35,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use command_wrappers::{command_wrapper_child_index, skip_command_wrappers};
 pub use config_tasks::config_task_scripts;
 use file_target_tools::file_target_tool;
 pub use resolve::{
@@ -46,20 +48,6 @@ use workspace_selection::{PackageSelector, WorkspacePackage, relative_dir};
 
 /// Environment variable wrapper commands to strip before the actual binary.
 const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
-
-struct CommandWrapperSpec {
-    binary: &'static str,
-    prefix: &'static [&'static str],
-    separator: &'static str,
-}
-
-/// Known wrappers; `--` alone does not imply that a CLI executes another command.
-const COMMAND_WRAPPERS: &[CommandWrapperSpec] = &[CommandWrapperSpec {
-    // `varlock run [options] -- <command>`: https://varlock.dev/reference/cli/load-and-run/
-    binary: "varlock",
-    prefix: &["run"],
-    separator: "--",
-}];
 
 /// Node.js runners whose first non-flag argument is a file path, not a binary name.
 const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
@@ -2616,31 +2604,6 @@ enum SegmentOutcome {
         /// Where the multiplexer runs the command.
         location: RunLocation,
     },
-}
-
-/// Return the first token of the child command for a known command wrapper.
-fn command_wrapper_child_index(tokens: &[&str], idx: usize) -> Option<usize> {
-    let Some(wrapper) = COMMAND_WRAPPERS.iter().find(|wrapper| {
-        tokens.get(idx) == Some(&wrapper.binary)
-            && tokens.get(idx + 1..idx + 1 + wrapper.prefix.len()) == Some(wrapper.prefix)
-    }) else {
-        return vite_plus::exec_child_index(tokens, idx);
-    };
-    let args_start = idx + 1 + wrapper.prefix.len();
-    let separator = tokens[args_start..]
-        .iter()
-        .position(|token| *token == wrapper.separator)?;
-    let child_idx = args_start + separator + 1;
-
-    (child_idx < tokens.len()).then_some(child_idx)
-}
-
-fn skip_command_wrappers(tokens: &[&str]) -> Option<usize> {
-    let mut idx = shell::skip_initial_wrappers(tokens, 0)?;
-    while let Some(child_idx) = command_wrapper_child_index(tokens, idx) {
-        idx = shell::skip_initial_wrappers(tokens, child_idx)?;
-    }
-    Some(idx)
 }
 
 fn command_runtime_host(

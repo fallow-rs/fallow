@@ -11,7 +11,15 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({
   backend: {
     family: "typescript-go",
     version: "7.0.2",
+    package: "typescript",
   },
+  experimental_backends: [
+    {
+      family: "tsrs",
+      package: "tsrs",
+      version: "0.18.0-ts7.1.0-dev.20260929",
+    },
+  ],
   sidecar: {
     package: "fallow-type-aware",
     version_source: "workspace-package",
@@ -26,4 +34,8 @@ export const QUERY_OPERATIONS = Object.freeze(TYPE_AWARE_PROTOCOL.query_operatio
 export const SESSION_ENVELOPE_TYPES = Object.freeze(TYPE_AWARE_PROTOCOL.session_envelope_types);
 export const BACKEND_FAMILY = TYPE_AWARE_PROTOCOL.backend.family;
 export const BACKEND_VERSION = TYPE_AWARE_PROTOCOL.backend.version;
+export const BACKENDS = Object.freeze([
+  TYPE_AWARE_PROTOCOL.backend,
+  ...TYPE_AWARE_PROTOCOL.experimental_backends,
+]);
 export const SIDECAR_PACKAGE = TYPE_AWARE_PROTOCOL.sidecar.package;

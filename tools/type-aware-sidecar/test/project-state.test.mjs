@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { API } from "typescript/unstable/sync";
+import { createApi } from "../src/backend.mjs";
 
 import { projectState } from "../src/project-state.mjs";
 
@@ -35,7 +35,7 @@ const AMBIENT_SVELTE_MODULE = `declare module "*.svelte" {
 
 const inspectProject = (files) => {
   const root = createRoot();
-  const api = new API();
+  const api = createApi();
   let snapshot;
   try {
     write(root, "tsconfig.json", BASE_CONFIG);
@@ -47,7 +47,7 @@ const inspectProject = (files) => {
     );
     Object.entries(files).forEach(([fileName, contents]) => write(root, fileName, contents));
     const configFileName = path.join(root, "tsconfig.json");
-    snapshot = api.updateSnapshot({ openProject: configFileName });
+    snapshot = api.updateSnapshot({ openProjects: [configFileName] });
     const project = snapshot.getProject(configFileName);
     assert.ok(project, "expected TypeScript-Go to open the fixture project");
     const state = projectState(root, project, "explicit");
@@ -205,4 +205,21 @@ test("prioritizes project-local structural diagnostics over Svelte gaps", () => 
   assert.equal(state.status, "unavailable");
   assert.equal(state.reasonCode, "blocking-diagnostics");
   assert.ok(state.blockingDiagnosticCount > 0);
+});
+
+test("names a file outside every tsconfig as the inferred project", () => {
+  const root = createRoot();
+  const api = createApi({ cwd: root });
+  let snapshot;
+  try {
+    write(root, "loose.ts", "export const loose = 1;\n");
+    const fileName = path.join(root, "loose.ts");
+    snapshot = api.updateSnapshot({ openFiles: [fileName] });
+    const state = projectState(root, snapshot.getDefaultProjectForFile(fileName), "auto");
+    assert.equal(state.config, "<inferred>");
+  } finally {
+    snapshot?.dispose();
+    api.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

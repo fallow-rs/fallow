@@ -1,4 +1,4 @@
-import { SymbolFlags } from "typescript/unstable/sync";
+import { sync } from "./backend.mjs";
 
 import {
   declarationName,
@@ -6,6 +6,8 @@ import {
   declarationsForSymbol,
   stableDeclarationKey,
 } from "./semantic-identity.mjs";
+
+const { SymbolFlags } = sync;
 
 export const targetName = (declaration) => declarationName(declaration) ?? "default";
 

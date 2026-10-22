@@ -4602,6 +4602,89 @@ fn health_coverage_gaps_exclude_vitest_replacement_targets() {
 }
 
 #[test]
+fn health_coverage_gaps_keep_top_level_runtime_statements_on_cold_and_warm_runs() {
+    let dir = tempdir().expect("create temp dir");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"type-only-runtime-statements","private":true,"type":"module","main":"src/entry.ts"}"#,
+    );
+    write_file(
+        &dir.path().join("src/entry.ts"),
+        "import './expressions'; import './await'; import './local'; import './class';\n\
+         import './control'; import './types'; import './ambient';\n\
+         import './reexport-inline'; import './reexport-all';\n\
+         export const entry = 1;\n",
+    );
+    for (name, source) in [
+        (
+            "expressions",
+            "globalThis.foo = 1; console.log('init'); export type A = string;",
+        ),
+        ("await", "await Promise.resolve(); export type A = string;"),
+        (
+            "local",
+            "const initialized = Date.now(); export type A = string;",
+        ),
+        (
+            "class",
+            "class Setup { static { console.log('init'); } } export type A = string;",
+        ),
+        ("control", "export const value = 1;"),
+        (
+            "types",
+            "namespace Shapes { export interface Shape {} } export type A = string;",
+        ),
+        (
+            "ambient",
+            "declare const value: string; declare class Shape {} export type A = string;",
+        ),
+        ("reexport-inline", "export { type A } from './types';"),
+        ("reexport-all", "export type * from './types';"),
+    ] {
+        write_file(&dir.path().join(format!("src/{name}.ts")), source);
+    }
+
+    for args in [
+        vec![
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+        vec!["--coverage-gaps", "--format", "json", "--quiet"],
+        vec!["--coverage-gaps", "--format", "json", "--quiet"],
+    ] {
+        let output = run_fallow_in_root("health", dir.path(), &args);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let json = parse_json(&output);
+        let coverage = &json["coverage_gaps"];
+        let mut files: Vec<_> = coverage["files"]
+            .as_array()
+            .expect("coverage files")
+            .iter()
+            .map(|item| item["path"].as_str().expect("file path").replace('\\', "/"))
+            .collect();
+        files.sort_unstable();
+        assert_eq!(
+            files,
+            [
+                "src/await.ts",
+                "src/class.ts",
+                "src/control.ts",
+                "src/entry.ts",
+                "src/expressions.ts",
+                "src/local.ts"
+            ],
+            "runtime statements must keep type-exporting modules in coverage; erased declarations must stay excluded"
+        );
+        assert_eq!(coverage["summary"]["runtime_files"], 6);
+        assert_eq!(coverage["summary"]["covered_files"], 0);
+    }
+    assert!(dir.path().join(".fallow").exists());
+}
+
+#[test]
 fn health_coverage_gaps_ignore_type_only_test_references() {
     let output = run_fallow(
         "health",

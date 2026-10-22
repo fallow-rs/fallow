@@ -2062,6 +2062,7 @@ mod danger;
 mod deno;
 mod dependency_cruiser;
 mod docusaurus;
+mod dotenv;
 mod drizzle;
 mod egg;
 mod electron;
@@ -2155,6 +2156,8 @@ mod tailwind;
 mod tanstack_router;
 mod tap;
 mod test_alias;
+#[cfg(test)]
+mod tests;
 mod tsd;
 mod tsdown;
 mod tsup;
@@ -2178,6 +2181,3 @@ mod webpack;
 mod wrangler;
 mod wuchale;
 mod wxt;
-
-#[cfg(test)]
-mod tests;

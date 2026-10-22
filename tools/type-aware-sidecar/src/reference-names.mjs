@@ -1,4 +1,6 @@
-import {
+import { ast } from "./backend.mjs";
+
+const {
   isExportDeclaration,
   isImportDeclaration,
   isImportEqualsDeclaration,
@@ -7,7 +9,7 @@ import {
   isNamedExports,
   isNamespaceExportDeclaration,
   isNamespaceImport,
-} from "typescript/unstable/ast/is";
+} = ast;
 
 const JAVASCRIPT_FILE = /\.[cm]?jsx?$/iu;
 

@@ -16,6 +16,75 @@ use helpers::regex_pattern_to_suffix;
 const LEGACY_SEMANTIC_TEST_OBJECT_PREFIXES: &[&str] = &["__fallow_", "__angular_"];
 
 #[test]
+fn top_level_runtime_statements_record_one_module_fact() {
+    for source in [
+        "globalThis.foo = 1; console.log('init'); export type A = string;",
+        "await Promise.resolve(); export type A = string;",
+        "const initialized = Date.now(); export type A = string;",
+        "let value: string; export type A = string;",
+        "class Setup { static { console.log('init'); } } export type A = string;",
+        "enum Value { One } export type A = string;",
+        "namespace Setup { console.log('init'); } export type A = string;",
+    ] {
+        let module = parse(source);
+        assert_eq!(
+            module
+                .semantic_facts
+                .iter()
+                .filter(|fact| matches!(fact, SemanticFact::TopLevelRuntimeStatement))
+                .count(),
+            1,
+            "runtime source should record exactly one module fact: {source}"
+        );
+    }
+}
+
+#[test]
+fn erased_declarations_and_static_imports_do_not_record_runtime_statement_facts() {
+    for source in [
+        "; export type A = string;",
+        "export interface A {}",
+        "export default interface A {}",
+        "declare const value: string; export type A = string;",
+        "declare function initialize(): void; export type A = string;",
+        "declare class Setup {} export type A = string;",
+        "declare enum Value { One } export type A = string;",
+        "declare namespace Setup { const value: string; } export type A = string;",
+        "namespace Shapes { export interface Shape {} } export type A = string;",
+        "import type { A } from './a'; export type { A };",
+        "import { type A } from './a'; export { type A };",
+        "export { type A } from './a';",
+        "export type * from './a';",
+    ] {
+        let module = parse(source);
+        assert!(
+            !module
+                .semantic_facts
+                .contains(&SemanticFact::TopLevelRuntimeStatement),
+            "erased declarations and static import records stay separate: {source}"
+        );
+    }
+}
+
+#[test]
+fn module_imports_and_exports_use_their_existing_runtime_records() {
+    for source in [
+        "export const value = 1;",
+        "export default console.log('init');",
+        "import './init'; export type A = string;",
+        "export * from './values';",
+    ] {
+        let module = parse(source);
+        assert!(
+            !module
+                .semantic_facts
+                .contains(&SemanticFact::TopLevelRuntimeStatement),
+            "module declarations already have dedicated runtime records: {source}"
+        );
+    }
+}
+
+#[test]
 fn into_module_info_transfers_exports() {
     let info = parse("export const a = 1; export function b() {}");
     assert_eq!(info.exports.len(), 2);

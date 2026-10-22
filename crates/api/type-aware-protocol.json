@@ -18,8 +18,16 @@
   ],
   "backend": {
     "family": "typescript-go",
-    "version": "7.0.2"
+    "version": "7.0.2",
+    "package": "typescript"
   },
+  "experimental_backends": [
+    {
+      "family": "tsrs",
+      "package": "tsrs",
+      "version": "0.18.0-ts7.1.0-dev.20260929"
+    }
+  ],
   "sidecar": {
     "package": "fallow-type-aware",
     "version_source": "workspace-package"

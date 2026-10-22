@@ -1,12 +1,9 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { version as typescriptVersion } from "typescript";
-
+import { BACKEND } from "./backend.mjs";
 import {
   ANALYSIS_OPERATION,
-  BACKEND_FAMILY,
-  BACKEND_VERSION,
   MUTANT_TYPECHECK_OPERATION,
   QUERY_OPERATIONS as MANIFEST_QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
@@ -18,17 +15,11 @@ const require = createRequire(import.meta.url);
 const { version: SIDECAR_VERSION } = require("../package.json");
 const QUERY_OPERATIONS = new Set(MANIFEST_QUERY_OPERATIONS);
 
-if (typescriptVersion !== BACKEND_VERSION) {
-  throw new Error(
-    `typescript backend version ${typescriptVersion} does not match protocol ${BACKEND_VERSION}`,
-  );
-}
-
 export const createStatusResponse = () => ({
   package_version: SIDECAR_VERSION,
   protocol_version: WIRE_PROTOCOL_VERSION,
-  backend_family: BACKEND_FAMILY,
-  backend_version: BACKEND_VERSION,
+  backend_family: BACKEND.family,
+  backend_version: BACKEND.version,
 });
 
 const BATCH_REQUEST_KEYS = new Set([
@@ -491,8 +482,8 @@ export const createSemanticResponse = ({
   protocol_version: WIRE_PROTOCOL_VERSION,
   operation: ANALYSIS_OPERATION,
   sidecar_version: SIDECAR_VERSION,
-  backend: BACKEND_FAMILY,
-  backend_version: BACKEND_VERSION,
+  backend: BACKEND.family,
+  backend_version: BACKEND.version,
   selected_tsconfigs: [...selectedTsconfigs].toSorted(compareText),
   projects: [...projectResults].toSorted((left, right) => compareText(left.config, right.config)),
   results: [...results]
@@ -507,8 +498,8 @@ export const createMutantTypecheckResponse = ({ results, elapsedMs }) => ({
   protocol_version: WIRE_PROTOCOL_VERSION,
   operation: MUTANT_TYPECHECK_OPERATION,
   sidecar_version: SIDECAR_VERSION,
-  backend: BACKEND_FAMILY,
-  backend_version: BACKEND_VERSION,
+  backend: BACKEND.family,
+  backend_version: BACKEND.version,
   results,
   elapsed_ms: Math.max(0, Math.round(elapsedMs)),
 });

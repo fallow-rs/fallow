@@ -3,8 +3,8 @@ import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { Checker } from "typescript/unstable/sync";
 
+import { sync } from "../src/backend.mjs";
 import { parseRequest } from "../src/protocol.mjs";
 import { analyzeSemanticQueries } from "../src/semantic.mjs";
 import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
@@ -56,16 +56,45 @@ const memberQuery = (id, member, line) => ({
   framework_contracts: [],
 });
 
+// TypeScript 7.0 defines checker methods as plain methods. TypeScript 7.1 and
+// tsrs define them as getters that return the bound method.
+const countedDescriptor = (descriptor, count) =>
+  descriptor.get
+    ? {
+        ...descriptor,
+        get() {
+          const method = descriptor.get.call(this);
+          return (...args) => {
+            count();
+            return method(...args);
+          };
+        },
+      }
+    : {
+        ...descriptor,
+        value(...args) {
+          count();
+          return descriptor.value.apply(this, args);
+        },
+      };
+
 const countCalls = (run) => {
   const counts = { realpath: 0 };
-  const originals = COUNTED_CHECKER_METHODS.map((method) => [method, Checker.prototype[method]]);
+  const prototype = sync.Checker.prototype;
+  const originals = COUNTED_CHECKER_METHODS.map((method) => [
+    method,
+    Object.getOwnPropertyDescriptor(prototype, method),
+  ]);
   const originalRealpath = fs.realpathSync.native;
-  for (const [method, original] of originals) {
+  for (const [method, descriptor] of originals) {
     counts[method] = 0;
-    Checker.prototype[method] = function countedCheckerMethod(...args) {
-      counts[method] += 1;
-      return original.apply(this, args);
-    };
+    Object.defineProperty(
+      prototype,
+      method,
+      countedDescriptor(descriptor, () => {
+        counts[method] += 1;
+      }),
+    );
   }
   fs.realpathSync.native = (...args) => {
     counts.realpath += 1;
@@ -74,7 +103,8 @@ const countCalls = (run) => {
   try {
     return { result: run(), counts };
   } finally {
-    for (const [method, original] of originals) Checker.prototype[method] = original;
+    for (const [method, descriptor] of originals)
+      Object.defineProperty(prototype, method, descriptor);
     fs.realpathSync.native = originalRealpath;
   }
 };

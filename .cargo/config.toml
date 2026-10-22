@@ -20,7 +20,7 @@ rustflags = ["-C", "link-arg=/STACK:16777216"]
 # libtest runs each `#[test]` on its own spawned thread, which sizes from
 # RUST_MIN_STACK (default ~2 MiB) rather than the main-thread `/STACK`
 # reserve set above. Constructing the full clap command tree
-# (`Cli::command()`, exercised by `crates/cli/src/schema.rs` tests) outgrew
+# (`Cli::command()`, exercised by `crates/cli/src/schema/mod.rs` tests) outgrew
 # that default on Windows as the CLI surface expanded, aborting the test
 # binary with STATUS_STACK_OVERFLOW. Pin test threads to the same 16 MiB the
 # main thread and rayon workers use. Applies to every `cargo test`; on POSIX
