@@ -56,8 +56,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     `start_handler` (`fallow_extract::register_thread_stack`). The CLI
     registers its main thread when it builds the global pool
     (`crates/cli/src/rayon_pool.rs`), from the soft `RLIMIT_STACK` on Unix
-    and from `GetCurrentThreadStackLimits` on Windows. Any other thread
-    counts as having no stack to spare, so its parse runs on a scoped thread
+    and from `GetCurrentThreadStackLimits` on Windows. The LSP and MCP
+    Tokio threads register in `on_thread_start`
+    (`fallow_api::register_thread_stack`). Any other thread counts as having
+    no stack to spare, so its parse runs on a scoped thread
     of the needed size. When that thread cannot start, the parse runs on the
     current thread.
   - A parse of part of a file inside `parse_bounded` runs on the same stack

@@ -65,6 +65,7 @@ pub fn run_stdio_server() -> ExitCode {
     // that reaches a parse another way still gets the worker stack.
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .thread_stack_size(fallow_api::WORKER_STACK_SIZE)
+        .on_thread_start(|| fallow_api::register_thread_stack(fallow_api::WORKER_STACK_SIZE))
         .enable_all()
         .build()
     {

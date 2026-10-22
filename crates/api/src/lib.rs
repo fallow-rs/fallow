@@ -126,12 +126,13 @@ pub use fallow_engine::change_scope::{
 };
 /// Engine-owned per-workspace Git baseline state used by analysis surfaces.
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
-/// Stack size for threads that run analysis.
+/// Stack size for threads that run analysis, and the registration that lets a
+/// bounded parse stay on such a thread.
 ///
 /// A process that runs analysis outside
 /// [`ProgrammaticAnalysisContext::install`], such as the LSP server, gives its
-/// own threads this stack size.
-pub use fallow_engine::thread_pool::WORKER_STACK_SIZE;
+/// own threads this stack size and registers it at thread start.
+pub use fallow_engine::thread_pool::{WORKER_STACK_SIZE, register_thread_stack};
 /// Parsed modules that a long-lived process keeps across analysis calls.
 ///
 /// A process that runs many calls on the same project, such as the MCP

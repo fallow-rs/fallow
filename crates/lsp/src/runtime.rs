@@ -1,6 +1,6 @@
 //! Tokio runtime for the stdio server.
 
-use fallow_api::WORKER_STACK_SIZE;
+use fallow_api::{WORKER_STACK_SIZE, register_thread_stack};
 
 /// Tokio worker threads of the stdio server.
 const SERVER_WORKER_THREADS: usize = 2;
@@ -10,7 +10,8 @@ const SERVER_WORKER_THREADS: usize = 2;
 /// Analysis runs in `spawn_blocking`. A small project parses on the blocking
 /// thread itself and a larger one on the global Rayon pool. Both default to a
 /// 2 MiB stack, which deeply nested sources overflow, so both get the stack of
-/// an analysis worker.
+/// an analysis worker. Each Tokio thread registers that stack, so a bounded
+/// parse of an ordinary file stays on the blocking thread.
 pub fn build_server_runtime() -> std::io::Result<tokio::runtime::Runtime> {
     if !fallow_api::configure_global_analysis_pool(0) {
         // The server still runs, and a small project still parses on the
@@ -33,6 +34,7 @@ pub fn build_server_runtime() -> std::io::Result<tokio::runtime::Runtime> {
         // enough and keep the reserved stack small.
         .worker_threads(SERVER_WORKER_THREADS)
         .thread_stack_size(WORKER_STACK_SIZE)
+        .on_thread_start(|| register_thread_stack(WORKER_STACK_SIZE))
         .enable_all()
         .build()
 }
