@@ -141,6 +141,8 @@ pub enum SimilarCodeExtractionSkipReason {
     GeneratedSource,
     /// Oxc recovered from one or more syntax diagnostics.
     SyntaxDiagnostic,
+    /// The source nests brackets too deep to parse without a stack overflow.
+    NestingLimit,
     /// A declaration or overload had no function body.
     DeclarationWithoutBody,
     /// Nested functions and callbacks are outside the first extraction semantics.

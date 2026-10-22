@@ -506,6 +506,9 @@ fn walk_one_parse(
     source_type: SourceType,
     line_offsets: &[u32],
 ) -> (Vec<InventoryEntry>, FxHashMap<String, InventoryComplexity>) {
+    if crate::exceeds_nesting_limit(source) {
+        return (Vec::new(), FxHashMap::default());
+    }
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 

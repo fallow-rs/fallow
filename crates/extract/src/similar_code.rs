@@ -601,6 +601,9 @@ pub fn extract_similar_code_functions(
     if is_generated_source(&file, source) {
         return single_skip_result(SimilarCodeExtractionSkipReason::GeneratedSource);
     }
+    if crate::exceeds_nesting_limit(source) {
+        return single_skip_result(SimilarCodeExtractionSkipReason::NestingLimit);
+    }
 
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, source_type).parse();

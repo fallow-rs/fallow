@@ -67,6 +67,16 @@ fn tokenize_file_inner(
 
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
+    if fallow_extract::exceeds_nesting_limit(source) {
+        return FileTokens {
+            tokens: Vec::new(),
+            function_spans: Vec::new(),
+            atomic_invocation_spans: Vec::new(),
+            literal_argument_spans: Vec::new(),
+            source: source.to_string(),
+            line_count: source.lines().count().max(1),
+        };
+    }
     if is_sfc_file(path) {
         return tokenize_sfc(source, strip_types, skip_imports);
     }

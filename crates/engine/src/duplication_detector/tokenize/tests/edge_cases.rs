@@ -511,3 +511,10 @@ export async function fetchAndProcess(url, options = {}) {
     assert!(has_spread, "Should have spread operator");
     assert!(has_nullish, "Should have nullish coalescing operator");
 }
+
+#[test]
+fn deeply_nested_source_yields_no_tokens_instead_of_overflowing() {
+    let depth = 20_000;
+    let code = format!("const x = {}1{};", "(".repeat(depth), ")".repeat(depth));
+    assert!(tokenize(&code).is_empty());
+}

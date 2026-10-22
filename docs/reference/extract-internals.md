@@ -31,6 +31,16 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
 - Preserve byte offsets and line numbers when lifting embedded code or styles.
 - Return partial information and diagnostics when one input cannot be read or
   parsed. Do not abort unrelated files.
+- The Oxc parser and the AST visitors recurse once per nesting level without a
+  limit, and a stack overflow aborts the whole process. Call
+  `fallow_extract::exceeds_nesting_limit` (`crates/extract/src/nesting.rs`)
+  before any parse of user source. Extraction turns a file past the cap into
+  a failed parse (`parse_panicked`) with no facts. The duplication tokenizer,
+  similar-code extraction, inventory and search visibility skip the file.
+  Brackets in strings, comments and template text do not count, and a
+  literal that does not end on its line is scanned again as code. Shapes that
+  nest without brackets (TypeScript generics, JSX elements, long member or
+  call chains) are not bounded yet.
 - Bind framework heuristics to imported symbols or other provenance. A local
   function with the same name must not activate library-specific behavior.
 - Avoid filesystem and graph policy inside AST visitors.

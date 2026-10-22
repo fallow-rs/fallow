@@ -1603,7 +1603,8 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                 "Parsed '{display}' with {error_count} error(s); {outcome}. Imports, exports, and \
                  references it did not reach are missing from this run, so files and symbols it \
                  uses can be reported as unused. Fix the syntax, or ignore this if the file uses \
-                 syntax newer than fallow's parser."
+                 syntax newer than fallow's parser. A file that nests brackets too deep for the \
+                 parser stack is not parsed at all, so it cannot abort the run."
             )
         }
         WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped => format!(

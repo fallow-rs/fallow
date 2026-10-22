@@ -40,8 +40,10 @@ mod jsdoc_attach;
 mod jsdoc_deprecated;
 pub mod mdx;
 mod module_info;
+mod nesting;
 pub mod og_image;
 mod parse;
+mod parse_degradation;
 pub mod sfc;
 pub mod sfc_css;
 mod sfc_props;
@@ -104,6 +106,7 @@ pub use css_in_js::{
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
+pub use nesting::{MAX_NESTING_DEPTH, exceeds_nesting_limit};
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
     is_sfc_file, sfc_merged_script_source,

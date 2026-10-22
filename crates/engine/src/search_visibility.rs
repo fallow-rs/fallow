@@ -437,6 +437,9 @@ fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
     let Ok(source_type) = oxc_span::SourceType::from_path(path) else {
         return FxHashSet::default();
     };
+    if fallow_extract::exceeds_nesting_limit(source) {
+        return FxHashSet::default();
+    }
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
     if parsed.fatal_error {
@@ -764,6 +767,9 @@ impl TopLevelStatement {
 /// The top-level statements of a script. A script that does not parse has
 /// none.
 fn top_level_statements(source: &str, source_type: oxc_span::SourceType) -> Vec<TopLevelStatement> {
+    if fallow_extract::exceeds_nesting_limit(source) {
+        return Vec::new();
+    }
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
     if parsed.fatal_error {

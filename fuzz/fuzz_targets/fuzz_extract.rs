@@ -9,6 +9,9 @@ mod extract_paths;
 
 use extract_paths::PATHS;
 
+#[path = "common/worker_stack.rs"]
+mod worker_stack;
+
 fuzz_target!(|data: &[u8]| {
     let Some((&selector, rest)) = data.split_first() else {
         return;
@@ -17,5 +20,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let path = Path::new(PATHS[usize::from(selector) % PATHS.len()]);
-    let _ = fallow_core::extract::parse_from_content(FileId(0), path, source);
+    worker_stack::on_worker_stack(|| {
+        let _ = fallow_core::extract::parse_from_content(FileId(0), path, source);
+    });
 });

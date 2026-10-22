@@ -20,6 +20,9 @@ mod extract_paths;
 
 use extract_paths::PATHS;
 
+#[path = "common/worker_stack.rs"]
+mod worker_stack;
+
 const FINGERPRINT: SourceFingerprint = SourceFingerprint {
     mtime_ns: 1,
     ctime_ns: 1,
@@ -43,19 +46,21 @@ fuzz_target!(|data: &[u8]| {
     };
     let path = Path::new(PATHS[usize::from(selector) % PATHS.len()]);
 
-    let first = cache_bytes(&fallow_extract::parse_from_content(FileId(0), path, source));
-    let second = cache_bytes(&fallow_extract::parse_from_content(FileId(0), path, source));
-    assert!(
-        first == second,
-        "two parses of the same {} source differ",
-        path.display()
-    );
+    worker_stack::on_worker_stack(|| {
+        let first = cache_bytes(&fallow_extract::parse_from_content(FileId(0), path, source));
+        let second = cache_bytes(&fallow_extract::parse_from_content(FileId(0), path, source));
+        assert!(
+            first == second,
+            "two parses of the same {} source differ",
+            path.display()
+        );
 
-    let cached: CachedModule = bitcode::decode(&first).expect("cache bytes decode");
-    let reloaded = cache_bytes(&cached_to_module(&cached, FileId(0)));
-    assert!(
-        first == reloaded,
-        "a cache save and load cycle changes the {} module",
-        path.display()
-    );
+        let cached: CachedModule = bitcode::decode(&first).expect("cache bytes decode");
+        let reloaded = cache_bytes(&cached_to_module(&cached, FileId(0)));
+        assert!(
+            first == reloaded,
+            "a cache save and load cycle changes the {} module",
+            path.display()
+        );
+    });
 });

@@ -5,6 +5,7 @@ mod effect;
 mod graphql;
 mod js_ts;
 mod mdx;
+mod nesting;
 mod regex_compile;
 mod sfc;
 
