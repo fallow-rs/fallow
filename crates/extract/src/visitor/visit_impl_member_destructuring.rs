@@ -88,11 +88,22 @@ impl<'a> ModuleInfoExtractor {
             // Rest copies unknown members, and a dynamic key can select any
             // member, the same as an opaque use of the source. The opaque use
             // covers each key, so only the nested patterns need a record.
-            self.record_whole_object_identifier_use(path);
+            if !self.imported_root_is_shadowed(path) {
+                self.record_whole_object_identifier_use(path);
+            }
             self.record_nested_entries(&entries, Some(path));
             return;
         }
         self.record_path_destructure(pattern, path);
+    }
+
+    /// Whether the root of `path` is an import local that a nested declaration
+    /// shadows. The analysis resolves an opaque use of `shared` through the
+    /// import of `shared`, so a shadowed root must not record one.
+    fn imported_root_is_shadowed(&self, path: &str) -> bool {
+        let root = path.split('.').next().unwrap_or(path);
+        self.nested_scope_shadows(root)
+            && self.imports.iter().any(|import| import.local_name == root)
     }
 
     /// Credit the nested patterns of `entries`. Each one reads its default and,

@@ -1,5 +1,5 @@
 import * as keys from './keys';
-import { Svc, shared, spread } from './svc';
+import { Field, Shadowed, Svc, quiet, shared, spread } from './svc';
 
 const { viaImport } = shared;
 viaImport();
@@ -36,5 +36,29 @@ export class Host {
 
   runDefault({ viaThisDefault } = this.svc): void {
     viaThisDefault();
+  }
+}
+
+// A parameter or a local named `quiet` shadows the import, so these
+// destructures read no member of `Shadowed`, and `hidden` stays unused.
+quiet.used();
+export const held: Shadowed = quiet;
+export function shadowRest(quiet: { hidden: number }): object {
+  const { ...copied } = quiet;
+  return copied;
+}
+export function shadowComputed(): number {
+  const quiet = { hidden: 1 };
+  const { [name]: value } = quiet;
+  return value;
+}
+
+// A rest element of `this.field` copies every member of `Field`.
+export class FieldHost {
+  constructor(private field: Field) {}
+
+  run(): object {
+    const { ...copied } = this.field;
+    return copied;
   }
 }

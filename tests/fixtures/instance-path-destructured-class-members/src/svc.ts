@@ -16,3 +16,15 @@ class Spread {
 
 export const shared = new Svc();
 export const spread = new Spread();
+
+export class Shadowed {
+  used(): void {}
+  hidden(): void {}
+}
+
+export class Field {
+  first(): void {}
+  second(): void {}
+}
+
+export const quiet = new Shadowed();

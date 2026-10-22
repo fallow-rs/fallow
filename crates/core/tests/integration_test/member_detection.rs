@@ -77,12 +77,14 @@ fn parameter_and_assignment_destructures_credit_class_members() {
 /// A destructure of an imported instance or of a `this.field` reads the same
 /// members as `shared.m` and `this.svc.m`. Declarations, assignments, parameter
 /// defaults and `typeof` annotations all get that credit. A dynamic key in a
-/// namespace destructure can select any export, so every export stays used.
+/// namespace destructure can select any export, so every export stays used. A
+/// rest element or a dynamic key on a local that shadows the import gives no
+/// credit.
 #[test]
 fn imported_instance_and_this_field_destructures_credit_class_members() {
     let config = create_config(fixture_path("instance-path-destructured-class-members"));
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
-    let unused: Vec<(&str, &str)> = results
+    let mut unused: Vec<(&str, &str)> = results
         .unused_class_members
         .iter()
         .map(|item| {
@@ -92,7 +94,8 @@ fn imported_instance_and_this_field_destructures_credit_class_members() {
             )
         })
         .collect();
-    assert_eq!(unused, [("Svc", "dead")]);
+    unused.sort_unstable();
+    assert_eq!(unused, [("Shadowed", "hidden"), ("Svc", "dead")]);
     let unused_exports: Vec<&str> = results
         .unused_exports
         .iter()
