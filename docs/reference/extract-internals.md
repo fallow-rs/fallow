@@ -44,6 +44,11 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   the shape of the old single-statement body. The duplication token visitor
   keeps the old tokens for concise bodies, `import.meta`, `new.target` and
   qualified interface heritage names.
+- `visit_formal_parameter` also visits the parameters of type-only
+  signatures: function types, overloads, `declare function`, and interface
+  or abstract methods. Code in these signatures never runs. A parameter hook
+  that credits a member read must run from `visit_function` when the function
+  has a body, or from `visit_arrow_function_expression`.
 - `SemanticBuilder` builds `AstNodes` only with `with_build_nodes(true)`.
   Set it on each pass that reads `semantic.nodes()`.
 - A `TSExternalModuleDeclaration` body (`declare module '<specifier>'`, a
