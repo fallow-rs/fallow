@@ -1,5 +1,25 @@
 # @fallow-cli/darwin-arm64
 
-This is the **aarch64-apple-darwin** binary for [`fallow`](https://www.npmjs.com/package/fallow).
+This package contains the macOS ARM64 (Apple Silicon) binaries of the [`fallow`](https://www.npmjs.com/package/fallow) CLI. Fallow is codebase intelligence for TypeScript and JavaScript: unused code, duplication, circular dependencies, complexity and architecture checks.
 
-You should not install this package directly. Install `fallow` instead; it will automatically select the correct binary for your platform.
+## Install
+
+Do not install this package directly. Install `fallow`. Your package manager then installs the platform package for your system from the `optionalDependencies` of `fallow`.
+
+```bash
+npm install --save-dev fallow
+```
+
+## Verification
+
+Before the first run, the `fallow` package checks the Ed25519 signature (`fallow.sig`) and the SHA-256 digest (`fallowDigests` in `package.json`) of the binary. When a check fails, `fallow` does not run the binary.
+
+## Links
+
+- Documentation: https://fallow.tools/docs/
+- Source code: https://github.com/fallow-rs/fallow
+- Security policy: https://github.com/fallow-rs/fallow/blob/main/SECURITY.md
+
+## License
+
+MIT. See `LICENSE`.

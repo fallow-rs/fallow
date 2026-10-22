@@ -1422,7 +1422,7 @@ jobs:
               }
               const digests = {};
               for (const entry of fs.readdirSync(dir)) {
-                if (entry.endsWith(".sig") || entry === "package.json" || entry === "README.md") {
+                if (entry.endsWith(".sig") || entry === "package.json" || entry === "README.md" || entry === "LICENSE") {
                   continue;
                 }
                 const full = path.join(dir, entry);
@@ -1500,6 +1500,20 @@ jobs:
         run: |
           cp LICENSE npm/fallow/LICENSE
           diff LICENSE npm/fallow/LICENSE
+
+      # npm always packs README and LICENSE, so every platform package gets
+      # both without a `files` entry. The napi platform directories exist only
+      # after `create-npm-dirs`, so this step writes their READMEs here.
+      - name: Bundle README and LICENSE into platform packages
+        run: |
+          node .github/scripts/prepare-platform-package-docs.mjs --license
+          node .github/scripts/prepare-platform-package-docs.mjs --check
+          for dir in npm/*/ crates/napi/npm/*/ crates/napi/; do
+            name=$(PKG_PATH="${dir}package.json" node -p 'require(process.env.PKG_PATH).name')
+            case "$name" in
+              @fallow-cli/*) diff LICENSE "${dir}LICENSE" ;;
+            esac
+          done
 
       - name: Pack tarballs
         run: |
