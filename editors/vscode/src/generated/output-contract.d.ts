@@ -411,6 +411,7 @@ export type PolicyViolationSeverity = ("error" | "warn")
  * The origin of a stale suppression: inline comment or JSDoc tag.
  */
 export type SuppressionOrigin = ({
+type: "comment"
 /**
  * The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
  */
@@ -432,8 +433,8 @@ is_file_level: boolean
  * adopted the field stay byte-compatible. See issue #449.
  */
 kind_known?: boolean
-type: "comment"
 } | {
+type: "jsdoc_tag"
 /**
  * The name of the export that was tagged.
  */
@@ -442,7 +443,6 @@ export_name: string
  * Human-authored reason after `--`, when present.
  */
 reason?: (string | null)
-type: "jsdoc_tag"
 })
 /**
  * Where an override entry was declared. Serialized as the filename label
@@ -564,66 +564,67 @@ degrades_analysis?: boolean
 export type WorkspaceDiagnostic1 = ({
 kind: "undeclared-workspace"
 } | {
+kind: "malformed-package-json"
 /**
  * `serde_json` parse error text.
  */
 error: string
-kind: "malformed-package-json"
 } | {
+kind: "glob-matched-no-package-json"
 /**
  * The glob pattern that matched the directory.
  */
 pattern: string
-kind: "glob-matched-no-package-json"
 } | {
+kind: "workspace-glob-outside-root"
 /**
  * The workspace entry, as written in the file.
  */
 pattern: string
-kind: "workspace-glob-outside-root"
 } | {
+kind: "workspace-pattern-dir-missing"
 /**
  * The workspace pattern, as written in the file.
  */
 pattern: string
-kind: "workspace-pattern-dir-missing"
 } | {
 kind: "nested-project-root"
 } | {
+kind: "malformed-tsconfig"
 /**
  * JSONC parse error text.
  */
 error: string
-kind: "malformed-tsconfig"
 } | {
 kind: "tsconfig-reference-dir-missing"
 } | {
+kind: "malformed-pnpm-workspace-yaml"
 /**
  * YAML parse error text.
  */
 error: string
-kind: "malformed-pnpm-workspace-yaml"
 } | {
-/**
- * On-disk size of the skipped file in bytes.
- */
-size_bytes: number
 kind: "skipped-large-file"
-} | {
 /**
  * On-disk size of the skipped file in bytes.
  */
 size_bytes: number
+} | {
 kind: "skipped-minified-file"
+/**
+ * On-disk size of the skipped file in bytes.
+ */
+size_bytes: number
 } | {
 kind: "skipped-source-dotdir"
 } | {
+kind: "source-read-failure"
 /**
  * Filesystem or UTF-8 decoding error from `read_to_string`.
  */
 error: string
-kind: "source-read-failure"
 } | {
+kind: "source-parse-degraded"
 /**
  * Number of parser diagnostics reported for the file.
  */
@@ -633,7 +634,6 @@ error_count: number
  * the extracted module is a fragment at best.
  */
 panicked: boolean
-kind: "source-parse-degraded"
 } | {
 kind: "bun-lockb-override-resolution-skipped"
 } | {
@@ -645,8 +645,8 @@ kind: "npm-lock-override-resolution-skipped"
 } | {
 kind: "bun-resolutions-shadowed-by-overrides"
 } | {
-cause: PnpmWorkspaceOverridesIgnoredCause
 kind: "pnpm-workspace-overrides-ignored"
+cause: PnpmWorkspaceOverridesIgnoredCause
 } | {
 kind: "node-modules-missing"
 } | {
@@ -654,6 +654,7 @@ kind: "boundaries-not-configured"
 } | {
 kind: "rule-packs-not-configured"
 } | {
+kind: "excluded-by-default-ignore"
 /**
  * The built-in glob that matched, verbatim (for example
  * `** /build/**`).
@@ -677,22 +678,22 @@ file_count: number
  * one matched location out of several.
  */
 directory_count: number
-kind: "excluded-by-default-ignore"
 } | {
+kind: "no-source-files-analyzed"
 /**
  * Candidate source files the built-in ignore patterns removed from
  * this walk, summed across every pattern. `0` when the walk found no
  * candidate to exclude in the first place.
  */
 excluded_file_count: number
-kind: "no-source-files-analyzed"
 } | {
+kind: "file-scores-unavailable"
 /**
  * Scoring error text.
  */
 error: string
-kind: "file-scores-unavailable"
 } | {
+kind: "hotspots-skipped"
 /**
  * Which input stopped it, as a kebab-case token: `not-a-repository`,
  * `no-commits`, `invalid-since` or `churn-file-unreadable`. The set is
@@ -706,25 +707,25 @@ kind: "file-scores-unavailable"
  * remedy for all four.
  */
 cause: string
-kind: "hotspots-skipped"
 } | {
+kind: "change-coupling-skipped"
 /**
  * Kebab-case token: `shallow-clone` (the fetched history is
  * incomplete) or `too-few-commits` (fewer analyzed commits than the
  * minimum revisions of one file). The set is open.
  */
 cause: string
-kind: "change-coupling-skipped"
 } | {
+kind: "shallow-clone"
 /**
  * `true` when the run also asked for ownership attribution, which a
  * shallow clone skews further by inflating single-author dominance.
  */
 ownership_requested: boolean
-kind: "shallow-clone"
 } | {
 kind: "unpinned-clock"
 } | {
+kind: "ownership-unavailable"
 /**
  * Which input failed, as a kebab-case token: `invalid-bot-pattern` or
  * `codeowners-parse-failed`. The set is open.
@@ -734,21 +735,21 @@ cause: string
  * Underlying error text.
  */
 error: string
-kind: "ownership-unavailable"
 } | {
+kind: "trend-snapshot-unreadable"
 /**
  * Filesystem or JSON error text.
  */
 error: string
-kind: "trend-snapshot-unreadable"
 } | {
+kind: "trend-group-baseline-unavailable"
 /**
  * Why the groups have no baseline, as a kebab-case token:
  * `snapshot-has-no-groups` or `grouped-by-mismatch`. The set is open.
  */
 cause: string
-kind: "trend-group-baseline-unavailable"
 } | {
+kind: "plugin-config-unreadable"
 /**
  * The plugin that read the config, as it labels itself:
  * `module-federation` for a standalone `module-federation.config.*`,
@@ -775,8 +776,8 @@ key: string
  * option the message points at.
  */
 reason: string
-kind: "plugin-config-unreadable"
 } | {
+kind: "plugin-effect-not-modeled"
 /**
  * The plugin that read the config, as it labels itself (`nuxt`).
  */
@@ -795,34 +796,33 @@ key: string
  * be classified at all. The set is open.
  */
 reason: string
-kind: "plugin-effect-not-modeled"
 } | {
 kind: "coverage-auto-detected"
 } | {
 kind: "flag-age-shallow-clone"
 } | {
+kind: "flag-age-unavailable"
 /**
  * Why no history is available, as a kebab-case token:
  * `not-a-repository` or `no-commits`. The set is open.
  */
 cause: string
-kind: "flag-age-unavailable"
 } | {
+kind: "ignore-dependencies-glob-unmatched"
 /**
  * The `ignoreDependencies` entry, as written in the config.
  */
 pattern: string
-kind: "ignore-dependencies-glob-unmatched"
 } | {
+kind: "ignore-findings-pattern-unmatched"
 /**
  * The `ignoreFindings` entry, as written in the config.
  */
 pattern: string
-kind: "ignore-findings-pattern-unmatched"
 } | {
+kind: "baseline-install-state-mismatch"
 baseline_node_modules: NodeModulesState
 run_node_modules: NodeModulesState
-kind: "baseline-install-state-mismatch"
 })
 /**
  * Why the declared pnpm version ignores the `overrides` section of
@@ -1189,12 +1189,13 @@ export type DiffRiskActionType = ("suppress-line" | "suppress-file" | "suppress-
  * `target` block of [`InspectOutput`], tagged by `type`.
  */
 export type InspectTargetDescriptor = ({
+type: "file"
 /**
  * File path relative to the analysed root.
  */
 file: string
-type: "file"
 } | {
+type: "symbol"
 /**
  * File path relative to the analysed root.
  */
@@ -1203,7 +1204,6 @@ file: string
  * Name of the inspected export.
  */
 export_name: string
-type: "symbol"
 })
 /**
  * `identity` block of [`InspectOutput`]; shape follows the target type.
