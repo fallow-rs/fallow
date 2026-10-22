@@ -665,6 +665,56 @@ if [ -z "${INPUT_CHANGED_SINCE:-}" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "tru
   echo "::notice::Auto-scoping analysis to files changed since PR base (${PR_BASE_SHA:0:7})"
 fi
 
+# --- Make a merge base available on shallow clones ---
+# `fallow --changed-since <base>` diffs against merge-base(<base>, HEAD). The
+# default actions/checkout clone has depth 1, so the base commit and the merge
+# base are not in the clone and the CLI exits 2 with "no merge base". Fetch the
+# smallest history that gives a merge base:
+#   1. The base commit itself (depth 1).
+#   2. For a merge commit (the pull_request default checkout), its parents.
+#      The first parent is the base branch tip, so this is usually enough.
+#   3. Otherwise deepen both histories in bounded steps.
+# The fetches use the checkout credentials, or none for a public fork PR. A
+# failed fetch never fails the job: the changed-files cascade below still runs.
+MERGE_BASE_DEEPEN_STEPS="50 100 200 400"
+
+has_merge_base() {
+  git merge-base "$1" HEAD >/dev/null 2>&1
+}
+
+fetch_for_merge_base() {
+  local fetch_err
+  fetch_err=$(mktemp)
+  git fetch --no-tags "$@" 2> "$fetch_err" || true
+  replay_stderr_as_debug "$fetch_err" "git fetch $*"
+}
+
+ensure_changed_since_merge_base() {
+  local base=$1 base_sha head_sha parent_count step
+  [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ] || return 0
+  head_sha=$(git rev-parse --verify -q 'HEAD^{commit}') || return 0
+  if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+    fetch_for_merge_base --depth=1 origin "$base"
+  fi
+  base_sha=$(git rev-parse --verify -q "${base}^{commit}") || return 0
+  has_merge_base "$base_sha" && return 0
+  # `git cat-file -p` lists every parent even when the clone grafts them away.
+  parent_count=$(git cat-file -p "$head_sha" 2>/dev/null | awk '/^parent /{n++} /^$/{exit} END{print n+0}')
+  if [ "${parent_count:-0}" -gt 1 ]; then
+    fetch_for_merge_base --depth=2 origin "$head_sha"
+    has_merge_base "$base_sha" && return 0
+  fi
+  for step in $MERGE_BASE_DEEPEN_STEPS; do
+    fetch_for_merge_base --deepen="$step" origin "$head_sha" "$base_sha"
+    has_merge_base "$base_sha" && return 0
+  done
+  echo "::warning::fallow: found no merge base between ${base_sha:0:7} and HEAD in this shallow clone. Use fetch-depth: 0 in actions/checkout."
+}
+
+if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
+  ensure_changed_since_merge_base "$INPUT_CHANGED_SINCE"
+fi
+
 # --- Pre-compute changed files list for downstream filtering ---
 # Downstream scripts (comment, summary, annotations, review) need the list of
 # changed files to scope results to the PR. On shallow clones (the default
