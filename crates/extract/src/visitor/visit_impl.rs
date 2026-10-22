@@ -63,6 +63,8 @@ mod visit_factory_returns;
 mod visit_helpers;
 #[path = "visit_impl_jsx_runtime.rs"]
 mod visit_jsx_runtime;
+#[path = "visit_impl_member_destructuring.rs"]
+mod visit_member_destructuring;
 #[path = "visit_impl_node_runtime.rs"]
 mod visit_node_runtime;
 #[path = "visit_impl_object_bindings.rs"]
@@ -2658,47 +2660,6 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    fn record_declarator_member_destructuring(
-        &mut self,
-        declarator: &VariableDeclarator<'a>,
-        init: &Expression<'a>,
-    ) {
-        // `const { member } = instance` reads the class member directly. The
-        // binding itself is a plain identifier, so no later `member` access
-        // can be resolved through `binding_target_names`; record the access at
-        // the destructuring site instead. This is the object-pattern parity
-        // of the existing `instance.member` path (see #2560).
-        if let BindingPattern::ObjectPattern(pattern) = &declarator.id
-            && let Expression::Identifier(source) = unwrap_static_expr(init)
-            && let Some(BindingTarget::Class(class_name)) =
-                self.resolve_bound_object_name(source.name.as_str())
-        {
-            if pattern.rest.is_some()
-                || pattern
-                    .properties
-                    .iter()
-                    .any(|property| property.key.static_name().is_none())
-            {
-                // Rest copies unknown members, and a dynamic key can select any
-                // member. Keep the same conservative credit as an opaque use.
-                self.whole_object_uses.push(class_name.clone());
-            }
-            for property in &pattern.properties {
-                if let Some(member) = property.key.static_name() {
-                    self.capture_subclass_binding_access(
-                        source.name.as_str(),
-                        Some(source.span),
-                        &member,
-                    );
-                    self.member_accesses.push(MemberAccess {
-                        object: class_name.clone(),
-                        member: member.to_string(),
-                    });
-                }
-            }
-        }
-    }
-
     fn record_declarator_receiver_aliases(
         &mut self,
         declarator: &VariableDeclarator<'a>,
@@ -4031,6 +3992,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
+        // A signature without a body (overload, `declare function`, abstract
+        // method) never runs, so its destructured keys read nothing.
+        if func.body.is_some() {
+            self.record_typed_parameter_member_destructuring(&func.params);
+        }
         self.record_scoped_typed_parameter_accesses(
             &func.params,
             func.body.as_deref().map(BodyRef::Block),
@@ -4089,6 +4055,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
+        self.record_typed_parameter_member_destructuring(&expr.params);
         self.record_scoped_typed_parameter_accesses(
             &expr.params,
             Some(BodyRef::arrow(&expr.body)),
@@ -4933,6 +4900,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         self.record_assignment_target_bindings(&expr.left);
+        self.record_assignment_member_destructuring(expr);
 
         // Track writes to a bare identifier for the alias value-proof. POISON
         // (any scope, ANY operator): a write that can leave the binding holding a

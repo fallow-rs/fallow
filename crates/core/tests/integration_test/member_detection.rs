@@ -45,6 +45,35 @@ fn destructured_fields_of_typed_parameters_credit_their_classes() {
     );
 }
 
+/// A destructure in a parameter with a class type annotation reads the class
+/// members, and so does a destructuring assignment from a class instance. Both
+/// forms must get the same credit as `const { m } = instance`. A signature
+/// without a body reads nothing, so it gives no credit.
+#[test]
+fn parameter_and_assignment_destructures_credit_class_members() {
+    let config = create_config(fixture_path("parameter-destructured-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(
+        unused,
+        [
+            ("Service", "dead"),
+            ("Service", "signatureOnly"),
+            ("Service", "untypedOnly")
+        ]
+    );
+}
+
 #[test]
 fn type_guard_subject_member_access_credits_only_its_predicate_class() {
     let project = tempfile::tempdir().expect("create project");

@@ -1,0 +1,4 @@
+{
+  "name": "parameter-destructured-class-members",
+  "main": "src/index.ts"
+}
