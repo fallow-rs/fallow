@@ -30,7 +30,11 @@ import {
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
 import { isJavaScriptFile, referenceNames } from "./reference-names.mjs";
 import { recordComputedMemberAccess } from "./computed-member-access.mjs";
-import { namespaceSourceIdentity, recordNamespaceUse } from "./namespace-uses.mjs";
+import {
+  namespaceSourceIdentity,
+  recordDynamicImportUncertainty,
+  recordNamespaceUse,
+} from "./namespace-uses.mjs";
 import {
   isLiteralMemberName,
   qualifierExpression,
@@ -489,9 +493,6 @@ const importTypeSpecifier = (node) => {
   return literal && isStringLiteralLikeNode(literal) ? literal : undefined;
 };
 
-const isDynamicImportCall = (node) =>
-  isCallExpression(node) && node.expression.getText(node.getSourceFile()) === "import";
-
 const MODULE_SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 const lexicalModuleIdentityForText = (project, sourceFile, specifierText) => {
@@ -626,22 +627,6 @@ const recordStringDispatchedMemberAccess = (state, projectEntries, node) => {
   recordNameUncertainty(state, projectEntries, node);
 };
 
-const recordDynamicImportUncertainty = (state, project, node) => {
-  if (!isDynamicImportCall(node)) return;
-  const specifier = node.arguments[0];
-  if (!specifier || !isStringLiteralLikeNode(specifier)) {
-    (state.exportEntriesByProject.get(project) ?? []).forEach((entry) =>
-      recordSymbolUncertainty(state, entry, "dynamic-behavior"),
-    );
-    return;
-  }
-  const moduleIdentity = moduleIdentityForSpecifier(project, specifier);
-  if (!moduleIdentity) return;
-  (state.exportEntriesByModule.get(moduleIdentity) ?? []).forEach((entry) =>
-    recordSymbolUncertainty(state, entry, "dynamic-behavior"),
-  );
-};
-
 const referenceNamespaces = (project, node, rawSymbol) => {
   const alias = aliasNode(node);
   if (!alias || !isExportSpecifier(alias)) {
@@ -682,7 +667,7 @@ const scanSymbolUseFile = (root, state, project, sourceFile, names) => {
   const projectEntries = classMemberEntrySetForProject(state, project);
   const nodes = [];
   visit(sourceFile, (node) => {
-    recordDynamicImportUncertainty(state, project, node);
+    recordDynamicImportUncertainty(state, project, node, moduleIdentityForSpecifier);
     if (projectEntries.size > 0) {
       recordStringDispatchedMemberAccess(state, projectEntries, node);
       recordComputedMemberAccess(state, project, projectEntries, node);

@@ -378,6 +378,39 @@ export const recordNamespaceUse = (state, project, node, symbol) => {
   }
 };
 
+const recordImportedModuleEscape = (state, project, specifier) => {
+  const moduleSymbol = project.checker.getSymbolAtLocation(specifier);
+  if (isOwnModule(moduleSourceFile(project, moduleSymbol))) {
+    recordModuleEscape(state, project, batchCache(state, project), moduleSymbol);
+  }
+};
+
+const isDynamicImportCall = (node) =>
+  isCallExpression(node) && node.expression.getText(node.getSourceFile()) === "import";
+
+const recordModuleEntriesUncertainty = (state, entries) =>
+  (entries ?? []).forEach((entry) => recordSymbolUncertainty(state, entry, "dynamic-behavior"));
+
+/**
+ * Records a `dynamic-behavior` uncertainty for the exports that a dynamic
+ * import can read. A non-literal specifier can load any module of the project.
+ * A literal specifier loads one namespace object, which also holds the exports
+ * that the module re-exports.
+ */
+export const recordDynamicImportUncertainty = (state, project, node, moduleIdentityOf) => {
+  if (!isDynamicImportCall(node)) return;
+  const specifier = node.arguments[0];
+  if (!specifier || !isStringLiteralLikeNode(specifier)) {
+    recordModuleEntriesUncertainty(state, state.exportEntriesByProject.get(project));
+    return;
+  }
+  if (state.exportedNames.size > 0) recordImportedModuleEscape(state, project, specifier);
+  const moduleIdentity = moduleIdentityOf(project, specifier);
+  if (moduleIdentity) {
+    recordModuleEntriesUncertainty(state, state.exportEntriesByModule.get(moduleIdentity));
+  }
+};
+
 const moduleIdentityOfSymbol = (project, symbol) => {
   const sourceFile = moduleSourceFile(project, symbol);
   return sourceFile ? sourceFileIdentity(sourceFile) : undefined;

@@ -1990,6 +1990,8 @@ const NAMESPACE_USE_CASES = [
     "named",
   ],
   ["namespace-block", "namespace N {\n  import z = ns;\n  console.log(z.x, z);\n}", "escape"],
+  ["dynamic-import-star", 'void import("./barrel");', "opaque", "starOnly"],
+  ["dynamic-import-nested", 'void import("./barrel");', "opaque", "named"],
 ];
 
 const NAMESPACE_IMPORTS = {
@@ -1997,12 +1999,14 @@ const NAMESPACE_IMPORTS = {
   outer: 'import * as outer from "./barrel";\n',
   star: 'import * as outer from "./barrel";\n',
   named: "",
+  starOnly: "",
   false: "",
 };
 const NAMESPACE_BARRELS = {
   outer: "export * as inner",
   star: "export *",
   named: "export * as inner",
+  starOnly: "export *",
 };
 const NAMESPACE_OUTCOMES = {
   static: ["confirmed-used", "confirmed-no-static-references", null],

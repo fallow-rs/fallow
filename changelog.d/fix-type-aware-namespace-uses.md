@@ -13,8 +13,9 @@
   `dynamic-behavior` for every export of that module, also the exports that a
   barrel re-exports. A destructure that can read a nested namespace, for
   example `const { inner } = outer`, abstains for the exports of the nested
-  module. Before this fix, such an export could get a
-  `confirmed-no-static-references` decision.
+  module. A dynamic import, for example `import("./barrel")`, now also
+  abstains for the exports that the barrel re-exports. Before this fix, such an
+  export could get a `confirmed-no-static-references` decision.
 - **`fallow dead-code --type-aware` abstains for a class member that a computed
   destructure key can read.** `const { [key]: run } = service` and
   `({ [key]: run } = service)` now give `dynamic-member-access`, as
