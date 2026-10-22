@@ -30,7 +30,7 @@ import {
 import {
   aggregatePhaseTimings,
   aggregateReasonCounts,
-  confirmationYieldMetrics,
+  blockedProjects,
   percentile,
   pairedOverheads,
   renderSummaryMarkdown,
@@ -39,6 +39,7 @@ import {
   summaryChecks,
   summarizeAdjudicatedFeatureBuckets,
   typeAwareResolutionCounts,
+  typeEvidenceCoverage,
 } from "./type-aware-corpus/summary.mjs";
 import {
   validateCapabilitiesArtifactData as validateCapabilitiesData,
@@ -2590,7 +2591,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
   const correctContracts = contracts.filter(({ truth }) => truth === "preserved");
   const incorrectContracts = contracts.filter(({ truth }) => truth !== "preserved");
   const correctUnusedRetained = retained.filter(({ truth }) => truth === "unused");
-  const { abstainedCount, unresolvedCount, blockingDiagnosticsCount } = typeAwareResolutionCounts(
+  const { abstainedCount, unresolvedCount, ...counts } = typeAwareResolutionCounts(
     discovery.projects,
   );
   const baselineRuns = measuredRuns(measurements, "baseline");
@@ -2618,12 +2619,11 @@ const summarize = (manifest, options, publicationMode = "write") => {
     .filter(({ role }) => role === "zero-control")
     .every(({ baseline_candidate_count }) => baseline_candidate_count === 0);
   const confirmationPrecision = safeRatio(correctConfirmed.length, confirmed.length);
-  const { confirmationYield, confirmationYieldDenominator, blockingDiagnosticsShare } =
-    confirmationYieldMetrics({
-      correctConfirmedCount: correctConfirmed.length,
-      candidateCount: entries.length,
-      blockingDiagnosticsCount,
-    });
+  const coverage = typeEvidenceCoverage(correctConfirmed.length, entries.length, {
+    abstainedCount,
+    unresolvedCount,
+    ...counts,
+  });
   const adjudicatedTruthCount = used.length + preserved.length + unused.length;
   const adjudicatedTruthCoverage = safeRatio(adjudicatedTruthCount, entries.length);
   const correctUnusedRetention = safeRatio(correctUnusedRetained.length, unused.length);
@@ -2639,9 +2639,8 @@ const summarize = (manifest, options, publicationMode = "write") => {
   const independentSignoff = Object(ledger.adjudication).independent_signoff;
   const checks = summaryChecks({
     abstention,
-    blockingDiagnosticsShare,
     confirmationPrecision,
-    confirmationYield,
+    coverage,
     confirmedProjectCount: confirmedProjects.size,
     correctUnusedRetention,
     determinismRuns: discovery.determinism_runs,
@@ -2679,8 +2678,8 @@ const summarize = (manifest, options, publicationMode = "write") => {
         indeterminate: entries.filter(({ truth }) => truth === "indeterminate").length,
       },
       confirmation_precision: confirmationPrecision,
-      confirmation_yield: confirmationYield,
-      confirmation_yield_denominator: confirmationYieldDenominator,
+      ...coverage,
+      blocked_projects: blockedProjects(discovery.projects),
       safe_resolution_yield: safeRatio(
         correctConfirmed.length + correctContracts.length,
         entries.length,
@@ -2694,8 +2693,6 @@ const summarize = (manifest, options, publicationMode = "write") => {
       abstention,
       unresolved_count: unresolvedCount,
       unresolved: safeRatio(unresolvedCount, entries.length),
-      blocking_diagnostics_count: blockingDiagnosticsCount,
-      blocking_diagnostics_share: blockingDiagnosticsShare,
     },
     value: {
       confirmed_repository_count: confirmedProjects.size,

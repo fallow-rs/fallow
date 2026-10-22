@@ -3,7 +3,8 @@
   "artifact_directory": "target/type-aware-corpus",
   "gates": {
     "minimum_confirmation_precision": 1,
-    "minimum_confirmation_yield": 0.25,
+    "minimum_checked_confirmation_yield": 0.25,
+    "minimum_checked_candidates": 250,
     "minimum_correct_unused_retention": 1,
     "maximum_abstention": 0.5,
     "maximum_blocking_diagnostics_share": 0.5,

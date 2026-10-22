@@ -53,10 +53,11 @@ import {
   selectedBackend,
 } from "./type-aware-corpus/runner.mjs";
 import {
-  confirmationYieldMetrics,
+  blockedProjects,
   renderSummaryMarkdown,
   summaryChecks,
   typeAwareResolutionCounts,
+  typeEvidenceCoverage,
 } from "./type-aware-corpus/summary.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1193,26 +1194,60 @@ test("feature bucket gate needs separate correct confirmations for distinct buck
   );
 });
 
-test("confirmation yield excludes candidates behind blocking diagnostics", () => {
+test("checked confirmation yield excludes candidates behind blocking diagnostics", () => {
   assert.deepEqual(
-    confirmationYieldMetrics({
-      correctConfirmedCount: 127,
-      candidateCount: 509,
-      blockingDiagnosticsCount: 234,
+    typeEvidenceCoverage(127, 512, {
+      abstainedCount: 134,
+      unresolvedCount: 238,
+      blockingDiagnosticsCount: 237,
     }),
     {
-      confirmationYield: 0.461818,
-      confirmationYieldDenominator: 275,
-      blockingDiagnosticsShare: 0.459725,
+      confirmation_yield: 0.248047,
+      checked_candidate_count: 275,
+      checked_confirmation_yield: 0.461818,
+      blocking_diagnostics_count: 237,
+      blocking_diagnostics_share: 0.462891,
+      no_type_evidence_count: 372,
+      no_type_evidence_share: 0.726563,
     },
   );
   assert.equal(
-    confirmationYieldMetrics({
-      correctConfirmedCount: 0,
-      candidateCount: 3,
+    typeEvidenceCoverage(0, 3, {
+      abstainedCount: 0,
+      unresolvedCount: 3,
       blockingDiagnosticsCount: 3,
-    }).confirmationYield,
+    }).checked_confirmation_yield,
     null,
+  );
+});
+
+test("blocked projects list each blocked program config", () => {
+  assert.deepEqual(
+    blockedProjects([
+      {
+        id: "svelte",
+        type_aware: {
+          abstention_reasons: { blocking_diagnostics: 79 },
+          projects: [
+            {
+              config: "packages/svelte/tsconfig.json",
+              reason_code: "blocking-diagnostics",
+              blocking_diagnostic_count: 7,
+            },
+            { config: "tsconfig.json", reason_code: null, blocking_diagnostic_count: 0 },
+          ],
+        },
+      },
+      { id: "astro", type_aware: { abstention_reasons: {}, projects: [] } },
+      { id: "vue-core" },
+    ]),
+    [
+      {
+        project_id: "svelte",
+        blocked_candidate_count: 79,
+        programs: [{ config: "packages/svelte/tsconfig.json", blocking_diagnostic_count: 7 }],
+      },
+    ],
   );
 });
 
@@ -1233,17 +1268,40 @@ test("resolution counts sum abstained, unresolved and blocked candidates", () =>
   );
 });
 
-test("blocking-diagnostics share gate fails above its threshold", () => {
-  const checks = (blockingDiagnosticsShare) =>
+test("type-evidence gates fail on a high blocked share or too few checked candidates", () => {
+  const checks = (coverage) =>
     summaryChecks({
-      blockingDiagnosticsShare,
+      coverage,
       featureBucketValue: { multiple_feature_buckets: true },
       isObject: () => true,
-      thresholds: { maximum_blocking_diagnostics_share: 0.5 },
-    }).blocking_diagnostics_share;
-  assert.equal(checks(0.5), true);
-  assert.equal(checks(0.51), false);
-  assert.equal(checks(null), false);
+      thresholds: {
+        maximum_blocking_diagnostics_share: 0.5,
+        minimum_checked_candidates: 250,
+        minimum_checked_confirmation_yield: 0.25,
+      },
+    });
+  const passing = {
+    blocking_diagnostics_share: 0.5,
+    checked_candidate_count: 250,
+    checked_confirmation_yield: 0.25,
+  };
+  const passed = checks(passing);
+  assert.equal(passed.blocking_diagnostics_share, true);
+  assert.equal(passed.checked_candidates, true);
+  assert.equal(passed.checked_confirmation_yield, true);
+  assert.equal(
+    checks({ ...passing, blocking_diagnostics_share: 0.51 }).blocking_diagnostics_share,
+    false,
+  );
+  assert.equal(
+    checks({ ...passing, blocking_diagnostics_share: null }).blocking_diagnostics_share,
+    false,
+  );
+  assert.equal(checks({ ...passing, checked_candidate_count: 249 }).checked_candidates, false);
+  assert.equal(
+    checks({ ...passing, checked_confirmation_yield: 0.249 }).checked_confirmation_yield,
+    false,
+  );
 });
 
 test("summary reports bounded evidence without claiming corpus-wide recall", () => {
@@ -1251,8 +1309,21 @@ test("summary reports bounded evidence without claiming corpus-wide recall", () 
     gate: { go: true },
     accuracy: {
       candidate_count: 10,
+      truth_counts: { used: 3 },
       confirmation_precision: 1,
       confirmation_yield: 0.3,
+      checked_candidate_count: 6,
+      checked_confirmation_yield: 0.5,
+      blocking_diagnostics_count: 4,
+      no_type_evidence_count: 5,
+      no_type_evidence_share: 0.5,
+      blocked_projects: [
+        {
+          project_id: "svelte",
+          blocked_candidate_count: 4,
+          programs: [{ config: "tsconfig.json", blocking_diagnostic_count: 2 }],
+        },
+      ],
       adjudicated_truth_coverage: 0.4,
       correct_unused_retention: 1,
       abstention: 0.2,
@@ -1267,9 +1338,12 @@ test("summary reports bounded evidence without claiming corpus-wide recall", () 
     },
   });
 
-  assert.match(rendered, /Safe confirmation yield: 0.3/);
+  assert.match(rendered, /Confirmed as used: 3 of 10 candidates \(confirmation yield 0.3\)/);
+  assert.match(rendered, /Checked confirmation yield \(gate\): 0.5 over 6 checked candidates/);
+  assert.match(rendered, /without type evidence \(abstained or unresolved\): 5 \(share 0.5\)/);
+  assert.match(rendered, /- svelte: 4 blocked candidates; `tsconfig.json` \(2 diagnostics\)/);
   assert.match(rendered, /Independently adjudicated truth coverage: 0.4/);
-  assert.match(rendered, /Blocking-diagnostics share: 0.4/);
+  assert.match(rendered, /Candidates behind blocking diagnostics: 4 \(share 0.4\)/);
   assert.match(rendered, /No corpus-wide recall is claimed/);
   assert.doesNotMatch(rendered, /Used recall/);
 });

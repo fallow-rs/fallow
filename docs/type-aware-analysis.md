@@ -505,13 +505,20 @@ coverage. It does not claim corpus-wide recall: retained candidates without
 independent truth remain `indeterminate` and are excluded from adjudicated
 accuracy metrics.
 
-The confirmation yield excludes candidates that the sidecar does not resolve
-because of `blocking-diagnostics`. The corpus does not install fixture
+The summary reports two yields. `confirmation_yield` is the share of all
+candidates that are correctly confirmed as used. The gated
+`checked_confirmation_yield` excludes candidates that the sidecar does not
+resolve because of `blocking-diagnostics`. The corpus does not install fixture
 dependencies, so a project that imports a package or type definition outside
 the Fallow workspace cannot type-check. These candidates measure the fixture
-environment, not semantic ability. The
-`maximum_blocking_diagnostics_share` gate bounds their share of all candidates,
-so a fixture that the sidecar cannot load stays visible.
+environment, not semantic ability. A ratio that excludes them rises when more
+projects block, so two more gates apply:
+
+- `maximum_blocking_diagnostics_share` bounds the share of blocked candidates.
+- `minimum_checked_candidates` requires a minimum count of checked candidates.
+
+The summary also lists each blocked project with its program configurations
+and the share of candidates without type evidence (abstained or unresolved).
 
 Each project role comes from the intent of the project, not from its current
 output. An `accuracy-core` project has internal class members where syntactic

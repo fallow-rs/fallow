@@ -1,6 +1,7 @@
 const REQUIRED_GATES = [
   "minimum_confirmation_precision",
-  "minimum_confirmation_yield",
+  "minimum_checked_confirmation_yield",
+  "minimum_checked_candidates",
   "minimum_correct_unused_retention",
   "maximum_abstention",
   "maximum_blocking_diagnostics_share",

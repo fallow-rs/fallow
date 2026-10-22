@@ -62,22 +62,48 @@ export const typeAwareResolutionCounts = (projects) =>
   );
 
 /**
- * Candidates in a program with blocking diagnostics measure the fixture environment (for example
- * dependencies that the corpus does not install), not semantic ability. The yield excludes them,
- * and the `blocking_diagnostics_share` gate bounds their share.
+ * Splits the confirmation yield by type evidence. `confirmation_yield` keeps its meaning over all
+ * candidates. Candidates in a program with blocking diagnostics measure the fixture environment
+ * (for example dependencies that the corpus does not install), not semantic ability, so the gated
+ * `checked_confirmation_yield` excludes them. Separate gates bound their share and require a
+ * minimum count of checked candidates, so the ratio cannot rise because more projects block.
  */
-export const confirmationYieldMetrics = ({
-  correctConfirmedCount,
-  candidateCount,
-  blockingDiagnosticsCount,
-}) => {
-  const confirmationYieldDenominator = candidateCount - blockingDiagnosticsCount;
+export const typeEvidenceCoverage = (correctConfirmedCount, candidateCount, counts) => {
+  const checkedCandidateCount = candidateCount - counts.blockingDiagnosticsCount;
+  const noTypeEvidenceCount = counts.abstainedCount + counts.unresolvedCount;
   return {
-    confirmationYield: safeRatio(correctConfirmedCount, confirmationYieldDenominator),
-    confirmationYieldDenominator,
-    blockingDiagnosticsShare: safeRatio(blockingDiagnosticsCount, candidateCount),
+    confirmation_yield: safeRatio(correctConfirmedCount, candidateCount),
+    checked_candidate_count: checkedCandidateCount,
+    checked_confirmation_yield: safeRatio(correctConfirmedCount, checkedCandidateCount),
+    blocking_diagnostics_count: counts.blockingDiagnosticsCount,
+    blocking_diagnostics_share: safeRatio(counts.blockingDiagnosticsCount, candidateCount),
+    no_type_evidence_count: noTypeEvidenceCount,
+    no_type_evidence_share: safeRatio(noTypeEvidenceCount, candidateCount),
   };
 };
+
+/** Projects with candidates behind blocking diagnostics, with each blocked program config. */
+export const blockedProjects = (projects) =>
+  projects
+    .map(({ id, type_aware: typeAware }) => ({
+      project_id: id,
+      blocked_candidate_count: typeAware?.abstention_reasons?.blocking_diagnostics ?? 0,
+      programs: (typeAware?.projects ?? [])
+        .filter(({ reason_code: reasonCode }) => reasonCode === "blocking-diagnostics")
+        .map(({ config, blocking_diagnostic_count: diagnosticCount }) => ({
+          config,
+          blocking_diagnostic_count: diagnosticCount,
+        })),
+    }))
+    .filter(({ blocked_candidate_count: count }) => count > 0);
+
+const blockedProjectLine = ({ project_id: projectId, blocked_candidate_count: count, programs }) =>
+  `- ${projectId}: ${count} blocked candidates; ${programs
+    .map(
+      ({ config, blocking_diagnostic_count: diagnostics }) =>
+        `\`${config}\` (${diagnostics} diagnostics)`,
+    )
+    .join(", ")}`;
 
 const confirmedUsed = ({ semantic_status: semanticStatus, truth }) =>
   semanticStatus === "confirmed-used" && truth === "used";
@@ -111,19 +137,25 @@ export const renderSummaryMarkdown = (summary) =>
     "",
     `- Candidates: ${summary.accuracy.candidate_count}`,
     `- Confirmation precision: ${display(summary.accuracy.confirmation_precision)}`,
-    `- Safe confirmation yield: ${display(summary.accuracy.confirmation_yield)}`,
+    `- Confirmed as used: ${summary.accuracy.truth_counts.used} of ${summary.accuracy.candidate_count} candidates (confirmation yield ${display(summary.accuracy.confirmation_yield)})`,
+    `- Checked confirmation yield (gate): ${display(summary.accuracy.checked_confirmation_yield)} over ${summary.accuracy.checked_candidate_count} checked candidates`,
     `- Contract-preserved false positives: ${summary.accuracy.contract_preserved_count}`,
     `- Combined safe-resolution yield: ${display(summary.accuracy.safe_resolution_yield)}`,
     `- Independently adjudicated truth coverage: ${display(summary.accuracy.adjudicated_truth_coverage)}`,
     `- Correct-unused retention: ${display(summary.accuracy.correct_unused_retention)}`,
     `- Abstention: ${display(summary.accuracy.abstention)}`,
-    `- Blocking-diagnostics share: ${display(summary.accuracy.blocking_diagnostics_share)}`,
+    `- Candidates behind blocking diagnostics: ${summary.accuracy.blocking_diagnostics_count} (share ${display(summary.accuracy.blocking_diagnostics_share)})`,
+    `- Candidates without type evidence (abstained or unresolved): ${summary.accuracy.no_type_evidence_count} (share ${display(summary.accuracy.no_type_evidence_share)})`,
     `- Median marginal overhead: ${display(summary.performance.marginal_overhead_ms.median)} ms`,
     `- P95 marginal overhead: ${display(summary.performance.marginal_overhead_ms.p95)} ms`,
     `- Independent repositories with confirmed value: ${summary.value.confirmed_repository_count}`,
     `- Semantic buckets with confirmed value: ${summary.value.confirmed_feature_buckets.join(", ") || "none"}`,
     "",
     "No corpus-wide recall is claimed. Indeterminate candidates are excluded from adjudicated accuracy metrics.",
+    "",
+    "The corpus does not install fixture dependencies. Candidates in a program that does not type-check have no type evidence and are excluded from the checked confirmation yield:",
+    "",
+    ...(summary.accuracy.blocked_projects ?? []).map(blockedProjectLine),
     "",
     "Raw machine output and source evidence remain under target/type-aware-corpus and are not tracked.",
     "",
@@ -175,9 +207,13 @@ export const summaryChecks = (values) => ({
     values.confirmationPrecision,
     values.thresholds.minimum_confirmation_precision,
   ),
-  confirmation_yield: metricAtLeast(
-    values.confirmationYield,
-    values.thresholds.minimum_confirmation_yield,
+  checked_confirmation_yield: metricAtLeast(
+    values.coverage.checked_confirmation_yield,
+    values.thresholds.minimum_checked_confirmation_yield,
+  ),
+  checked_candidates: metricAtLeast(
+    values.coverage.checked_candidate_count,
+    values.thresholds.minimum_checked_candidates,
   ),
   correct_unused_retention: metricAtLeast(
     values.correctUnusedRetention,
@@ -185,7 +221,7 @@ export const summaryChecks = (values) => ({
   ),
   abstention: metricAtMost(values.abstention, values.thresholds.maximum_abstention),
   blocking_diagnostics_share: metricAtMost(
-    values.blockingDiagnosticsShare,
+    values.coverage.blocking_diagnostics_share,
     values.thresholds.maximum_blocking_diagnostics_share,
   ),
   marginal_overhead: metricAtMost(
