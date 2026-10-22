@@ -245,6 +245,7 @@ pub fn parse_all_files_cancellable(
                     path: file.path.clone(),
                     error_count: module.parse_error_count,
                     panicked: module.parse_panicked,
+                    nesting_limit: module.parse_nesting_too_deep.then_some(MAX_NESTING_DEPTH),
                 });
             }
             modules.push(module);

@@ -501,7 +501,8 @@ mod tests {
             .filter_map(|diagnostic| {
                 let kind = match diagnostic.kind {
                     WorkspaceDiagnosticKind::SourceReadFailure { .. } => "read",
-                    WorkspaceDiagnosticKind::SourceParseDegraded { .. } => "parse",
+                    WorkspaceDiagnosticKind::SourceParseDegraded { .. }
+                    | WorkspaceDiagnosticKind::SourceNestingTooDeep { .. } => "parse",
                     _ => return None,
                 };
                 let name = diagnostic.path.file_name()?.to_string_lossy().into_owned();

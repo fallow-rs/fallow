@@ -194,7 +194,7 @@ pub struct CheckOutput {
     /// - source discovery, during the file walk: `skipped-large-file`,
     ///   `skipped-minified-file`, `skipped-source-dotdir`,
     ///   `excluded-by-default-ignore`, `source-read-failure`,
-    ///   `source-parse-degraded`;
+    ///   `source-parse-degraded`, `source-nesting-too-deep`;
     /// - dead-code analysis, from the dependency-catalog and override
     ///   detectors: `malformed-pnpm-workspace-yaml`,
     ///   `bun-lockb-override-resolution-skipped`;
@@ -213,10 +213,11 @@ pub struct CheckOutput {
     ///
     /// A diagnostic here is advisory and never withholds a finding. Where an
     /// entry reports a source file this run never fully analyzed
-    /// (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
-    /// `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
-    /// verdict, so the affected `unused_files[]`, `unused_exports[]`, and
-    /// dependency entries additionally carry the caveat themselves in their own
+    /// (`source-parse-degraded`, `source-nesting-too-deep`,
+    /// `source-read-failure`, `skipped-large-file`, `skipped-minified-file`,
+    /// `skipped-source-dotdir`) it can distort a verdict, so the affected
+    /// `unused_files[]`, `unused_exports[]`, and dependency entries
+    /// additionally carry the caveat themselves in their own
     /// optional `reachability_caveats[]` array, and a reader who never scrolls
     /// back up to this list still sees it. `fallow fix` reads the same array
     /// and withholds the removal while a caveat stands.

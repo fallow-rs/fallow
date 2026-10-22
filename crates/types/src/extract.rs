@@ -58,19 +58,16 @@ pub struct ModuleInfo {
     pub has_angular_component_template_url: bool,
     /// xxh3 hash of the file content for incremental caching.
     pub content_hash: u64,
-    /// Number of parser diagnostics the parse of this file produced.
-    ///
-    /// Non-zero means extraction saw a partial or repaired tree, so imports,
-    /// exports, and references after the first error may be missing. Reported
-    /// through `workspace_diagnostics[]` as `source-parse-degraded`; it never
-    /// withholds a finding, because oxc also reports recoverable errors for
-    /// valid syntax newer than the parser, and gating on it would mute real
-    /// results project-wide. Zero for non-JS extraction paths, which do not run
-    /// the oxc parser.
+    /// Number of parser diagnostics the parse of this file produced. Non-zero
+    /// means imports, exports and references after the first error may be
+    /// missing (`source-parse-degraded`, which never withholds a finding).
+    /// Zero for non-JS extraction paths, which do not run the oxc parser.
     pub parse_error_count: u32,
     /// `true` when the parser abandoned the file instead of recovering. The
     /// extracted module is then a fragment of the real one at best.
     pub parse_panicked: bool,
+    /// `true` when the file nests too deep to parse, so it was not parsed.
+    pub parse_nesting_too_deep: bool,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
     /// Suppression tokens that did not parse to any known `IssueKind`.
@@ -447,6 +444,7 @@ impl ModuleInfo {
             content_hash: 0,
             parse_error_count: 0,
             parse_panicked: false,
+            parse_nesting_too_deep: false,
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
             unused_import_bindings: Vec::new(),
@@ -4083,7 +4081,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1464);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1472);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
@@ -4216,6 +4214,8 @@ pub struct SourceParseDegradation {
     pub error_count: u32,
     /// `true` when the parser abandoned the file instead of recovering.
     pub panicked: bool,
+    /// The nesting cap when the file nests too deep to parse.
+    pub nesting_limit: Option<u32>,
 }
 
 #[cfg(test)]

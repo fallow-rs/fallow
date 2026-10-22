@@ -127,9 +127,9 @@ pub enum ReachabilityCaveat {
     /// "is any export of this file referenced from a reachable module" test
     /// reads exactly that truncated export list.
     ///
-    /// Two workspace diagnostics put a file in this state: it was read but did
-    /// not parse cleanly (`source-parse-degraded`), or it could not be read at
-    /// all (`source-read-failure`). The token names the consequence rather than
+    /// Three workspace diagnostics put a file in this state: a partial parse
+    /// (`source-parse-degraded`), no parse (`source-nesting-too-deep`), or no
+    /// read (`source-read-failure`). The token names the consequence rather than
     /// either cause, so a future kind that leaves a discovered file partially
     /// extracted carries the same value.
     ///
@@ -140,11 +140,11 @@ pub enum ReachabilityCaveat {
     /// import that would have credited this finding may never have been seen.
     ///
     /// The cause is any workspace diagnostic that leaves a source file's
-    /// imports unseen: a degraded parse (`source-parse-degraded`), a file that
-    /// could not be read (`source-read-failure`), or a file discovery skipped
-    /// before reading it (`skipped-large-file`, `skipped-minified-file`,
-    /// `skipped-source-dotdir`). The token names the class rather than any one
-    /// cause.
+    /// imports unseen: a partial parse (`source-parse-degraded`), no parse
+    /// (`source-nesting-too-deep`), no read (`source-read-failure`), or a skip
+    /// by discovery before the read (`skipped-large-file`,
+    /// `skipped-minified-file`, `skipped-source-dotdir`). The token names the
+    /// class rather than any one cause.
     ///
     /// Which modules feed the verdict differs by array, and the caveat is
     /// emitted only when a degraded module is actually one of them:

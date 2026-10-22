@@ -1,12 +1,13 @@
 //! Attach `reachability_caveats` to the dead-code findings a file this run
 //! never fully analyzed can distort.
 //!
-//! A run can fail to see a source file's imports in five ways, and every one
+//! A run can fail to see a source file's imports in six ways, and every one
 //! of them is already recorded in `workspace_diagnostics[]`: the file did not
-//! parse cleanly (`source-parse-degraded`), it could not be read
+//! parse cleanly (`source-parse-degraded`), it nests too deep to parse
+//! (`source-nesting-too-deep`), it could not be read
 //! (`source-read-failure`), or discovery skipped it before reading it
 //! (`skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`).
-//! All five have the same consequence. An import the run never saw credits
+//! All six have the same consequence. An import the run never saw credits
 //! nothing, so the module it pointed at can surface as a confident
 //! `unused-file` or `unused-export` finding carrying a `delete-file` or
 //! `remove-export` action.

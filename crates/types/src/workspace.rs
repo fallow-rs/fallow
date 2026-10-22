@@ -236,6 +236,15 @@ pub enum WorkspaceDiagnosticKind {
         /// the extracted module is a fragment at best.
         panicked: bool,
     },
+    /// A source file nests brackets deeper than the parser cap, or needs more
+    /// stack than fallow reserves, so it was not parsed at all. The file can be
+    /// valid code, so this is not reported as a syntax error, but it degrades
+    /// the run in the same way: its imports credit nothing. It counts for the
+    /// parse-error gate and adds the same caveats as `source-parse-degraded`.
+    SourceNestingTooDeep {
+        /// The bracket nesting cap of the pre-parse scan.
+        limit: u32,
+    },
     /// Dependency-override resolution was skipped because bun's legacy binary
     /// `bun.lockb` sits next to this `package.json`, fallow cannot read the
     /// binary format, and no parseable text lockfile was found to use
@@ -643,6 +652,7 @@ impl WorkspaceDiagnosticKind {
             Self::SkippedSourceDotdir => "skipped-source-dotdir",
             Self::SourceReadFailure { .. } => "source-read-failure",
             Self::SourceParseDegraded { .. } => "source-parse-degraded",
+            Self::SourceNestingTooDeep { .. } => "source-nesting-too-deep",
             Self::BunLockbOverrideResolutionSkipped => "bun-lockb-override-resolution-skipped",
             Self::BunLockOverrideResolutionSkipped => "bun-lock-override-resolution-skipped",
             Self::PnpmLockOverrideResolutionSkipped => "pnpm-lock-override-resolution-skipped",
@@ -743,6 +753,7 @@ impl WorkspaceDiagnosticKind {
             | Self::SkippedSourceDotdir
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
+            | Self::SourceNestingTooDeep { .. }
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
@@ -781,6 +792,7 @@ impl WorkspaceDiagnosticKind {
                 | Self::SkippedSourceDotdir
                 | Self::SourceReadFailure { .. }
                 | Self::SourceParseDegraded { .. }
+                | Self::SourceNestingTooDeep { .. }
                 | Self::NodeModulesMissing
                 | Self::ExcludedByDefaultIgnore { .. }
                 | Self::NoSourceFilesAnalyzed { .. }
@@ -869,6 +881,7 @@ impl WorkspaceDiagnosticKind {
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
             | Self::SourceParseDegraded { .. }
+            | Self::SourceNestingTooDeep { .. }
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
@@ -938,6 +951,7 @@ impl WorkspaceDiagnosticKind {
             | Self::SkippedSourceDotdir
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
+            | Self::SourceNestingTooDeep { .. }
             | Self::NodeModulesMissing
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
@@ -1002,6 +1016,7 @@ impl WorkspaceDiagnosticKind {
             | Self::SkippedSourceDotdir
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
+            | Self::SourceNestingTooDeep { .. }
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
@@ -1059,6 +1074,7 @@ impl WorkspaceDiagnosticKind {
             | Self::SkippedSourceDotdir
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
+            | Self::SourceNestingTooDeep { .. }
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
@@ -1603,10 +1619,17 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                 "Parsed '{display}' with {error_count} error(s); {outcome}. Imports, exports, and \
                  references it did not reach are missing from this run, so files and symbols it \
                  uses can be reported as unused. Fix the syntax, or ignore this if the file uses \
-                 syntax newer than fallow's parser. A file that nests brackets too deep for the \
-                 parser stack is not parsed at all, so it cannot abort the run."
+                 syntax newer than fallow's parser."
             )
         }
+        WorkspaceDiagnosticKind::SourceNestingTooDeep { limit } => format!(
+            "Did not parse '{display}': it nests brackets deeper than {limit} levels, or it \
+             needs more stack than fallow reserves, so a parse could overflow the stack. Its \
+             imports and exports are missing from this run, so files and symbols it uses can be \
+             reported as unused, and while the file is reachable `fallow fix` holds back its \
+             actions for the whole project. Add '{display}' to ignoreFindings if it is generated \
+             code, or reduce its nesting."
+        ),
         WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped => format!(
             "Skipped dependency-override resolution for '{display}': bun's legacy binary bun.lockb \
              sits next to it, fallow cannot read the binary format, and no parseable text lockfile \

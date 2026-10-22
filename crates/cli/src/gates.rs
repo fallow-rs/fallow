@@ -34,7 +34,7 @@
 use std::path::Path;
 
 use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
-use fallow_output::{GateFile, GateName, GateOutcome, GateOutcomes, GateStatus};
+use fallow_output::{GateFile, GateFileReason, GateName, GateOutcome, GateOutcomes, GateStatus};
 
 /// `pass` or `fail` from a plain predicate.
 pub const fn status_of(failed: bool) -> GateStatus {
@@ -167,8 +167,8 @@ pub fn type_aware_meta_outcome(
 /// The files of a run that did not parse cleanly, sorted by path, for the
 /// `parse-error` gate.
 ///
-/// Reads the `source-parse-degraded` entries of the run's workspace
-/// diagnostics, so the gate and `workspace_diagnostics[]` name the same files.
+/// Reads the `source-parse-degraded` and `source-nesting-too-deep` entries of
+/// the run's workspace diagnostics, so the gate and `workspace_diagnostics[]` name the same files.
 /// Other kinds that set `degrades_analysis` do not count: several of them fire
 /// on clean projects.
 pub fn parse_degraded_files(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<GateFile> {
@@ -182,6 +182,15 @@ pub fn parse_degraded_files(root: &Path, diagnostics: &[WorkspaceDiagnostic]) ->
                 path: fallow_types::path_util::display_relative(root, &diagnostic.path),
                 error_count,
                 panicked,
+                reason: None,
+            }),
+            // The values match what the too-deep module records, so the
+            // existing fields keep their meaning for an older consumer.
+            WorkspaceDiagnosticKind::SourceNestingTooDeep { .. } => Some(GateFile {
+                path: fallow_types::path_util::display_relative(root, &diagnostic.path),
+                error_count: 1,
+                panicked: true,
+                reason: Some(GateFileReason::NestingTooDeep),
             }),
             _ => None,
         })
@@ -228,6 +237,9 @@ pub fn sections_parse_error_outcome(
 /// The one-line reason of a degraded file, for human text: the number of
 /// parser errors and whether the parser stopped.
 pub fn parse_error_reason(file: &GateFile) -> String {
+    if file.reason == Some(GateFileReason::NestingTooDeep) {
+        return "nests too deep to parse".to_owned();
+    }
     let errors = if file.error_count == 1 {
         "1 parser error".to_owned()
     } else {
@@ -1022,11 +1034,13 @@ mod tests {
                     path: "src/a.tsx".to_owned(),
                     error_count: 2,
                     panicked: true,
+                    reason: None,
                 },
                 GateFile {
                     path: "src/z.ts".to_owned(),
                     error_count: 2,
                     panicked: false,
+                    reason: None,
                 },
             ]
         );
@@ -1042,6 +1056,7 @@ mod tests {
             path: "src/a.ts".to_owned(),
             error_count: 1,
             panicked: false,
+            reason: None,
         }];
         assert_eq!(parse_error_outcome(false, true, &files), None);
         let armed = parse_error_outcome(true, true, &files).expect("armed");
@@ -1057,6 +1072,7 @@ mod tests {
             path: "src/a.ts".to_owned(),
             error_count: 1,
             panicked: false,
+            reason: None,
         }];
         let gates = health_gate_outcomes(&HealthGateInputs {
             report_only: true,

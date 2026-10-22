@@ -101,10 +101,10 @@ pub enum GateName {
     /// unavailable.
     TypeAwareRequire,
     /// `--fail-on-parse-error` or the `failOnParseError` config key: at least
-    /// one source file did not parse cleanly (a `source-parse-degraded` entry
-    /// in `workspace_diagnostics[]`). The entry lists each such file in
-    /// `files`. Never armed by default, because the parser also rejects valid
-    /// syntax that is newer than the parser.
+    /// one source file did not parse cleanly (a `source-parse-degraded` or
+    /// `source-nesting-too-deep` entry in `workspace_diagnostics[]`). The
+    /// entry lists each such file in `files`. Never armed by default, because
+    /// the parser also rejects valid syntax that is newer than the parser.
     ParseError,
 }
 
@@ -245,17 +245,32 @@ pub struct GateOutcome {
 ///
 /// Today only `parse-error` emits it. The item carries the same facts as the
 /// `source-parse-degraded` entry in `workspace_diagnostics[]` for that file,
-/// so a consumer can act on the gate without a join.
+/// so a consumer can act on the gate without a join. With `reason` set, the
+/// count and the parser outcome are placeholders.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GateFile {
     /// The file path, relative to the project root, with `/` separators.
     pub path: String,
-    /// The number of parser errors for the file.
+    /// The number of parser errors for the file. `1` when `reason` is set.
     pub error_count: u32,
     /// True when the parser stopped in the file instead of recovering, so the
-    /// analysis saw only the part before the error.
+    /// analysis saw only the part before the error. `true` when `reason` is set.
     pub panicked: bool,
+    /// Why the file counts when it is not a parser error. Absent for a parser
+    /// error, the only reason before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<GateFileReason>,
+}
+
+/// Why a file counts for the `parse-error` gate, other than a parser error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum GateFileReason {
+    /// The file nests too deep to parse, so it was not parsed
+    /// (`source-nesting-too-deep`).
+    NestingTooDeep,
 }
 
 impl GateOutcome {
@@ -484,6 +499,7 @@ mod tests {
                     path: "src/Broken.tsx".to_owned(),
                     error_count: 1,
                     panicked: true,
+                    reason: None,
                 }],
             ),
         );

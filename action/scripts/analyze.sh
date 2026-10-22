@@ -1683,7 +1683,7 @@ gate_detail() {
       files=$(jq_debug -r '
         [ (.gate_outcomes["parse-error"].files // [])[]
           | (.path | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A")) as $path
-          | "\($path) (\(.error_count) parser error\(if .error_count == 1 then "" else "s" end), the parser \(if .panicked then "stopped" else "recovered" end))" ]
+          | "\($path) (\(if .reason == "nesting-too-deep" then "nests too deep to parse" else "\(.error_count) parser error\(if .error_count == 1 then "" else "s" end), the parser \(if .panicked then "stopped" else "recovered" end)" end))" ]
         | join(", ")
       ' "$RESULTS_FILE" || true)
       [ -n "$files" ] && printf 'fallow could not parse %s' "$files"

@@ -3804,9 +3804,9 @@ impl ModuleInfoExtractor {
             has_cjs_exports: self.has_cjs_exports,
             has_angular_component_template_url: self.has_angular_component_template_url,
             content_hash,
-            // Set by the parse layer, which owns the parser diagnostics.
-            parse_error_count: 0,
+            parse_error_count: 0, // Set by the parse layer, like the two below.
             parse_panicked: false,
+            parse_nesting_too_deep: false,
             suppressions: parsed.suppressions,
             unknown_suppression_kinds: parsed.unknown_kinds,
             unused_import_bindings: Vec::new(),
