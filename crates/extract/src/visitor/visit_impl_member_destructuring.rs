@@ -59,7 +59,7 @@ impl<'a> ModuleInfoExtractor {
     ) {
         let source = unwrap_static_expr(source);
         if let Expression::ObjectExpression(object) = source {
-            self.record_literal_destructure(pattern, object);
+            self.record_literal_destructure(pattern, object, top_level);
             return;
         }
         let entries = pattern.entries();
@@ -78,19 +78,20 @@ impl<'a> ModuleInfoExtractor {
             self.record_path_destructure(pattern, &path);
             return;
         }
-        let mut source_path = None;
-        for entry in &entries {
+        self.record_nested_entries(&entries, static_member_object_name(source).as_deref());
+    }
+
+    /// Credit the nested patterns of `entries`. Each one reads its default and,
+    /// when the source has a static `path`, the member `path.key`.
+    fn record_nested_entries(&mut self, entries: &[DestructureEntry<'_, 'a>], path: Option<&str>) {
+        for entry in entries {
             let Some(nested) = entry.nested else {
                 continue;
             };
             if let Some(default) = entry.default {
                 self.record_object_destructure(nested, default, false);
             }
-            let Some(key) = entry.key.as_deref() else {
-                continue;
-            };
-            if let Some(path) = source_path.get_or_insert_with(|| static_member_object_name(source))
-            {
+            if let (Some(path), Some(key)) = (path, entry.key.as_deref()) {
                 self.record_path_destructure(nested, &format!("{path}.{key}"));
             }
         }
@@ -98,12 +99,19 @@ impl<'a> ModuleInfoExtractor {
 
     /// `{ k: { m } } = { k: instance }` reads `m` from the literal value of `k`.
     /// The literal itself has no class members, so only nested patterns and
-    /// their defaults can read one.
+    /// their defaults can read one. A spread `{ ...source }` can supply any
+    /// key, so the pattern also destructures each spread argument.
     fn record_literal_destructure(
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         object: &ObjectExpression<'a>,
+        top_level: bool,
     ) {
+        for property in &object.properties {
+            if let ObjectPropertyKind::SpreadProperty(spread) = property {
+                self.record_object_destructure(pattern, &spread.argument, top_level);
+            }
+        }
         for entry in pattern.entries() {
             let Some(nested) = entry.nested else {
                 continue;
@@ -139,17 +147,95 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    pub(in crate::visitor) fn record_typed_parameter_member_destructuring(
+    /// A signature without a body (overload, `declare function`, abstract
+    /// method) never runs, so its destructured keys read nothing.
+    pub(in crate::visitor) fn record_function_member_destructuring(&mut self, func: &Function<'a>) {
+        if func.body.is_some() {
+            self.record_parameter_member_destructuring(&func.params);
+        }
+    }
+
+    /// `({ m }: Service) => ...` and `({ m } = instance) => ...` read `m`
+    /// from the annotated type or from the default value of the parameter.
+    pub(in crate::visitor) fn record_parameter_member_destructuring(
         &mut self,
-        params: &FormalParameters<'_>,
+        params: &FormalParameters<'a>,
     ) {
         for param in &params.items {
-            if let BindingPattern::ObjectPattern(pattern) = &param.pattern
-                && let Some(type_annotation) = param.type_annotation.as_deref()
-            {
+            let BindingPattern::ObjectPattern(pattern) = &param.pattern else {
+                continue;
+            };
+            if let Some(type_annotation) = param.type_annotation.as_deref() {
                 self.record_typed_member_destructuring(pattern, &type_annotation.type_annotation);
             }
+            if let Some(initializer) = param.initializer.as_deref() {
+                self.record_object_destructure(
+                    DestructureObject::Binding(pattern),
+                    initializer,
+                    true,
+                );
+            }
         }
+    }
+
+    /// `for (const { m } of items)` reads `m` from each element. An array
+    /// literal gives each element as a source. A typed iterable, such as
+    /// `items: Service[]`, gives its element class.
+    pub(in crate::visitor) fn record_for_of_member_destructuring(
+        &mut self,
+        stmt: &ForOfStatement<'a>,
+    ) {
+        let pattern = match &stmt.left {
+            ForStatementLeft::VariableDeclaration(declaration) => {
+                match declaration
+                    .declarations
+                    .first()
+                    .map(|declarator| &declarator.id)
+                {
+                    Some(BindingPattern::ObjectPattern(pattern)) => {
+                        DestructureObject::Binding(pattern)
+                    }
+                    _ => return,
+                }
+            }
+            ForStatementLeft::ObjectAssignmentTarget(target) => {
+                DestructureObject::Assignment(target)
+            }
+            _ => return,
+        };
+        let iterable = unwrap_static_expr(&stmt.right);
+        if let Expression::ArrayExpression(array) = iterable {
+            for element in &array.elements {
+                if let Some(element) = element.as_expression() {
+                    self.record_object_destructure(pattern, element, true);
+                }
+            }
+            return;
+        }
+        let Some(receiver) = static_member_object_name(iterable) else {
+            return;
+        };
+        let receiver = self.qualify_this_scope(&receiver);
+        if let Some(class_name) = self.iterable_element_type_for(&receiver) {
+            let keys: Vec<_> = pattern
+                .entries()
+                .into_iter()
+                .map(|entry| entry.key)
+                .collect();
+            self.credit_destructured_class_members(&class_name, None, &keys, pattern.has_rest());
+        }
+    }
+
+    /// `({ k: { m } }: typeof holder)` destructures the type of the value
+    /// `holder`, so it reads the same members as `const { k: { m } } = holder`.
+    fn record_typeof_destructure(&mut self, pattern: &ObjectPattern<'a>, path: &str) {
+        let pattern = DestructureObject::Binding(pattern);
+        let entries = pattern.entries();
+        if let Some(BindingTarget::Class(class_name)) = self.resolve_bound_object_name(path) {
+            let keys: Vec<_> = entries.iter().map(|entry| entry.key.clone()).collect();
+            self.credit_destructured_class_members(&class_name, None, &keys, pattern.has_rest());
+        }
+        self.record_nested_entries(&entries, Some(path));
     }
 
     /// `({ member }: Service) => ...` reads `Service.member`. The annotation is
@@ -157,7 +243,7 @@ impl<'a> ModuleInfoExtractor {
     /// literal property that names one credits members. A nested pattern
     /// recurses only through a type literal, because the property types of a
     /// named type are not known here.
-    fn record_typed_member_destructuring(&mut self, pattern: &ObjectPattern<'_>, ty: &TSType<'_>) {
+    fn record_typed_member_destructuring(&mut self, pattern: &ObjectPattern<'a>, ty: &TSType<'_>) {
         if let TSType::TSTypeLiteral(type_lit) = ty {
             for property in &pattern.properties {
                 let Some(key) = property.key.static_name() else {
@@ -181,6 +267,14 @@ impl<'a> ModuleInfoExtractor {
                     continue;
                 };
                 self.record_typed_member_destructuring(inner, &property_type.type_annotation);
+            }
+            return;
+        }
+        if let TSType::TSTypeQuery(query) = ty {
+            if query.type_arguments.is_none()
+                && let Some(path) = type_query_path(&query.expr_name)
+            {
+                self.record_typeof_destructure(pattern, &path);
             }
             return;
         }
@@ -317,22 +411,50 @@ impl<'b, 'a> DestructureObject<'b, 'a> {
 
 /// The value of the last `key` property in an object literal. A spread can
 /// also set `key`, but the explicit value stays a possible source, so it keeps
-/// its credit.
+/// its credit. A getter `get key() { return value }` gives `value` when its
+/// body is that one return statement.
 fn object_literal_property_value<'b, 'a>(
     object: &'b ObjectExpression<'a>,
     key: &str,
 ) -> Option<&'b Expression<'a>> {
-    object
-        .properties
-        .iter()
-        .rev()
-        .find_map(|property| match property {
-            ObjectPropertyKind::ObjectProperty(property)
-                if property.kind == PropertyKind::Init
-                    && property.key.static_name().as_deref() == Some(key) =>
-            {
-                Some(&property.value)
-            }
-            _ => None,
-        })
+    object.properties.iter().rev().find_map(|property| {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            return None;
+        };
+        if property.key.static_name().as_deref() != Some(key) {
+            return None;
+        }
+        match property.kind {
+            PropertyKind::Init => Some(&property.value),
+            PropertyKind::Get => getter_return_value(&property.value),
+            PropertyKind::Set => None,
+        }
+    })
+}
+
+fn getter_return_value<'b, 'a>(value: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
+    let Expression::FunctionExpression(getter) = value else {
+        return None;
+    };
+    match getter.body.as_deref()?.statements.as_slice() {
+        [Statement::ReturnStatement(statement)] => statement.argument.as_ref(),
+        _ => None,
+    }
+}
+
+/// The dotted value path of a `typeof` query, such as `holder` or
+/// `registry.holder`.
+fn type_query_path(name: &TSTypeQueryExprName<'_>) -> Option<String> {
+    fn type_name_path(name: &TSTypeName<'_>) -> Option<String> {
+        match name {
+            TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
+            TSTypeName::QualifiedName(qualified) => Some(format!(
+                "{}.{}",
+                type_name_path(&qualified.left)?,
+                qualified.right.name
+            )),
+            TSTypeName::ThisExpression(_) => None,
+        }
+    }
+    type_name_path(name.as_ts_type_name()?)
 }

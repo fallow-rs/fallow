@@ -104,3 +104,67 @@ viaNestedLiteralPath();
 let viaNestedDefaultPath: () => void;
 ({ svc: { viaNestedDefaultPath } = holder.svc } = {});
 viaNestedDefaultPath();
+
+const services: Service[] = [service];
+
+for (const {
+  svc: { viaForOfLiteral },
+} of [{ svc: service }]) {
+  viaForOfLiteral();
+}
+
+for (const { viaForOfTyped } of services) {
+  viaForOfTyped();
+}
+
+let viaForOfAssign: () => void;
+for ({ viaForOfAssign } of [service]) {
+  viaForOfAssign();
+}
+
+for (const {
+  svc: { dead: deadInLoop },
+} of [{ other: service }] as { svc: { dead: () => void } }[]) {
+  deadInLoop();
+}
+
+function paramInitializer({ viaParamInitializer } = service): void {
+  viaParamInitializer();
+}
+paramInitializer();
+
+function nestedParamInitializer({ svc: { viaNestedParamInitializer } } = { svc: service }): void {
+  viaNestedParamInitializer();
+}
+nestedParamInitializer();
+
+const typeofParam = ({ svc: { viaTypeofParam } }: typeof holder): void => viaTypeofParam();
+typeofParam(holder);
+
+const typeofNested = ({ svc: { viaTypeofNested } }: { svc: typeof service }): void =>
+  viaTypeofNested();
+typeofNested({ svc: service });
+
+const registry = { holder };
+const typeofQualified = ({ svc: { viaTypeofQualified } }: typeof registry.holder): void =>
+  viaTypeofQualified();
+typeofQualified(holder);
+
+const {
+  svc: { viaGetter },
+} = {
+  get svc() {
+    return service;
+  },
+};
+viaGetter();
+
+const {
+  svc: { viaSpread },
+} = { ...holder };
+viaSpread();
+
+const {
+  svc: { viaSpreadLiteral },
+} = { ...{ svc: service } };
+viaSpreadLiteral();

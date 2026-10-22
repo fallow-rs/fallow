@@ -3995,11 +3995,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
-        // A signature without a body (overload, `declare function`, abstract
-        // method) never runs, so its destructured keys read nothing.
-        if func.body.is_some() {
-            self.record_typed_parameter_member_destructuring(&func.params);
-        }
+        self.record_function_member_destructuring(func);
         self.record_scoped_typed_parameter_accesses(
             &func.params,
             func.body.as_deref().map(BodyRef::Block),
@@ -4058,7 +4054,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
-        self.record_typed_parameter_member_destructuring(&expr.params);
+        self.record_parameter_member_destructuring(&expr.params);
         self.record_scoped_typed_parameter_accesses(
             &expr.params,
             Some(BodyRef::arrow(&expr.body)),
@@ -4774,6 +4770,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         self.bind_for_of_element(stmt);
         self.bind_for_of_map_value(stmt);
+        self.record_for_of_member_destructuring(stmt);
         self.visit_statement(&stmt.body);
         self.pop_optional_binding_scope(values);
         self.pop_direct_object_binding_scope();
