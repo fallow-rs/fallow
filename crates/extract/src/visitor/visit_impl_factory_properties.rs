@@ -170,15 +170,28 @@ fn property_observations(
     Some(())
 }
 
+/// The dotted path of a static member chain and the span of its root
+/// identifier. The visitor asks for this path at every link of a chain, so
+/// the walk collects the properties first and builds the string once.
 fn receiver_path(expression: &Expression<'_>) -> Option<(String, Span)> {
-    match unwrap_static_expr(expression) {
-        Expression::Identifier(id) => Some((id.name.to_string(), id.span)),
-        Expression::StaticMemberExpression(member) => {
-            let (parent, reference) = receiver_path(&member.object)?;
-            Some((format!("{parent}.{}", member.property.name), reference))
+    let mut properties = Vec::new();
+    let mut current = unwrap_static_expr(expression);
+    let root = loop {
+        match current {
+            Expression::Identifier(id) => break id,
+            Expression::StaticMemberExpression(member) => {
+                properties.push(member.property.name.as_str());
+                current = unwrap_static_expr(&member.object);
+            }
+            _ => return None,
         }
-        _ => None,
+    };
+    let mut path = root.name.to_string();
+    for property in properties.iter().rev() {
+        path.push('.');
+        path.push_str(property);
     }
+    Some((path, root.span))
 }
 
 impl ModuleInfoExtractor {
@@ -986,6 +999,32 @@ impl ModuleInfoExtractor {
 mod tests {
     use super::*;
     use std::fmt::Write;
+
+    #[test]
+    fn receiver_path_builds_a_long_chain_in_one_pass() {
+        // A chain this long overflows a test thread stack with a recursive
+        // walk, and a build that copies the parent path at each link takes
+        // seconds.
+        const LINKS: usize = 300_000;
+        let allocator = oxc_allocator::Allocator::default();
+        let source = format!("(a{});", ".b".repeat(LINKS));
+        let parsed =
+            oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts()).parse();
+        let Some(Statement::ExpressionStatement(statement)) = parsed.program.body.first() else {
+            panic!("expected an expression statement");
+        };
+        let start = std::time::Instant::now();
+        let path = receiver_path(&statement.expression);
+        let elapsed = start.elapsed();
+        assert_eq!(
+            path,
+            Some((format!("a{}", ".b".repeat(LINKS)), Span::new(1, 2)))
+        );
+        assert!(
+            elapsed.as_secs() < 1,
+            "a chain of {LINKS} links took {elapsed:?}"
+        );
+    }
 
     #[test]
     fn factory_properties_preserve_local_static_class_identity() {

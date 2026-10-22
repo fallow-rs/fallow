@@ -49,6 +49,8 @@ use super::{
 
 #[path = "visit_impl_callback_properties.rs"]
 mod visit_callback_properties;
+#[path = "visit_impl_chain_names.rs"]
+mod visit_chain_names;
 #[path = "visit_impl_constructor_alternatives.rs"]
 mod visit_constructor_alternatives;
 #[path = "visit_impl_di.rs"]
@@ -110,6 +112,7 @@ mod visit_sveltekit_load;
 #[path = "visit_impl_taint_sources.rs"]
 mod visit_taint_sources;
 
+use visit_chain_names::static_member_object_name;
 pub(super) use visit_dynamic_imports::ComponentLoaderImport;
 pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
@@ -6243,60 +6246,6 @@ fn subclass_receiver_reference<'a, 'b>(
             path.push(name.to_string());
             Some((reference, path))
         }
-        _ => None,
-    }
-}
-
-fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
-    match expr {
-        Expression::ParenthesizedExpression(wrapper) => {
-            static_member_object_name(&wrapper.expression)
-        }
-        Expression::TSAsExpression(wrapper) => static_member_object_name(&wrapper.expression),
-        Expression::TSTypeAssertion(wrapper) => static_member_object_name(&wrapper.expression),
-        Expression::TSSatisfiesExpression(wrapper) => {
-            static_member_object_name(&wrapper.expression)
-        }
-        Expression::TSNonNullExpression(wrapper) => static_member_object_name(&wrapper.expression),
-        Expression::Identifier(obj) => Some(obj.name.to_string()),
-        Expression::ThisExpression(_) => Some("this".to_string()),
-        Expression::StaticMemberExpression(member) => Some(format!(
-            "{}.{}",
-            static_member_object_name(&member.object)?,
-            member.property.name
-        )),
-        Expression::ComputedMemberExpression(member) => Some(format!(
-            "{}.{}",
-            static_member_object_name(&member.object)?,
-            member.static_property_name()?
-        )),
-        // `#`-private field receiver (`this.#dep`): oxc's `PrivateIdentifier.name`
-        // excludes the leading `#`, so spell the key `this.#dep` to match the
-        // binding key `visit_property_definition` / the assignment arms record
-        // for private fields (issue #1821).
-        Expression::PrivateFieldExpression(member) => Some(format!(
-            "{}.#{}",
-            static_member_object_name(&member.object)?,
-            member.field.name
-        )),
-        Expression::CallExpression(call) if call.arguments.is_empty() => {
-            Some(format!("{}()", static_member_object_name(&call.callee)?))
-        }
-        Expression::NewExpression(new_expr) => match &new_expr.callee {
-            Expression::Identifier(callee) => Some(callee.name.to_string()),
-            _ => None,
-        },
-        Expression::ChainExpression(chain) => match &chain.expression {
-            ChainElement::CallExpression(call) if call.arguments.is_empty() => {
-                Some(format!("{}()", static_member_object_name(&call.callee)?))
-            }
-            ChainElement::StaticMemberExpression(member) => Some(format!(
-                "{}.{}",
-                static_member_object_name(&member.object)?,
-                member.property.name
-            )),
-            _ => None,
-        },
         _ => None,
     }
 }

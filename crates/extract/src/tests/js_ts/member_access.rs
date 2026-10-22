@@ -683,3 +683,21 @@ fn namespace_spy_call_on_shadowed_namespace_records_nothing() {
         "a shadowed namespace binding must not record a member access"
     );
 }
+
+#[test]
+fn long_member_chain_records_the_full_receiver_name() {
+    const LINKS: usize = 500;
+    for link in [".b", "?.b"] {
+        let info = parse_source(&format!(
+            "import {{ a }} from './a';\nexport const x = a{};",
+            link.repeat(LINKS)
+        ));
+        let deepest = format!("a{}", ".b".repeat(LINKS - 1));
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == deepest && access.member == "b"),
+            "the outermost link of a `{link}` chain must record the full receiver name"
+        );
+    }
+}
