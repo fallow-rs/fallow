@@ -33,11 +33,15 @@ const STACK_PER_BRACKET_LEVEL: usize = if cfg!(fuzzing) { 8 * 4096 } else { 4096
 /// recurse with the source, and the thread start.
 const BASE_STACK: usize = 256 * 1024;
 
-/// Largest stack a parse asks for. A source of 5 MB, the default file size
-/// limit, needs at most about 2.9 GiB at the measured worst case. The stack is
-/// a reservation: a parse touches only the pages that its depth uses.
+/// Largest stack a parse asks for. The stack is a reservation: a parse
+/// touches only the pages that its depth uses. A larger need is refused, so
+/// the file counts as too deep instead of parsing on too small a stack. In a
+/// 64-bit release build only a source over 64 MB reaches the cap, which needs
+/// `--max-file-size 0` or a raised limit. A thread with such a stack can fail
+/// to start under strict memory limits; the parse then runs on the current
+/// thread.
 const MAX_STACK: usize = if cfg!(target_pointer_width = "64") {
-    4 << 30
+    64 << 30
 } else {
     1 << 30
 };
@@ -59,13 +63,13 @@ pub fn register_thread_stack(size: usize) {
 }
 
 /// Stack that a parse of `source_len` bytes with `bracket_depth` nested
-/// brackets can use.
-pub fn stack_need(source_len: usize, bracket_depth: usize) -> usize {
-    source_len
+/// brackets can use, or `None` when that is more than the cap.
+pub fn stack_need(source_len: usize, bracket_depth: usize) -> Option<usize> {
+    let need = source_len
         .saturating_mul(STACK_PER_SOURCE_BYTE)
         .saturating_add(bracket_depth.saturating_mul(STACK_PER_BRACKET_LEVEL))
-        .saturating_add(BASE_STACK)
-        .min(MAX_STACK)
+        .saturating_add(BASE_STACK);
+    (need <= MAX_STACK).then_some(need)
 }
 
 /// Run `run` with at least `need` bytes of stack.
@@ -141,10 +145,11 @@ mod tests {
 
     #[test]
     fn need_grows_with_length_and_brackets() {
-        assert_eq!(stack_need(0, 0), BASE_STACK);
+        assert_eq!(stack_need(0, 0), Some(BASE_STACK));
         assert!(stack_need(1000, 0) > stack_need(100, 0));
         assert!(stack_need(1000, 500) > stack_need(1000, 0));
-        assert_eq!(stack_need(usize::MAX, usize::MAX), MAX_STACK);
+        assert_eq!(stack_need(usize::MAX, usize::MAX), None);
+        assert_eq!(stack_need(MAX_STACK / STACK_PER_SOURCE_BYTE + 1, 0), None);
     }
 
     #[test]

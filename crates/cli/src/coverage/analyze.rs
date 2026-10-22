@@ -673,10 +673,9 @@ fn instrumenter_functions_for_file(
     entries
         .into_iter()
         .map(|entry| {
-            // Complexity is paired by `source_hash`, which the walker derives
-            // from the same full-span slice it hashes for the entry, so the
-            // lookup is exact.
-            let metrics = complexity.get(&entry.source_hash).copied();
+            // Complexity pairs by `source_hash`; an entry without one has no metrics.
+            let hash = entry.source_hash.as_deref();
+            let metrics = hash.and_then(|hash| complexity.get(hash)).copied();
             instrumenter_function_info(entry, metrics, context, reachability)
         })
         .collect()
@@ -715,7 +714,7 @@ fn instrumenter_function_info(
         caller_count: context.caller_count,
         owner_count: context.owner_count,
         stable_id,
-        source_hash: Some(entry.source_hash),
+        source_hash: entry.source_hash,
         is_callback: entry.is_callback,
     }
 }

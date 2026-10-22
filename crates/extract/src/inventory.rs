@@ -77,8 +77,10 @@ pub struct InventoryEntry {
     /// The slice is the canonical body bytes (signature line + body + closing
     /// brace, no whitespace normalization), identical for `Function` and
     /// `ArrowFunctionExpression`. Stable across line moves, so a
-    /// moved-but-unedited function keeps the same hash.
-    pub source_hash: String,
+    /// moved-but-unedited function keeps the same hash. `None` for a function
+    /// with more nested functions below it than the cap in `function_hash`,
+    /// the same rule that the complexity walk applies.
+    pub source_hash: Option<String>,
     /// Whether the name was taken from the callee of the call this function is
     /// passed to (`arr.map(cb)` -> `map`) instead of from a declaration, a
     /// binding, or a property key. Lets a consumer describe the function as a
@@ -89,10 +91,41 @@ pub struct InventoryEntry {
 /// Rolling state for [`InventoryVisitor::line_col_utf16`]: the last resolved
 /// offset's line index, clamped byte position, and 0-based UTF-16 column.
 /// `line_idx` starts at `usize::MAX` so the first query never matches.
+#[derive(Clone, Copy)]
 struct ColCache {
     line_idx: usize,
     byte_end: usize,
     utf16_units: usize,
+}
+
+impl ColCache {
+    const EMPTY: Self = Self {
+        line_idx: usize::MAX,
+        byte_end: 0,
+        utf16_units: 0,
+    };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Source bytes that the column lookups encoded on this thread.
+    static UTF16_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Return the bytes that the column lookups encoded on this thread since the
+/// last call.
+#[cfg(test)]
+fn take_utf16_bytes() -> usize {
+    UTF16_BYTES.with(|encoded| encoded.replace(0))
+}
+
+/// A function that the inventory walk is inside.
+struct OpenFunction {
+    /// Index of its entry in [`InventoryVisitor::entries`].
+    entry: usize,
+    span: Span,
+    /// Levels of nested functions below it so far.
+    height: u32,
 }
 
 /// A resolved function name plus how it was resolved.
@@ -116,7 +149,12 @@ struct InventoryVisitor<'a> {
     source: &'a str,
     line_offsets: &'a [u32],
     entries: Vec<InventoryEntry>,
-    col_cache: ColCache,
+    /// Column cursors for span starts and span ends. One shared cursor jumps
+    /// across the whole span for each nested function on one line.
+    start_cols: ColCache,
+    end_cols: ColCache,
+    /// Open functions. The hash is computed on leave, when the height is known.
+    open: Vec<OpenFunction>,
     /// Parent-provided name override (method key, variable binding, etc.).
     pending_name: Option<String>,
     /// Callee name for a function passed as a call / `new` argument. Ranks BELOW
@@ -133,11 +171,9 @@ impl<'a> InventoryVisitor<'a> {
             source,
             line_offsets,
             entries: Vec::new(),
-            col_cache: ColCache {
-                line_idx: usize::MAX,
-                byte_end: 0,
-                utf16_units: 0,
-            },
+            start_cols: ColCache::EMPTY,
+            end_cols: ColCache::EMPTY,
+            open: Vec::new(),
             pending_name: None,
             pending_callee_name: None,
             anonymous_counter: 0,
@@ -173,24 +209,38 @@ impl<'a> InventoryVisitor<'a> {
     }
 
     fn record(&mut self, resolved: ResolvedName, span: Span) {
-        let (line, start_column) = self.line_col_utf16(span.start);
-        let (end_line, end_column) = self.line_col_utf16(span.end);
-        let source_hash = self
-            .source
-            .get(span.start as usize..span.end as usize)
-            .map_or_else(
-                || fallow_cov_protocol::source_hash_for(b""),
-                |slice| fallow_cov_protocol::source_hash_for(slice.as_bytes()),
-            );
+        let mut start_cols = self.start_cols;
+        let (line, start_column) = self.line_col_utf16(&mut start_cols, span.start);
+        self.start_cols = start_cols;
+        let mut end_cols = self.end_cols;
+        let (end_line, end_column) = self.line_col_utf16(&mut end_cols, span.end);
+        self.end_cols = end_cols;
+        self.open.push(OpenFunction {
+            entry: self.entries.len(),
+            span,
+            height: 0,
+        });
         self.entries.push(InventoryEntry {
             name: resolved.name,
             line,
             start_column,
             end_line,
             end_column,
-            source_hash,
+            source_hash: None,
             is_callback: resolved.is_callback,
         });
+    }
+
+    /// Close the function that [`Self::record`] opened last and hash it.
+    fn leave_function(&mut self) {
+        let Some(open) = self.open.pop() else {
+            return;
+        };
+        self.entries[open.entry].source_hash =
+            crate::function_hash::function_source_hash(self.source, open.span, open.height);
+        if let Some(parent) = self.open.last_mut() {
+            parent.height = parent.height.max(open.height + 1);
+        }
     }
 
     /// Map a UTF-8 byte offset to `(1-based line, 1-indexed UTF-16 column)`.
@@ -207,7 +257,7 @@ impl<'a> InventoryVisitor<'a> {
     /// only the gap to the previous offset keeps the walk linear on
     /// single-line (minified / generated) files instead of re-encoding the
     /// full line prefix for every function.
-    fn line_col_utf16(&mut self, byte_offset: u32) -> (u32, u32) {
+    fn line_col_utf16(&self, cache: &mut ColCache, byte_offset: u32) -> (u32, u32) {
         let line_idx = match self.line_offsets.binary_search(&byte_offset) {
             Ok(idx) => idx,
             Err(idx) => idx.saturating_sub(1),
@@ -221,19 +271,19 @@ impl<'a> InventoryVisitor<'a> {
         // Both `end` and the cached position are char boundaries at or after
         // `line_start` on the same line, so the gap slice is always valid and
         // a backward gap never exceeds the cached column.
-        let from_cache = if self.col_cache.line_idx == line_idx {
-            if end >= self.col_cache.byte_end {
-                self.utf16_len(self.col_cache.byte_end, end)
-                    .map(|gap| self.col_cache.utf16_units + gap)
+        let from_cache = if cache.line_idx == line_idx {
+            if end >= cache.byte_end {
+                self.utf16_len(cache.byte_end, end)
+                    .map(|gap| cache.utf16_units + gap)
             } else {
-                self.utf16_len(end, self.col_cache.byte_end)
-                    .map(|gap| self.col_cache.utf16_units - gap)
+                self.utf16_len(end, cache.byte_end)
+                    .map(|gap| cache.utf16_units - gap)
             }
         } else {
             None
         };
         let col_utf16 = from_cache.unwrap_or_else(|| self.utf16_len(line_start, end).unwrap_or(0));
-        self.col_cache = ColCache {
+        *cache = ColCache {
             line_idx,
             byte_end: end,
             utf16_units: col_utf16,
@@ -244,9 +294,10 @@ impl<'a> InventoryVisitor<'a> {
     /// UTF-16 code-unit count of `source[start..end]`, `None` when the range
     /// is not sliceable.
     fn utf16_len(&self, start: usize, end: usize) -> Option<usize> {
-        self.source
-            .get(start..end)
-            .map(|slice| slice.encode_utf16().count())
+        let slice = self.source.get(start..end)?;
+        #[cfg(test)]
+        UTF16_BYTES.with(|encoded| encoded.set(encoded.get() + slice.len()));
+        Some(slice.encode_utf16().count())
     }
 }
 
@@ -259,12 +310,14 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
         let resolved = self.resolve_name(func.id.as_ref().map(|id| id.name.as_str()));
         self.record(resolved, func.span);
         walk::walk_function(self, func, flags);
+        self.leave_function();
     }
 
     fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'ast>) {
         let resolved = self.resolve_name(None);
         self.record(resolved, arrow.span);
         walk::walk_arrow_function_expression(self, arrow);
+        self.leave_function();
     }
 
     fn visit_method_definition(&mut self, method: &MethodDefinition<'ast>) {
@@ -986,22 +1039,68 @@ mod tests {
         );
     }
 
+    /// A chain of `levels` nested arrows on one line.
+    fn nested_arrow_source(levels: usize) -> String {
+        format!("export const f = {}1;\n", "()=>".repeat(levels))
+    }
+
+    #[test]
+    fn deep_nesting_keeps_the_hash_join_with_complexity() {
+        let levels = crate::function_hash::MAX_HASHED_FUNCTION_HEIGHT as usize + 3;
+        let source = nested_arrow_source(levels);
+        let (entries, complexity) = walk_source_with_complexity(&PathBuf::from("a.js"), &source);
+        assert_eq!(entries.len(), levels);
+        // Pre-order: the outermost arrow comes first and has the most levels
+        // of nested functions below it.
+        for (index, entry) in entries.iter().enumerate() {
+            let height = levels - 1 - index;
+            let kept = height <= crate::function_hash::MAX_HASHED_FUNCTION_HEIGHT as usize;
+            assert_eq!(entry.source_hash.is_some(), kept, "height {height}");
+            if let Some(hash) = &entry.source_hash {
+                assert!(
+                    complexity.contains_key(hash),
+                    "height {height} has no metrics"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn column_lookups_stay_linear_on_nested_functions_in_one_line() {
+        // The counter is per thread, so the walk must stay on this thread:
+        // a thread with a registered stack keeps the bounded parse on it.
+        const STACK: usize = 64 << 20;
+        let (encoded, entries, source_len) = std::thread::Builder::new()
+            .stack_size(STACK)
+            .spawn(|| {
+                crate::register_thread_stack(STACK);
+                take_utf16_bytes();
+                let source = nested_arrow_source(4_000);
+                let entries = walk_source(&PathBuf::from("a.js"), &source);
+                (take_utf16_bytes(), entries.len(), source.len())
+            })
+            .expect("probe thread should start")
+            .join()
+            .expect("probe thread should finish");
+        assert_eq!(entries, 4_000);
+        assert!(
+            encoded <= 4 * source_len,
+            "encoded {encoded} bytes for {source_len}"
+        );
+    }
+
     #[test]
     fn source_hash_is_the_content_digest_of_the_function_span() {
         let src = "function foo() { return 1; }";
         let entries = walk(src);
         assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].source_hash,
-            fallow_cov_protocol::source_hash_for(src.as_bytes())
-        );
-        assert_eq!(entries[0].source_hash.len(), 16);
-        assert!(
-            entries[0]
-                .source_hash
-                .chars()
-                .all(|c| c.is_ascii_hexdigit())
-        );
+        let hash = entries[0]
+            .source_hash
+            .as_deref()
+            .expect("a shallow function keeps its hash");
+        assert_eq!(hash, fallow_cov_protocol::source_hash_for(src.as_bytes()));
+        assert_eq!(hash.len(), 16);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]

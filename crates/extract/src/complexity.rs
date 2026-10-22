@@ -73,6 +73,8 @@ struct FunctionFrame {
     prop_count: u16,
     /// Per-increment breakdown accumulated as the function body is walked.
     contributions: Vec<ComplexityContribution>,
+    /// Levels of nested functions below this one (`function_hash`).
+    height: u32,
 }
 
 #[derive(Clone)]
@@ -141,20 +143,6 @@ impl<'a> ComplexityVisitor<'a> {
         }
     }
 
-    /// Compute the content digest for a function's full-span byte slice.
-    ///
-    /// The slice (`&source[span.start..span.end]`) is the canonical body bytes
-    /// (signature line + body + closing brace, no whitespace normalization).
-    /// Returns `None` if the span falls outside the source or on a non-char
-    /// boundary; valid AST spans never do, but we clamp defensively rather than
-    /// panic, mirroring `line_col_utf16` in the inventory walker.
-    fn source_hash_for_span(&self, span: Span) -> Option<String> {
-        let start = span.start as usize;
-        let end = span.end as usize;
-        let slice = self.source.get(start..end)?;
-        Some(fallow_cov_protocol::source_hash_for(slice.as_bytes()))
-    }
-
     fn push_function(
         &mut self,
         identity: FunctionIdentity,
@@ -175,6 +163,7 @@ impl<'a> ComplexityVisitor<'a> {
             hook_count: 0,
             prop_count,
             contributions: Vec::new(),
+            height: 0,
         });
     }
 
@@ -188,7 +177,11 @@ impl<'a> ComplexityVisitor<'a> {
                 fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.start);
             let end_line =
                 fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.end).0;
-            let source_hash = self.source_hash_for_span(frame.span);
+            let source_hash =
+                crate::function_hash::function_source_hash(self.source, frame.span, frame.height);
+            if let Some(parent) = self.stack.last_mut() {
+                parent.height = parent.height.max(frame.height + 1);
+            }
             self.results.push(FunctionComplexity {
                 name: frame.identity.name,
                 is_private_member: frame.identity.is_private_member,

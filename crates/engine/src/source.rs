@@ -61,8 +61,9 @@ pub mod inventory {
         pub end_line: u32,
         /// 1-indexed UTF-16 column of the function node end.
         pub end_column: u32,
-        /// Content digest of the function's full-span source slice.
-        pub source_hash: String,
+        /// Content digest of the function's full-span source slice. `None`
+        /// for a function with too many nested functions below it.
+        pub source_hash: Option<String>,
         /// Whether the name came from the callee of the call this function is
         /// passed to (`arr.map(cb)` -> `map`) rather than from a declaration,
         /// a binding, or a property key.
