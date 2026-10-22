@@ -394,6 +394,46 @@ impl PackageJson {
         links.dedup();
         links
     }
+
+    /// The workspace package that the dependency `name` is an alias of.
+    ///
+    /// pnpm installs `"vite": "workspace:@scope/core@*"` as the workspace
+    /// package `@scope/core` under the name `vite`. A `workspace:` spec with
+    /// only a range (`workspace:*`, `workspace:^1.0.0`) or a path
+    /// (`workspace:../core`) is not an alias.
+    #[must_use]
+    pub fn workspace_alias_target(&self, name: &str) -> Option<&str> {
+        [
+            &self.dependencies,
+            &self.dev_dependencies,
+            &self.optional_dependencies,
+            &self.peer_dependencies,
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|deps| deps.get(name))
+        .and_then(|spec| workspace_alias_name(spec))
+    }
+}
+
+/// The package name in a `workspace:<name>@<range>` dependency spec.
+fn workspace_alias_name(spec: &str) -> Option<&str> {
+    let rest = spec.trim().strip_prefix("workspace:")?;
+    let separator = if let Some(scoped) = rest.strip_prefix('@') {
+        scoped.find('@')? + 1
+    } else {
+        rest.find('@')?
+    };
+    let name = &rest[..separator];
+    let is_package_name = !name.is_empty()
+        && !name.starts_with('.')
+        && match name.strip_prefix('@') {
+            Some(scoped) => scoped
+                .split_once('/')
+                .is_some_and(|(scope, base)| !scope.is_empty() && !base.is_empty()),
+            None => !name.contains('/'),
+        };
+    is_package_name.then_some(name)
 }
 
 /// Extract unique subdirectory names referenced by the `exports` field keys.
@@ -995,5 +1035,30 @@ mod tests {
         let pkg: PackageJson =
             serde_json::from_str(r#"{"exports": {".": "./dist/index.js"}}"#).unwrap();
         assert!(pkg.exports_subdirectories().is_empty());
+    }
+
+    #[test]
+    fn workspace_alias_target_reads_the_aliased_package_name() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "dependencies": {
+                    "vite": "workspace:@scope/core@*",
+                    "plain": "workspace:other@^1.0.0",
+                    "range": "workspace:*",
+                    "caret": "workspace:^1.0.0",
+                    "path": "workspace:../core",
+                    "npm": "npm:@scope/core@1.0.0",
+                    "bad-scope": "workspace:@scope@1.0.0"
+                },
+                "devDependencies": {"tool": "workspace:@scope/tool@workspace:*"}
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(pkg.workspace_alias_target("vite"), Some("@scope/core"));
+        assert_eq!(pkg.workspace_alias_target("plain"), Some("other"));
+        assert_eq!(pkg.workspace_alias_target("tool"), Some("@scope/tool"));
+        for name in ["range", "caret", "path", "npm", "bad-scope", "missing"] {
+            assert_eq!(pkg.workspace_alias_target(name), None, "{name}");
+        }
     }
 }

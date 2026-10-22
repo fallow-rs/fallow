@@ -25,6 +25,9 @@ use super::path_info::{
 };
 use super::react_native::{build_condition_names, build_extensions};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
+use super::workspace_alias::{
+    resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
+};
 
 /// Create an `oxc_resolver` instance with standard configuration.
 ///
@@ -1609,8 +1612,9 @@ impl ResolvedPathContext<'_, '_> {
     fn package_or_external_result(&self, path: &Path) -> Option<ResolveResult> {
         if let Some(pkg_name) = package_usage_name_for_resolved_package(self.specifier, path) {
             if self.ctx.workspace_roots.contains_key(pkg_name.as_str())
-                && let Some(result) = try_workspace_package_fallback(
+                && let Some(result) = try_aliased_workspace_package_fallback(
                     self.ctx,
+                    self.from_file,
                     self.specifier,
                     self.from_style || is_style_file(self.from_file),
                 )
@@ -2050,6 +2054,7 @@ fn resolve_failed_specifier(
     if flags.is_alias || flags.matches_plugin_alias {
         return resolve_failed_alias_specifier(
             ctx,
+            from_file,
             specifier,
             from_style || is_style_file(from_file),
             flags.is_bare,
@@ -2083,6 +2088,7 @@ fn resolve_failed_regular_specifier(
     if is_bare && is_valid_package_name(specifier) {
         return resolve_failed_bare_package_specifier(
             ctx,
+            from_file,
             specifier,
             from_style || is_style_file(from_file),
             matches_tsconfig_path_alias,
@@ -2134,6 +2140,7 @@ fn try_failed_package_fallbacks(
 
 fn resolve_failed_alias_specifier(
     ctx: &ResolveContext<'_>,
+    from_file: &Path,
     specifier: &str,
     style_context: bool,
     is_bare: bool,
@@ -2144,7 +2151,8 @@ fn resolve_failed_alias_specifier(
     }
     if is_bare
         && is_valid_package_name(specifier)
-        && let Some(result) = try_workspace_package_fallback(ctx, specifier, style_context)
+        && let Some(result) =
+            try_aliased_workspace_package_fallback(ctx, from_file, specifier, style_context)
     {
         return result;
     }
@@ -2152,31 +2160,6 @@ fn resolve_failed_alias_specifier(
         return ResolveResult::Unresolvable(specifier.to_string());
     }
     ResolveResult::Unresolvable(specifier.to_string())
-}
-
-fn resolve_failed_bare_package_specifier(
-    ctx: &ResolveContext<'_>,
-    specifier: &str,
-    style_context: bool,
-    matches_tsconfig_path_alias: bool,
-) -> ResolveResult {
-    if let Some(result) = try_workspace_package_fallback(ctx, specifier, style_context) {
-        return result;
-    }
-    if matches_tsconfig_path_alias {
-        return ResolveResult::Unresolvable(specifier.to_string());
-    }
-    let pkg_name = extract_package_name(specifier);
-    if ctx.workspace_roots.contains_key(pkg_name.as_str())
-        || ctx
-            .package_manifests
-            .iter()
-            .any(|manifest| manifest.name.as_deref() == Some(pkg_name.as_str()))
-    {
-        ResolveResult::Unresolvable(specifier.to_string())
-    } else {
-        ResolveResult::NpmPackage(pkg_name)
-    }
 }
 
 fn try_tsconfig_root_dirs(

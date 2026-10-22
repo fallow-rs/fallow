@@ -626,6 +626,8 @@ mod nestjs_trpc_interfaces;
 mod external_override_class_members;
 #[path = "integration_test/flue_plugin.rs"]
 mod flue_plugin;
+#[path = "integration_test/gitignored_workspace_members.rs"]
+mod gitignored_workspace_members;
 #[path = "integration_test/issue_2752_nuxt_components_scope.rs"]
 mod issue_2752_nuxt_components_scope;
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]

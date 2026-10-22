@@ -690,7 +690,7 @@ fn load_tsconfig_workspace_package(
 /// Targets outside the root, missing targets and tarballs are skipped without a
 /// diagnostic, because a dependency spec is not a workspace declaration. A
 /// target that source discovery does not walk is also skipped (see
-/// [`is_skipped_link_target`] and [`link_targets_reached_by_source_walk`]). A
+/// [`is_skipped_link_target`] and [`crate::source_walk::dirs_reached_by_source_walk`]). A
 /// target with a malformed `package.json` gets the same diagnostic as a
 /// declared workspace.
 fn collect_link_dependency_workspaces(
@@ -715,7 +715,7 @@ fn collect_link_dependency_workspaces(
                 && !is_skipped_link_target(canonical_root, canonical_dir, ignore_patterns)
         })
         .collect();
-    let walked = link_targets_reached_by_source_walk(canonical_root, &candidates);
+    let walked = crate::source_walk::dirs_reached_by_source_walk(canonical_root, &candidates);
 
     let mut workspaces = Vec::new();
     for canonical_dir in candidates {
@@ -747,50 +747,6 @@ fn is_skipped_link_target(
         .components()
         .any(|component| is_skip_listed_dir(&component.as_os_str().to_string_lossy()))
         || is_ignored_workspace_dir(relative, ignore_patterns)
-}
-
-/// The link targets that the source discovery walk reaches.
-///
-/// A target under a gitignored directory has no discovered source files, for
-/// the same reason as a skip-listed target. The walk uses the ignore-file
-/// settings of source discovery ([`crate::source_walk_builder`]), so nested
-/// `.gitignore` files, `.git/info/exclude` and the global gitignore apply with
-/// the same rules. The walk enters only the ancestor directories of the
-/// targets, so it reads a small number of directories. A gitignore rule that
-/// ignores files but not their directory (for example `*.ts`) does not stop
-/// the walk, so such a target stays a workspace.
-fn link_targets_reached_by_source_walk(
-    canonical_root: &Path,
-    targets: &[PathBuf],
-) -> rustc_hash::FxHashSet<PathBuf> {
-    let mut reached = rustc_hash::FxHashSet::default();
-    if targets.is_empty() {
-        return reached;
-    }
-    let mut on_path: rustc_hash::FxHashSet<PathBuf> = rustc_hash::FxHashSet::default();
-    for target in targets {
-        for ancestor in target.ancestors() {
-            if ancestor == canonical_root || !on_path.insert(ancestor.to_path_buf()) {
-                break;
-            }
-        }
-    }
-    let max_depth = targets
-        .iter()
-        .filter_map(|target| target.strip_prefix(canonical_root).ok())
-        .map(|relative| relative.components().count())
-        .max();
-    let mut builder = crate::source_walk_builder(canonical_root);
-    builder
-        .max_depth(max_depth)
-        .filter_entry(move |entry| entry.depth() == 0 || on_path.contains(entry.path()));
-    let targets: rustc_hash::FxHashSet<&Path> = targets.iter().map(PathBuf::as_path).collect();
-    for entry in builder.build().flatten() {
-        if targets.contains(entry.path()) {
-            reached.insert(entry.into_path());
-        }
-    }
-    reached
 }
 
 /// Express a canonical link target under the caller's `root` spelling.

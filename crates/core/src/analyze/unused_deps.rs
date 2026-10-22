@@ -1200,7 +1200,7 @@ pub fn find_unused_dependencies(
 
     let inputs = scan.workspace_inputs(config, &root_flagged);
     append_workspace_unused_dependencies(
-        workspaces,
+        &fallow_config::source_walked_workspaces(&config.root, workspaces),
         &inputs,
         &mut unused_deps,
         &mut unused_dev_deps,
