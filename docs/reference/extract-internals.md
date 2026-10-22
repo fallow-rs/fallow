@@ -43,7 +43,7 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     Brackets in strings, comments and template text do not count, and a
     literal that does not end on its line is scanned again as code.
   - It then runs the parse on a stack of
-    `256 KiB + 1024 * source length + 4096 * bracket depth`, with a 1 GiB cap
+    `256 KiB + 1024 * source length + 4096 * bracket depth`, with a 4 GiB cap
     (`crates/extract/src/stack.rs`). Each nesting level uses at least one
     source byte. A shape without brackets (generics, JSX elements,
     `class extends`, ternaries, arrows, assignment, member and call chains)

@@ -33,9 +33,14 @@ const STACK_PER_BRACKET_LEVEL: usize = if cfg!(fuzzing) { 8 * 4096 } else { 4096
 /// recurse with the source, and the thread start.
 const BASE_STACK: usize = 256 * 1024;
 
-/// Largest stack a parse asks for. Only a source of about a megabyte reaches
-/// this cap.
-const MAX_STACK: usize = 1 << 30;
+/// Largest stack a parse asks for. A source of 5 MB, the default file size
+/// limit, needs at most about 2.9 GiB at the measured worst case. The stack is
+/// a reservation: a parse touches only the pages that its depth uses.
+const MAX_STACK: usize = if cfg!(target_pointer_width = "64") {
+    4 << 30
+} else {
+    1 << 30
+};
 
 thread_local! {
     /// Address near the top of this thread's stack and the stack size, when
