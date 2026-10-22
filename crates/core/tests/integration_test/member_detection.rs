@@ -76,7 +76,9 @@ fn parameter_and_assignment_destructures_credit_class_members() {
 
 /// A nested binding that provably holds no class instance shadows the module
 /// instance of the same name. A read through the shadow gives no credit to the
-/// class. A class instance that is declared in the nested scope keeps its credit.
+/// class. A class instance that is declared in the nested scope keeps its
+/// credit, and so does a parameter typed by a type literal, because a class
+/// instance satisfies that type.
 #[test]
 fn nested_non_instance_shadow_gives_no_class_member_credit() {
     let config = create_config(fixture_path("shadowed-class-binding-members"));
@@ -95,15 +97,16 @@ fn nested_non_instance_shadow_gives_no_class_member_credit() {
     assert_eq!(
         unused,
         [
-            ("Service", "shadowArrowParam"),
+            ("Service", "shadowBeforeVar"),
             ("Service", "shadowBlock"),
             ("Service", "shadowComputed"),
             ("Service", "shadowDestructure"),
             ("Service", "shadowInner"),
             ("Service", "shadowLocal"),
-            ("Service", "shadowParam"),
-            ("Service", "shadowParamDestructure"),
-            ("Service", "shadowTypeof")
+            ("Service", "shadowTypeof"),
+            ("Service", "toFixed"),
+            ("Service", "toLowerCase"),
+            ("Service", "toUpperCase")
         ]
     );
 }

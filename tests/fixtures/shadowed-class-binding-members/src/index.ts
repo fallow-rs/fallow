@@ -27,13 +27,11 @@ export function sibling(): void {
   service.keptSibling();
 }
 
-export function paramShadow(service: { shadowParam(): void }): void {
-  service.shadowParam();
+export function paramShadow(service: string): string {
+  return service.toUpperCase();
 }
 
-export const arrowParamShadow = (service: { shadowArrowParam(): void }): void => {
-  service.shadowArrowParam();
-};
+export const arrowParamShadow = (service: number): string => service.toFixed();
 
 export function destructureShadow(): void {
   const service = { shadowDestructure(): void {} };
@@ -41,9 +39,42 @@ export function destructureShadow(): void {
   shadowDestructure();
 }
 
-export function paramDestructureShadow(service: { shadowParamDestructure(): void }): void {
-  const { shadowParamDestructure } = service;
-  shadowParamDestructure();
+export function paramDestructureShadow(service: string): string {
+  const { toLowerCase } = service;
+  return toLowerCase.call(service);
+}
+
+// A type literal gives no proof: a `Service` instance satisfies it.
+export function structuralParam(service: { keptStructural(): void }): void {
+  service.keptStructural();
+}
+structuralParam(new Service());
+
+export function structuralParamDestructure(service: { keptStructuralDestructure(): void }): void {
+  const { keptStructuralDestructure } = service;
+  keptStructuralDestructure();
+}
+structuralParamDestructure(new Service());
+
+// `var` hoists, so the read before the declaration uses the local binding.
+export function readBeforeVar(): void {
+  service.shadowBeforeVar();
+  var service = { other: 1 };
+  void service;
+}
+
+export function closureThenSiblingShadow(): () => void {
+  const read = (): void => service.keptClosure();
+  {
+    const service = { other: 1 };
+    void service;
+  }
+  return read;
+}
+
+export function annotatedInstance(): void {
+  const service: Service = new Service();
+  service.keptAnnotated();
 }
 
 export function blockShadow(flag: boolean): void {

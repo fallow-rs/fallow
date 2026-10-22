@@ -5,13 +5,18 @@ export class Service {
   keptNested(): void {}
   keptNestedDestructure(): void {}
   keptOuter(): void {}
+  keptStructural(): void {}
+  keptStructuralDestructure(): void {}
+  keptClosure(): void {}
+  keptAnnotated(): void {}
   shadowLocal(): void {}
-  shadowParam(): void {}
-  shadowArrowParam(): void {}
+  shadowBeforeVar(): void {}
+  toUpperCase(): void {}
+  toFixed(): void {}
   shadowDestructure(): void {}
   shadowBlock(): void {}
   shadowComputed(): void {}
   shadowInner(): void {}
-  shadowParamDestructure(): void {}
+  toLowerCase(): void {}
   shadowTypeof(): void {}
 }

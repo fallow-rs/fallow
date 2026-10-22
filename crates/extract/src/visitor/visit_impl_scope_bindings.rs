@@ -84,9 +84,9 @@ fn expression_holds_no_instance(expr: &Expression<'_>) -> bool {
 }
 
 /// Whether a binding annotated with `ty` provably holds no class instance: a
-/// primitive, a literal or function type, or an array, union or type literal
-/// built only from such types. A named type can be a class, so it gives no
-/// proof.
+/// primitive, a literal or function type, or an array or union built only from
+/// such types. TypeScript types are structural, so a class instance satisfies
+/// a named type or a type literal with matching members. Neither gives proof.
 fn type_holds_no_instance(ty: &TSType<'_>) -> bool {
     match ty {
         TSType::TSStringKeyword(_)
@@ -104,14 +104,6 @@ fn type_holds_no_instance(ty: &TSType<'_>) -> bool {
         TSType::TSParenthesizedType(paren) => type_holds_no_instance(&paren.type_annotation),
         TSType::TSArrayType(array) => type_holds_no_instance(&array.element_type),
         TSType::TSUnionType(union) => union.types.iter().all(type_holds_no_instance),
-        TSType::TSTypeLiteral(literal) => literal.members.iter().all(|member| match member {
-            TSSignature::TSMethodSignature(_) => true,
-            TSSignature::TSPropertySignature(property) => property
-                .type_annotation
-                .as_deref()
-                .is_some_and(|annotation| type_holds_no_instance(&annotation.type_annotation)),
-            _ => false,
-        }),
         _ => false,
     }
 }
