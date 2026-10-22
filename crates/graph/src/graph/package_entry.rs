@@ -144,7 +144,7 @@ mod tests {
     // Entry resolution probes many candidates for one package. Each miss must
     // reuse the canonical index of the first miss. A resolver that scans the
     // modules again on each miss resolves the real path of every module per
-    // probe, which cost seconds on a project with 38,000 modules.
+    // probe, which costs seconds on a large project.
     #[cfg_attr(miri, ignore)]
     #[test]
     fn resolver_builds_the_canonical_index_once_per_package() {
