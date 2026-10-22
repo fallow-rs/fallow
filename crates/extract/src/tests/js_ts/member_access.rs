@@ -238,16 +238,17 @@ fn jsx_namespace_member_tag_records_single_access_for_paired_tags() {
 }
 
 #[test]
-fn non_namespace_destructuring_not_captured() {
+fn non_namespace_destructuring_records_member_access() {
+    // `const { a } = obj` reads `obj.a`, so it records the same access as the
+    // member expression. An imported instance or a `this.field` source needs
+    // this access to credit its class members.
     let info =
         parse_source("import { foo } from './utils';\nconst obj = { a: 1 };\nconst { a } = obj;");
-    let has_obj_a = info
-        .member_accesses
-        .iter()
-        .any(|a| a.object == "obj" && a.member == "a");
     assert!(
-        !has_obj_a,
-        "Should not capture destructuring of non-namespace variables"
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "obj" && a.member == "a"),
+        "destructuring must record the same access as `obj.a`"
     );
 }
 

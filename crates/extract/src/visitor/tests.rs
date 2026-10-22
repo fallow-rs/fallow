@@ -10470,14 +10470,18 @@ fn dynamic_import_namespace_destructuring() {
 }
 
 #[test]
-fn non_namespace_destructuring_not_tracked() {
-    let info = parse("const obj = { a: 1 };\nconst { a } = obj;");
+fn this_field_destructuring_records_this_member_access() {
+    // `const { m } = this.svc` reads `this.svc.m`, so it records the same
+    // access as the member expression, with the `this.` spelling restored.
+    let info = parse(
+        "class Host {\n  constructor(private svc: Svc) {}\n  run() { const { m } = this.svc; m(); }\n}",
+    );
     assert!(
-        !info
-            .member_accesses
+        info.member_accesses
             .iter()
-            .any(|a| a.object == "obj" && a.member == "a"),
-        "destructuring of non-namespace vars should not produce member accesses"
+            .any(|a| a.object == "this.svc" && a.member == "m"),
+        "got {:?}",
+        info.member_accesses
     );
 }
 

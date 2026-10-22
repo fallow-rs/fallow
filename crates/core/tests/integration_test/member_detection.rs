@@ -74,6 +74,33 @@ fn parameter_and_assignment_destructures_credit_class_members() {
     );
 }
 
+/// A destructure of an imported instance or of a `this.field` reads the same
+/// members as `shared.m` and `this.svc.m`. Declarations, assignments, parameter
+/// defaults and `typeof` annotations all get that credit. A dynamic key in a
+/// namespace destructure can select any export, so every export stays used.
+#[test]
+fn imported_instance_and_this_field_destructures_credit_class_members() {
+    let config = create_config(fixture_path("instance-path-destructured-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(unused, [("Svc", "dead")]);
+    let unused_exports: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|item| item.export.export_name.as_str())
+        .collect();
+    assert!(unused_exports.is_empty(), "{unused_exports:?}");
+}
+
 /// A nested binding that provably holds no class instance shadows the module
 /// instance of the same name. A read through the shadow gives no credit to the
 /// class. A class instance that is declared in the nested scope keeps its

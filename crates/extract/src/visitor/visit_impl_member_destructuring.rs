@@ -27,7 +27,7 @@ impl<'a> ModuleInfoExtractor {
         // the destructuring site instead. This is the object-pattern parity
         // of the existing `instance.member` path (see #2560).
         if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
-            self.record_object_destructure(DestructureObject::Binding(pattern), init, true);
+            self.record_object_destructure(DestructureObject::Binding(pattern), init);
         }
     }
 
@@ -38,47 +38,61 @@ impl<'a> ModuleInfoExtractor {
         expr: &AssignmentExpression<'a>,
     ) {
         if let AssignmentTarget::ObjectAssignmentTarget(target) = &expr.left {
-            self.record_object_destructure(
-                DestructureObject::Assignment(target),
-                &expr.right,
-                true,
-            );
+            self.record_object_destructure(DestructureObject::Assignment(target), &expr.right);
         }
     }
 
     /// Credit the members that `pattern` reads from `source`. A nested pattern
     /// follows the source into an object literal property, a static member
     /// path (`{ k: { m } } = holder` reads `holder.k.m`) and a default value
-    /// (`{ k: { m } = instance }` can read `instance.m`). The top-level keys
-    /// of a source that is not a class instance stay without credit.
+    /// (`{ k: { m } = instance }` can read `instance.m`).
     fn record_object_destructure(
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         source: &Expression<'a>,
-        top_level: bool,
     ) {
         let source = unwrap_static_expr(source);
         if let Expression::ObjectExpression(object) = source {
-            self.record_literal_destructure(pattern, object, top_level);
+            self.record_literal_destructure(pattern, object);
             return;
         }
+        let Some(path) = static_member_object_name(source) else {
+            self.record_nested_entries(&pattern.entries(), None);
+            return;
+        };
+        let ident = match source {
+            Expression::Identifier(ident) => Some(&**ident),
+            _ => None,
+        };
+        self.record_source_path_destructure(pattern, &path, ident);
+    }
+
+    /// `const { m } = holder` reads `holder.m`. A local class instance credits
+    /// its class directly. Any other static path, such as an imported instance
+    /// or `this.svc`, records the same `path.key` accesses as the equivalent
+    /// member expression, so the later binding resolution finds the class.
+    fn record_source_path_destructure(
+        &mut self,
+        pattern: DestructureObject<'_, 'a>,
+        path: &str,
+        source: Option<&IdentifierReference<'_>>,
+    ) {
         let entries = pattern.entries();
-        if let Expression::Identifier(ident) = source
-            && let Some(BindingTarget::Class(class_name)) =
-                self.resolve_bound_object_name(ident.name.as_str())
-        {
+        if let Some(BindingTarget::Class(class_name)) = self.resolve_bound_object_name(path) {
             let keys: Vec<_> = entries.iter().map(|entry| entry.key.clone()).collect();
-            self.credit_destructured_class_members(
-                &class_name,
-                Some(ident),
-                &keys,
-                pattern.has_rest(),
-            );
-        } else if !top_level && let Some(path) = static_member_object_name(source) {
-            self.record_path_destructure(pattern, &path);
+            self.credit_destructured_class_members(&class_name, source, &keys, pattern.has_rest());
+            self.record_nested_entries(&entries, Some(path));
             return;
         }
-        self.record_nested_entries(&entries, static_member_object_name(source).as_deref());
+        if pattern.has_rest() || entries.iter().any(|entry| entry.key.is_none()) {
+            // Rest copies unknown members, and a dynamic key can select any
+            // member, the same as an opaque use of the source. The opaque use
+            // covers each key, so only the nested patterns need a record.
+            self.record_whole_object_identifier_use(path);
+            self.record_nested_entries(&entries, Some(path));
+            return;
+        }
+        self.record_path_destructure(pattern, path);
     }
 
     /// Credit the nested patterns of `entries`. Each one reads its default and,
@@ -89,7 +103,7 @@ impl<'a> ModuleInfoExtractor {
                 continue;
             };
             if let Some(default) = entry.default {
-                self.record_object_destructure(nested, default, false);
+                self.record_object_destructure(nested, default);
             }
             if let (Some(path), Some(key)) = (path, entry.key.as_deref()) {
                 self.record_path_destructure(nested, &format!("{path}.{key}"));
@@ -105,11 +119,10 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         object: &ObjectExpression<'a>,
-        top_level: bool,
     ) {
         for property in &object.properties {
             if let ObjectPropertyKind::SpreadProperty(spread) = property {
-                self.record_object_destructure(pattern, &spread.argument, top_level);
+                self.record_object_destructure(pattern, &spread.argument);
             }
         }
         for entry in pattern.entries() {
@@ -117,14 +130,14 @@ impl<'a> ModuleInfoExtractor {
                 continue;
             };
             if let Some(default) = entry.default {
-                self.record_object_destructure(nested, default, false);
+                self.record_object_destructure(nested, default);
             }
             if let Some(value) = entry
                 .key
                 .as_deref()
                 .and_then(|key| object_literal_property_value(object, key))
             {
-                self.record_object_destructure(nested, value, false);
+                self.record_object_destructure(nested, value);
             }
         }
     }
@@ -135,7 +148,7 @@ impl<'a> ModuleInfoExtractor {
     fn record_path_destructure(&mut self, pattern: DestructureObject<'_, 'a>, path: &str) {
         for entry in pattern.entries() {
             if let (Some(nested), Some(default)) = (entry.nested, entry.default) {
-                self.record_object_destructure(nested, default, false);
+                self.record_object_destructure(nested, default);
             }
             let Some(key) = entry.key.as_deref() else {
                 continue;
@@ -169,11 +182,7 @@ impl<'a> ModuleInfoExtractor {
                 self.record_typed_member_destructuring(pattern, &type_annotation.type_annotation);
             }
             if let Some(initializer) = param.initializer.as_deref() {
-                self.record_object_destructure(
-                    DestructureObject::Binding(pattern),
-                    initializer,
-                    true,
-                );
+                self.record_object_destructure(DestructureObject::Binding(pattern), initializer);
             }
         }
     }
@@ -212,7 +221,7 @@ impl<'a> ModuleInfoExtractor {
             if let ArrayExpressionElement::SpreadElement(spread) = element {
                 self.record_iterable_element_destructure(pattern, &spread.argument);
             } else if let Some(element) = element.as_expression() {
-                self.record_object_destructure(pattern, element, true);
+                self.record_object_destructure(pattern, element);
             }
         }
     }
@@ -241,13 +250,7 @@ impl<'a> ModuleInfoExtractor {
     /// `({ k: { m } }: typeof holder)` destructures the type of the value
     /// `holder`, so it reads the same members as `const { k: { m } } = holder`.
     fn record_typeof_destructure(&mut self, pattern: &ObjectPattern<'a>, path: &str) {
-        let pattern = DestructureObject::Binding(pattern);
-        let entries = pattern.entries();
-        if let Some(BindingTarget::Class(class_name)) = self.resolve_bound_object_name(path) {
-            let keys: Vec<_> = entries.iter().map(|entry| entry.key.clone()).collect();
-            self.credit_destructured_class_members(&class_name, None, &keys, pattern.has_rest());
-        }
-        self.record_nested_entries(&entries, Some(path));
+        self.record_source_path_destructure(DestructureObject::Binding(pattern), path, None);
     }
 
     /// `({ member }: Service) => ...` reads `Service.member`. The annotation is
