@@ -506,9 +506,10 @@ independent truth remain `indeterminate` and are excluded from adjudicated
 accuracy metrics.
 
 The confirmation yield excludes candidates that the sidecar does not resolve
-because of `blocking-diagnostics`. These candidates come from fixture
-configuration that the pinned TypeScript backend rejects, so they measure
-configuration compatibility, not semantic ability. The
+because of `blocking-diagnostics`. The corpus does not install fixture
+dependencies, so a project that imports a package or type definition outside
+the Fallow workspace cannot type-check. These candidates measure the fixture
+environment, not semantic ability. The
 `maximum_blocking_diagnostics_share` gate bounds their share of all candidates,
 so a fixture that the sidecar cannot load stays visible.
 

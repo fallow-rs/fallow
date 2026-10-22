@@ -62,8 +62,9 @@ export const typeAwareResolutionCounts = (projects) =>
   );
 
 /**
- * Candidates in a program with blocking diagnostics measure fixture configuration, not semantic
- * ability. The yield excludes them, and the `blocking_diagnostics_share` gate bounds their share.
+ * Candidates in a program with blocking diagnostics measure the fixture environment (for example
+ * dependencies that the corpus does not install), not semantic ability. The yield excludes them,
+ * and the `blocking_diagnostics_share` gate bounds their share.
  */
 export const confirmationYieldMetrics = ({
   correctConfirmedCount,
