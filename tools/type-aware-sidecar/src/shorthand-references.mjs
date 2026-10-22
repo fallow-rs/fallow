@@ -115,7 +115,11 @@ const propertyNameText = (name) =>
 // patterns give undefined, and the caller records an uncertainty for them.
 const assignmentPatternType = (project, literal) => {
   const parent = literal.parent;
-  if (isBinaryExpression(parent)) return project.checker.getTypeAtLocation(parent.right);
+  if (isBinaryExpression(parent)) {
+    // A binary that is itself a pattern target is a default value, and the
+    // pattern also reads the outer source.
+    return isAssignmentTarget(parent) ? undefined : project.checker.getTypeAtLocation(parent.right);
+  }
   if (!isPropertyAssignment(parent) || !isObjectLiteralExpression(parent.parent)) return undefined;
   const outer = assignmentPatternType(project, parent.parent);
   const name = propertyNameText(parent.name);
@@ -138,6 +142,10 @@ const assignmentPropertySymbol = (project, node) => {
   return type ? project.checker.getPropertyOfType(type, node.text) : undefined;
 };
 
+const isPropertyName = (node) =>
+  (isShorthandPropertyAssignment(node.parent) || isPropertyAssignment(node.parent)) &&
+  node.parent.name === node;
+
 const shorthandPropertySymbols = (project, node, names, unresolved) => {
   if (isAssignmentTarget(node.parent.parent)) {
     if (!names.candidates.has(node.text)) return [];
@@ -145,6 +153,7 @@ const shorthandPropertySymbols = (project, node, names, unresolved) => {
     if (!property) unresolved.push(node);
     return property ? [property] : [];
   }
+  if (!isShorthandPropertyName(node)) return [];
   if (!names.readsExports || !names.imports.has(node.text)) return [];
   const value = project.checker.getShorthandAssignmentValueSymbol(node.parent);
   return value ? [value] : [];
@@ -153,8 +162,8 @@ const shorthandPropertySymbols = (project, node, names, unresolved) => {
 /**
  * Returns the symbols that each name in `nodes` reads. `symbols` holds the
  * checker symbol of each name. A shorthand binding element also reads a
- * property of the destructured type. A shorthand property in an assignment
- * pattern does the same. A shorthand property in an object literal also reads
+ * property of the destructured type. A shorthand or renamed property in an
+ * assignment pattern does the same. A shorthand property in an object literal also reads
  * the binding it names, which can be an import.
  *
  * The candidate names of `state` limit the property lookups, and its export
@@ -169,7 +178,7 @@ export const shorthandReferenceSymbols = (project, nodes, symbols, state) => {
     nodes.filter((node) => isShorthandBindingName(node) && state.candidateNames.has(node.text)),
     symbolsByNode,
   );
-  const shorthandProperties = nodes.filter(isShorthandPropertyName);
+  const shorthandProperties = nodes.filter(isPropertyName);
   const readsExports = state.exportedNames.size > 0;
   const names = {
     candidates: state.candidateNames,
