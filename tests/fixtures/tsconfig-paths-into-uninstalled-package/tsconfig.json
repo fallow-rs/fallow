@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "paths": {
+      "@components/*": ["./node_modules/@acme/theme/src/components/*"],
+      "@kit/*": ["./node_modules/@acme/kit/src/*"]
+    }
+  },
+  "include": ["src"]
+}

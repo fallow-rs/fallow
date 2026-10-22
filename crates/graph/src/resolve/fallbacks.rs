@@ -654,8 +654,8 @@ pub(super) fn installed_workspace_package_target(
     specifier: &str,
     resolved_file: &Path,
 ) -> Option<String> {
-    let package_name = super::specifier::package_usage_name_for_external_bare_specifier(specifier)?;
-    let workspace_root = *ctx.workspace_roots.get(package_name.as_str())?;
+    let name = super::package_credit::package_usage_name_for_external_bare_specifier(specifier)?;
+    let workspace_root = *ctx.workspace_roots.get(name.as_str())?;
     let resolved = ctx
         .canonicalize_cache
         .get(resolved_file)
@@ -665,9 +665,9 @@ pub(super) fn installed_workspace_package_target(
     }
     let installed = from_file.ancestors().skip(1).find_map(|dir| {
         ctx.canonicalize_cache
-            .get(&dir.join("node_modules").join(&package_name))
+            .get(&dir.join("node_modules").join(&name))
     })?;
-    (installed == workspace_root).then_some(package_name)
+    (installed == workspace_root).then_some(name)
 }
 
 /// Resolve a relative import into a TypeScript output directory to its source.

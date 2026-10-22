@@ -28,6 +28,8 @@ node_modules/
 !tests/fixtures/script-runtime-peer-classification/packages/dev/node_modules/
 !tests/fixtures/script-runtime-peer-classification/packages/tests/node_modules/
 !tests/fixtures/script-runtime-peer-classification/packages/build/node_modules/
+!tests/fixtures/tsconfig-paths-into-node-modules/node_modules/
+!tests/fixtures/tsconfig-paths-into-uninstalled-package/node_modules/
 .DS_Store
 # macOS Spotlight index control markers (written into build output dirs)
 .metadata_never_index

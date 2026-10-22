@@ -840,6 +840,13 @@ specifier resolves back to workspace source. Package `imports` aliases are
 owned by the nearest package manifest; do not turn unmatched hash specifiers
 into global aliases. Per-file tsconfig failure may degrade to ordinary relative
 or package resolution, with diagnostics, without inventing missing path aliases.
+A bare specifier that a `paths` pattern of the nearest tsconfig matches is an
+alias, also when its scope is lowercase or a real package has the same name.
+When it resolves into `node_modules`, the package of the resolved file gets the
+dependency credit (`package_credit.rs`). A target that is a declaration file
+keeps the credit on the specifier, because that mapping is for types only.
+Without an install, an alias target in a package directory that does not exist
+credits that package.
 Web-root-relative asset resolution must preserve the importer/workspace context
 before considering the analysis root. A workspace package subpath that names a
 non-source file on disk, such as `<pkg>/package.json`, credits the package

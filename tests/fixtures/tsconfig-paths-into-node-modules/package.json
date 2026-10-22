@@ -1,0 +1,13 @@
+{
+  "name": "tsconfig-paths-into-node-modules",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@acme/theme": "1.0.0",
+    "@types/react": "^19.0.0"
+  }
+}

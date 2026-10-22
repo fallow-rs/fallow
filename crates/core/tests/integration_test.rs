@@ -205,6 +205,8 @@ mod ssr_load_module;
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
+#[path = "integration_test/tsconfig_paths_into_node_modules.rs"]
+mod tsconfig_paths_into_node_modules;
 #[path = "integration_test/tsdown_root_workspace_globs.rs"]
 mod tsdown_root_workspace_globs;
 #[path = "integration_test/type_test_entries.rs"]

@@ -22,6 +22,7 @@ pub(crate) mod inline_loaders;
 mod jsx_runtime;
 mod memo;
 mod output_entry;
+mod package_credit;
 mod path_info;
 mod re_exports;
 mod react_native;

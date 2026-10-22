@@ -1,0 +1,10 @@
+{
+  "name": "tsconfig-paths-into-uninstalled-package",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@acme/kit": "1.0.0",
+    "@acme/theme": "1.0.0"
+  }
+}

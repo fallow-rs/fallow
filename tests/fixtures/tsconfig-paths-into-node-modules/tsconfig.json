@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "paths": {
+      "@components/*": ["./node_modules/@acme/theme/src/components/*"],
+      "@assets/*": ["./node_modules/@acme/theme/src/assets/*"],
+      "react": ["./node_modules/@types/react"]
+    }
+  },
+  "include": ["src"]
+}

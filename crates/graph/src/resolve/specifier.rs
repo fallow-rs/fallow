@@ -10,15 +10,18 @@ use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
 use super::fallbacks::{
-    extract_package_name_from_node_modules_path, installed_workspace_package_target,
-    lookup_internal_file_id, nearest_package_manifest, normalize_path_lexically,
-    package_imports_workspace_target, try_css_extension_fallback, try_package_imports_fallback,
-    try_path_alias_fallback, try_pnpm_workspace_fallback,
+    installed_workspace_package_target, lookup_internal_file_id, nearest_package_manifest,
+    normalize_path_lexically, package_imports_workspace_target, try_css_extension_fallback,
+    try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
     try_relative_package_root_source_fallback, try_relative_tsconfig_output_fallback,
     try_scss_include_path_fallback, try_scss_node_modules_fallback, try_scss_partial_fallback,
     try_source_fallback, try_workspace_package_fallback,
 };
 use super::inline_loaders::InlineLoaderRequest;
+use super::package_credit::{
+    package_usage_name_for_external_bare_specifier, package_usage_name_for_import,
+    uninstalled_tsconfig_alias_target_package,
+};
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
     normalize_npm_specifier,
@@ -427,7 +430,7 @@ fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
     }
 }
 
-fn local_tsconfig_chain(ctx: &ResolveContext<'_>, from_file: &Path) -> Arc<[PathBuf]> {
+pub(super) fn local_tsconfig_chain(ctx: &ResolveContext<'_>, from_file: &Path) -> Arc<[PathBuf]> {
     if let Some(chain) = ctx.tsconfig_cache.chain(from_file) {
         return chain;
     }
@@ -818,7 +821,10 @@ fn read_tsconfig_json(path: &Path) -> Option<Value> {
     read_json_file(path)
 }
 
-fn read_tsconfig_json_cached(ctx: &ResolveContext<'_>, path: &Path) -> Option<Arc<Value>> {
+pub(super) fn read_tsconfig_json_cached(
+    ctx: &ResolveContext<'_>,
+    path: &Path,
+) -> Option<Arc<Value>> {
     ctx.tsconfig_cache.json(path, read_tsconfig_json)
 }
 
@@ -842,7 +848,7 @@ fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {
     path_alias_capture(pattern, specifier).is_some()
 }
 
-fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> {
+pub(super) fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> {
     match pattern.split_once('*') {
         Some((prefix, suffix)) if !prefix.is_empty() || !suffix.is_empty() => {
             if specifier.starts_with(prefix)
@@ -865,12 +871,14 @@ fn matches_nearest_tsconfig_path_alias(
     specifier: &str,
 ) -> bool {
     for tsconfig_path in local_tsconfig_chain(ctx, from_file).iter() {
-        let Some(paths) = read_tsconfig_json_cached(ctx, tsconfig_path).and_then(|json| {
-            json.get("compilerOptions")
-                .and_then(|compiler_options| compiler_options.get("paths"))
-                .and_then(Value::as_object)
-                .cloned()
-        }) else {
+        let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
+            continue;
+        };
+        let Some(paths) = json
+            .get("compilerOptions")
+            .and_then(|compiler_options| compiler_options.get("paths"))
+            .and_then(Value::as_object)
+        else {
             continue;
         };
         return paths
@@ -937,21 +945,7 @@ fn try_tsconfig_paths_from_config(
 ) -> Option<ResolveResult> {
     let compiler_options = json.get("compilerOptions")?;
     let paths = compiler_options.get("paths")?.as_object()?;
-    let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
-    let base_dir = compiler_options
-        .get("baseUrl")
-        .and_then(Value::as_str)
-        .map_or_else(
-            || tsconfig_dir.to_path_buf(),
-            |base_url| {
-                let base_url = Path::new(base_url);
-                if base_url.is_absolute() {
-                    base_url.to_path_buf()
-                } else {
-                    tsconfig_dir.join(base_url)
-                }
-            },
-        );
+    let base_dir = tsconfig_paths_base_dir(ctx, tsconfig_path, compiler_options);
 
     let mut matches: Vec<_> = paths
         .iter()
@@ -986,7 +980,24 @@ fn try_tsconfig_paths_from_config(
     None
 }
 
-fn path_alias_specificity(pattern: &str) -> usize {
+/// Directory that `paths` targets of `tsconfig_path` resolve against: `baseUrl`
+/// when set, else the tsconfig directory.
+pub(super) fn tsconfig_paths_base_dir(
+    ctx: &ResolveContext<'_>,
+    tsconfig_path: &Path,
+    compiler_options: &Value,
+) -> PathBuf {
+    let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
+    compiler_options
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .map_or_else(
+            || tsconfig_dir.to_path_buf(),
+            |base_url| tsconfig_dir.join(base_url),
+        )
+}
+
+pub(super) fn path_alias_specificity(pattern: &str) -> usize {
     match pattern.split_once('*') {
         Some((prefix, suffix)) => prefix.len() + suffix.len(),
         None => usize::MAX,
@@ -1407,7 +1418,7 @@ fn try_style_condition_package_resolution(
         return Some(ResolveResult::ExternalFile(resolved_path.to_path_buf()));
     }
 
-    if let Some(pkg_name) = package_usage_name_for_resolved_package(specifier, resolved_path)
+    if let Some(pkg_name) = package_usage_name_for_import(ctx, from_file, specifier, resolved_path)
         && !ctx.workspace_roots.contains_key(pkg_name.as_str())
     {
         return Some(ResolveResult::NpmPackage(pkg_name));
@@ -1419,7 +1430,7 @@ fn try_style_condition_package_resolution(
         ));
     }
 
-    package_usage_name_for_resolved_package(specifier, resolved_path)
+    package_usage_name_for_import(ctx, from_file, specifier, resolved_path)
         .map(ResolveResult::NpmPackage)
         .or_else(|| Some(ResolveResult::ExternalFile(resolved_path.to_path_buf())))
 }
@@ -1453,7 +1464,7 @@ fn resolve_style_canonical_path(
     if should_preserve_node_modules_style_file(specifier, from_file, &canonical, from_style) {
         return ResolveResult::ExternalFile(canonical);
     }
-    if let Some(pkg_name) = package_usage_name_for_resolved_package(specifier, &canonical)
+    if let Some(pkg_name) = package_usage_name_for_import(ctx, from_file, specifier, &canonical)
         && !ctx.workspace_roots.contains_key(pkg_name.as_str())
     {
         return ResolveResult::NpmPackage(pkg_name);
@@ -1492,45 +1503,6 @@ fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
         .is_some_and(|canonical_root| path.starts_with(canonical_root))
 }
 
-/// Package-usage key for an import that resolved into `node_modules`.
-///
-/// pnpm can install a package under a declared name (e.g. `unstorage`) symlinked
-/// to a `.pnpm` store whose inner package has a different "source" name (e.g.
-/// `unstorage-nightly`). For a plain bare specifier we credit the declared import
-/// name so `unused-dependency` / `unlisted-dependency` accounting matches what the
-/// user wrote in `package.json`, not the on-disk source package. Path aliases that
-/// happen to be bare (Node.js `#imports`, `~/`, `@/`, PascalCase scopes) are
-/// excluded: they can map to an external package whose real name is only recoverable
-/// from the resolved path, so they keep the resolved-package name. Returns `None`
-/// when the path is not inside a `node_modules` directory.
-pub(super) fn package_usage_name_for_resolved_package(
-    specifier: &str,
-    resolved_path: &Path,
-) -> Option<String> {
-    let resolved_package = extract_package_name_from_node_modules_path(resolved_path)?;
-    if is_bare_specifier(specifier) && !is_path_alias(specifier) {
-        Some(extract_package_name(specifier))
-    } else {
-        Some(resolved_package)
-    }
-}
-
-/// Package-usage key for a valid bare package specifier whose resolved file
-/// canonicalized outside the analyzed root before a `node_modules` segment could
-/// be observed. This preserves dependency accounting for pnpm workspace symlinks
-/// when users analyze a workspace package directly.
-pub(super) fn package_usage_name_for_external_bare_specifier(specifier: &str) -> Option<String> {
-    if !is_bare_specifier(specifier) || is_path_alias(specifier) {
-        return None;
-    }
-    if specifier.starts_with('@') && specifier.split('/').nth(1).is_none_or(str::is_empty) {
-        return None;
-    }
-
-    let package_name = extract_package_name(specifier);
-    is_valid_package_name(&package_name).then_some(package_name)
-}
-
 struct ResolvedPathContext<'ctx, 'resolve> {
     ctx: &'resolve ResolveContext<'ctx>,
     from_file: &'resolve Path,
@@ -1563,7 +1535,8 @@ impl ResolvedPathContext<'_, '_> {
         {
             return None;
         }
-        let pkg_name = package_usage_name_for_resolved_package(self.specifier, resolved_path)?;
+        let pkg_name =
+            package_usage_name_for_import(self.ctx, self.from_file, self.specifier, resolved_path)?;
         if self.ctx.workspace_roots.contains_key(pkg_name.as_str()) {
             return None;
         }
@@ -1607,7 +1580,9 @@ impl ResolvedPathContext<'_, '_> {
     }
 
     fn package_or_external_result(&self, path: &Path) -> Option<ResolveResult> {
-        if let Some(pkg_name) = package_usage_name_for_resolved_package(self.specifier, path) {
+        if let Some(pkg_name) =
+            package_usage_name_for_import(self.ctx, self.from_file, self.specifier, path)
+        {
             if self.ctx.workspace_roots.contains_key(pkg_name.as_str())
                 && let Some(result) = try_workspace_package_fallback(
                     self.ctx,
@@ -2046,6 +2021,12 @@ fn resolve_failed_specifier(
     if let Some(result) = try_failed_package_fallbacks(ctx, from_file, specifier) {
         return result;
     }
+    if matches_tsconfig_path_alias
+        && let Some(pkg_name) = uninstalled_tsconfig_alias_target_package(ctx, from_file, specifier)
+        && !ctx.workspace_roots.contains_key(pkg_name.as_str())
+    {
+        return ResolveResult::NpmPackage(pkg_name);
+    }
 
     if flags.is_alias || flags.matches_plugin_alias {
         return resolve_failed_alias_specifier(
@@ -2243,16 +2224,16 @@ mod tests {
     use crate::resolve::react_native;
     use crate::resolve::types::{CanonicalizeCache, ResolveContext, TsconfigCache};
 
+    use super::super::package_credit::package_usage_name_for_resolved_package;
     use super::{
         SpecifierNormalization, extension_alias_matches, glob_values_match, has_glob_meta,
         is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
         is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
         is_safe_static_dir_relative_path, is_style_file, is_tsconfig_error,
         matches_nearest_tsconfig_path_alias, normalize_resolve_specifier,
-        package_usage_name_for_external_bare_specifier, package_usage_name_for_resolved_package,
-        path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
-        resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
-        resolve_tsconfig_reference_path, serves_static_dir_mounts,
+        package_usage_name_for_external_bare_specifier, path_alias_capture,
+        path_alias_pattern_matches, path_alias_specificity, resolve_tsconfig_extends_candidate,
+        resolve_tsconfig_extends_path, resolve_tsconfig_reference_path, serves_static_dir_mounts,
         should_preserve_node_modules_style_file, specifier_matches_alias_prefix,
         static_dir_relative_path, static_mount_url_path, strip_url_suffix, tsconfig_extends_values,
         with_appended_extension, with_exact_extension,
@@ -2772,7 +2753,7 @@ mod tests {
     fn package_usage_name_bare_specifier_uses_import_name() {
         let specifier = "lodash";
         let resolved = Path::new("/project/node_modules/lodash/index.js");
-        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        let name = package_usage_name_for_resolved_package(specifier, resolved, |_| false);
         assert_eq!(name, Some("lodash".to_string()));
     }
 
@@ -2780,7 +2761,7 @@ mod tests {
     fn package_usage_name_scoped_bare_specifier_uses_import_name() {
         let specifier = "@babel/core";
         let resolved = Path::new("/project/node_modules/@babel/core/lib/index.js");
-        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        let name = package_usage_name_for_resolved_package(specifier, resolved, |_| false);
         assert_eq!(name, Some("@babel/core".to_string()));
     }
 
@@ -2788,7 +2769,7 @@ mod tests {
     fn package_usage_name_non_node_modules_path_returns_none() {
         let specifier = "./local";
         let resolved = Path::new("/project/src/local.ts");
-        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        let name = package_usage_name_for_resolved_package(specifier, resolved, |_| false);
         assert_eq!(name, None);
     }
 
@@ -3112,7 +3093,7 @@ mod tests {
     fn package_usage_name_path_alias_specifier_uses_resolved_package() {
         let specifier = "@/utils";
         let resolved = Path::new("/project/node_modules/some-pkg/utils/index.js");
-        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        let name = package_usage_name_for_resolved_package(specifier, resolved, |_| false);
         assert_eq!(name, Some("some-pkg".to_string()));
     }
 
