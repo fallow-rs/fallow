@@ -148,7 +148,6 @@ ignored = [
     "chrono",       # feature-only dep: unifies features with a workspace build
     "hashbrown",    # feature-only dep: unifies features with a workspace build
     "httparse",     # feature-only dep: unifies features with a workspace build
-    "syn",          # feature-only build dep: unifies features with a workspace build
     "miette",       # feature-only dep: activates fancy rendering for fallow-config's miette::Report
     "proc-macro2",  # feature-only dep: activates `span-locations` so syn-returned `.span().start().line` reports real source positions in the schema-drift gate (crates/cli/tests/integration/schema_tests.rs); no explicit import
 ]
