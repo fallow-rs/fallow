@@ -538,13 +538,13 @@
           "description": "Plugin detected if this package is in dependencies.",
           "type": "object",
           "properties": {
-            "package": {
-              "description": "Exact package name looked up in the project's declared dependencies.",
-              "type": "string"
-            },
             "type": {
               "type": "string",
               "const": "dependency"
+            },
+            "package": {
+              "description": "Exact package name looked up in the project's declared dependencies.",
+              "type": "string"
             }
           },
           "required": [
@@ -556,13 +556,13 @@
           "description": "Plugin detected if this file pattern matches.",
           "type": "object",
           "properties": {
-            "pattern": {
-              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).\nA single `*` stays within one path segment; use `**` to match across directories.",
-              "type": "string"
-            },
             "type": {
               "type": "string",
               "const": "fileExists"
+            },
+            "pattern": {
+              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).\nA single `*` stays within one path segment; use `**` to match across directories.",
+              "type": "string"
             }
           },
           "required": [
@@ -574,16 +574,16 @@
           "description": "All conditions must be true.",
           "type": "object",
           "properties": {
+            "type": {
+              "type": "string",
+              "const": "all"
+            },
             "conditions": {
               "description": "Sub-conditions combined with logical AND.",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/PluginDetection"
               }
-            },
-            "type": {
-              "type": "string",
-              "const": "all"
             }
           },
           "required": [
@@ -595,16 +595,16 @@
           "description": "Any condition must be true.",
           "type": "object",
           "properties": {
+            "type": {
+              "type": "string",
+              "const": "any"
+            },
             "conditions": {
               "description": "Sub-conditions combined with logical OR.",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/PluginDetection"
               }
-            },
-            "type": {
-              "type": "string",
-              "const": "any"
             }
           },
           "required": [
