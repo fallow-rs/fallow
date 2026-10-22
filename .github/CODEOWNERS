@@ -11,6 +11,9 @@
 /.codex/    @bartwaardenburg
 /.agents/   @bartwaardenburg
 /docs/  @bartwaardenburg
+# Generated from the Rust types by npm run generate:contracts, so a dependency
+# update that regenerates it needs no code-owner review.
+/docs/output-schema.json
 /.trigger-tree/  @bartwaardenburg
 /scripts/knowledge-surfaces.json  @bartwaardenburg
 /scripts/check-knowledge-architecture.mjs  @bartwaardenburg

@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-api"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-benchmarks"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "codspeed-criterion-compat",
  "fallow-api",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "base64",
  "bitcode",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "deser-value",
  "deser-yaml",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "codspeed-criterion-compat",
  "dunce",
@@ -1314,7 +1314,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-engine"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "bitcode",
  "codspeed-criterion-compat",
@@ -1356,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -1381,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "dashmap",
  "dunce",
@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-license"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1413,7 +1413,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "dunce",
  "fallow-api",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "fallow-api",
  "fallow-output",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-multicall"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "fallow-cli",
  "fallow-lsp",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mutation"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "insta",
  "oxc_allocator",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-node"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "fallow-api",
  "fallow-types",
@@ -1498,7 +1498,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-output"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-process"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "libc",
  "rustc-hash",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1535,7 +1535,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-v8-coverage"
-version = "3.34.1"
+version = "3.35.0"
 dependencies = [
  "proptest",
  "serde",
@@ -4021,9 +4021,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
+checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
 dependencies = [
  "chrono",
  "dyn-clone",
@@ -4035,9 +4035,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba"
+checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
 dependencies = [
  "proc-macro2",
  "quote",

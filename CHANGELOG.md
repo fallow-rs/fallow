@@ -7,6 +7,708 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.35.0] - 2026-10-21
+
+### Added
+
+- **Each release now publishes a CycloneDX SBOM for every target.** The files
+  are named `fallow-<target>.cdx.json`. `.vex/openvex.json` states why fallow
+  is not affected by each advisory that the repository ignores. `SECURITY.md`
+  now lists the supported versions and the code scanning policy.
+
+- **A human `fallow mutation` run now shows phase progress on stderr.** The
+  lines name the runner setup, the baseline run, the mutant runs with
+  done and total counts, the retries, and the final worktree check and
+  report. A long phase prints a line at a fixed interval, also in captured
+  non-TTY output, so a slow run does not look stalled. `--quiet` and
+  `--format json` print no progress lines, and stdout does not change. The
+  programmatic API has `run_mutation_with_progress` with the
+  `MutationProgress` events.
+  (Closes [#3599](https://github.com/fallow-rs/fallow/issues/3599))
+
+- **`fallow mutation --runner-config <path>` selects the Vitest config of
+  a run.** A project that keeps its integration, UI or browser tests in a
+  separate Vitest config can now run mutants against those tests. The
+  `mutation.runnerConfig` config key sets the same file, and the flag
+  wins. The file must exist inside the project root, and only the Vitest
+  runner accepts it. A static test file that the selected config does not
+  include stays visible as a `test-files-not-discovered` error. `--config`
+  still selects the Fallow config.
+  (Closes [#3598](https://github.com/fallow-rs/fallow/issues/3598))
+
+- **`fallow mutation --format json` keeps the history of a retried mutant.**
+  A retried mutant result has a new `attempts` array with the first run and
+  the retry. Each entry has the status and the duration of that run, and the
+  killing test, the failure kind (`assertion`, `error` or `timeout`) or the
+  runtime-error reason when the run has one. A `timeout -> survived` result
+  and a `survived -> killed` result are both `flaky`, and the saved report
+  now shows which history each one has. The `status`, `duration_ms` and
+  `retried` fields do not change.
+  (Closes [#3656](https://github.com/fallow-rs/fallow/issues/3656))
+
+- **`fallow audit` reports inherited complexity findings that got worse.** A
+  complexity finding that is in the base snapshot is now `worsened` when a
+  measured value is higher than at the base. The measured values are
+  cyclomatic, cognitive, CRAP (when both sides have a score) and the line
+  count of the function. The line count must grow by at least 5 lines. The
+  line count includes comments and blank lines. The minimum keeps a finding inherited after a short comment or a formatter
+  rewrap. A function that grows from 80 to 300 lines with the same complexity
+  values is now `worsened`, not inherited.
+
+  The JSON output adds these fields:
+
+  - `attribution` on each complexity finding: `introduced`, `worsened` or
+    `inherited`.
+  - `worsened_metrics` on each complexity finding with a grown value: the
+    metric, the base value and the head value.
+  - `attribution.worsened`: the active mode.
+  - `attribution.complexity_worsened`: the number of worsened findings.
+
+  The human, compact and markdown output add a "Worse than base" section.
+  SARIF puts the values in the result property bag. CodeClimate descriptions
+  name them. The GitHub summary marks each finding as `worsened`.
+
+  The `--worsened` flag and the `audit.worsened` config key select the effect:
+
+  - `warn` (default): a worsened finding makes the verdict at least `warn`.
+    The exit code stays 0.
+  - `error`: a worsened finding counts like an introduced finding.
+  - `off`: a finding is worsened only when a metric that it exceeds grew.
+    Growth only in other metrics stays `inherited`.
+
+  The GitHub Action takes a `worsened` input. The GitLab template takes
+  `FALLOW_AUDIT_WORSENED`. The MCP `audit` tool takes a `worsened` parameter.
+
+- **Mutation JSON now shows the edit of each mutant.** Each mutant in the
+  `mutation` report and the `mutation-plan` document has a `change` object,
+  for example `{"from": "??", "to": "&&"}`. The values come from a fixed
+  vocabulary of operator tokens, literals and placeholders such as
+  `<expression>` and `<string>`, so the report still holds no source text.
+  ([#3658](https://github.com/fallow-rs/fallow/issues/3658))
+
+- **`fallow mutation` now mutates fluent chains in module-level `const`
+  initializers.** The new `removed-chain-link` operator removes one call link
+  of a chain, so `z.number().int().positive()` gives a mutant without
+  `.int()` and a mutant without `.positive()`. A validation schema that has no
+  literal or operator now has mutants. The operator is on by default and
+  `--operators` and the `mutation.operators` config accept its name.
+  ([#3662](https://github.com/fallow-rs/fallow/issues/3662))
+
+- **The VS Code extension has a `fallow.audit.worsened` setting.** The
+  setting selects how an inherited complexity finding that got worse affects
+  the audit verdict in the editor. The values are `warn`, `error` and `off`,
+  the same as `fallow audit --worsened`. The default `auto` uses
+  `audit.worsened` from the project config. The extension sends the flag only
+  to a CLI that supports it. With an older CLI, the audit runs without the
+  flag and the output channel shows a note.
+
+- **External plugins can opt a config pattern out of the `default` export
+  credit.** List the pattern in `configDefaultExportOptOut` when the tool
+  reads named exports, or when the pattern also matches ordinary source
+  files.
+
+- **A dead-code baseline now records whether `node_modules` existed.** A
+  `--save-baseline` run writes `analysis_identity.node_modules` as `present`
+  or `missing`. A later run in the other install state adds a
+  `baseline-install-state-mismatch` entry to `workspace_diagnostics` and
+  prints a warning, also under `--quiet`. Findings that need installed
+  packages can differ between the two states, so the run can report baseline
+  findings as new. Save the baseline again once to get this check. A baseline
+  without the key loads as before.
+
+- **Fallow reads the entry files of a JavaScript GitHub Action.** When
+  `action.yml` or `action.yaml` sets `runs.using` to a `node` runtime, the
+  `runs.pre`, `runs.main` and `runs.post` files are entry points. A path in
+  `dist/` maps to its source file with the same rules as a `package.json`
+  `main` field. A composite or Docker action adds no entry points.
+
+- **Fallow now detects Egg.js and tegg projects.** The new `egg` plugin
+  activates on `egg`, `@eggjs/core` or `@eggjs/tegg`, or on an `egg`,
+  `eggPlugin` or `eggModule` key in `package.json`. It marks the files that
+  the Egg loader loads by convention as entry points: `app.js`, `agent.js`,
+  the router, controllers, services, middleware, extensions, schedules and
+  config files, also in nested example and test fixture apps. It marks every
+  file of a tegg module as an entry point. It credits the packages that
+  `config/plugin.*` names with `package`, the `egg.framework` package and the
+  default `egg` framework to the `package.json` that owns the app.
+
+- **Fallow now reads Vite+ projects.** A `vite-plus` dependency, or a root
+  `vite.config.*` that imports `vite-plus`, enables the new `vite-plus`
+  plugin. The `pack.entry` values are entry points, and the `lint.jsPlugins`,
+  `lint.overrides[].jsPlugins` and `lint.extends` packages are used. A
+  `vite.config.*` that lists `@e18e/eslint-plugin` in `lint.jsPlugins` no
+  longer reports it as an unused dev dependency. The `vite-plus` dependency
+  also enables the Vitest plugin, so the test and bench files are entry
+  points without a Vitest dependency.
+- **Vite+ commands credit their dependencies.** The `vp`, `vpr` and `vpx`
+  binaries credit `vite-plus`. `vp lint` and `vp fmt` file targets are not
+  entry points, `vp test -c <file>` reads the file as a Vitest config,
+  `vp exec <binary>` credits the binary, and `vp run <task>` calls the
+  script. The commands of the `staged` and `run.tasks` blocks and of the
+  `.vite-hooks/` scripts are read like `package.json` scripts and hooks.
+  A `vi.mock` call through `vite-plus/test` now counts as a Vitest mock.
+
+- **New workspace diagnostic `workspace-pattern-dir-missing`.** A positive
+  workspace pattern whose directory does not exist (for example `vite` and
+  `vite/packages/*` for a repository that CI clones into the workspace) now
+  gets a diagnostic with the pattern and the declaring file. The packages in
+  that directory can use catalog entries, so the run does not report
+  `unused-catalog-entries` while such a pattern exists. One such pattern turns
+  off this check for all catalogs, also when the directory does not exist yet
+  (for example `packages/*` in a template). The diagnostic is a stderr
+  warning with `degrades_analysis: true`. To get the check back, create the
+  directory before the run or remove the pattern. A directory that exists but
+  holds no package does not turn off the check. Unresolved catalog references
+  and empty catalog groups are still reported.
+- **New workspace diagnostic `nested-project-root`.** A directory with its own
+  `package.json` and `pnpm-workspace.yaml` that no root workspace pattern
+  declares is an independent pnpm project. Fallow now analyzes it as a
+  workspace and reports this information-only diagnostic.
+
+### Changed
+
+- **The `fallow` skill shows the review loop that fallow checks.** One short
+  example runs `fallow audit`, reads the walkthrough guide, writes a judgment,
+  and validates it with `--walkthrough-file`. It saves the guide and the
+  judgment in the temporary folder, because a new file in the project tree
+  makes the judgment stale.
+
+- **`fallow audit --gate new-only` no longer fails on a CRAP score from
+  estimated coverage alone.** Without a coverage map, Fallow estimates CRAP
+  from static test reachability. This estimate does not measure the change. A
+  complexity finding that exceeds only the CRAP threshold with estimated
+  coverage now has `effective_severity: warn`. It stays in the report, and the
+  verdict is at least `warn`, with exit code 0. SARIF reports it at level
+  `warning`.
+
+  A finding that also exceeds the cyclomatic or cognitive threshold still
+  gates. CRAP from measured coverage (`--coverage`, `health.coverage`,
+  `FALLOW_COVERAGE` or runtime coverage) still gates. `--gate all` does not
+  change.
+
+- **`fallow audit --gate new-only` reports growth of an already exceeded
+  complexity metric as `worsened`, not `introduced`.** A function that
+  exceeded a threshold on the base and grows a little in the PR no longer
+  fails the audit by default. With the default `audit.worsened: warn`, the
+  verdict is `warn` and the exit code is 0. The finding stays `introduced`
+  when the growth moves it to a higher severity tier (`moderate`, `high`,
+  `critical`), or when it now exceeds a metric that it did not exceed on the
+  base and that metric grew. The exceeded flags and the tier of the base
+  finding come from the base run, so a threshold override in the same PR does
+  not make an old finding introduced.
+
+  To keep the earlier gate, set `audit.worsened: "error"` or pass
+  `--worsened error`. With `audit.worsened: off`, growth of an exceeded metric
+  now gives a `warn` verdict as `worsened`, and the run does not fail. Growth
+  only in metrics that the finding does not exceed stays `inherited`, as
+  before. The JSON fields do not change. Cached base snapshots of earlier
+  versions are not reused.
+
+- **`fallow audit` no longer fails on a complexity finding in a test file.**
+  A long `it(...)` or `describe(...)` callback often exceeds the cognitive
+  threshold. Such a finding now has `effective_severity: warn` and the new
+  field `gate_exemption: "test-file"`. It stays in the report with its
+  attribution, and the verdict is at least `warn`, with exit code 0. This
+  applies to `--gate new-only` and `--gate all`. SARIF reports the finding at
+  level `warning` with `gate_exemption` in the property bag. The human,
+  markdown and compact views list these findings under "Test files, not
+  gated".
+
+  The shared test-path rule decides what a test file is: `*.test.*`,
+  `*.spec.*`, `*.e2e.*`, files below `__tests__/`, `test/`, `tests/` or `e2e/`,
+  mocks and fixtures. `fallow health` does not change: it still reports these
+  findings at the severity of their `complexity-*` rule.
+
+- **The GitHub Action requests the branded token only when it posts.** The
+  `Fallow branded token` step now runs only on a `pull_request` event with
+  `comment: true` or `review-comments: true`. Other runs do not request an
+  OIDC token. The `branded-token` input now defaults to `auto`. `auto` posts
+  as the Fallow app when the workflow grants `id-token: write`, and it falls
+  back to `github-token` without a log line when the permission is missing.
+  An explicit `branded-token: true` keeps one short fallback line. No line
+  asks the workflow for more permissions. `false` behaves as before.
+
+### Fixed
+
+- **A `<` in template text no longer hides a later component invocation in
+  the component contract scan.** Before this fix, the caller scan for Vue,
+  Svelte, Angular and Ember templates read each `<` as the start of a tag.
+  In `<p>{{ a < b }}<Button size="lg" /></p>`, the scan read
+  `< b }}<Button size="lg" />` as one tag, and the `Button` invocation was
+  lost. The scan now reads a `<` as a tag start only when a letter, `/`, `!`
+  or `?` follows it. It also skips text expressions as a unit: `{{ }}` in
+  Vue, Angular and Ember, and `{ }` in Svelte. A Handlebars comment, such as
+  `{{!-- don't --}}`, is skipped as plain text, so an apostrophe in it cannot
+  hide a later tag. The cache versions change, so a warm cache does not keep
+  the old result.
+
+- **A JSON or JSONC config file that ends with a `//` line comment and no
+  final newline is now read.** Before this fix, the comment hid the end of
+  the config, so the parse failed and fallow read nothing from the file.
+  This affected `.oxlintrc.jsonc` and the JSON configs of the ESLint,
+  Prettier, TypeScript, Jest and Babel plugins. For example, a
+  `tsconfig.json` with a final comment lost its `extends` package, and an
+  `.oxlintrc.jsonc` lost its `jsPlugins` packages, which were then reported
+  as unused dependencies.
+
+- **The `fallow-setup` skill now detects all Oxlint and Oxfmt config file
+  names.** The tooling detection table listed only `.oxlintrc.json` and
+  `.oxfmtrc.json`. An agent that followed the skill could miss an existing
+  linter or formatter and propose a second one. The table now also lists
+  `.oxlintrc.jsonc`, `oxlint.config.{ts,mts}`, `.oxfmtrc.jsonc` and
+  `oxfmt.config.*`.
+
+- **Glob expansion on disk works when the project path contains `[`, `*` or
+  `?`.** Plugin `fileExists` detection, `fallow plugin-check` entry seeds and
+  `package.json` or `pnpm-workspace.yaml` workspace globs put the project
+  root into the glob without an escape. Under a root such as
+  `~/work/app [1]`, these globs then matched nothing. A plugin did not
+  activate, and a workspace package was not found, so its files were
+  reported as unused. Tooling config detection
+  already escaped the root. All four now use one function that escapes the
+  root and keeps every match inside it.
+
+- **An older fallow no longer drops data from an Impact store that a newer
+  fallow wrote.** A project-local fallow could rewrite the shared store through
+  its own older model, and fields it did not know were lost. Every write path
+  now leaves such a store unchanged. `fallow impact enable`, `fallow impact
+  disable`, and `fallow init --decline` exit with code 2 and name the store
+  schema and the fallow version of the newest record. Audit and combined runs do not
+  record into it. Reads stay available.
+  (Closes [#3597](https://github.com/fallow-rs/fallow/issues/3597))
+
+- **A mutation run in which the runner does not list a static test file is
+  now `partial`.** The tests of such a file never run, but the run reported
+  `completion.status: "complete"`. An empty survivor list then looked
+  conclusive. The completion now has the new reason
+  `test-files-not-discovered`, the same name as the `errors` entry that
+  names the files. The exit code does not change.
+  (Closes [#3596](https://github.com/fallow-rs/fallow/issues/3596))
+
+- **`fallow mutation` no longer makes an equivalent mutant for a `case`
+  label whose body is the same as the `default` body.** The original label
+  and the empty-string or swapped-boolean label select the same body for
+  each input, so no test can kill the mutant. The rule applies only when all
+  labels are literals, both bodies end in an unconditional exit, and no other
+  label has the original or the mutated value.
+  (Closes [#3639](https://github.com/fallow-rs/fallow/issues/3639))
+
+- **`fallow mutation` no longer makes an equivalent `!=` mutant for the test
+  of a counted `for` loop.** For a `let` counter that starts at an integer
+  literal, moves one step to an integer literal bound, and has no other write,
+  `i < N` and `i != N` select the same iterations. No test can kill that
+  mutant. The `<=` and constant mutants of the test do not change.
+  (Closes [#3649](https://github.com/fallow-rs/fallow/issues/3649))
+
+- **`fallow mutation` no longer makes equivalent mutants for a zero
+  comparison on the length of a known array.** An array length is never
+  negative, so `items.length > 0` and `items.length != 0` give the same
+  result. No test can kill that mutant. The rule also covers `<= 0` (the
+  `==` swap), `< 0` (the constant `false`), `>= 0` (the constant `true`) and
+  the reversed forms. The receiver must be an array literal, or a name
+  that resolves to a `const` with an array value, a binding with an array
+  type, or a rest parameter. A global with the same name and an object with
+  a `length` property keep each mutant.
+  (Closes [#3651](https://github.com/fallow-rs/fallow/issues/3651))
+
+- **`fallow mutation` now runs the tests of static importers for a module
+  that a test also imports at run time.** When one test file imports a module
+  statically and another test loads it through a dynamic `import()`, a mutant
+  in module-level code ran only the dynamic test. The assertion of the static
+  importer never ran, and the mutant survived. The mutant is now a static
+  mutant and runs the tests of both files.
+  (Closes [#3652](https://github.com/fallow-rs/fallow/issues/3652))
+
+- **`fallow mutation` now instruments a file that a Vitest test loads with
+  a native `require`.** A test that loads a CommonJS file through
+  `createRequire(import.meta.url)` ran the original file. The report then
+  listed the file in `unloaded_paths` and gave each of its mutants
+  `no_coverage`. The Vitest setup file now serves the instrumented file to
+  such a load on Node 22.15 and later. On an older Node, the file stays in
+  `unloaded_paths`, and a static `import` is the workaround.
+  (Closes [#3653](https://github.com/fallow-rs/fallow/issues/3653))
+
+- **Warnings on a pipe or in a log file no longer carry color codes.** The
+  tracing warnings on stderr were colored for every writer. An agent or a CI
+  log then got escape codes such as `\x1b[33m` around each `WARN` line. Color
+  now stays on only for a terminal, and `NO_COLOR` turns it off.
+  `CLICOLOR_FORCE` turns it on, the same as for the report.
+- **The setup hint of a bare run names the current setup commands.** The hint
+  now names `fallow init` for a config and `fallow agent install --dry-run`
+  for the agent guide, skills, MCP server, and commit gate. The JSON `setup`
+  next step now has the same offer: its command is
+  `fallow agent install --dry-run`, not `fallow schema`.
+- **`fallow init` names the next step.** After it writes the config, `init`
+  tells you to run `fallow` for a first report. When the config root is not
+  the current directory, the command includes `--root`. `--quiet` drops this
+  line.
+- **`fallow agent install --dry-run` names the command that applies the plan.**
+  A dry run that plans writes puts `agent-install-apply` first in
+  `next_actions[]`, also in the human `Next:` list. The command repeats the
+  flags that change the plan, without `--dry-run`. A harness that detection
+  found is repeated as `--harness`, so a run in another shell writes the
+  same plan.
+- **The review focus no longer calls one importer "high fan-in".** The reason
+  now reads `fan-in (1 importer)`, the same form for every count.
+
+- **`fallow dead-code` no longer reports unlisted dependencies below a nested `package.json` without dependency fields.**
+  A nested manifest with only metadata, for example a tegg module with
+  `{ "name": "x", "eggModule": {} }`, now inherits the dependency
+  declarations of its ancestor manifests. Version 3.34.1 used such a manifest
+  as the only owner of the files below it. A manifest with an explicit empty
+  field, such as `"dependencies": {}`, stays the owner of its files.
+
+- **The `default` export of `postcss.config.*` is no longer reported as an
+  unused export under `includeEntryExports`.** PostCSS reads that export, as
+  Vite reads the default export of `vite.config.*`, which fallow already
+  credited. Thanks [@osazemeu](https://github.com/osazemeu) for the patch in
+  [#3694](https://github.com/fallow-rs/fallow/pull/3694).
+
+- **A Vitest `test.include` no longer makes bench files unused.** The bench
+  files are entry points again when a config sets `test.include`. Fallow now
+  reads `test.benchmark.include`, and the default bench pattern is the Vitest
+  default `**/*.{bench,benchmark}.?(c|m)[jt]s?(x)`. Before, the default pattern
+  did not match `.benchmark.` files or the `.mts` and `.cts` extensions.
+- **A Vitest config below the project root no longer replaces the test entry
+  points of the whole project.** Vitest finds a `vitest.config` or
+  `vite.config` file (`.ts`, `.js`, `.mts`, `.mjs`, `.cts` or `.cjs`) in the
+  directory that it runs in. The `test.include` globs of such a file below
+  the root, for example a fixture config, now apply below its own directory.
+  Only a config in the project root or the workspace root replaces the default
+  test patterns. The globs of a config that a package script loads with
+  `--config` stay relative to the package root. The configs of one project
+  now add up, so no config removes the patterns of another config. A
+  `vite.config` file next to a `vitest.config` file gives no includes, unless
+  the `vitest.config` file names it. After the upgrade, `fallow dead-code` can
+  report files that only a fixture config marked as used before. You can
+  remove an `entry` workaround for test files that Vitest finds.
+- **A Vitest reporter path is now a used file, not a dependency.** A
+  `reporters` entry such as `'./scripts/ci-reporter.ts'` marks that file as
+  used. Before, Fallow read the path as a package name and reported the file
+  as unused. Fallow also reads a reporter in a spread array, such as
+  `...(process.env.CI ? ['./scripts/ci-reporter.ts'] : [])`. The config reader
+  of the other plugins now also reads spread arrays and both branches of a
+  condition.
+
+- **`fallow mutation` now prunes mutants in functions that write through an ORM or a query builder.** The side-effect prune took its database sinks from the security catalogue, which matches only injection shapes. A safe write such as `db.insert(records).values({ value })` matched no row, so the plan kept its mutants and a run could write to a real database. The plan now also treats member calls with a database write method name (`insert`, `insertOne`, `update`, `delete`, `del`, `create`, `upsert`, `save`, `$transaction` and similar) as sinks. A tagged template or a call with SQL text that starts with a write verb is a sink too, such as ``sql`insert into ...` `` for `postgres` and `@vercel/postgres`, or `lite.prepare("INSERT ...").run(value)` for `better-sqlite3`. A prepared statement run, such as `insertStmt.run(value)` after `const insertStmt = db.prepare("INSERT ...")` or `db.prepare(INSERT_SQL).run(value)`, is a sink too. This includes a class field (also a `static` or a `#private` field), an object literal property or an assignment that holds the statement, such as `this.insert.run(value)` or `statements.insert.run(value)`. This applies also when the module imports the client from a project module. A prepared `SELECT` statement is not a sink. In a module that loads a database client package itself, `run` and `exec` calls count too, but `exec` on a regular expression does not. A route registration such as `app.delete("/items/:id", handler)` is not a sink. This applies only in a module that loads a database client package, such as `drizzle-orm`, `@prisma/client`, `kysely`, `knex`, `mongodb` or `pg`, or that loads a project module that loads one. An ES import, a type-only import, a `require()` call and an `import()` call each count. `--allow-side-effects` keeps these mutants. Projects with ORM writes can see more `pruned` mutants and a different score.
+  (Closes [#3641](https://github.com/fallow-rs/fallow/issues/3641))
+
+- **The napi-rs plugin works in a source repository.** The plugin now
+  activates on the `napi` field and its `targets`. It does not need
+  `optionalDependencies`, which `napi prepublish` adds only at publish time.
+  In a loader with the `auto-generated by NAPI-RS` header, imports of
+  `<package>-<platform>` packages and `@napi-rs/wasm-runtime` are no longer
+  unlisted dependencies. The generated `./<binary>.wasi.cjs` and
+  `./<binary>.wasi-browser.js` loaders are no longer unresolved imports.
+  A generated `browser.js` that only re-exports `<package>-wasm32-wasi` no
+  longer reports that package as unlisted. `wasi-worker*.mjs` files are
+  always used. Projects can remove the
+  `ignorePatterns` and `ignoreDependencies` entries for these files.
+- **A resolve specifier from a conditional const credits each package.**
+  `const c = native ? 'pkg' : '@scope/pkg-wasm'` followed by
+  ``import.meta.resolve(`${c}/package.json`)`` or `require.resolve(c)` now
+  credits both packages. The `?:`, `||` and `??` operators are supported when
+  each branch is a string literal. The extraction cache version changes, so
+  the first run after the upgrade parses each file again.
+
+- **`css-broken-reference` no longer suggests a "did you mean" fix for a defined class.** Three cases caused false findings. In a Tailwind project, a utility such as `w-full` was reported as a typo of an authored class such as `wl-full`. Fallow now skips tokens with the shape of a Tailwind utility when a stylesheet loads Tailwind or the root `package.json` declares it. As a result, in a Tailwind project an authored class that starts with a utility root (for example `text-` or `list-`) gets no typo suggestion. A class that a component defines only through `:global` in an Astro, Vue or Svelte `<style>` block, or in a CSS module, now counts as defined. This includes `:global(.x)`, the Svelte 5 block form `:global { .x {} }` and the selector form `div :global .x {}`. A `<style>` block in an `.html` file now contributes its classes. Thanks to @zaphir for the report.
+  (Closes [#3588](https://github.com/fallow-rs/fallow/issues/3588))
+
+- **The `default` export of a tool config file is no longer reported as an
+  unused export under `includeEntryExports`.** The tool loads its config file
+  and reads the default export. This rule applies to every config pattern of
+  an active plugin, built-in or external, for example
+  `tailwind.config.js`, `jest.config.js`, `playwright.config.ts` and a config
+  file in a workspace package. Named exports of a config file stay
+  reportable. Some patterns do not get the credit: Gatsby `gatsby-node`,
+  `gatsby-browser` and `gatsby-ssr` (Gatsby reads named exports), Vercel
+  `vercel.*` (Vercel reads the named `config` export), and GraphQL Codegen
+  `codegen*` and Serverless `serverless.*`, because these patterns also match
+  ordinary source files. Output without
+  `includeEntryExports` does not change. Thanks to
+  [@osazemeu](https://github.com/osazemeu) for the report.
+  (Closes [#3691](https://github.com/fallow-rs/fallow/issues/3691))
+
+- **The generated napi-rs loader no longer causes duplicate exports.** The
+  napi-rs plugin now treats a loader with the `auto-generated by NAPI-RS`
+  header and the generated `browser.js` as support entry points. A
+  hand-written wrapper that exports a class with the name of a binding is no
+  longer a duplicate export, and an unused binding is no longer an unused
+  export. A `require` of a native addon `./<binary>.<platform>.node` is no
+  longer an unresolved import. Projects can remove the `ignorePatterns` entry
+  for the generated `index.js`.
+
+- **Fallow now reads `test.root`, `test.dir` and the Vite `root` of a Vitest
+  config.** The `test.include` globs are relative to `test.dir` below the
+  Vitest root, and `setupFiles`, `globalSetup` and reporter paths are relative
+  to the Vitest root. Before, Fallow read all of them relative to the config
+  directory or the project root, so it reported test files and setup files as
+  unused.
+- **Vitest project files with another name now add their test files.** A
+  project file such as `packages/a/vitest.unit.config.ts` in `test.projects`
+  is the root of its project. Fallow now reads its `test.include` and its
+  setup files relative to its own directory. A project without
+  `test.include` runs the Vitest default include. Before, Fallow reported the
+  test files of such a project as unused. An inline project in
+  `test.projects` also gets the includes, the excludes, the `root` and the
+  `dir` that it merges from its base config.
+- **The default Vitest test patterns match `.mts`, `.cts`, `.mjs` and `.cjs`
+  files.** Files such as `src/a.test.mts` and `tools/b.spec.cts` are test
+  entry points without a config, as in Vitest.
+
+- **A `fallow mutation` run with `--time-budget` now keeps time to confirm
+  its survivors.** Before, the first pass could use the full budget. Then no
+  survivor or timeout got its retry, the result cache stored none of them,
+  and a repeat run with the same budget ran the same mutants again. Now the
+  first pass stops new mutant runs early by the estimated retry time of the
+  survivors and timeouts that it found. The confirmed results go into the
+  cache, and a repeat run continues with the next mutants. A survivor that
+  gets no retry stays unconfirmed and is not stored.
+  (Closes [#3665](https://github.com/fallow-rs/fallow/issues/3665))
+
+- **More tool config files keep their exports under `includeEntryExports`.**
+  Fallow no longer reports the `default` export of these config files as
+  unused: Capacitor `capacitor.config.*`, Sanity `sanity.config.*` and
+  `sanity.cli.*`, Nitro, SVGO, SVGR (`svgr.config.*` and `.svgrrc.js`),
+  Kysely, OpenAPI TS, Remix, i18next `i18next.config.*`, VitePress
+  `.vitepress/config.*`, CSpell `cspell.config.*`, `@sanity/pkg-utils`
+  `package.config.*`, Electron Forge `forge.config.*` and electron-builder
+  `electron-builder.{js,cjs,ts}`. A root `codegen*` file of GraphQL Codegen
+  and a root `serverless.*` file of the Serverless Framework and osls also
+  keep the `default` export. A helper module such as `src/lib/serverless.ts`
+  stays reportable. cucumber-js reads each named export of `cucumber.js` as a
+  profile, and `@vercel/config` reads the named exports of `vercel.ts`, so
+  these exports also count as used. Output without `includeEntryExports`
+  does not change.
+
+- **`fallow dead-code --include-entry-exports` no longer reports the export
+  that a Serverless handler names.** A handler such as `src/users.main` makes
+  `src/users.ts` an entry point, and the framework calls its `main` export.
+  The Serverless Framework and osls plugins now mark that export as used.
+  Other exports of the handler file still report. Output without
+  `--include-entry-exports` does not change.
+
+- **`fallow mutation` no longer reports a false survivor when a test reads a
+  cached value.** The per-test hits of the dry run name only the tests that
+  execute the mutated code. A test that reads a value that an earlier test of
+  its file cached gets no hit, so no run of the mutant included it. The retry
+  of a survivor now runs each test of the files of its covering tests. A kill
+  by a test that the first run did not execute gives `killed`, not `flaky`,
+  when the same tests pass in a control run with no active mutant. The first
+  run of each mutant stays narrow. `covering_tests` still lists the tests
+  that reached the mutant in the dry run, so `killed_by` can name a test
+  that is not in that list. With `--time-budget`, the time that the first
+  pass keeps free for a survivor retry grows with the tests of its files.
+  (Closes [#3670](https://github.com/fallow-rs/fallow/issues/3670))
+
+- **`fallow mutation` runs a mapped test file in a dot directory with the
+  `node-test` and `bun-test` runners.** The glob discovery of these runners
+  did not go into a directory such as `.github/`, so a test file there did
+  not run, and its mutants were `no_coverage`. Fallow now sends the static
+  test files to the runner. The runner adds each file that matches its
+  default patterns. A file that the patterns do not match still makes the
+  run `partial` with `test-files-not-discovered`.
+  (Closes [#3678](https://github.com/fallow-rs/fallow/issues/3678))
+
+- **`fallow mutation` no longer makes an equivalent `true` mutant for an
+  optional lookup before `.filter(Boolean)`.** In
+  `["base", align ? alignment[align] : ""].filter(Boolean)`, the constant
+  `true` for `align` gives `undefined` instead of `""` for a falsy `align`,
+  and `filter(Boolean)` drops both. No test can kill that mutant. The
+  `false` mutant stays. The object must be a local `const` object literal
+  that is not exported, has no falsy key such as `undefined` or `0`, and is
+  only read. A template literal, a `.join` without `.filter(Boolean)` and a
+  truthy alternate keep both mutants.
+  (Closes [#3667](https://github.com/fallow-rs/fallow/issues/3667))
+
+- **A nested `serverless.ts` or `serverless.js` module is no longer read as a
+  Serverless config.** The Serverless Framework and osls read `serverless.*`
+  from the service directory only. Fallow now reads a JS or TS config only at
+  the project root, at a workspace package root, or in a directory with its
+  own `package.json`. A module such as `src/lib/serverless.ts` is an ordinary
+  source file again: its `plugins` get no dependency credit and its handlers
+  are not entry points. A nested `serverless.yml` is still a service config.
+
+- **Fallow now treats `sanity.config.tsx` and `sanity.config.jsx` as Sanity
+  entry points.** Sanity Studio loads its config from
+  `sanity.config.{ts,tsx,js,jsx}`, but fallow knew only the `.ts` and `.js`
+  names. Modules that only a `.tsx` or `.jsx` config file imports, such as a
+  studio logo or a custom structure, are no longer reported as unused files,
+  and their exports are no longer reported as unused. Under
+  `includeEntryExports`, the `default` export of these config files counts as
+  used. This changes the output for projects with a `.tsx` or `.jsx` Sanity
+  config file in all modes.
+
+- **A `<workspace-package>/package.json` import resolves without `node_modules`.**
+  Fallow reported the import as unresolved and the workspace dependency as
+  unused when the package was not installed. The import now credits the
+  package, the same as an installed workspace package. An `exports` map
+  without a `./package.json` key still blocks the import.
+- **`require.resolve` on a function-scoped `createRequire(import.meta.url)`
+  credits the package.** Fallow treated the local `require` as a shadow and
+  reported the dependency as unused. A `require` from
+  `createRequire(import.meta.url)` or `createRequire(__filename)` now counts in
+  every scope.
+- **`require('..')` and `require('.')` resolve to package source.** A relative
+  import of a package root whose `main` points at missing build output now uses
+  the source entry, the same as `require('../')`.
+
+- **`ignoreFindings` now covers the parse errors of the files it hides.** A
+  syntax-error test fixture that `ignoreFindings` covers no longer reports
+  `source-parse-degraded`, no longer prints a parse warning, and no longer
+  fails the `parse-error` gate. Its partial parse also no longer marks other
+  findings with the `incomplete-import-graph` caveat, and the pattern no
+  longer reads as a pattern that matched no finding.
+- **`--quiet` now hides the analysis warnings on stderr.** A run with
+  `--quiet`, `--ci` or `FALLOW_QUIET` no longer prints warnings that repeat a
+  `workspace_diagnostics` entry, such as parse degradations, the tsconfig
+  chain warning, re-export cycles and skipped `package.json` entry points.
+  The JSON output does not change. Set `RUST_LOG=warn` to show them again.
+  Config warnings, such as an unknown rule name, still print.
+
+- **`fallow mutation` now keeps the error of a test that fails in a control
+  run.** A control run runs the covering tests with no active mutant. When a
+  test fails there, the `baseline_failures` message now adds the error of the
+  test after the reason: the assertion on the first line, then the stack
+  frames of the project. The `FALLOW_MUTATION_BASELINE_FAILED` error and
+  the `Error:` line of the human footer also show the assertion. Before, the
+  message gave the reason only. Paths are relative to the project, and the
+  error is about 4 KiB at most. The verdict does not change: the run still
+  stops with exit code 2.
+  (Closes [#3690](https://github.com/fallow-rs/fallow/issues/3690))
+
+- **Workspace package binaries now credit their package without
+  `node_modules`.** Fallow reads the `bin` field of each workspace package
+  that a manifest declares. A script that calls such a binary marks the
+  declaring package as used.
+- **More binaries map to their package.** `napi` and `napi-raw` now credit
+  `@napi-rs/cli`, `taplo` credits `@taplo/cli`, `oxnode` credits
+  `@oxc-node/cli`, and `ut` and `utx` credit `utoo`.
+- **GitHub Actions steps resolve file arguments in their
+  `working-directory`.** Fallow reads the step value and the
+  `defaults.run.working-directory` value of the workflow and of the job.
+  Paths that start with `$GITHUB_WORKSPACE/` or `${{ github.workspace }}/`
+  resolve from the project root, and so do GitLab `$CI_PROJECT_DIR/` paths.
+  A relative path in a directory outside the project, or in a directory with
+  a run-time value, makes no entry point.
+- **Fallow now reads composite actions.** It reads the run steps in
+  `.github/actions/*/action.yml`, `.github/actions/*/*/action.yml` and the
+  root `action.yml` like workflow steps. `${{ github.action_path }}/` paths
+  resolve from the action directory.
+
+- **VitePress: the `vite` block of the VitePress config credits its
+  packages.** Packages in `vite.optimizeDeps`, `vite.ssr.external` and
+  `vite.ssr.noExternal` are no longer unused dependencies, and
+  `vite.resolve.alias` entries resolve imports.
+- **Vite: a nested `optimizeDeps` entry credits its parent package.** An entry
+  such as `'mermaid > @braintree/sanitize-url'` now credits `mermaid`.
+
+- **`fallow mutation` now stops a Vitest inline project at the first failed
+  test.** The Vitest companion set fail-fast only on the root config. A
+  worker reads the config of its project, and an inline project in
+  `test.projects` keeps the `bail` value that Vitest copied at start. A
+  mutant run in an inline project then ran each selected test after the
+  first failure. The companion now sets `bail` on each project for each run,
+  and a control run still runs the full selection.
+  (Closes [#3701](https://github.com/fallow-rs/fallow/issues/3701))
+
+- **`fallow mutation` with `node:test` now serves the mutant to a Node child
+  process of a test.** A test that ran a CLI with `execFileSync` of
+  `process.execPath` loaded the original source in that child. So an exact
+  CLI assertion could not kill the mutant, and the report showed a false
+  survivor. The test process now adds the overlay preload to `NODE_OPTIONS`.
+  Each Node child process (`spawn`, `exec`, `execFile` or `fork`) then loads
+  the instrumented files with the active mutant. The hits of a child process
+  do not count as coverage. A child that is not Node, or a child with an
+  environment without `NODE_OPTIONS`, still loads the original files.
+  (Closes [#3680](https://github.com/fallow-rs/fallow/issues/3680))
+
+- **`--trace` no longer calls an export unused when a framework plugin
+  marks it as used.** The trace read only import references. The `default`
+  export of a Next.js page or the export that a Serverless handler names
+  traced as `is_used: false`, although the analysis did not report it.
+  `--trace` and `--trace-file` now list these credits in a new
+  `plugin_credits` field with the plugin and its file pattern. For a
+  reachable file, the export then traces as used, and the reason names the
+  plugin. The human output shows the same credit.
+
+- **A peer of a package that a script runs or that a plugin credits is no
+  longer reported as an unused dependency.** Before this fix, only the
+  packages that a file imports started the peer-dependency closure. For
+  example, a `napi build` script uses `@napi-rs/cli`, but its peer
+  `@emnapi/runtime` was reported as an unused devDependency. The closure now
+  also starts from the packages that a script runs, that a plugin config
+  names, and the plugin tooling with evidence of use. `fallow dead-code
+  --trace-dependency` names the same host in `peer_of`.
+- **A module that imports `X` under an alias and exports its own `X` is no
+  longer a duplicate export of the source module.** Such a module is an
+  adapter, for example `import { configureAuth as core } from "../ci/auth"`
+  followed by `export function configureAuth()`. It derives its export from
+  the source, as a re-export does. When a third module exports the same name
+  independently, the finding stays between the source and that module. Two
+  modules that import `X` from each other under aliases are still reported.
+
+- **`fallow audit --gate new-only` no longer reads a missing base CRAP score as
+  growth.** A matched complexity finding was introduced when the head had a
+  CRAP score and the base finding had none. The two runs then had different
+  coverage input, and the code did not grow. Such a finding is now `worsened`
+  or `inherited`. A CRAP score from estimated coverage also no longer makes a
+  matched finding introduced; it can make it `worsened`.
+
+- **A `package.json` with no name and no dependencies is not an undeclared
+  workspace.** A file such as `bench/package.json` with only
+  `{"type":"module"}` sets the module type of the scripts next to it. It no
+  longer gets `undeclared-workspace`.
+- **A nested independent pnpm project owns its files and dependencies.** Its
+  `package.json` now activates framework plugins and declares the dependencies
+  of its files, without a `workspaces.patterns` entry in the fallow config. Its
+  directories are not reported as undeclared workspaces, and its `catalog:`
+  references are not checked against the root catalog.
+- **pnpm overrides take precedence over a `catalog:` reference.** pnpm applies
+  an override before it resolves `catalog:`. A `package.json` reference to a
+  package that an override key with no version selector replaces (`vite`, or
+  `<consumer>>vite`) is no longer an unresolved catalog reference. A key with a
+  version selector (`vite@^5`) does not replace the reference, because pnpm
+  fails the install for it.
+- **`audit --gate new-only` does not gate a finding class that the base could
+  not check.** The base snapshot holds committed files only, so a gitignored
+  workspace member (for example a `vite/` clone that CI makes) is missing in
+  the base. The base then does not report unused catalog entries, and the head
+  reports them. These head findings are now inherited, not introduced, so they
+  no longer change the verdict. A new unused catalog entry in such a run is
+  also inherited. The audit base snapshot cache moves to version 16.
+
+### Performance
+
+- **`fallow mutation` no longer repeats the setup of unrelated test files for
+  each static mutant with Vitest `isolate: false`.** Without fresh modules
+  for each run, each static mutant runs in a new runner process. That process
+  did a dry run of each test file of the run. It now dry-runs only the test
+  files that cover the mutant. The safety check of the new process stays: a
+  covering test that does not pass in its dry run is still a baseline failure.
+  (Closes [#3650](https://github.com/fallow-rs/fallow/issues/3650))
+
+- **`--type-aware` class-member refinement is faster on large projects.** Since 3.18.0, the symbol-use scan sent extra checker requests and resolved file paths for every identifier in every file, also when the identifier could not match a query. The scan now checks the name first and keeps one alias answer for each symbol. On the TypeScript repository, the scan takes 4 to 12 s instead of 35 to 70 s on the same machine, with the same decisions.
+
+- **`--type-aware` asks the checker only about identifiers that can reach a query.** The symbol-use scan sent every identifier of every TypeScript file to the checker. It now sends only the names of the queried symbols and the names that imports and exports of the project declare. JavaScript files keep the full scan, because `require` bindings also create aliases. The decisions stay the same.
+
+### Security
+
+- **The Docker image now pins its base images and corepack.** `Dockerfile`
+  and `Dockerfile.dev` pin each base image by its multi-platform digest and
+  install corepack from a committed lockfile with an integrity hash.
+  Dependabot keeps the digests and the corepack version current.
+
+- **Fallow and the similar-code sidecar link rustls-webpki 0.103.16 and
+  webpki-roots 1.0.10.** rustls-webpki 0.103.15 has the advisory
+  RUSTSEC-2026-0382. webpki-roots 1.0.6 and 1.0.9 have the advisory
+  RUSTSEC-2026-0381. Both advisories are about certificate chains with
+  distrusted intermediate certificates.
+
+- **The Docker image now runs on Node.js 26.12.1.** `Dockerfile` and
+  `Dockerfile.dev` pin the `node:26-bookworm-slim` digest of the Node.js
+  26.12.1 security release. The earlier digest had Node.js 26.12.0.
+
 ## [3.34.1] - 2026-10-18
 
 ### Fixed
@@ -15052,7 +15754,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.34.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.35.0...HEAD
+[3.35.0]: https://github.com/fallow-rs/fallow/compare/v3.34.1...v3.35.0
 [3.34.1]: https://github.com/fallow-rs/fallow/compare/v3.34.0...v3.34.1
 [3.34.0]: https://github.com/fallow-rs/fallow/compare/v3.33.1...v3.34.0
 [3.33.1]: https://github.com/fallow-rs/fallow/compare/v3.33.0...v3.33.1
