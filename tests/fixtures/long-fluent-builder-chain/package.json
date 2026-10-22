@@ -1,0 +1,5 @@
+{
+  "name": "long-fluent-builder-chain",
+  "private": true,
+  "main": "src/index.ts"
+}

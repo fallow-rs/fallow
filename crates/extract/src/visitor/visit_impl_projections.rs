@@ -12,6 +12,7 @@ use super::super::{
     ModuleInfoExtractor, ProjectedMemberAccess, SemanticFact, TypedPropertyExpansion,
 };
 use super::unwrap_static_expr;
+use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 
 pub(in crate::visitor) const MAX_PROJECTION_VALUES: usize = 8192;
 const MAX_PROJECTED_ACCESSES: usize = 8192;
@@ -627,6 +628,21 @@ impl ModuleInfoExtractor {
         expression: &Expression<'_>,
         track: bool,
     ) -> Option<ProjectionValue> {
+        self.resolve_projected_value_at(expression, track, 0)
+    }
+
+    /// Resolve `expression`, which sits `links` member links below the
+    /// receiver that the caller asked for. Past `MAX_RECORDED_CHAIN_LINKS`
+    /// links the walk gives `None`, so one call on a long chain stays bounded.
+    fn resolve_projected_value_at(
+        &mut self,
+        expression: &Expression<'_>,
+        track: bool,
+        links: usize,
+    ) -> Option<ProjectionValue> {
+        if links > MAX_RECORDED_CHAIN_LINKS {
+            return None;
+        }
         match unwrap_static_expr(expression) {
             Expression::Identifier(identifier) => {
                 let (value, entry) = self.direct_binding_value(identifier.name.as_str())?;
@@ -649,7 +665,8 @@ impl ModuleInfoExtractor {
                 Some((value, requirements))
             }
             Expression::StaticMemberExpression(member) => {
-                let (parent, requirements) = self.resolve_projected_value(&member.object, track)?;
+                let (parent, requirements) =
+                    self.resolve_projected_value_at(&member.object, track, links + 1)?;
                 let value = self.projected_property(parent, member.property.name.as_str())?;
                 if !track {
                     return Some((value, requirements));
@@ -662,7 +679,7 @@ impl ModuleInfoExtractor {
             }
             Expression::ComputedMemberExpression(member) => {
                 let (parent, mut requirements) =
-                    self.resolve_projected_value(&member.object, track)?;
+                    self.resolve_projected_value_at(&member.object, track, links + 1)?;
                 let element = self.projection_value_view(parent).array_element?;
                 match unwrap_static_expr(&member.expression) {
                     Expression::NumericLiteral(number)

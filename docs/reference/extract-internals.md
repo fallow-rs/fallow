@@ -41,6 +41,17 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   literal that does not end on its line is scanned again as code. Shapes that
   nest without brackets (TypeScript generics, JSX elements, long member or
   call chains) are not bounded yet.
+- A walk that the visitor runs at each link of a member or call chain stops
+  after `MAX_RECORDED_CHAIN_LINKS` links
+  (`crates/extract/src/visitor/visit_impl_chain_names.rs`). Past the cap, the
+  walk gives no name, so the visitor records no member access, no binding key
+  and no projection for that link. Binding keys and member accesses use the
+  same builders, so both sides stop at the same link. Without this cap, the
+  time and the output for one chain grow with the square of its length. A new
+  per-link walk must use the same cap.
+- A fluent-chain fact keeps each step name once instead of a cap. The consumer
+  only checks that every step returns `this`, so order and repeats do not
+  matter, and a cap would drop the credit for the steps past it.
 - Bind framework heuristics to imported symbols or other provenance. A local
   function with the same name must not activate library-specific behavior.
 - Avoid filesystem and graph policy inside AST visitors.

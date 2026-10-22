@@ -1076,6 +1076,27 @@ fn fluent_builder_chain_credits_intermediate_setters() {
 }
 
 #[test]
+fn long_new_rooted_fluent_chain_credits_every_step() {
+    // The chain has more steps than the receiver-name cap of 64 links.
+    const STEPS: usize = 70;
+    let root = fixture_path("long-fluent-builder-chain");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert_eq!(
+        unused_class_members,
+        vec!["Builder.unusedStep".to_string()],
+        "every one of the {STEPS} chained steps must be credited"
+    );
+}
+
+#[test]
 fn generic_constrained_param_credits_base_class_member() {
     let root = fixture_path("issue-388-generic-constraint");
     let config = create_config(root);

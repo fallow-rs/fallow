@@ -1,4 +1,4 @@
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{ImportedName, SemanticFact};
 
 use crate::tests::{parse_ts as parse_source, parse_tsx};
 
@@ -685,20 +685,78 @@ fn namespace_spy_call_on_shadowed_namespace_records_nothing() {
     );
 }
 
+/// The most links a recorded receiver name holds.
+const RECORDED_LINKS: usize = 64;
+
 #[test]
-fn long_member_chain_records_the_full_receiver_name() {
+fn long_member_chain_records_receiver_names_up_to_the_cap() {
     const LINKS: usize = 500;
     for link in [".b", "?.b"] {
         let info = parse_source(&format!(
             "import {{ a }} from './a';\nexport const x = a{};",
             link.repeat(LINKS)
         ));
-        let deepest = format!("a{}", ".b".repeat(LINKS - 1));
+        let deepest = format!("a{}", ".b".repeat(RECORDED_LINKS));
         assert!(
             info.member_accesses
                 .iter()
                 .any(|access| access.object == deepest && access.member == "b"),
-            "the outermost link of a `{link}` chain must record the full receiver name"
+            "a `{link}` chain must record the receiver name at the cap"
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .all(|access| access.object.len() <= deepest.len()),
+            "a `{link}` chain must record no receiver name past the cap"
         );
     }
+}
+
+/// A chain long enough that a record per link with the full chain name
+/// makes about 400 MB of output.
+const LONG_CHAIN_LINKS: usize = 20_000;
+
+/// Extract `source` on a thread with a large stack: the recursive AST walk
+/// needs more than the default test thread stack for a long chain.
+fn parse_long_chain(source: String) -> fallow_types::extract::ModuleInfo {
+    std::thread::Builder::new()
+        .stack_size(1 << 30)
+        .spawn(move || parse_source(&source))
+        .expect("spawn the extraction thread")
+        .join()
+        .expect("extraction must not panic")
+}
+
+#[test]
+fn long_member_chain_records_a_bounded_receiver_output() {
+    let info = parse_long_chain(format!(
+        "export const x = a{};\n",
+        ".b".repeat(LONG_CHAIN_LINKS)
+    ));
+    let longest = info
+        .member_accesses
+        .iter()
+        .map(|access| access.object.matches('.').count())
+        .max();
+    assert_eq!(longest, Some(RECORDED_LINKS));
+    assert_eq!(info.member_accesses.len(), RECORDED_LINKS + 1);
+}
+
+#[test]
+fn long_fluent_chain_records_each_step_name_once() {
+    let info = parse_long_chain(format!(
+        "import {{ a }} from './a';\nexport const x = a{};\n",
+        ".b()".repeat(LONG_CHAIN_LINKS)
+    ));
+    let chains = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::FluentChainMemberAccess(access) => Some(access.chain.len()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    // Each call past the root records the one distinct step name `b`.
+    assert_eq!(chains.len(), LONG_CHAIN_LINKS - 1);
+    assert!(chains.iter().all(|steps| *steps <= 1));
 }

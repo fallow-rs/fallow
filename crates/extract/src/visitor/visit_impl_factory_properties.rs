@@ -13,6 +13,7 @@ use super::super::{
     ModuleInfoExtractor, SemanticFact,
 };
 use super::unwrap_static_expr;
+use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::visit_factory_returns::object_literal_from_return;
 use super::visit_projections::MAX_PROJECTION_VALUES;
 use crate::function_body::BodyRef;
@@ -172,11 +173,15 @@ fn property_observations(
 
 /// The dotted path of a static member chain and the span of its root
 /// identifier. The visitor asks for this path at every link of a chain, so
-/// the walk collects the properties first and builds the string once.
+/// the walk collects the properties first and builds the string once. Like
+/// `static_member_object_name`, it gives `None` past `MAX_RECORDED_CHAIN_LINKS`.
 fn receiver_path(expression: &Expression<'_>) -> Option<(String, Span)> {
     let mut properties = Vec::new();
     let mut current = unwrap_static_expr(expression);
     let root = loop {
+        if properties.len() > MAX_RECORDED_CHAIN_LINKS {
+            return None;
+        }
         match current {
             Expression::Identifier(id) => break id,
             Expression::StaticMemberExpression(member) => {
@@ -634,6 +639,9 @@ impl ModuleInfoExtractor {
         let mut receiver = unwrap_static_expr(object);
         let mut properties = Vec::new();
         while let Expression::StaticMemberExpression(property) = receiver {
+            if properties.len() == MAX_RECORDED_CHAIN_LINKS {
+                return;
+            }
             properties.push(property.property.name.as_str());
             receiver = unwrap_static_expr(&property.object);
         }
@@ -1000,30 +1008,33 @@ mod tests {
     use super::*;
     use std::fmt::Write;
 
-    #[test]
-    fn receiver_path_builds_a_long_chain_in_one_pass() {
-        // A chain this long overflows a test thread stack with a recursive
-        // walk, and a build that copies the parent path at each link takes
-        // seconds.
-        const LINKS: usize = 300_000;
+    fn chain_receiver_path(links: usize) -> Option<(String, Span)> {
         let allocator = oxc_allocator::Allocator::default();
-        let source = format!("(a{});", ".b".repeat(LINKS));
+        let source = format!("(a{});", ".b".repeat(links));
         let parsed =
             oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts()).parse();
         let Some(Statement::ExpressionStatement(statement)) = parsed.program.body.first() else {
             panic!("expected an expression statement");
         };
-        let start = std::time::Instant::now();
-        let path = receiver_path(&statement.expression);
-        let elapsed = start.elapsed();
+        receiver_path(&statement.expression)
+    }
+
+    #[test]
+    fn receiver_path_builds_a_chain_at_the_cap() {
         assert_eq!(
-            path,
-            Some((format!("a{}", ".b".repeat(LINKS)), Span::new(1, 2)))
+            chain_receiver_path(MAX_RECORDED_CHAIN_LINKS),
+            Some((
+                format!("a{}", ".b".repeat(MAX_RECORDED_CHAIN_LINKS)),
+                Span::new(1, 2)
+            ))
         );
-        assert!(
-            elapsed.as_secs() < 1,
-            "a chain of {LINKS} links took {elapsed:?}"
-        );
+    }
+
+    #[test]
+    fn receiver_path_refuses_a_chain_past_the_cap() {
+        assert_eq!(chain_receiver_path(MAX_RECORDED_CHAIN_LINKS + 1), None);
+        // A recursive walk overflows a test thread stack on a chain this long.
+        assert_eq!(chain_receiver_path(300_000), None);
     }
 
     #[test]

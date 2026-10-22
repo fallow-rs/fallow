@@ -1,0 +1,3 @@
+### Performance
+
+- **A very long member chain no longer makes extraction slow and large.** For a chain such as `a.b.b.b` with thousands of links, each link recorded the full name of its receiver, so the time and the cached output grew with the square of the chain length. Fallow now records a receiver name only up to 64 links. A link deeper than that records no member access. A fluent builder chain such as `new Builder().a().b()` now records each step name once, so a long chain keeps the credit for all of its steps. The extraction cache version changes, so the first run after the upgrade parses every file again. OSS-Fuzz found this.

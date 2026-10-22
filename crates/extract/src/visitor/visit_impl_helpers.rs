@@ -10,6 +10,7 @@ use crate::MemberAccess;
 use crate::function_body::BodyRef;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
+use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::{assignment_target_identifier_name, static_member_object_name, unwrap_static_expr};
 
 pub(super) const PINO_PACKAGE: &str = "pino";
@@ -1231,13 +1232,19 @@ fn collect_object_pattern_bindings(
     }
 }
 
+/// The root name of a test callee (`test` in `test.describe.only`). The walk
+/// gives `None` past `MAX_RECORDED_CHAIN_LINKS` links, so one call stays bounded.
 pub(super) fn playwright_test_callee_name(expr: &Expression<'_>) -> Option<String> {
-    match expr {
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
-        Expression::StaticMemberExpression(member) => playwright_test_callee_name(&member.object),
-        Expression::CallExpression(call) => playwright_test_callee_name(&call.callee),
-        _ => None,
+    let mut current = expr;
+    for _ in 0..=MAX_RECORDED_CHAIN_LINKS {
+        match current {
+            Expression::Identifier(ident) => return Some(ident.name.to_string()),
+            Expression::StaticMemberExpression(member) => current = &member.object,
+            Expression::CallExpression(call) => current = &call.callee,
+            _ => return None,
+        }
     }
+    None
 }
 
 /// Find the call expression returned by a function body. A direct

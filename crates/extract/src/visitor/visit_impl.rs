@@ -12,10 +12,9 @@ use std::path::PathBuf;
 use crate::{
     AngularComponentFieldArrayTypeFact, AngularThisSpreadFact, ComputedEnumKeyUseFact,
     DefaultImportWholeObjectUseFact, DynamicCustomElementRenderFact, DynamicImportInfo,
-    DynamicImportPattern, ExportInfo, ExportName, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleLoadMechanism,
-    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact,
-    VisibilityTag,
+    DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
+    ModuleLoadMechanism, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
+    RequiredTypeMemberFact, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
@@ -623,57 +622,6 @@ impl ModuleInfoExtractor {
             Some(Some(constraint)) => constraint.reference_span,
             Some(None) => None,
             None => origin,
-        }
-    }
-
-    /// Emit typed fluent-chain facts for chained calls.
-    fn try_record_fluent_chain_access(&mut self, expr: &CallExpression<'_>) {
-        let Expression::StaticMemberExpression(member) = &expr.callee else {
-            return;
-        };
-        let Expression::CallExpression(_) = &member.object else {
-            return;
-        };
-        let this_method = member.property.name.as_str();
-        let mut chain_prefix_reversed: Vec<String> = Vec::new();
-        let mut current = &member.object;
-        loop {
-            let Expression::CallExpression(call) = current else {
-                return;
-            };
-            let Expression::StaticMemberExpression(inner_member) = &call.callee else {
-                return;
-            };
-            if let Expression::Identifier(root_id) = &inner_member.object {
-                chain_prefix_reversed.reverse();
-                self.semantic_facts
-                    .push(SemanticFact::FluentChainMemberAccess(
-                        FluentChainMemberAccessFact {
-                            root_object: root_id.name.to_string(),
-                            root_method: inner_member.property.name.to_string(),
-                            chain: chain_prefix_reversed,
-                            member: this_method.to_string(),
-                        },
-                    ));
-                return;
-            }
-            if let Expression::NewExpression(new_expr) = &inner_member.object
-                && let Expression::Identifier(class_id) = &new_expr.callee
-            {
-                chain_prefix_reversed.push(inner_member.property.name.to_string());
-                chain_prefix_reversed.reverse();
-                self.semantic_facts
-                    .push(SemanticFact::FluentChainNewMemberAccess(
-                        FluentChainNewMemberAccessFact {
-                            class_name: class_id.name.to_string(),
-                            chain: chain_prefix_reversed,
-                            member: this_method.to_string(),
-                        },
-                    ));
-                return;
-            }
-            chain_prefix_reversed.push(inner_member.property.name.to_string());
-            current = &inner_member.object;
         }
     }
 
@@ -1870,9 +1818,10 @@ impl ModuleInfoExtractor {
                     Some((reference.name.to_string(), reference.span))
                 }
                 Expression::StaticMemberExpression(callee) => {
-                    static_member_object_name(&callee.object)
-                        .zip(iteration_source_reference(&callee.object))
-                        .map(|(root, span)| (format!("{root}.{}", callee.property.name), span))
+                    static_member_object_name(&callee.object).and_then(|root| {
+                        iteration_source_reference(&callee.object)
+                            .map(|span| (format!("{root}.{}", callee.property.name), span))
+                    })
                 }
                 _ => None,
             };
