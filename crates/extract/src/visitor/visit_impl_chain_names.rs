@@ -94,10 +94,28 @@ mod tests {
     #[test]
     fn static_member_object_name_builds_a_long_chain_in_one_pass() {
         let allocator = oxc_allocator::Allocator::default();
-        let source = format!("(this.#a{}.c() as T)?.d;", ".b".repeat(LINKS));
+        let source = format!(
+            "class C {{ #a: any; m() {{ (this.#a{}.c() as T)?.d; }} }}",
+            ".b".repeat(LINKS)
+        );
         let parsed =
             oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts()).parse();
-        let Some(Statement::ExpressionStatement(statement)) = parsed.program.body.first() else {
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "the fixture must parse without errors"
+        );
+        let Some(Statement::ClassDeclaration(class)) = parsed.program.body.first() else {
+            panic!("expected a class declaration");
+        };
+        let Some(ClassElement::MethodDefinition(method)) = class.body.body.get(1) else {
+            panic!("expected a method");
+        };
+        let Some(Statement::ExpressionStatement(statement)) = method
+            .value
+            .body
+            .as_ref()
+            .and_then(|body| body.statements.first())
+        else {
             panic!("expected an expression statement");
         };
         let start = std::time::Instant::now();
