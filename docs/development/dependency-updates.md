@@ -16,19 +16,28 @@ workflows take them to `main` without a maintainer in most cases.
    after each CI or CodeQL run on a Dependabot branch, and every three hours:
    - After a failed run, it reruns cancelled jobs and the flaky
      `VS Code Extension` job, or asks Claude for a repair, or labels the pull
-     request `needs-human` after two failed repairs.
-   - A repair of generated files (the viz bundle, the coverage producer
-     manifest) or snapshots is pushed by the App and merges when the checks
-     pass.
-   - Any other repair is not pushed. The pull request gets the `needs-review`
-     label, auto-merge is turned off, and a comment holds the patch, the list
-     of changed files and a command that applies the patch after a SHA-256
-     check.
+     request `needs-human` after two failed repairs. A branch that is behind
+     `main` first gets `main` merged in, so the repair builds on the current
+     base.
+   - A repair of lockfiles, dependency version lines in package manifests,
+     tests, snapshots or generated files (the viz bundle, the coverage
+     producer manifest) becomes a commit that GitHub signs for the App. It
+     merges when the checks pass.
+   - Any other repair is not committed. The pull request gets the
+     `needs-review` label, auto-merge is turned off, and a comment holds the
+     patch, the list of changed files and a command that applies the patch
+     after a SHA-256 check.
    - After a successful run, it merges the pull request when every check on
-     the head commit passed, except CodSpeed.
+     the head commit passed, except CodSpeed, majors included. A pull request
+     with a repair merges only on top of the current `main`. The squash
+     subject stays within the 100 character limit of commitlint.
 
-Major updates do not auto-merge. The repair still runs on them, so a
-maintainer can review a green pull request.
+The commit lint and the title lint in `commitlint.yml` skip bot pull requests:
+their commit headers and long titles never reach `main`.
+
+A Dependabot pull request that changes a file with a code owner in
+`.github/CODEOWNERS` waits for that review, because branch protection requires
+it for everyone.
 
 ## Repository notes
 
@@ -55,7 +64,7 @@ These causes made a person act on a Dependabot pull request in the past:
 | --- | --- | --- |
 | `DEPENDABOT_APP_CLIENT_ID` | Organization and repository variable | The client ID of the fallow-dependabot GitHub App. |
 | `DEPENDABOT_APP_PRIVATE_KEY` | Actions and Dependabot secret | The private key of that App. `dependabot-auto-merge.yml` runs for Dependabot, so it can need the Dependabot copy. |
-| `ANTHROPIC_API_KEY` | Actions secret | The Claude API key for the repair. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Organization secret | The Claude token for the repair. |
 
 The App needs the `contents`, `pull_requests` and `workflows` write
 permissions on this repository.
@@ -66,8 +75,12 @@ The org-wide workflow documents its trust boundary in its README. In short:
 
 - The repair job installs and builds third-party code, so it holds only a
   read-only `GITHUB_TOKEN` and no OIDC permission.
-- A separate job on a new runner checks the patch and pushes only generated
-  files. A push from the App starts CI with the repository secrets, so code
-  changes wait for a maintainer.
+- A separate job on a new runner checks the patch and commits only
+  dependency, test and generated changes, as a commit that GitHub signs for
+  the App. A commit from the App starts CI with the repository secrets, so
+  code changes wait for a maintainer.
+- Only signed commits from Dependabot or the App count as automation. Any
+  other commit makes the pull request a maintainer's, and the automation
+  leaves it alone.
 - The scripts and instructions come from the pinned commit of the org-wide
   workflow, and the repository notes from `main`.

@@ -466,6 +466,14 @@ npm run type-aware:corpus -- verify-publication \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 ```
 
+No CI job runs the corpus, so the script tests check the age of the tracked
+evidence instead. `benchmarks/type-aware-corpus-freshness.json` sets the
+maximum count of minor releases between the Fallow version that produced
+`benchmarks/type-aware-corpus-evidence.json` and the workspace version. A
+release bump past that lag fails CI. Regenerate the gate, or add a waiver with
+a tracking issue, a last version (`until_version`) and a reason. A waiver on
+fresh evidence also fails, so that it does not stay after the regeneration.
+
 Use `--project` only with a non-canonical `--out-dir` for iteration. The
 publication gate requires the complete manifest, repeated normalized output,
 complete paired measurements, source-current evidence, checked-in review
