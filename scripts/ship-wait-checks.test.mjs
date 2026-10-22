@@ -1521,3 +1521,19 @@ test("a check that fails only on main does not fail the pull request", fakeGhOpt
     "a passing pull request does not read main",
   );
 });
+
+test("a cancelled check next to a shared failure keeps exit code 1", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    ...prChecks(
+      checkRun("Cargo Deny", "COMPLETED", "FAILURE"),
+      checkRun("Tests", "COMPLETED", "CANCELLED"),
+    ),
+    runs: mainChecks({
+      [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "failure"),
+    }),
+  });
+
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /FAIL \(also on main dddddddddddd\): Cargo Deny/u);
+  assert.match(result.stdout, /^ {2}CANCEL: Tests/mu);
+});
