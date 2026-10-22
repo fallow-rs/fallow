@@ -13,4 +13,5 @@ export class Service {
   shadowComputed(): void {}
   shadowInner(): void {}
   shadowParamDestructure(): void {}
+  shadowTypeof(): void {}
 }

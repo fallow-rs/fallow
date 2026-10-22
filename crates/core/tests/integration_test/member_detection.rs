@@ -102,7 +102,8 @@ fn nested_non_instance_shadow_gives_no_class_member_credit() {
             ("Service", "shadowInner"),
             ("Service", "shadowLocal"),
             ("Service", "shadowParam"),
-            ("Service", "shadowParamDestructure")
+            ("Service", "shadowParamDestructure"),
+            ("Service", "shadowTypeof")
         ]
     );
 }

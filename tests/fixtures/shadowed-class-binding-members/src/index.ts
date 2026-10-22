@@ -17,6 +17,12 @@ export function computedShadow(): void {
   service['shadowComputed']();
 }
 
+export function typeofShadow(): void {
+  const service = { shadowTypeof(): void {} };
+  const read = ({ shadowTypeof }: typeof service): void => shadowTypeof();
+  read(service);
+}
+
 export function sibling(): void {
   service.keptSibling();
 }
