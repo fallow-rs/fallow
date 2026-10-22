@@ -30,7 +30,7 @@ const POLICY_RULES = [
     "freshness policy maximum_minor_lag must be a non-negative integer",
   ],
   [
-    (policy) => policy.waiver === undefined || validWaiver(Object(policy.waiver)),
+    (policy) => policy.waiver == null || validWaiver(Object(policy.waiver)),
     "freshness waiver needs a fallow issue URL, an until_version and a reason",
   ],
 ];
@@ -46,11 +46,11 @@ const staleness = (evidence, workspace, maximumMinorLag) => {
 
 const waiverErrors = (waiver, stale, workspace, workspaceText) => {
   if (!stale) {
-    return waiver === undefined
+    return waiver == null
       ? []
       : [`type-aware corpus evidence is fresh; remove the waiver for ${waiver.issue}`];
   }
-  if (waiver === undefined) return null;
+  if (waiver == null) return null;
   if (compareVersions(workspace, parseVersion(waiver.until_version)) <= 0) return [];
   return [
     `type-aware corpus freshness waiver for ${waiver.issue} ended at ${waiver.until_version}; the workspace is ${workspaceText}. ${REGENERATE}, or extend the waiver with a reason.`,
@@ -78,8 +78,10 @@ export const evidenceFreshnessErrors = ({ evidenceVersion, workspaceVersion, pol
 };
 
 const workspacePackageVersion = (cargoToml) => {
-  const section = /^\[workspace\.package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(cargoToml);
-  return /^version\s*=\s*"([^"]+)"/m.exec(section?.[1] ?? "")?.[1];
+  const section = /^\[workspace\.package\]\s*(?:#.*)?$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(
+    cargoToml,
+  );
+  return /^\s*version\s*=\s*"([^"]+)"/m.exec(section?.[1] ?? "")?.[1];
 };
 
 /** Apply the freshness policy to the tracked evidence file and the root Cargo manifest. */

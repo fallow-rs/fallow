@@ -100,6 +100,18 @@ test("a malformed policy or version fails", () => {
   );
 });
 
+test("the workspace version reader accepts header comments, indentation and a null waiver", () => {
+  const evidence = {
+    generated_from: { discovery_provenance: { fallow: { version: "fallow 3.35.0" } } },
+  };
+  const cargoToml =
+    '[package]\nversion = "0.1.0"\n\n[workspace.package] # shared\n  version = "3.36.0"\r\n';
+  assert.deepEqual(
+    trackedEvidenceFreshnessErrors({ evidence, cargoToml, policy: { ...policy(), waiver: null } }),
+    [],
+  );
+});
+
 test("tracked type-aware corpus evidence is fresh or has an active waiver", () => {
   const errors = trackedEvidenceFreshnessErrors({
     evidence: JSON.parse(

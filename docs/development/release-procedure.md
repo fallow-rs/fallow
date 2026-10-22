@@ -226,6 +226,12 @@ invariants in this file.
    Version-string assertions do not catch the second case. Verify a touched
    lockfile with `cd crates/napi && rm -rf node_modules && npm ci`.
 
+   The tracked type-aware corpus evidence is tied to the workspace version.
+   Run `node --test scripts/type-aware-corpus-freshness.test.mjs` right after
+   the bump. A failure means the evidence is too old: regenerate the corpus
+   gate, or extend the waiver in `benchmarks/type-aware-corpus-freshness.json`
+   with its tracking issue.
+
    The comparative performance numbers are the one artifact a version bump
    cannot regenerate: `benchmarks/compare.mjs` is the only script that runs
    both fallow and knip. Refresh
