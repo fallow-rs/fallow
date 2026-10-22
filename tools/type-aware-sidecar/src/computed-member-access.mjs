@@ -1,13 +1,8 @@
 import { ast } from "./backend.mjs";
-import { assignmentPatternType, patternOfKey } from "./shorthand-references.mjs";
+import { patternOfKey, patternSourceType } from "./shorthand-references.mjs";
 import { matchingSymbolEntries, recordSymbolUncertainty } from "./symbol-targets.mjs";
 
-const {
-  isComputedPropertyName,
-  isElementAccessExpression,
-  isObjectBindingPattern,
-  isStringLiteralLikeNode,
-} = ast;
+const { isComputedPropertyName, isElementAccessExpression, isStringLiteralLikeNode } = ast;
 
 const isComputedAccess = (node) =>
   isElementAccessExpression(node) &&
@@ -24,10 +19,7 @@ const computedReceiverType = (project, node) => {
   if (!isComputedKey(node)) return undefined;
   const pattern = patternOfKey(node.expression);
   if (!pattern) return undefined;
-  const type = isObjectBindingPattern(pattern)
-    ? project.checker.getTypeAtLocation(pattern)
-    : assignmentPatternType(project, pattern);
-  return type ?? null;
+  return patternSourceType(project, pattern) ?? null;
 };
 
 /**

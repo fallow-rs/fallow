@@ -1,10 +1,15 @@
 import { SyntaxKind, ast, sync } from "./backend.mjs";
-import { NODE_MODULES_SEGMENT, isJavaScriptFile, ownSourceFiles } from "./reference-names.mjs";
+import {
+  NODE_MODULES_SEGMENT,
+  isJavaScriptFile,
+  moduleBodyStatements,
+  ownSourceFiles,
+} from "./reference-names.mjs";
 import { declarationsForSymbol, resolveAlias, sourceFileIdentity } from "./semantic-identity.mjs";
 import {
-  assignmentPatternType,
   isAssignmentTarget,
   patternOfKey,
+  patternSourceType,
   qualifierExpression,
   referenceValueSymbol,
 } from "./shorthand-references.mjs";
@@ -24,7 +29,6 @@ const {
   isImportDeclaration,
   isImportEqualsDeclaration,
   isImportSpecifier,
-  isModuleBlock,
   isModuleDeclaration,
   isNamedImports,
   isNamespaceExport,
@@ -98,15 +102,18 @@ const isStaticAssignmentPattern = (literal) =>
       (isPropertyAssignment(property) && isLiteralKey(property.name)),
   );
 
-// A declared type or a default value changes the type that the pattern reads,
-// and then a key no longer resolves to the export.
+// The source is the initializer of a variable, or the default value of a
+// parameter. A declared type replaces the type of the source, and then a key
+// no longer resolves to the export.
 const isStaticDeclarationSource = (parent, node) =>
   parent.initializer === node && !parent.type && isStaticBindingPattern(parent.name);
 
-const isTypeAssertionOf = (query) =>
-  [isAsExpression, isSatisfiesExpression, isTypeAssertion].some((matches) =>
-    matches(query.parent),
-  ) && query.parent.type === query;
+const keyText = (name) => (isComputedPropertyName(name) ? name.expression.text : name.text);
+
+const bindingKeys = (pattern) =>
+  pattern.elements.map((element) => keyText(element.propertyName ?? element.name));
+
+const assignmentKeys = (literal) => literal.properties.map((property) => keyText(property.name));
 
 const isStaticPatternType = (query) =>
   (isParameterDeclaration(query.parent) || isVariableDeclaration(query.parent)) &&
@@ -114,38 +121,55 @@ const isStaticPatternType = (query) =>
   isStaticBindingPattern(query.parent.name);
 
 // A member read names one export, and the scan tracks a namespace that this
-// export holds by its name. `typeof ns` in a type assertion reads nothing, and
-// the scan classifies the asserted expression on its own.
+// export holds by its name. A type position cannot read a value: a value of
+// type `typeof ns` comes from a value use of `ns`, which the scan classifies on
+// its own. Only a type that a pattern destructures reads keys.
 const MEMBER_USE_RULES = [
   [isPropertyAccessExpression, (parent, node) => parent.expression === node],
   [isQualifiedName, (parent, node) => parent.left === node],
-  [isTypeQueryNode, (parent, node) => parent.exprName === node && isTypeAssertionOf(parent)],
+  [isTypeQueryNode, (parent, node) => parent.exprName === node && !isStaticPatternType(parent)],
 ];
 
+const isStaticAssignmentSource = (parent, node) =>
+  parent.operatorToken.kind === SyntaxKind.EqualsToken &&
+  parent.right === node &&
+  !isAssignmentTarget(parent) &&
+  isStaticAssignmentPattern(parent.left);
+
+const declarationKeys = (parent, node) =>
+  isStaticDeclarationSource(parent, node) ? bindingKeys(parent.name) : undefined;
+
 // A keyed read, such as a literal element access or a destructure with literal
-// keys, can pass on a nested namespace under another name.
+// keys, gives the export names that it reads. Such a read can pass on a nested
+// namespace under another name.
 const KEYED_USE_RULES = [
   [
     isElementAccessExpression,
-    (parent, node) => parent.expression === node && isLiteralKeyText(parent.argumentExpression),
+    (parent, node) =>
+      parent.expression === node && isLiteralKeyText(parent.argumentExpression)
+        ? [parent.argumentExpression.text]
+        : undefined,
   ],
-  [isVariableDeclaration, isStaticDeclarationSource],
-  [isParameterDeclaration, isStaticDeclarationSource],
+  [isVariableDeclaration, declarationKeys],
+  [isParameterDeclaration, declarationKeys],
   [
     isBinaryExpression,
     (parent, node) =>
-      parent.operatorToken.kind === SyntaxKind.EqualsToken &&
-      parent.right === node &&
-      !isAssignmentTarget(parent) &&
-      isStaticAssignmentPattern(parent.left),
+      isStaticAssignmentSource(parent, node) ? assignmentKeys(parent.left) : undefined,
   ],
-  [isTypeQueryNode, (parent, node) => parent.exprName === node && isStaticPatternType(parent)],
+  [
+    isTypeQueryNode,
+    (parent, node) =>
+      parent.exprName === node && isStaticPatternType(parent)
+        ? bindingKeys(parent.parent.name)
+        : undefined,
+  ],
 ];
 
-const matchesRule = (rules, expression) => {
+const ruleResult = (rules, expression) => {
   const parent = expression.parent;
   const rule = parent && rules.find(([matches]) => matches(parent));
-  return rule ? rule[1](parent, expression) : false;
+  return rule ? rule[1](parent, expression) : undefined;
 };
 
 const IMPORT_DECLARATION_PARENTS = [
@@ -198,33 +222,37 @@ const NAMESPACE_NAME_RULES = [
   [isImportEqualsDeclaration, (statement) => [statement.name]],
   [isExportDeclaration, namespaceExportNames],
   [isVariableStatement, requireBindingNames],
-  [isModuleDeclaration, (statement) => moduleBodyNames(statement.body)],
+  [
+    isModuleDeclaration,
+    (statement) => moduleBodyStatements(statement.body).flatMap(statementNamespaceNames),
+  ],
 ];
 
 const statementNamespaceNames = (statement) =>
   NAMESPACE_NAME_RULES.find(([matches]) => matches(statement))?.[1](statement) ?? [];
 
-const moduleBodyNames = (body) => {
-  if (body && isModuleDeclaration(body)) return moduleBodyNames(body.body);
-  return body && isModuleBlock(body) ? body.statements.flatMap(statementNamespaceNames) : [];
-};
-
-const importSpecifiers = (statement) => {
-  const bindings = isImportDeclaration(statement)
-    ? statement.importClause?.namedBindings
-    : undefined;
-  return bindings && isNamedImports(bindings) ? bindings.elements : [];
+// Each binding is a pair of the imported name and the local name. A default
+// import reads `default`, which `export * as default` can make a namespace.
+const importBindings = (statement) => {
+  const clause = isImportDeclaration(statement) ? statement.importClause : undefined;
+  const bindings = clause?.namedBindings;
+  const named =
+    bindings && isNamedImports(bindings)
+      ? bindings.elements.map((element) => [
+          (element.propertyName ?? element.name).text,
+          element.name.text,
+        ])
+      : [];
+  return clause?.name ? [["default", clause.name.text], ...named] : named;
 };
 
 // `import { inner as local }` binds a namespace that a barrel re-exports under
 // a new name. Each pass adds one level of renames.
-const addRenamedImports = (names, specifiers) => {
+const addRenamedImports = (names, bindings) => {
   let size = -1;
   while (size !== names.size) {
     size = names.size;
-    specifiers
-      .filter((specifier) => names.has((specifier.propertyName ?? specifier.name).text))
-      .forEach((specifier) => names.add(specifier.name.text));
+    bindings.filter(([imported]) => names.has(imported)).forEach(([, local]) => names.add(local));
   }
   return names;
 };
@@ -237,7 +265,7 @@ const programNamespaceNames = (project) => {
     .flatMap(statementNamespaceNames)
     .filter((name) => name && isIdentifier(name))
     .map((name) => name.text);
-  return addRenamedImports(new Set(names), statements.flatMap(importSpecifiers));
+  return addRenamedImports(new Set(names), statements.flatMap(importBindings));
 };
 
 const caches = new WeakMap();
@@ -302,17 +330,23 @@ const nestedNamespaceModules = (project, cache, moduleSymbol) => {
   if (!cache.nestedModules.has(moduleSymbol)) {
     const nested = project.checker
       .getExportsOfModule(moduleSymbol)
-      .map((exported) => namespaceModule(project, cache, exported))
-      .filter(Boolean);
+      .map((exported) => ({
+        name: exported.name,
+        module: namespaceModule(project, cache, exported),
+      }))
+      .filter(({ module }) => module);
     cache.nestedModules.set(moduleSymbol, nested);
   }
   return cache.nestedModules.get(moduleSymbol);
 };
 
 const recordExpressionUse = (state, project, cache, expression, moduleSymbol) => {
-  if (matchesRule(MEMBER_USE_RULES, expression)) return;
-  const escaped = matchesRule(KEYED_USE_RULES, expression)
+  if (ruleResult(MEMBER_USE_RULES, expression)) return;
+  const keys = ruleResult(KEYED_USE_RULES, expression);
+  const escaped = keys
     ? nestedNamespaceModules(project, cache, moduleSymbol)
+        .filter(({ name }) => keys.includes(name))
+        .map(({ module }) => module)
     : [moduleSymbol];
   escaped.forEach((escapedModule) => recordModuleEscape(state, project, cache, escapedModule));
 };
@@ -419,18 +453,23 @@ const moduleIdentityOfSymbol = (project, symbol) => {
 const moduleIdentityOfType = (project, type) =>
   type ? moduleIdentityOfSymbol(project, type.getSymbol()) : undefined;
 
-const patternSourceType = (project, pattern) =>
-  isObjectBindingPattern(pattern)
-    ? project.checker.getTypeAtLocation(pattern)
-    : assignmentPatternType(project, pattern);
+// Many reads share one qualifier symbol, such as `ns` in `(ns as T).name`.
+const symbolModuleIdentities = new WeakMap();
+
+const aliasModuleIdentity = (project, symbol) => {
+  if (!symbol) return undefined;
+  const bySymbol = symbolModuleIdentities.get(project) ?? new Map();
+  symbolModuleIdentities.set(project, bySymbol);
+  if (!bySymbol.has(symbol)) {
+    bySymbol.set(symbol, moduleIdentityOfSymbol(project, resolveAlias(project.checker, symbol)));
+  }
+  return bySymbol.get(symbol);
+};
 
 const qualifierModuleIdentity = (project, qualifier) => {
-  const symbol = resolveAlias(
-    project.checker,
-    project.checker.getSymbolAtLocation(innermostExpression(qualifier)),
-  );
+  const symbol = project.checker.getSymbolAtLocation(innermostExpression(qualifier));
   return (
-    moduleIdentityOfSymbol(project, symbol) ??
+    aliasModuleIdentity(project, symbol) ??
     (isQualifiedName(qualifier)
       ? undefined
       : moduleIdentityOfType(project, project.checker.getTypeAtLocation(qualifier)))

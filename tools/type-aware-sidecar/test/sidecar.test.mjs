@@ -1951,7 +1951,8 @@ const NAMESPACE_USE_CASES = [
   ["export-specifier", "export { ns };\nexport const out = ns.x;", "escape"],
   ["default-export", "export default ns;\nexport const out = ns.x;", "escape"],
   ["shorthand-property", "export const bag = { ns };\nexport const out = ns.x;", "escape"],
-  ["type-query", "export const out = ns.x;\nexport type Keys = keyof typeof ns;", "escape"],
+  ["type-query", "export const out = ns.x;\nexport type Keys = keyof typeof ns;", "static"],
+  ["type-alias", "export const out = ns.x;\nexport type Api = typeof ns;", "static"],
   [
     "computed-access",
     "declare const k: keyof typeof ns;\nexport const out = [ns[k], ns.x];",
@@ -1991,6 +1992,26 @@ const NAMESPACE_USE_CASES = [
   ],
   ["namespace-block", "namespace N {\n  import z = ns;\n  console.log(z.x, z);\n}", "escape"],
   ["dynamic-import-star", 'void import("./barrel");', "opaque", "starOnly"],
+  [
+    "default-namespace-import",
+    'import d from "./barrel";\nconsole.log(d.x, d);',
+    "escape",
+    "defaultBarrel",
+  ],
+  [
+    "keyed-barrel-destructure",
+    "const { z } = outer;\nexport const out = [z, outer.inner.x];",
+    "static",
+    "outer",
+    { "barrel.ts": 'export * as inner from "./exp";\nexport const z = 1;\n' },
+  ],
+  [
+    "keyed-barrel-element",
+    'export const out = [outer["z"], outer.inner.x];',
+    "static",
+    "outer",
+    { "barrel.ts": 'export * as inner from "./exp";\nexport const z = 1;\n' },
+  ],
   ["dynamic-import-nested", 'void import("./barrel");', "opaque", "named"],
 ];
 
@@ -2000,6 +2021,7 @@ const NAMESPACE_IMPORTS = {
   star: 'import * as outer from "./barrel";\n',
   named: "",
   starOnly: "",
+  defaultBarrel: "",
   false: "",
 };
 const NAMESPACE_BARRELS = {
@@ -2007,6 +2029,7 @@ const NAMESPACE_BARRELS = {
   star: "export *",
   named: "export * as inner",
   starOnly: "export *",
+  defaultBarrel: "export * as default",
 };
 const NAMESPACE_OUTCOMES = {
   static: ["confirmed-used", "confirmed-no-static-references", null],

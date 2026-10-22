@@ -142,7 +142,7 @@ test("symbol-use scan cost does not grow with unrelated identifier references", 
   assert.deepEqual(many.counts, few.counts);
 });
 
-const createNamespaceFixture = (referenceCount) => {
+const createNamespaceFixture = (referenceCount, line) => {
   const root = mkdtempSync(path.join(tmpdir(), "fallow-type-aware-scan-cost-"));
   write(root, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true } }));
   write(
@@ -157,10 +157,7 @@ const createNamespaceFixture = (referenceCount) => {
     [
       'import * as ns from "./values";',
       'import * as outer from "./barrel";',
-      ...Array.from(
-        { length: referenceCount },
-        (_, index) => `console.log(ns.helper(${index}), outer.inner.helper(${index}), ns);`,
-      ),
+      ...Array.from({ length: referenceCount }, (_, index) => line(index)),
       "",
     ].join("\n"),
   );
@@ -182,8 +179,8 @@ const exportQuery = (id, name, line) => ({
   framework_contracts: [],
 });
 
-const scanNamespaceFixture = (referenceCount) => {
-  const root = createNamespaceFixture(referenceCount);
+const scanNamespaceFixture = (referenceCount, line) => {
+  const root = createNamespaceFixture(referenceCount, line);
   try {
     const request = parseRequest({
       protocol_version: WIRE_PROTOCOL_VERSION,
@@ -191,7 +188,7 @@ const scanNamespaceFixture = (referenceCount) => {
       root,
       projects: ["tsconfig.json"],
       evidence_limit: 40,
-      queries: [exportQuery(0, "target", 1)],
+      queries: [exportQuery(0, "target", 1), exportQuery(1, "helper", 2)],
     });
     return countCalls(() => analyzeSemanticQueries(request));
   } finally {
@@ -199,15 +196,27 @@ const scanNamespaceFixture = (referenceCount) => {
   }
 };
 
-test("namespace use scan cost does not grow with namespace references", () => {
-  const few = scanNamespaceFixture(4);
-  const many = scanNamespaceFixture(64);
+const growth = (line) => {
+  const few = scanNamespaceFixture(4, line);
+  const many = scanNamespaceFixture(64, line);
+  return Object.fromEntries(
+    Object.keys(many.counts).map((name) => [name, many.counts[name] - few.counts[name]]),
+  );
+};
 
-  for (const { result } of [few, many]) {
-    assert.deepEqual(
-      result.results.map(({ queryId, assertion }) => [queryId, assertion]),
-      [[0, "no-confirmed-use"]],
-    );
+test("namespace escape cost does not grow with namespace references", () => {
+  assert.deepEqual(
+    growth(() => "console.log(ns, outer.inner, outer);"),
+    { realpath: 0, getAliasedSymbol: 0, getSymbolAtLocation: 0 },
+  );
+});
+
+test("a wrapped or nested namespace read costs as much as a plain member read", () => {
+  const plain = growth((index) => `console.log(ns.helper(${index}), ns.helper(${index}));`);
+  const wrapped = growth(
+    (index) => `console.log((ns as typeof ns).helper(${index}), outer.inner.helper(${index}));`,
+  );
+  for (const [name, count] of Object.entries(wrapped)) {
+    assert.ok(count <= plain[name], `${name}: ${count} > ${plain[name]}`);
   }
-  assert.deepEqual(many.counts, few.counts);
 });

@@ -30,9 +30,10 @@ const exportNames = ({ exportClause }) => {
   return [exportClause.name];
 };
 
-const moduleBodyNames = (body) => {
-  if (body && isModuleDeclaration(body)) return moduleBodyNames(body.body);
-  return body && isModuleBlock(body) ? body.statements.flatMap(statementAliasNames) : [];
+/** Returns the statements of a `namespace` or `declare module` body, also when nested. */
+export const moduleBodyStatements = (body) => {
+  if (body && isModuleDeclaration(body)) return moduleBodyStatements(body.body);
+  return body && isModuleBlock(body) ? body.statements : [];
 };
 
 const statementAliasNames = (statement) => {
@@ -41,7 +42,9 @@ const statementAliasNames = (statement) => {
     return [statement.name];
   }
   if (isExportDeclaration(statement)) return exportNames(statement);
-  if (isModuleDeclaration(statement)) return moduleBodyNames(statement.body);
+  if (isModuleDeclaration(statement)) {
+    return moduleBodyStatements(statement.body).flatMap(statementAliasNames);
+  }
   return [];
 };
 

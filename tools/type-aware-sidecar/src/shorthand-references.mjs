@@ -136,7 +136,7 @@ const propertyNameText = (name) =>
 
 // Only a direct `=` source and nested object patterns resolve. Array and loop
 // patterns give undefined, and the caller records an uncertainty for them.
-export const assignmentPatternType = (project, literal) => {
+const assignmentPatternType = (project, literal) => {
   const parent = literal.parent;
   if (isBinaryExpression(parent)) {
     // A binary that is itself a pattern target is a default value, and the
@@ -177,6 +177,12 @@ export const patternOfKey = (node) => {
   const literal = assignmentKeyProperty(node)?.parent;
   return literal && isAssignmentTarget(literal) ? literal : undefined;
 };
+
+/** Returns the type of the source that a binding or an assignment pattern reads. */
+export const patternSourceType = (project, pattern) =>
+  isObjectBindingPattern(pattern)
+    ? project.checker.getTypeAtLocation(pattern)
+    : assignmentPatternType(project, pattern);
 
 /** Returns true when a string literal names the member that an access or a pattern reads. */
 export const isLiteralMemberName = (node) =>

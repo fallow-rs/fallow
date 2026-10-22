@@ -245,12 +245,16 @@ that owning TypeScript project remains advisory. A namespace object, such as
 `ns` after `import * as ns`, `import ns = require()`, `export * as ns` or a
 JavaScript `require()`, can read every export of its module. A static member
 read of the object, such as `ns.name`, `ns["name"]`, `ns.Type` or a destructure
-with literal keys, credits the export that it names. Any other use, such as a
-call argument, an alias, an `export { ns }`, a rest element,
-`keyof typeof ns` or a computed key, records `dynamic-behavior` for every
-export that the object can reach, re-exports included. A computed destructure
-key, such as `const { [key]: run } = service`, records `dynamic-member-access`
-as `service[key]` does. Fallow also abstains when no project can be selected.
+with literal keys, credits the export that it names. A type such as
+`typeof ns` reads no value. Any other use, such as a call argument, an alias,
+an `export { ns }`, a rest element or a computed key, records
+`dynamic-behavior` for every export that the object can reach, re-exports
+included. A literal key that names a nested namespace, such as
+`const { inner } = outer`, records it for the exports of that nested module.
+A dynamic import, such as `import("./barrel")`, does the same for the module
+that it loads. A computed destructure key, such as
+`const { [key]: run } = service`, records `dynamic-member-access` as
+`service[key]` does. Fallow also abstains when no project can be selected.
 If an external framework declaration cannot be attributed to an exact package,
 Fallow records `framework-contract-provenance` and keeps the candidate.
 Warnings and stable reason codes explain each abstention class.
