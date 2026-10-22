@@ -8,10 +8,8 @@
 use std::path::Path;
 
 use fallow_graph::resolve::extract_package_name;
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{Argument, CallExpression, Expression, ObjectExpression};
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use super::{Plugin, PluginResult, config_parser};
@@ -130,29 +128,28 @@ struct CollectedConfig {
 
 fn collect_config(source: &str, config_path: &Path) -> CollectedConfig {
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let mut collector = ConfigCollector::default();
 
-    let mut collector = ConfigCollector::default();
+        if let Some(config) = config_parser::find_config_object(&parsed.program) {
+            collector.root_dir = config_parser::find_property(config, "root")
+                .and_then(|prop| config_parser::expression_to_path_string(&prop.value));
+            collector.output_data = config_parser::find_property(config, "output")
+                .and_then(|prop| config_parser::object_expression(&prop.value))
+                .and_then(|output| config_parser::find_property(output, "data"))
+                .and_then(|prop| config_parser::expression_to_path_string(&prop.value));
+        }
 
-    if let Some(config) = config_parser::find_config_object(&parsed.program) {
-        collector.root_dir = config_parser::find_property(config, "root")
-            .and_then(|prop| config_parser::expression_to_path_string(&prop.value));
-        collector.output_data = config_parser::find_property(config, "output")
-            .and_then(|prop| config_parser::object_expression(&prop.value))
-            .and_then(|output| config_parser::find_property(output, "data"))
-            .and_then(|prop| config_parser::expression_to_path_string(&prop.value));
-    }
+        collector.visit_program(&parsed.program);
+        collector.patterns.sort();
+        collector.patterns.dedup();
 
-    collector.visit_program(&parsed.program);
-    collector.patterns.sort();
-    collector.patterns.dedup();
-
-    CollectedConfig {
-        root_dir: collector.root_dir,
-        output_data: collector.output_data,
-        patterns: collector.patterns,
-    }
+        CollectedConfig {
+            root_dir: collector.root_dir,
+            output_data: collector.output_data,
+            patterns: collector.patterns,
+        }
+    })
 }
 
 #[derive(Default)]

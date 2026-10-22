@@ -3,7 +3,7 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ModuleInfo, VisibilityTag};
 
-use crate::parse::parse_source_to_module;
+use crate::parse_source_to_module;
 
 /// Parse as a .js file (not .tsx) to test JSX retry fallback logic.
 fn parse_as_js(source: &str) -> ModuleInfo {

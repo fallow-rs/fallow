@@ -7,10 +7,8 @@
 
 use std::path::Path;
 
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{Expression, ObjectProperty, PropertyKey};
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 /// Return `true` when `source` contains an object property
@@ -21,11 +19,11 @@ pub(super) fn source_sets_packages_external(source: &str, path: &Path) -> bool {
         return false;
     }
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    let mut finder = PackagesExternalFinder { found: false };
-    finder.visit_program(&parsed.program);
-    finder.found
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let mut finder = PackagesExternalFinder { found: false };
+        finder.visit_program(&parsed.program);
+        finder.found
+    })
 }
 
 struct PackagesExternalFinder {

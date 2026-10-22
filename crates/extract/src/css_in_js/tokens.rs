@@ -48,7 +48,6 @@
 //!
 use std::path::Path;
 
-use oxc_allocator::Allocator;
 use oxc_ast::{
     AstKind,
     ast::{
@@ -62,7 +61,6 @@ use oxc_ast::{
     },
 };
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_semantic::{ReferenceId, ScopeFlags, Scoping, SemanticBuilder, SymbolId};
 use oxc_span::{GetSpan, SourceType, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -117,21 +115,20 @@ pub enum CssInJsTokenOrigin {
 #[must_use]
 pub fn css_in_js_token_defs(source: &str, path: &Path) -> Vec<CssInJsTokenDef> {
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, source, source_type).parse();
-
-    let mut collector = TokenDefCollector::new(source);
-    collector.build_import_map(&ret.program);
-    if collector.imports.is_empty() {
-        return Vec::new();
-    }
-    let semantic_return = SemanticBuilder::new().build(&ret.program);
-    collector.build_const_object_map(&ret.program, semantic_return.semantic.scoping());
-    collector.collecting_mutations = true;
-    collector.visit_program(&ret.program);
-    collector.collecting_mutations = false;
-    collector.visit_program(&ret.program);
-    collector.defs
+    crate::parse_bounded_or_default(source, source_type, |ret| {
+        let mut collector = TokenDefCollector::new(source);
+        collector.build_import_map(&ret.program);
+        if collector.imports.is_empty() {
+            return Vec::new();
+        }
+        let semantic_return = SemanticBuilder::new().build(&ret.program);
+        collector.build_const_object_map(&ret.program, semantic_return.semantic.scoping());
+        collector.collecting_mutations = true;
+        collector.visit_program(&ret.program);
+        collector.collecting_mutations = false;
+        collector.visit_program(&ret.program);
+        collector.defs
+    })
 }
 
 /// One located consumer of a CSS-in-JS token: the defined LEAF token path it
@@ -153,15 +150,14 @@ pub struct TokenConsumerHit {
 #[must_use]
 pub fn css_in_js_theme_token_defs(source: &str, path: &Path) -> Vec<CssInJsTokenDef> {
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, source, source_type).parse();
-
-    let mut collector = ThemeDefCollector {
-        lines: LineCounter::new(source),
-        defs: Vec::new(),
-    };
-    collector.visit_program(&ret.program);
-    collector.defs
+    crate::parse_bounded_or_default(source, source_type, |ret| {
+        let mut collector = ThemeDefCollector {
+            lines: LineCounter::new(source),
+            defs: Vec::new(),
+        };
+        collector.visit_program(&ret.program);
+        collector.defs
+    })
 }
 
 /// One attribution query to run against a single parsed consumer source. A scan
@@ -229,40 +225,40 @@ pub fn css_in_js_consumer_scan(
         return Vec::new();
     }
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, source, source_type).parse();
-    let mut out = Vec::new();
-    if queries.iter().any(ConsumerQuery::is_batched) {
-        let mut collector = BatchedBindingCollector {
-            lines: LineCounter::new(source),
-            queries,
-            namespaces: FxHashSet::default(),
-            theme_functions: FxHashSet::default(),
-            stylex_imports: FxHashMap::default(),
-            member_queries: FxHashMap::default(),
-            theme_queries: FxHashMap::default(),
-            root_reference_spans: FxHashSet::default(),
-            static_values: FxHashMap::default(),
-            static_alias_neighbors: FxHashMap::default(),
-            collecting_mutations: false,
-            hits: Vec::new(),
-        };
-        collector.build_import_map(&ret.program);
-        collector.build_query_indexes();
-        collector.build_static_value_map(&ret.program);
-        collector.build_root_reference_spans(&ret.program);
-        collector.collecting_mutations = true;
-        collector.visit_program(&ret.program);
-        collector.collecting_mutations = false;
-        collector.visit_program(&ret.program);
-        out.extend(collector.hits);
-    }
-    for (idx, query) in queries.iter().enumerate() {
-        if !query.is_batched() {
-            run_consumer_query(query, source, &ret.program, idx, &mut out);
+    crate::parse_bounded_or_default(source, source_type, |ret| {
+        let mut out = Vec::new();
+        if queries.iter().any(ConsumerQuery::is_batched) {
+            let mut collector = BatchedBindingCollector {
+                lines: LineCounter::new(source),
+                queries,
+                namespaces: FxHashSet::default(),
+                theme_functions: FxHashSet::default(),
+                stylex_imports: FxHashMap::default(),
+                member_queries: FxHashMap::default(),
+                theme_queries: FxHashMap::default(),
+                root_reference_spans: FxHashSet::default(),
+                static_values: FxHashMap::default(),
+                static_alias_neighbors: FxHashMap::default(),
+                collecting_mutations: false,
+                hits: Vec::new(),
+            };
+            collector.build_import_map(&ret.program);
+            collector.build_query_indexes();
+            collector.build_static_value_map(&ret.program);
+            collector.build_root_reference_spans(&ret.program);
+            collector.collecting_mutations = true;
+            collector.visit_program(&ret.program);
+            collector.collecting_mutations = false;
+            collector.visit_program(&ret.program);
+            out.extend(collector.hits);
         }
-    }
-    out
+        for (idx, query) in queries.iter().enumerate() {
+            if !query.is_batched() {
+                run_consumer_query(query, source, &ret.program, idx, &mut out);
+            }
+        }
+        out
+    })
 }
 
 struct BatchedBindingCollector<'a, 'q, 'v> {

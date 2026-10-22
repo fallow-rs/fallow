@@ -5,11 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use fallow_extract::visitor::extract_import_from_callable;
-use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
 
@@ -442,7 +440,7 @@ fn extract_config_object_nested(
     source: &str,
     path: &Path,
     object_path: &[&str],
-    extract_fn: impl Fn(&ObjectExpression<'_>) -> Option<Vec<String>>,
+    extract_fn: impl Fn(&ObjectExpression<'_>) -> Option<Vec<String>> + Sync,
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
@@ -1165,25 +1163,21 @@ pub(crate) fn parent_relative_config_path(
 /// parentheses to produce an AST compatible with `find_config_object`. The native
 /// JSON source type in Oxc produces a different AST structure that our helpers
 /// don't handle.
-pub(crate) fn extract_from_source<T>(
+pub(crate) fn extract_from_source<T: Send>(
     source: &str,
     path: &Path,
-    extractor: impl FnOnce(&Program) -> Option<T>,
+    extractor: impl FnOnce(&Program) -> Option<T> + Send,
 ) -> Option<T> {
-    let source_type = SourceType::from_path(path).unwrap_or_default();
-    let alloc = Allocator::default();
-
     let is_json = path
         .extension()
         .is_some_and(|ext| ext == "json" || ext == "jsonc");
+    let walk = |parsed: &oxc_parser::ParserReturn<'_>| extractor(&parsed.program);
     if is_json {
         let wrapped = wrap_json_as_expression(source);
-        let parsed = Parser::new(&alloc, &wrapped, SourceType::mjs()).parse();
-        return extractor(&parsed.program);
+        return fallow_extract::parse_bounded_or_default(&wrapped, SourceType::mjs(), walk);
     }
-
-    let parsed = Parser::new(&alloc, source, source_type).parse();
-    extractor(&parsed.program)
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    fallow_extract::parse_bounded_or_default(source, source_type, walk)
 }
 
 /// Wrap JSON or JSONC source in parentheses so Oxc parses it as one JavaScript

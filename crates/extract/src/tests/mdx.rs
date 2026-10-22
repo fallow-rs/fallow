@@ -2,7 +2,7 @@ use std::path::Path;
 
 use fallow_types::discover::FileId;
 
-use crate::parse::parse_source_to_module;
+use crate::parse_source_to_module;
 
 #[test]
 fn extracts_mdx_imports() {

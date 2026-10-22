@@ -281,42 +281,40 @@ fn normalize_tsconfig_path_alias(
 
 /// Extract `compilerOptions.plugins[].name` from a tsconfig as referenced dependencies.
 fn parse_tsconfig_plugins(source: &str, path: &Path, result: &mut PluginResult) {
-    use oxc_allocator::Allocator;
     use oxc_ast::ast::Expression;
-    use oxc_parser::Parser;
+
     use oxc_span::SourceType;
 
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let Some(obj) = config_parser::find_config_object(&parsed.program) else {
+            return;
+        };
 
-    let Some(obj) = config_parser::find_config_object(&parsed.program) else {
-        return;
-    };
+        let Some(compiler_opts) = find_object_property_object(obj, "compilerOptions") else {
+            return;
+        };
 
-    let Some(compiler_opts) = find_object_property_object(obj, "compilerOptions") else {
-        return;
-    };
+        let plugins_arr = compiler_opts.properties.iter().find_map(|prop| {
+            use oxc_ast::ast::ObjectPropertyKind;
+            if let ObjectPropertyKind::ObjectProperty(p) = prop
+                && object_property_key_is(&p.key, "plugins")
+                && let Expression::ArrayExpression(arr) = &p.value
+            {
+                return Some(arr);
+            }
+            None
+        });
+        let Some(plugins_arr) = plugins_arr else {
+            return;
+        };
 
-    let plugins_arr = compiler_opts.properties.iter().find_map(|prop| {
-        use oxc_ast::ast::ObjectPropertyKind;
-        if let ObjectPropertyKind::ObjectProperty(p) = prop
-            && object_property_key_is(&p.key, "plugins")
-            && let Expression::ArrayExpression(arr) = &p.value
-        {
-            return Some(arr);
+        for el in &plugins_arr.elements {
+            if let Some(Expression::ObjectExpression(plugin_obj)) = el.as_expression() {
+                collect_tsconfig_plugin_name(plugin_obj, result);
+            }
         }
-        None
     });
-    let Some(plugins_arr) = plugins_arr else {
-        return;
-    };
-
-    for el in &plugins_arr.elements {
-        if let Some(Expression::ObjectExpression(plugin_obj)) = el.as_expression() {
-            collect_tsconfig_plugin_name(plugin_obj, result);
-        }
-    }
 }
 
 /// True when an object-property key is the static identifier or string literal `name`.
@@ -365,51 +363,50 @@ fn collect_tsconfig_plugin_name(
 
 /// Extract `references[].path` from a tsconfig and add them as setup files.
 fn parse_tsconfig_references(source: &str, path: &Path, root: &Path, result: &mut PluginResult) {
-    use oxc_allocator::Allocator;
     use oxc_ast::ast::{Expression, ObjectPropertyKind, PropertyKey};
-    use oxc_parser::Parser;
+
     use oxc_span::SourceType;
 
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let Some(obj) = config_parser::find_config_object(&parsed.program) else {
+            return;
+        };
 
-    let Some(obj) = config_parser::find_config_object(&parsed.program) else {
-        return;
-    };
-
-    for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(p) = prop {
-            let is_references = match &p.key {
-                PropertyKey::StaticIdentifier(id) => id.name == "references",
-                PropertyKey::StringLiteral(s) => s.value == "references",
-                _ => false,
-            };
-            if !is_references {
-                continue;
-            }
-            if let Expression::ArrayExpression(arr) = &p.value {
-                for el in &arr.elements {
-                    if let Some(Expression::ObjectExpression(ref_obj)) = el.as_expression() {
-                        for ref_prop in &ref_obj.properties {
-                            if let ObjectPropertyKind::ObjectProperty(rp) = ref_prop {
-                                let is_path = match &rp.key {
-                                    PropertyKey::StaticIdentifier(id) => id.name == "path",
-                                    PropertyKey::StringLiteral(s) => s.value == "path",
-                                    _ => false,
-                                };
-                                if is_path && let Expression::StringLiteral(s) = &rp.value {
-                                    let ref_path = s.value.to_string();
-                                    let ref_target = root.join(ref_path.trim_start_matches("./"));
-                                    let tsconfig_path = if ref_target
-                                        .extension()
-                                        .is_some_and(|ext| ext == "json")
-                                    {
-                                        ref_target
-                                    } else {
-                                        ref_target.join("tsconfig.json")
+        for prop in &obj.properties {
+            if let ObjectPropertyKind::ObjectProperty(p) = prop {
+                let is_references = match &p.key {
+                    PropertyKey::StaticIdentifier(id) => id.name == "references",
+                    PropertyKey::StringLiteral(s) => s.value == "references",
+                    _ => false,
+                };
+                if !is_references {
+                    continue;
+                }
+                if let Expression::ArrayExpression(arr) = &p.value {
+                    for el in &arr.elements {
+                        if let Some(Expression::ObjectExpression(ref_obj)) = el.as_expression() {
+                            for ref_prop in &ref_obj.properties {
+                                if let ObjectPropertyKind::ObjectProperty(rp) = ref_prop {
+                                    let is_path = match &rp.key {
+                                        PropertyKey::StaticIdentifier(id) => id.name == "path",
+                                        PropertyKey::StringLiteral(s) => s.value == "path",
+                                        _ => false,
                                     };
-                                    result.setup_files.push(tsconfig_path);
+                                    if is_path && let Expression::StringLiteral(s) = &rp.value {
+                                        let ref_path = s.value.to_string();
+                                        let ref_target =
+                                            root.join(ref_path.trim_start_matches("./"));
+                                        let tsconfig_path = if ref_target
+                                            .extension()
+                                            .is_some_and(|ext| ext == "json")
+                                        {
+                                            ref_target
+                                        } else {
+                                            ref_target.join("tsconfig.json")
+                                        };
+                                        result.setup_files.push(tsconfig_path);
+                                    }
                                 }
                             }
                         }
@@ -417,7 +414,7 @@ fn parse_tsconfig_references(source: &str, path: &Path, root: &Path, result: &mu
                 }
             }
         }
-    }
+    });
 }
 
 #[cfg(test)]

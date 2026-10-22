@@ -198,6 +198,7 @@ jobs:
               - 'crates/cli/src/impact.rs'
               - 'crates/cli/src/lib.rs'
               - 'crates/cli/src/license/mod.rs'
+              - 'crates/cli/src/rayon_pool.rs'
               - 'crates/cli/src/setup_hooks.rs'
               - 'crates/cli/src/similar_code_cli.rs'
               - 'crates/cli/src/telemetry.rs'

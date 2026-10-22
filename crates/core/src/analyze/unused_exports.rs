@@ -267,34 +267,34 @@ fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> 
         return FxHashSet::default();
     };
 
-    let allocator = oxc_allocator::Allocator::default();
-    let parser_return = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
-    let semantic_ret = oxc_semantic::SemanticBuilder::new()
-        .with_build_nodes(true)
-        .build(&parser_return.program);
-    let semantic = semantic_ret.semantic;
-    let scoping = semantic.scoping();
-    let nodes = semantic.nodes();
-    let root_scope = scoping.root_scope_id();
+    fallow_extract::parse_bounded_or_default(&source, source_type, |parser_return| {
+        let semantic_ret = oxc_semantic::SemanticBuilder::new()
+            .with_build_nodes(true)
+            .build(&parser_return.program);
+        let semantic = semantic_ret.semantic;
+        let scoping = semantic.scoping();
+        let nodes = semantic.nodes();
+        let root_scope = scoping.root_scope_id();
 
-    let mut used = FxHashSet::default();
-    for export in module.exports.iter() {
-        let Some(local_name) = local_export_binding_name(export) else {
-            continue;
-        };
-        let name = oxc_str::Ident::from(local_name);
-        let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
-            continue;
-        };
-        let has_real_use = scoping
-            .get_resolved_references(symbol_id)
-            .any(|reference| !is_inside_export_specifier(nodes, reference.node_id()));
-        if has_real_use {
-            used.insert(export.name.to_string());
+        let mut used = FxHashSet::default();
+        for export in module.exports.iter() {
+            let Some(local_name) = local_export_binding_name(export) else {
+                continue;
+            };
+            let name = oxc_str::Ident::from(local_name);
+            let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
+                continue;
+            };
+            let has_real_use = scoping
+                .get_resolved_references(symbol_id)
+                .any(|reference| !is_inside_export_specifier(nodes, reference.node_id()));
+            if has_real_use {
+                used.insert(export.name.to_string());
+            }
         }
-    }
 
-    used
+        used
+    })
 }
 
 /// Walk ancestors of `node_id` and return `true` if the reference originates

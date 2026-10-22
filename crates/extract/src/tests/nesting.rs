@@ -3,7 +3,7 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleInfo;
 
-use crate::parse::parse_source_to_module;
+use crate::parse_source_to_module;
 
 /// Far past the depth at which the Oxc parser overflows a 16 MiB stack.
 const DEEP: usize = 20_000;

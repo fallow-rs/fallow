@@ -219,33 +219,36 @@ struct Bucket {
 #[must_use]
 pub fn css_in_js_object_sheets(source: &str, path: &Path) -> CssInJsObjectSheets {
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    // A best-effort parse: even with recoverable syntax errors oxc returns a
-    // partial program, and the walk lifts whatever object styles it can reach
-    // (matching `compute_css_analytics`'s error-recovery philosophy).
-    let ret = Parser::new(&allocator, source, source_type).parse();
-    if !has_recognized_value_import(&ret.program) {
-        return CssInJsObjectSheets::default();
-    }
-    let semantic_ret = SemanticBuilder::new().build(&ret.program);
-    let scoping = semantic_ret.semantic.scoping();
+    crate::parse_bounded(source, || {
+        let allocator = Allocator::default();
+        // A best-effort parse: even with recoverable syntax errors oxc returns a
+        // partial program, and the walk lifts whatever object styles it can reach
+        // (matching `compute_css_analytics`'s error-recovery philosophy).
+        let ret = Parser::new(&allocator, source, source_type).parse();
+        if !has_recognized_value_import(&ret.program) {
+            return CssInJsObjectSheets::default();
+        }
+        let semantic_ret = SemanticBuilder::new().build(&ret.program);
+        let scoping = semantic_ret.semantic.scoping();
 
-    let mut collector = ObjectStyleCollector::new(source);
-    collector.build_import_map(&ret.program, scoping);
-    if collector.imports.is_empty() {
-        // No recognized CSS-in-JS import binding: provenance gate is closed, so
-        // nothing can fire. Cheap exit before the call walk.
-        return CssInJsObjectSheets::default();
-    }
-    if collector
-        .imports
-        .values()
-        .any(|(library, _)| *library == Lib::StyleX)
-    {
-        collector.build_const_string_map(&ret.program, scoping);
-    }
-    collector.visit_program(&ret.program);
-    collector.finish()
+        let mut collector = ObjectStyleCollector::new(source);
+        collector.build_import_map(&ret.program, scoping);
+        if collector.imports.is_empty() {
+            // No recognized CSS-in-JS import binding: provenance gate is closed, so
+            // nothing can fire. Cheap exit before the call walk.
+            return CssInJsObjectSheets::default();
+        }
+        if collector
+            .imports
+            .values()
+            .any(|(library, _)| *library == Lib::StyleX)
+        {
+            collector.build_const_string_map(&ret.program, scoping);
+        }
+        collector.visit_program(&ret.program);
+        collector.finish()
+    })
+    .unwrap_or_default()
 }
 
 fn has_recognized_value_import(program: &Program<'_>) -> bool {

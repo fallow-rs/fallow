@@ -487,10 +487,13 @@ fn statement_block_is_accepted(block: &[(usize, &str)]) -> bool {
 /// "Accept" means the parse was not fatal, the criterion the whole-body parse
 /// uses: a head the parser recovers from is classified the way that parse
 /// would have treated it anyway.
+///
+/// The MDX scan also runs outside extraction (search visibility reads the
+/// statements of an MDX file), so this parse sizes its own stack.
 fn parses_as_typescript(source: &str) -> bool {
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
-    !parsed.fatal_error && parsed.diagnostics.is_empty()
+    crate::parse_bounded_or_default(source, SourceType::tsx(), |parsed| {
+        !parsed.fatal_error && parsed.diagnostics.is_empty()
+    })
 }
 
 fn lines_with_offsets(source: &str) -> impl Iterator<Item = (usize, &str)> {

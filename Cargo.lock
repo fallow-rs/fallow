@@ -1281,7 +1281,6 @@ dependencies = [
  "globset",
  "ignore",
  "indicatif",
- "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",

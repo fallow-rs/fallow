@@ -431,15 +431,22 @@ fn trim_script_whitespace(text: &str) -> &str {
 /// parse has none.
 #[must_use]
 fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
-    use oxc_ast::ast::{ImportDeclarationSpecifier, Statement};
-    use oxc_ast_visit::Visit;
-
     let Ok(source_type) = oxc_span::SourceType::from_path(path) else {
         return FxHashSet::default();
     };
-    if fallow_extract::exceeds_nesting_limit(source) {
-        return FxHashSet::default();
-    }
+    fallow_extract::parse_bounded(source, || {
+        forwarded_import_bindings_unbounded(source, source_type)
+    })
+    .unwrap_or_default()
+}
+
+fn forwarded_import_bindings_unbounded(
+    source: &str,
+    source_type: oxc_span::SourceType,
+) -> FxHashSet<String> {
+    use oxc_ast::ast::{ImportDeclarationSpecifier, Statement};
+    use oxc_ast_visit::Visit;
+
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
     if parsed.fatal_error {
@@ -767,9 +774,16 @@ impl TopLevelStatement {
 /// The top-level statements of a script. A script that does not parse has
 /// none.
 fn top_level_statements(source: &str, source_type: oxc_span::SourceType) -> Vec<TopLevelStatement> {
-    if fallow_extract::exceeds_nesting_limit(source) {
-        return Vec::new();
-    }
+    fallow_extract::parse_bounded(source, || {
+        top_level_statements_unbounded(source, source_type)
+    })
+    .unwrap_or_default()
+}
+
+fn top_level_statements_unbounded(
+    source: &str,
+    source_type: oxc_span::SourceType,
+) -> Vec<TopLevelStatement> {
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
     if parsed.fatal_error {

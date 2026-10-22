@@ -26,6 +26,7 @@ mod component_contracts;
 pub mod css;
 pub mod css_classes;
 pub mod css_in_js;
+mod css_masked_bytes;
 pub mod css_metrics;
 pub mod effect_facts;
 pub mod federation_runtime;
@@ -40,6 +41,7 @@ mod jsdoc_attach;
 mod jsdoc_deprecated;
 pub mod mdx;
 mod module_info;
+mod module_parse;
 mod nesting;
 pub mod og_image;
 mod parse;
@@ -50,6 +52,7 @@ mod sfc_props;
 mod sfc_template;
 pub mod similar_code;
 mod source_map;
+mod stack;
 pub mod suppress;
 /// Tailwind CSS arbitrary-value detection.
 pub mod tailwind;
@@ -106,7 +109,9 @@ pub use css_in_js::{
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
-pub use nesting::{MAX_NESTING_DEPTH, exceeds_nesting_limit};
+pub use nesting::{
+    MAX_NESTING_DEPTH, exceeds_nesting_limit, parse_bounded, parse_bounded_or_default,
+};
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
     is_sfc_file, sfc_merged_script_source,
@@ -116,6 +121,7 @@ pub use sfc_css::{
 };
 pub use similar_code::extract_similar_code_functions;
 pub use source_map::{ExtractionResult, ScriptSection, embedded_script_sections};
+pub use stack::register_thread_stack;
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(
@@ -126,7 +132,7 @@ fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
 
-pub use parse::{parse_source_to_module, parse_source_to_module_with_flags};
+pub use module_parse::{parse_source_to_module, parse_source_to_module_with_flags};
 
 /// Leading UTF-8 byte order mark codepoint.
 ///
@@ -406,7 +412,7 @@ fn parse_single_file_cached(
 
     let parse_start = std::time::Instant::now();
     // Drop a count that a scan outside a parse left on this thread.
-    css::take_comment_masked_bytes();
+    css_masked_bytes::take();
     let module = parse_source_to_module_with_flags(
         file.id,
         &file.path,
@@ -418,7 +424,7 @@ fn parse_single_file_cached(
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let mut result =
         ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len());
-    result.css_masked_bytes = css::take_comment_masked_bytes();
+    result.css_masked_bytes = css_masked_bytes::take();
     result
 }
 

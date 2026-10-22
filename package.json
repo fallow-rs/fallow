@@ -17,6 +17,7 @@
     "check:cargo-features": "node scripts/check-cargo-features.mjs",
     "check:crate-boundaries": "node scripts/check-crate-boundaries.mjs",
     "check:miri-cfg": "node scripts/check-miri-cfg.mjs",
+    "check:parse-sites": "node scripts/check-parse-sites.mjs",
     "scaffold:analyzer": "node scripts/scaffold-analyzer-plan.mjs",
     "conformance:public-smoke": "node scripts/public-smoke-conformance.mjs",
     "conformance:semantic-clones": "node scripts/semantic-clone-conformance.mjs",

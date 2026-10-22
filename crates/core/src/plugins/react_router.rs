@@ -8,11 +8,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     CallExpression, ExportDefaultDeclarationKind, Expression, ObjectExpression, Program, Statement,
 };
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use super::{Plugin, PluginResult, config_parser};
@@ -221,14 +219,14 @@ fn collect_route_config_from_source(
     root: &Path,
 ) {
     let source_type = SourceType::from_path(route_config_path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
-    let Some(expr) = find_default_export_expression(&parsed.program) else {
-        return;
-    };
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let Some(expr) = find_default_export_expression(&parsed.program) else {
+            return;
+        };
 
-    let base_dir = route_config_path.parent().unwrap_or(root);
-    collect_route_entries(expr, &parsed.program, base_dir, root, result);
+        let base_dir = route_config_path.parent().unwrap_or(root);
+        collect_route_entries(expr, &parsed.program, base_dir, root, result);
+    });
 }
 
 fn find_default_export_expression<'a>(program: &'a Program<'a>) -> Option<&'a Expression<'a>> {

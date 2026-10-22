@@ -8,13 +8,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, ImportDeclaration, ObjectExpression,
     Program, Statement, VariableDeclaration,
 };
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 const ENABLERS: &[&str] = &[
@@ -270,13 +268,13 @@ fn resolve_tsr_config(config_path: &Path, source: &str, root: &Path) -> PluginRe
 
 fn resolve_bundler_config(config_path: &Path, source: &str, root: &Path) -> Option<PluginResult> {
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    let options = collect_router_plugin_route_options(&parsed.program, config_path, root)
-        .into_iter()
-        .next()?;
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let options = collect_router_plugin_route_options(&parsed.program, config_path, root)
+            .into_iter()
+            .next()?;
 
-    Some(resolve_route_options(options))
+        Some(resolve_route_options(options))
+    })
 }
 
 #[derive(Debug, Default)]
@@ -552,11 +550,11 @@ struct VirtualRouteRefs {
 
 fn collect_virtual_route_call_refs(source: &str, path: &Path) -> VirtualRouteRefs {
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    let mut collector = VirtualRouteCallCollector::default();
-    collector.visit_program(&parsed.program);
-    collector.refs
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let mut collector = VirtualRouteCallCollector::default();
+        collector.visit_program(&parsed.program);
+        collector.refs
+    })
 }
 
 fn collect_virtual_route_expression_refs(program: &Program, expr: &Expression) -> VirtualRouteRefs {

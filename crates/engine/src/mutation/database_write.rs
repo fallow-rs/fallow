@@ -99,14 +99,14 @@ const RUNTIME_RECEIVERS: [&str; 2] = ["Object", "Reflect"];
 /// with only literal arguments, which the security capture does not record.
 pub(super) fn starts(source: &str, layout: Layout, direct: bool) -> Vec<u32> {
     let (text, kind) = layout.parse_view(source);
-    let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
-    let mut writes = Writes {
-        direct,
-        ..Writes::default()
-    };
-    writes.visit_program(&parsed.program);
-    writes.finish()
+    fallow_extract::parse_bounded_or_default(&text, kind.source_type(), |parsed| {
+        let mut writes = Writes {
+            direct,
+            ..Writes::default()
+        };
+        writes.visit_program(&parsed.program);
+        writes.finish()
+    })
 }
 
 fn sql_verb(text: &str) -> &str {

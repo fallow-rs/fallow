@@ -236,7 +236,7 @@ multiple_crate_versions = "allow"       # Transitive dependency version conflict
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn" # Prefer crate/self/super paths inside crates
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(miri)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(miri)', 'cfg(fuzzing)'] }
 unsafe_code = "warn"
 unsafe_op_in_unsafe_fn = "warn"         # Require unsafe blocks even inside unsafe fn
 unused_unsafe = "warn"                  # Catch unnecessary unsafe blocks

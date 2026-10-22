@@ -5,9 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{Expression, ObjectExpression};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
 
@@ -239,30 +237,30 @@ fn parse_docusaurus_config(
     root: &Path,
 ) -> Option<ParsedDocusaurusConfig> {
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
-    let config = config_parser::find_config_object(&parsed.program)?;
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let config = config_parser::find_config_object(&parsed.program)?;
 
-    let mut result = ParsedDocusaurusConfig {
-        i18n_path: parse_i18n_path(config, config_path, root),
-        static_directories: parse_static_directories(config, config_path, root),
-        ..ParsedDocusaurusConfig::default()
-    };
-    let static_directories = result.static_directories.clone();
+        let mut result = ParsedDocusaurusConfig {
+            i18n_path: parse_i18n_path(config, config_path, root),
+            static_directories: parse_static_directories(config, config_path, root),
+            ..ParsedDocusaurusConfig::default()
+        };
+        let static_directories = result.static_directories.clone();
 
-    collect_top_level_assets(config, config_path, root, &static_directories, &mut result);
+        collect_top_level_assets(config, config_path, root, &static_directories, &mut result);
 
-    if let Some(plugins_expr) = config_parser::property_expr(config, "plugins") {
-        parse_plugin_entries(plugins_expr, config_path, root, &mut result);
-    }
-    if let Some(themes_expr) = config_parser::property_expr(config, "themes") {
-        parse_theme_entries(themes_expr, config_path, root, &mut result);
-    }
-    if let Some(presets_expr) = config_parser::property_expr(config, "presets") {
-        parse_preset_entries(presets_expr, config_path, root, &mut result);
-    }
+        if let Some(plugins_expr) = config_parser::property_expr(config, "plugins") {
+            parse_plugin_entries(plugins_expr, config_path, root, &mut result);
+        }
+        if let Some(themes_expr) = config_parser::property_expr(config, "themes") {
+            parse_theme_entries(themes_expr, config_path, root, &mut result);
+        }
+        if let Some(presets_expr) = config_parser::property_expr(config, "presets") {
+            parse_preset_entries(presets_expr, config_path, root, &mut result);
+        }
 
-    Some(result)
+        Some(result)
+    })
 }
 
 fn collect_top_level_assets(

@@ -3,7 +3,7 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleInfo;
 
-use crate::parse::parse_source_to_module;
+use crate::parse_source_to_module;
 
 fn parse_sfc(source: &str, filename: &str) -> ModuleInfo {
     parse_source_to_module(FileId(0), Path::new(filename), source, 0, false)

@@ -1,14 +1,80 @@
+/// Build the global analysis pool and register the stack of the main thread.
+/// A project with few files parses on the main thread, and a bounded parse on
+/// a thread with an unknown stack runs on a new thread each time.
 #[allow(
     dead_code,
     reason = "used by the CLI binary; the library build uses per-call pools"
 )]
 pub fn configure_global_pool(threads: usize) {
     let _ = fallow_api::configure_global_analysis_pool(threads);
+    // The size is the stack of the process main thread. Another thread that
+    // calls this, for example a test thread, keeps an unknown stack.
+    if std::thread::current().name() == Some("main")
+        && let Some(size) = main_thread_stack_size()
+    {
+        fallow_engine::thread_pool::register_thread_stack(size);
+    }
+}
+
+/// Stack to assume for a main thread without a stack limit.
+#[cfg(unix)]
+const UNLIMITED_MAIN_STACK: usize = 8 * 1024 * 1024;
+
+#[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "reading the stack resource limit requires getrlimit FFI"
+)]
+fn main_thread_stack_size() -> Option<usize> {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `limit` is a valid, writable `rlimit` that outlives the call.
+    if unsafe { libc::getrlimit(libc::RLIMIT_STACK, &raw mut limit) } != 0 {
+        return None;
+    }
+    if limit.rlim_cur == libc::RLIM_INFINITY {
+        return Some(UNLIMITED_MAIN_STACK);
+    }
+    usize::try_from(limit.rlim_cur).ok()
+}
+
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "reading the stack bounds of the current thread requires Win32 FFI"
+)]
+fn main_thread_stack_size() -> Option<usize> {
+    let mut low = 0_usize;
+    let mut high = 0_usize;
+    // SAFETY: both pointers refer to writable `usize` values that outlive
+    // the call. The function has no other preconditions.
+    unsafe {
+        windows_sys::Win32::System::Threading::GetCurrentThreadStackLimits(
+            &raw mut low,
+            &raw mut high,
+        );
+    }
+    high.checked_sub(low).filter(|size| *size > 0)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn main_thread_stack_size() -> Option<usize> {
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use std::process::Command;
+
+    #[test]
+    fn main_thread_stack_size_is_known_on_supported_platforms() {
+        let size = super::main_thread_stack_size();
+        if cfg!(any(unix, windows)) {
+            assert!(size.is_some_and(|size| size >= 512 * 1024));
+        }
+    }
 
     const STACK_PROBE_ENV: &str = "FALLOW_RAYON_STACK_PROBE_CHILD";
     const STACK_PROBE_TEST: &str =

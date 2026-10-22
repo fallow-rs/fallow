@@ -6,13 +6,11 @@
 use std::path::Path;
 
 use fallow_graph::resolve::extract_package_name;
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrowFunctionBody, CallExpression, Expression, FunctionBody, ObjectExpression,
     Statement,
 };
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use super::{Plugin, PluginResult, config_parser};
@@ -91,16 +89,16 @@ impl Plugin for ContentlayerPlugin {
 
 fn collect_content_patterns(source: &str, config_path: &Path, root: &Path) -> Vec<String> {
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    let mut collector = ContentlayerCollector {
-        content_dirs: Vec::new(),
-        document_patterns: Vec::new(),
-        config_path,
-        root,
-    };
-    collector.visit_program(&parsed.program);
-    collector.into_patterns()
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let mut collector = ContentlayerCollector {
+            content_dirs: Vec::new(),
+            document_patterns: Vec::new(),
+            config_path,
+            root,
+        };
+        collector.visit_program(&parsed.program);
+        collector.into_patterns()
+    })
 }
 
 struct ContentlayerCollector<'a> {

@@ -1,6 +1,7 @@
 mod astro;
 mod component_contracts;
 mod css;
+mod deep_shapes;
 mod effect;
 mod graphql;
 mod js_ts;
@@ -14,7 +15,7 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleInfo;
 
-use crate::parse::parse_source_to_module;
+use crate::parse_source_to_module;
 
 /// Shared test helper: parse TypeScript source and return `ModuleInfo`.
 pub fn parse_ts(source: &str) -> ModuleInfo {

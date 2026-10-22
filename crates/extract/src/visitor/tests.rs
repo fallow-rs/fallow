@@ -11800,7 +11800,7 @@ fn ts_import_type_inside_declare_global() {
 
 #[test]
 fn ts_import_type_inside_actual_dts_file() {
-    use crate::parse::parse_source_to_module;
+    use crate::parse_source_to_module;
     use fallow_types::discover::FileId;
     use std::path::Path;
 

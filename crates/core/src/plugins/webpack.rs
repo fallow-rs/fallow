@@ -147,33 +147,31 @@ define_plugin!(
 /// - `{ use: [{ loader: 'css-loader', options: {} }] }`
 /// - `{ oneOf: [...rules] }`
 pub(super) fn parse_webpack_loaders(source: &str, path: &Path, result: &mut PluginResult) {
-    use oxc_allocator::Allocator;
     use oxc_ast::ast::Expression;
-    use oxc_parser::Parser;
+
     use oxc_span::SourceType;
 
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let Some(obj) = config_parser::find_config_object(&parsed.program) else {
+            return;
+        };
 
-    let Some(obj) = config_parser::find_config_object(&parsed.program) else {
-        return;
-    };
+        let Some(module_prop) = find_obj_prop(obj, "module") else {
+            return;
+        };
+        let Expression::ObjectExpression(module_obj) = &module_prop.value else {
+            return;
+        };
+        let Some(rules_prop) = find_obj_prop(module_obj, "rules") else {
+            return;
+        };
+        let Expression::ArrayExpression(rules_arr) = &rules_prop.value else {
+            return;
+        };
 
-    let Some(module_prop) = find_obj_prop(obj, "module") else {
-        return;
-    };
-    let Expression::ObjectExpression(module_obj) = &module_prop.value else {
-        return;
-    };
-    let Some(rules_prop) = find_obj_prop(module_obj, "rules") else {
-        return;
-    };
-    let Expression::ArrayExpression(rules_arr) = &rules_prop.value else {
-        return;
-    };
-
-    walk_rules(rules_arr, result);
+        walk_rules(rules_arr, result);
+    });
 }
 
 fn find_obj_prop<'a>(

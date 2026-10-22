@@ -7,13 +7,11 @@
 use std::fs;
 use std::path::Path;
 
-use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, ImportDeclaration, ObjectExpression,
     VariableDeclaration,
 };
 use oxc_ast_visit::{Visit, walk};
-use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use super::{Plugin, PluginResult, config_parser};
@@ -116,11 +114,11 @@ fn credit_config_imports(result: &mut PluginResult, source: &str, config_path: &
 
 fn extract_require_sources(source: &str, config_path: &Path) -> Vec<String> {
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
-    let mut collector = RequireSourceCollector::default();
-    collector.visit_program(&parsed.program);
-    collector.sources
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let mut collector = RequireSourceCollector::default();
+        collector.visit_program(&parsed.program);
+        collector.sources
+    })
 }
 
 #[derive(Default)]
@@ -144,17 +142,17 @@ fn is_package_specifier(specifier: &str) -> bool {
 
 fn extract_vite_custom_config_files(source: &str, config_path: &Path, root: &Path) -> Vec<String> {
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
-    let mut collector = WuchaleVitePluginCollector {
-        callable_names: Vec::new(),
-        namespaces: Vec::new(),
-        custom_config_files: Vec::new(),
-        config_path,
-        root,
-    };
-    collector.visit_program(&parsed.program);
-    collector.custom_config_files
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let mut collector = WuchaleVitePluginCollector {
+            callable_names: Vec::new(),
+            namespaces: Vec::new(),
+            custom_config_files: Vec::new(),
+            config_path,
+            root,
+        };
+        collector.visit_program(&parsed.program);
+        collector.custom_config_files
+    })
 }
 
 struct WuchaleVitePluginCollector<'a> {

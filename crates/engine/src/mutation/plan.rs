@@ -801,15 +801,15 @@ fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
     }
 
     let (text, kind) = layout.parse_view(source);
-    let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
-    let mut spans = Spans::default();
-    spans.visit_program(&parsed.program);
-    starts.iter().any(|&start| {
-        !spans
-            .0
-            .iter()
-            .any(|&(from, to)| from <= start && start < to)
+    fallow_extract::parse_bounded_or_default(&text, kind.source_type(), |parsed| {
+        let mut spans = Spans::default();
+        spans.visit_program(&parsed.program);
+        starts.iter().any(|&start| {
+            !spans
+                .0
+                .iter()
+                .any(|&(from, to)| from <= start && start < to)
+        })
     })
 }
 
@@ -840,24 +840,24 @@ fn framework_regions(
         return Vec::new();
     }
     let (text, kind) = layout.parse_view(source);
-    let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
-    parsed
-        .program
-        .body
-        .iter()
-        .filter(|statement| {
-            let span = statement.span();
-            starts
-                .iter()
-                .any(|&offset| span.start <= offset && offset < span.end)
-                || (commonjs_default && assigns_module_exports(statement))
-        })
-        .map(|statement| {
-            let span = statement.span();
-            (span.start, span.end)
-        })
-        .collect()
+    fallow_extract::parse_bounded_or_default(&text, kind.source_type(), |parsed| {
+        parsed
+            .program
+            .body
+            .iter()
+            .filter(|statement| {
+                let span = statement.span();
+                starts
+                    .iter()
+                    .any(|&offset| span.start <= offset && offset < span.end)
+                    || (commonjs_default && assigns_module_exports(statement))
+            })
+            .map(|statement| {
+                let span = statement.span();
+                (span.start, span.end)
+            })
+            .collect()
+    })
 }
 
 /// True for a top-level `module.exports = ...` statement. A CommonJS config

@@ -15,7 +15,8 @@
 //! a regex cannot hide brackets either. It does not need to be
 //! exact, because real code stays far below the cap. Nesting without brackets
 //! (TypeScript generics, JSX elements, long member or call chains) is not
-//! bounded here.
+//! capped. [`parse_bounded`] runs such a parse on a stack that is large
+//! enough for it.
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleInfo;
@@ -30,14 +31,11 @@ use crate::visitor::ModuleInfoExtractor;
 /// below this cap.
 pub const MAX_NESTING_DEPTH: u32 = 1024;
 
-/// The module of a file whose nesting would overflow the parser stack, or
-/// `None` when the file is safe to parse. The module is a failed parse with no
-/// facts, so the file shows up as degraded instead of aborting the run.
-pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> Option<ModuleInfo> {
+/// The module of a file whose bracket nesting exceeds [`MAX_NESTING_DEPTH`].
+/// The module is a failed parse with no facts, so the file shows up as
+/// degraded instead of aborting the run.
+pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let source = crate::strip_bom(source);
-    if !exceeds_nesting_limit(source) {
-        return None;
-    }
     let mut info = ModuleInfoExtractor::new().into_module_info(
         file_id,
         content_hash,
@@ -46,15 +44,49 @@ pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> Opti
     info.parse_error_count = 1;
     info.parse_panicked = true;
     info.line_offsets = fallow_types::extract::compute_line_offsets(source);
-    Some(info)
+    info
 }
 
 /// Returns `true` when the bracket nesting of `source` exceeds
-/// [`MAX_NESTING_DEPTH`]. Every caller that hands user source to the Oxc
-/// parser checks this first.
+/// [`MAX_NESTING_DEPTH`].
 #[must_use]
 pub fn exceeds_nesting_limit(source: &str) -> bool {
     max_depth(source, MAX_NESTING_DEPTH) > MAX_NESTING_DEPTH
+}
+
+/// Run `parse`, which parses `source` with Oxc and walks the result, without
+/// a stack overflow. Returns `None` when the bracket nesting of `source`
+/// exceeds [`MAX_NESTING_DEPTH`], so the caller treats the file as a failed
+/// parse.
+///
+/// Every parse of user source goes through this function. It sizes the stack
+/// from the source length and the bracket depth, and it moves the work to a
+/// thread with that stack when the current thread has too little left. A
+/// parse of a fragment inside `parse` runs on the same stack and needs no
+/// second call.
+pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
+    let depth = max_depth(source, MAX_NESTING_DEPTH);
+    if depth > MAX_NESTING_DEPTH {
+        return None;
+    }
+    let need = crate::stack::stack_need(source.len(), depth as usize);
+    Some(crate::stack::run_with_stack(need, parse))
+}
+
+/// Parse `source` with Oxc and call `walk` with the result, through
+/// [`parse_bounded`]. Returns `T::default()` when the bracket nesting exceeds
+/// [`MAX_NESTING_DEPTH`].
+pub fn parse_bounded_or_default<T: Send + Default>(
+    source: &str,
+    source_type: oxc_span::SourceType,
+    walk: impl FnOnce(&oxc_parser::ParserReturn<'_>) -> T + Send,
+) -> T {
+    parse_bounded(source, || {
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+        walk(&parsed)
+    })
+    .unwrap_or_default()
 }
 
 /// Maximum bracket nesting depth of `source`. The scan stops as soon as the

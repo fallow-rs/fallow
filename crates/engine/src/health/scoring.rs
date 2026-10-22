@@ -2197,17 +2197,17 @@ fn collect_named_function_starts(
     source: &str,
     source_type: oxc_span::SourceType,
 ) -> Option<rustc_hash::FxHashMap<usize, usize>> {
-    let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-    if parsed.fatal_error || !parsed.diagnostics.is_empty() {
-        return None;
-    }
-    let mut starts = rustc_hash::FxHashMap::default();
-    let mut collector = NamedFunctionSyntaxCollector {
-        starts: &mut starts,
-    };
-    oxc_ast_visit::Visit::visit_program(&mut collector, &parsed.program);
-    Some(starts)
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        if parsed.fatal_error || !parsed.diagnostics.is_empty() {
+            return None;
+        }
+        let mut starts = rustc_hash::FxHashMap::default();
+        let mut collector = NamedFunctionSyntaxCollector {
+            starts: &mut starts,
+        };
+        oxc_ast_visit::Visit::visit_program(&mut collector, &parsed.program);
+        Some(starts)
+    })
 }
 
 struct NamedFunctionSyntaxCollector<'a> {

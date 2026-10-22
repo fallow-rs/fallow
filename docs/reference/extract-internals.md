@@ -32,15 +32,42 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
 - Return partial information and diagnostics when one input cannot be read or
   parsed. Do not abort unrelated files.
 - The Oxc parser and the AST visitors recurse once per nesting level without a
-  limit, and a stack overflow aborts the whole process. Call
-  `fallow_extract::exceeds_nesting_limit` (`crates/extract/src/nesting.rs`)
-  before any parse of user source. Extraction turns a file past the cap into
-  a failed parse (`parse_panicked`) with no facts. The duplication tokenizer,
-  similar-code extraction, inventory and search visibility skip the file.
-  Brackets in strings, comments and template text do not count, and a
-  literal that does not end on its line is scanned again as code. Shapes that
-  nest without brackets (TypeScript generics, JSX elements, long member or
-  call chains) are not bounded yet.
+  limit, and a stack overflow aborts the whole process. Run every parse of
+  user source, and the walks over its AST, inside
+  `fallow_extract::parse_bounded` (`crates/extract/src/nesting.rs`).
+  `scripts/check-parse-sites.mjs` lists each production parser call and
+  fails on a new one.
+  - `parse_bounded` first scans the bracket depth. A file past
+    `MAX_NESTING_DEPTH` returns `None`. Extraction turns it into a failed
+    parse (`parse_panicked`) with no facts, and the other callers skip it.
+    Brackets in strings, comments and template text do not count, and a
+    literal that does not end on its line is scanned again as code.
+  - It then runs the parse on a stack of
+    `256 KiB + 1024 * source length + 4096 * bracket depth`, with a 1 GiB cap
+    (`crates/extract/src/stack.rs`). Each nesting level uses at least one
+    source byte. A shape without brackets (generics, JSX elements,
+    `class extends`, ternaries, arrows, assignment, member and call chains)
+    uses at most about 570 stack bytes per source byte in a release build. An
+    unclosed `(` uses about 1900 per level, which the bracket term covers. So
+    a parse cannot overflow. A debug build reserves 2048 per source byte,
+    because its frames are larger.
+  - The parse runs on the current thread when that thread has enough stack
+    left. Analysis pool workers register their stack in the Rayon
+    `start_handler` (`fallow_extract::register_thread_stack`). The CLI
+    registers its main thread when it builds the global pool
+    (`crates/cli/src/rayon_pool.rs`), from the soft `RLIMIT_STACK` on Unix
+    and from `GetCurrentThreadStackLimits` on Windows. Any other thread
+    counts as having no stack to spare, so its parse runs on a scoped thread
+    of the needed size. When that thread cannot start, the parse runs on the
+    current thread.
+  - A parse of part of a file inside `parse_bounded` runs on the same stack
+    and needs no second call. The CSS comment mask counts per thread, so
+    `parse_source_to_module_with_flags` carries its count back from the
+    sized thread.
+  - A pool worker keeps a parse of a file up to about 15 KB on its own stack.
+    A larger file parses on a scoped thread.
+  - The fuzz build (`cfg(fuzzing)`) reserves 8 times the debug stack per byte
+    and per bracket level, because AddressSanitizer pads every frame.
 - A walk that the visitor runs at each link of a member or call chain stops
   after `MAX_RECORDED_CHAIN_LINKS` links
   (`crates/extract/src/visitor/visit_impl_chain_names.rs`). Past the cap, the

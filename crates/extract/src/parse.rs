@@ -44,35 +44,9 @@ fn source_type_for_path(path: &Path) -> SourceType {
     }
 }
 
-/// Parse source text into a [`ModuleInfo`].
-///
-/// When `need_complexity` is false the per-function complexity visitor is
-/// skipped, saving one full AST walk per file.  The dead-code analysis
-/// pipeline never consumes complexity data, so callers that only need
-/// imports/exports should pass `false`.
-///
-/// Flag detection uses the built-in patterns only; see
-/// [`parse_source_to_module_with_flags`].
-pub fn parse_source_to_module(
-    file_id: FileId,
-    path: &Path,
-    source: &str,
-    content_hash: u64,
-    need_complexity: bool,
-) -> ModuleInfo {
-    parse_source_to_module_with_flags(
-        file_id,
-        path,
-        source,
-        content_hash,
-        need_complexity,
-        &FlagPatterns::default(),
-    )
-}
-
-/// Parse source text into a [`ModuleInfo`], with the user flag patterns
-/// applied on top of the built-in ones.
-pub fn parse_source_to_module_with_flags(
+/// [`crate::parse_source_to_module_with_flags`] on the current stack, without
+/// the nesting guard.
+pub fn parse_source_to_module_unbounded(
     file_id: FileId,
     path: &Path,
     source: &str,
@@ -80,9 +54,6 @@ pub fn parse_source_to_module_with_flags(
     need_complexity: bool,
     flag_patterns: &FlagPatterns,
 ) -> ModuleInfo {
-    if let Some(module) = crate::nesting::too_deep_module(file_id, source, content_hash) {
-        return module;
-    }
     let mut module = parse_source_to_module_inner(
         file_id,
         path,
@@ -2262,9 +2233,10 @@ pub fn compute_import_binding_usage(
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_jsdoc_brace_stack, classify_jsdoc_visibility_tag, parse_source_to_module,
-        scan_jsdoc_import_tags_in, scan_jsdoc_imports_in,
+        advance_jsdoc_brace_stack, classify_jsdoc_visibility_tag, scan_jsdoc_import_tags_in,
+        scan_jsdoc_imports_in,
     };
+    use crate::parse_source_to_module;
     use fallow_types::discover::FileId;
     use fallow_types::extract::{ImportInfo, ImportedName, VisibilityTag};
     use std::path::Path;

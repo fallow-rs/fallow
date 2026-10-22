@@ -88,6 +88,11 @@ const FAST_COMMANDS = [
     args: ["run", "check:miri-cfg"],
   },
   {
+    label: "Bounded parse sites",
+    command: "npm",
+    args: ["run", "check:parse-sites"],
+  },
+  {
     label: "Emitted version drift",
     command: "npm",
     args: ["run", "check:emitted-versions"],

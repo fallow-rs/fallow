@@ -61,6 +61,20 @@ impl Layout {
         path: &str,
         options: &MutationOptions,
     ) -> Result<Instrumented, MutationError> {
+        fallow_extract::parse_bounded(source, || self.instrument_unbounded(source, path, options))
+            .unwrap_or_else(|| {
+                Err(MutationError::Parse {
+                    messages: vec!["the source nests brackets too deep to parse".to_owned()],
+                })
+            })
+    }
+
+    fn instrument_unbounded(
+        self,
+        source: &str,
+        path: &str,
+        options: &MutationOptions,
+    ) -> Result<Instrumented, MutationError> {
         match self {
             Self::Script(kind) => fallow_mutation::instrument(source, path, kind, options),
             Self::SvelteModule(kind) => {
