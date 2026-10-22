@@ -1423,6 +1423,7 @@ dependencies = [
  "ls-types",
  "mimalloc",
  "proptest",
+ "rayon",
  "rustc-hash",
  "serde",
  "serde_json",

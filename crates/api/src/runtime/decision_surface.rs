@@ -46,7 +46,9 @@ pub fn run_decision_surface(
         });
     }
 
-    let head = run_decision_analysis(&resolved, Some(&changed_files), None)?;
+    // The caller can be a 2 MiB Tokio blocking thread. Parse on the worker
+    // stack of the analysis pool instead.
+    let head = resolved.install(|| run_decision_analysis(&resolved, Some(&changed_files), None))?;
     let manifests = changed_manifests(&resolved.root, &changed_files);
     let base = compute_base_decision_snapshot(
         options,
@@ -290,7 +292,7 @@ fn compute_base_decision_snapshot(
         ..options.analysis.clone()
     };
     let resolved = resolve_programmatic_analysis_context(&base_analysis)?;
-    let base = run_decision_analysis(&resolved, None, Some(head_config))?;
+    let base = resolved.install(|| run_decision_analysis(&resolved, None, Some(head_config)))?;
     let mut snapshot = snapshot_from_decision_analysis(&base);
     snapshot.manifests = base_manifests;
     Ok(snapshot)
@@ -459,5 +461,106 @@ fn export_line_resolver(
             .find(|(name, _)| symbols.iter().any(|symbol| name == symbol))
             .or_else(|| exports.first())
             .map_or(0, |(_, line)| *line)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use crate::{AnalysisOptions, DecisionSurfaceOptions};
+
+    const STACK_PROBE_ENV: &str = "FALLOW_DECISION_SURFACE_STACK_PROBE_CHILD";
+    const STACK_PROBE_TEST: &str =
+        "runtime::decision_surface::tests::decision_surface_parses_on_the_worker_stack";
+    /// Deep enough to overflow a 2 MiB thread in a release build and to fit
+    /// the 16 MiB worker stack in a debug build. An assignment chain has no
+    /// brackets, so the pre-parse bracket guard does not stop it.
+    const ASSIGNMENT_CHAIN_DEPTH: usize = 4_000;
+
+    // A stack overflow aborts the process, so the probe re-runs this test
+    // binary as a child without RUST_MIN_STACK (pinned to 16 MiB in
+    // .cargo/config.toml). The child test thread then has the 2 MiB default
+    // stack of an MCP blocking thread.
+    #[test]
+    fn decision_surface_parses_on_the_worker_stack() {
+        if std::env::var_os(STACK_PROBE_ENV).is_some() {
+            run_stack_probe_child();
+            return;
+        }
+
+        let current_exe = std::env::current_exe().expect("current test binary should be known");
+        let output = Command::new(current_exe)
+            .arg("--exact")
+            .arg(STACK_PROBE_TEST)
+            .arg("--nocapture")
+            .env(STACK_PROBE_ENV, "1")
+            .env_remove("RUST_MIN_STACK")
+            .output()
+            .expect("stack probe child should start");
+
+        assert!(
+            output.status.success(),
+            "stack probe child failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn run_stack_probe_child() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(root.join("index.ts"), "export const used = 1;\n").expect("write entry");
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        commit(root, "initial");
+        git(root, &["checkout", "-b", "feature"]);
+        let deep = format!(
+            "export let a = 0;\n{}1;\n",
+            "a=".repeat(ASSIGNMENT_CHAIN_DEPTH)
+        );
+        std::fs::write(root.join("deep.ts"), deep).expect("write deep file");
+        git(root, &["add", "."]);
+        commit(root, "deep");
+
+        let options = DecisionSurfaceOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                threads: Some(1),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("main".to_owned()),
+            max_decisions: None,
+        };
+        super::super::run_decision_surface(&options).expect("decision surface should run");
+    }
+
+    fn commit(root: &Path, message: &str) {
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                message,
+            ],
+        );
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("git command");
+        assert!(status.success(), "git {args:?} failed");
     }
 }

@@ -4,8 +4,10 @@
 ///
 /// Recursive AST extraction and analysis overflow the default Rayon worker
 /// stack on deeply nested sources, so every pool that runs analysis work must
-/// be built with this size. The CLI global pool and the programmatic per-call
-/// pools share this builder so embedders cannot drift.
+/// be built with this size. The CLI and LSP global pools and the programmatic
+/// per-call pools share this builder so embedders cannot drift. A thread that
+/// runs analysis outside these pools, such as a Tokio blocking thread in a
+/// server, needs this size too.
 pub const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
 
 /// Rayon pool builder preconfigured with the analysis worker stack size.

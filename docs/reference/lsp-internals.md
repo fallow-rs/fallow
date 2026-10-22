@@ -23,6 +23,12 @@ lifecycle behavior.
 
 - Keep analysis and fix semantics in shared APIs. The LSP adapts typed results
   to protocol objects.
+- Analysis runs in `spawn_blocking` and on the global Rayon pool, not inside
+  `ProgrammaticAnalysisContext::install`. `runtime.rs` gives both the analysis
+  worker stack (`fallow_api::WORKER_STACK_SIZE`), because the
+  default 2 MiB stack overflows on deeply nested sources. Cargo pins
+  `RUST_MIN_STACK` for tests, so a stack test must remove it in a child
+  process.
 - Convert paths through the LSP path helpers. Never construct document URIs by
   string concatenation.
 - Publish only results that still match the current document version.

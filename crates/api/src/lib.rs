@@ -126,6 +126,12 @@ pub use fallow_engine::change_scope::{
 };
 /// Engine-owned per-workspace Git baseline state used by analysis surfaces.
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
+/// Stack size for threads that run analysis.
+///
+/// A process that runs analysis outside
+/// [`ProgrammaticAnalysisContext::install`], such as the LSP server, gives its
+/// own threads this stack size.
+pub use fallow_engine::thread_pool::WORKER_STACK_SIZE;
 /// Parsed modules that a long-lived process keeps across analysis calls.
 ///
 /// A process that runs many calls on the same project, such as the MCP
@@ -1235,6 +1241,19 @@ pub struct ComplexityRunOptions<'a> {
     pub min_commits: Option<u32>,
     /// Test coverage inputs.
     pub coverage_inputs: ComplexityCoverageInputs<'a>,
+}
+
+/// Build the process-global Rayon pool with the [`WORKER_STACK_SIZE`] stack
+/// and the default thread count.
+///
+/// A process that runs analysis outside
+/// [`ProgrammaticAnalysisContext::install`] calls this once at startup, before
+/// any parallel work. Returns `false` when the global pool already exists or
+/// when a worker thread cannot start. Rayon then keeps its default pool.
+pub fn configure_global_analysis_pool() -> bool {
+    fallow_engine::thread_pool::worker_pool_builder(0)
+        .build_global()
+        .is_ok()
 }
 
 /// Derive effective health section flags for API consumers.

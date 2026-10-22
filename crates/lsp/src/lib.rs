@@ -23,6 +23,7 @@ mod path_utils;
 mod position;
 mod protocol;
 mod publish;
+mod runtime;
 mod schedule;
 mod server_capabilities;
 mod session_store;
@@ -1476,10 +1477,7 @@ pub fn run_stdio_server() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
+    let runtime = match runtime::build_server_runtime() {
         Ok(runtime) => runtime,
         Err(error) => {
             #[expect(

@@ -61,7 +61,10 @@ pub fn run_stdio_server() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // Tool calls run analysis on per-call worker pools. A blocking thread
+    // that reaches a parse another way still gets the worker stack.
     let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(fallow_api::WORKER_STACK_SIZE)
         .enable_all()
         .build()
     {
