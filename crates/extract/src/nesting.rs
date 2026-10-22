@@ -239,17 +239,29 @@ impl Scanner<'_> {
             && !matches!(body.first(), Some(b'\'' | b'"'))
     }
 
-    /// Skips an unquoted `url(` body up to its `)`. A CSS escape skips the
-    /// next character.
+    /// Skips an unquoted `url(` body up to its `)`. Quotes and `/*` in it are
+    /// raw text. Its brackets still count, as in a regex body: a `(` that only
+    /// looks like `url(` must not hide nesting. A CSS escape skips the next
+    /// character.
     fn skip_unquoted_url(&mut self) {
+        self.open();
+        let mut local = 0_u32;
+        let mut peak = 0_u32;
         while let Some(&byte) = self.bytes.get(self.pos) {
             self.pos += 1;
             match byte {
                 b'\\' => self.skip_escape(),
-                b')' => return,
+                b'(' | b'[' | b'{' => {
+                    local += 1;
+                    peak = peak.max(local);
+                }
+                b')' if local == 0 => break,
+                b')' | b']' | b'}' => local = local.saturating_sub(1),
                 _ => {}
             }
         }
+        self.max_depth = self.max_depth.max(self.depth + peak);
+        self.depth = self.depth - 1 + local;
     }
 
     /// Skips a `/* */` comment when one starts at the `/` at `pos - 1`.
@@ -272,8 +284,10 @@ impl Scanner<'_> {
             self.pos += 1;
             match byte {
                 b'\\' => self.skip_escape(),
-                // A string may hold U+2028 and U+2029 since ES2019.
+                // A string may hold U+2028 and U+2029 since ES2019. A form
+                // feed is a newline in CSS.
                 b'\n' | b'\r' => break,
+                0x0C if self.dialect == Dialect::Style => break,
                 _ if byte == quote => return,
                 _ => {}
             }
@@ -452,6 +466,10 @@ mod tests {
         assert_eq!(style_depth_of(".j{a:url(it's.png)}.k{a:b((c))}"), 3);
         assert_eq!(style_depth_of(".l{a:URL( \"(((\" )}"), 2);
         assert_eq!(style_depth_of(".m{a:myurl(((b)))}"), 4);
+        // A url() body still counts its brackets, so a misread url( hides
+        // nothing.
+        assert_eq!(style_depth_of("#url({{{{"), 5);
+        assert_eq!(style_depth_of(".n{a:\"x\u{c}((((1"), 5);
     }
 
     #[test]
