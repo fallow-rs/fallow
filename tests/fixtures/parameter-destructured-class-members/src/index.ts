@@ -60,3 +60,47 @@ const spread = ({ first, ...rest }: RestSource): void => {
   console.log(rest);
 };
 spread(restSource);
+
+const holder: { svc: Service } = { svc: service };
+
+let viaNestedLiteral: () => void;
+({ svc: { viaNestedLiteral } } = { svc: service });
+viaNestedLiteral();
+
+let viaNestedHolder: () => void;
+({ svc: { viaNestedHolder } } = holder);
+viaNestedHolder();
+
+let viaNestedDefault: () => void;
+({ svc: { viaNestedDefault } = service } = {});
+viaNestedDefault();
+
+const {
+  svc: { viaNestedLiteralBinding },
+} = { svc: service };
+viaNestedLiteralBinding();
+
+const {
+  svc: { viaNestedHolderBinding },
+} = holder;
+viaNestedHolderBinding();
+
+const { svc: { viaNestedDefaultBinding } = service }: { svc?: Service } = {};
+viaNestedDefaultBinding();
+
+const { viaLeafDefault = service.viaLeafDefault }: { viaLeafDefault?: () => void } = {};
+viaLeafDefault();
+
+const { missing: { dead } = { dead: noop } } = { svc: service } as {
+  svc: Service;
+  missing?: { dead: () => void };
+};
+dead();
+
+let viaNestedLiteralPath: () => void;
+({ svc: { viaNestedLiteralPath } } = { svc: holder.svc });
+viaNestedLiteralPath();
+
+let viaNestedDefaultPath: () => void;
+({ svc: { viaNestedDefaultPath } = holder.svc } = {});
+viaNestedDefaultPath();

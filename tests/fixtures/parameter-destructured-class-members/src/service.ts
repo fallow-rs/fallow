@@ -9,6 +9,15 @@ export class Service {
   viaAssign(): void {}
   viaAssignRenamed(): void {}
   viaAssignDefault(): void {}
+  viaNestedLiteral(): void {}
+  viaNestedHolder(): void {}
+  viaNestedDefault(): void {}
+  viaNestedLiteralBinding(): void {}
+  viaNestedHolderBinding(): void {}
+  viaNestedDefaultBinding(): void {}
+  viaLeafDefault(): void {}
+  viaNestedLiteralPath(): void {}
+  viaNestedDefaultPath(): void {}
   untypedOnly(): void {}
   signatureOnly(): void {}
   dead(): void {}
