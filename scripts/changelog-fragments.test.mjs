@@ -113,6 +113,13 @@ test("fragment problems name the path and the rule", () => {
   ]);
 });
 
+test("a fragment that names another analysis tool has a problem", () => {
+  assert.deepEqual(
+    fragmentProblems("changelog.d/a.md", "### Added\n\n- Maps the Knip `dotenv` key.\n"),
+    ["changelog.d/a.md: names another analysis tool; describe what fallow does instead"],
+  );
+});
+
 test("a ### line in a fenced code block is entry text", () => {
   const { sections } = splitSections("### Added\n\n- Example:\n\n  ```md\n  ### Fixed\n  ```\n");
   assert.deepEqual(

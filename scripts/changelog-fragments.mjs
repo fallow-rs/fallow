@@ -18,6 +18,9 @@ const CHANGELOG = "CHANGELOG.md";
 const README = "README.md";
 const EM_DASH = String.fromCodePoint(0x2014);
 
+/** Other analysis tools that public text must not name or compare against. */
+export const COMPARED_TOOLS = /\b(?:knip|jscpd|madge|dpdm)\b/iu;
+
 /** The `###` headings a fragment may use, in the order of a release section. */
 export const KINDS = [
   "Breaking",
@@ -89,6 +92,9 @@ export const fragmentProblems = (path, text) => {
     sections.length === 0 ? `has no ### heading (${KIND_LIST})` : null,
     ...sectionProblems(sections),
     text.includes(EM_DASH) ? "contains an em-dash, which the release notes inherit" : null,
+    COMPARED_TOOLS.test(text)
+      ? "names another analysis tool; describe what fallow does instead"
+      : null,
   ]
     .filter((problem) => problem !== null)
     .map((problem) => `${path}: ${problem}`);

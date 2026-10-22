@@ -8,7 +8,12 @@ import {
   QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
 } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
-import { FRAGMENT_DIR, changelogFragments, fragmentNames } from "./changelog-fragments.mjs";
+import {
+  COMPARED_TOOLS,
+  FRAGMENT_DIR,
+  changelogFragments,
+  fragmentNames,
+} from "./changelog-fragments.mjs";
 import { releasedSkillNames } from "./released-skills.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -95,7 +100,6 @@ test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
 const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
 
 /** Other analysis tools. The README states fallow's own results only. */
-const COMPARED_TOOLS = /\b(?:knip|jscpd|madge|dpdm)\b/iu;
 
 const missingBenchmarkNumbers = (readme, benchmarks) =>
   quotedBenchmarkNumbers(readmeProse(readme)).filter((value) => !benchmarks.includes(value));
