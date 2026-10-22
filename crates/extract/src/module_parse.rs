@@ -45,7 +45,7 @@ pub fn parse_source_to_module_with_flags(
     need_complexity: bool,
     flag_patterns: &FlagPatterns,
 ) -> ModuleInfo {
-    let bounded = crate::nesting::parse_bounded(crate::strip_bom(source), || {
+    let bounded = crate::nesting::parse_file_bounded(path, crate::strip_bom(source), || {
         let module = parse_source_to_module_unbounded(
             file_id,
             path,

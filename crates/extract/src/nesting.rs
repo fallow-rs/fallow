@@ -18,6 +18,8 @@
 //! capped. [`parse_bounded`] runs such a parse on a stack that is large
 //! enough for it.
 
+use std::path::Path;
+
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleInfo;
 
@@ -51,7 +53,19 @@ pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> Modu
 /// [`MAX_NESTING_DEPTH`].
 #[must_use]
 pub fn exceeds_nesting_limit(source: &str) -> bool {
-    max_depth(source, MAX_NESTING_DEPTH) > MAX_NESTING_DEPTH
+    max_depth(source, MAX_NESTING_DEPTH, Dialect::Script) > MAX_NESTING_DEPTH
+}
+
+/// The lexical rules of the scanned source.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Dialect {
+    /// JavaScript, TypeScript and the component formats that embed them.
+    Script,
+    /// CSS, Sass and Less. A stylesheet has no regex or template literals, and
+    /// `//` is not a comment in `url(//host/a.png)`, so only strings and
+    /// `/* */` comments are skipped. A Sass `//` comment is scanned as code,
+    /// which can only over-count.
+    Style,
 }
 
 /// Run `parse`, which parses `source` with Oxc and walks the result, without
@@ -65,7 +79,36 @@ pub fn exceeds_nesting_limit(source: &str) -> bool {
 /// parse of a fragment inside `parse` runs on the same stack and needs no
 /// second call.
 pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
-    let depth = max_depth(source, MAX_NESTING_DEPTH);
+    parse_bounded_as(source, Dialect::Script, parse)
+}
+
+/// [`parse_bounded`] for a lightningcss parse of stylesheet source. The
+/// nesting scan uses stylesheet rules.
+pub fn parse_style_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
+    parse_bounded_as(source, Dialect::Style, parse)
+}
+
+/// [`parse_bounded`] for the file at `path`. A CSS, Sass or Less file is
+/// scanned with stylesheet rules.
+pub fn parse_file_bounded<R: Send>(
+    path: &Path,
+    source: &str,
+    parse: impl FnOnce() -> R + Send,
+) -> Option<R> {
+    let dialect = if crate::css::is_css_file(path) {
+        Dialect::Style
+    } else {
+        Dialect::Script
+    };
+    parse_bounded_as(source, dialect, parse)
+}
+
+fn parse_bounded_as<R: Send>(
+    source: &str,
+    dialect: Dialect,
+    parse: impl FnOnce() -> R + Send,
+) -> Option<R> {
+    let depth = max_depth(source, MAX_NESTING_DEPTH, dialect);
     if depth > MAX_NESTING_DEPTH {
         return None;
     }
@@ -91,13 +134,14 @@ pub fn parse_bounded_or_default<T: Send + Default>(
 
 /// Maximum bracket nesting depth of `source`. The scan stops as soon as the
 /// depth passes `limit`, so the result is at most `limit + 1`.
-fn max_depth(source: &str, limit: u32) -> u32 {
+fn max_depth(source: &str, limit: u32, dialect: Dialect) -> u32 {
     let mut scanner = Scanner {
         bytes: source.as_bytes(),
         pos: 0,
         depth: 0,
         max_depth: 0,
         limit,
+        dialect,
         templates: Vec::new(),
         regex_allowed: true,
     };
@@ -111,6 +155,7 @@ struct Scanner<'a> {
     depth: u32,
     max_depth: u32,
     limit: u32,
+    dialect: Dialect,
     /// Depth of each open `${` substitution, innermost last. The `}` that
     /// brings the depth back to this value resumes the template text.
     templates: Vec<u32>,
@@ -127,6 +172,10 @@ impl Scanner<'_> {
             }
             self.pos += 1;
             match byte {
+                b'\\' if self.dialect == Dialect::Style => self.skip_escape(),
+                b'(' if self.dialect == Dialect::Style && self.at_unquoted_url() => {
+                    self.skip_unquoted_url();
+                }
                 b'(' | b'[' | b'{' => {
                     self.open();
                     self.regex_allowed = true;
@@ -144,7 +193,8 @@ impl Scanner<'_> {
                     self.skip_string(byte);
                     self.regex_allowed = false;
                 }
-                b'`' => self.skip_template_text(),
+                b'`' if self.dialect == Dialect::Script => self.skip_template_text(),
+                b'/' if self.dialect == Dialect::Style => self.skip_block_comment(),
                 b'/' => self.skip_slash(),
                 b' ' | b'\t' | b'\n' | b'\r' => {}
                 _ => self.regex_allowed = starts_expression(byte),
@@ -165,18 +215,53 @@ impl Scanner<'_> {
                     self.pos += 1;
                 }
             }
-            Some(b'*') => {
-                self.pos += 1;
-                while self.pos < self.bytes.len() && !self.bytes[self.pos..].starts_with(b"*/") {
-                    self.pos += 1;
-                }
-                self.pos = (self.pos + 2).min(self.bytes.len());
-            }
+            Some(b'*') => self.skip_block_comment(),
             _ if self.may_start_regex() && self.skip_regex() => {
                 self.regex_allowed = false;
             }
             _ => self.regex_allowed = true,
         }
+    }
+
+    /// Whether the `(` at `pos - 1` opens an unquoted CSS `url(`, whose body is
+    /// raw text: quotes, `/*` and brackets in it are not tokens.
+    fn at_unquoted_url(&self) -> bool {
+        let open = self.pos - 1;
+        let Some(name) = open.checked_sub(3).map(|start| &self.bytes[start..open]) else {
+            return false;
+        };
+        let starts_word = open
+            .checked_sub(4)
+            .is_none_or(|before| !is_css_name_byte(self.bytes[before]));
+        let body = self.bytes[self.pos..].trim_ascii_start();
+        name.eq_ignore_ascii_case(b"url")
+            && starts_word
+            && !matches!(body.first(), Some(b'\'' | b'"'))
+    }
+
+    /// Skips an unquoted `url(` body up to its `)`. A CSS escape skips the
+    /// next character.
+    fn skip_unquoted_url(&mut self) {
+        while let Some(&byte) = self.bytes.get(self.pos) {
+            self.pos += 1;
+            match byte {
+                b'\\' => self.skip_escape(),
+                b')' => return,
+                _ => {}
+            }
+        }
+    }
+
+    /// Skips a `/* */` comment when one starts at the `/` at `pos - 1`.
+    fn skip_block_comment(&mut self) {
+        if self.bytes.get(self.pos) != Some(&b'*') {
+            return;
+        }
+        self.pos += 1;
+        while self.pos < self.bytes.len() && !self.bytes[self.pos..].starts_with(b"*/") {
+            self.pos += 1;
+        }
+        self.pos = (self.pos + 2).min(self.bytes.len());
     }
 
     /// Skips a string body. A quote without a closing quote on its line is
@@ -262,6 +347,11 @@ impl Scanner<'_> {
     }
 }
 
+/// Whether `byte` can be part of a CSS identifier, so `myurl(` is not `url(`.
+const fn is_css_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') || byte >= 0x80
+}
+
 /// Keywords after which a `/` starts a regex literal.
 const REGEX_KEYWORDS: &[&[u8]] = &[
     b"await",
@@ -337,7 +427,31 @@ mod tests {
     use super::*;
 
     fn depth_of(source: &str) -> u32 {
-        max_depth(source, u32::MAX)
+        max_depth(source, u32::MAX, Dialect::Script)
+    }
+
+    fn style_depth_of(source: &str) -> u32 {
+        max_depth(source, u32::MAX, Dialect::Style)
+    }
+
+    #[test]
+    fn style_sources_skip_strings_and_block_comments_only() {
+        assert_eq!(style_depth_of(".a{content:\"(((\"}/* [[[ */"), 1);
+        assert_eq!(
+            style_depth_of(".b{background:url(//cdn.example.com/a.png)}.c{a:b(c(d))}"),
+            3
+        );
+        assert_eq!(style_depth_of(".d{width:calc(100%/3)}"), 2);
+        assert_eq!(
+            style_depth_of(".e::before{content:'it\\'s'}.f{g:h((i))}"),
+            3
+        );
+        // A CSS escape is not a quote, and an unquoted url() body is raw text.
+        assert_eq!(style_depth_of(".g\\\"{a:b((c))}"), 3);
+        assert_eq!(style_depth_of(".h{a:url(/*x.png)}.i{a:b((c))}"), 3);
+        assert_eq!(style_depth_of(".j{a:url(it's.png)}.k{a:b((c))}"), 3);
+        assert_eq!(style_depth_of(".l{a:URL( \"(((\" )}"), 2);
+        assert_eq!(style_depth_of(".m{a:myurl(((b)))}"), 4);
     }
 
     #[test]

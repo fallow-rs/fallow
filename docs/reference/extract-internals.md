@@ -41,7 +41,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     `MAX_NESTING_DEPTH` returns `None`. Extraction turns it into a failed
     parse (`parse_panicked`) with no facts, and the other callers skip it.
     Brackets in strings, comments and template text do not count, and a
-    literal that does not end on its line is scanned again as code.
+    literal that does not end on its line is scanned again as code. A CSS,
+    Sass or Less file is scanned with stylesheet rules: strings, escapes,
+    `/* */` comments and unquoted `url()` only, because `//` in
+    `url(//host/a.png)` is not a comment.
   - It then runs the parse on a stack of
     `256 KiB + 1024 * source length + 4096 * bracket depth`, with a 4 GiB cap
     (`crates/extract/src/stack.rs`). Each nesting level uses at least one
@@ -70,6 +73,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     A larger file parses on a scoped thread.
   - The fuzz build (`cfg(fuzzing)`) reserves 8 times the debug stack per byte
     and per bracket level, because AddressSanitizer pads every frame.
+- Run every lightningcss parse of stylesheet source through
+  `fallow_extract::parse_style_bounded`. Past the cap, CSS Modules class
+  extraction falls back to the plain class scan, and CSS analytics and color
+  parsing return `None`.
 - A walk that the visitor runs at each link of a member or call chain stops
   after `MAX_RECORDED_CHAIN_LINKS` links
   (`crates/extract/src/visitor/visit_impl_chain_names.rs`). Past the cap, the
