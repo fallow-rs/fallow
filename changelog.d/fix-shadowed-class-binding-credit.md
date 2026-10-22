@@ -1,0 +1,3 @@
+### Fixed
+
+- **`unused-class-members` no longer credits a class through a local shadow.** Without `--type-aware`, a module instance `const service = new Service()` gave credit to `Service.m` for `service.m`, `service['m']` and `const { m } = service` inside a function that declares its own `service`. Fallow then missed an unused member. Fallow now ignores this credit when the nested `service` provably holds no class instance: an object literal of functions and primitives, a primitive or function value, or a parameter whose type annotation is a primitive, function or type literal type. A class instance that the nested scope declares keeps its credit.

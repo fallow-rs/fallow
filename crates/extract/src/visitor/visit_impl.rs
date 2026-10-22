@@ -1790,6 +1790,7 @@ impl ModuleInfoExtractor {
                 for declarator in nested_scope_declarators(var) {
                     self.record_nested_declaration_names(declarator.id.get_binding_identifiers());
                 }
+                self.record_non_instance_declarators(var);
             }
             Declaration::ClassDeclaration(class) => {
                 if let Some(id) = class.id.as_ref() {
@@ -2503,10 +2504,7 @@ impl<'a> ModuleInfoExtractor {
         {
             let object = self.qualify_this_scope(object_name);
             if !self.record_walk_order_member_access(&object, member) {
-                self.member_accesses.push(MemberAccess {
-                    object,
-                    member: member.to_string(),
-                });
+                self.push_receiver_member_access(object, member.to_string());
             }
         }
     }
@@ -3886,6 +3884,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
+            self.scoped_non_instance_bindings.push(FxHashSet::default());
             self.scoped_namespace_binding_names
                 .push(FxHashSet::default());
             self.scoped_array_binding_element_types
@@ -3910,6 +3909,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_non_instance_bindings.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
@@ -5198,10 +5198,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             if let Expression::StringLiteral(lit) = &expr.expression
                 && !shadowed
             {
-                self.member_accesses.push(MemberAccess {
-                    object: obj.name.to_string(),
-                    member: lit.value.to_string(),
-                });
+                self.push_receiver_member_access(obj.name.to_string(), lit.value.to_string());
                 self.mark_structured_namespace_reference(obj);
             } else if !shadowed {
                 self.record_whole_object_identifier_use(obj.name.as_str());

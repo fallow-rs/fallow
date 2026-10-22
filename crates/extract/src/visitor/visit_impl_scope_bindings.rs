@@ -47,6 +47,87 @@ impl<'a> Visit<'a> for FunctionVarRootCollector {
     fn visit_ts_global_declaration(&mut self, _declaration: &TSGlobalDeclaration<'a>) {}
 }
 
+/// Whether a nested binding initialized with `expr` provably holds no class
+/// instance: a primitive, a function, or an array or object literal built
+/// only from such values. A type assertion can name a class, so it gives no
+/// proof.
+fn expression_holds_no_instance(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            expression_holds_no_instance(&paren.expression)
+        }
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::RegExpLiteral(_)
+        | Expression::TemplateLiteral(_)
+        | Expression::FunctionExpression(_)
+        | Expression::ArrowFunctionExpression(_)
+        | Expression::ClassExpression(_) => true,
+        Expression::ArrayExpression(array) => array.elements.iter().all(|element| {
+            element
+                .as_expression()
+                .is_some_and(expression_holds_no_instance)
+        }),
+        Expression::ObjectExpression(object) => {
+            object.properties.iter().all(|property| match property {
+                ObjectPropertyKind::ObjectProperty(property) => {
+                    expression_holds_no_instance(&property.value)
+                }
+                ObjectPropertyKind::SpreadProperty(_) => false,
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Whether a binding annotated with `ty` provably holds no class instance: a
+/// primitive, a literal or function type, or an array, union or type literal
+/// built only from such types. A named type can be a class, so it gives no
+/// proof.
+fn type_holds_no_instance(ty: &TSType<'_>) -> bool {
+    match ty {
+        TSType::TSStringKeyword(_)
+        | TSType::TSNumberKeyword(_)
+        | TSType::TSBooleanKeyword(_)
+        | TSType::TSBigIntKeyword(_)
+        | TSType::TSSymbolKeyword(_)
+        | TSType::TSNullKeyword(_)
+        | TSType::TSUndefinedKeyword(_)
+        | TSType::TSVoidKeyword(_)
+        | TSType::TSNeverKeyword(_)
+        | TSType::TSLiteralType(_)
+        | TSType::TSTemplateLiteralType(_)
+        | TSType::TSFunctionType(_) => true,
+        TSType::TSParenthesizedType(paren) => type_holds_no_instance(&paren.type_annotation),
+        TSType::TSArrayType(array) => type_holds_no_instance(&array.element_type),
+        TSType::TSUnionType(union) => union.types.iter().all(type_holds_no_instance),
+        TSType::TSTypeLiteral(literal) => literal.members.iter().all(|member| match member {
+            TSSignature::TSMethodSignature(_) => true,
+            TSSignature::TSPropertySignature(property) => property
+                .type_annotation
+                .as_deref()
+                .is_some_and(|annotation| type_holds_no_instance(&annotation.type_annotation)),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
+/// Whether a nested declarator binds a value that provably holds no class
+/// instance, through its type annotation or its initializer.
+fn declarator_holds_no_instance(declarator: &VariableDeclarator<'_>) -> bool {
+    if let Some(annotation) = declarator.type_annotation.as_deref() {
+        return type_holds_no_instance(&annotation.type_annotation);
+    }
+    declarator
+        .init
+        .as_ref()
+        .is_some_and(expression_holds_no_instance)
+}
+
 impl ModuleInfoExtractor {
     pub(super) fn is_module_scope(&self) -> bool {
         self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0
@@ -54,6 +135,101 @@ impl ModuleInfoExtractor {
 
     pub(in crate::visitor) fn is_module_or_function_runtime_scope(&self) -> bool {
         self.namespace_depth == 0
+    }
+
+    /// Whether the root of `object` names a nested binding that provably holds
+    /// no class instance. `binding_target_names` is module-flat, so a read of
+    /// such a shadow must not resolve through the class binding of the same
+    /// name in an outer or sibling scope.
+    pub(in crate::visitor) fn class_binding_root_is_shadowed(&self, object: &str) -> bool {
+        let root = object.split_once('.').map_or(object, |(root, _)| root);
+        self.nested_declaration_stack
+            .iter()
+            .rposition(|scope| scope.contains(root))
+            .and_then(|index| self.scoped_non_instance_bindings.get(index))
+            .is_some_and(|scope| scope.contains(root))
+    }
+
+    /// Record the nested declarators of `var` that provably hold no class
+    /// instance. Call it together with `record_nested_declaration_names`.
+    pub(super) fn record_non_instance_declarators(&mut self, var: &VariableDeclaration<'_>) {
+        if self.namespace_depth > 0 {
+            return;
+        }
+        let Some(scope) = self.scoped_non_instance_bindings.last_mut() else {
+            return;
+        };
+        for declarator in &var.declarations {
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && declarator_holds_no_instance(declarator)
+            {
+                scope.insert(id.name.to_string());
+            }
+        }
+    }
+
+    /// A class binding under the root of `binding` disproves the shadow that
+    /// the declaring scope recorded for the root.
+    pub(in crate::visitor) fn clear_non_instance_binding(&mut self, binding: &str) {
+        let root = binding.split_once('.').map_or(binding, |(root, _)| root);
+        if let Some(index) = self
+            .nested_declaration_stack
+            .iter()
+            .rposition(|scope| scope.contains(root))
+            && let Some(scope) = self.scoped_non_instance_bindings.get_mut(index)
+        {
+            scope.remove(root);
+        }
+    }
+
+    /// Record a read of `member` on the name path `object`. A receiver whose
+    /// root is a nested shadow keeps its raw access but never resolves through
+    /// the module-flat class bindings.
+    pub(in crate::visitor) fn push_receiver_member_access(
+        &mut self,
+        object: String,
+        member: String,
+    ) {
+        if self.class_binding_root_is_shadowed(&object) {
+            self.shadowed_member_access_indices
+                .insert(self.member_accesses.len());
+        }
+        self.member_accesses
+            .push(crate::MemberAccess { object, member });
+    }
+
+    pub(in crate::visitor) fn insert_class_binding_target(
+        &mut self,
+        binding: String,
+        target: String,
+    ) {
+        self.clear_non_instance_binding(&binding);
+        self.walk_order_class_bindings
+            .insert(binding.clone(), target.clone());
+        let target = super::super::BindingTarget::Class(target);
+        self.binding_target_names
+            .entry(binding)
+            .and_modify(|existing| {
+                if *existing != target {
+                    *existing = super::super::BindingTarget::Ambiguous;
+                }
+            })
+            .or_insert(target);
+    }
+
+    pub(in crate::visitor) fn insert_class_binding_target_if_absent(
+        &mut self,
+        binding: String,
+        target: String,
+    ) {
+        self.clear_non_instance_binding(&binding);
+        if !self.binding_target_names.contains_key(&binding) {
+            self.walk_order_class_bindings
+                .insert(binding.clone(), target.clone());
+        }
+        self.binding_target_names
+            .entry(binding)
+            .or_insert(super::super::BindingTarget::Class(target));
     }
 
     pub(super) fn nested_scope_shadows(&self, name: &str) -> bool {
@@ -360,6 +536,7 @@ impl ModuleInfoExtractor {
         }
 
         let mut scope = FxHashSet::default();
+        let mut non_instance_scope = FxHashSet::default();
         // Array-typed parameters (`items: Item[]`) mapped to their element class,
         // so a `for...of` loop or `.map`/`.forEach` callback over the parameter in
         // the function body credits the item's member accesses onto the class.
@@ -377,6 +554,12 @@ impl ModuleInfoExtractor {
                     .into_iter()
                     .map(|id| id.name.to_string()),
             );
+            if let BindingPattern::BindingIdentifier(id) = &param.pattern
+                && let Some(type_annotation) = param.type_annotation.as_deref()
+                && type_holds_no_instance(&type_annotation.type_annotation)
+            {
+                non_instance_scope.insert(id.name.to_string());
+            }
             if let BindingPattern::BindingIdentifier(id) = &param.pattern
                 && let Some(type_annotation) = param.type_annotation.as_deref()
                 && let Some(element) =
@@ -413,6 +596,7 @@ impl ModuleInfoExtractor {
             .map(|name| (name.clone(), None))
             .collect::<FxHashMap<_, _>>();
         self.nested_declaration_stack.push(scope);
+        self.scoped_non_instance_bindings.push(non_instance_scope);
         self.scoped_namespace_binding_names
             .push(FxHashSet::default());
         self.scoped_array_binding_element_types
@@ -430,6 +614,7 @@ impl ModuleInfoExtractor {
     pub(super) fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_non_instance_bindings.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();

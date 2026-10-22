@@ -989,6 +989,14 @@ pub(crate) struct ModuleInfoExtractor {
     loop_object_property_values: Vec<FxHashMap<String, FxHashMap<String, Vec<String>>>>,
     package_resolution_function_args: FxHashMap<String, usize>,
     nested_declaration_stack: Vec<FxHashSet<String>>,
+    /// Per `nested_declaration_stack` frame: the names declared there that
+    /// provably hold no class instance, such as `const service = { m() {} }` or
+    /// a parameter `service: number`.
+    scoped_non_instance_bindings: Vec<FxHashSet<String>>,
+    /// Indices into `member_accesses` whose receiver root is one of those
+    /// shadows. `resolve_bound_member_accesses` does not resolve them through
+    /// the module-flat class bindings.
+    shadowed_member_access_indices: FxHashSet<usize>,
     class_type_param_constraints: Vec<FxHashMap<String, Option<TypePropertyTarget>>>,
     pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
     pending_playwright_factory_aliases: Vec<(String, String)>,
@@ -1762,30 +1770,6 @@ impl ModuleInfoExtractor {
         self.semantic_facts.extend(whole_object_facts);
     }
 
-    fn insert_class_binding_target(&mut self, binding: String, target: String) {
-        self.walk_order_class_bindings
-            .insert(binding.clone(), target.clone());
-        let target = BindingTarget::Class(target);
-        self.binding_target_names
-            .entry(binding)
-            .and_modify(|existing| {
-                if *existing != target {
-                    *existing = BindingTarget::Ambiguous;
-                }
-            })
-            .or_insert(target);
-    }
-
-    fn insert_class_binding_target_if_absent(&mut self, binding: String, target: String) {
-        if !self.binding_target_names.contains_key(&binding) {
-            self.walk_order_class_bindings
-                .insert(binding.clone(), target.clone());
-        }
-        self.binding_target_names
-            .entry(binding)
-            .or_insert(BindingTarget::Class(target));
-    }
-
     fn direct_object_binding_targets(&self, object: &str) -> Option<(&FxHashSet<String>, u64)> {
         let root = object.split_once('.').map_or(object, |(root, _)| root);
         for index in (0..self.scoped_direct_object_binding_targets.len()).rev() {
@@ -1894,7 +1878,9 @@ impl ModuleInfoExtractor {
             };
             prefix = parent;
         }
-        if let Some(class) = self.walk_order_class_bindings.get(object) {
+        if let Some(class) = self.walk_order_class_bindings.get(object)
+            && !self.class_binding_root_is_shadowed(object)
+        {
             self.walk_order_member_accesses.push((
                 Some(object.to_string()),
                 class.clone(),
@@ -2013,10 +1999,7 @@ impl ModuleInfoExtractor {
             {
                 let object = self.qualify_this_scope(&object_name);
                 if !self.record_walk_order_member_access(&object, current.property.name.as_str()) {
-                    self.member_accesses.push(MemberAccess {
-                        object,
-                        member: current.property.name.to_string(),
-                    });
+                    self.push_receiver_member_access(object, current.property.name.to_string());
                 }
             }
             match &current.object {
@@ -3254,6 +3237,9 @@ impl ModuleInfoExtractor {
     }
 
     fn resolve_bound_object_name(&self, object: &str) -> Option<BindingTarget> {
+        if self.class_binding_root_is_shadowed(object) {
+            return None;
+        }
         if let Some(target_name) = self.binding_target_names.get(object) {
             return Some(target_name.clone());
         }
@@ -3384,7 +3370,10 @@ impl ModuleInfoExtractor {
         let mut additional_accesses = Vec::new();
         let mut additional_facts = Vec::new();
         let mut additional_typed_property_facts = Vec::new();
-        for access in &self.member_accesses {
+        for (index, access) in self.member_accesses.iter().enumerate() {
+            if self.shadowed_member_access_indices.contains(&index) {
+                continue;
+            }
             let Some(target) = self.resolve_bound_object_name(&access.object) else {
                 continue;
             };

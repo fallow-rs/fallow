@@ -74,6 +74,39 @@ fn parameter_and_assignment_destructures_credit_class_members() {
     );
 }
 
+/// A nested binding that provably holds no class instance shadows the module
+/// instance of the same name. A read through the shadow gives no credit to the
+/// class. A class instance that is declared in the nested scope keeps its credit.
+#[test]
+fn nested_non_instance_shadow_gives_no_class_member_credit() {
+    let config = create_config(fixture_path("shadowed-class-binding-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(
+        unused,
+        [
+            ("Service", "shadowArrowParam"),
+            ("Service", "shadowBlock"),
+            ("Service", "shadowComputed"),
+            ("Service", "shadowDestructure"),
+            ("Service", "shadowInner"),
+            ("Service", "shadowLocal"),
+            ("Service", "shadowParam"),
+            ("Service", "shadowParamDestructure")
+        ]
+    );
+}
+
 #[test]
 fn type_guard_subject_member_access_credits_only_its_predicate_class() {
     let project = tempfile::tempdir().expect("create project");
