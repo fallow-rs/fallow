@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
+  BACKENDS,
   QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
 } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
@@ -540,6 +541,58 @@ test("type-aware public surfaces expose only the stable protocol", () => {
   for (const surface of [guide, readme, readFileSync("README.md", "utf8")]) {
     assert.doesNotMatch(surface, /proof[- ]of[- ]concept|\bpoc\b/iu);
   }
+});
+
+const SIDECAR_ROOT = "tools/type-aware-sidecar";
+// These modules select and load the backend package. Every other sidecar
+// module must take the TypeScript API from `src/backend.mjs`, so that the
+// selected backend and the TypeScript 7.1 path changes apply everywhere.
+const BACKEND_LOADERS = new Set([
+  "src/backend.mjs",
+  "src/backend-preflight.mjs",
+  "src/backend-selection.mjs",
+]);
+const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*(["'`])((?:(?!\1)[^\\\n])+)\1/gu;
+
+const directBackendImports = (source) => {
+  const packages = BACKENDS.map((backend) => backend.package);
+  return [...source.matchAll(MODULE_SPECIFIER)]
+    .map((match) => match[2])
+    .filter((specifier) =>
+      packages.some((name) => specifier === name || specifier.startsWith(`${name}/`)),
+    );
+};
+
+test("type-aware sidecar imports the TypeScript API only through backend.mjs", () => {
+  assert.deepEqual(
+    directBackendImports(
+      [
+        'import { SyntaxKind } from "typescript/unstable/ast";',
+        "const ts = await import(`typescript/sync`);",
+        'const { version } = require("tsrs/package.json");',
+        'import "typescript";',
+        'import { sync } from "./backend.mjs";',
+        'import ts from "typescript-eslint";',
+      ].join("\n"),
+    ),
+    ["typescript/unstable/ast", "typescript/sync", "tsrs/package.json", "typescript"],
+  );
+
+  const violations = [];
+  for (const dir of ["src", "test"]) {
+    for (const name of readdirSync(join(SIDECAR_ROOT, dir))) {
+      const file = `${dir}/${name}`;
+      if (!/\.[cm]?js$/u.test(name) || BACKEND_LOADERS.has(file)) continue;
+      for (const specifier of directBackendImports(
+        readFileSync(join(SIDECAR_ROOT, file), "utf8"),
+      )) {
+        violations.push(
+          `${SIDECAR_ROOT}/${file} imports "${specifier}"; use ./backend.mjs (src/backend.mjs) instead`,
+        );
+      }
+    }
+  }
+  assert.deepEqual(violations, [], violations.join("\n"));
 });
 
 test("CONTRIBUTING uses the root contract generation commands", () => {
