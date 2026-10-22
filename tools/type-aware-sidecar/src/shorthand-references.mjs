@@ -4,6 +4,7 @@ const {
   isArrayLiteralExpression,
   isBinaryExpression,
   isBindingElement,
+  isComputedPropertyName,
   isElementAccessExpression,
   isForInStatement,
   isForOfStatement,
@@ -28,12 +29,32 @@ const {
 // it to the local binding, so the property it reads, or the import it
 // forwards, needs a separate lookup.
 
-const isShorthandBindingName = (node) =>
-  isBindingElement(node.parent) &&
-  node.parent.name === node &&
-  !node.parent.propertyName &&
-  !node.parent.dotDotDotToken &&
-  isObjectBindingPattern(node.parent.parent);
+// A literal key can sit in a computed name, such as `{ ["name"]: local }`.
+const keyNode = (node) => (isComputedPropertyName(node.parent) ? node.parent : node);
+
+const bindingKeyPattern = (node) => {
+  const key = keyNode(node);
+  const element = key.parent;
+  if (!isBindingElement(element) || !isObjectBindingPattern(element.parent)) return undefined;
+  const isKey = element.propertyName
+    ? element.propertyName === key
+    : element.name === key && !element.dotDotDotToken;
+  return isKey ? element.parent : undefined;
+};
+
+// The checker already resolves an identifier key that renames, such as `name`
+// in `{ name: local }`, to the property.
+const isRenamingKey = (node) =>
+  isIdentifier(node) && isBindingElement(node.parent) && node.parent.propertyName === node;
+
+const assignmentKeyProperty = (node) => {
+  const key = keyNode(node);
+  const property = key.parent;
+  return (isShorthandPropertyAssignment(property) || isPropertyAssignment(property)) &&
+    property.name === key
+    ? property
+    : undefined;
+};
 
 const isShorthandPropertyName = (node) =>
   isShorthandPropertyAssignment(node.parent) && node.parent.name === node;
@@ -103,7 +124,8 @@ const ASSIGNMENT_TARGET_RULES = [
   [isSpreadAssignment, (parent) => isAssignmentTarget(parent)],
 ];
 
-const isAssignmentTarget = (node) => {
+/** Returns true when a node is the target of an assignment, such as a pattern in `({ a } = b)`. */
+export const isAssignmentTarget = (node) => {
   const parent = node.parent;
   const rule = parent && ASSIGNMENT_TARGET_RULES.find(([matches]) => matches(parent));
   return rule ? rule[1](parent, node) : false;
@@ -114,7 +136,7 @@ const propertyNameText = (name) =>
 
 // Only a direct `=` source and nested object patterns resolve. Array and loop
 // patterns give undefined, and the caller records an uncertainty for them.
-const assignmentPatternType = (project, literal) => {
+export const assignmentPatternType = (project, literal) => {
   const parent = literal.parent;
   if (isBinaryExpression(parent)) {
     // A binary that is itself a pattern target is a default value, and the
@@ -131,7 +153,7 @@ const assignmentPatternType = (project, literal) => {
 
 const bindingPropertySymbols = (project, nodes, symbolsByNode) => {
   if (nodes.length === 0) return;
-  const types = project.checker.getTypeAtLocation(nodes.map((node) => node.parent.parent));
+  const types = project.checker.getTypeAtLocation(nodes.map(bindingKeyPattern));
   nodes.forEach((node, index) => {
     const property = types[index] && project.checker.getPropertyOfType(types[index], node.text);
     if (property) symbolsByNode.set(node, [property]);
@@ -139,16 +161,31 @@ const bindingPropertySymbols = (project, nodes, symbolsByNode) => {
 };
 
 const assignmentPropertySymbol = (project, node) => {
-  const type = assignmentPatternType(project, node.parent.parent);
+  const type = assignmentPatternType(project, assignmentKeyProperty(node).parent);
   return type ? project.checker.getPropertyOfType(type, node.text) : undefined;
 };
 
-const isPropertyName = (node) =>
-  (isShorthandPropertyAssignment(node.parent) || isPropertyAssignment(node.parent)) &&
-  node.parent.name === node;
+const isPropertyName = (node) => assignmentKeyProperty(node) !== undefined;
+
+/**
+ * Returns the object binding pattern or the assignment pattern whose source a
+ * key reads, such as `{ name }` in `const { name } = source`.
+ */
+export const patternOfKey = (node) => {
+  const pattern = bindingKeyPattern(node);
+  if (pattern) return pattern;
+  const literal = assignmentKeyProperty(node)?.parent;
+  return literal && isAssignmentTarget(literal) ? literal : undefined;
+};
+
+/** Returns true when a string literal names the member that an access or a pattern reads. */
+export const isLiteralMemberName = (node) =>
+  isStringLiteralLikeNode(node) &&
+  ((isElementAccessExpression(node.parent) && node.parent.argumentExpression === node) ||
+    patternOfKey(node) !== undefined);
 
 const shorthandPropertySymbols = (project, node, names, unresolved) => {
-  if (isAssignmentTarget(node.parent.parent)) {
+  if (isAssignmentTarget(assignmentKeyProperty(node).parent)) {
     if (!names.candidates.has(node.text)) return [];
     const property = assignmentPropertySymbol(project, node);
     if (!property) unresolved.push(node);
@@ -162,10 +199,10 @@ const shorthandPropertySymbols = (project, node, names, unresolved) => {
 
 /**
  * Returns the symbols that each name in `nodes` reads. `symbols` holds the
- * checker symbol of each name. A shorthand binding element also reads a
- * property of the destructured type. A shorthand or renamed property in an
- * assignment pattern does the same. A shorthand property in an object literal also reads
- * the binding it names, which can be an import.
+ * checker symbol of each name. The key of a binding element, also a string or
+ * computed string key, reads a property of the destructured type. A key in an
+ * assignment pattern does the same. A shorthand property in an object literal
+ * also reads the binding it names, which can be an import.
  *
  * The candidate names of `state` limit the property lookups, and its export
  * names enable the import lookups. `unresolved` lists the assignment pattern
@@ -176,7 +213,10 @@ export const shorthandReferenceSymbols = (project, nodes, symbols, state) => {
   const unresolved = [];
   bindingPropertySymbols(
     project,
-    nodes.filter((node) => isShorthandBindingName(node) && state.candidateNames.has(node.text)),
+    nodes.filter(
+      (node) =>
+        state.candidateNames.has(node.text) && bindingKeyPattern(node) && !isRenamingKey(node),
+    ),
     symbolsByNode,
   );
   const shorthandProperties = nodes.filter(isPropertyName);

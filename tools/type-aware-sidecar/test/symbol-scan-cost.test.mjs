@@ -141,3 +141,73 @@ test("symbol-use scan cost does not grow with unrelated identifier references", 
   }
   assert.deepEqual(many.counts, few.counts);
 });
+
+const createNamespaceFixture = (referenceCount) => {
+  const root = mkdtempSync(path.join(tmpdir(), "fallow-type-aware-scan-cost-"));
+  write(root, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true } }));
+  write(
+    root,
+    "src/values.ts",
+    "export const target = 1;\nexport const helper = (value: number): number => value;\n",
+  );
+  write(root, "src/barrel.ts", 'export * as inner from "./values";\n');
+  write(
+    root,
+    "src/consumer.ts",
+    [
+      'import * as ns from "./values";',
+      'import * as outer from "./barrel";',
+      ...Array.from(
+        { length: referenceCount },
+        (_, index) => `console.log(ns.helper(${index}), outer.inner.helper(${index}), ns);`,
+      ),
+      "",
+    ].join("\n"),
+  );
+  return root;
+};
+
+const exportQuery = (id, name, line) => ({
+  id,
+  operation: "symbol-use",
+  symbol: {
+    path: "src/values.ts",
+    namespace: "value",
+    declaration_kind: "export",
+    exported_name: name,
+    local_name: name,
+    line,
+    col: 13,
+  },
+  framework_contracts: [],
+});
+
+const scanNamespaceFixture = (referenceCount) => {
+  const root = createNamespaceFixture(referenceCount);
+  try {
+    const request = parseRequest({
+      protocol_version: WIRE_PROTOCOL_VERSION,
+      operation: ANALYSIS_OPERATION,
+      root,
+      projects: ["tsconfig.json"],
+      evidence_limit: 40,
+      queries: [exportQuery(0, "target", 1)],
+    });
+    return countCalls(() => analyzeSemanticQueries(request));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("namespace use scan cost does not grow with namespace references", () => {
+  const few = scanNamespaceFixture(4);
+  const many = scanNamespaceFixture(64);
+
+  for (const { result } of [few, many]) {
+    assert.deepEqual(
+      result.results.map(({ queryId, assertion }) => [queryId, assertion]),
+      [[0, "no-confirmed-use"]],
+    );
+  }
+  assert.deepEqual(many.counts, few.counts);
+});

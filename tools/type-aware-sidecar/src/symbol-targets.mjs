@@ -68,3 +68,7 @@ export const matchingAliasEntries = (project, symbol, namespace, state) => {
   }
   return byNamespace.get(namespace);
 };
+
+export const recordSymbolUncertainty = (state, entry, reasonCode) => {
+  state.uncertaintiesByQuery.get(entry.query.id).add(reasonCode);
+};

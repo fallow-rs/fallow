@@ -1752,6 +1752,9 @@ test("protocol v7 confirms class members read through shorthand destructuring", 
       "  viaDefaultedPattern(): void {}",
       "  viaArrayPattern(): void {}",
       "  viaLoopPattern(): void {}",
+      "  viaStringKey(): void {}",
+      "  viaComputedStringKey(): void {}",
+      "  viaAssignmentStringKey(): void {}",
       "  unused(): void {}",
       "}",
       "",
@@ -1780,6 +1783,11 @@ test("protocol v7 confirms class members read through shorthand destructuring", 
       "[{ viaArrayPattern }] = [service];",
       "let viaLoopPattern: () => void;",
       "for ({ viaLoopPattern } of [service]) viaLoopPattern();",
+      'const { "viaStringKey": viaString } = service;',
+      'const { ["viaComputedStringKey"]: viaComputed } = service;',
+      "let viaAssigned: () => void;",
+      '({ "viaAssignmentStringKey": viaAssigned } = service);',
+      "[viaString, viaComputed, viaAssigned].forEach((run) => run());",
       "",
     ].join("\n");
     write(
@@ -1799,6 +1807,9 @@ test("protocol v7 confirms class members read through shorthand destructuring", 
       "viaDefaultedPattern",
       "viaArrayPattern",
       "viaLoopPattern",
+      "viaStringKey",
+      "viaComputedStringKey",
+      "viaAssignmentStringKey",
       "unused",
     ];
     const queries = names.map((name, id) => ({
@@ -1830,6 +1841,9 @@ test("protocol v7 confirms class members read through shorthand destructuring", 
       viaDefaultedPattern: "no-confirmed-use",
       viaArrayPattern: "no-confirmed-use",
       viaLoopPattern: "no-confirmed-use",
+      viaStringKey: "confirmed-used",
+      viaComputedStringKey: "confirmed-used",
+      viaAssignmentStringKey: "confirmed-used",
       unused: "confirmed-no-static-references",
     });
     const bindingUse = response.results.find((result) => result.query_id === 0).evidence[0];
@@ -1901,6 +1915,204 @@ test("protocol v7 confirms exports read through shorthand properties and destruc
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Each case reads the export `x` of its own module through a namespace
+// object. A static read credits `x` and keeps the closed-world claim for the
+// unused export `y`. An escaping or computed use makes `y` abstain. An opaque
+// use also hides the read of `x`.
+const NAMESPACE_USE_CASES = [
+  ["assignment-shorthand", "let x = 0;\n({ x } = ns);\nexport const out = x;", "static"],
+  ["assignment-renamed", "let v = 0;\n({ x: v } = ns);\nexport const out = v;", "static"],
+  ["string-key", 'const { "x": v } = ns;\nexport const out = v;', "static"],
+  ["computed-string-key", 'const { ["x"]: v } = ns;\nexport const out = v;', "static"],
+  ["parameter-default", "export function read({ x } = ns) { return x; }", "static"],
+  ["typed-parameter", "export const read = ({ x }: typeof ns) => x;", "static"],
+  ["parenthesized", "const { x } = (ns);\nexport const out = x;", "static"],
+  ["as-expression", "const { x } = ns as typeof ns;\nexport const out = x;", "static"],
+  ["non-null", "const { x } = ns!;\nexport const out = x;", "static"],
+  ["satisfies", "const { x } = ns satisfies object;\nexport const out = x;", "static"],
+  ["asserted-member", "export const out = (ns as typeof ns).x;", "static"],
+  ["import-equals", 'import m = require("./exp");\nexport const out = m.x;', "static", false],
+  ["namespace-export", "export const out = outer.inner.x;", "static", "outer"],
+  ["loop-source", "for (const { x } of [ns]) console.log(x);", "escape"],
+  ["nested-source", "const { inner: { x } } = { inner: ns };\nexport const out = x;", "escape"],
+  ["rest-element", "const { ...r } = ns;\nexport const out = r.x;", "opaque"],
+  ["annotated-source", "const { x }: { x: number } = ns;\nexport const out = x;", "escape"],
+  [
+    "defaulted-source",
+    "let x = 0;\n({ a: { x } = ns } = { a: undefined });\nexport const out = x;",
+    "opaque",
+  ],
+  ["typeof-operator", "export const out = [typeof ns, ns.x];", "escape"],
+  ["star-reexport", "export const out = [outer.x, outer];", "escape", "star"],
+  ["local-alias", "const n2 = ns;\nexport const out = n2.x;", "escape"],
+  ["call-argument", "console.log(ns.x, ns);", "escape"],
+  ["export-specifier", "export { ns };\nexport const out = ns.x;", "escape"],
+  ["default-export", "export default ns;\nexport const out = ns.x;", "escape"],
+  ["shorthand-property", "export const bag = { ns };\nexport const out = ns.x;", "escape"],
+  ["type-query", "export const out = ns.x;\nexport type Keys = keyof typeof ns;", "escape"],
+  [
+    "computed-access",
+    "declare const k: keyof typeof ns;\nexport const out = [ns[k], ns.x];",
+    "escape",
+  ],
+  [
+    "computed-key",
+    'declare const k: "x" | "y";\nconst { [k]: v, x } = ns;\nexport const out = [v, x];',
+    "escape",
+  ],
+  ["namespace-export-escape", "console.log(outer.inner.x, outer.inner);", "escape", "outer"],
+  ["outer-escape", "console.log(outer.inner.x, outer);", "escape", "outer"],
+  [
+    "nested-destructure",
+    "const { inner } = outer;\nconsole.log(inner.x, inner);",
+    "escape",
+    "outer",
+  ],
+  [
+    "nested-parameter",
+    "export function read({ inner } = outer) {\n  return [inner.x, inner];\n}",
+    "escape",
+    "outer",
+  ],
+  [
+    "nested-typed-parameter",
+    "export const read = ({ inner }: typeof outer) => [inner.x, inner];",
+    "escape",
+    "outer",
+  ],
+  ["nested-element-access", 'console.log(outer.inner.x, outer["inner"]);', "escape", "outer"],
+  [
+    "renamed-namespace-import",
+    'import { inner as q } from "./barrel";\nconsole.log(q.x, q);',
+    "escape",
+    "named",
+  ],
+  ["namespace-block", "namespace N {\n  import z = ns;\n  console.log(z.x, z);\n}", "escape"],
+];
+
+const NAMESPACE_IMPORTS = {
+  ns: 'import * as ns from "./exp";\n',
+  outer: 'import * as outer from "./barrel";\n',
+  star: 'import * as outer from "./barrel";\n',
+  named: "",
+  false: "",
+};
+const NAMESPACE_BARRELS = {
+  outer: "export * as inner",
+  star: "export *",
+  named: "export * as inner",
+};
+const NAMESPACE_OUTCOMES = {
+  static: ["confirmed-used", "confirmed-no-static-references", null],
+  escape: ["confirmed-used", "no-confirmed-use", "dynamic-behavior"],
+  opaque: ["no-confirmed-use", "no-confirmed-use", "dynamic-behavior"],
+};
+
+// Returns the outcome of `x` and `y` per case: the assertion of `x`, the
+// assertion of `y`, and the reason code of `y`.
+const namespaceUseOutcomes = (cases, compilerOptions, include) => {
+  const root = makeProject();
+  try {
+    const source = "export const x = 1;\nexport const y = 2;\n";
+    write(root, "tsconfig.json", JSON.stringify({ compilerOptions, include }));
+    const queries = cases.flatMap(([name, consumer, , importKind = "ns", files = {}]) => {
+      const dir = `src/${name}`;
+      write(root, `${dir}/exp.ts`, source);
+      const barrel = NAMESPACE_BARRELS[importKind];
+      if (barrel) write(root, `${dir}/barrel.ts`, `${barrel} from "./exp";\n`);
+      write(root, `${dir}/consumer.ts`, `${NAMESPACE_IMPORTS[importKind]}${consumer}\n`);
+      Object.entries(files).forEach(([file, contents]) => write(root, `${dir}/${file}`, contents));
+      return ["x", "y"].map((exportedName) => ({
+        operation: "symbol-use",
+        framework_contracts: [],
+        symbol: symbolIdentity({
+          source,
+          marker: `${exportedName} =`,
+          file: `${dir}/exp.ts`,
+          namespace: "value",
+          declarationKind: "export",
+          exportedName,
+        }),
+      }));
+    });
+
+    const response = runSidecar(
+      semanticRequest(
+        root,
+        queries.map((query, id) => ({ id, ...query })),
+      ),
+    );
+    return Object.fromEntries(
+      cases.map(([name], index) => {
+        const [x, y] = [2 * index, 2 * index + 1].map((id) =>
+          response.results.find((result) => result.query_id === id),
+        );
+        return [name, [x.assertion, y.assertion, y.reason_code ?? null]];
+      }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+const expectedNamespaceOutcomes = (cases) =>
+  Object.fromEntries(cases.map(([name, , kind]) => [name, NAMESPACE_OUTCOMES[kind]]));
+
+test("protocol v7 never claims closed-world absence for exports behind a namespace use", () => {
+  const actual = namespaceUseOutcomes(
+    NAMESPACE_USE_CASES,
+    { strict: true, module: "preserve", moduleResolution: "bundler" },
+    ["src/**/*.ts"],
+  );
+  assert.deepEqual(actual, expectedNamespaceOutcomes(NAMESPACE_USE_CASES));
+});
+
+const COMMONJS_NAMESPACE_USE_CASES = [
+  [
+    "module-exports-require",
+    'import r = require("./r");\nconsole.log(r.x, r);',
+    "escape",
+    false,
+    { "r.js": 'module.exports = require("./exp");\n' },
+  ],
+  [
+    "exports-property-require",
+    "export {};",
+    "escape",
+    false,
+    {
+      "r.js": 'exports.m = require("./exp");\n',
+      "c.js": 'const { m } = require("./r");\nconsole.log(m.x, m);\n',
+    },
+  ],
+  [
+    "require-member",
+    "export {};",
+    "static",
+    false,
+    { "c.js": 'const m = require("./exp");\nconsole.log(m.x);\n' },
+  ],
+  [
+    "nested-require",
+    "export {};",
+    "escape",
+    false,
+    {
+      "c.js":
+        'function load() {\n  const m = require("./exp");\n  console.log(m.x, m);\n}\nload();\n',
+    },
+  ],
+];
+
+test("protocol v7 never claims closed-world absence for exports behind a CommonJS namespace", () => {
+  const actual = namespaceUseOutcomes(
+    COMMONJS_NAMESPACE_USE_CASES,
+    { strict: true, module: "commonjs", allowJs: true, noEmit: true },
+    ["src/**/*.ts", "src/**/*.js"],
+  );
+  assert.deepEqual(actual, expectedNamespaceOutcomes(COMMONJS_NAMESPACE_USE_CASES));
 });
 
 test("protocol v7 preserves required interface, abstract, and inherited contracts", () => {
@@ -2033,6 +2245,33 @@ test("protocol v7 abstains for optional contracts, decorators, and dynamic membe
         'const key: keyof Worker = Math.random() ? "execute" : "execute";',
         "worker[key]();",
         "export { worker };",
+        "",
+      ].join("\n"),
+      markerOccurrence: 1,
+    },
+    {
+      reason: "dynamic-member-access",
+      source: [
+        "class Worker {",
+        "  execute(): void {}",
+        "}",
+        "declare const key: keyof Worker;",
+        "const { [key]: run } = new Worker();",
+        "export { run };",
+        "",
+      ].join("\n"),
+      markerOccurrence: 1,
+    },
+    {
+      reason: "dynamic-member-access",
+      source: [
+        "class Worker {",
+        "  execute(): void {}",
+        "}",
+        "declare const key: keyof Worker;",
+        "let run: () => void = () => {};",
+        "({ [key]: run } = new Worker());",
+        "export { run };",
         "",
       ].join("\n"),
       markerOccurrence: 1,
@@ -2505,10 +2744,10 @@ test("protocol v7 resolves typeof import for both halves of a declaration merge"
   }
 });
 
-test("protocol v7 abstains when a dynamic import can consume an unresolved export", () => {
+test("protocol v7 credits a dynamic import destructure and abstains for its siblings", () => {
   const root = makeProject();
   try {
-    const source = "export const runtimeValue = 1;\n";
+    const source = "export const runtimeValue = 1;\nexport const siblingValue = 2;\n";
     write(
       root,
       "tsconfig.json",
@@ -2520,25 +2759,29 @@ test("protocol v7 abstains when a dynamic import can consume an unresolved expor
       "src/consumer.ts",
       'void import("./source").then(({ runtimeValue }) => runtimeValue);\n',
     );
-    const identity = symbolIdentity({
-      source,
-      marker: "runtimeValue",
-      file: "src/source.ts",
-      namespace: "value",
-      declarationKind: "export",
-      exportedName: "runtimeValue",
-      localName: "runtimeValue",
-    });
+    const queries = ["runtimeValue", "siblingValue"].map((name, index) => ({
+      id: 70 + index,
+      operation: "symbol-use",
+      symbol: symbolIdentity({
+        source,
+        marker: name,
+        file: "src/source.ts",
+        namespace: "value",
+        declarationKind: "export",
+        exportedName: name,
+      }),
+    }));
 
-    const response = runSidecar(
-      semanticRequest(root, [{ id: 70, operation: "symbol-use", symbol: identity }]),
+    const response = runSidecar(semanticRequest(root, queries));
+    const [read, sibling] = [70, 71].map((id) =>
+      response.results.find((result) => result.query_id === id),
     );
-    const result = response.results[0];
 
-    assert.equal(result.assertion, "no-confirmed-use");
-    assert.equal(result.status, "partial");
-    assert.equal(result.reason_code, "dynamic-behavior");
-    assert.equal(result.data.closed_world_eligible, false);
+    assert.equal(read.assertion, "confirmed-used");
+    assert.equal(sibling.assertion, "no-confirmed-use");
+    assert.equal(sibling.status, "partial");
+    assert.equal(sibling.reason_code, "dynamic-behavior");
+    assert.equal(sibling.data.closed_world_eligible, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -29,12 +29,20 @@ import {
 } from "./semantic-identity.mjs";
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
 import { isJavaScriptFile, referenceNames } from "./reference-names.mjs";
+import { recordComputedMemberAccess } from "./computed-member-access.mjs";
+import { namespaceSourceIdentity, recordNamespaceUse } from "./namespace-uses.mjs";
 import {
+  isLiteralMemberName,
   qualifierExpression,
   referenceValueSymbol,
   shorthandReferenceSymbols,
 } from "./shorthand-references.mjs";
-import { matchingAliasEntries, matchingSymbolEntries, targetName } from "./symbol-targets.mjs";
+import {
+  matchingAliasEntries,
+  matchingSymbolEntries,
+  recordSymbolUncertainty,
+  targetName,
+} from "./symbol-targets.mjs";
 import { analyzeTypeCoupling } from "./type-coupling.mjs";
 
 const { SignatureKind, SymbolFlags } = sync;
@@ -43,7 +51,6 @@ const {
   isClassDeclaration,
   isClassExpression,
   isDecorator,
-  isElementAccessExpression,
   isExportDeclaration,
   isExportSpecifier,
   isFunctionBody,
@@ -365,13 +372,10 @@ const candidateNameMatches = (candidateNames, name) => !candidateNames || candid
 const isIdentifierReference = (node, names) =>
   isIdentifier(node) && candidateNameMatches(names, node.text);
 
-const isElementNameNode = (node) =>
-  isStringLiteralLikeNode(node) &&
-  isElementAccessExpression(node.parent) &&
-  node.parent.argumentExpression === node;
-
 const isElementReference = (node, candidateNames) =>
-  isElementNameNode(node) && candidateNameMatches(candidateNames, node.text);
+  isStringLiteralLikeNode(node) &&
+  candidateNameMatches(candidateNames, node.text) &&
+  isLiteralMemberName(node);
 
 const entriesByName = (entries) => {
   const byName = new Map();
@@ -563,7 +567,8 @@ const referencedModuleIdentity = (project, node) => {
 
 const isExactExportReference = (project, entry, node) => {
   if (entry.query.symbol.declarationKind !== "export") return true;
-  const referencedModule = referencedModuleIdentity(project, node);
+  const referencedModule =
+    referencedModuleIdentity(project, node) ?? namespaceSourceIdentity(project, node);
   if (!referencedModule) return false;
   const queryModule = canonicalFileIdentity(entry.query.symbol.absolutePath);
   return (
@@ -608,11 +613,8 @@ const classMemberEntrySetForProject = (state, project) => {
   return entries;
 };
 
-const recordSymbolUncertainty = (state, entry, reasonCode) => {
-  state.uncertaintiesByQuery.get(entry.query.id).add(reasonCode);
-};
-
-const isExactElementReference = (node) => isElementNameNode(node) && typeof node.text === "string";
+const isExactElementReference = (node) =>
+  isLiteralMemberName(node) && typeof node.text === "string";
 
 const recordNameUncertainty = (state, projectEntries, node) =>
   (state.classMemberEntriesByName.get(node.text) ?? [])
@@ -622,31 +624,6 @@ const recordNameUncertainty = (state, projectEntries, node) =>
 const recordStringDispatchedMemberAccess = (state, projectEntries, node) => {
   if (!isStringLiteralLikeNode(node) || isExactElementReference(node)) return;
   recordNameUncertainty(state, projectEntries, node);
-};
-
-const recordComputedMemberAccess = (state, project, entries, node) => {
-  if (
-    entries.size === 0 ||
-    state.projectsWithUnknownDynamicAccess.has(project) ||
-    !isElementAccessExpression(node) ||
-    node.argumentExpression === undefined ||
-    isStringLiteralLikeNode(node.argumentExpression)
-  ) {
-    return;
-  }
-  const receiverType = project.checker.getTypeAtLocation(node.expression);
-  const receiverProperties = project.checker.getPropertiesOfType(receiverType);
-  if (receiverProperties.length === 0) {
-    entries.forEach((entry) => recordSymbolUncertainty(state, entry, "dynamic-member-access"));
-    state.projectsWithUnknownDynamicAccess.add(project);
-    return;
-  }
-  const matched = new Set(
-    receiverProperties
-      .filter((property) => state.candidateNames.has(property.name))
-      .flatMap((property) => [...matchingSymbolEntries(project, property, "value", state)]),
-  );
-  matched.forEach((entry) => recordSymbolUncertainty(state, entry, "dynamic-member-access"));
 };
 
 const recordDynamicImportUncertainty = (state, project, node) => {
@@ -721,6 +698,7 @@ const scanSymbolUseFile = (root, state, project, sourceFile, names) => {
   references.unresolved.forEach((node) => recordNameUncertainty(state, projectEntries, node));
   nodes.forEach((node, index) => {
     const rawSymbol = symbols[index];
+    recordNamespaceUse(state, project, node, rawSymbol);
     referenceNamespaces(project, node, rawSymbol).forEach((namespace) => {
       const entries = new Set([
         ...references.symbols[index].flatMap((symbol) => [

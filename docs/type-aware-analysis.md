@@ -241,11 +241,19 @@ TypeScript's project-wide global diagnostic pass, which eagerly checks the
 whole program without adding confidence to an exact declaration match. Fallow
 scopes a literal dynamic import to its resolved module. A non-literal
 `import(variable)` can target any local module, so every export candidate in
-that owning TypeScript project remains advisory. Fallow also abstains when no
-project can be selected. If an external framework
-declaration cannot be attributed to an exact package, Fallow records
-`framework-contract-provenance` and keeps the candidate. Warnings and stable
-reason codes explain each abstention class.
+that owning TypeScript project remains advisory. A namespace object, such as
+`ns` after `import * as ns`, `import ns = require()`, `export * as ns` or a
+JavaScript `require()`, can read every export of its module. A static member
+read of the object, such as `ns.name`, `ns["name"]`, `ns.Type` or a destructure
+with literal keys, credits the export that it names. Any other use, such as a
+call argument, an alias, an `export { ns }`, a rest element,
+`keyof typeof ns` or a computed key, records `dynamic-behavior` for every
+export that the object can reach, re-exports included. A computed destructure
+key, such as `const { [key]: run } = service`, records `dynamic-member-access`
+as `service[key]` does. Fallow also abstains when no project can be selected.
+If an external framework declaration cannot be attributed to an exact package,
+Fallow records `framework-contract-provenance` and keeps the candidate.
+Warnings and stable reason codes explain each abstention class.
 
 ### Svelte virtual-module exports
 

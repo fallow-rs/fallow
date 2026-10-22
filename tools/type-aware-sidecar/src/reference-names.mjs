@@ -48,19 +48,23 @@ const statementAliasNames = (statement) => {
 // Default-library and external-library files sit below node_modules. The
 // path check skips them before the source file and its metadata, which each
 // cost a checker round trip.
-const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/u;
+export const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/u;
 
 const isOwnSourceFile = (project, sourceFile) =>
   Boolean(sourceFile) &&
   !project.program.isSourceFileDefaultLibrary(sourceFile) &&
   !project.program.isSourceFileFromExternalLibrary(sourceFile);
 
-const programAliasNames = (project) =>
+/** Returns the program files outside node_modules and the default libraries. */
+export const ownSourceFiles = (project) =>
   project.program
     .getSourceFileNames()
     .filter((fileName) => !NODE_MODULES_SEGMENT.test(fileName))
     .map((fileName) => project.program.getSourceFile(fileName))
-    .filter((sourceFile) => isOwnSourceFile(project, sourceFile))
+    .filter((sourceFile) => isOwnSourceFile(project, sourceFile));
+
+const programAliasNames = (project) =>
+  ownSourceFiles(project)
     .flatMap((sourceFile) => sourceFile.statements.flatMap(statementAliasNames))
     .map((name) => name?.text)
     .filter((text) => typeof text === "string");
