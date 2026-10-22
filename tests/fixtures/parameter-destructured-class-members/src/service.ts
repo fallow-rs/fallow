@@ -21,6 +21,7 @@ export class Service {
   viaForOfLiteral(): void {}
   viaForOfTyped(): void {}
   viaForOfAssign(): void {}
+  viaForOfSpread(): void {}
   viaParamInitializer(): void {}
   viaNestedParamInitializer(): void {}
   viaTypeofParam(): void {}

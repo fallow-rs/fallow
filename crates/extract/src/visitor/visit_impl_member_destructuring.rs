@@ -179,8 +179,8 @@ impl<'a> ModuleInfoExtractor {
     }
 
     /// `for (const { m } of items)` reads `m` from each element. An array
-    /// literal gives each element as a source. A typed iterable, such as
-    /// `items: Service[]`, gives its element class.
+    /// literal gives each element as a source, and a spread in it gives the
+    /// elements of the spread iterable.
     pub(in crate::visitor) fn record_for_of_member_destructuring(
         &mut self,
         stmt: &ForOfStatement<'a>,
@@ -204,15 +204,27 @@ impl<'a> ModuleInfoExtractor {
             _ => return,
         };
         let iterable = unwrap_static_expr(&stmt.right);
-        if let Expression::ArrayExpression(array) = iterable {
-            for element in &array.elements {
-                if let Some(element) = element.as_expression() {
-                    self.record_object_destructure(pattern, element, true);
-                }
-            }
+        let Expression::ArrayExpression(array) = iterable else {
+            self.record_iterable_element_destructure(pattern, iterable);
             return;
+        };
+        for element in &array.elements {
+            if let ArrayExpressionElement::SpreadElement(spread) = element {
+                self.record_iterable_element_destructure(pattern, &spread.argument);
+            } else if let Some(element) = element.as_expression() {
+                self.record_object_destructure(pattern, element, true);
+            }
         }
-        let Some(receiver) = static_member_object_name(iterable) else {
+    }
+
+    /// Credit the members that `pattern` reads from each element of a typed
+    /// iterable, such as `items: Service[]`.
+    fn record_iterable_element_destructure(
+        &mut self,
+        pattern: DestructureObject<'_, 'a>,
+        iterable: &Expression<'a>,
+    ) {
+        let Some(receiver) = static_member_object_name(unwrap_static_expr(iterable)) else {
             return;
         };
         let receiver = self.qualify_this_scope(&receiver);

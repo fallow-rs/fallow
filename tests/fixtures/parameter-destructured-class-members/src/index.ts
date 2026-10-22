@@ -117,6 +117,10 @@ for (const { viaForOfTyped } of services) {
   viaForOfTyped();
 }
 
+for (const { viaForOfSpread } of [...services]) {
+  viaForOfSpread();
+}
+
 let viaForOfAssign: () => void;
 for ({ viaForOfAssign } of [service]) {
   viaForOfAssign();
