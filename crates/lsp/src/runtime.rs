@@ -2,6 +2,9 @@
 
 use fallow_api::WORKER_STACK_SIZE;
 
+/// Tokio worker threads of the stdio server.
+const SERVER_WORKER_THREADS: usize = 2;
+
 /// Build the multi-threaded runtime that serves the stdio protocol.
 ///
 /// Analysis runs in `spawn_blocking`. A small project parses on the blocking
@@ -9,10 +12,26 @@ use fallow_api::WORKER_STACK_SIZE;
 /// 2 MiB stack, which deeply nested sources overflow, so both get the stack of
 /// an analysis worker.
 pub fn build_server_runtime() -> std::io::Result<tokio::runtime::Runtime> {
-    // A failure leaves the default Rayon pool. The server still runs, and a
-    // small project still parses on the sized blocking thread.
-    let _ = fallow_api::configure_global_analysis_pool();
+    if !fallow_api::configure_global_analysis_pool(0) {
+        // The server still runs, and a small project still parses on the
+        // sized blocking thread. A large project can overflow the default
+        // pool, so say why.
+        #[expect(
+            clippy::print_stderr,
+            reason = "the tracing subscriber starts after the runtime"
+        )]
+        {
+            eprintln!(
+                "fallow-lsp: could not build the analysis thread pool; \
+                 parallel analysis keeps the default 2 MiB stack"
+            );
+        }
+    }
     tokio::runtime::Builder::new_multi_thread()
+        // The workers only move protocol messages and timers. Analysis runs
+        // on the blocking threads and the Rayon pool, so two workers are
+        // enough and keep the reserved stack small.
+        .worker_threads(SERVER_WORKER_THREADS)
         .thread_stack_size(WORKER_STACK_SIZE)
         .enable_all()
         .build()

@@ -1,11 +1,9 @@
-use fallow_engine::thread_pool::worker_pool_builder;
-
 #[allow(
     dead_code,
     reason = "used by the CLI binary; the library build uses per-call pools"
 )]
 pub fn configure_global_pool(threads: usize) {
-    let _ = worker_pool_builder(threads).build_global();
+    let _ = fallow_api::configure_global_analysis_pool(threads);
 }
 
 #[cfg(test)]

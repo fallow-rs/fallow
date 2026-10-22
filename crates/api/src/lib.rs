@@ -1244,14 +1244,15 @@ pub struct ComplexityRunOptions<'a> {
 }
 
 /// Build the process-global Rayon pool with the [`WORKER_STACK_SIZE`] stack
-/// and the default thread count.
+/// and `threads` workers. Zero threads selects the Rayon default count, which
+/// honors `RAYON_NUM_THREADS`.
 ///
 /// A process that runs analysis outside
 /// [`ProgrammaticAnalysisContext::install`] calls this once at startup, before
 /// any parallel work. Returns `false` when the global pool already exists or
 /// when a worker thread cannot start. Rayon then keeps its default pool.
-pub fn configure_global_analysis_pool() -> bool {
-    fallow_engine::thread_pool::worker_pool_builder(0)
+pub fn configure_global_analysis_pool(threads: usize) -> bool {
+    fallow_engine::thread_pool::worker_pool_builder(threads)
         .build_global()
         .is_ok()
 }
