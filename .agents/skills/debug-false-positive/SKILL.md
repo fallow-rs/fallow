@@ -19,7 +19,9 @@ description: Diagnose and fix a Fallow false positive or false negative through 
    premise before a fourth fix.
 6. Add a regression test that fails without the fix.
 7. Run the fixed binary on a real consumer project with a cleared `.fallow/`
-   cache and compare old versus new output.
+   cache and compare old versus new output. A debug build
+   (`cargo build -p fallow-cli`) is enough for this comparison. A release
+   build adds a slow LTO link and gives the same findings.
 8. Run `review` with the affected surface reviewers.
 
 Do not tune expected output around one fixture when the semantic model requires
