@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use fallow_types::trace::PeerClosureSeeds;
 use rustc_hash::FxHashSet;
 
 use crate::duplicates::DuplicationReport;
@@ -132,7 +133,10 @@ pub fn trace_dependency(
         workspace_roots,
         ignore_patterns,
         package_name,
-        script_used_packages,
+        &trace_impl::DependencyCredit {
+            script_used_packages,
+            peer_seeds: &PeerClosureSeeds::from_shared(script_used_packages.iter().cloned()),
+        },
     )
 }
 
@@ -166,13 +170,16 @@ pub fn build_dependency_trace(
     inputs: &DependencyTraceInputs<'_>,
     package_name: &str,
 ) -> DependencyTrace {
-    let mut trace = trace_dependency(
-        inputs.graph,
+    let mut trace = trace_impl::trace_dependency(
+        inputs.graph.as_graph(),
         inputs.root,
         inputs.workspace_roots,
         inputs.ignore_patterns,
         package_name,
-        inputs.script_used_packages,
+        &trace_impl::DependencyCredit {
+            script_used_packages: inputs.script_used_packages,
+            peer_seeds: inputs.provenance.peer_seeds(),
+        },
     );
     trace.sources = inputs.provenance.dependency_sources(package_name);
     trace.apply_tooling_credit(inputs.provenance.tooling_credit(package_name));

@@ -411,6 +411,7 @@ export type PolicyViolationSeverity = ("error" | "warn")
  * The origin of a stale suppression: inline comment or JSDoc tag.
  */
 export type SuppressionOrigin = ({
+type: "comment"
 /**
  * The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
  */
@@ -432,8 +433,8 @@ is_file_level: boolean
  * adopted the field stay byte-compatible. See issue #449.
  */
 kind_known?: boolean
-type: "comment"
 } | {
+type: "jsdoc_tag"
 /**
  * The name of the export that was tagged.
  */
@@ -442,7 +443,6 @@ export_name: string
  * Human-authored reason after `--`, when present.
  */
 reason?: (string | null)
-type: "jsdoc_tag"
 })
 /**
  * Where an override entry was declared. Serialized as the filename label
@@ -564,58 +564,67 @@ degrades_analysis?: boolean
 export type WorkspaceDiagnostic1 = ({
 kind: "undeclared-workspace"
 } | {
+kind: "malformed-package-json"
 /**
  * `serde_json` parse error text.
  */
 error: string
-kind: "malformed-package-json"
 } | {
+kind: "glob-matched-no-package-json"
 /**
  * The glob pattern that matched the directory.
  */
 pattern: string
-kind: "glob-matched-no-package-json"
 } | {
+kind: "workspace-glob-outside-root"
 /**
  * The workspace entry, as written in the file.
  */
 pattern: string
-kind: "workspace-glob-outside-root"
 } | {
+kind: "workspace-pattern-dir-missing"
+/**
+ * The workspace pattern, as written in the file.
+ */
+pattern: string
+} | {
+kind: "nested-project-root"
+} | {
+kind: "malformed-tsconfig"
 /**
  * JSONC parse error text.
  */
 error: string
-kind: "malformed-tsconfig"
 } | {
 kind: "tsconfig-reference-dir-missing"
 } | {
+kind: "malformed-pnpm-workspace-yaml"
 /**
  * YAML parse error text.
  */
 error: string
-kind: "malformed-pnpm-workspace-yaml"
 } | {
-/**
- * On-disk size of the skipped file in bytes.
- */
-size_bytes: number
 kind: "skipped-large-file"
-} | {
 /**
  * On-disk size of the skipped file in bytes.
  */
 size_bytes: number
+} | {
 kind: "skipped-minified-file"
+/**
+ * On-disk size of the skipped file in bytes.
+ */
+size_bytes: number
 } | {
 kind: "skipped-source-dotdir"
 } | {
+kind: "source-read-failure"
 /**
  * Filesystem or UTF-8 decoding error from `read_to_string`.
  */
 error: string
-kind: "source-read-failure"
 } | {
+kind: "source-parse-degraded"
 /**
  * Number of parser diagnostics reported for the file.
  */
@@ -625,7 +634,6 @@ error_count: number
  * the extracted module is a fragment at best.
  */
 panicked: boolean
-kind: "source-parse-degraded"
 } | {
 kind: "bun-lockb-override-resolution-skipped"
 } | {
@@ -637,8 +645,8 @@ kind: "npm-lock-override-resolution-skipped"
 } | {
 kind: "bun-resolutions-shadowed-by-overrides"
 } | {
-cause: PnpmWorkspaceOverridesIgnoredCause
 kind: "pnpm-workspace-overrides-ignored"
+cause: PnpmWorkspaceOverridesIgnoredCause
 } | {
 kind: "node-modules-missing"
 } | {
@@ -646,6 +654,7 @@ kind: "boundaries-not-configured"
 } | {
 kind: "rule-packs-not-configured"
 } | {
+kind: "excluded-by-default-ignore"
 /**
  * The built-in glob that matched, verbatim (for example
  * `** /build/**`).
@@ -669,22 +678,22 @@ file_count: number
  * one matched location out of several.
  */
 directory_count: number
-kind: "excluded-by-default-ignore"
 } | {
+kind: "no-source-files-analyzed"
 /**
  * Candidate source files the built-in ignore patterns removed from
  * this walk, summed across every pattern. `0` when the walk found no
  * candidate to exclude in the first place.
  */
 excluded_file_count: number
-kind: "no-source-files-analyzed"
 } | {
+kind: "file-scores-unavailable"
 /**
  * Scoring error text.
  */
 error: string
-kind: "file-scores-unavailable"
 } | {
+kind: "hotspots-skipped"
 /**
  * Which input stopped it, as a kebab-case token: `not-a-repository`,
  * `no-commits`, `invalid-since` or `churn-file-unreadable`. The set is
@@ -698,25 +707,25 @@ kind: "file-scores-unavailable"
  * remedy for all four.
  */
 cause: string
-kind: "hotspots-skipped"
 } | {
+kind: "change-coupling-skipped"
 /**
  * Kebab-case token: `shallow-clone` (the fetched history is
  * incomplete) or `too-few-commits` (fewer analyzed commits than the
  * minimum revisions of one file). The set is open.
  */
 cause: string
-kind: "change-coupling-skipped"
 } | {
+kind: "shallow-clone"
 /**
  * `true` when the run also asked for ownership attribution, which a
  * shallow clone skews further by inflating single-author dominance.
  */
 ownership_requested: boolean
-kind: "shallow-clone"
 } | {
 kind: "unpinned-clock"
 } | {
+kind: "ownership-unavailable"
 /**
  * Which input failed, as a kebab-case token: `invalid-bot-pattern` or
  * `codeowners-parse-failed`. The set is open.
@@ -726,21 +735,21 @@ cause: string
  * Underlying error text.
  */
 error: string
-kind: "ownership-unavailable"
 } | {
+kind: "trend-snapshot-unreadable"
 /**
  * Filesystem or JSON error text.
  */
 error: string
-kind: "trend-snapshot-unreadable"
 } | {
+kind: "trend-group-baseline-unavailable"
 /**
  * Why the groups have no baseline, as a kebab-case token:
  * `snapshot-has-no-groups` or `grouped-by-mismatch`. The set is open.
  */
 cause: string
-kind: "trend-group-baseline-unavailable"
 } | {
+kind: "plugin-config-unreadable"
 /**
  * The plugin that read the config, as it labels itself:
  * `module-federation` for a standalone `module-federation.config.*`,
@@ -767,8 +776,8 @@ key: string
  * option the message points at.
  */
 reason: string
-kind: "plugin-config-unreadable"
 } | {
+kind: "plugin-effect-not-modeled"
 /**
  * The plugin that read the config, as it labels itself (`nuxt`).
  */
@@ -787,36 +796,46 @@ key: string
  * be classified at all. The set is open.
  */
 reason: string
-kind: "plugin-effect-not-modeled"
 } | {
 kind: "coverage-auto-detected"
 } | {
 kind: "flag-age-shallow-clone"
 } | {
+kind: "flag-age-unavailable"
 /**
  * Why no history is available, as a kebab-case token:
  * `not-a-repository` or `no-commits`. The set is open.
  */
 cause: string
-kind: "flag-age-unavailable"
 } | {
+kind: "ignore-dependencies-glob-unmatched"
 /**
  * The `ignoreDependencies` entry, as written in the config.
  */
 pattern: string
-kind: "ignore-dependencies-glob-unmatched"
 } | {
+kind: "ignore-findings-pattern-unmatched"
 /**
  * The `ignoreFindings` entry, as written in the config.
  */
 pattern: string
-kind: "ignore-findings-pattern-unmatched"
+} | {
+kind: "baseline-install-state-mismatch"
+baseline_node_modules: NodeModulesState
+run_node_modules: NodeModulesState
 })
 /**
  * Why the declared pnpm version ignores the `overrides` section of
  * `pnpm-workspace.yaml`.
  */
 export type PnpmWorkspaceOverridesIgnoredCause = ("package-json-overrides" | "pnpm-version")
+/**
+ * Whether the project had a `node_modules` directory at a point in time.
+ *
+ * A dead-code baseline records this when it is saved, so a later run in a
+ * different install state can say that its results can differ.
+ */
+export type NodeModulesState = ("present" | "missing")
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
  * emitted by the legacy `build_clone_group_actions` walker.
@@ -899,6 +918,10 @@ export type AuditFindingAttribution = ("introduced" | "worsened" | "inherited")
  * A measured metric of a complexity finding.
  */
 export type WorsenedMetricKind = ("cyclomatic" | "cognitive" | "crap" | "line_count")
+/**
+ * Audit-mode reason why a complexity finding does not gate the verdict.
+ */
+export type AuditGateExemption = "test-file"
 /**
  * Coverage model used for CRAP score computation.
  */
@@ -1166,12 +1189,13 @@ export type DiffRiskActionType = ("suppress-line" | "suppress-file" | "suppress-
  * `target` block of [`InspectOutput`], tagged by `type`.
  */
 export type InspectTargetDescriptor = ({
+type: "file"
 /**
  * File path relative to the analysed root.
  */
 file: string
-type: "file"
 } | {
+type: "symbol"
 /**
  * File path relative to the analysed root.
  */
@@ -1180,7 +1204,6 @@ file: string
  * Name of the inspected export.
  */
 export_name: string
-type: "symbol"
 })
 /**
  * `identity` block of [`InspectOutput`]; shape follows the target type.
@@ -3402,7 +3425,8 @@ _meta?: (Meta | null)
  *
  * - workspace discovery, at config load: `undeclared-workspace`,
  *   `malformed-package-json`, `glob-matched-no-package-json`,
- *   `workspace-glob-outside-root`, `malformed-tsconfig`,
+ *   `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,
+ *   `nested-project-root`, `malformed-tsconfig`,
  *   `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
@@ -8009,7 +8033,9 @@ severity: FindingSeverity
  * `overrides[].rules` entries: `error` fails the run, `warn` does not.
  * The most severe rule of the kinds in `exceeded` wins. It is separate
  * from the band in `severity`, which ranks the finding and does not gate
- * it. Absent in reports from older versions.
+ * it. Under `audit --gate new-only`, a finding that exceeds only CRAP
+ * from estimated coverage has `warn`. Absent in reports from older
+ * versions.
  */
 effective_severity?: (EffectiveSeverity | null)
 /**
@@ -8072,8 +8098,11 @@ actions: HealthFindingAction[]
 /**
  * Audit-mode flag indicating whether the finding is new versus the base
  * snapshot. A complexity finding is new when no base finding has the same
- * path and function name, or when a metric that it exceeds has a higher
- * value than in that base finding.
+ * path and function name, when a grown metric exceeds a threshold that
+ * the base finding did not exceed, or when the growth of an exceeded
+ * metric moves it to a higher severity tier. A CRAP score from estimated
+ * coverage, or a CRAP score that the base finding does not have, is not
+ * growth.
  */
 introduced?: (boolean | null)
 /**
@@ -8090,6 +8119,12 @@ attribution?: (AuditFindingAttribution | null)
  * finding. Absent when no metric grew.
  */
 worsened_metrics?: WorsenedMetric[]
+/**
+ * Audit-mode reason why the finding does not gate the verdict. With
+ * `test-file`, the finding is in a test file and `effective_severity` is
+ * `warn`. Absent outside `audit`, and on a finding that gates.
+ */
+gate_exemption?: (AuditGateExemption | null)
 }
 /**
  * Per-component React hook profile derived from the cached `hook_uses` IR at
@@ -12232,6 +12267,13 @@ star_export_ambiguity?: (StarExportAmbiguity | null)
  */
 re_export_chains: ReExportChain[]
 /**
+ * The framework plugin rules that mark this export as used. The
+ * framework calls or reads the export, so no import is necessary. A
+ * credit sets `is_used` when the file is reachable. Absent when no
+ * plugin credits the export.
+ */
+plugin_credits?: PluginExportCredit[]
+/**
  * Human-readable reason summary.
  */
 reason: string
@@ -12322,6 +12364,19 @@ exported_as: string
  * Number of references on the barrel's re-exported symbol.
  */
 reference_count: number
+}
+/**
+ * A framework plugin rule that marks an export as used.
+ */
+export interface PluginExportCredit {
+/**
+ * The plugin that gives the rule, for example `nextjs`.
+ */
+plugin: string
+/**
+ * The project-relative file pattern of the rule.
+ */
+pattern: string
 }
 /**
  * Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
@@ -12442,6 +12497,11 @@ reference_count: number
  * Files that reference this export.
  */
 referenced_by: ExportReference[]
+/**
+ * The framework plugin rules that mark this export as used. Absent when
+ * no plugin credits the export.
+ */
+plugin_credits?: PluginExportCredit[]
 }
 /**
  * A re-export with source information.
@@ -16703,7 +16763,8 @@ _meta?: (Meta | null)
  *
  * - workspace discovery, at config load: `undeclared-workspace`,
  *   `malformed-package-json`, `glob-matched-no-package-json`,
- *   `workspace-glob-outside-root`, `malformed-tsconfig`,
+ *   `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,
+ *   `nested-project-root`, `malformed-tsconfig`,
  *   `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
@@ -20002,6 +20063,9 @@ prune_reason?: (string | null)
  * first failing test, and it runs the fastest covering test first, so a
  * second run on the same code can name another covering test. No
  * fingerprint or baseline comparison uses this field.
+ *
+ * The retry of a survivor also runs the other tests of its test files,
+ * so this test can be absent from `covering_tests`.
  */
 killed_by?: (string | null)
 /**

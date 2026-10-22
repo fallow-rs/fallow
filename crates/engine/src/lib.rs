@@ -85,6 +85,7 @@ pub mod thread_pool;
 pub mod trace;
 pub mod trace_chain;
 pub mod trace_error;
+pub mod unprovable;
 /// Input validation shared by CLI-facing entry points: git refs, root paths,
 /// and control-character rejection.
 pub mod validate;

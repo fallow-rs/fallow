@@ -667,6 +667,12 @@ needs a maintainer decision. The step is the last step of the job and runs
 after a failed step. When the step cannot read the base ref, for example
 because the ref is not fetched, it exits with 2, not 1.
 
+`verify:fast` runs the same command as its `Large file growth` step, so a
+local run finds the failure before CI does. The step compares with the local
+`origin/main` ref, so run `git fetch origin main` first to compare with the
+current base. When `origin/main` does not exist, for example in a fork clone
+with another remote name, `verify:fast` skips the step and prints the reason.
+
 During a merge commit, the pre-commit step compares each file with the larger
 of its `HEAD` and `MERGE_HEAD` versions. Thus growth that the merged branch
 brought in does not fail the merge. On `git commit --amend`, the step compares

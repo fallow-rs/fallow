@@ -56,6 +56,8 @@ struct SavedHealthFinding {
     attribution: Option<crate::AuditFindingAttribution>,
     #[serde(default)]
     worsened_metrics: Vec<crate::WorsenedMetric>,
+    #[serde(default)]
+    gate_exemption: Option<crate::AuditGateExemption>,
     /// Carried through so a `report --from` re-render describes the finding
     /// against the ceiling it was measured with. Absent in envelopes written by
     /// an older fallow, which then fall back to the summary (issue #2163).
@@ -274,6 +276,7 @@ impl From<SavedHealthFinding> for HealthFinding {
         );
         finding.attribution = saved.attribution;
         finding.worsened_metrics = saved.worsened_metrics;
+        finding.gate_exemption = saved.gate_exemption;
         finding
     }
 }

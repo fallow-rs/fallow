@@ -1,0 +1,10 @@
+{
+  "name": "sanity-config-jsx",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "react": "^19.0.0",
+    "sanity": "^4.0.0"
+  }
+}

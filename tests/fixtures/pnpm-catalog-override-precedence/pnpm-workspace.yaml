@@ -1,0 +1,6 @@
+catalog:
+  lodash: ^4.17.21
+overrides:
+  vite: ^5.4.0
+  rolldown@^1: ^1.0.0
+  override-root>tool: ^1.0.0

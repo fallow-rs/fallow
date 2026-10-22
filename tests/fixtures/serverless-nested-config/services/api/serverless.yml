@@ -1,0 +1,6 @@
+service: api
+plugins:
+  - serverless-esbuild
+functions:
+  hello:
+    handler: handler.main

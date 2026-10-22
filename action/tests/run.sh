@@ -5436,6 +5436,47 @@ run_broker BRANDED_TOKEN="false"
 assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON=branded token disabled" \
   "broker: an opt-out records the fallback cause"
 
+# Without an explicit `branded-token: true`, a workflow without id-token
+# permission gets the default token silently. An explicit `true` gets one short
+# notice. Neither case asks the workflow for more permissions.
+run_broker -u ACTIONS_ID_TOKEN_REQUEST_URL BRANDED_TOKEN="auto"
+if [ -z "$BROKER_STDERR" ]; then
+  pass "broker: the default falls back silently without id-token"
+else
+  fail "broker: the default falls back silently without id-token" "stderr: ${BROKER_STDERR}"
+fi
+assert_contains "$(cat "$BROKER_OUTPUT")" "branded=false" \
+  "broker: the silent fallback still sets the step output"
+assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON=no id-token permission" \
+  "broker: the silent fallback still records the fallback cause"
+
+run_broker -u ACTIONS_ID_TOKEN_REQUEST_URL
+if [ -z "$BROKER_STDERR" ]; then
+  pass "broker: an unset input falls back silently without id-token"
+else
+  fail "broker: an unset input falls back silently without id-token" "stderr: ${BROKER_STDERR}"
+fi
+
+run_broker -u ACTIONS_ID_TOKEN_REQUEST_URL BRANDED_TOKEN="true"
+assert_contains "$BROKER_STDERR" "no id-token permission" \
+  "broker: an explicit true names the missing id-token"
+assert_not_contains "$BROKER_STDERR" "permissions:" \
+  "broker: an explicit true does not suggest more permissions"
+
+# The broker step mints a token only for a run that can post a comment or a
+# review. Other runs never request an OIDC token.
+BROKER_STEP_IF=$(sed -n '/name: Fallow branded token/,/run: bash/p' "$DIR/../../action.yml")
+assert_contains "$BROKER_STEP_IF" "inputs.comment == 'true'" \
+  "action.yml: the broker step runs for PR comments"
+assert_contains "$BROKER_STEP_IF" "inputs.review-comments == 'true'" \
+  "action.yml: the broker step runs for review comments"
+assert_contains "$BROKER_STEP_IF" "github.event_name == 'pull_request'" \
+  "action.yml: the broker step runs only on pull_request events"
+assert_contains "$BROKER_STEP_IF" "inputs.command != 'security'" \
+  "action.yml: the broker step skips the command that never posts"
+assert_contains "$(grep -A3 '^  branded-token:' "$DIR/../../action.yml")" "default: 'auto'" \
+  "action.yml: branded-token defaults to auto"
+
 rm -rf "$BROKER_WORK"
 
 # --- Architecture command (issue #3271) ---

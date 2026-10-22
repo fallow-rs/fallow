@@ -1,0 +1,9 @@
+{
+  "name": "ci-working-directory",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "vite-plus-plain-vite",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vite": "1.0.0"
+  }
+}

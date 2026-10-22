@@ -770,6 +770,12 @@ fn merge_plugin_result_fields(
             .into_iter()
             .map(|rule| PluginUsedExportRule::new(pname.to_string(), rule)),
     );
+    result.config_export_credits.extend(
+        plugin_result
+            .entry_export_credits
+            .into_iter()
+            .map(|rule| PluginUsedExportRule::new(pname.to_string(), rule)),
+    );
     result
         .used_class_members
         .extend(plugin_result.used_class_members);

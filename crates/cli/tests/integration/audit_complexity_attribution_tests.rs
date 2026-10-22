@@ -1,8 +1,10 @@
 //! `audit --gate new-only` attribution of complexity findings (#3277).
 //!
-//! A head finding is introduced when no base finding matches it, or when a
-//! metric that the head finding exceeds has a higher value than in the base
-//! finding. Unchanged and decreased metrics stay inherited, also when the
+//! A head finding is introduced when no base finding matches it, when it
+//! exceeds a metric that the base finding did not exceed and that metric grew,
+//! or when an exceeded metric grew into a higher severity tier. Growth of a
+//! metric that the base finding already exceeded, in the same tier, is
+//! worsened. Unchanged and decreased metrics stay inherited, also when the
 //! exceeded category changes.
 
 #![allow(
@@ -69,6 +71,7 @@ struct Attribution {
     verdict: String,
     introduced: u64,
     inherited: u64,
+    worsened: u64,
     /// `(cyclomatic, cognitive, exceeded, introduced)` of each finding.
     findings: Vec<(u64, u64, String, bool)>,
 }
@@ -120,6 +123,9 @@ fn audit(dir: &Path) -> Attribution {
         inherited: json["attribution"]["complexity_inherited"]
             .as_u64()
             .unwrap(),
+        worsened: json["attribution"]["complexity_worsened"]
+            .as_u64()
+            .unwrap_or(0),
         findings,
     };
     // Verdict, attribution counts and the flag of each finding agree.
@@ -145,6 +151,15 @@ fn assert_inherited(result: &Attribution, findings: u64) {
     assert_eq!(result.verdict, "pass");
     assert_eq!(result.introduced, 0, "{:?}", result.findings);
     assert_eq!(result.inherited, findings, "{:?}", result.findings);
+}
+
+/// A grown inherited finding: the default `audit.worsened: warn` gives `warn`.
+fn assert_worsened(result: &Attribution, findings: u64, worsened: u64) {
+    assert_eq!(result.code, 0, "expected no fail: {:?}", result.findings);
+    assert_eq!(result.verdict, "warn");
+    assert_eq!(result.introduced, 0, "{:?}", result.findings);
+    assert_eq!(result.inherited, findings, "{:?}", result.findings);
+    assert_eq!(result.worsened, worsened, "{:?}", result.findings);
 }
 
 fn assert_introduced(result: &Attribution, introduced: u64, inherited: u64) {
@@ -175,18 +190,41 @@ fn unchanged_metrics_stay_inherited() {
 }
 
 #[test]
-fn increased_metric_of_existing_finding_is_introduced() {
+fn increased_exceeded_metric_in_the_same_tier_is_worsened() {
     let tmp = fixture(&hotspot("hotspot", 16));
     edit(tmp.path(), &hotspot("hotspot", 17));
 
     let result = audit(tmp.path());
 
-    assert_introduced(&result, 1, 0);
+    assert_worsened(&result, 1, 1);
     assert_eq!(
         result.findings,
-        vec![(18, 17, "both".to_string(), true)],
-        "the worse hotspot is introduced"
+        vec![(18, 17, "both".to_string(), false)],
+        "growth of a metric that the base already exceeds is worsened"
     );
+}
+
+#[test]
+fn increased_exceeded_metric_into_a_higher_tier_is_introduced() {
+    // Cognitive 20 to 25 reaches the `high` tier.
+    let tmp = fixture(&hotspot("hotspot", 20));
+    edit(tmp.path(), &hotspot("hotspot", 25));
+
+    let result = audit(tmp.path());
+
+    assert_introduced(&result, 1, 0);
+}
+
+#[test]
+fn newly_exceeded_metric_that_grew_is_introduced() {
+    // The base exceeds only cyclomatic (16). Cognitive grows from 15 to 16.
+    let tmp = fixture(&hotspot("hotspot", 15));
+    edit(tmp.path(), &hotspot("hotspot", 16));
+
+    let result = audit(tmp.path());
+
+    assert_introduced(&result, 1, 0);
+    assert_eq!(result.findings[0].2, "both");
 }
 
 #[test]
@@ -240,14 +278,14 @@ fn line_shift_keeps_unchanged_finding_inherited() {
 }
 
 #[test]
-fn line_shift_with_increase_is_introduced() {
+fn line_shift_with_increase_is_worsened() {
     let tmp = fixture(&hotspot("hotspot", 16));
     let shifted = format!("export const first = 1;\n\n{}", hotspot("hotspot", 17));
     edit(tmp.path(), &shifted);
 
     let result = audit(tmp.path());
 
-    assert_introduced(&result, 1, 0);
+    assert_worsened(&result, 1, 1);
 }
 
 #[test]
@@ -267,7 +305,7 @@ fn renamed_file_compares_metrics_with_the_old_path() {
     fs::write(dir.join("src/moved.js"), hotspot("hotspot", 18)).unwrap();
     commit_all(dir, "rename plus regression");
 
-    assert_introduced(&audit(dir), 1, 0);
+    assert_worsened(&audit(dir), 1, 1);
 }
 
 #[test]
@@ -294,6 +332,17 @@ fn same_named_methods_count_and_compare_separately() {
             class_with_run("Second", 20)
         ),
     );
+    assert_worsened(&audit(dir), 2, 1);
+
+    // Move the first method to the `high` tier (cognitive 25).
+    edit(
+        dir,
+        &format!(
+            "{}{}",
+            class_with_run("First", 25),
+            class_with_run("Second", 20)
+        ),
+    );
     let result = audit(dir);
     assert_introduced(&result, 1, 1);
     assert_eq!(
@@ -302,8 +351,8 @@ fn same_named_methods_count_and_compare_separately() {
             .iter()
             .find(|finding| finding.3)
             .map(|finding| finding.0),
-        Some(18),
-        "the worsened method carries the introduced flag: {:?}",
+        Some(26),
+        "the method in the higher tier carries the introduced flag: {:?}",
         result.findings
     );
 }
@@ -342,4 +391,101 @@ fn adding_a_same_named_method_is_introduced() {
         "the new method carries the introduced flag: {:?}",
         result.findings
     );
+}
+
+/// A repository whose base commit has no complexity finding, with CRAP gated
+/// at 10. No test reaches `src/index.js`, so CRAP comes from estimated
+/// coverage.
+fn estimated_crap_fixture() -> TempDir {
+    let tmp = fixture("export const value = 1;\n");
+    fs::write(
+        tmp.path().join(".fallowrc.json"),
+        r#"{"entry": ["src/*.js"], "health": {"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 10, "maxUnitSize": 999999}}"#,
+    )
+    .unwrap();
+    commit_all(tmp.path(), "gate CRAP");
+    tmp
+}
+
+fn audit_format(dir: &Path, format: &str) -> crate::common::CommandOutput {
+    run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "new-only",
+        "--format",
+        format,
+        "--quiet",
+        "--no-cache",
+        "--no-css",
+    ])
+}
+
+/// The JSON finding of the function `name`.
+fn json_finding(json: &serde_json::Value, name: &str) -> serde_json::Value {
+    json["complexity"]["findings"]
+        .as_array()
+        .and_then(|findings| findings.iter().find(|item| item["name"] == name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no finding for {name}: {json:#}"))
+}
+
+#[test]
+fn new_function_over_estimated_crap_only_warns() {
+    let tmp = estimated_crap_fixture();
+    // Cyclomatic 7 and cognitive 6 stay under 15; CRAP at 0% is 56.
+    edit(tmp.path(), &hotspot("estimated", 6));
+
+    let output = audit_format(tmp.path(), "json");
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"], "warn", "{json:#}");
+    assert_eq!(json["attribution"]["complexity_introduced"], 1);
+    let finding = json_finding(&json, "estimated");
+    assert_eq!(finding["exceeded"], "crap");
+    assert_eq!(finding["coverage_source"], "estimated");
+    assert_eq!(finding["attribution"], "introduced");
+    assert_eq!(finding["effective_severity"], "warn", "{finding:#}");
+
+    let sarif = audit_format(tmp.path(), "sarif");
+    assert_eq!(sarif.code, 0, "stderr: {}", sarif.stderr);
+    let sarif = parse_json(&sarif);
+    let levels: Vec<&str> = sarif["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|run| run["results"].as_array().unwrap())
+        .filter(|result| {
+            result["ruleId"]
+                .as_str()
+                .is_some_and(|rule| rule.contains("crap"))
+        })
+        .filter_map(|result| result["level"].as_str())
+        .collect();
+    assert_eq!(levels, ["warning"], "{sarif:#}");
+}
+
+#[test]
+fn estimated_crap_does_not_hide_a_cognitive_finding() {
+    let tmp = estimated_crap_fixture();
+    // Also exceeds cyclomatic and cognitive, so it still gates.
+    edit(
+        tmp.path(),
+        &format!("{}{}", hotspot("estimated", 6), hotspot("tangled", 16)),
+    );
+
+    let output = audit_format(tmp.path(), "json");
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"], "fail");
+    assert_eq!(
+        json_finding(&json, "estimated")["effective_severity"],
+        "warn"
+    );
+    let tangled = json_finding(&json, "tangled");
+    assert_eq!(tangled["exceeded"], "all");
+    assert_eq!(tangled["effective_severity"], "error");
 }

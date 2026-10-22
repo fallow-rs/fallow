@@ -1,0 +1,9 @@
+{
+  "name": "serverless-nested-config",
+  "private": true,
+  "devDependencies": {
+    "serverless": "^3.0.0",
+    "serverless-esbuild": "^1.0.0",
+    "serverless-offline": "^13.0.0"
+  }
+}

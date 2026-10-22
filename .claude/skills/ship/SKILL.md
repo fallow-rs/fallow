@@ -150,6 +150,14 @@ Use these scripts for each pull request, one at a time:
    conflicts with its base. The script then stops with exit code 3.
    Update the branch, push, and wait again.
 
+   The script compares each failed check with the same check name on the
+   newest completed run of `main`. A check that also fails on `main` gets
+   the line `FAIL (also on main <sha>)`. When all failed checks also fail
+   on `main`, the script stops with exit code 4. The failure does not come
+   from the pull request, so do not stop as blocked. Wait for the fix on
+   `main`, merge `main` into the branch, push, and wait again. Exit code 1
+   means that at least one failure is new on the pull request.
+
 3. Merge through the protected-main workflow. Then continue with the next
    pull request.
 

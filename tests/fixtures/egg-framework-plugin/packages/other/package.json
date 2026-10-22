@@ -1,0 +1,11 @@
+{
+  "name": "other",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "egg": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eggjs/tracer": "^3.0.0"
+  }
+}

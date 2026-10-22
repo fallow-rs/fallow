@@ -20,6 +20,7 @@ const commandSignatures = (commands) => commands.map(({ command, args }) => [com
 const FAST_COMMANDS = [
   ["npm", ["run", "check:knowledge-architecture"]],
   ["npm", ["run", "check:agent-adapters"]],
+  ["node", ["scripts/check-file-size.mjs", "--base", "origin/main"]],
   ["cargo", ["fmt", "--all", "--", "--check"]],
   ["cargo", ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]],
   [
@@ -125,6 +126,49 @@ test("verification stops at the first failed command", () => {
     executed,
     commands.slice(0, 2).map(({ label }) => label),
   );
+});
+
+test("the large file growth step runs when the base ref exists", () => {
+  const executed = [];
+  const checkedRefs = [];
+  const exitCode = runVerification("fast", {
+    assertInstall: () => {},
+    hasRef: (ref) => {
+      checkedRefs.push(ref);
+      return true;
+    },
+    runCommand: (command) => {
+      executed.push(command.label);
+      return 0;
+    },
+    write: () => {},
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(checkedRefs, ["origin/main"]);
+  assert.ok(executed.includes("Large file growth"));
+});
+
+test("the large file growth step is skipped when the base ref is missing", () => {
+  const executed = [];
+  let output = "";
+  const exitCode = runVerification("fast", {
+    assertInstall: () => {},
+    hasRef: () => false,
+    runCommand: (command) => {
+      executed.push(command.label);
+      return 0;
+    },
+    write: (message) => {
+      output += message;
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.ok(!executed.includes("Large file growth"));
+  assert.equal(executed.length, commandsForMode("fast").length - 1);
+  assert.match(output, /Large file growth: skipped, because origin\/main does not exist/u);
+  assert.match(output, /git fetch origin main/u);
 });
 
 test("successful verification discloses gates that remain CI-only", () => {

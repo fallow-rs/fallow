@@ -1,7 +1,29 @@
 //! Used-export rules: the export names that a plugin marks as used in the
 //! files that a path rule matches.
 
-use super::{AggregatedPluginResult, CompiledPathRule, PathRule};
+use super::{AggregatedPluginResult, CompiledPathRule, PathRule, PluginResult};
+
+impl PluginResult {
+    pub(super) fn push_used_export_rule(
+        &mut self,
+        pattern: impl Into<String>,
+        exports: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        self.used_exports
+            .push(UsedExportRule::new(pattern, exports));
+    }
+
+    /// Credit `exports` of the entry files that `pattern` matches, under
+    /// `includeEntryExports` only.
+    pub(super) fn push_entry_export_credit(
+        &mut self,
+        pattern: impl Into<String>,
+        exports: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        self.entry_export_credits
+            .push(UsedExportRule::new(pattern, exports));
+    }
+}
 
 /// A used-export rule bound to a file-pattern rule.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

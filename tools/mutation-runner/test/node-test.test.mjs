@@ -6,6 +6,7 @@ import { after, afterEach, before, describe, test } from "node:test";
 
 import { childRunnerSuite } from "./support/child-runner-suite.mjs";
 import { startCompanion } from "./support/companion-process.mjs";
+import { mappedTestFilesSuite } from "./support/mapped-test-files-suite.mjs";
 import { readMutationConstant } from "./support/vitest-fixture.mjs";
 
 childRunnerSuite({
@@ -151,5 +152,156 @@ describe("node-test adapter with the Node flags of the test script", () => {
     const ready = await init({ env: {}, node_args: "--experimental-transform-types" });
     assert.equal(ready.type, "error", JSON.stringify(ready));
     assert.equal(ready.error.code, "bad-request");
+  });
+});
+
+mappedTestFilesSuite({
+  runner: "node-test",
+  runtime: process.execPath,
+  testImport: 'import assert from "node:assert/strict";\nimport { test } from "node:test";',
+  assertion: "assert.equal(add(2, 2), 4)",
+});
+
+const CLI_TEST = "test/cli.test.mjs";
+
+/**
+ * A project whose tests start Node child processes that load a source file.
+ * The workspace path has a space, so the preload URL must survive the
+ * NODE_OPTIONS parse.
+ */
+const createSubprocessProject = () => {
+  const workspace = mkdtempSync(join(tmpdir(), "fallow mutation node child-"));
+  const root = join(workspace, "project");
+  const runDir = join(workspace, "run");
+  const main =
+    "if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) console.log(add(Number(process.argv[2]), Number(process.argv[3])));\n";
+  const files = {
+    "project/package.json": '{"name":"p","type":"module"}\n',
+    "project/src/math.mjs": `import { pathToFileURL } from "node:url";\nexport const add = (a, b) => a + b;\n${main}`,
+    "project/src/forked.mjs": [
+      'import { add } from "./math.mjs";',
+      "process.send({ sum: add(2, 2) }, () => process.exit(0));",
+      "",
+    ].join("\n"),
+    [`project/${CLI_TEST}`]: [
+      'import assert from "node:assert/strict";',
+      'import { execFileSync, fork } from "node:child_process";',
+      'import { test } from "node:test";',
+      'import { fileURLToPath } from "node:url";',
+      'import { add } from "../src/math.mjs";',
+      "const path = (name) => fileURLToPath(new URL(`../src/${name}`, import.meta.url));",
+      'test("cli", () => {',
+      "  assert.ok(Number.isFinite(add(2, 2)));",
+      '  const out = execFileSync(process.execPath, [path("math.mjs"), "2", "2"], { encoding: "utf8" });',
+      '  assert.equal(out.trim(), "4");',
+      "});",
+      'test("fork", async () => {',
+      "  assert.ok(Number.isFinite(add(2, 2)));",
+      '  const child = fork(path("forked.mjs"), [], { silent: true });',
+      '  let output = "";',
+      '  child.stdout.on("data", (chunk) => { output += chunk; });',
+      '  child.stderr.on("data", (chunk) => { output += chunk; });',
+      '  const message = await new Promise((resolve) => child.once("message", resolve));',
+      '  await new Promise((resolve) => child.once("close", resolve));',
+      '  assert.equal(output, "");',
+      "  assert.equal(message.sum, 4);",
+      "});",
+      'test("env", () => {',
+      "  assert.ok(Number.isFinite(add(2, 2)));",
+      '  assert.deepEqual(Object.keys(process.env).filter((key) => key.startsWith("FALLOW_MUTATION")), []);',
+      "});",
+      "",
+    ].join("\n"),
+    "run/files/src/math.mjs": `${PRELUDE}
+import { pathToFileURL } from "node:url";
+export const add = (a, b) => (__fallow_m_a("s1") ? (a - b) : (__fallow_m_c("s1"), (a + b)));
+${main}`,
+  };
+  for (const [path, text] of Object.entries(files)) {
+    const target = join(workspace, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, text);
+  }
+  return {
+    root,
+    runDir,
+    pathMap: { "src/math.mjs": "files/src/math.mjs" },
+    cleanup: () => rmSync(workspace, { recursive: true, force: true }),
+  };
+};
+
+describe("node-test adapter with a test that starts a Node child process", () => {
+  let project;
+  let companion;
+  let nextId = 1;
+  const request = (message) => companion.request({ v: 1, id: nextId++, ...message });
+
+  before(async () => {
+    project = createSubprocessProject();
+    companion = startCompanion();
+    const ready = await request({
+      type: "init",
+      root: project.root,
+      runner: "node-test",
+      config_path: null,
+      run_dir: project.runDir,
+      path_map: project.pathMap,
+      options: { env: {} },
+    });
+    assert.equal(ready.type, "ready", JSON.stringify(ready));
+  });
+
+  after(async () => {
+    await request({ type: "shutdown" }).catch(() => {});
+    companion?.stop();
+    project?.cleanup();
+  });
+
+  test("the dry run passes and the hits of the test process select each test", async () => {
+    const dryRun = await request({ type: "dry_run", test_files: [CLI_TEST] });
+    assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
+    assert.deepEqual(dryRun.unhandled_errors, []);
+    assert.deepEqual(
+      dryRun.tests.map(({ name, status }) => ({ name, status })),
+      [
+        { name: "cli", status: "pass" },
+        { name: "fork", status: "pass" },
+        { name: "env", status: "pass" },
+      ],
+    );
+    assert.deepEqual(dryRun.hits, {
+      [`${CLI_TEST}::cli`]: ["s1"],
+      [`${CLI_TEST}::fork`]: ["s1"],
+      [`${CLI_TEST}::env`]: ["s1"],
+    });
+  });
+
+  for (const name of ["cli", "fork"]) {
+    test(`the child process of the ${name} test loads the active mutant`, async () => {
+      const result = await request({
+        type: "run",
+        mutant_id: "s1",
+        test_ids: [`${CLI_TEST}::${name}`],
+        timeout_ms: 10_000,
+        bail: true,
+      });
+      assert.equal(result.status, "killed", JSON.stringify(result));
+      assert.deepEqual(
+        result.tests.map(({ message: _message, ...rest }) => rest),
+        [{ test_id: `${CLI_TEST}::${name}`, status: "fail", failure_kind: "assertion" }],
+      );
+      assert.match(result.tests[0].message, /^AssertionError: /u);
+    });
+  }
+
+  test("the test process sees no Fallow variable in its environment", async () => {
+    const result = await request({
+      type: "run",
+      mutant_id: "s1",
+      test_ids: [`${CLI_TEST}::env`],
+      timeout_ms: 10_000,
+      bail: true,
+    });
+    assert.equal(result.status, "survived", JSON.stringify(result));
   });
 });

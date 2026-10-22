@@ -1,5 +1,6 @@
 // Generated from tools/mutation-runner/src/adapters/common.mjs. Do not edit.
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { RUNNERS } from "../generated-protocol.mjs";
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
@@ -84,6 +85,10 @@ export const validateInit = (init) => {
     isOptional(options.test_files, isStringList),
     "options.test_files must be a list of paths",
   );
+  expectRequest(
+    isOptional(options.extra_test_files, isStringList),
+    "options.extra_test_files must be a list of paths",
+  );
   expectRequest(isOptional(options.env, isStringMap), "options.env must map names to strings");
   expectRequest(
     isOptional(options.node_args, isStringList),
@@ -143,6 +148,61 @@ export const uniqueNames = (fullNames) => {
 export const hasRun = (status) => status === "pass" || status === "fail";
 
 export const errorMessage = (error) => String(error?.message ?? error);
+
+/**
+ * The longest test error that a run result carries, in UTF-16 code units. A
+ * run result goes over the pipe for each failed test of each mutant run.
+ */
+export const MAX_TEST_ERROR_LENGTH = 4096;
+
+// oxlint-disable-next-line no-control-regex -- the pattern matches terminal color codes
+const ANSI_ESCAPE = /\u001b\[[0-9;?]*[A-Za-z]/gu;
+const STACK_FRAME = /^\s+at /u;
+const RUNNER_FRAME = /node_modules[\\/]|node:internal|\(node:|at node:|\(<anonymous>\)/u;
+
+const errorHead = (error) => {
+  const message = errorMessage(error);
+  const name = typeof error?.name === "string" ? error.name : "";
+  return name.length === 0 || message.startsWith(`${name}:`) ? message : `${name}: ${message}`;
+};
+
+/** The stack frames of `error` outside the runner, Node, and dependencies. */
+const projectFrames = (error) =>
+  typeof error?.stack === "string"
+    ? error.stack.split("\n").filter((line) => STACK_FRAME.test(line) && !RUNNER_FRAME.test(line))
+    : [];
+
+/**
+ * The directories whose prefix a test error loses: the run directory and the
+ * project root, each also as its real path, the longest first.
+ */
+export const errorDirectories = (root, runDir) =>
+  [
+    ...new Set([runDir, realPath(runDir), root, realPath(root)].map((dir) => resolve(dir))),
+  ].toSorted((left, right) => right.length - left.length);
+
+const withoutDirectories = (text, directories) =>
+  directories.reduce(
+    (current, dir) =>
+      current.replaceAll(`${pathToFileURL(dir).href}/`, "").replaceAll(`${dir}${sep}`, ""),
+    text,
+  );
+
+/**
+ * Gives the text of the error of a failed test: the name and message of the
+ * error, then its stack frames outside the runner. Paths become relative to
+ * the project, color codes go, and the text is at most
+ * `MAX_TEST_ERROR_LENGTH` long. Gives null for no error.
+ */
+export const testErrorText = (error, directories) => {
+  if (error === undefined || error === null) return null;
+  const text = withoutDirectories(
+    [errorHead(error), ...projectFrames(error)].join("\n").replace(ANSI_ESCAPE, ""),
+    directories,
+  ).trim();
+  if (text.length === 0) return null;
+  return text.length <= MAX_TEST_ERROR_LENGTH ? text : `${text.slice(0, MAX_TEST_ERROR_LENGTH)}...`;
+};
 
 /** Rounds each value of a map up to a whole millisecond, with the keys sorted. */
 const roundedByKey = (values) =>

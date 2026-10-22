@@ -1,0 +1,7 @@
+name: Example action
+description: A JavaScript action with pre, main and post steps
+runs:
+  using: node20
+  pre: dist/setup.js
+  main: dist/main.js
+  post: dist/cleanup.js

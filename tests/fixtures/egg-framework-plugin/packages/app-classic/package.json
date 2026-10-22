@@ -1,0 +1,5 @@
+{
+  "name": "app-classic",
+  "private": true,
+  "dependencies": { "egg": "^4.0.0" }
+}

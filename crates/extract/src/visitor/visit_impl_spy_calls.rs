@@ -28,8 +28,9 @@ const GLOBAL_SPY_APIS: [(&str, SpyApi); 3] = [
 ];
 
 /// Modules that export a spy object (`vi`, `jest`) or a `spyOn` function.
-const SPY_SOURCES: [&str; 6] = [
+const SPY_SOURCES: [&str; 7] = [
     "vitest",
+    "vite-plus/test",
     "@vitest/spy",
     "bun:test",
     "@jest/globals",

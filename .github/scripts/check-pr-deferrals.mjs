@@ -236,6 +236,8 @@ const formatFailure = (untracked) =>
   [
     "The pull request description defers work without a tracking issue.",
     "Open an issue for each item and link it, or add 'No follow-up planned.' to an intentional non-goal.",
+    "Then edit the pull request description. The edit starts a new run of this check.",
+    "Do not re-run this job: a re-run keeps the old description and cancels the new run.",
     "",
     ...untracked.map((text) => `- ${text.length > 200 ? `${text.slice(0, 197)}...` : text}`),
   ].join("\n");

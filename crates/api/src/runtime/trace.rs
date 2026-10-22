@@ -45,12 +45,13 @@ pub fn run_trace_export(
         // enum / store member trace so the MCP tool and Code Mode match the
         // CLI's `--trace FILE:MEMBER` behavior instead of a hard not-found
         // (issue #1744).
-        let output = if let Some(export) = fallow_engine::trace::trace_export(
+        let output = if let Some(mut export) = fallow_engine::trace::trace_export(
             &artifacts.graph,
             session.root(),
             &options.file,
             &options.export_name,
         ) {
+            export.apply_plugin_credits(&artifacts.trace_provenance);
             TraceExportTargetOutput::Export(export)
         } else if let Some(member) = fallow_engine::trace::trace_class_member(
             &artifacts.graph,
@@ -109,6 +110,7 @@ pub fn run_trace_file(
                     .with_context("trace_file")
                 })?;
         output.sources = artifacts.trace_provenance.file_sources(&output.file);
+        output.apply_plugin_credits(&artifacts.trace_provenance);
         Ok(TraceFileProgrammaticOutput { output })
     })
 }

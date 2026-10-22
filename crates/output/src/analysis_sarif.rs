@@ -365,16 +365,16 @@ fn append_complexity_sarif_results(
     }
 }
 
-/// Audit only: put the attribution class and the grown metrics of a
-/// complexity finding in the result property bag. The message and the
-/// fingerprints do not change.
+/// Audit only: put the attribution class, the grown metrics and the gate
+/// exemption of a complexity finding in the result property bag. The message
+/// and the fingerprints do not change.
 fn set_audit_attribution_properties(
     result: &mut serde_json::Value,
     finding: &crate::HealthFinding,
 ) {
-    let Some(attribution) = finding.attribution else {
+    if finding.attribution.is_none() && finding.gate_exemption.is_none() {
         return;
-    };
+    }
     let Some(object) = result.as_object_mut() else {
         return;
     };
@@ -384,10 +384,18 @@ fn set_audit_attribution_properties(
     let Some(props) = props.as_object_mut() else {
         return;
     };
-    props.insert(
-        "attribution".to_string(),
-        serde_json::to_value(attribution).unwrap_or(serde_json::Value::Null),
-    );
+    if let Some(attribution) = finding.attribution {
+        props.insert(
+            "attribution".to_string(),
+            serde_json::to_value(attribution).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let Some(exemption) = finding.gate_exemption {
+        props.insert(
+            "gate_exemption".to_string(),
+            serde_json::Value::String(exemption.token().to_string()),
+        );
+    }
     if !finding.worsened_metrics.is_empty() {
         props.insert(
             "worsened_metrics".to_string(),

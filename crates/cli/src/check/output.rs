@@ -42,7 +42,7 @@ pub(super) fn handle_trace_output(
         output,
         json_style,
     };
-    handle_trace_export(graph, trace_opts, root, output, json_style)
+    handle_trace_export(&request, facts.provenance)
         .or_else(|| handle_trace_file(&request, facts.provenance))
         .or_else(|| handle_trace_dependency(&request, facts))
         .or_else(|| handle_impact_closure_trace(graph, trace_opts, root, output, json_style))
@@ -56,11 +56,11 @@ pub(super) fn handle_trace_output(
 )]
 pub(super) fn handle_type_aware_trace_output(
     graph: &RetainedModuleGraph,
-    trace_opts: &TraceOptions,
+    opts: &super::CheckOptions<'_>,
     config: &ResolvedConfig,
-    explain: bool,
-    json_style: crate::json_style::JsonStyle,
+    trace_provenance: &fallow_engine::trace::TraceProvenance,
 ) -> Option<ExitCode> {
+    let (trace_opts, explain, json_style) = (opts.trace_opts, opts.explain, opts.json_style);
     if !config.type_aware.enabled {
         return None;
     }
@@ -81,6 +81,7 @@ pub(super) fn handle_type_aware_trace_output(
         if let Some(mut trace) =
             fallow_engine::trace::trace_export(graph, &config.root, file_path, export_name)
         {
+            trace.apply_plugin_credits(trace_provenance);
             let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
                 graph,
                 &config.root,
@@ -234,12 +235,16 @@ fn semantic_completeness_exit(
 }
 
 fn handle_trace_export(
-    graph: &RetainedModuleGraph,
-    trace_opts: &TraceOptions,
-    root: &std::path::Path,
-    output: OutputFormat,
-    json_style: crate::json_style::JsonStyle,
+    request: &TraceRequest<'_>,
+    trace_provenance: &fallow_engine::trace::TraceProvenance,
 ) -> Option<ExitCode> {
+    let TraceRequest {
+        graph,
+        trace_opts,
+        root,
+        output,
+        json_style,
+    } = *request;
     let trace_spec = trace_opts.trace_export.as_ref()?;
     let Some((file_path, export_name)) = parse_trace_spec(trace_spec) else {
         return Some(emit_error(
@@ -248,7 +253,9 @@ fn handle_trace_export(
             output,
         ));
     };
-    if let Some(trace) = fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
+    if let Some(mut trace) = fallow_engine::trace::trace_export(graph, root, file_path, export_name)
+    {
+        trace.apply_plugin_credits(trace_provenance);
         report::print_export_trace(&trace, output, json_style);
         return Some(ExitCode::SUCCESS);
     }
@@ -285,6 +292,7 @@ fn handle_trace_file(
     match fallow_engine::trace::trace_file(request.graph, request.root, file_path) {
         Some(mut trace) => {
             trace.sources = trace_provenance.file_sources(&trace.file);
+            trace.apply_plugin_credits(trace_provenance);
             report::print_file_trace(&trace, request.output, request.json_style);
             Some(ExitCode::SUCCESS)
         }

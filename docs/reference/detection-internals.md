@@ -370,6 +370,11 @@ error by suppressing a downstream detector.
   path reference, because the consumer of the path can run the file, and
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
+- A `require` from `createRequire(import.meta.url)` or
+  `createRequire(__filename)` in any scope is the module `require`, so its
+  `require.resolve` calls count. A nested `require` with another base, a
+  parameter or another declaration shadows the module `require`
+  (`is_module_create_require_binding`).
 
 ## Value references and test reach
 
@@ -543,6 +548,21 @@ called script of each selected package as runtime. The public
 seeds, so the type-aware entry points (`list_inventory::collect_entry_points`)
 match the package entry points of the analysis.
 
+CI commands run in the `working-directory` of their step, or of the innermost
+`defaults.run` (`crates/core/src/scripts/ci.rs`). `parse_working_directory` keeps the directory
+as segments relative to the root. A segment with a run-time value
+(`${{ matrix.name }}`) or a directory outside the project (`${{ runner.temp }}`)
+is an `Expression` segment. A file argument that ends on an `Expression`
+segment makes no entry point, but `../x.ts` can pop one. A workspace anchor
+(`$GITHUB_WORKSPACE/`) is rewritten to a relative path back to the root, so it
+always resolves. A workspace package directory resolves script calls with the
+scripts of that package. Composite actions under `.github/actions/` and the
+root `action.yml` are CI files too.
+
+The bin map also holds the `bin` fields of the declared workspace packages
+(`add_workspace_binaries`), so a workspace binary credits its package without
+`node_modules`. An entry from `node_modules` keeps priority.
+
 A declared script name wins over a binary with the same name, as it does in
 the package manager. When the body is unknown (several packages declare the
 name with different bodies), `yarn eslint src/a.ts` keeps `src/a.ts` as a file
@@ -712,6 +732,30 @@ merges these sources and keeps the first entry for each canonical directory:
    `optionalDependencies`.
 4. The shallow scan of two directory levels. This source runs only when no
    workspace pattern exists.
+5. Nested independent pnpm projects. This source runs only when a root
+   manifest declares a workspace pattern. A directory up to two levels deep
+   that holds both `package.json` and `pnpm-workspace.yaml`, and that no root
+   manifest pattern declares, is registered as a workspace with a
+   `nested-project-root` diagnostic (`collect_nested_project_workspaces`).
+   `ignorePatterns` excludes it. The undeclared-workspace scan does not look
+   inside such a directory.
+
+Three more rules keep the workspace diagnostics and the catalog checks
+consistent:
+
+- The undeclared-workspace scan skips a `package.json` with no `name` and no
+  dependency field (`manifest_declares_package`). Such a file, for example
+  `{"type":"module"}`, only sets the module type of the scripts next to it.
+- A positive pattern whose literal directory prefix does not exist gets
+  `workspace-pattern-dir-missing`, anchored at the declaring file
+  (`missing_dir_patterns`). `has_missing_workspace_pattern_dirs` reads the
+  same function, and the dead-code pass then does not report
+  `unused-catalog-entries`, because the packages in the missing directory can
+  consume the entries. Unresolved references and empty catalog groups are
+  still reported.
+- `is_independent_pnpm_project` removes a nested pnpm project from the root
+  catalog consumers, also when the fallow config `workspaces.patterns` adds
+  it. pnpm resolves its `catalog:` references against its own catalog.
 
 Source 3 is for yarn-era monorepos such as older Kibana. These repositories
 have no `workspaces` field. The root lists each package as
@@ -797,7 +841,12 @@ owned by the nearest package manifest; do not turn unmatched hash specifiers
 into global aliases. Per-file tsconfig failure may degrade to ordinary relative
 or package resolution, with diagnostics, without inventing missing path aliases.
 Web-root-relative asset resolution must preserve the importer/workspace context
-before considering the analysis root.
+before considering the analysis root. A workspace package subpath that names a
+non-source file on disk, such as `<pkg>/package.json`, credits the package
+without `node_modules` (`workspace_package_asset`). An `exports` map that does
+not list the subpath still blocks the import. A relative package root import
+(`require('..')`, `require('.')`) uses the package source entry when `main`
+names build output that is not on disk, the same as `require('../')`.
 
 Style resolution is distinct from JavaScript resolution. Preserve scoped npm
 specifier identity, SCSS partial and directory-index lookup, configured include
@@ -826,8 +875,20 @@ export. Disabled-rule suppressions must not become stale merely because their
 detector did not run.
 
 Dependency credit must distinguish source, scripts, configuration, required
-installed peers, optional peers and runtime-provided built-ins. Dependency
-ignores suppress findings without fabricating resolution edges. Raw-specifier
+installed peers, optional peers and runtime-provided built-ins. The
+peer-dependency closure starts from the imported packages and also from the
+packages that a script runs, that a plugin config names, or that a plugin
+credits as tooling with evidence of use. Plugin tooling without evidence and
+catalogue tooling do not start a closure. The dependency trace reads the same
+seeds through `TraceProvenance::peer_seeds`, so `peer_of` names the same
+hosts. A duplicate-export group drops an aliased-import adapter: a module that
+imports `X` under another local name from a group member and declares its own
+`X` derives its export from that member, as a re-export chain member does.
+An adapter is dropped only when its adapter links reach a member that is not
+an adapter. Two modules that import `X` from each other under aliases both
+stay. The check does not read the body of the local `X`, so an aliased import
+that only avoids a name clash also marks the module as an adapter.
+Dependency ignores suppress findings without fabricating resolution edges. Raw-specifier
 unresolved-import ignores are not filesystem globs. A relative import whose
 target is missing and ignored by a repository ignore file is build output, not
 an unresolved import; this check reads no global git excludes file and applies

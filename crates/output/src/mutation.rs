@@ -363,6 +363,9 @@ pub struct MutantResult {
     /// first failing test, and it runs the fastest covering test first, so a
     /// second run on the same code can name another covering test. No
     /// fingerprint or baseline comparison uses this field.
+    ///
+    /// The retry of a survivor also runs the other tests of its test files,
+    /// so this test can be absent from `covering_tests`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed_by: Option<String>,
     /// The tests that reached the mutant in the dry run, sorted by test id.

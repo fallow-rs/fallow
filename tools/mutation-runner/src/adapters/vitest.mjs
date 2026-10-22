@@ -10,12 +10,14 @@ import {
   buildOverlay,
   byCodeUnit,
   dryRunResult,
+  errorDirectories,
   errorMessage,
   hasRun,
   isSupportedVersion,
   parseVersion,
   realPath,
   runResult,
+  testErrorText,
   toPosix,
   uniqueNames,
   unsupportedVersion,
@@ -349,6 +351,21 @@ const createTimeoutControl = (projects) => {
   };
 };
 
+/**
+ * Sets the fail-fast value of a run on the root config and on each project.
+ * The root value controls the cancellation of the pool. A worker reads the
+ * serialized project config, and Vitest copies the root `bail` value into an
+ * inline project only when it creates the project. Each run sets the value
+ * again, so a run without bail never keeps the value of a mutant run.
+ */
+const setBail = (vitest, bail) => {
+  const value = bail ? 1 : 0;
+  vitest.config.bail = value;
+  for (const project of vitest.projects) {
+    project.config.bail = value;
+  }
+};
+
 const groupByFile = (specifications, root) => {
   const byFile = new Map();
   for (const specification of specifications) {
@@ -451,19 +468,26 @@ const readDryRunTests = (testModule, file, prefix) => {
   });
 };
 
+/** The entry of a failed test, with its first error when it has one. */
+const failedTestEntry = (testCase, testId, directories) => {
+  const entry = { test_id: testId, status: "fail", failure_kind: failureKind(testCase) };
+  const message = testErrorText(testCase.result().errors?.[0], directories);
+  return message === null ? entry : { ...entry, message };
+};
+
 /** Gives the report entry of one test of a run, or no entry when it did not run. */
-const runTestEntry = (testCase, testId) => {
+const runTestEntry = (testCase, testId, directories) => {
   const status = testStatus(testCase);
   if (testId === undefined || !hasRun(status)) return [];
   return status === "fail"
-    ? [{ test_id: testId, status, failure_kind: failureKind(testCase) }]
+    ? [failedTestEntry(testCase, testId, directories)]
     : [{ test_id: testId, status }];
 };
 
-const collectRunTests = (testModules, testIdByTask) =>
+const collectRunTests = (testModules, testIdByTask, directories) =>
   testModules.flatMap((testModule) =>
     [...testModule.children.allTests()].flatMap((testCase) =>
-      runTestEntry(testCase, testIdByTask.get(testCase.id)),
+      runTestEntry(testCase, testIdByTask.get(testCase.id), directories),
     ),
   );
 
@@ -494,6 +518,7 @@ export const createAdapter = async (init) => {
   const root = resolve(init.root);
   const { createVitest, version } = await loadProjectVitest(root);
   const overlay = buildOverlay(root, init.run_dir, init.path_map);
+  const directories = errorDirectories(root, init.run_dir);
   const loaded = new Set();
   setVitestEnv();
   Object.assign(process.env, init.options?.env ?? {});
@@ -521,7 +546,7 @@ export const createAdapter = async (init) => {
   const runSpecifications = async (specifications, { mutantId, bail, timeoutMs = null }) => {
     provideActiveMutant(vitest, mutantId);
     setTimeouts(timeoutMs);
-    vitest.config.bail = bail ? 1 : 0;
+    setBail(vitest, bail);
     const result = await vitest.runTestSpecifications(specifications);
     return {
       testModules: modulesOfRun(result.testModules, specifications),
@@ -607,7 +632,7 @@ export const createAdapter = async (init) => {
     });
     return runResult({
       mutantId: request.mutant_id,
-      tests: collectRunTests(result.testModules, testIdByTask),
+      tests: collectRunTests(result.testModules, testIdByTask, directories),
       errors: runErrors(result, root),
       requestedCount: requested.length,
       durationMs: performance.now() - started,

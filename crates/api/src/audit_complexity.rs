@@ -3,21 +3,44 @@
 //! A complexity finding is identified by its path and function name. The
 //! exceeded category and the line are not part of the identity, so a line
 //! shift or a category change keeps the match with the base finding. The
-//! metric values then decide the attribution: a head finding is introduced
-//! when no base finding matches it, or when a metric that the head finding
-//! exceeds has a higher value than in its matched base finding. Unchanged and
-//! decreased metrics stay inherited, also when the exceeded category changes
-//! (#3277).
+//! metric values then decide the attribution. A head finding is introduced
+//! when:
+//!
+//! - no base finding matches it,
+//! - it exceeds a metric that the base finding did not exceed, and that metric
+//!   grew (see [`newly_exceeded_metric_grew`]), or
+//! - a metric that it exceeds grew, and its severity tier is higher than the
+//!   tier of the base finding (see [`severity_tier_rose`]).
+//!
+//! The exceeded flags and the tier of the base finding come from the base run,
+//! so a threshold override in the same change cannot make an old finding
+//! introduced. Unchanged and decreased metrics stay inherited, also when the
+//! exceeded category changes (#3277).
 //!
 //! A matched finding that is not introduced is worsened when its cyclomatic,
-//! cognitive or CRAP value is higher than in its matched base finding. A line
-//! count must grow by a minimum (see [`line_count_grew`]). The
-//! `audit.worsened` setting decides how a worsened finding affects the
-//! verdict.
+//! cognitive or CRAP value is higher than in its matched base finding. Growth
+//! of a metric that the base finding already exceeded, in the same tier, is
+//! worsened too. A line count must grow by a minimum (see
+//! [`line_count_grew`]). The `audit.worsened` setting decides how a worsened
+//! finding affects the verdict.
+//!
+//! A CRAP score from estimated coverage does not make a finding introduced.
+//! Under the `new-only` gate, a finding that exceeds only that CRAP score gets
+//! the gate severity `warn` (see [`demote_estimated_crap_gates`]).
+//!
+//! Under every gate, a finding in a test file gets the gate severity `warn`
+//! and the gate exemption `test-file` (see [`exempt_test_file_gates`]). The
+//! attribution of the finding does not change.
 
 use std::path::Path;
 
-use fallow_output::{AuditFindingAttribution, WorsenedMetric, WorsenedMetricKind};
+use fallow_output::{
+    AuditFindingAttribution, AuditGateExemption, CoverageSource, DEFAULT_COGNITIVE_CRITICAL,
+    DEFAULT_COGNITIVE_HIGH, DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH,
+    ExceededThreshold, FindingSeverity, WorsenedMetric, WorsenedMetricKind,
+    compute_finding_severity,
+};
+use fallow_types::output_dead_code::EffectiveSeverity;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::audit_keys::{health_finding_key, remap_key_for_renames};
@@ -35,6 +58,12 @@ pub struct ComplexityMetrics {
     pub crap: Option<f64>,
     /// Lines of code in the function body.
     pub line_count: u32,
+    /// The thresholds that the finding exceeded in its own run.
+    pub exceeded: ExceededThreshold,
+    /// The severity tier of the finding in its own run.
+    pub severity: FindingSeverity,
+    /// Whether the CRAP score comes from estimated coverage.
+    pub crap_estimated: bool,
 }
 
 impl ComplexityMetrics {
@@ -47,6 +76,9 @@ impl ComplexityMetrics {
             cognitive: finding.cognitive,
             crap: finding.crap,
             line_count: finding.line_count,
+            exceeded: finding.exceeded,
+            severity: finding.severity,
+            crap_estimated: crap_is_estimated(finding),
         }
     }
 
@@ -68,12 +100,16 @@ impl ComplexityMetrics {
 /// Attribution of one head complexity finding against the base findings.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ComplexityClass {
-    /// `true` when no base finding matches, or when a metric that the finding
-    /// exceeds grew (the new-only gate rule since #3277).
+    /// `true` when no base finding matches, when a newly exceeded metric
+    /// grew, or when growth moved the finding to a higher severity tier.
     pub introduced: bool,
     /// The measured metrics that are higher than in the matched base finding.
     /// Empty when no base finding matches or when no metric grew.
     pub worsened_metrics: Vec<WorsenedMetric>,
+    /// `true` when a metric that the finding exceeds grew. Before this rule,
+    /// that growth made the finding introduced, so `audit.worsened: off`
+    /// keeps it worsened (see [`Self::clear_worsened_for_off`]).
+    pub exceeded_metric_grew: bool,
 }
 
 impl ComplexityClass {
@@ -96,6 +132,16 @@ impl ComplexityClass {
         }
     }
 
+    /// Clear the grown metrics for `audit.worsened: off`. Growth only in
+    /// metrics that the finding does not exceed then stays inherited. Growth
+    /// of an exceeded metric stays worsened, so it gives at least `warn` and
+    /// does not disappear from the report.
+    pub fn clear_worsened_for_off(&mut self) {
+        if !self.introduced && !self.exceeded_metric_grew {
+            self.worsened_metrics.clear();
+        }
+    }
+
     fn of_match(
         head: &fallow_output::ComplexityViolation,
         base: Option<&ComplexityMetrics>,
@@ -104,10 +150,16 @@ impl ComplexityClass {
             Self {
                 introduced: true,
                 worsened_metrics: Vec::new(),
+                exceeded_metric_grew: false,
             },
-            |base| Self {
-                introduced: exceeded_metric_increased(head, base),
-                worsened_metrics: grown_metrics(head, base),
+            |base| {
+                let exceeded_metric_grew = exceeded_metric_increased(head, base);
+                Self {
+                    introduced: newly_exceeded_metric_grew(head, base)
+                        || (exceeded_metric_grew && severity_tier_rose(head, base)),
+                    worsened_metrics: grown_metrics(head, base),
+                    exceeded_metric_grew,
+                }
             },
         )
     }
@@ -225,7 +277,8 @@ fn sort_by_line(baseline: &mut ComplexityBaseline) {
 
 /// Whether `head` is worse than `base` in a metric that `head` exceeds.
 ///
-/// A CRAP score that the base finding does not have counts as an increase.
+/// CRAP counts only when both sides have a measured score (see
+/// [`measured_crap_grew`]).
 fn exceeded_metric_increased(
     head: &fallow_output::ComplexityViolation,
     base: &ComplexityMetrics,
@@ -233,12 +286,112 @@ fn exceeded_metric_increased(
     let exceeded = head.exceeded;
     (exceeded.includes_cyclomatic() && head.cyclomatic > base.cyclomatic)
         || (exceeded.includes_cognitive() && head.cognitive > base.cognitive)
-        || (exceeded.includes_crap()
-            && match (head.crap, base.crap) {
-                (Some(head), Some(base)) => head > base,
-                (Some(_), None) => true,
-                (None, _) => false,
-            })
+        || (exceeded.includes_crap() && measured_crap_grew(head, base))
+}
+
+/// Whether `head` exceeds a metric that `base` did not exceed in its own run,
+/// and that metric grew. A metric that crosses its limit only because a
+/// threshold changed does not grow, so it stays inherited.
+fn newly_exceeded_metric_grew(
+    head: &fallow_output::ComplexityViolation,
+    base: &ComplexityMetrics,
+) -> bool {
+    let (now, before) = (head.exceeded, base.exceeded);
+    (now.includes_cyclomatic()
+        && !before.includes_cyclomatic()
+        && head.cyclomatic > base.cyclomatic)
+        || (now.includes_cognitive()
+            && !before.includes_cognitive()
+            && head.cognitive > base.cognitive)
+        || (now.includes_crap() && !before.includes_crap() && measured_crap_grew(head, base))
+}
+
+/// Whether both sides have a CRAP score from measured coverage and the head
+/// score is higher. A score that only one side has, or a score from estimated
+/// coverage, reflects the coverage input, not the code.
+fn measured_crap_grew(head: &fallow_output::ComplexityViolation, base: &ComplexityMetrics) -> bool {
+    crap_is_comparable(head, base)
+        && matches!((head.crap, base.crap), (Some(head), Some(base)) if head > base)
+}
+
+fn crap_is_comparable(head: &fallow_output::ComplexityViolation, base: &ComplexityMetrics) -> bool {
+    head.crap.is_some() && base.crap.is_some() && !crap_is_estimated(head) && !base.crap_estimated
+}
+
+/// Whether the severity tier of `head` is higher than the tier of `base`.
+///
+/// The tiers use fixed limits, not the configured thresholds. The CRAP score
+/// takes part only when both sides have a measured score; else both tiers come
+/// from cyclomatic and cognitive complexity only.
+fn severity_tier_rose(head: &fallow_output::ComplexityViolation, base: &ComplexityMetrics) -> bool {
+    if crap_is_comparable(head, base) {
+        return head.severity > base.severity;
+    }
+    complexity_tier(head.cognitive, head.cyclomatic)
+        > complexity_tier(base.cognitive, base.cyclomatic)
+}
+
+fn complexity_tier(cognitive: u16, cyclomatic: u16) -> FindingSeverity {
+    compute_finding_severity(
+        cognitive,
+        cyclomatic,
+        None,
+        DEFAULT_COGNITIVE_HIGH,
+        DEFAULT_COGNITIVE_CRITICAL,
+        DEFAULT_CYCLOMATIC_HIGH,
+        DEFAULT_CYCLOMATIC_CRITICAL,
+    )
+}
+
+/// Whether the CRAP score of the finding comes from estimated coverage, not
+/// from a measured coverage map (`--coverage` or runtime coverage).
+#[must_use]
+pub const fn crap_is_estimated(finding: &fallow_output::ComplexityViolation) -> bool {
+    matches!(
+        finding.coverage_source,
+        Some(CoverageSource::Estimated | CoverageSource::EstimatedComponentInherited)
+    )
+}
+
+/// Whether CRAP from estimated coverage is the only threshold that the
+/// finding exceeds.
+#[must_use]
+pub const fn exceeds_only_estimated_crap(finding: &fallow_output::ComplexityViolation) -> bool {
+    matches!(finding.exceeded, ExceededThreshold::Crap) && crap_is_estimated(finding)
+}
+
+/// Give the gate severity `warn` to each finding that exceeds only CRAP from
+/// estimated coverage, for the `new-only` gate.
+///
+/// The estimate comes from static test reachability, so it does not measure
+/// the change. The finding stays in the report, and the verdict reads `warn`
+/// for it. A finding that also exceeds cyclomatic or cognitive complexity
+/// keeps its gate severity. Measured coverage keeps the gate severity too.
+pub fn demote_estimated_crap_gates(findings: &mut [fallow_output::HealthFinding]) {
+    for finding in findings {
+        if exceeds_only_estimated_crap(finding)
+            && finding.effective_severity == Some(EffectiveSeverity::Error)
+        {
+            finding.violation.effective_severity = Some(EffectiveSeverity::Warn);
+        }
+    }
+}
+
+/// Give the gate severity `warn` to each finding in a test file, and mark it
+/// with [`AuditGateExemption::TestFile`].
+///
+/// The shared test-path classifier ([`fallow_engine::test_paths::is_test_path`])
+/// decides what a test file is: specs, test directories, end-to-end suites,
+/// mocks and fixtures. The finding stays in the report. `fallow health` does
+/// not call this, so it keeps the rule severity there.
+pub fn exempt_test_file_gates(findings: &mut [fallow_output::HealthFinding], root: &Path) {
+    for finding in findings {
+        let relative = finding.path.strip_prefix(root).unwrap_or(&finding.path);
+        if fallow_engine::test_paths::is_test_path(root, relative) {
+            finding.violation.effective_severity = Some(EffectiveSeverity::Warn);
+            finding.gate_exemption = Some(AuditGateExemption::TestFile);
+        }
+    }
 }
 
 /// Classify each head complexity finding as introduced (`true`) or inherited
@@ -374,6 +527,7 @@ pub fn classify_complexity_attribution_against_all<'a>(
                 .min_by_key(|class| class.worsened_metrics.len());
             inherited.cloned().unwrap_or_else(|| ComplexityClass {
                 introduced: true,
+                exceeded_metric_grew: false,
                 worsened_metrics: classes
                     .map(|class| &class.worsened_metrics)
                     .find(|metrics| !metrics.is_empty())
@@ -483,10 +637,10 @@ mod tests {
             classify(vec![finding("f", 1, 17, 16)], &[finding("f", 1, 17, 16)]),
             [false]
         );
-        // Increased.
+        // Increased in the same severity tier: worsened, not introduced.
         assert_eq!(
             classify(vec![finding("f", 1, 17, 16)], &[finding("f", 1, 18, 17)]),
-            [true]
+            [false]
         );
         // Decreased, same category.
         assert_eq!(
@@ -526,10 +680,11 @@ mod tests {
             classify_complexity_findings_against_all(&head, &root(), [&primary, &merged]),
             [false, true]
         );
-        // A finding that grew against every base stays introduced.
+        // A finding that moved to a higher tier against every base stays
+        // introduced.
         assert_eq!(
             classify_complexity_findings_against_all(
-                &[finding("f", 1, 18, 17)],
+                &[finding("f", 1, 31, 17)],
                 &root(),
                 [&baseline(vec![finding("f", 1, 17, 16)]), &merged]
             ),
@@ -545,16 +700,129 @@ mod tests {
         );
     }
 
+    fn crap_finding(crap: Option<f64>, source: Option<CoverageSource>) -> HealthFinding {
+        let mut finding = finding("f", 1, 16, 5);
+        finding.violation.exceeded = ExceededThreshold::Crap;
+        finding.violation.crap = crap;
+        finding.violation.coverage_source = source;
+        finding.violation.effective_severity = Some(EffectiveSeverity::Error);
+        finding
+    }
+
     #[test]
-    fn crap_without_base_value_counts_as_increase() {
-        let mut head = finding("f", 1, 16, 5);
-        head.violation.exceeded = ExceededThreshold::Crap;
+    fn crap_without_base_value_is_not_an_increase() {
+        // A base without a CRAP score ran without that coverage input. The
+        // code did not grow.
+        let head = crap_finding(Some(50.0), Some(CoverageSource::Istanbul));
+        assert_eq!(
+            classify(vec![crap_finding(None, None)], std::slice::from_ref(&head)),
+            [false]
+        );
+        // Measured CRAP growth in the same tier is worsened.
+        assert_eq!(
+            classify(
+                vec![crap_finding(Some(40.0), Some(CoverageSource::Istanbul))],
+                std::slice::from_ref(&head)
+            ),
+            [false]
+        );
+        assert_eq!(
+            classify(
+                vec![crap_finding(Some(60.0), Some(CoverageSource::Istanbul))],
+                &[head]
+            ),
+            [false]
+        );
+    }
+
+    #[test]
+    fn estimated_crap_growth_is_worsened_not_introduced() {
+        let estimated = Some(CoverageSource::Estimated);
+        let classes = attribution(
+            vec![crap_finding(Some(40.0), estimated)],
+            &[crap_finding(Some(50.0), estimated)],
+        );
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Crap, 40.0, 50.0)]
+        );
+        // A grown cognitive value that the base already exceeds is worsened.
+        let mut base = crap_finding(Some(40.0), estimated);
+        base.violation.exceeded = ExceededThreshold::CognitiveCrap;
+        base.violation.cognitive = 20;
+        let mut head = base.clone();
+        head.violation.cognitive = 21;
         head.violation.crap = Some(50.0);
-        let mut base = finding("f", 1, 16, 5);
-        base.violation.exceeded = ExceededThreshold::Crap;
-        assert_eq!(classify(vec![base.clone()], &[head.clone()]), [true]);
-        base.violation.crap = Some(60.0);
-        assert_eq!(classify(vec![base], &[head]), [false]);
+        assert_eq!(classify(vec![base.clone()], &[head.clone()]), [false]);
+        // A grown cognitive value that reaches the next tier is introduced.
+        head.violation.cognitive = 25;
+        assert_eq!(classify(vec![base], &[head]), [true]);
+    }
+
+    #[test]
+    fn test_file_findings_get_warn_gate_severity_and_the_exemption() {
+        // The project itself lives below a `tests` directory. Only the path
+        // below the project root decides.
+        let project = root().join("tests").join("project");
+        let at = |relative: &str| {
+            let mut finding = finding("f", 1, 16, 5);
+            finding.violation.path = project.join(relative);
+            finding.violation.effective_severity = Some(EffectiveSeverity::Error);
+            finding
+        };
+        let mut findings = [
+            at("src/__tests__/app.js"),
+            at("src/app.spec.ts"),
+            at("src/app.test.tsx"),
+            at("src/__mocks__/api.js"),
+            at("src/app.js"),
+            at("src/latest.js"),
+        ];
+        exempt_test_file_gates(&mut findings, &project);
+        let marks: Vec<_> = findings
+            .iter()
+            .map(|finding| (finding.effective_severity, finding.gate_exemption))
+            .collect();
+        let exempt = (
+            Some(EffectiveSeverity::Warn),
+            Some(AuditGateExemption::TestFile),
+        );
+        let gated = (Some(EffectiveSeverity::Error), None);
+        assert_eq!(marks, [exempt, exempt, exempt, exempt, gated, gated]);
+    }
+
+    #[test]
+    fn estimated_crap_only_findings_get_warn_gate_severity() {
+        let mut both = crap_finding(Some(50.0), Some(CoverageSource::Estimated));
+        both.violation.exceeded = ExceededThreshold::CognitiveCrap;
+        let mut warn_rule = crap_finding(Some(50.0), Some(CoverageSource::Estimated));
+        warn_rule.violation.effective_severity = Some(EffectiveSeverity::Warn);
+        let mut findings = [
+            crap_finding(Some(50.0), Some(CoverageSource::Estimated)),
+            crap_finding(
+                Some(50.0),
+                Some(CoverageSource::EstimatedComponentInherited),
+            ),
+            crap_finding(Some(50.0), Some(CoverageSource::Istanbul)),
+            both,
+            warn_rule,
+        ];
+        demote_estimated_crap_gates(&mut findings);
+        let severities: Vec<_> = findings
+            .iter()
+            .map(|finding| finding.effective_severity)
+            .collect();
+        assert_eq!(
+            severities,
+            [
+                Some(EffectiveSeverity::Warn),
+                Some(EffectiveSeverity::Warn),
+                Some(EffectiveSeverity::Error),
+                Some(EffectiveSeverity::Error),
+                Some(EffectiveSeverity::Warn),
+            ]
+        );
     }
 
     #[test]
@@ -588,8 +856,16 @@ mod tests {
         // The first one worsened, the second one unchanged.
         assert_eq!(
             classify(
-                base,
+                base.clone(),
                 &[finding("run", 1, 18, 17), finding("run", 30, 21, 20)]
+            ),
+            [false, false]
+        );
+        // The first one moved to a higher tier, the second one unchanged.
+        assert_eq!(
+            classify(
+                base,
+                &[finding("run", 1, 30, 17), finding("run", 30, 21, 20)]
             ),
             [true, false]
         );
@@ -636,6 +912,52 @@ mod tests {
             classes[0].worsened_metrics,
             [metric(WorsenedMetricKind::Cognitive, 5.0, 9.0)]
         );
+    }
+
+    #[test]
+    fn grown_exceeded_metric_in_the_same_tier_is_worsened() {
+        // Cyclomatic 100 to 103 stays in the critical tier.
+        let classes = attribution(vec![finding("f", 1, 100, 16)], &[finding("f", 1, 103, 16)]);
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
+        assert!(classes[0].exceeded_metric_grew);
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Cyclomatic, 100.0, 103.0)]
+        );
+        // Growth only in a metric that the finding does not exceed.
+        let below = attribution(vec![finding("f", 1, 20, 5)], &[finding("f", 1, 20, 9)]);
+        assert!(!below[0].exceeded_metric_grew);
+    }
+
+    #[test]
+    fn severity_tier_uses_the_base_values_not_todays_thresholds() {
+        // The base finding exceeded only cyclomatic. A threshold override in
+        // the same change lowers the cognitive limit, so the head finding
+        // exceeds cognitive too, without cognitive growth.
+        let mut head = finding("f", 1, 18, 10);
+        head.violation.exceeded = ExceededThreshold::Both;
+        assert_eq!(
+            classify(vec![finding("f", 1, 17, 10)], &[head.clone()]),
+            [false]
+        );
+        // Cognitive grew and the base did not exceed it: newly exceeded.
+        head.violation.cognitive = 11;
+        assert_eq!(classify(vec![finding("f", 1, 17, 10)], &[head]), [true]);
+    }
+
+    #[test]
+    fn measured_crap_tier_crossing_is_introduced() {
+        let istanbul = Some(CoverageSource::Istanbul);
+        let mut base = crap_finding(Some(40.0), istanbul);
+        base.violation.severity = FindingSeverity::Moderate;
+        let mut head = crap_finding(Some(120.0), istanbul);
+        head.violation.severity = FindingSeverity::Critical;
+        assert_eq!(classify(vec![base.clone()], &[head.clone()]), [true]);
+        // The same values from estimated coverage do not cross a tier.
+        let estimated = Some(CoverageSource::Estimated);
+        base.violation.coverage_source = estimated;
+        head.violation.coverage_source = estimated;
+        assert_eq!(classify(vec![base], &[head]), [false]);
     }
 
     #[test]

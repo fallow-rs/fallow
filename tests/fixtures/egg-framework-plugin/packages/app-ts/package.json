@@ -1,0 +1,6 @@
+{
+  "name": "app-ts",
+  "private": true,
+  "type": "module",
+  "dependencies": { "egg": "^4.0.0", "@eggjs/tegg": "^4.0.0", "@eggjs/view": "^4.0.0" }
+}

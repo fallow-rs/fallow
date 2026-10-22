@@ -2006,8 +2006,7 @@ fn introduced_label(item: &Value) -> &'static str {
     }
 }
 
-/// Status of a complexity finding: `worsened` when its audit attribution says
-/// so, otherwise the introduced flag.
+/// Status of a complexity finding: `worsened` if its attribution says so, else the introduced flag.
 fn complexity_status_label(item: &Value) -> &'static str {
     if item.get("attribution").and_then(Value::as_str) == Some("worsened") {
         "worsened"
@@ -2029,6 +2028,7 @@ fn audit_rule_severity(item: &Value) -> &'static str {
         .and_then(Value::as_str)
     {
         Some("error") => "error",
+        Some("warn") if item["gate_exemption"] == "test-file" => "warn (test file)",
         Some("warn") => "warn",
         _ => "unknown",
     }

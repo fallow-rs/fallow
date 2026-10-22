@@ -167,6 +167,45 @@ fn an_armed_gate_passes_when_every_file_parses() {
     }
 }
 
+const IGNORED_BY_FINDINGS: &str =
+    r#"{"rules":{"unused-files":"warn"},"ignoreFindings":["src/Broken*"]}"#;
+
+/// A file that `ignoreFindings` covers is broken on purpose, for example a
+/// syntax-error test fixture. The armed gate does not count it, the envelope
+/// does not report it, and the pattern counts as matched.
+#[test]
+fn ignore_findings_takes_a_covered_file_out_of_the_gate() {
+    let project = broken_project(IGNORED_BY_FINDINGS);
+    for command in COMMANDS {
+        let (output, json) = run_json(&project, command, &["--fail-on-parse-error"]);
+        assert_eq!(output.code, 0, "`{command}` stderr: {}", output.stderr);
+        assert_eq!(
+            json["gate_outcomes"]["parse-error"]["status"], "pass",
+            "`{command}`: {}",
+            json["gate_outcomes"]
+        );
+        let kinds: Vec<&str> = json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter_map(|diagnostic| diagnostic["kind"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            !kinds.contains(&"source-parse-degraded"),
+            "`{command}` reports no covered file: {kinds:?}"
+        );
+        if command == "dead-code" {
+            assert!(
+                !kinds.contains(&"ignore-findings-pattern-unmatched"),
+                "the pattern covers the broken file: {kinds:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn health_report_only_publishes_the_verdict_and_does_not_fail() {
     let project = broken_project(ARMED_BY_CONFIG);

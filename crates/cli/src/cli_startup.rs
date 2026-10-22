@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use clap::Parser;
 use fallow_engine::validate;
+use fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET;
 use tracing_subscriber::filter::{LevelFilter, Targets};
 
 use crate::cli_format::{Format, FormatConfig, format_from_env, parse_format_arg, resolve_format};
@@ -23,9 +24,18 @@ use crate::{
 ///
 /// The filter reads `target=level` and `level` directives. It skips a directive
 /// that it cannot read, such as a span or field filter, and keeps the others.
-pub fn build_tracing_filter(rust_log: Option<&str>) -> Targets {
+///
+/// A quiet run (`--quiet`, `--ci` or `FALLOW_QUIET`) also hides the warnings
+/// under [`ANALYSIS_DIAGNOSTIC_LOG_TARGET`]. The JSON envelope carries those
+/// facts, and the stderr lines only add noise to a quiet run. Other warnings,
+/// such as an unknown rule key in the config, stay visible. An explicit
+/// `RUST_LOG` always wins.
+pub fn build_tracing_filter(rust_log: Option<&str>, quiet: bool) -> Targets {
     match rust_log.map(str::trim) {
         Some(value) => parse_targets_lossy(value),
+        None if quiet => Targets::new()
+            .with_default(LevelFilter::WARN)
+            .with_target(ANALYSIS_DIAGNOSTIC_LOG_TARGET, LevelFilter::OFF),
         None => Targets::new().with_default(LevelFilter::WARN),
     }
 }
@@ -64,8 +74,8 @@ pub fn tracing_uses_ansi(
     stderr_is_terminal && no_color.is_none_or(OsStr::is_empty)
 }
 
-/// Set up tracing for the CLI.
-pub fn setup_tracing() {
+/// Set up tracing for the CLI. `quiet` is the resolved quiet mode of the run.
+pub fn setup_tracing(quiet: bool) {
     use std::io::IsTerminal as _;
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
@@ -84,7 +94,7 @@ pub fn setup_tracing() {
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::uptime())
         .finish()
-        .with(build_tracing_filter(rust_log.as_deref()))
+        .with(build_tracing_filter(rust_log.as_deref(), quiet))
         .init();
 }
 
@@ -847,6 +857,57 @@ fn init_cli_diff_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracing_filter_defaults_to_warn_without_env() {
+        let filter = build_tracing_filter(None, false);
+        assert!(filter.would_enable("fallow_core", &tracing::Level::WARN));
+        assert!(!filter.would_enable("fallow_core", &tracing::Level::INFO));
+        assert!(filter.would_enable(ANALYSIS_DIAGNOSTIC_LOG_TARGET, &tracing::Level::WARN));
+    }
+
+    #[test]
+    fn a_quiet_run_hides_only_analysis_diagnostic_warnings() {
+        let filter = build_tracing_filter(None, true);
+        assert!(!filter.would_enable(ANALYSIS_DIAGNOSTIC_LOG_TARGET, &tracing::Level::WARN));
+        assert!(!filter.would_enable(ANALYSIS_DIAGNOSTIC_LOG_TARGET, &tracing::Level::ERROR));
+        assert!(filter.would_enable("fallow_config", &tracing::Level::WARN));
+        assert!(!filter.would_enable("fallow_core", &tracing::Level::INFO));
+    }
+
+    #[test]
+    fn an_explicit_env_filter_wins_over_quiet() {
+        let filter = build_tracing_filter(Some("warn"), true);
+        assert!(filter.would_enable(ANALYSIS_DIAGNOSTIC_LOG_TARGET, &tracing::Level::WARN));
+    }
+
+    #[test]
+    fn tracing_filter_respects_explicit_env_directives() {
+        let filter = build_tracing_filter(Some("info"), false);
+        assert!(filter.would_enable("fallow_core", &tracing::Level::INFO));
+        assert!(!filter.would_enable("fallow_core", &tracing::Level::DEBUG));
+
+        let filter = build_tracing_filter(Some("fallow=debug"), false);
+        assert!(filter.would_enable("fallow_core::lib", &tracing::Level::DEBUG));
+        assert!(!filter.would_enable("oxc_resolver", &tracing::Level::ERROR));
+    }
+
+    #[test]
+    fn tracing_filter_skips_a_directive_that_it_cannot_read() {
+        let directives = "fallow[span{id=1}]=trace,fallow_graph=debug,warn";
+        let filter = build_tracing_filter(Some(directives), false);
+        assert!(filter.would_enable("fallow_graph", &tracing::Level::DEBUG));
+        assert!(filter.would_enable("oxc_resolver", &tracing::Level::WARN));
+        assert!(!filter.would_enable("fallow_core", &tracing::Level::TRACE));
+    }
+
+    #[test]
+    fn tracing_filter_treats_empty_env_as_off() {
+        for value in ["", "   "] {
+            let filter = build_tracing_filter(Some(value), false);
+            assert!(!filter.would_enable("fallow_core", &tracing::Level::ERROR));
+        }
+    }
 
     /// Tracing color follows the terminal, so a pipe or a log file gets
     /// plain warnings.

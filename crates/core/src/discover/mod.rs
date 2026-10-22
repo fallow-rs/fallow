@@ -17,7 +17,7 @@ pub(crate) use entry_points::{
     DiscoveredPaths, EntryPointDiscovery, ScriptWorkspaces, collect_workspace_packages,
     discover_plugin_entry_point_sets_timed, discover_root_entry_points,
     discover_workspace_package_entry_points, resolve_entry_path_with_discovered,
-    warn_skipped_entry_summary, workspace_runtime_script_seeds,
+    resolve_entry_path_with_tracking, warn_skipped_entry_summary, workspace_runtime_script_seeds,
 };
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(crate) use infrastructure::discover_infrastructure_entry_points;
@@ -58,6 +58,21 @@ pub fn collect_plugin_hidden_dir_scopes(
     }
 
     scopes
+}
+
+/// The compiled set of plugin entry patterns, or `None` with a warning when it
+/// does not compile. Without the set no plugin entry point applies, so the
+/// run must not stay silent.
+fn plugin_glob_set_or_warn(
+    built: Result<globset::GlobSet, globset::Error>,
+) -> Option<globset::GlobSet> {
+    built
+        .inspect_err(|err| {
+            tracing::warn!(
+                "plugin entry patterns could not be compiled, so no plugin entry point applies: {err}"
+            );
+        })
+        .ok()
 }
 
 /// Combined plugin-derived and script-derived hidden directory scopes.
@@ -701,5 +716,20 @@ mod tests {
             !names.contains(&"packages/other/.config/eslint.config.js".to_string()),
             "unscoped workspace must not get .config traversed"
         );
+    }
+
+    #[test]
+    fn plugin_glob_set_or_warn_returns_none_for_a_failed_build() {
+        let failed = globset::Glob::new("src/[").map(|_| globset::GlobSet::empty());
+        assert!(failed.is_err(), "an unclosed class must not compile");
+        assert!(plugin_glob_set_or_warn(failed).is_none());
+    }
+
+    #[test]
+    fn plugin_glob_set_or_warn_keeps_a_built_set() {
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("src/app.ts").expect("valid glob"));
+        let set = plugin_glob_set_or_warn(builder.build()).expect("set builds");
+        assert!(set.is_match("src/app.ts"));
     }
 }

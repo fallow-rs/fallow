@@ -1,11 +1,14 @@
 mod deno_json;
 mod diagnostics;
+mod missing_pattern_dirs;
+mod nested_project;
 mod npm_overrides;
 mod package_json;
 mod parsers;
 mod pnpm_catalog;
 mod pnpm_overrides;
 mod tsconfig;
+mod undeclared;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,11 +28,15 @@ pub use diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceLoadError, append_workspace_diagnostics,
     clear_analysis_stage_diagnostics, clear_health_stage_diagnostics,
     health_stage_workspace_diagnostics, missing_node_modules_diagnostic, node_modules_missing,
-    record_plugin_config_diagnostics, record_source_parse_degradations,
+    node_modules_state, record_plugin_config_diagnostics, record_source_parse_degradations,
     record_source_read_failures, record_workspace_diagnostics, registry_diagnostics_to_fold,
     replace_source_discovery_diagnostics, stash_workspace_diagnostics, workspace_diagnostics_for,
 };
 use diagnostics::{emit_diagnostics, is_ignored_workspace_dir, is_skip_listed_dir};
+pub use missing_pattern_dirs::has_missing_workspace_pattern_dirs;
+use missing_pattern_dirs::missing_dir_patterns;
+pub use nested_project::is_independent_pnpm_project;
+use nested_project::{NestedProjectScan, collect_nested_project_workspaces};
 pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
 pub use package_json::{NapiConfig, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
@@ -47,6 +54,7 @@ pub use pnpm_overrides::{
     parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
 };
 pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution, tsconfig_linked_files};
+pub use undeclared::{find_undeclared_workspaces, find_undeclared_workspaces_with_ignores};
 
 /// Workspace configuration for monorepo support.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -217,11 +225,17 @@ fn collect_workspaces_and_diagnostics(
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
     let mut diagnostics = Vec::new();
     let manifest_declares_workspaces = !collect_declared_patterns(root, &[])?.is_empty();
-    let patterns = split_outside_root_patterns(
-        root,
-        collect_declared_patterns(root, extra_patterns)?,
-        &mut diagnostics,
-    );
+    let declared = collect_declared_patterns(root, extra_patterns)?;
+    diagnostics.extend(missing_dir_patterns(root, &declared).map(|declared| {
+        pattern_source_diagnostic(
+            root,
+            declared.source.clone(),
+            WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                pattern: declared.pattern.clone(),
+            },
+        )
+    }));
+    let patterns = split_outside_root_patterns(root, declared, &mut diagnostics);
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut manifest_cache = ManifestCache::default();
 
@@ -240,7 +254,18 @@ fn collect_workspaces_and_diagnostics(
         &mut diagnostics,
         &mut manifest_cache,
     ));
-    if !manifest_declares_workspaces {
+    if manifest_declares_workspaces {
+        collect_nested_project_workspaces(
+            &NestedProjectScan {
+                root,
+                canonical_root: &canonical_root,
+                ignore_patterns,
+            },
+            &mut workspaces,
+            &mut diagnostics,
+            &mut manifest_cache,
+        );
+    } else {
         workspaces.extend(collect_shallow_package_workspaces(
             root,
             &canonical_root,
@@ -340,148 +365,22 @@ pub fn link_only_workspace_dependencies(
         .collect()
 }
 
-/// Find directories containing `package.json` that are not declared as workspaces.
-///
-/// Only meaningful in monorepos that declare workspaces (via `package.json` `workspaces`
-/// field or `pnpm-workspace.yaml`). Scans up to two directory levels deep, skipping
-/// hidden directories, `node_modules`, and `build`.
-#[must_use]
-pub fn find_undeclared_workspaces(
+/// A diagnostic about a declared workspace pattern, anchored at the file that
+/// declares it. A fallow config pattern is anchored at the root, stored as
+/// `.`: the JSON envelopes strip only a `root + separator` prefix, so a path
+/// equal to the root would stay absolute there.
+fn pattern_source_diagnostic(
     root: &Path,
-    declared: &[WorkspaceInfo],
-) -> Vec<WorkspaceDiagnostic> {
-    find_undeclared_workspaces_with_ignores(root, declared, &crate::IgnorePatternSet::empty())
-}
-
-/// Find directories containing `package.json` that are not declared as workspaces,
-/// excluding candidates covered by the supplied ignore globset.
-///
-/// This is the ignore-aware variant used by the full analyzer after config
-/// resolution. See [`find_undeclared_workspaces`] for the compatibility wrapper.
-///
-/// Directories whose project-root-relative path matches `ignore_patterns` are skipped
-/// so users who already excluded a path via `ignorePatterns` don't see a redundant
-/// "not declared as workspace" warning. See issue #193.
-#[must_use]
-pub fn find_undeclared_workspaces_with_ignores(
-    root: &Path,
-    declared: &[WorkspaceInfo],
-    ignore_patterns: &crate::IgnorePatternSet,
-) -> Vec<WorkspaceDiagnostic> {
-    let declares_workspaces = collect_declared_patterns(root, &[]).is_ok_and(|p| !p.is_empty());
-    if !declares_workspaces {
-        return Vec::new();
+    source: PathBuf,
+    kind: WorkspaceDiagnosticKind,
+) -> WorkspaceDiagnostic {
+    let anchored_at_root = source == root;
+    let diagnostic = WorkspaceDiagnostic::new(root, source, kind);
+    if anchored_at_root {
+        diagnostic.into_root_relative(root)
+    } else {
+        diagnostic
     }
-
-    let declared_roots: rustc_hash::FxHashSet<PathBuf> = declared
-        .iter()
-        .map(|w| dunce::canonicalize(&w.root).unwrap_or_else(|_| w.root.clone()))
-        .collect();
-
-    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-
-    let mut undeclared = Vec::new();
-
-    let Ok(top_entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-
-    for entry in top_entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if !path.is_dir() || is_undeclared_scan_skip_dir(&entry.file_name().to_string_lossy()) {
-            continue;
-        }
-
-        let mut input = UndeclaredScanInput {
-            root,
-            canonical_root: &canonical_root,
-            declared_roots: &declared_roots,
-            ignore_patterns,
-            undeclared: &mut undeclared,
-        };
-        check_undeclared(
-            &path,
-            input.root,
-            input.canonical_root,
-            input.declared_roots,
-            input.ignore_patterns,
-            input.undeclared,
-        );
-        scan_child_dirs_for_undeclared(&path, &mut input);
-    }
-
-    undeclared
-}
-
-/// Whether an undeclared-workspace scan should skip a directory by leaf name.
-fn is_undeclared_scan_skip_dir(name: &str) -> bool {
-    name.starts_with('.') || name == "node_modules" || name == "build"
-}
-
-/// Borrowed inputs threaded through the second-level undeclared-workspace scan.
-struct UndeclaredScanInput<'a> {
-    root: &'a Path,
-    canonical_root: &'a Path,
-    declared_roots: &'a rustc_hash::FxHashSet<PathBuf>,
-    ignore_patterns: &'a crate::IgnorePatternSet,
-    undeclared: &'a mut Vec<WorkspaceDiagnostic>,
-}
-
-/// Check each immediate child of `parent` for an undeclared workspace.
-fn scan_child_dirs_for_undeclared(parent: &Path, input: &mut UndeclaredScanInput<'_>) {
-    let Ok(child_entries) = std::fs::read_dir(parent) else {
-        return;
-    };
-    for child in child_entries.filter_map(Result::ok) {
-        let child_path = child.path();
-        if !child_path.is_dir() || is_undeclared_scan_skip_dir(&child.file_name().to_string_lossy())
-        {
-            continue;
-        }
-        check_undeclared(
-            &child_path,
-            input.root,
-            input.canonical_root,
-            input.declared_roots,
-            input.ignore_patterns,
-            input.undeclared,
-        );
-    }
-}
-
-/// Check a single directory for an undeclared workspace.
-fn check_undeclared(
-    dir: &Path,
-    root: &Path,
-    canonical_root: &Path,
-    declared_roots: &rustc_hash::FxHashSet<PathBuf>,
-    ignore_patterns: &crate::IgnorePatternSet,
-    undeclared: &mut Vec<WorkspaceDiagnostic>,
-) {
-    if !dir_has_package_manifest(dir) {
-        return;
-    }
-    let canonical = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    if canonical == *canonical_root {
-        return;
-    }
-    if declared_roots.contains(&canonical) {
-        return;
-    }
-    let relative = dir.strip_prefix(root).unwrap_or(dir);
-    let relative_str = relative.to_string_lossy().replace('\\', "/");
-    if ignore_patterns.is_match(relative_str.as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/deno.json").as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/deno.jsonc").as_str())
-    {
-        return;
-    }
-    undeclared.push(WorkspaceDiagnostic::new(
-        root,
-        dir.to_path_buf(),
-        WorkspaceDiagnosticKind::UndeclaredWorkspace,
-    ));
 }
 
 /// A workspace glob and the file that declares it.
@@ -575,19 +474,11 @@ fn split_outside_root_patterns(
     let mut patterns = Vec::with_capacity(declared.len());
     for DeclaredPattern { pattern, source } in declared {
         if !pattern.starts_with('!') && crate::glob_validation::escapes_project_root(&pattern) {
-            let anchored_at_root = source == root;
-            let diagnostic = WorkspaceDiagnostic::new(
+            diagnostics.push(pattern_source_diagnostic(
                 root,
                 source,
                 WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot { pattern },
-            );
-            // The JSON envelopes strip only a `root + separator` prefix, so a
-            // path equal to the root would stay absolute there.
-            diagnostics.push(if anchored_at_root {
-                diagnostic.into_root_relative(root)
-            } else {
-                diagnostic
-            });
+            ));
             continue;
         }
         patterns.push(pattern);
@@ -2694,4 +2585,5 @@ mod tests {
             "{diagnostic:?}"
         );
     }
+    mod layout_tests;
 }

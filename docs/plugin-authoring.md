@@ -208,8 +208,15 @@ Config discovery adds a `**/` prefix to a pattern that has no `/`, does not
 start with a dot and names only source extensions (`.ts`, `.js` and similar).
 The credit uses the same prefix, so `my-framework.config.ts` also matches
 `src/my-framework.config.ts`. A pattern such as `.my-frameworkrc.js` gets no
-prefix and matches only at the project root and at the root of each workspace
-package.
+prefix and gets the credit only at the project root and at the root of each
+workspace package.
+
+The prefix rule controls the credit, not the full config discovery. For a
+built-in plugin, config discovery also probes a pattern without the prefix in
+every ancestor directory of a source file. So `resolve_config` can receive a
+nested file that the tool never reads. When the tool reads its config from one
+directory only, return an empty result for a nested file in `resolve_config`.
+The Serverless plugin does this for a nested `serverless.ts`.
 Keep config patterns specific: a broad pattern such as `config*.ts` also
 gives the credit to source files such as `src/configUtils.ts`.
 
@@ -247,7 +254,12 @@ for every export. Use it in these cases:
 These patterns are anchored. They get the workspace prefix, but no `**/`
 prefix, so they match only at the project root and at the root of each
 workspace package. Like the `default` credit, this credit applies only under
-`includeEntryExports`. External plugins have no anchored credit. The
+`includeEntryExports`. A `resolve_config` result can give the same credit
+for the files that a config names, with
+`PluginResult::push_entry_export_credit`. The Serverless plugin uses it for
+the export that each `handler` names. Do not use `push_used_export_rule` for
+this: a used-export rule also makes the matching entry file reportable
+without `includeEntryExports`. External plugins have no anchored credit. The
 `usedExports` field is the nearest option, but it also applies without
 `includeEntryExports`: fallow then analyses the exports of a matching entry
 file.

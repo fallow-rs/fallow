@@ -42,8 +42,10 @@ jobs:
       - name: Install commitlint
         run: npm ci --ignore-scripts
 
+      # The merge automation writes the squash subject of a bot pull request
+      # within the header limit, so a long Dependabot title never reaches main.
       - name: Lint pull request title
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: printf '%s\n' "$PR_TITLE" | npm run commitlint -- --verbose
@@ -66,7 +68,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node .github/scripts/check-dco.mjs
 
+      # A bot pull request is squash-merged with a subject that the merge
+      # automation writes, so its own commit headers never reach main. The push
+      # run still lints that squash commit.
       - name: Lint commit messages
+        if: github.event_name != 'pull_request' || github.event.pull_request.user.type != 'Bot'
         env:
           BEFORE_SHA: ${{ github.event.before }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}

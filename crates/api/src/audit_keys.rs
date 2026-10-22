@@ -435,13 +435,12 @@ impl AuditComparison {
             .count()
     }
 
-    /// Reclassify each worsened complexity finding as inherited, for
-    /// `audit.worsened: off`. An introduced finding keeps its grown values.
+    /// Reclassify worsened complexity findings as inherited, for
+    /// `audit.worsened: off`. Growth of an exceeded metric stays worsened, see
+    /// [`ComplexityClass::clear_worsened_for_off`].
     pub fn clear_worsened(&mut self) {
         for class in &mut self.health_classes {
-            if !class.introduced {
-                class.worsened_metrics.clear();
-            }
+            class.clear_worsened_for_off();
         }
     }
 }

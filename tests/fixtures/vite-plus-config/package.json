@@ -1,0 +1,24 @@
+{
+  "name": "vite-plus-config",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp test run",
+    "e2e": "vp test -c vitest.e2e.config.ts",
+    "lint": "vp lint scripts/lint-target.ts",
+    "fmt": "vp fmt scripts/fmt-target.ts",
+    "gen": "vp exec tsx scripts/gen.ts",
+    "release": "vpr build"
+  },
+  "devDependencies": {
+    "@e18e/eslint-plugin": "1.0.0",
+    "eslint-plugin-override-only": "1.0.0",
+    "eslint-plugin-unused-control": "1.0.0",
+    "hook-tool": "1.0.0",
+    "staged-tool": "1.0.0",
+    "task-tool": "1.0.0",
+    "tsx": "1.0.0",
+    "vite-plus": "1.0.0"
+  }
+}

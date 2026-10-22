@@ -31,7 +31,7 @@ RUN set -eux; \
   echo "${sha256}  /usr/local/bin/fallow" | sha256sum -c -; \
   chmod +x /usr/local/bin/fallow
 
-FROM node:26-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS runtime
+FROM node:26-bookworm-slim@sha256:1e96b01216cab31612cd1f9480e83413472dee8686d423cb4c1ec62bf8a26e9e AS runtime
 
 # tools/corepack/package-lock.json pins the corepack version and its hash.
 COPY tools/corepack/package.json tools/corepack/package-lock.json /opt/corepack/

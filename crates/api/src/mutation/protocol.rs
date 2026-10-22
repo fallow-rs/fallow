@@ -11,6 +11,12 @@ pub struct InitOptions {
     /// The test files that the adapter selects. Empty selects every file.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub test_files: Vec<String>,
+    /// The test files of the static map, as root-relative paths. A runner
+    /// that discovers its test files with glob patterns adds each file that
+    /// its default patterns match outside a dot directory. The patterns do
+    /// not match a path in a dot directory, such as `.github/`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extra_test_files: Vec<String>,
     /// Extra environment variables for the runner.
     pub env: BTreeMap<String, String>,
     /// The Node flags for each test process of the `node:test` runner. A
@@ -179,6 +185,10 @@ pub struct RunTest {
     /// companion leaves it out.
     #[serde(default)]
     pub failure_kind: Option<String>,
+    /// The first error of a failed test: its message and the stack frames
+    /// of the project, bounded in size. An older companion leaves it out.
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -366,6 +376,25 @@ mod tests {
         assert_eq!(result.tests_executed, 1);
         assert_eq!(result.tests[0].status, TestStatus::Fail);
         assert_eq!(result.tests[0].failure_kind.as_deref(), Some("assertion"));
+        assert_eq!(
+            result.tests[0].message, None,
+            "an older companion sends no message"
+        );
+    }
+
+    #[test]
+    fn a_run_result_keeps_the_error_of_a_failed_test() {
+        let line = RUN_RESULT.replace(
+            r#""failure_kind":"assertion""#,
+            r#""failure_kind":"assertion","message":"AssertionError: expected 1 to be 2""#,
+        );
+        let Response::Run(result) = decode_response(&line, 1, 3, "run_result").unwrap() else {
+            panic!("expected a run result");
+        };
+        assert_eq!(
+            result.tests[0].message.as_deref(),
+            Some("AssertionError: expected 1 to be 2")
+        );
     }
 
     #[test]

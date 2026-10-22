@@ -51,10 +51,10 @@ mod unused_svelte_event;
 pub(crate) mod test_support;
 
 pub use predicates::is_builtin_module;
-pub(crate) use unused_deps::cli_tool_own_config;
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
 pub use unused_deps::peer_dependency_hosts;
+pub(crate) use unused_deps::{cli_tool_own_config, peer_closure_seeds};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -107,8 +107,8 @@ use unrendered_component::{
     find_unrendered_lit_elements,
 };
 use unused_catalog::{
-    find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
-    gather_pnpm_catalog_state,
+    can_prove_unused_catalog_entries, find_empty_catalog_groups,
+    find_unresolved_catalog_references, find_unused_catalog_entries, gather_pnpm_catalog_state,
 };
 use unused_component_emit::find_unused_component_emits;
 use unused_component_input::find_unused_component_inputs;
@@ -798,7 +798,7 @@ pub(crate) fn find_dead_code_full(
     // run failed to read it at all. `clear_analysis_stage_diagnostics` above
     // touches only analyze-stage kinds, so the walk's skip list is intact here.
     let diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
-    graph_confidence::GraphConfidenceContext::new(graph, modules, &diagnostics)
+    graph_confidence::GraphConfidenceContext::for_run(graph, modules, &diagnostics, config)
         .annotate(&mut results);
 
     results.sort();
@@ -2287,7 +2287,7 @@ fn populate_pnpm_catalog_findings(
         return;
     };
 
-    if need_unused {
+    if need_unused && can_prove_unused_catalog_entries(config) {
         results.unused_catalog_entries = find_unused_catalog_entries(&state)
             .into_iter()
             .map(UnusedCatalogEntryFinding::with_actions)

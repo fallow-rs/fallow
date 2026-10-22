@@ -645,10 +645,13 @@ mod tests {
         );
     }
 
+    /// The `all` gate lets a CRAP score from estimated coverage fail the run,
+    /// which `new-only` does not do.
     fn gated_params(fixture: &CoverageFixture) -> AuditParams {
         AuditParams {
             root: Some(fixture.root_string()),
             base: Some("HEAD~1".to_string()),
+            gate: Some("all".to_string()),
             max_crap: Some(10.0),
             no_cache: Some(true),
             ..AuditParams::default()

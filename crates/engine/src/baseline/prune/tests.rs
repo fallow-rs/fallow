@@ -75,6 +75,25 @@ fn dead_code_prune_removes_a_fixed_finding_and_hides_the_same_findings() {
     assert_eq!(staleness.stale_entries(), 0, "{staleness:?}");
 }
 
+#[test]
+fn dead_code_prune_keeps_the_saved_install_state() {
+    let saved = make_results();
+    let content = serde_json::to_string_pretty(
+        &BaselineData::from_results(&saved, Path::new(ROOT))
+            .with_node_modules(fallow_types::workspace::NodeModulesState::Missing),
+    )
+    .unwrap();
+    let mut current = make_results();
+    current.unused_files.pop();
+
+    let pruned = prune_dead_code(&content, &current).unwrap();
+    let new_content = pruned.content.expect("a pruned file has new content");
+    assert_eq!(
+        crate::baseline::saved_node_modules_state(&new_content),
+        Some(fallow_types::workspace::NodeModulesState::Missing)
+    );
+}
+
 /// The saved results, with every export and member finding moved to the
 /// cascade state, as the rule pass does for the findings of an unused file.
 fn results_with_cascade_hidden() -> crate::results::AnalysisResults {

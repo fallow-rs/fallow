@@ -206,6 +206,41 @@ property, an optional chain (`items?.length`) and a computed access
 (`items["length"]`) keep each mutant. A type annotation is a type-level
 proof: a cast such as `as any` can pass another value.
 
+A conditional lookup in an array before `.filter(Boolean)` gives no `true`
+mutant for `negate-condition`. An example is
+`["base", align ? alignment[align] : ""].filter(Boolean)`. For a truthy
+`align`, the `true` mutant takes the same branch. For a falsy `align`, the
+mutant reads `alignment[align]`, which is `undefined`, and `filter(Boolean)`
+drops it as it drops `""`. The rule needs all of these conditions:
+
+- the conditional is a direct element of an array literal, and the array
+  literal is the receiver of a `.filter(Boolean)` call that is not optional,
+  with the global `Boolean`;
+- the test is a name with a local binding, and the consequent is `obj[test]`
+  or `obj?.[test]` with the same binding as its key;
+- the alternate is `""`, an empty template, `null`, the global `undefined`,
+  `false`, `0` or `0n`;
+- `obj` is a `const` that is not exported, has no redeclaration, and has an
+  object literal value, optionally with `as` or `satisfies`;
+- the declaration of `obj` ends before the conditional starts, so the
+  mutant cannot read `obj` before its declaration runs;
+- the object literal has only plain properties with name, string or number
+  keys, and no spread, getter, setter, method, computed key or `__proto__`
+  key;
+- no key is `undefined`, `null`, `false`, `0`, `NaN` or the empty string,
+  because a falsy key converts to one of these keys;
+- each use of `obj` is a member read, not an assignment target, a `delete`
+  operand or a callee.
+
+The `false` mutant does not change. A template literal, a `.join` without
+`.filter(Boolean)`, a `.filter((v) => v)` callback, a different key, a truthy
+alternate and a local `Boolean` binding keep the `true` mutant. A `with`
+statement or a direct `eval` call stops each proof in the file. A change to
+`Object.prototype` or `Array.prototype.filter` at run time can break the
+proof. A call from the value of `obj` to a hoisted function that holds the
+conditional can read `obj` before its declaration runs. The rule accepts these
+risks.
+
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has
 114119 mutants, and the operator adds 6473 mutants (5.7 %), 24 % of them on
@@ -395,6 +430,14 @@ shows as `pending`.
   completion is `partial` (`test-files-not-discovered`). A survivor or a
   `no_coverage` mutant that such a file reaches is then not proof of a
   test gap.
+- The `node-test` and `bun-test` adapters find test files with the default
+  patterns of the runner. These glob patterns do not go into a dot
+  directory, such as `.github/`. Fallow therefore sends the static test files
+  in `init.options.extra_test_files`. The adapter adds each file that exists,
+  is not in `node_modules` or `.git`, and matches a default pattern when its
+  directory names have no leading dot. A static test file that the adapter
+  does not add stays a `test-files-not-discovered` error. The Vitest adapter
+  does not get this list, because Vitest has its own `include` setting.
 - A `partial` completion does not change the exit code. The run exits `0`,
   or `1` when the score is under `--min-score`, or `2` when baseline
   failures leave each mutant without a test result (see Exit codes).
@@ -411,13 +454,41 @@ tests detect the mutant.
 | `survived` | `timeout` | `survived` |
 | `timeout` | `timeout` | `timeout` |
 | `timeout` | `killed` | `killed` |
+| `survived` | `killed` by a test that the first run did not execute | `killed` |
 | any | `runtime_error` | `runtime_error` |
 | any | other result | `flaky` |
 
 - A `survived` result with a `timeout` retry stays `survived`. The first
   run finished all tests with the mutant active. Host load alone can make
   the retry time out, so the timeout is no proof that the tests detect the
-  mutant. A `killed` retry of a survivor gives `flaky`.
+  mutant. A `killed` retry of a survivor gives `flaky` when a test of the
+  first run kills it.
+- The retry of a survivor runs each passing test of the files of its
+  covering tests, not only the covering tests (issue #3670). The per-test
+  hits of the dry run name only the tests that execute the mutated code. A
+  test can read a value that an earlier test of its file computed and
+  cached, so the dry run gives that test no hit. The first run stays
+  narrow, because most mutants are killed. A static mutant and a runner
+  without `test_filter` already run whole files, so their retry runs the
+  same tests.
+- A kill in the retry by a test that the first run did not execute is no
+  disagreement with the first run, so the status is `killed`. A test can
+  fail in a run of part of its file because it depends on the order of the
+  tests. Thus the scheduler keeps this kill only when the retry tests pass
+  in a control run with no active mutant (one control run for each test
+  set, the same memo as for a kill with no executed test). When the control
+  run fails, the first run decides: the mutant stays `survived`, and the
+  failed tests are baseline failures.
+- The retry of a survivor stops at the first failing test, and that test
+  decides the status. The companion runs the tests of each file in file
+  order, so a new test can fail before a test of the first run. The result
+  is then `killed`, also when the test of the first run would fail too.
+  Before, such a pair of runs was `flaky`. The control run still guards the
+  kill, and the mutant fails a test in both cases.
+- `covering_tests` of a retried survivor stays the dry-run hits of the
+  first run. It names the tests that reached the mutant and need an
+  assertion. A kill by a test of the retry can thus name a `killed_by` test
+  that is not in `covering_tests`.
 - The retry of a `timeout` waits twice as long. Host load often lasts into
   the retry, and a real infinite loop still times out.
 - A `killed` result gets no retry. In repeated runs under host load, no
@@ -428,8 +499,8 @@ tests detect the mutant.
 - With `--time-budget`, the first pass keeps time free for the retries of
   the survivors and timeouts that it found. Before each new mutant run, it
   adds these parts to the current time: the estimated retry time of each
-  suspect (the measured run time, twice for a timeout, divided by
-  `--concurrency` or by the suspect count when that count is smaller), the
+  suspect (the measured run time, divided by `--concurrency` or by the
+  suspect count when that count is smaller), the
   setup and dry-run time of the retry companions, and
   twice the mean run time. When the sum reaches the deadline, the next
   mutants stay `pending`. Thus a budgeted run confirms its survivors, the
@@ -438,6 +509,11 @@ tests detect the mutant.
   repeat run does it again. The reserve uses measured run times, so the
   first run of each worker starts without a reserve. A budget that is
   shorter than one wave of runs can still end before any retry.
+  For a survivor, the reserve adds to its measured run time the dry-run
+  time that the other tests of its files add to its retry. A timeout
+  reserves twice its run time. The control run that confirms a kill by a
+  new test is not in the reserve. When no time is left for it, the retry
+  gets no result and the mutant keeps its first status.
 - A run that started before the deadline continues until its watchdog
   fires, so the command can end after the deadline. For a mutant run, the
   overrun is at most `timeout_ms` plus the setup time plus 2 seconds. For
@@ -539,6 +615,16 @@ mutant. Their results decide no mutant status.
   baseline failure. Its message says that the test fails in a mutant run
   with no active mutant but passed in the dry run of its whole file. A test
   that depends on another test of its file gives this result.
+- The message of a control-run failure keeps the first error of the test
+  after that reason: the error name and message on the first line, then the
+  stack frames of the project. The companion removes the frames of the
+  runner, Node and dependencies, makes paths relative to the project, and
+  removes color codes. The companion cuts the error at 4096 UTF-16 code
+  units, and fallow keeps at most 8 KiB of it. The first line of the
+  message, with the assertion, also goes into the
+  `FALLOW_MUTATION_BASELINE_FAILED` error. The human footer shows the
+  reason on the `Message:` line and the first line of the error on the
+  `Error:` line. A companion that sends no error gives the reason only.
 - Each restarted companion runs its own dry run. A covering test that does
   not pass there is a baseline failure of that companion, with the ids of the
   affected mutants in `mutant_ids`. The mutant runs with its other covering
@@ -818,6 +904,16 @@ test run.
 - With `bail`, a run stops the test process at the first failure. Node 22
   applies the run timeout to the whole test file process. A requested test
   with no result after that timeout counts as a timeout.
+- The `node:test` preload adds `--import` of
+  `runtime/node-subprocess-preload.mjs` to `NODE_OPTIONS` of the test
+  process. So a Node process that a test starts (`spawn`, `exec`,
+  `execFile` or `fork`) also loads the instrumented files with the active
+  mutant. The URL of that import carries the overlay path and the mutant
+  id, so the test environment has no `FALLOW_MUTATION_*` variable. The hits
+  of such a child process do not count as coverage, so a mutant that only a
+  child process reaches stays `no_coverage`. A child that is not Node (for
+  example `bun`), or a child that gets an environment without
+  `NODE_OPTIONS`, loads the original files.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
 - Neither runtime can load a Vue, Svelte or Astro component file. The
@@ -872,7 +968,9 @@ The key hashes these parts:
 - the key format and the Fallow version;
 - the runner name, the runner version and the runtime version;
 - the mutant id, and the content of the mutated source file;
-- the covering test ids;
+- the covering test ids of the first run. The retry of a survivor adds
+  only tests of the same files, so the file digests below also cover the
+  tests of the retry;
 - the content of the covering test files, and of the files that they reach
   through static imports in the module graph (`MutationPlan::test_file_reach`).
   The run computes one digest for each test file and its reach, and each

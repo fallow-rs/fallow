@@ -447,6 +447,40 @@ fn human_baseline_footer_shows_the_first_line_of_the_failure_message() {
 }
 
 #[test]
+fn human_baseline_footer_shows_the_test_error_of_a_control_run_failure() {
+    let mut partial = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Killed)],
+        vec![MutationIncompleteReason::BaselineFailure],
+    );
+    partial.baseline_failures = vec![baseline_failure(
+        Some("test/a.test.ts::adds"),
+        Some(
+            "the test fails in a mutant run with no active mutant, but passed in the dry run of its whole file; it can depend on another test of its file: AssertionError: expected 1 to be 2\n    at test/a.test.ts:3:5",
+        ),
+    )];
+    let text = run_text(&partial, &OPTIONS);
+    assert!(
+        text.contains("\n  Message: the test fails in a mutant run with no active mutant"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n  Error: AssertionError: expected 1 to be 2\n"),
+        "{text}"
+    );
+    assert!(!text.contains("test/a.test.ts:3:5"), "{text}");
+
+    let mut confirmation = report(Vec::new(), vec![MutationIncompleteReason::BaselineFailure]);
+    confirmation.baseline_failures = vec![baseline_failure(
+        Some("test/a.test.ts::adds"),
+        Some(
+            "the test fails with no active mutant in a run of each test of its file that passed in the dry run, but passed in the dry run of its whole file; it can depend on a test of its file that failed or was skipped in the dry run, or it can be flaky: Error: boom",
+        ),
+    )];
+    let text = run_text(&confirmation, &OPTIONS);
+    assert!(text.contains("\n  Error: Error: boom\n"), "{text}");
+}
+
+#[test]
 fn human_run_report_groups_survivors_by_file_in_rank_order() {
     let report = report(
         vec![

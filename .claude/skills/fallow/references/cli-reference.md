@@ -440,7 +440,7 @@ The `--entry-weight` JSON output carries `entry_weight.entries[]`, one row per r
 
 To gate eager growth in CI, save a baseline file on the main branch with `fallow list --entry-weight --save-regression-baseline <PATH>`. A later run with `--regression-baseline <PATH>` adds `entry_weight.regression`: per-entry `baseline_eager_bytes`, `current_eager_bytes`, `new_eager_packages` and `exceeded`. The comparison is report-only until you add `--fail-on-regression`; then an entry that grew more than `--tolerance` (bytes, or a percentage such as `5%`) exits 1. A new entry never fails the gate.
 
-The `--workspaces` JSON output carries `workspaces[]` (name, project-root-relative path, `is_internal_dependency` bool) plus `workspace_diagnostics[]`. Each diagnostic has a `kind` discriminator (for example `undeclared-workspace`, `malformed-package-json`, `glob-matched-no-package-json`, `workspace-glob-outside-root`, `malformed-tsconfig`, `tsconfig-reference-dir-missing`, `malformed-pnpm-workspace-yaml`, `skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`, `source-read-failure`, `npm-lock-override-resolution-skipped`) with a typed payload (`error`, `pattern`, or none), and a `path` that is project-root-relative with forward slashes on every envelope that carries the array. The same `workspace_diagnostics[]` array is also surfaced on the `fallow dead-code --format json`, `fallow dupes --format json`, and `fallow health --format json` envelopes, at the top level of the bare combined `fallow --format json` envelope, on `fallow audit --format json` under `dead_code`, and on the `audit-brief` envelope shared by `fallow review --format json` and `fallow audit --brief --format json`, also under `dead_code` (omitted when empty). The combined carrier is the envelope root, not a section, so `--skip check`, `--only health`, and `--only dupes` all still report what their analyses recorded. The combined root is the union of what every analysis in the run recorded, deduplicated on the whole `kind` (typed payload included) plus `path`, so two overlapping globs still report the same package-less directory once per `pattern` (a declared glob's no-op `./` prefix is normalised away, so one glob written `"./apps/**"` in `package.json` and `apps/**` in `pnpm-workspace.yaml` stays one entry): a combined run walks the project once per analysis, and a per-analysis `production` mode (`production: { deadCode, health, dupes }`, `--production-health`) can give those walks different file sets, so only the union reports what the run as a whole saw. Each analysis contributes the workspace-discovery list its own config load produced, the same list `fallow list --workspaces` reports, so the combined root can carry an `undeclared-workspace` or `glob-matched-no-package-json` entry that the standalone `dead-code`, `check`, `health`, and `dupes` envelopes, which read the process diagnostics registry instead, do not. `fallow audit --format json` and the `audit-brief` envelope are on the same broad side: they fold the dead-code analysis's own list into their `dead_code.workspace_diagnostics[]`, so they too report an `undeclared-workspace` entry the standalone envelopes miss. The CLI and the programmatic route (MCP code mode, NAPI, embedders) agree on everything an analysis records: both folds close with the same process-registry read, which covers what an analysis records after its section captured its list (a `source-read-failure`, or the analysis-stage kinds a health run's own dead-code precompute records) and skips `skipped-large-file`, `skipped-minified-file`, and `skipped-source-dotdir`, since those reach an envelope only from the walk that recorded them. The analysis-stage kinds (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`, `bun-lock-override-resolution-skipped`, `pnpm-lock-override-resolution-skipped`, `npm-lock-override-resolution-skipped`, `bun-resolutions-shadowed-by-overrides`, `pnpm-workspace-overrides-ignored`, `boundaries-not-configured`, `rule-packs-not-configured`) are recorded by the dead-code analyze pass, so they only appear on runs that include it: `fallow dupes --format json` and `fallow --only dupes` report the workspace-discovery and source-discovery kinds alone. A malformed ROOT `package.json` exits 2 at config load; everything else warns and continues. The dead-code result adds two more kinds, each with a `pattern` payload and `path: "."`: `ignore-dependencies-glob-unmatched` (an `ignoreDependencies` glob matched no declared dependency; omitted when the run reports no dependency finding, for example with `--unused-files` or `--file`) and `ignore-findings-pattern-unmatched` (an `ignoreFindings` pattern matched no finding). SARIF carries the same entries under `invocations[0].toolConfigurationNotifications[]` of the dead-code run. Markdown, `github-summary`, `pr-comment-github`, `pr-comment-gitlab` and the summary `body` of `review-github` and `review-gitlab` add an `Unmatched config patterns` section. Human, compact, CodeClimate and `github-annotations` print a stderr note. `fallow report --from` uses the same place as the live run of that format.
+The `--workspaces` JSON output carries `workspaces[]` (name, project-root-relative path, `is_internal_dependency` bool) plus `workspace_diagnostics[]`. Each diagnostic has a `kind` discriminator (for example `undeclared-workspace`, `malformed-package-json`, `glob-matched-no-package-json`, `workspace-glob-outside-root`, `workspace-pattern-dir-missing`, `nested-project-root`, `malformed-tsconfig`, `tsconfig-reference-dir-missing`, `malformed-pnpm-workspace-yaml`, `skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`, `source-read-failure`, `npm-lock-override-resolution-skipped`) with a typed payload (`error`, `pattern`, or none), and a `path` that is project-root-relative with forward slashes on every envelope that carries the array. The same `workspace_diagnostics[]` array is also surfaced on the `fallow dead-code --format json`, `fallow dupes --format json`, and `fallow health --format json` envelopes, at the top level of the bare combined `fallow --format json` envelope, on `fallow audit --format json` under `dead_code`, and on the `audit-brief` envelope shared by `fallow review --format json` and `fallow audit --brief --format json`, also under `dead_code` (omitted when empty). The combined carrier is the envelope root, not a section, so `--skip check`, `--only health`, and `--only dupes` all still report what their analyses recorded. The combined root is the union of what every analysis in the run recorded, deduplicated on the whole `kind` (typed payload included) plus `path`, so two overlapping globs still report the same package-less directory once per `pattern` (a declared glob's no-op `./` prefix is normalised away, so one glob written `"./apps/**"` in `package.json` and `apps/**` in `pnpm-workspace.yaml` stays one entry): a combined run walks the project once per analysis, and a per-analysis `production` mode (`production: { deadCode, health, dupes }`, `--production-health`) can give those walks different file sets, so only the union reports what the run as a whole saw. Each analysis contributes the workspace-discovery list its own config load produced, the same list `fallow list --workspaces` reports, so the combined root can carry an `undeclared-workspace` or `glob-matched-no-package-json` entry that the standalone `dead-code`, `check`, `health`, and `dupes` envelopes, which read the process diagnostics registry instead, do not. `fallow audit --format json` and the `audit-brief` envelope are on the same broad side: they fold the dead-code analysis's own list into their `dead_code.workspace_diagnostics[]`, so they too report an `undeclared-workspace` entry the standalone envelopes miss. The CLI and the programmatic route (MCP code mode, NAPI, embedders) agree on everything an analysis records: both folds close with the same process-registry read, which covers what an analysis records after its section captured its list (a `source-read-failure`, or the analysis-stage kinds a health run's own dead-code precompute records) and skips `skipped-large-file`, `skipped-minified-file`, and `skipped-source-dotdir`, since those reach an envelope only from the walk that recorded them. The analysis-stage kinds (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`, `bun-lock-override-resolution-skipped`, `pnpm-lock-override-resolution-skipped`, `npm-lock-override-resolution-skipped`, `bun-resolutions-shadowed-by-overrides`, `pnpm-workspace-overrides-ignored`, `boundaries-not-configured`, `rule-packs-not-configured`) are recorded by the dead-code analyze pass, so they only appear on runs that include it: `fallow dupes --format json` and `fallow --only dupes` report the workspace-discovery and source-discovery kinds alone. A malformed ROOT `package.json` exits 2 at config load; everything else warns and continues. The dead-code result adds two more kinds, each with a `pattern` payload and `path: "."`: `ignore-dependencies-glob-unmatched` (an `ignoreDependencies` glob matched no declared dependency; omitted when the run reports no dependency finding, for example with `--unused-files` or `--file`) and `ignore-findings-pattern-unmatched` (an `ignoreFindings` pattern matched no finding). SARIF carries the same entries under `invocations[0].toolConfigurationNotifications[]` of the dead-code run. Markdown, `github-summary`, `pr-comment-github`, `pr-comment-gitlab` and the summary `body` of `review-github` and `review-gitlab` add an `Unmatched config patterns` section. Human, compact, CodeClimate and `github-annotations` print a stderr note. `fallow report --from` uses the same place as the live run of that format.
 
 The `--boundaries` JSON output carries `boundaries.logical_groups[]` alongside the existing `zones[]` / `rules[]` arrays. Each logical-group entry surfaces a user-authored `autoDiscover` parent zone (which expansion otherwise flattens into per-child zones like `features/auth` / `features/billing`): `name`, `children`, `auto_discover` (verbatim user strings), `status` (`ok` / `empty` / `invalid_path`), `source_zone_index`, summed `file_count`, optional `authored_rule` (the pre-expansion `{ allow, allowTypeOnly }` keyed on the parent), optional `fallback_zone` cross-reference when the parent also kept its own `patterns` (Bulletproof case), optional `merged_from` (parent zone indices when the user declared the same parent name twice; surfaces the duplicate in JSON instead of only in `tracing::warn!`), optional `original_zone_root` (echo of the parent's `root` subtree scope for monorepo patchers), and optional `child_source_indices` (parallel to `children`, attributing each child to a specific `auto_discover` entry when multiple paths were authored). The full shape is documented in `docs/output-schema.json` under `ListBoundariesOutput`.
 
@@ -526,7 +526,7 @@ Human output groups paths under "Shared with your team (commit these)" and "Loca
 {
   "kind": "agent-install",
   "schema_version": 1,
-  "fallow_version": "3.34.1",
+  "fallow_version": "3.35.0",
   "root": "/abs/path",
   "mode": "install",
   "dry_run": false,
@@ -737,7 +737,7 @@ fallow health --format json --quiet --trend
 {
   "kind": "health",
   "schema_version": 7,
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -1143,15 +1143,20 @@ A merge of the default branch brings in code that the default branch already has
 A complexity finding matches its base finding by file path and function name. The line and the exceeded category do not affect the match, and a renamed file keeps its match. A complexity finding is introduced in these cases:
 
 - No base finding matches it.
-- A metric that the head finding exceeds has a higher value than in the base finding.
+- The head finding exceeds a metric that the base finding did not exceed, and that metric grew.
+- A metric that the head finding exceeds grew, and the finding moved to a higher severity tier (`moderate`, `high`, `critical`).
+
+Growth of a metric that the base finding already exceeded, in the same severity tier, makes the finding `worsened`, not introduced.
 
 An unchanged or decreased metric keeps the finding inherited, also when the exceeded category changes (for example from `both` to `cyclomatic`). When one file has more than one finding with the same function name, each base finding matches at most one head finding. Head findings with unchanged metric values and an unchanged line count match first. Head findings with unchanged metric values match next. The other findings then match in line order.
 
-A matched finding that is not introduced is `worsened` when a measured value is higher than in the base finding. The measured values are cyclomatic, cognitive, CRAP (only when both sides have a score) and the line count of the function. The line count must grow by at least 5 lines. It includes comments and blank lines, so the minimum keeps a finding inherited after a short comment or a formatter rewrap. Each complexity finding carries `attribution` (`introduced`, `worsened` or `inherited`). When a value grew, it also carries `worsened_metrics` with the `metric`, the `base` value and the `head` value. An introduced finding whose exceeded metric grew also carries `worsened_metrics`. `attribution.worsened` gives the active mode. `attribution.complexity_worsened` counts the worsened findings, which are also in `complexity_inherited`. `--worsened` (config `audit.worsened`) decides their effect on the verdict:
+A matched finding that is not introduced is `worsened` when a measured value is higher than in the base finding. The measured values are cyclomatic, cognitive, CRAP (only when both sides have a score) and the line count of the function. The line count must grow by at least 5 lines. It includes comments and blank lines, so the minimum keeps a finding inherited after a short comment or a formatter rewrap. Each complexity finding carries `attribution` (`introduced`, `worsened` or `inherited`). When a value grew, it also carries `worsened_metrics` with the `metric`, the `base` value and the `head` value. An introduced finding that matched a base finding also carries `worsened_metrics`. `attribution.worsened` gives the active mode. `attribution.complexity_worsened` counts the worsened findings, which are also in `complexity_inherited`. `--worsened` (config `audit.worsened`) decides their effect on the verdict:
 
 - `warn` (default): a worsened finding makes the verdict at least `warn`. The exit code stays 0.
 - `error`: a worsened finding counts like an introduced finding, so its `complexity-*` rule decides the verdict.
-- `off`: no finding is worsened, and the verdict does not change.
+- `off`: growth only in metrics that the finding does not exceed stays inherited. Growth of an exceeded metric stays `worsened` and makes the verdict at least `warn`.
+
+A complexity finding in a test file does not gate the audit verdict, under either gate. A test file is a spec (`*.test.*`, `*.spec.*`, `*.e2e.*`), a file below a test directory (`__tests__/`, `test/`, `tests/`, `e2e/`), a mock or a fixture. Such a finding has `effective_severity: warn` and `gate_exemption: "test-file"`, and it stays in the report with its attribution. It makes the verdict at least `warn`. `fallow health` still reports it at the severity of its rule.
 
 ### JSON contract: which fields are severity-aware
 
@@ -1207,7 +1212,7 @@ fallow audit \
 {
   "kind": "audit",
   "schema_version": 7,
-  "version": "3.34.1",
+  "version": "3.35.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -1295,7 +1300,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 7,
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1396,7 +1401,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -1425,7 +1430,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -2240,7 +2245,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 {
   "kind": "dead-code",
   "schema_version": 7,
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -2400,7 +2405,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 {
   "kind": "dupes",
   "schema_version": 7,
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -2444,11 +2449,11 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "kind": "combined",
   "schema_version": 7,
-  "version": "3.34.1",
+  "version": "3.35.0",
   "elapsed_ms": 159,
   "check": {
     "schema_version": 7,
-    "version": "3.34.1",
+    "version": "3.35.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],

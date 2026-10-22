@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
+import {
+  assertArtifactDirectoryInWorkspace,
+  fixtureDependencyEnvironment,
+} from "./type-aware-corpus/dependencies.mjs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +26,6 @@ import {
   candidateKey,
   compareCandidateSets,
   evidenceProducerErrors,
-  fixtureDependencyEnvironment,
   independentReviewDigest,
   independentReviewErrors,
   indexLedgerForRefresh,
@@ -825,10 +836,59 @@ test("fixture dependency provenance records approved ancestor node_modules", () 
     });
     assert.throws(
       () => fixtureDependencyEnvironment(fixture, "fixture", resolve(workspace, "other")),
+      /outside the approved dependency root/,
+    );
+    mkdirSync(resolve(workspace, "target/node_modules"));
+    assert.throws(
+      () => fixtureDependencyEnvironment(fixture, "fixture", workspace),
       /resolves dependencies from an unapproved ancestor/,
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixture dependency provenance rejects a missing fixture or dependency install", () => {
+  const workspace = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-workspace-"));
+  try {
+    const fixture = resolve(workspace, "target/corpus/fixture");
+    assert.throws(
+      () => fixtureDependencyEnvironment(fixture, "fixture", workspace),
+      /fixture is missing: .*run prepare or supplemental first/,
+    );
+    mkdirSync(fixture, { recursive: true });
+    assert.throws(
+      () => fixtureDependencyEnvironment(fixture, "fixture", workspace),
+      /no installed dependencies.*npm ci/,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixture dependency provenance follows a symlinked artifact directory", () => {
+  const workspace = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-workspace-"));
+  const external = mkdtempSync(resolve(tmpdir(), "fallow-type-aware-external-"));
+  try {
+    mkdirSync(resolve(workspace, "node_modules"), { recursive: true });
+    mkdirSync(resolve(external, "corpus/fixture"), { recursive: true });
+    symlinkSync(external, resolve(workspace, "target"), "junction");
+    const fixture = resolve(workspace, "target/corpus/fixture");
+
+    assert.throws(
+      () => fixtureDependencyEnvironment(fixture, "fixture", workspace),
+      /fixture path .*target.*corpus.*fixture resolves to .*outside the approved dependency root.*symlinked target directory/,
+    );
+    assert.throws(
+      () => assertArtifactDirectoryInWorkspace(resolve(workspace, "target/not-created"), workspace),
+      /artifact directory .*resolves to .*outside the approved dependency root/,
+    );
+    assert.doesNotThrow(() =>
+      assertArtifactDirectoryInWorkspace(resolve(workspace, "real/not-created"), workspace),
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
   }
 });
 

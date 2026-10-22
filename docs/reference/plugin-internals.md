@@ -473,6 +473,93 @@ Scout runner loads by name (`test/scout/**/*playwright.config.ts` and
 `AsyncPlugin` gets `setup`, `start` and `stop` as used class members, because the platform calls them on the
 object that a plugin entry returns.
 
+## GitHub Action manifests
+
+The `github-action` plugin reads `action.yml` and `action.yaml` in the package
+root. It activates only when `runs.using` starts with `node`, so a composite or
+Docker action, such as the Fallow action, changes nothing. The `runs.pre`,
+`runs.main` and `runs.post` values go through the package entry resolver
+(`resolve_entry_path_with_tracking`), the same resolver as a `package.json`
+`main` field. The tsconfig output map, the output-directory-to-`src/` map and
+the source index fallback then apply. The plugin collects the skipped paths,
+so a missing target writes no warning. An action in a nested directory, such
+as `.github/actions/<name>/action.yml`, is not read.
+
+## VitePress `vite` block
+
+The `vitepress` plugin parses `.vitepress/config.*` and
+`.vitepress/config/index.*`, also below `docs/`. The `vite` key of the config
+object is a Vite config: `vite::credit_dependency_lists` credits its
+`optimizeDeps` and `ssr` lists with the prefix `["vite"]`, and its
+`resolve.alias` entries become path aliases. Imports in `<script setup>` of a
+Markdown page are not read.
+
+## Egg.js load units and tegg modules
+
+The `egg` plugin activates on `egg`, `@eggjs/core` or `@eggjs/tegg`, or on an
+`egg`, `eggPlugin` or `eggModule` key in `package.json`. The Egg loader loads
+the files of a load unit by directory convention. The plugin follows
+`packages/core/src/loader/egg_loader.ts` of the Egg repository.
+
+- The static entry patterns cover the load unit at the package root. They are
+  two globs only, because every active workspace adds them to one compiled
+  glob set.
+- A nested load unit, such as an example app or a test fixture app, has a
+  `config/config.default.*` or a `config/plugin.*` file. These are config
+  patterns with a `**/` prefix. For each nested unit, the plugin walks the unit
+  and seeds each convention file as one literal entry path.
+- tegg loads every source file of a directory whose `package.json` has an
+  `eggModule` object. The `package.json` hook walks the package for these
+  directories, or reads `config/module.json` when it exists. Each module file
+  is one literal entry path. The walk skips the directories and files that
+  `LoaderUtil.filePattern` of tegg skips.
+
+Nested units and modules use literal paths and not globs. A repository can
+hold hundreds of fixture apps and modules. One glob for each of them makes
+the glob set too large to compile, and then no plugin entry point applies.
+`discover/entry_points.rs` logs a warning when that happens.
+
+The plugin credits each `package` value of a `config/plugin.*` file, the
+`package` values of `config/module.json`, and `egg.framework`, `egg.tscompiler`
+and the package specifiers of `egg.require`. A load unit without
+`egg.framework` also credits `egg`, the default framework that `egg-bin` and
+`egg-scripts` start. Each credit goes to the owning manifest: the nearest
+`package.json` that has a dependency section and is not in a `test` or
+`fixtures` directory. A fixture app manifest does not install packages, so
+its enclosing workspace package must declare them. A credit never goes to the
+whole project, because a package that only another workspace names is still
+unused in this one.
+
+The plugin has no tooling dependencies. The Egg binaries (`egg-bin`,
+`egg-scripts`) are credited by the scripts that call them.
+
+## Vite+ config blocks
+
+Vite+ keeps the config of each tool that it bundles in `vite.config.*`.
+Each block goes to the code that reads the same tool elsewhere:
+
+- `test`: the Vitest plugin. A `vite-plus` dependency enables it.
+- `pack`: the Vite+ plugin. Each `entry` is a runtime entry point. `pack` is
+  one tsdown config or an array of them.
+- `lint`: the Vite+ plugin, with the Oxlint rules for `jsPlugins`,
+  `overrides[].jsPlugins` and `extends`.
+- `fmt`: nothing. The block holds formatter options only.
+- `staged`: the hook scanner, like a lint-staged config. It credits packages
+  only.
+- `run.tasks`: the script layer, keyed `vp:<task>`. A task with `cwd` gives
+  no command, because its paths resolve against another directory.
+
+The hook scanner and the task scripts read the first root `vite.config.*` of
+the project root and of each workspace root. A nested config in a fixture
+directory gives no command.
+
+`vp <subcommand>` credits `vite-plus`. The bundled tool decides how the
+arguments are read: `vp lint` and `vp fmt` take file targets that are not
+entry points, `vp test -c <file>` sends the file to the Vitest plugin, and
+`vp pack <file>` makes an entry point. `vp run <task>` and `vpr <task>` call a
+declared script. `vp exec`, `vp dlx` and `vpx` run their child command, as a
+command wrapper does.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:

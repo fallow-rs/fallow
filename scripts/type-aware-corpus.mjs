@@ -53,6 +53,11 @@ import {
   parseArgs as parseCorpusArgs,
   validateManifest as validateCorpusManifest,
 } from "./type-aware-corpus/config.mjs";
+import {
+  assertArtifactDirectoryInWorkspace,
+  DEPENDENCY_DIRECTORY_NAMES,
+  fixtureDependencyEnvironment,
+} from "./type-aware-corpus/dependencies.mjs";
 import { WIRE_PROTOCOL_VERSION } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
 import { cargoFallowBin } from "./cargo-target.mjs";
 
@@ -83,7 +88,6 @@ const SEMANTIC_TIMEOUT_MS = 120_000;
 const SEMANTIC_PROTOCOL_VERSION = WIRE_PROTOCOL_VERSION;
 const SEMANTIC_QUERY_STATUSES = new Set(["complete", "partial", "unavailable"]);
 const TRUTH_STATUSES = new Set(["used", "preserved", "unused", "indeterminate"]);
-const DEPENDENCY_DIRECTORY_NAMES = new Set(["node_modules", ".pnpm-store"]);
 const FOCUSED_TEST_PATH = resolve(REPO_ROOT, "tools/type-aware-sidecar/test/sidecar.test.mjs");
 const REQUIRED_FOCUSED_CASES = [
   "confirms a nested generic class-member use",
@@ -320,43 +324,8 @@ export const assertNoFixtureDependencyDirectories = (root, projectId, ignoredPat
   }
 };
 
-const ancestorDirectories = (root) => {
-  const directories = [];
-  let ancestor = dirname(resolve(root));
-  while (true) {
-    directories.push(ancestor);
-    const parent = dirname(ancestor);
-    if (parent === ancestor) return directories;
-    ancestor = parent;
-  }
-};
-
-const containsInstalledDependencies = (root) =>
-  [...DEPENDENCY_DIRECTORY_NAMES].some((name) => existsSync(resolve(root, name)));
-
 const existingDirectory = (path) => (existsSync(path) ? statSync(path).isDirectory() : false);
 const existingFile = (path) => (existsSync(path) ? statSync(path).isFile() : false);
-
-export const fixtureDependencyEnvironment = (
-  root,
-  projectId,
-  approvedDependencyRoot = REPO_ROOT,
-) => {
-  const dependencyRoots = ancestorDirectories(root).filter(containsInstalledDependencies);
-  if (dependencyRoots.length === 0) {
-    return { dependency_installation: "none", dependency_root: null };
-  }
-  const approved = resolve(approvedDependencyRoot);
-  if (dependencyRoots.some((dependencyRoot) => dependencyRoot !== approved)) {
-    fail(
-      `${projectId} resolves dependencies from an unapproved ancestor: ${dependencyRoots.join(", ")}`,
-    );
-  }
-  return {
-    dependency_installation: "ancestor-workspace",
-    dependency_root: approved,
-  };
-};
 
 const sourceFixtureRoot = (project) => {
   const root = resolve(REPO_ROOT, project.fixture);
@@ -433,6 +402,7 @@ const prepareProject = (project, outDir) => {
 };
 
 const prepare = (projects, outDir) => {
+  assertArtifactDirectoryInWorkspace(outDir);
   const prepared = projects.map((project) => prepareProject(project, outDir));
   writeJson(resolve(outDir, "fixtures.json"), { schema_version: 1, projects: prepared });
   return prepared;

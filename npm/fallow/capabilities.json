@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.34.1",
+  "version": "3.35.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -8280,7 +8280,7 @@
     ]
   },
   "plugins": {
-    "count": 145,
+    "count": 148,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8289,6 +8289,7 @@
       "remix",
       "astro",
       "browser-extension",
+      "github-action",
       "wxt",
       "angular",
       "react-router",
@@ -8303,6 +8304,7 @@
       "nestjs-trpc",
       "nest-commander",
       "adonis",
+      "egg",
       "docusaurus",
       "gatsby",
       "sveltekit",
@@ -8341,6 +8343,7 @@
       "module-federation",
       "tsup",
       "tsdown",
+      "vite-plus",
       "pkg-utils",
       "parcel",
       "vitest",

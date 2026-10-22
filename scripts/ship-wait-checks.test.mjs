@@ -1438,3 +1438,102 @@ test("--head waits until the pull request reports the pushed commit", fakeGhOpti
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(rollupReads(result.calls).length, 2);
 });
+
+const MAIN_COMMITS = "repos/{owner}/{repo}/commits?sha=main&per_page=10";
+const NEWEST_MAIN = "d".repeat(40);
+const OLDER_MAIN = "e".repeat(40);
+const mainCheckEndpoint = (sha, name) =>
+  `repos/{owner}/{repo}/commits/${sha}/check-runs?check_name=${encodeURIComponent(name)}&filter=latest&per_page=100`;
+const mainRun = (name, status, conclusion) => ({
+  check_runs: [{ name, status, conclusion, html_url: `https://example.invalid/main/${name}` }],
+});
+const mainChecks = (runs) => ({
+  [MAIN_COMMITS]: [{ sha: NEWEST_MAIN }, { sha: OLDER_MAIN }],
+  ...runs,
+});
+const prChecks = (...entries) => ({ selected: [], rollups: [{ statusCheckRollup: entries }] });
+
+test("a check that fails on the pull request and on main exits with code 4", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    ...prChecks(
+      checkRun("Cargo Deny", "COMPLETED", "FAILURE"),
+      checkRun("Tests", "COMPLETED", "SUCCESS"),
+    ),
+    // The newest main run is still in progress, so the older completed run decides.
+    runs: mainChecks({
+      [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "in_progress", null),
+      [mainCheckEndpoint(OLDER_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "failure"),
+    }),
+  });
+
+  assert.equal(result.status, 4, result.stdout + result.stderr);
+  assert.match(result.stdout, /each failed check also fails on main/u);
+  assert.match(result.stdout, /FAIL \(also on main eeeeeeeeeeee\): Cargo Deny/u);
+});
+
+test(
+  "a check that fails only on the pull request stays a pull request failure",
+  fakeGhOptions,
+  () => {
+    const result = runWithFakeGh({
+      ...prChecks(
+        checkRun("Cargo Deny", "COMPLETED", "FAILURE"),
+        checkRun("Tests", "COMPLETED", "FAILURE"),
+      ),
+      runs: mainChecks({
+        [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun(
+          "Cargo Deny",
+          "completed",
+          "failure",
+        ),
+        [mainCheckEndpoint(NEWEST_MAIN, "Tests")]: mainRun("Tests", "completed", "success"),
+      }),
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /FAIL \(also on main dddddddddddd\): Cargo Deny/u);
+    assert.match(result.stdout, /^ {2}FAIL: Tests/mu);
+  },
+);
+
+test("a failed read of main keeps the failure of the pull request", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    ...prChecks(checkRun("Cargo Deny", "COMPLETED", "FAILURE")),
+    runs: {},
+  });
+
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /Read of the main checks failed/u);
+});
+
+test("a check that fails only on main does not fail the pull request", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    ...prChecks(checkRun("Cargo Deny", "COMPLETED", "SUCCESS")),
+    runs: mainChecks({
+      [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "failure"),
+    }),
+  });
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(
+    result.calls.filter((args) => args[0] === "api").length,
+    0,
+    "a passing pull request does not read main",
+  );
+});
+
+test("a cancelled check next to a shared failure keeps exit code 1", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    ...prChecks(
+      checkRun("Cargo Deny", "COMPLETED", "FAILURE"),
+      checkRun("Tests", "COMPLETED", "CANCELLED"),
+    ),
+    runs: mainChecks({
+      [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "failure"),
+    }),
+  });
+
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /FAIL \(also on main dddddddddddd\): Cargo Deny/u);
+  assert.match(result.stdout, /^ {2}CANCEL: Tests/mu);
+});

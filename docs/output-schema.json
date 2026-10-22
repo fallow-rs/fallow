@@ -1033,7 +1033,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `workspace-glob-outside-root`, `malformed-tsconfig`,\n  `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`;\n- the dead-code result, for config patterns that matched nothing:\n  `ignore-dependencies-glob-unmatched`,\n  `ignore-findings-pattern-unmatched`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,\n  `nested-project-root`, `malformed-tsconfig`,\n  `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`;\n- the dead-code result, for config patterns that matched nothing:\n  `ignore-dependencies-glob-unmatched`,\n  `ignore-findings-pattern-unmatched`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
         },
         "next_steps": {
           "type": "array",
@@ -3573,7 +3573,7 @@
               "type": "null"
             }
           ],
-          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Absent in reports from older versions."
+          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Under `audit --gate new-only`, a finding that exceeds only CRAP\nfrom estimated coverage has `warn`. Absent in reports from older\nversions."
         },
         "crap": {
           "type": [
@@ -3681,7 +3681,7 @@
             "boolean",
             "null"
           ],
-          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, or when a metric that it exceeds has a higher\nvalue than in that base finding."
+          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, when a grown metric exceeds a threshold that\nthe base finding did not exceed, or when the growth of an exceeded\nmetric moves it to a higher severity tier. A CRAP score from estimated\ncoverage, or a CRAP score that the base finding does not have, is not\ngrowth."
         },
         "attribution": {
           "anyOf": [
@@ -3700,6 +3700,17 @@
             "$ref": "#/definitions/WorsenedMetric"
           },
           "description": "Audit-mode list of the measured metrics that are higher than in the\nmatched base finding, with the base value and the head value. Present\non a worsened finding, and on an introduced finding that matches a base\nfinding. Absent when no metric grew."
+        },
+        "gate_exemption": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditGateExemption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Audit-mode reason why the finding does not gate the verdict. With\n`test-file`, the finding is in a test file and `effective_severity` is\n`warn`. Absent outside `audit`, and on a finding that gates."
         }
       },
       "required": [
@@ -7354,6 +7365,10 @@
         {
           "type": "object",
           "properties": {
+            "type": {
+              "type": "string",
+              "const": "comment"
+            },
             "issue_kind": {
               "type": [
                 "string",
@@ -7375,10 +7390,6 @@
             "kind_known": {
               "type": "boolean",
               "description": "Whether `issue_kind` parses to a known `IssueKind`. False when the\ntoken is a typo or refers to a kind that was renamed or removed in\na newer fallow release. JSON consumers (CI annotations, MCP agents,\nVS Code) branch on this to choose the right next-step text.\nOmitted from the wire when `true` so producers that have not yet\nadopted the field stay byte-compatible. See issue #449."
-            },
-            "type": {
-              "type": "string",
-              "const": "comment"
             }
           },
           "required": [
@@ -7390,6 +7401,10 @@
         {
           "type": "object",
           "properties": {
+            "type": {
+              "type": "string",
+              "const": "jsdoc_tag"
+            },
             "export_name": {
               "type": "string",
               "description": "The name of the export that was tagged."
@@ -7400,10 +7415,6 @@
                 "null"
               ],
               "description": "Human-authored reason after `--`, when present."
-            },
-            "type": {
-              "type": "string",
-              "const": "jsdoc_tag"
             }
           },
           "required": [
@@ -12227,7 +12238,7 @@
               "type": "null"
             }
           ],
-          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Absent in reports from older versions."
+          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Under `audit --gate new-only`, a finding that exceeds only CRAP\nfrom estimated coverage has `warn`. Absent in reports from older\nversions."
         },
         "crap": {
           "type": [
@@ -12800,13 +12811,13 @@
         {
           "type": "object",
           "properties": {
-            "error": {
-              "type": "string",
-              "description": "`serde_json` parse error text."
-            },
             "kind": {
               "type": "string",
               "const": "malformed-package-json"
+            },
+            "error": {
+              "type": "string",
+              "description": "`serde_json` parse error text."
             }
           },
           "required": [
@@ -12818,13 +12829,13 @@
         {
           "type": "object",
           "properties": {
-            "pattern": {
-              "type": "string",
-              "description": "The glob pattern that matched the directory."
-            },
             "kind": {
               "type": "string",
               "const": "glob-matched-no-package-json"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The glob pattern that matched the directory."
             }
           },
           "required": [
@@ -12836,13 +12847,13 @@
         {
           "type": "object",
           "properties": {
-            "pattern": {
-              "type": "string",
-              "description": "The workspace entry, as written in the file."
-            },
             "kind": {
               "type": "string",
               "const": "workspace-glob-outside-root"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The workspace entry, as written in the file."
             }
           },
           "required": [
@@ -12854,13 +12865,44 @@
         {
           "type": "object",
           "properties": {
-            "error": {
+            "kind": {
               "type": "string",
-              "description": "JSONC parse error text."
+              "const": "workspace-pattern-dir-missing"
             },
+            "pattern": {
+              "type": "string",
+              "description": "The workspace pattern, as written in the file."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "A positive workspace pattern names a directory that does not exist.\nThe check reads the literal part of the pattern before the first\nsegment with a glob character (`vite` for `vite/packages/*`). A pattern\nwithout a literal part (`**/pkg`) never gets this diagnostic, and a\nliteral directory that exists but holds no package does not get it\neither. `path` is the file that declares the pattern, or the project\nroot for an entry of the fallow config `workspaces.patterns`.\n\nA repository that clones other repositories into the workspace in CI\ndeclares such patterns. The packages there can consume catalog\nentries, so the run does not report `unused-catalog-entries` while a\npattern of this kind exists."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "nested-project-root"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "A directory has its own `package.json` and `pnpm-workspace.yaml`, and\nno workspace pattern of the root manifests declares it. pnpm installs\nit as an independent project. Fallow analyzes it as a workspace, so its\n`package.json` owns its files and dependencies, and its `catalog:`\nreferences are not checked against the root catalog.\n\nInformation only: nothing is lost from the analysis, so\n`degrades_analysis` is false."
+        },
+        {
+          "type": "object",
+          "properties": {
             "kind": {
               "type": "string",
               "const": "malformed-tsconfig"
+            },
+            "error": {
+              "type": "string",
+              "description": "JSONC parse error text."
             }
           },
           "required": [
@@ -12885,13 +12927,13 @@
         {
           "type": "object",
           "properties": {
-            "error": {
-              "type": "string",
-              "description": "YAML parse error text."
-            },
             "kind": {
               "type": "string",
               "const": "malformed-pnpm-workspace-yaml"
+            },
+            "error": {
+              "type": "string",
+              "description": "YAML parse error text."
             }
           },
           "required": [
@@ -12903,13 +12945,13 @@
         {
           "type": "object",
           "properties": {
-            "size_bytes": {
-              "type": "integer",
-              "description": "On-disk size of the skipped file in bytes."
-            },
             "kind": {
               "type": "string",
               "const": "skipped-large-file"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "description": "On-disk size of the skipped file in bytes."
             }
           },
           "required": [
@@ -12921,13 +12963,13 @@
         {
           "type": "object",
           "properties": {
-            "size_bytes": {
-              "type": "integer",
-              "description": "On-disk size of the skipped file in bytes."
-            },
             "kind": {
               "type": "string",
               "const": "skipped-minified-file"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "description": "On-disk size of the skipped file in bytes."
             }
           },
           "required": [
@@ -12952,13 +12994,13 @@
         {
           "type": "object",
           "properties": {
-            "error": {
-              "type": "string",
-              "description": "Filesystem or UTF-8 decoding error from `read_to_string`."
-            },
             "kind": {
               "type": "string",
               "const": "source-read-failure"
+            },
+            "error": {
+              "type": "string",
+              "description": "Filesystem or UTF-8 decoding error from `read_to_string`."
             }
           },
           "required": [
@@ -12970,6 +13012,10 @@
         {
           "type": "object",
           "properties": {
+            "kind": {
+              "type": "string",
+              "const": "source-parse-degraded"
+            },
             "error_count": {
               "type": "integer",
               "description": "Number of parser diagnostics reported for the file."
@@ -12977,10 +13023,6 @@
             "panicked": {
               "type": "boolean",
               "description": "`true` when the parser abandoned the file instead of recovering, so\nthe extracted module is a fragment at best."
-            },
-            "kind": {
-              "type": "string",
-              "const": "source-parse-degraded"
             }
           },
           "required": [
@@ -12988,7 +13030,7 @@
             "error_count",
             "panicked"
           ],
-          "description": "A source file was read but parsed with diagnostics, so the module\nextracted from it may be missing imports, exports, or references after\nthe first error. Analysis proceeds with the partial module, which is why\nthis is reported: an import the parser never saw credits nothing, and its\ntarget can surface as a confident `unused-file` or `unused-export`\nfinding with a `delete-file` or `remove-export` action on it.\n\nRecorded by the parse stage, alongside `source-read-failure`, and never\nused to withhold a finding. oxc reports recoverable errors for valid\nsyntax newer than the parser as well as for genuinely broken files, so\ngating findings on this would mute real results project-wide instead of\njust the affected file."
+          "description": "A source file was read but parsed with diagnostics, so the module\nextracted from it may be missing imports, exports, or references after\nthe first error. Analysis proceeds with the partial module, which is why\nthis is reported: an import the parser never saw credits nothing, and its\ntarget can surface as a confident `unused-file` or `unused-export`\nfinding with a `delete-file` or `remove-export` action on it.\n\nRecorded by the parse stage, alongside `source-read-failure`, and never\nused to withhold a finding. oxc reports recoverable errors for valid\nsyntax newer than the parser as well as for genuinely broken files, so\ngating findings on this would mute real results project-wide instead of\njust the affected file.\n\nA file that `ignoreFindings` covers is not reported. The user marked it\nas broken on purpose, so its partial parse also adds no caveat to other\nfindings and does not count for the parse-error gate."
         },
         {
           "type": "object",
@@ -13058,13 +13100,13 @@
         {
           "type": "object",
           "properties": {
-            "cause": {
-              "description": "Why pnpm ignores the section. The cause decides the remedy.",
-              "$ref": "#/definitions/PnpmWorkspaceOverridesIgnoredCause"
-            },
             "kind": {
               "type": "string",
               "const": "pnpm-workspace-overrides-ignored"
+            },
+            "cause": {
+              "description": "Why pnpm ignores the section. The cause decides the remedy.",
+              "$ref": "#/definitions/PnpmWorkspaceOverridesIgnoredCause"
             }
           },
           "required": [
@@ -13115,6 +13157,10 @@
         {
           "type": "object",
           "properties": {
+            "kind": {
+              "type": "string",
+              "const": "excluded-by-default-ignore"
+            },
             "pattern": {
               "type": "string",
               "description": "The built-in glob that matched, verbatim (for example\n`**/build/**`)."
@@ -13126,10 +13172,6 @@
             "directory_count": {
               "type": "integer",
               "description": "Distinct directories this pattern matched at, `path` included, and\nnot the number of directories that held the files. A\ndirectory-shaped pattern (`**/dist/**`) matches at the directory it\nnames, so an excluded subtree counts once however many nested\ndirectories inside it held source: a `dist/` holding files in three\nsub-directories reports `1`. A file-shaped pattern (`**/*.min.js`)\nhas no directory to collapse to and counts each matched file's own\nparent. Exact either way, and anything above `1` says `path` names\none matched location out of several."
-            },
-            "kind": {
-              "type": "string",
-              "const": "excluded-by-default-ignore"
             }
           },
           "required": [
@@ -13143,13 +13185,13 @@
         {
           "type": "object",
           "properties": {
-            "excluded_file_count": {
-              "type": "integer",
-              "description": "Candidate source files the built-in ignore patterns removed from\nthis walk, summed across every pattern. `0` when the walk found no\ncandidate to exclude in the first place."
-            },
             "kind": {
               "type": "string",
               "const": "no-source-files-analyzed"
+            },
+            "excluded_file_count": {
+              "type": "integer",
+              "description": "Candidate source files the built-in ignore patterns removed from\nthis walk, summed across every pattern. `0` when the walk found no\ncandidate to exclude in the first place."
             }
           },
           "required": [
@@ -13161,13 +13203,13 @@
         {
           "type": "object",
           "properties": {
-            "error": {
-              "type": "string",
-              "description": "Scoring error text."
-            },
             "kind": {
               "type": "string",
               "const": "file-scores-unavailable"
+            },
+            "error": {
+              "type": "string",
+              "description": "Scoring error text."
             }
           },
           "required": [
@@ -13179,13 +13221,13 @@
         {
           "type": "object",
           "properties": {
-            "cause": {
-              "type": "string",
-              "description": "Which input stopped it, as a kebab-case token: `not-a-repository`,\n`no-commits`, `invalid-since` or `churn-file-unreadable`. The set is\nopen.\n\nThe cause decides the remedy, which is why it is on the wire: a run\noutside a repository is fixed by running fallow inside one, a\nbranch without a commit by committing, a malformed `--since` by\nrespelling the flag, and a churn file that changed under the run by\nrerunning it. A consumer reading only the kind would offer the first\nremedy for all four."
-            },
             "kind": {
               "type": "string",
               "const": "hotspots-skipped"
+            },
+            "cause": {
+              "type": "string",
+              "description": "Which input stopped it, as a kebab-case token: `not-a-repository`,\n`no-commits`, `invalid-since` or `churn-file-unreadable`. The set is\nopen.\n\nThe cause decides the remedy, which is why it is on the wire: a run\noutside a repository is fixed by running fallow inside one, a\nbranch without a commit by committing, a malformed `--since` by\nrespelling the flag, and a churn file that changed under the run by\nrerunning it. A consumer reading only the kind would offer the first\nremedy for all four."
             }
           },
           "required": [
@@ -13197,13 +13239,13 @@
         {
           "type": "object",
           "properties": {
-            "cause": {
-              "type": "string",
-              "description": "Kebab-case token: `shallow-clone` (the fetched history is\nincomplete) or `too-few-commits` (fewer analyzed commits than the\nminimum revisions of one file). The set is open."
-            },
             "kind": {
               "type": "string",
               "const": "change-coupling-skipped"
+            },
+            "cause": {
+              "type": "string",
+              "description": "Kebab-case token: `shallow-clone` (the fetched history is\nincomplete) or `too-few-commits` (fewer analyzed commits than the\nminimum revisions of one file). The set is open."
             }
           },
           "required": [
@@ -13215,13 +13257,13 @@
         {
           "type": "object",
           "properties": {
-            "ownership_requested": {
-              "type": "boolean",
-              "description": "`true` when the run also asked for ownership attribution, which a\nshallow clone skews further by inflating single-author dominance."
-            },
             "kind": {
               "type": "string",
               "const": "shallow-clone"
+            },
+            "ownership_requested": {
+              "type": "boolean",
+              "description": "`true` when the run also asked for ownership attribution, which a\nshallow clone skews further by inflating single-author dominance."
             }
           },
           "required": [
@@ -13246,6 +13288,10 @@
         {
           "type": "object",
           "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ownership-unavailable"
+            },
             "cause": {
               "type": "string",
               "description": "Which input failed, as a kebab-case token: `invalid-bot-pattern` or\n`codeowners-parse-failed`. The set is open."
@@ -13253,10 +13299,6 @@
             "error": {
               "type": "string",
               "description": "Underlying error text."
-            },
-            "kind": {
-              "type": "string",
-              "const": "ownership-unavailable"
             }
           },
           "required": [
@@ -13269,13 +13311,13 @@
         {
           "type": "object",
           "properties": {
-            "error": {
-              "type": "string",
-              "description": "Filesystem or JSON error text."
-            },
             "kind": {
               "type": "string",
               "const": "trend-snapshot-unreadable"
+            },
+            "error": {
+              "type": "string",
+              "description": "Filesystem or JSON error text."
             }
           },
           "required": [
@@ -13287,13 +13329,13 @@
         {
           "type": "object",
           "properties": {
-            "cause": {
-              "type": "string",
-              "description": "Why the groups have no baseline, as a kebab-case token:\n`snapshot-has-no-groups` or `grouped-by-mismatch`. The set is open."
-            },
             "kind": {
               "type": "string",
               "const": "trend-group-baseline-unavailable"
+            },
+            "cause": {
+              "type": "string",
+              "description": "Why the groups have no baseline, as a kebab-case token:\n`snapshot-has-no-groups` or `grouped-by-mismatch`. The set is open."
             }
           },
           "required": [
@@ -13305,6 +13347,10 @@
         {
           "type": "object",
           "properties": {
+            "kind": {
+              "type": "string",
+              "const": "plugin-config-unreadable"
+            },
             "plugin": {
               "type": "string",
               "description": "The plugin that read the config, as it labels itself:\n`module-federation` for a standalone `module-federation.config.*`,\nor the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`) that\nread the same options inline from its own config."
@@ -13316,10 +13362,6 @@
             "reason": {
               "type": "string",
               "description": "Why it could not be read, as a kebab-case token:\n`not-object-literal`, `array-form`, `spread`,\n`unreadable-entries`, `unrecognized-call`,\n`import-target-unreadable` or `dynamic-argument`. The set is open.\n\nThe reason decides the remedy, which is why it is on the wire: a\nvalue that is not an object literal is fixed by writing one, while\nunreadable entries are fixed by naming those entries in the config\noption the message points at."
-            },
-            "kind": {
-              "type": "string",
-              "const": "plugin-config-unreadable"
             }
           },
           "required": [
@@ -13333,6 +13375,10 @@
         {
           "type": "object",
           "properties": {
+            "kind": {
+              "type": "string",
+              "const": "plugin-effect-not-modeled"
+            },
             "plugin": {
               "type": "string",
               "description": "The plugin that read the config, as it labels itself (`nuxt`)."
@@ -13344,10 +13390,6 @@
             "reason": {
               "type": "string",
               "description": "Why the effect is not modeled, as a kebab-case token:\n`key-effect-not-modeled` when the key's own value is the reason,\n`config-property-unreadable` when a top-level property of the same\nconfig file could not be read statically, so no surface in it can\nbe classified at all. The set is open."
-            },
-            "kind": {
-              "type": "string",
-              "const": "plugin-effect-not-modeled"
             }
           },
           "required": [
@@ -13387,13 +13429,13 @@
         {
           "type": "object",
           "properties": {
-            "cause": {
-              "type": "string",
-              "description": "Why no history is available, as a kebab-case token:\n`not-a-repository` or `no-commits`. The set is open."
-            },
             "kind": {
               "type": "string",
               "const": "flag-age-unavailable"
+            },
+            "cause": {
+              "type": "string",
+              "description": "Why no history is available, as a kebab-case token:\n`not-a-repository` or `no-commits`. The set is open."
             }
           },
           "required": [
@@ -13405,13 +13447,13 @@
         {
           "type": "object",
           "properties": {
-            "pattern": {
-              "type": "string",
-              "description": "The `ignoreDependencies` entry, as written in the config."
-            },
             "kind": {
               "type": "string",
               "const": "ignore-dependencies-glob-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The `ignoreDependencies` entry, as written in the config."
             }
           },
           "required": [
@@ -13423,13 +13465,13 @@
         {
           "type": "object",
           "properties": {
-            "pattern": {
-              "type": "string",
-              "description": "The `ignoreFindings` entry, as written in the config."
-            },
             "kind": {
               "type": "string",
               "const": "ignore-findings-pattern-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The `ignoreFindings` entry, as written in the config."
             }
           },
           "required": [
@@ -13437,6 +13479,29 @@
             "pattern"
           ],
           "description": "A pattern in `ignoreFindings` matched no finding of the dead-code run,\nso the entry had no effect in this run. The usual cause is a typo in\nthe path.\n\nThe pattern is compared with every finding the analysis produced,\nbefore issue-type filters and scope filters, so a filtered run does not\nmake a pattern look unused. `path` is the project root.\n\nNot a degraded run, for the same reason as\n[`Self::IgnoreDependenciesGlobUnmatched`]."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "baseline-install-state-mismatch"
+            },
+            "baseline_node_modules": {
+              "description": "The install state when the baseline was saved.",
+              "$ref": "#/definitions/NodeModulesState"
+            },
+            "run_node_modules": {
+              "description": "The install state of this run.",
+              "$ref": "#/definitions/NodeModulesState"
+            }
+          },
+          "required": [
+            "kind",
+            "baseline_node_modules",
+            "run_node_modules"
+          ],
+          "description": "The dead-code baseline was saved in a different install state than\nthis run: one of the two runs had `node_modules` and the other did not.\nFindings that need installed packages (dependency, unlisted,\nunresolved-import and script-binary findings) can differ, so the run\ncan report baseline findings as new. `path` is the baseline file.\n\nOnly a baseline that records its install state can report this. A\nlegacy baseline has no record, so the state is unknown."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -19950,13 +20015,13 @@
         {
           "type": "object",
           "properties": {
-            "file": {
-              "type": "string",
-              "description": "File path relative to the analysed root."
-            },
             "type": {
               "type": "string",
               "const": "file"
+            },
+            "file": {
+              "type": "string",
+              "description": "File path relative to the analysed root."
             }
           },
           "required": [
@@ -19968,6 +20033,10 @@
         {
           "type": "object",
           "properties": {
+            "type": {
+              "type": "string",
+              "const": "symbol"
+            },
             "file": {
               "type": "string",
               "description": "File path relative to the analysed root."
@@ -19975,10 +20044,6 @@
             "export_name": {
               "type": "string",
               "description": "Name of the inspected export."
-            },
-            "type": {
-              "type": "string",
-              "const": "symbol"
             }
           },
           "required": [
@@ -24604,6 +24669,13 @@
           },
           "description": "Re-export chains that pass through this export."
         },
+        "plugin_credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PluginExportCredit"
+          },
+          "description": "The framework plugin rules that mark this export as used. The\nframework calls or reads the export, so no import is necessary. A\ncredit sets `is_used` when the file is reachable. Absent when no\nplugin credits the export."
+        },
         "reason": {
           "type": "string",
           "description": "Human-readable reason summary."
@@ -24871,6 +24943,13 @@
             "$ref": "#/definitions/ExportReference"
           },
           "description": "Files that reference this export."
+        },
+        "plugin_credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PluginExportCredit"
+          },
+          "description": "The framework plugin rules that mark this export as used. Absent when\nno plugin credits the export."
         }
       },
       "required": [
@@ -30987,7 +31066,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `workspace-glob-outside-root`, `malformed-tsconfig`,\n  `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`;\n- the dead-code result, for config patterns that matched nothing:\n  `ignore-dependencies-glob-unmatched`,\n  `ignore-findings-pattern-unmatched`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `workspace-glob-outside-root`, `workspace-pattern-dir-missing`,\n  `nested-project-root`, `malformed-tsconfig`,\n  `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`;\n- the dead-code result, for config patterns that matched nothing:\n  `ignore-dependencies-glob-unmatched`,\n  `ignore-findings-pattern-unmatched`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
         },
         "next_steps": {
           "type": "array",
@@ -33313,7 +33392,7 @@
             "string",
             "null"
           ],
-          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field."
+          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field.\n\nThe retry of a survivor also runs the other tests of its test files,\nso this test can be absent from `covering_tests`."
         },
         "covering_tests": {
           "type": "array",
@@ -34340,7 +34419,7 @@
         {
           "type": "string",
           "const": "off",
-          "description": "No finding is worsened: a grown inherited finding stays inherited and\ndoes not change the verdict. This is the behavior before `worsened`\nexisted."
+          "description": "Growth only in metrics that the finding does not exceed stays\ninherited. Growth of an exceeded metric stays worsened and gives at\nleast `warn`."
         }
       ],
       "description": "Value of `audit.worsened`: how a worsened complexity finding affects the\n`fallow audit` verdict."
@@ -34350,12 +34429,12 @@
         {
           "type": "string",
           "const": "introduced",
-          "description": "No base finding matches, or a metric that the finding exceeds grew."
+          "description": "No base finding matches, or a grown metric now exceeds a threshold\nthat the base finding did not exceed, or the growth of an exceeded\nmetric moved the finding to a higher severity tier. A CRAP score from\nestimated coverage does not count as growth."
         },
         {
           "type": "string",
           "const": "worsened",
-          "description": "A base finding matches and a measured metric grew, but no metric that\nthe finding exceeds grew."
+          "description": "A base finding matches and a measured metric grew, but the finding is\nnot introduced. Growth of an exceeded metric in the same severity tier\nis worsened."
         },
         {
           "type": "string",
@@ -34430,6 +34509,49 @@
         "to"
       ],
       "description": "The edit of a mutant, without project text.\n\nEach side is an operator token (for example `??` or `<=`), a fixed literal\n(`true`, `undefined`, `\"\"`, `\"fallow\"`, `void 0`), a regular expression\ntoken (`^`, `$`, `[`, `[^`, `\\d`), or a placeholder for a side that is\nproject code: `<condition>`, `<call>`, `<expression>` or `<string>`. An\nempty side means that the edit removes the token."
+    },
+    "NodeModulesState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "present",
+          "description": "`node_modules` existed, or the project legitimately runs without it."
+        },
+        {
+          "type": "string",
+          "const": "missing",
+          "description": "`node_modules` did not exist."
+        }
+      ],
+      "description": "Whether the project had a `node_modules` directory at a point in time.\n\nA dead-code baseline records this when it is saved, so a later run in a\ndifferent install state can say that its results can differ."
+    },
+    "PluginExportCredit": {
+      "type": "object",
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "description": "The plugin that gives the rule, for example `nextjs`."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "The project-relative file pattern of the rule."
+        }
+      },
+      "required": [
+        "plugin",
+        "pattern"
+      ],
+      "description": "A framework plugin rule that marks an export as used."
+    },
+    "AuditGateExemption": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "test-file",
+          "description": "The finding is in a test file: a spec, a test directory, an end-to-end\nsuite, a mock or a fixture. Its gate severity is `warn`."
+        }
+      ],
+      "description": "Audit-mode reason why a complexity finding does not gate the verdict."
     }
   }
 }

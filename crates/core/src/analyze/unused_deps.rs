@@ -25,6 +25,12 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 use crate::plugins::{CompiledPathRule, ProvidedDependencyRule};
 
+#[path = "unused_deps_peer_closure.rs"]
+mod peer_closure;
+pub use peer_closure::peer_closure_seeds;
+pub use peer_closure::peer_dependency_hosts;
+use peer_closure::{PeerDependencyResolver, PeerSeedInput, peer_closure_shared_seeds};
+
 /// Return `true` if a virtual-module `prefix` from the active plugin set covers
 /// `spec`. Two shapes are recognised:
 ///
@@ -104,190 +110,6 @@ pub struct SharedDepSets<'a> {
     pub project_root: &'a Path,
     pub script_used: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a IgnoreDependencyMatcher,
-}
-
-struct PeerDependencyResolver {
-    cache: FxHashMap<(PathBuf, String), Vec<InstalledPeer>>,
-}
-
-/// One entry of an installed package's `peerDependencies`.
-#[derive(Clone)]
-struct InstalledPeer {
-    name: String,
-    /// `peerDependenciesMeta.<name>.optional` is set.
-    optional: bool,
-}
-
-impl PeerDependencyResolver {
-    fn new() -> Self {
-        Self {
-            cache: FxHashMap::default(),
-        }
-    }
-
-    /// Every package that a seed package lists in `peerDependencies`, directly
-    /// or through another credited peer, mapped to the packages that list it.
-    ///
-    /// Optional peers (`peerDependenciesMeta.<name>.optional`) count too: a
-    /// project lists an optional peer of a package it uses to turn on a feature
-    /// of that package, which loads the peer at runtime where the import graph
-    /// does not see it. Only used packages seed the closure, so the peers of an
-    /// unused package get no credit.
-    ///
-    /// A required peer always passes credit on to its own peers, because the
-    /// host needs it. An optional peer passes credit on only when `listed`
-    /// (the names that the root and workspace manifests declare) contains it.
-    /// An optional peer that the project does not list is not turned on, so
-    /// its peers get no credit through it.
-    fn peer_dependency_closure<'b>(
-        &mut self,
-        package_root: &Path,
-        seeds: impl IntoIterator<Item = &'b str>,
-        listed: &FxHashSet<String>,
-    ) -> FxHashMap<String, Vec<String>> {
-        let mut hosts_by_peer: FxHashMap<String, Vec<String>> = FxHashMap::default();
-        let mut expanded = FxHashSet::default();
-        let mut queue: Vec<String> = seeds.into_iter().map(str::to_string).collect();
-
-        while let Some(package_name) = queue.pop() {
-            if !expanded.insert(package_name.clone()) {
-                continue;
-            }
-
-            for peer in self.peer_dependencies_for(package_root, &package_name) {
-                if !peer.optional || listed.contains(peer.name.as_str()) {
-                    queue.push(peer.name.clone());
-                }
-                hosts_by_peer
-                    .entry(peer.name)
-                    .or_default()
-                    .push(package_name.clone());
-            }
-        }
-
-        hosts_by_peer
-    }
-
-    fn peer_dependencies_for(
-        &mut self,
-        package_root: &Path,
-        package_name: &str,
-    ) -> Vec<InstalledPeer> {
-        let key = (package_root.to_path_buf(), package_name.to_string());
-        if let Some(cached) = self.cache.get(&key) {
-            return cached.clone();
-        }
-
-        let peer_dependencies: Vec<InstalledPeer> =
-            find_installed_package_json(package_root, package_name)
-                .and_then(|path| PackageJson::load(&path).ok())
-                .map(|pkg| {
-                    pkg.peer_dependency_names()
-                        .into_iter()
-                        .map(|name| InstalledPeer {
-                            optional: pkg.peer_dependency_is_optional(&name),
-                            name,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-        self.cache.insert(key, peer_dependencies.clone());
-        peer_dependencies
-    }
-}
-
-/// The packages that give `package_name` peer-dependency credit in the
-/// unused-dependency check: each one is used, or credited itself, and lists
-/// `package_name` in its installed `peerDependencies`, required or optional.
-///
-/// The check runs one closure for the root manifest and one for each
-/// workspace, and this function runs the same closures. The root closure
-/// starts from every package that the import graph records and looks up the
-/// installed manifests from `project_root` and its ancestors. A workspace
-/// closure starts from the packages that the files of that workspace import
-/// and looks up the installed manifests from the workspace root. In every
-/// closure, an optional peer passes credit on only when the root
-/// `package.json` or a workspace `package.json` lists it, as in the root and
-/// workspace checks. A workspace `package.json` that `ignore_patterns` matches
-/// or that does not load does not count and gets no closure, as in those
-/// checks. The result is the union of the hosts, sorted, and empty when no
-/// closure credits `package_name`.
-pub fn peer_dependency_hosts(
-    graph: &ModuleGraph,
-    project_root: &Path,
-    workspace_roots: &[&Path],
-    ignore_patterns: &fallow_config::IgnorePatternSet,
-    package_name: &str,
-) -> Vec<String> {
-    let root_declared = PackageJson::load(&project_root.join("package.json"))
-        .map(|pkg| pkg.all_dependency_names())
-        .unwrap_or_default();
-    let workspace_manifests: Vec<(&Path, Vec<String>)> = workspace_roots
-        .iter()
-        .copied()
-        .filter_map(|ws_root| {
-            let pkg_path = ws_root.join("package.json");
-            if is_package_json_ignored_under(&pkg_path, project_root, ignore_patterns) {
-                return None;
-            }
-            let pkg = PackageJson::load(&pkg_path).ok()?;
-            Some((ws_root, pkg.all_dependency_names()))
-        })
-        .collect();
-    let listed = closure_listed_names(
-        &root_declared,
-        workspace_manifests
-            .iter()
-            .flat_map(|(_, declared)| declared.iter()),
-    );
-    let workspace_roots: Vec<&Path> = workspace_manifests
-        .iter()
-        .map(|(ws_root, _)| *ws_root)
-        .collect();
-    let mut resolver = PeerDependencyResolver::new();
-    let mut hosts = resolver
-        .peer_dependency_closure(
-            project_root,
-            graph.package_usage.keys().map(String::as_str),
-            &listed,
-        )
-        .remove(package_name)
-        .unwrap_or_default();
-    let ownership = WorkspaceOwnershipIndex::new(graph, &workspace_roots);
-    let used_by_workspace = collect_workspace_used_packages(graph, &workspace_roots, &ownership);
-    for ws_root in &workspace_roots {
-        let Some(used) = used_by_workspace.get(ws_root) else {
-            continue;
-        };
-        if let Some(ws_hosts) = resolver
-            .peer_dependency_closure(ws_root, used.iter().copied(), &listed)
-            .remove(package_name)
-        {
-            hosts.extend(ws_hosts);
-        }
-    }
-    hosts.sort_unstable();
-    hosts.dedup();
-    hosts
-}
-
-fn find_installed_package_json(package_root: &Path, package_name: &str) -> Option<PathBuf> {
-    for base in package_root.ancestors() {
-        let candidate = node_modules_package_json(base, package_name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
-    let mut path = base.join("node_modules");
-    for segment in package_name.split('/') {
-        path.push(segment);
-    }
-    path.join("package.json")
 }
 
 /// Map graph files to their deepest matching workspace once per analysis.
@@ -1308,7 +1130,19 @@ fn plugin_tooling_sets<'a>(
         .map(String::as_str)
         .chain(root_declared.iter().map(String::as_str))
         .collect();
-    let credited = plugin_result
+    PluginToolingSets {
+        declared: plugin_tooling_set(Some(plugin_result)),
+        credited: credited_plugin_tooling(plugin_result),
+        declared_packages,
+    }
+}
+
+/// The tooling dependencies of the plugins that found evidence that the
+/// project uses them.
+fn credited_plugin_tooling(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) -> FxHashSet<&str> {
+    plugin_result
         .plugin_tooling
         .iter()
         .filter(|entry| {
@@ -1317,12 +1151,7 @@ fn plugin_tooling_sets<'a>(
                 .is_some()
         })
         .flat_map(|entry| entry.dependencies.iter().map(String::as_str))
-        .collect();
-    PluginToolingSets {
-        declared: plugin_tooling_set(Some(plugin_result)),
-        credited,
-        declared_packages,
-    }
+        .collect()
 }
 
 fn script_used_set(
@@ -1383,6 +1212,8 @@ pub fn find_unused_dependencies(
 
 struct UnusedDependencyScan<'a> {
     plugin_referenced: FxHashSet<&'a str>,
+    /// See [`peer_closure_shared_seeds`].
+    peer_extra_seeds: FxHashSet<&'a str>,
     plugin_tooling: PluginToolingSets<'a>,
     script_used: FxHashSet<&'a str>,
     package_referenced: FxHashMap<PathBuf, FxHashSet<&'a str>>,
@@ -1417,6 +1248,7 @@ impl<'a> UnusedDependencyScan<'a> {
             plugin_referenced: &self.plugin_referenced,
             plugin_tooling: &self.plugin_tooling,
             script_used: &self.script_used,
+            peer_extra_seeds: &self.peer_extra_seeds,
             ignore_deps: self.ignore_deps,
             workspace_used_packages: &self.usage.workspace_used_packages,
             bundled_workspace_usage: &self.usage.bundled_workspace_usage,
@@ -1435,16 +1267,32 @@ fn build_unused_dependency_scan<'a>(
     workspaces: &'a [fallow_config::WorkspaceInfo],
     root_declared: &'a [String],
 ) -> UnusedDependencyScan<'a> {
+    let peer_extra_seeds = plugin_result
+        .map(peer_closure_shared_seeds)
+        .unwrap_or_default();
+    let package_referenced = plugin_result
+        .map(package_referenced_dependencies_by_path)
+        .unwrap_or_default();
+    let root_peer_seeds = PeerSeedInput {
+        shared: &peer_extra_seeds,
+        manifest: package_referenced.get(&config.root.join("package.json")),
+    };
+    let usage = collect_dependency_usage_indices(
+        graph,
+        config,
+        workspaces,
+        root_declared,
+        &root_peer_seeds,
+    );
     UnusedDependencyScan {
         plugin_referenced: plugin_referenced_set(plugin_result),
         plugin_tooling: plugin_tooling_sets(plugin_result, root_declared),
         script_used: script_used_set(plugin_result),
-        package_referenced: plugin_result
-            .map(package_referenced_dependencies_by_path)
-            .unwrap_or_default(),
+        peer_extra_seeds,
+        package_referenced,
         empty_package_referenced: FxHashSet::default(),
         ignore_deps: &config.ignore_dependencies,
-        usage: collect_dependency_usage_indices(graph, config, workspaces, root_declared),
+        usage,
     }
 }
 
@@ -1514,6 +1362,7 @@ fn collect_dependency_usage_indices<'a>(
     config: &ResolvedConfig,
     workspaces: &'a [fallow_config::WorkspaceInfo],
     root_declared: &[String],
+    root_peer_seeds: &PeerSeedInput<'_, 'a>,
 ) -> DependencyUsageIndices<'a> {
     let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
     let manifests = read_workspace_manifests(workspaces, config);
@@ -1525,7 +1374,7 @@ fn collect_dependency_usage_indices<'a>(
     );
     let root_peer_used = PeerDependencyResolver::new().peer_dependency_closure(
         &config.root,
-        used_packages.iter().copied(),
+        used_packages.iter().copied().chain(root_peer_seeds.iter()),
         &closure_listed,
     );
     let workspace_roots = dependency_owning_workspace_roots(&manifests);
@@ -1668,6 +1517,7 @@ struct WorkspaceUnusedDependencyInputs<'a> {
     plugin_referenced: &'a FxHashSet<&'a str>,
     plugin_tooling: &'a PluginToolingSets<'a>,
     script_used: &'a FxHashSet<&'a str>,
+    peer_extra_seeds: &'a FxHashSet<&'a str>,
     ignore_deps: &'a IgnoreDependencyMatcher,
     workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
@@ -1693,6 +1543,10 @@ fn collect_workspace_unused_dependencies<'a>(
         .package_referenced
         .get(&ws_pkg_path)
         .unwrap_or(inputs.empty_package_referenced);
+    let ws_peer_seeds = PeerSeedInput {
+        shared: inputs.peer_extra_seeds,
+        manifest: Some(ws_package_referenced),
+    };
     let ws_shared = shared_dep_sets(
         inputs.plugin_referenced,
         ws_package_referenced,
@@ -1714,7 +1568,7 @@ fn collect_workspace_unused_dependencies<'a>(
         .collect();
     let ws_peer_used = PeerDependencyResolver::new().peer_dependency_closure(
         ws_root,
-        ws_used_packages.iter().copied(),
+        ws_used_packages.iter().copied().chain(ws_peer_seeds.iter()),
         inputs.closure_listed,
     );
     let usage = workspace_dependency_usage(

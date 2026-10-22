@@ -1,0 +1,11 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "gen": "tool-alias x"
+  },
+  "dependencies": {
+    "@scope/tool": "workspace:*"
+  }
+}
