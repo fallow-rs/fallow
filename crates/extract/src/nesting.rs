@@ -56,8 +56,8 @@ pub fn exceeds_nesting_limit(source: &str) -> bool {
 
 /// Run `parse`, which parses `source` with Oxc and walks the result, without
 /// a stack overflow. Returns `None` when the bracket nesting of `source`
-/// exceeds [`MAX_NESTING_DEPTH`], so the caller treats the file as a failed
-/// parse.
+/// exceeds [`MAX_NESTING_DEPTH`] or the stack it needs exceeds the cap in
+/// `stack.rs`, so the caller treats the file as a failed parse.
 ///
 /// Every parse of user source goes through this function. It sizes the stack
 /// from the source length and the bracket depth, and it moves the work to a
@@ -69,7 +69,7 @@ pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) ->
     if depth > MAX_NESTING_DEPTH {
         return None;
     }
-    let need = crate::stack::stack_need(source.len(), depth as usize);
+    let need = crate::stack::stack_need(source.len(), depth as usize)?;
     Some(crate::stack::run_with_stack(need, parse))
 }
 

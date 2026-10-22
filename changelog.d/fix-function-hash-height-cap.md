@@ -1,0 +1,4 @@
+### Fixed
+
+- **Deeply nested arrow functions no longer make extraction quadratic.** Each function hashed its whole source text for runtime coverage, so a chain of nested arrows took time that grew with the square of its length. 160000 levels took about 17 seconds. A function with more than 64 levels of nested functions below it now gets no `source_hash`. Real code stays far below that, so every real function keeps the same hash. The coverage inventory also computes columns in linear time for nested functions on one line, and it no longer sends the hash of empty input for a span that it cannot read.
+- **A very large file no longer parses on a stack that is too small.** The parse stack cap is now 64 GiB on 64-bit targets, which a source over 64 MB reaches in a release build. A file that needs more stack is reported as a failed parse, like a file with too deeply nested brackets. Before, such a file got a capped stack and could stop the run.

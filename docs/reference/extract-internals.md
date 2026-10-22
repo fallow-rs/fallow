@@ -43,8 +43,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     Brackets in strings, comments and template text do not count, and a
     literal that does not end on its line is scanned again as code.
   - It then runs the parse on a stack of
-    `256 KiB + 1024 * source length + 4096 * bracket depth`, with a 4 GiB cap
-    (`crates/extract/src/stack.rs`). Each nesting level uses at least one
+    `256 KiB + 1024 * source length + 4096 * bracket depth`
+    (`crates/extract/src/stack.rs`). A need over 64 GiB (a source over 64 MB in
+    a 64-bit release build) is refused like a too-deep file, so no file parses
+    on too small a stack. Each nesting level uses at least one
     source byte. A shape without brackets (generics, JSX elements,
     `class extends`, ternaries, arrows, assignment, member and call chains)
     uses at most about 570 stack bytes per source byte in a release build. An
@@ -78,6 +80,14 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   same builders, so both sides stop at the same link. Without this cap, the
   time and the output for one chain grow with the square of its length. A new
   per-link walk must use the same cap.
+- A function with more than `MAX_HASHED_FUNCTION_HEIGHT` (64) levels of nested
+  functions below it gets no `source_hash`
+  (`crates/extract/src/function_hash.rs`). Each function hashes its whole
+  span, so without the cap a chain of nested arrows hashes a quadratic number
+  of bytes. The complexity walk and the inventory apply the same rule, so the
+  hashes that join them stay the same. The deepest real function measured has
+  10 levels below it. The inventory computes columns with separate cursors for
+  span starts and span ends, so nested functions on one line stay linear.
 - A fluent-chain fact keeps each step name once instead of a cap. The consumer
   only checks that every step returns `this`, so order and repeats do not
   matter, and a cap would drop the credit for the steps past it.

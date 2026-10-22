@@ -343,7 +343,11 @@ fn collect_inventory(
             // Complexity is paired by `source_hash`, which both the inventory
             // walker and the complexity visitor derive from the identical
             // full-span slice over the same parse, so the lookup is exact.
-            let metrics = complexity.get(&entry.source_hash).copied();
+            let metrics = entry
+                .source_hash
+                .as_deref()
+                .and_then(|h| complexity.get(h))
+                .copied();
             out.push(InventoryFunction::from_entry(
                 &posix_path,
                 &repo_relative,
@@ -524,7 +528,7 @@ impl InventoryFunction {
             start_column: Some(entry.start_column),
             end_line: Some(entry.end_line),
             end_column: Some(entry.end_column),
-            source_hash: Some(entry.source_hash.clone()),
+            source_hash: entry.source_hash.clone(),
             resolution: IdentityResolution::Resolved,
             stable_id,
         };
@@ -1293,7 +1297,7 @@ mod tests {
             start_column: 1,
             end_line: 50,
             end_column: 2,
-            source_hash: "0123456789abcdef".to_owned(),
+            source_hash: Some("0123456789abcdef".to_owned()),
             is_callback: false,
         }
     }
@@ -1596,7 +1600,7 @@ mod tests {
             start_column: 1,
             end_line: line + 1,
             end_column: 2,
-            source_hash: hash.to_owned(),
+            source_hash: Some(hash.to_owned()),
             is_callback: false,
         }
     }

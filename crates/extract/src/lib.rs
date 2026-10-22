@@ -32,6 +32,7 @@ pub mod effect_facts;
 pub mod federation_runtime;
 pub mod flags;
 mod function_body;
+pub(crate) mod function_hash;
 pub mod glimmer;
 pub(crate) mod graphql;
 pub(crate) mod html;
