@@ -130,3 +130,14 @@ fn css_module_exports_skip_a_too_deep_stylesheet() {
 fn css_analytics_skip_a_too_deep_stylesheet() {
     assert!(crate::css_metrics::compute_css_analytics(&deep_custom_property()).is_none());
 }
+
+#[test]
+fn a_hash_or_at_url_prefix_does_not_hide_nesting() {
+    for prefix in ["#url(", "@url(", "url("] {
+        let source = format!(".a{{--x:{prefix}{}}}", "(".repeat(DEEP));
+        assert!(
+            crate::parse_style_bounded(&source, || ()).is_none(),
+            "{prefix} hid the nesting"
+        );
+    }
+}
