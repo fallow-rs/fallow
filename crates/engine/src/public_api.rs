@@ -163,11 +163,9 @@ fn add_package_public_api_entry_points(
     }
 
     let output_map = TsconfigOutputMap::from_project(package_root);
-    let file_id_for = |path: &Path| {
-        graph.package_entry_file_id(package_root, path, |candidate| {
-            path_to_file_id.get(candidate).copied()
-        })
-    };
+    let resolver = graph.package_entry_resolver(package_root);
+    let file_id_for =
+        |path: &Path| resolver.file_id(path, |candidate| path_to_file_id.get(candidate).copied());
     for entry in package_json.entry_points() {
         let Some(entry_point) = resolve_public_api_entry_path(
             package_root,

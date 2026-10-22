@@ -269,10 +269,9 @@ fn add_package_public_api_entry_points(
         return;
     }
 
+    let resolver = graph.package_entry_resolver(package_root);
     let file_id_for = |path: &std::path::Path| {
-        graph.package_entry_file_id(package_root, path, |candidate| {
-            path_to_file_id.get(candidate).copied()
-        })
+        resolver.file_id(path, |candidate| path_to_file_id.get(candidate).copied())
     };
     let is_discovered = |path: &std::path::Path| file_id_for(path).is_some();
     for entry in package_json.entry_points() {
@@ -1641,7 +1640,7 @@ fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsI
 /// ([`add_package_public_api_entry_points`]) already canonicalizes the ENTRY and
 /// matches it against raw module paths, which covers every project without
 /// intra-project symlinks. The residual symlinked-module case is handled lazily
-/// and package-scoped by `ModuleGraph::package_entry_file_id`, so the common
+/// and package-scoped by `ModuleGraph::package_entry_resolver`, so the common
 /// path pays zero canonicalize syscalls.
 fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
     graph
