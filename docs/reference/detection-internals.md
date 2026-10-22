@@ -559,6 +559,24 @@ always resolves. A workspace package directory resolves script calls with the
 scripts of that package. Composite actions under `.github/actions/` and the
 root `action.yml` are CI files too.
 
+Three CI forms name a script outside a plain `run:` value
+(`crates/core/src/scripts/ci_references.rs` and `ci.rs`):
+
+- A command that is only `${{ matrix.<path> }}` becomes the values of that
+  key path in the `matrix:` block of the same job, directly or under
+  `include:`: a plain scalar, each line of a block scalar, or each item of a
+  block sequence. A key under `exclude:` gives nothing. The values keep the
+  `working-directory` of the step.
+- The `script:` input of an `actions/github-script` step names a file through
+  `${process.env.GITHUB_WORKSPACE}/`, `${{ github.workspace }}/`, or
+  `require('./...')`, which resolves from the workspace. A relative `import()`
+  resolves from the action bundle, so it makes no entry point. A line that
+  starts a JavaScript comment is not read. In a composite
+  action, `${{ github.action_path }}/` resolves from the action directory.
+- A step `env` entry whose whole value is a workspace anchor
+  (`NAME: ${{ github.action_path }}`) replaces `$NAME` and `${NAME}` in the
+  commands of that step. Job and workflow `env` entries are not read.
+
 The bin map also holds the `bin` fields of the declared workspace packages
 (`add_workspace_binaries`), so a workspace binary credits its package without
 `node_modules`. An entry from `node_modules` keeps priority.

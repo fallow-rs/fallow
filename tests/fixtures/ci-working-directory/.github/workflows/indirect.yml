@@ -1,0 +1,34 @@
+name: Indirect
+on: push
+jobs:
+  ecosystem:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project:
+          - name: first
+            other: node scripts/matrix-unrelated.ts
+            command: |
+              # node scripts/commented.ts
+              node $GITHUB_WORKSPACE/ecosystem-ci/matrix-command.ts
+              vp test
+    steps:
+      - working-directory: ${{ runner.temp }}/ecosystem/${{ matrix.project.name }}
+        run: ${{ matrix.project.command }}
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        check:
+          - node scripts/matrix-list.ts
+    steps:
+      - run: ${{ matrix.check }}
+  github-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { run } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/imported.mjs`);
+            const required = require('./.github/scripts/required.js');
+            const relative = await import('./.github/scripts/relative-import.mjs');

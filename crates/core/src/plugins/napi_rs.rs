@@ -9,6 +9,10 @@
 //! activates on the `napi` field and its `targets`, and credits the imports of the
 //! generated loader and WASI worker.
 //!
+//! The loader can sit in a direct subdirectory of the package when the build
+//! runs with `--cwd` or `--output-dir`. The WASI workers and `browser.js` of
+//! that directory count as generated too.
+//!
 //! The generated loader and `browser.js` are support entry points. Their
 //! exports mirror the Rust bindings, so a hand-written wrapper that reuses a
 //! binding name is not a duplicate export, and an unused binding is not an
@@ -30,6 +34,15 @@ const LOADER_HEADER_SCAN_BYTES: u64 = 512;
 
 /// The extensions that `napi build` uses for the JavaScript loader.
 const LOADER_EXTENSIONS: &[&str] = &["js", "cjs", "mjs"];
+
+/// The child directories that never hold the loader of the package itself:
+/// installed packages, the Cargo build output, and bundler output.
+const SKIPPED_LOADER_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "out"];
+
+/// The most script files that a child directory can hold and still be read
+/// for a loader. A build output directory holds few files, and the limit keeps
+/// a large source directory from costing one file read per script.
+const MAX_SUBDIR_LOADER_CANDIDATES: usize = 32;
 
 /// The WASI workers that `napi build` generates for the `wasm32-wasi*` targets.
 const WASI_WORKERS: &str = "wasi-worker*.mjs";
@@ -84,15 +97,37 @@ impl Plugin for NapiRsPlugin {
             return PluginResult::default();
         };
         let mut result = PluginResult::default();
-        result
-            .provided_dependencies
-            .push(ProvidedDependencyRule::new(
-                WASI_WORKERS,
-                [WASM_RUNTIME],
-                [format!("{WASM_RUNTIME}/")],
-            ));
+        let loaders = generated_loaders(root);
+        let mut output_dirs: Vec<&str> = loaders.iter().map(|loader| loader_dir(loader)).collect();
+        output_dirs.push("");
+        output_dirs.sort_unstable();
+        output_dirs.dedup();
+        for dir in output_dirs {
+            let workers = format!("{dir}{WASI_WORKERS}");
+            if !dir.is_empty() {
+                result.always_used_files.push(workers.clone());
+            }
+            result
+                .provided_dependencies
+                .push(ProvidedDependencyRule::new(
+                    workers,
+                    [WASM_RUNTIME],
+                    [format!("{WASM_RUNTIME}/")],
+                ));
+            let browser_entry = format!("{dir}{BROWSER_ENTRY}");
+            if is_generated_browser_entry(&root.join(&browser_entry), base) {
+                result.push_entry_pattern(browser_entry.clone());
+                result
+                    .provided_dependencies
+                    .push(ProvidedDependencyRule::new(
+                        browser_entry,
+                        [format!("{base}-{WASM32_WASI_SUFFIX}")],
+                        std::iter::empty::<String>(),
+                    ));
+            }
+        }
         let platform_prefix = format!("{base}-");
-        for loader in generated_loaders(root) {
+        for loader in loaders {
             result.push_entry_pattern(loader.clone());
             result
                 .provided_dependencies
@@ -102,18 +137,13 @@ impl Plugin for NapiRsPlugin {
                     [platform_prefix.clone(), format!("{WASM_RUNTIME}/")],
                 ));
         }
-        if is_generated_browser_entry(&root.join(BROWSER_ENTRY), base) {
-            result.push_entry_pattern(BROWSER_ENTRY);
-            result
-                .provided_dependencies
-                .push(ProvidedDependencyRule::new(
-                    BROWSER_ENTRY,
-                    [format!("{base}-{WASM32_WASI_SUFFIX}")],
-                    std::iter::empty::<String>(),
-                ));
-        }
         result
     }
+}
+
+/// The directory part of a loader path, with its trailing `/`.
+fn loader_dir(loader: &str) -> &str {
+    loader.rfind('/').map_or("", |slash| &loader[..=slash])
 }
 
 /// Whether `path` holds only the one-line re-export that `napi build` writes
@@ -138,18 +168,47 @@ fn is_generated_browser_entry(path: &Path, base: &str) -> bool {
     })
 }
 
-/// The file names of the generated loaders in the package directory.
+/// The paths of the generated loaders, relative to the package directory.
 ///
-/// `napi build` writes the loader next to `package.json` by default. A file
-/// counts as a loader only when its header names NAPI-RS, so a hand-written
-/// file that imports a platform package stays checked.
+/// `napi build` writes the loader next to `package.json` by default.
+/// `--cwd <dir>` and `--output-dir <dir>` write it to a subdirectory, so the
+/// search also reads each direct child directory, except installed packages,
+/// the Cargo build output and hidden directories. A file counts as a loader
+/// only when its header names NAPI-RS, so a hand-written file that imports a
+/// platform package stays checked.
 fn generated_loaders(root: &Path) -> Vec<String> {
+    let mut loaders = loaders_in(root, "", usize::MAX);
     let Ok(entries) = std::fs::read_dir(root) else {
+        return loaders;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if name.starts_with('.') || SKIPPED_LOADER_DIRS.contains(&name.as_str()) {
+            continue;
+        }
+        loaders.extend(loaders_in(
+            &entry.path(),
+            &format!("{name}/"),
+            MAX_SUBDIR_LOADER_CANDIDATES,
+        ));
+    }
+    loaders.sort();
+    loaders
+}
+
+/// The loaders directly in `dir`, each with `prefix` before its file name.
+/// A directory with more than `max_candidates` script files gives none.
+fn loaders_in(dir: &Path, prefix: &str, max_candidates: usize) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut loaders: Vec<String> = entries
+    let candidates: Vec<String> = entries
         .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_file())
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| {
             Path::new(name)
@@ -157,10 +216,19 @@ fn generated_loaders(root: &Path) -> Vec<String> {
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| LOADER_EXTENSIONS.contains(&ext))
         })
-        .filter(|name| has_loader_header(&root.join(name)))
+        .take(max_candidates.saturating_add(1))
         .collect();
-    loaders.sort();
-    loaders
+    if candidates.len() > max_candidates {
+        return Vec::new();
+    }
+    candidates
+        .into_iter()
+        .filter(|name| {
+            let path = dir.join(name);
+            path.is_file() && has_loader_header(&path)
+        })
+        .map(|name| format!("{prefix}{name}"))
+        .collect()
 }
 
 fn has_loader_header(path: &Path) -> bool {
@@ -417,6 +485,41 @@ mod tests {
             .expect("write declarations");
 
         assert_eq!(generated_loaders(root), ["browser.cjs", "index.js"]);
+    }
+
+    #[test]
+    fn loaders_in_direct_subdirectories_are_found() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        for sub in [
+            "binding",
+            "binding/deep",
+            "node_modules/dep",
+            "target",
+            "dist",
+            ".cache",
+            "src",
+        ] {
+            std::fs::create_dir_all(root.join(sub)).expect("create dir");
+            std::fs::write(
+                root.join(sub).join("index.cjs"),
+                "/* auto-generated by NAPI-RS */\n",
+            )
+            .expect("write loader");
+        }
+        std::fs::write(
+            root.join("binding/index.js"),
+            "export * from './index.cjs'\n",
+        )
+        .expect("write wrapper");
+        for index in 0..MAX_SUBDIR_LOADER_CANDIDATES {
+            std::fs::write(root.join(format!("src/file{index}.js")), "export {}\n")
+                .expect("write source file");
+        }
+
+        assert_eq!(generated_loaders(root), ["binding/index.cjs"]);
+        assert_eq!(loader_dir("binding/index.cjs"), "binding/");
+        assert_eq!(loader_dir("index.js"), "");
     }
 
     #[test]
