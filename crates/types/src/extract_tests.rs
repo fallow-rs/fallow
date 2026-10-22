@@ -407,6 +407,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         content_hash: 42,
         parse_error_count: 0,
         parse_panicked: false,
+        parse_nesting_too_deep: false,
         suppressions: Vec::new(),
         unknown_suppression_kinds: Vec::new(),
         unused_import_bindings: vec!["unused".to_string()],

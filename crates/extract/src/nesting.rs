@@ -43,6 +43,7 @@ pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> Modu
     );
     info.parse_error_count = 1;
     info.parse_panicked = true;
+    info.parse_nesting_too_deep = true;
     info.line_offsets = fallow_types::extract::compute_line_offsets(source);
     info
 }

@@ -667,14 +667,14 @@ pub fn record_source_parse_degradations(
                 .is_ignored_path(root, &degradation.path)
         })
         .map(|degradation| {
-            WorkspaceDiagnostic::new(
-                root,
-                degradation.path.clone(),
+            let kind = degradation.nesting_limit.map_or(
                 WorkspaceDiagnosticKind::SourceParseDegraded {
                     error_count: degradation.error_count,
                     panicked: degradation.panicked,
                 },
-            )
+                |limit| WorkspaceDiagnosticKind::SourceNestingTooDeep { limit },
+            );
+            WorkspaceDiagnostic::new(root, degradation.path.clone(), kind)
         })
         .collect();
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -685,6 +685,7 @@ pub fn record_source_parse_degradations(
             !matches!(
                 diagnostic.kind,
                 WorkspaceDiagnosticKind::SourceParseDegraded { .. }
+                    | WorkspaceDiagnosticKind::SourceNestingTooDeep { .. }
             )
         });
         existing.extend(diagnostics.iter().cloned());

@@ -512,6 +512,7 @@ pub fn cached_to_module_opts(
         content_hash: cached.content_hash,
         parse_error_count: cached.parse_error_count,
         parse_panicked: cached.parse_panicked,
+        parse_nesting_too_deep: cached.parse_nesting_too_deep,
         suppressions: cached_suppressions_to_module(&cached.suppressions),
         unknown_suppression_kinds: cached_unknown_suppressions_to_module(
             &cached.unknown_suppression_kinds,
@@ -647,6 +648,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         dynamic_import_patterns: module_dynamic_patterns_to_cached(&module.dynamic_import_patterns),
         parse_error_count: module.parse_error_count,
         parse_panicked: module.parse_panicked,
+        parse_nesting_too_deep: module.parse_nesting_too_deep,
         has_cjs_exports: module.has_cjs_exports,
         has_angular_component_template_url: module.has_angular_component_template_url,
         unused_import_bindings: module.unused_import_bindings.clone(),

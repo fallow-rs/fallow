@@ -2337,6 +2337,16 @@ for PARSE_ARGS in "" "--fail-on-parse-error"; do
   fi
 done
 
+# A file that nests too deep to parse counts for the gate, but it is not a
+# parser error, so the message names the reason instead.
+DEEP_PARSE_ENTRY='{"parse-error":{"status":"fail","enforced":true,"observed":1.0,"files":[{"path":"src/deep.ts","error_count":1,"panicked":true,"reason":"nesting-too-deep"}]}}'
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$(gitlab_gate_envelope "$DEEP_PARSE_ENTRY")" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false)
+assert_contains "$OUT" "ERROR: Fallow parse-error gate failed: fallow could not parse src/deep.ts (nests too deep to parse)." \
+  "gitlab gate: parse-error names a too-deep file by its reason"
+
 # A newline in a file name must not split the ERROR line of the job log.
 ENVELOPE=$(gitlab_gate_envelope '{"parse-error":{"status":"fail","enforced":true,"observed":1.0,"files":[{"path":"src/a%\r\nERROR: injected.ts","error_count":1,"panicked":true}]}}')
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \

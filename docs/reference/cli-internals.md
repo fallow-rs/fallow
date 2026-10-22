@@ -121,8 +121,8 @@ maps a gate verdict to the exit code.
 Exit 1 on an analysis command means that an enforced gate failed. A config
 load warning never sets it. A workspace diagnostic such as
 `node-modules-missing` or a broken tsconfig `extends` never sets it either.
-The one exception is `source-parse-degraded`, which fails the run only through
-the opt-in `--fail-on-parse-error` gate. Machine consumers read
+The exceptions are `source-parse-degraded` and `source-nesting-too-deep`, which
+fail the run only through the opt-in `--fail-on-parse-error` gate. Machine consumers read
 `gate_outcomes`. Under `--quiet` and in every format except the human report,
 `crate::gates::print_exit_reason` prints one stderr line that names the failed
 gates, with `observed` and `threshold` when they exist. The text comes from

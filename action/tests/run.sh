@@ -4876,6 +4876,14 @@ for parse_case in 'config|' 'flag|INPUT_ARGS=--fail-on-parse-error'; do
   fi
 done
 
+# A file that nests too deep to parse counts for the gate, but it is not a
+# parser error, so the message names the reason instead.
+DEEP_PARSE_ENTRY='{"parse-error":{"status":"fail","enforced":true,"observed":1.0,"files":[{"path":"src/deep.ts","error_count":1,"panicked":true,"reason":"nesting-too-deep"}]}}'
+run_gate_analyze "$(gate_envelope "$DEEP_PARSE_ENTRY")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::error::Fallow parse-error gate failed: fallow could not parse src/deep.ts (nests too deep to parse)." \
+  "gate: parse-error names a too-deep file by its reason"
+
 # A fork controls file names. A path with `%`, CR and LF must not start a new
 # workflow command line, in the enforced `::error::` or the unenforced
 # `::warning::`.

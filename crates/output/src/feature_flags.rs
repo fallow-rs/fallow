@@ -88,8 +88,8 @@ pub struct FeatureFlagsOutput {
     /// A flags run walks and parses the project like every other analysis, so
     /// it records the same discovery kinds: a `skipped-large-file`,
     /// `skipped-minified-file`, or `source-read-failure` file was never
-    /// scanned for flags, and a `source-parse-degraded` file was scanned from
-    /// a partial module. Each is a reason a flag can be missing from
+    /// scanned for flags, a `source-parse-degraded` file was scanned from a
+    /// partial module, and a `source-nesting-too-deep` file was not scanned. Each is a reason a flag can be missing from
     /// `feature_flags[]`, which is exactly what a consumer reading a
     /// zero-result run needs to know. The analysis-stage kinds appear here
     /// too: the scan correlates flags with dead exports, so it runs the

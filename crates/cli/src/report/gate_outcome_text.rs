@@ -165,6 +165,8 @@ fn read_gate_files(entry: &Value) -> Vec<String> {
                 .and_then(Value::as_u64)
                 .and_then(|count| u32::try_from(count).ok());
             let panicked = item.get("panicked").and_then(Value::as_bool);
+            let reason = (item.get("reason").and_then(Value::as_str) == Some("nesting-too-deep"))
+                .then_some(fallow_output::GateFileReason::NestingTooDeep);
             Some(match (error_count, panicked) {
                 (Some(error_count), Some(panicked)) => format!(
                     "{path}: {}",
@@ -172,6 +174,7 @@ fn read_gate_files(entry: &Value) -> Vec<String> {
                         path: path.to_owned(),
                         error_count,
                         panicked,
+                        reason,
                     })
                 ),
                 _ => path.to_owned(),

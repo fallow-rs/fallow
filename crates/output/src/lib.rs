@@ -207,7 +207,9 @@ pub use feature_flags::{
 };
 pub use finding_id_query::{FindingIdQuery, FindingIdQueryReason};
 pub use fix::{FixJsonOutput, FixJsonOutputInput, count_applied_fixes, serialize_fix_json_output};
-pub use gate_outcomes::{GateFile, GateName, GateOutcome, GateOutcomes, GateStatus};
+pub use gate_outcomes::{
+    GateFile, GateFileReason, GateName, GateOutcome, GateOutcomes, GateStatus,
+};
 pub use health::{
     HEALTH_SCHEMA_VERSION, HealthJsonOutputInput, HealthOutput, HealthOutputInput,
     serialize_health_json_output,

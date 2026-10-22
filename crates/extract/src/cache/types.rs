@@ -144,6 +144,8 @@ pub struct CachedModule {
     pub parse_error_count: u32,
     /// Whether the parser abandoned this file instead of recovering.
     pub parse_panicked: bool,
+    /// Whether the file nests too deep to parse, so it was not parsed.
+    pub parse_nesting_too_deep: bool,
     /// Whether this module uses CJS exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares at least one Angular `@Component({

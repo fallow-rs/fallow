@@ -475,8 +475,8 @@ pub struct Cli {
 
     /// Exit with code 1 if fallow could not parse a source file cleanly.
     ///
-    /// Arms the `parse-error` gate: a file with a `source-parse-degraded`
-    /// entry in `workspace_diagnostics[]` fails the run, and the gate entry in
+    /// Arms the `parse-error` gate: a file with a `source-parse-degraded` or
+    /// `source-nesting-too-deep` entry in `workspace_diagnostics[]` fails the run, and the gate entry in
     /// `gate_outcomes["parse-error"]` names each such file. Off by default,
     /// because the parser also rejects valid syntax that is newer than the
     /// parser. Applies to `dead-code`, `architecture`, `health`, `audit` and

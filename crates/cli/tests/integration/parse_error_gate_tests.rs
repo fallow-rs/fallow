@@ -496,3 +496,84 @@ fn a_failed_gate_replaces_the_clean_grouped_status_line() {
         output.stderr
     );
 }
+
+/// A project whose only problem file nests brackets past the parser cap. The
+/// file is valid code, so the run must not call it a syntax error, but the
+/// gate still counts it: the analysis did not see its imports.
+fn too_deep_project() -> TempDir {
+    let dir = TempDir::new().expect("temp project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"deep-gate-fx","version":"1.0.0","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { deep } from './deep';\nconsole.log(deep);\n",
+    )
+    .expect("entry");
+    let depth = 1_100;
+    std::fs::write(
+        root.join("src/deep.ts"),
+        format!(
+            "export const deep = {}1{};\n",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        ),
+    )
+    .expect("deep file");
+    std::fs::write(root.join(".fallowrc.json"), WARN_UNUSED_FILES).expect("config");
+    dir
+}
+
+#[test]
+fn a_too_deep_file_counts_for_the_gate_with_its_reason() {
+    let project = too_deep_project();
+    let (output, json) = run_json(&project, "dead-code", &["--fail-on-parse-error"]);
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    let kinds: Vec<&str> = json["workspace_diagnostics"]
+        .as_array()
+        .expect("workspace_diagnostics")
+        .iter()
+        .filter_map(|diagnostic| diagnostic["kind"].as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"source-nesting-too-deep"),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"source-parse-degraded"),
+        "kinds: {kinds:?}"
+    );
+    assert_eq!(
+        json["gate_outcomes"]["parse-error"]["files"],
+        serde_json::json!([{
+            "path": "src/deep.ts",
+            "error_count": 1,
+            "panicked": true,
+            "reason": "nesting-too-deep"
+        }]),
+    );
+}
+
+#[test]
+fn the_human_run_says_a_too_deep_file_nests_too_deep() {
+    let project = too_deep_project();
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--no-cache",
+        "--fail-on-parse-error",
+    ]);
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("  src/deep.ts: nests too deep to parse"),
+        "stderr: {}",
+        output.stderr
+    );
+}

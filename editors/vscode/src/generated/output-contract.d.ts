@@ -165,6 +165,10 @@ export type AuditWorsened = ("warn" | "error" | "off")
  */
 export type GateStatus = ("pass" | "warn" | "fail" | "skipped")
 /**
+ * Why a file counts for the `parse-error` gate, other than a parser error.
+ */
+export type GateFileReason = "nesting-too-deep"
+/**
  * Analysis mode stored with baselines, snapshots, audit sides, and impact data.
  */
 export type SemanticAnalysisMode = ("syntactic" | "type-aware")
@@ -634,6 +638,12 @@ error_count: number
  * the extracted module is a fragment at best.
  */
 panicked: boolean
+} | {
+kind: "source-nesting-too-deep"
+/**
+ * The bracket nesting cap of the pre-parse scan.
+ */
+limit: number
 } | {
 kind: "bun-lockb-override-resolution-skipped"
 } | {
@@ -2031,7 +2041,8 @@ files?: GateFile[]
  *
  * Today only `parse-error` emits it. The item carries the same facts as the
  * `source-parse-degraded` entry in `workspace_diagnostics[]` for that file,
- * so a consumer can act on the gate without a join.
+ * so a consumer can act on the gate without a join. With `reason` set, the
+ * count and the parser outcome are placeholders.
  */
 export interface GateFile {
 /**
@@ -2039,14 +2050,19 @@ export interface GateFile {
  */
 path: string
 /**
- * The number of parser errors for the file.
+ * The number of parser errors for the file. `1` when `reason` is set.
  */
 error_count: number
 /**
  * True when the parser stopped in the file instead of recovering, so the
- * analysis saw only the part before the error.
+ * analysis saw only the part before the error. `true` when `reason` is set.
  */
 panicked: boolean
+/**
+ * Why the file counts when it is not a parser error. Absent for a parser
+ * error, the only reason before this field existed.
+ */
+reason?: (GateFileReason | null)
 }
 /**
  * Metric and rule definitions emitted under `_meta` when `--explain` is
@@ -3431,7 +3447,7 @@ _meta?: (Meta | null)
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
  *   `excluded-by-default-ignore`, `source-read-failure`,
- *   `source-parse-degraded`;
+ *   `source-parse-degraded`, `source-nesting-too-deep`;
  * - dead-code analysis, from the dependency-catalog and override
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`;
@@ -3450,10 +3466,11 @@ _meta?: (Meta | null)
  *
  * A diagnostic here is advisory and never withholds a finding. Where an
  * entry reports a source file this run never fully analyzed
- * (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
- * `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
- * verdict, so the affected `unused_files[]`, `unused_exports[]`, and
- * dependency entries additionally carry the caveat themselves in their own
+ * (`source-parse-degraded`, `source-nesting-too-deep`,
+ * `source-read-failure`, `skipped-large-file`, `skipped-minified-file`,
+ * `skipped-source-dotdir`) it can distort a verdict, so the affected
+ * `unused_files[]`, `unused_exports[]`, and dependency entries
+ * additionally carry the caveat themselves in their own
  * optional `reachability_caveats[]` array, and a reader who never scrolls
  * back up to this list still sees it. `fallow fix` reads the same array
  * and withholds the removal while a caveat stands.
@@ -16769,7 +16786,7 @@ _meta?: (Meta | null)
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
  *   `excluded-by-default-ignore`, `source-read-failure`,
- *   `source-parse-degraded`;
+ *   `source-parse-degraded`, `source-nesting-too-deep`;
  * - dead-code analysis, from the dependency-catalog and override
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`;
@@ -16788,10 +16805,11 @@ _meta?: (Meta | null)
  *
  * A diagnostic here is advisory and never withholds a finding. Where an
  * entry reports a source file this run never fully analyzed
- * (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
- * `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
- * verdict, so the affected `unused_files[]`, `unused_exports[]`, and
- * dependency entries additionally carry the caveat themselves in their own
+ * (`source-parse-degraded`, `source-nesting-too-deep`,
+ * `source-read-failure`, `skipped-large-file`, `skipped-minified-file`,
+ * `skipped-source-dotdir`) it can distort a verdict, so the affected
+ * `unused_files[]`, `unused_exports[]`, and dependency entries
+ * additionally carry the caveat themselves in their own
  * optional `reachability_caveats[]` array, and a reader who never scrolls
  * back up to this list still sees it. `fallow fix` reads the same array
  * and withholds the removal while a caveat stands.
@@ -16984,8 +17002,8 @@ total_flags: number
  * A flags run walks and parses the project like every other analysis, so
  * it records the same discovery kinds: a `skipped-large-file`,
  * `skipped-minified-file`, or `source-read-failure` file was never
- * scanned for flags, and a `source-parse-degraded` file was scanned from
- * a partial module. Each is a reason a flag can be missing from
+ * scanned for flags, a `source-parse-degraded` file was scanned from a
+ * partial module, and a `source-nesting-too-deep` file was not scanned. Each is a reason a flag can be missing from
  * `feature_flags[]`, which is exactly what a consumer reading a
  * zero-result run needs to know. The analysis-stage kinds appear here
  * too: the scan correlates flags with dead exports, so it runs the
