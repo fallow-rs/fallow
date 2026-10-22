@@ -113,6 +113,73 @@ fn canonical_module_path(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::resolve::ResolvedModule;
+    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+
+    fn graph_of(paths: &[PathBuf]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = paths
+            .iter()
+            .zip(0..)
+            .map(|(path, id)| DiscoveredFile {
+                id: FileId(id),
+                path: path.clone(),
+                size_bytes: 1,
+            })
+            .collect();
+        let resolved: Vec<ResolvedModule> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let entry_points = vec![EntryPoint {
+            path: paths[0].clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        ModuleGraph::build(&resolved, &entry_points, &files)
+    }
+
+    // Entry resolution probes many candidates for one package. Each miss must
+    // reuse the canonical index of the first miss. A resolver that scans the
+    // modules again on each miss resolves the real path of every module per
+    // probe, which cost seconds on a project with 38,000 modules.
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn resolver_builds_the_canonical_index_once_per_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let real_dir = dir.path().join("real");
+        std::fs::create_dir(&real_dir).unwrap();
+        let real_file = real_dir.join("mod.ts");
+        std::fs::write(&real_file, "").unwrap();
+        let link_dir = dir.path().join("link");
+        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::write(&bin, "").unwrap();
+
+        let graph = graph_of(&[link_dir.join("mod.ts")]);
+        let by_path: FxHashMap<PathBuf, FileId> = graph
+            .modules
+            .iter()
+            .map(|module| (module.path.clone(), module.file_id))
+            .collect();
+        let lookup = |path: &Path| by_path.get(path).copied();
+        let resolver = graph.package_entry_resolver(dir.path());
+
+        // An entry on disk that is not in the graph builds the index.
+        assert_eq!(resolver.file_id(&bin, lookup), None);
+        assert_eq!(resolver.file_id(&real_file, lookup), Some(FileId(0)));
+
+        // Without the symlink, a new scan cannot reach the module. The kept
+        // index still can.
+        std::fs::remove_file(&link_dir).unwrap();
+        assert_eq!(resolver.file_id(&real_file, lookup), Some(FileId(0)));
+
+        // A new resolver scans again and misses.
+        let fresh = graph.package_entry_resolver(dir.path());
+        assert_eq!(fresh.file_id(&real_file, lookup), None);
+    }
 
     // A module whose discovered (raw) path goes through a symlinked directory
     // has a raw path that differs from the canonical entry path. The raw-map
