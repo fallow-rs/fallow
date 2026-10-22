@@ -505,6 +505,20 @@ coverage. It does not claim corpus-wide recall: retained candidates without
 independent truth remain `indeterminate` and are excluded from adjudicated
 accuracy metrics.
 
+The confirmation yield excludes candidates that the sidecar does not resolve
+because of `blocking-diagnostics`. These candidates come from fixture
+configuration that the pinned TypeScript backend rejects, so they measure
+configuration compatibility, not semantic ability. The
+`maximum_blocking_diagnostics_share` gate bounds their share of all candidates,
+so a fixture that the sidecar cannot load stays visible.
+
+Each project role comes from the intent of the project, not from its current
+output. An `accuracy-core` project has internal class members where syntactic
+analysis has known gaps. A `zero-control` project exposes its class members as
+public API by design, so it must report no candidates. Vue Core is a
+zero-control because each package declares `"./*": "./*"` in `exports`, which
+makes every module a public entry under Node subpath rules.
+
 Feature-bucket value requires two separate candidates that are both manually
 classified as used and correctly confirmed by semantic refinement. The two
 candidates must provide explicitly adjudicated evidence for distinct buckets.

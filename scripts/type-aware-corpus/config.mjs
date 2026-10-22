@@ -1,3 +1,13 @@
+const REQUIRED_GATES = [
+  "minimum_confirmation_precision",
+  "minimum_confirmation_yield",
+  "minimum_correct_unused_retention",
+  "maximum_abstention",
+  "maximum_blocking_diagnostics_share",
+  "maximum_p95_marginal_overhead_ms",
+  "maximum_p95_refined_rss_kb",
+];
+
 const requireValid = (condition, message, fail) => {
   if (!condition) fail(message);
 };
@@ -81,7 +91,7 @@ const validateProject = (project, seen, dependencies) => {
 };
 
 export const validateManifest = (manifest, dependencies) => {
-  const { fail, isObject, requiredGates, requiredProjects } = dependencies;
+  const { fail, isObject, requiredProjects } = dependencies;
   requireValid(
     isObject(manifest) && manifest.schema_version === 1,
     "manifest schema_version must be 1",
@@ -93,7 +103,7 @@ export const validateManifest = (manifest, dependencies) => {
     fail,
   );
   requireValid(isObject(manifest.gates), "manifest gates must be an object", fail);
-  requiredGates.forEach((gate) => validateGate(manifest.gates, gate, fail));
+  REQUIRED_GATES.forEach((gate) => validateGate(manifest.gates, gate, fail));
   requireValid(
     Array.isArray(manifest.projects) && manifest.projects.length === requiredProjects.size,
     `manifest must contain exactly ${requiredProjects.size} corpus projects`,

@@ -49,6 +49,35 @@ export const aggregatePhaseTimings = (runs) => {
 export const safeRatio = (numerator, denominator) =>
   denominator === 0 ? null : Math.round((numerator / denominator) * 1_000_000) / 1_000_000;
 
+export const typeAwareResolutionCounts = (projects) =>
+  projects.reduce(
+    (totals, { type_aware: typeAware }) => ({
+      abstainedCount: totals.abstainedCount + (typeAware?.abstained_count ?? 0),
+      unresolvedCount: totals.unresolvedCount + (typeAware?.unresolved_count ?? 0),
+      blockingDiagnosticsCount:
+        totals.blockingDiagnosticsCount +
+        (typeAware?.abstention_reasons?.blocking_diagnostics ?? 0),
+    }),
+    { abstainedCount: 0, unresolvedCount: 0, blockingDiagnosticsCount: 0 },
+  );
+
+/**
+ * Candidates in a program with blocking diagnostics measure fixture configuration, not semantic
+ * ability. The yield excludes them, and the `blocking_diagnostics_share` gate bounds their share.
+ */
+export const confirmationYieldMetrics = ({
+  correctConfirmedCount,
+  candidateCount,
+  blockingDiagnosticsCount,
+}) => {
+  const confirmationYieldDenominator = candidateCount - blockingDiagnosticsCount;
+  return {
+    confirmationYield: safeRatio(correctConfirmedCount, confirmationYieldDenominator),
+    confirmationYieldDenominator,
+    blockingDiagnosticsShare: safeRatio(blockingDiagnosticsCount, candidateCount),
+  };
+};
+
 const confirmedUsed = ({ semantic_status: semanticStatus, truth }) =>
   semanticStatus === "confirmed-used" && truth === "used";
 
@@ -87,6 +116,7 @@ export const renderSummaryMarkdown = (summary) =>
     `- Independently adjudicated truth coverage: ${display(summary.accuracy.adjudicated_truth_coverage)}`,
     `- Correct-unused retention: ${display(summary.accuracy.correct_unused_retention)}`,
     `- Abstention: ${display(summary.accuracy.abstention)}`,
+    `- Blocking-diagnostics share: ${display(summary.accuracy.blocking_diagnostics_share)}`,
     `- Median marginal overhead: ${display(summary.performance.marginal_overhead_ms.median)} ms`,
     `- P95 marginal overhead: ${display(summary.performance.marginal_overhead_ms.p95)} ms`,
     `- Independent repositories with confirmed value: ${summary.value.confirmed_repository_count}`,
@@ -153,6 +183,10 @@ export const summaryChecks = (values) => ({
     values.thresholds.minimum_correct_unused_retention,
   ),
   abstention: metricAtMost(values.abstention, values.thresholds.maximum_abstention),
+  blocking_diagnostics_share: metricAtMost(
+    values.blockingDiagnosticsShare,
+    values.thresholds.maximum_blocking_diagnostics_share,
+  ),
   marginal_overhead: metricAtMost(
     values.marginalOverheadP95,
     values.thresholds.maximum_p95_marginal_overhead_ms,

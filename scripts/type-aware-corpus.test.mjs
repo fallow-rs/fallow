@@ -52,7 +52,12 @@ import {
   minimalEnvironment,
   selectedBackend,
 } from "./type-aware-corpus/runner.mjs";
-import { renderSummaryMarkdown } from "./type-aware-corpus/summary.mjs";
+import {
+  confirmationYieldMetrics,
+  renderSummaryMarkdown,
+  summaryChecks,
+  typeAwareResolutionCounts,
+} from "./type-aware-corpus/summary.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -400,8 +405,8 @@ test("manifest contains the complete pinned accuracy and control corpus", () => 
   assert.deepEqual(validateManifest(structuredClone(manifest)), manifest);
 
   const invalid = structuredClone(manifest);
-  invalid.projects.find(({ id }) => id === "vite").candidate_expectation = "nonzero";
-  assert.throws(() => validateManifest(invalid), /vite\.candidate_expectation must be zero/);
+  invalid.projects.find(({ id }) => id === "fastify").candidate_expectation = "nonzero";
+  assert.throws(() => validateManifest(invalid), /fastify\.candidate_expectation must be zero/);
 });
 
 test("manifest reports malformed containers and feature buckets without dereferencing them", () => {
@@ -1188,6 +1193,59 @@ test("feature bucket gate needs separate correct confirmations for distinct buck
   );
 });
 
+test("confirmation yield excludes candidates behind blocking diagnostics", () => {
+  assert.deepEqual(
+    confirmationYieldMetrics({
+      correctConfirmedCount: 127,
+      candidateCount: 509,
+      blockingDiagnosticsCount: 234,
+    }),
+    {
+      confirmationYield: 0.461818,
+      confirmationYieldDenominator: 275,
+      blockingDiagnosticsShare: 0.459725,
+    },
+  );
+  assert.equal(
+    confirmationYieldMetrics({
+      correctConfirmedCount: 0,
+      candidateCount: 3,
+      blockingDiagnosticsCount: 3,
+    }).confirmationYield,
+    null,
+  );
+});
+
+test("resolution counts sum abstained, unresolved and blocked candidates", () => {
+  assert.deepEqual(
+    typeAwareResolutionCounts([
+      {
+        type_aware: {
+          abstained_count: 1,
+          unresolved_count: 87,
+          abstention_reasons: { blocking_diagnostics: 87 },
+        },
+      },
+      { type_aware: { abstained_count: 26, unresolved_count: 0, abstention_reasons: {} } },
+      {},
+    ]),
+    { abstainedCount: 27, unresolvedCount: 87, blockingDiagnosticsCount: 87 },
+  );
+});
+
+test("blocking-diagnostics share gate fails above its threshold", () => {
+  const checks = (blockingDiagnosticsShare) =>
+    summaryChecks({
+      blockingDiagnosticsShare,
+      featureBucketValue: { multiple_feature_buckets: true },
+      isObject: () => true,
+      thresholds: { maximum_blocking_diagnostics_share: 0.5 },
+    }).blocking_diagnostics_share;
+  assert.equal(checks(0.5), true);
+  assert.equal(checks(0.51), false);
+  assert.equal(checks(null), false);
+});
+
 test("summary reports bounded evidence without claiming corpus-wide recall", () => {
   const rendered = renderSummaryMarkdown({
     gate: { go: true },
@@ -1198,6 +1256,7 @@ test("summary reports bounded evidence without claiming corpus-wide recall", () 
       adjudicated_truth_coverage: 0.4,
       correct_unused_retention: 1,
       abstention: 0.2,
+      blocking_diagnostics_share: 0.4,
     },
     performance: {
       marginal_overhead_ms: { median: 10, p95: 20 },
@@ -1210,6 +1269,7 @@ test("summary reports bounded evidence without claiming corpus-wide recall", () 
 
   assert.match(rendered, /Safe confirmation yield: 0.3/);
   assert.match(rendered, /Independently adjudicated truth coverage: 0.4/);
+  assert.match(rendered, /Blocking-diagnostics share: 0.4/);
   assert.match(rendered, /No corpus-wide recall is claimed/);
   assert.doesNotMatch(rendered, /Used recall/);
 });
