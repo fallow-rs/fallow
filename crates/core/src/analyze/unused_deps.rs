@@ -1749,7 +1749,7 @@ pub fn find_type_only_dependencies(
 /// Returns `None` when the glob set fails to compile, mirroring the original
 /// early-return-empty behavior of both dependency detectors. The `Option` is
 /// cached too, so a failed compilation is never replaced with an empty matcher.
-fn production_exclude_globset() -> Option<&'static globset::GlobSet> {
+pub(super) fn production_exclude_globset() -> Option<&'static globset::GlobSet> {
     static SET: OnceLock<Option<globset::GlobSet>> = OnceLock::new();
     SET.get_or_init(|| {
         let mut builder = globset::GlobSetBuilder::new();

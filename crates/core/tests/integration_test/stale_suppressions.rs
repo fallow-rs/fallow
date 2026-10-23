@@ -3,8 +3,50 @@ use fallow_types::results::SuppressionOrigin;
 
 use super::common::{
     copy_fixture_tree, create_config, create_config_with_overrides, create_config_with_rules,
-    fixture_path,
+    create_production_config, fixture_path,
 };
+
+/// Issue #3825: an `unused-export` suppression on an export that only a test
+/// file imports is needed under `--production`, because production mode
+/// excludes the test. The run without `--production` must not report it stale.
+#[test]
+fn suppression_needed_only_in_production_is_not_stale() {
+    let root = fixture_path("stale-suppression-production-only");
+    let results =
+        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+
+    let stale_lines: Vec<u32> = results
+        .stale_suppressions
+        .iter()
+        .filter(|s| s.path.ends_with("src/math.ts"))
+        .map(|s| s.line)
+        .collect();
+    assert!(
+        !stale_lines.contains(&1),
+        "suppression for the test-only export must not be stale, found: {stale_lines:?}"
+    );
+    assert!(
+        stale_lines.contains(&10),
+        "suppression for an export that production code uses must stay stale, found: {stale_lines:?}"
+    );
+    assert!(
+        results
+            .stale_suppressions
+            .iter()
+            .any(|s| s.path.ends_with("src/exposed.ts") && s.line == 1),
+        "suppression for an export that the package entry re-exports must stay stale"
+    );
+
+    let production = fallow_core::analyze(&create_production_config(root))
+        .expect("production analysis should succeed");
+    assert!(
+        !production
+            .stale_suppressions
+            .iter()
+            .any(|s| s.path.ends_with("src/math.ts") && s.line == 1),
+        "suppression for the test-only export must not be stale under production mode"
+    );
+}
 
 #[test]
 fn stale_next_line_suppression_on_used_export() {

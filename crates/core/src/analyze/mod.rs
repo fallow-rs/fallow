@@ -22,6 +22,7 @@ mod package_json_utils;
 mod package_manager;
 mod policy;
 mod predicates;
+mod production_only_suppressions;
 mod prop_drilling;
 mod re_export_cycles;
 mod react_intel;
@@ -1089,10 +1090,8 @@ fn populate_package_and_framework_findings(input: &mut PostDetectionInput<'_, '_
 /// suppression accounting metadata onto the results.
 fn populate_stale_suppression_findings(input: &mut PostDetectionInput<'_, '_>) {
     if input.config.rules.stale_suppressions != Severity::Off {
-        input
-            .results
-            .stale_suppressions
-            .extend(input.suppressions.find_stale(input.graph, input.config));
+        let stale = production_only_suppressions::find_stale(input);
+        input.results.stale_suppressions.extend(stale);
     }
     if input.config.rules.require_suppression_reason != Severity::Off {
         input
