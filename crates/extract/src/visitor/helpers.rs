@@ -7,8 +7,11 @@ use oxc_ast::ast::{
 use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
 
+#[path = "helpers_heritage_names.rs"]
+mod heritage_names;
 use crate::{MemberInfo, MemberKind};
 use fallow_types::extract::{AngularInputMember, AngularOutputMember};
+use heritage_names::{extract_static_expression_name, extract_type_name};
 
 pub struct AngularComponentMetadata {
     pub template_url: Option<String>,
@@ -1819,30 +1822,6 @@ fn decorator_path(expr: &Expression<'_>) -> String {
         Expression::CallExpression(call) => decorator_path(&call.callee),
         Expression::ParenthesizedExpression(paren) => decorator_path(&paren.expression),
         _ => String::new(),
-    }
-}
-
-fn extract_static_expression_name(expr: &Expression<'_>) -> Option<String> {
-    match expr {
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
-        Expression::StaticMemberExpression(member) => Some(format!(
-            "{}.{}",
-            extract_static_expression_name(&member.object)?,
-            member.property.name
-        )),
-        _ => None,
-    }
-}
-
-fn extract_type_name(name: &TSTypeName<'_>) -> Option<String> {
-    match name {
-        TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
-        TSTypeName::QualifiedName(name) => Some(format!(
-            "{}.{}",
-            extract_type_name(&name.left)?,
-            name.right.name
-        )),
-        TSTypeName::ThisExpression(_) => None,
     }
 }
 
