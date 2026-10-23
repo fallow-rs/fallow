@@ -210,6 +210,9 @@ Focused integration checks:
   changes.
 - `npm run conformance:public-smoke` for changes that need public
   real-project evidence.
+- `node scripts/compare-binaries.mjs --base <bin> --head <bin>` for
+  extraction or analysis changes that must not change the output. See
+  [No-change evidence](#no-change-evidence-for-extraction-and-analysis-changes).
 - `cargo test -p fallow-cli --test drift -- --include-ignored` for changes to a finding that the
   CLI, MCP, and `fallow_api` all report. Build `fallow-mcp` first; see the
   [drift contract](drift-contract.md).
@@ -730,6 +733,34 @@ with the changes of the branch. Pass `--clone` with a shared
 `--cache-dir`: without a local project path, every project is skipped and the
 script exits 2. Explain every difference in the pull request. An unexplained
 difference is a finding.
+
+### No-change evidence for extraction and analysis changes
+
+Use `scripts/compare-binaries.mjs` to prove that a change to extraction or
+analysis does not change the output on real projects. Build a release binary
+of the merge base and a release binary of the branch. Then run:
+
+```bash
+node scripts/compare-binaries.mjs --base /path/to/base/fallow --head target/release/fallow
+```
+
+The script runs both binaries with `--format json --quiet --no-cache` on each
+project and command. It removes volatile keys, such as timings and run IDs,
+and compares the results. Each pair gives one line: `IDENTICAL`, `DIFF` or
+`ERROR`, the two exit codes, and the user CPU time of each run. The script
+writes the normalized output and a unified diff of each `DIFF` to
+`target/compare-binaries`. It exits 1 on a `DIFF`, an `ERROR` or an exit-code
+mismatch.
+
+The default projects are `fastify`, `vue-core`, `svelte` and `next.js` under
+`benchmarks/fixtures/real-world/`. Run `node benchmarks/download-fixtures.mjs`
+to get them. In a worktree, the script uses the fixtures of the main checkout.
+
+The command set must cover every analysis that reads the changed facts. Bare
+`fallow` does not run opt-in analyses such as `security`. The default set is
+bare `fallow`, `security`, `health` and `dupes`. When a change touches facts
+that other commands read, add each command with `--command`, for example
+`--command flags` or `--command "dupes --mode semantic"`.
 
 For documentation and agent discovery, validate a clean Git-visible tree,
 classified root and maintainer documents, local links, repository source paths,
