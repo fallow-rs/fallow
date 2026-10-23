@@ -462,6 +462,154 @@ fn gate_block_message_honors_the_report_and_output_settings() {
     assert!(!repo.join(".fallow/gate-report.json").exists());
 }
 
+/// Returns the report path that the block message names.
+fn named_report_path(stderr: &str) -> PathBuf {
+    stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("fallow-gate: full report: "))
+        .map_or_else(
+            || panic!("no report path in stderr={stderr}"),
+            PathBuf::from,
+        )
+}
+
+/// A symbolic link in the audited tree must not make the gate write outside
+/// the tree. The gate refuses a link at `.fallow`, at the report file, or at a
+/// directory of a relative FALLOW_GATE_REPORT, and names a temporary copy of
+/// the report. It does not write a `.fallow/.gitignore` that is a link.
+#[test]
+fn gate_block_message_does_not_write_through_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    if skip_without_tools() {
+        return;
+    }
+    let report = new_only_fail_report();
+    let cases: [(&str, &[(&str, &str)]); 3] = [
+        (".fallow", &[]),
+        (".fallow/gate-report.json", &[]),
+        ("reports", &[("FALLOW_GATE_REPORT", "reports/gate.json")]),
+    ];
+    for (link, env) in cases {
+        let (_tmp, root) = spaced_root();
+        let repo = root.join("repo");
+        init_repo(&repo);
+        let gate = install_gate(&repo, ".claude");
+        std::fs::write(repo.join(STUB_REPORT_FILE), report.to_string()).unwrap();
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let victim = outside.join("victim");
+        std::fs::write(&victim, "keep\n").unwrap();
+        std::fs::create_dir_all(repo.join(link).parent().unwrap()).unwrap();
+        let target = if link == ".fallow/gate-report.json" {
+            &victim
+        } else {
+            &outside
+        };
+        symlink(target, repo.join(link)).unwrap();
+
+        let run = run_gate_with_env(
+            &gate,
+            &repo,
+            &root.join("home"),
+            &commit_payload(&repo),
+            env,
+        );
+        let stderr = String::from_utf8_lossy(&run.output.stderr);
+        assert_eq!(run.output.status.code(), Some(2), "{link}: stderr={stderr}");
+        let named = named_report_path(&stderr);
+        assert!(
+            !named.starts_with(&root),
+            "{link}: the message must name the temporary report; stderr={stderr}"
+        );
+        let kept: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&named).unwrap()).unwrap();
+        assert_eq!(kept, report, "{link}: the temporary report must stay");
+        std::fs::remove_file(&named).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "keep\n",
+            "{link}"
+        );
+        let written: Vec<_> = std::fs::read_dir(&outside)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            written,
+            ["victim"],
+            "{link}: nothing may land outside the tree"
+        );
+        assert!(repo.join(link).is_symlink(), "{link}: the link must stay");
+    }
+
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    std::fs::write(repo.join(STUB_REPORT_FILE), report.to_string()).unwrap();
+    std::fs::create_dir_all(repo.join(".fallow")).unwrap();
+    let dangling = root.join("outside-gitignore");
+    symlink(&dangling, repo.join(".fallow/.gitignore")).unwrap();
+
+    let run = run_gate(&gate, &repo, &root.join("home"), &commit_payload(&repo));
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert_eq!(run.output.status.code(), Some(2), "stderr={stderr}");
+    assert_eq!(
+        named_report_path(&stderr),
+        repo.join(".fallow/gate-report.json")
+    );
+    assert!(
+        !dangling.exists(),
+        "the gate must not create the target of a .gitignore link"
+    );
+    assert!(repo.join(".fallow/.gitignore").is_symlink());
+}
+
+/// Names and paths in the report come from the audited tree. Each control
+/// character (C0, DEL, C1) and each Unicode line or paragraph separator in a
+/// listed field becomes a space, so one finding stays on one line and no
+/// terminal escape sequence reaches the block message.
+#[test]
+fn gate_block_message_removes_control_characters() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    let report = serde_json::json!({
+        "verdict": "fail",
+        "attribution": { "gate": "new-only" },
+        "dead_code": { "unused_exports": [{
+            "code": "rule\u{9b}31m",
+            "path": "src/\u{1b}]0;title\u{7}a.ts",
+            "line": "7\u{0}\u{7f}",
+            "export_name": "x\r\ny\u{85}z\u{2028}w\u{2029}v\u{1b}[2J",
+            "actions": [], "introduced": true, "effective_severity": "error"
+        }] }
+    });
+    std::fs::write(repo.join(STUB_REPORT_FILE), report.to_string()).unwrap();
+
+    let run = run_gate(&gate, &repo, &root.join("home"), &commit_payload(&repo));
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert_eq!(run.output.status.code(), Some(2), "stderr={stderr}");
+    assert!(
+        stderr.contains(
+            "verdict fail, 1 finding(s) caused the block:\n  \
+             rule 31m src/ ]0;title a.ts:7  x y z w v [2J\n"
+        ),
+        "stderr={stderr:?}"
+    );
+    assert!(
+        !stderr
+            .chars()
+            .any(|c| c != '\n' && (c.is_control() || c == '\u{2028}' || c == '\u{2029}')),
+        "stderr={stderr:?}"
+    );
+}
+
 /// Under `gate = "all"` no finding carries `introduced`, so the message lists
 /// every finding that is not a warning. A long list stops at 50 lines.
 #[test]

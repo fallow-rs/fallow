@@ -18,6 +18,10 @@ set -euo pipefail
 # tree. Set FALLOW_GATE_REPORT to write it to another path (a relative path
 # resolves against the audited tree). Set FALLOW_GATE_OUTPUT=json to print the
 # full JSON report on stderr instead, as gates before this change did.
+# The gate does not write through a symbolic link. When the report path or a
+# directory of a relative report path is a link, the block message names a
+# temporary copy of the report. When .fallow/.gitignore is a link, the gate
+# does not write it.
 #
 # Version floor (FALLOW_GATE_MIN_VERSION, default 2.85.0). The gate passes
 # --gate-marker agent (added in v2.85.0) so Impact can record containment;
@@ -519,6 +523,10 @@ def location: .path // (.files // [])[0] // ((.instances // [])[0] // {}).file
 def line: .line // ((.instances // [])[0] // {}).start_line;
 def detail: .export_name // .package_name // .member_name // .entry_name // .name
   // .url // .value // .message // "";
+# The report holds names and paths from the audited tree. A control character
+# (C0, DEL, C1) or a Unicode line or paragraph separator in one of them could
+# split a line or send a terminal escape sequence, so each becomes a space.
+def clean: tostring | gsub("[\\x{0}-\\x{1f}\\x{7f}-\\x{9f}\\x{2028}\\x{2029}]+"; " ");
 def kind($keys): .code // .rule // ((.finding_id // "") | split(":") | .[1])
   // (if $keys[-1] == "findings" or $keys[-1] == "clone_groups" then $keys[0] else $keys[-1] end);
 . as $root
@@ -532,12 +540,43 @@ def kind($keys): .code // .rule // ((.finding_id // "") | split(":") | .[1])
 | .[]
 | .keys as $keys
 | .f
-| "\(kind($keys)) \(location)\(line as $l | if $l == null then "" else ":\($l)" end)\(detail | tostring | gsub("[\r\n]+"; " ") | if . == "" then "" else " \(.)" end)"
+| "\(kind($keys) | clean) \(location | clean)\(line as $l | if $l == null then "" else ":\($l | clean)" end)\(detail | clean | if . == "" then "" else " \(.)" end)"
 '
 
 # The block message lists at most this many findings. The full report holds
 # the rest.
 GATE_MAX_FINDINGS=50
+
+# The audited tree can hold symbolic links, for example a committed `.fallow`
+# link that points to a directory outside the tree. The gate must not write
+# through such a link, so the two functions below refuse it.
+
+# Succeeds when no existing component of the relative path $1 is a symbolic
+# link. Components resolve against the current directory.
+no_symlink_below_pwd() {
+  local prefix="." part parts
+  IFS=/ read -r -a parts <<<"$1"
+  for part in ${parts[@]+"${parts[@]}"}; do
+    [ -n "$part" ] || continue
+    prefix="$prefix/$part"
+    [ ! -L "$prefix" ] || return 1
+  done
+}
+
+# Writes stdin to the file $1. A symbolic link or a directory at $1 makes the
+# function fail. The data goes to a temporary file in the target directory, and
+# `mv -f` then replaces $1 with that file, so a link to a file that appears after
+# the check is replaced, not followed.
+write_no_follow() {
+  local target="$1" tmp
+  [ ! -L "$target" ] && [ ! -d "$target" ] || return 1
+  tmp="$(mktemp "$(dirname "$target")/.fallow-gate.XXXXXX")" || return 1
+  if cat >"$tmp" && mv -f "$tmp" "$target"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
 
 # Prints the block message for the report in $TMP_JSON. The message names the
 # findings that caused the block and the path of the full report.
@@ -547,13 +586,19 @@ print_block_message() {
     /*) report_path="$report" ;;
     *) report_path="$(pwd -P)/$report" ;;
   esac
-  if ! { mkdir -p "$(dirname "$report_path")" && cp "$TMP_JSON" "$report_path"; } 2>/dev/null; then
+  if ! {
+    case "$report" in
+      /*) true ;;
+      *) no_symlink_below_pwd "$report" ;;
+    esac && mkdir -p "$(dirname "$report_path")" \
+      && write_no_follow "$report_path" <"$TMP_JSON"
+  } 2>/dev/null; then
     KEEP_TMP_JSON=1
     report_path="$TMP_JSON"
   elif [ -z "${FALLOW_GATE_REPORT:-}" ] && [ ! -e .fallow/.gitignore ]; then
     # Same self-ignore as the fallow cache directory, so the report never
     # makes the work tree dirty.
-    printf '*\n' >.fallow/.gitignore 2>/dev/null || true
+    printf '*\n' | write_no_follow .fallow/.gitignore 2>/dev/null || true
   fi
   findings="$(jq -r "$GATE_FINDINGS_JQ" <"$TMP_JSON" 2>/dev/null || true)"
   count="$(printf '%s' "$findings" | grep -c . || true)"
