@@ -2,11 +2,6 @@
 # ships only vscode-languageclient and vscode-languageserver-protocol.
 
 [[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-ignoreUntil = 2027-01-15T00:00:00Z
-reason = "Development dependency, not in the bundled extension; the parent package range blocks the patched version."
-
-[[IgnoredVulns]]
 id = "GHSA-73rr-hh4g-fpgx"
 ignoreUntil = 2027-01-15T00:00:00Z
 reason = "Development dependency, not in the bundled extension; the parent package range blocks the patched version."
