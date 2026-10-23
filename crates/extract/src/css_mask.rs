@@ -4,6 +4,7 @@
 //! Byte offsets in the masked string thus stay equal to the offsets in the
 //! original source.
 
+use std::path::Path;
 use std::sync::LazyLock;
 
 /// Regex to find a Sass module member call such as `math.div(` or
@@ -19,6 +20,14 @@ static SCSS_NAMESPACED_CALL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 /// the mixin name (issue #3839).
 static SCSS_NAMESPACED_INCLUDE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r"@include\s+[a-zA-Z_][a-zA-Z0-9_-]*(\.)[a-zA-Z_][a-zA-Z0-9_-]*")
+});
+
+/// Regex to find the indented Sass include shorthand such as `+utils.baz`
+/// at the start of a line. Group 1 is the `.` between the namespace and the
+/// mixin name. Only `.sass` files use this form. In CSS and SCSS, a line that
+/// starts with `+` is an adjacent sibling combinator, as in `+p.intro`.
+static SASS_NAMESPACED_INCLUDE_SHORTHAND_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r"(?m)^[ \t]*\+[ \t]*[a-zA-Z_][a-zA-Z0-9_-]*(\.)[a-zA-Z_][a-zA-Z0-9_-]*")
 });
 
 /// Regex to find the argument of a view transition pseudo-element such as
@@ -73,6 +82,18 @@ fn mask_capture_with_whitespace(src: &str, re: &regex::Regex) -> String {
 pub fn mask_sass_module_members(src: &str) -> String {
     let masked = mask_capture_with_whitespace(src, &SCSS_NAMESPACED_CALL_RE);
     mask_capture_with_whitespace(&masked, &SCSS_NAMESPACED_INCLUDE_RE)
+}
+
+/// Mask the `.` of the `+utils.baz` include shorthand when `path` is an
+/// indented `.sass` file, so the class scan does not read the mixin name as a
+/// class. Other files stay as they are, because there a line that starts with
+/// `+` is an adjacent sibling combinator, as in `+p.intro`.
+pub fn mask_sass_shorthand(src: String, path: &Path) -> String {
+    if path.extension().is_some_and(|ext| ext == "sass") {
+        mask_capture_with_whitespace(&src, &SASS_NAMESPACED_INCLUDE_SHORTHAND_RE)
+    } else {
+        src
+    }
 }
 
 /// Mask the argument of `::view-transition-*()` pseudo-elements, so the class

@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a namespaced mixin such as `@include utils.baz`, gave a false
   `unused-export` for `div`, `bar` and `baz`. The class scan now skips a
   `.member` that follows a namespace and comes before `(`, and the mixin name
-  after `@include`. A compound selector such as `button.primary` still
+  after `@include`. In `.module.sass` files, the scan also skips the mixin
+  name in the `+utils.baz` include shorthand. A compound selector such as
+  `button.primary` still
   exports `primary`. The extraction cache version changes, so the first run
   after the upgrade parses each file again.
   (Closes [#3839](https://github.com/fallow-rs/fallow/issues/3839))

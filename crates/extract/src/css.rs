@@ -1072,7 +1072,7 @@ pub(crate) fn parse_css_to_module(
         .and_then(|e| e.to_str())
         .is_some_and(|ext| matches!(ext, "scss" | "sass" | "less"));
 
-    let stripped = mask_css_comments(source, is_scss);
+    let stripped = crate::css_mask::mask_sass_shorthand(mask_css_comments(source, is_scss), path);
     let imports = build_css_imports(&stripped, is_scss);
 
     let exports = if is_css_module_file(path) {

@@ -575,21 +575,19 @@ fn issue_540_nested_cascade_layers_do_not_export_sub_names() {
     assert_eq!(named, vec!["root", "pressed"], "phantom exports leaked");
 }
 
+fn module_class_names(file: &str, source: &str) -> Vec<String> {
+    parse_source_to_module(FileId(0), Path::new(file), source, 0, false)
+        .exports
+        .iter()
+        .filter_map(|e| match &e.name {
+            ExportName::Named(n) => Some(n.clone()),
+            ExportName::Default => None,
+        })
+        .collect()
+}
+
 fn scss_module_class_names(source: &str) -> Vec<String> {
-    parse_source_to_module(
-        FileId(0),
-        Path::new("Component.module.scss"),
-        source,
-        0,
-        false,
-    )
-    .exports
-    .iter()
-    .filter_map(|e| match &e.name {
-        ExportName::Named(n) => Some(n.clone()),
-        ExportName::Default => None,
-    })
-    .collect()
+    module_class_names("Component.module.scss", source)
 }
 
 #[test]
@@ -616,4 +614,19 @@ fn scss_module_view_transition_class_arguments_are_not_classes() {
         ".foo {\n  view-transition-name: demo;\n}\n\n::view-transition-new(.demo) {\n  animation-duration: 200ms;\n}\n::view-transition-group(*.card.big) { }\n::view-transition-old(root) { }\n.after::view-transition-image-pair(.pair) { }\n",
     );
     assert_eq!(named, vec!["foo".to_string(), "after".to_string()]);
+}
+
+#[test]
+fn sass_module_include_shorthand_is_not_a_class() {
+    let named = module_class_names(
+        "Component.module.sass",
+        "@use 'my-utils'\n.foo\n  +my-utils.mx\n  + my-utils.spaced\n  color: my-utils.fn()\n  &.active\n    color: red\n",
+    );
+    assert_eq!(named, vec!["foo".to_string(), "active".to_string()]);
+}
+
+#[test]
+fn scss_module_adjacent_sibling_class_stays_a_class() {
+    let named = module_class_names("Component.module.scss", "h1\n+p.intro { color: red; }\n");
+    assert_eq!(named, vec!["intro".to_string()]);
 }
