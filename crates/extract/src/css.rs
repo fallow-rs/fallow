@@ -18,6 +18,7 @@ use std::sync::LazyLock;
 use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
+use crate::css_mask::{mask_sass_module_members, mask_with_whitespace};
 use crate::css_module_classes::lightningcss_class_set;
 use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
 use fallow_types::discover::FileId;
@@ -719,29 +720,6 @@ pub fn scan_stylesheet_tokens(source: &str) -> StylesheetTokens {
     }
 }
 
-/// Mask every regex match in `src` with ASCII spaces (`0x20`) of equal byte
-/// length, so byte offsets in the returned string correspond 1:1 to byte
-/// offsets in the original.
-///
-/// Used to neutralise CSS comments, quoted strings, `url(...)`, and at-rule
-/// preludes before scanning for `.class` selectors, while preserving the
-/// original-source positions that callers need to populate `ExportInfo.span`
-/// (issue #549). The `regex` crate guarantees match boundaries respect UTF-8
-/// char boundaries, so the masked buffer is always valid UTF-8.
-fn mask_with_whitespace(src: &str, re: &regex::Regex) -> String {
-    let mut out = String::with_capacity(src.len());
-    let mut cursor = 0;
-    for m in re.find_iter(src) {
-        out.push_str(&src[cursor..m.start()]);
-        for _ in m.start()..m.end() {
-            out.push(' ');
-        }
-        cursor = m.end();
-    }
-    out.push_str(&src[cursor..]);
-    out
-}
-
 /// Extract class names from a CSS module file as named exports.
 ///
 /// For standard CSS, lightningcss parses the source into an AST and supplies the
@@ -794,6 +772,7 @@ fn mask_css_module_class_candidates(comment_masked: &str, has_class_filter: bool
     let mut masked = mask_with_whitespace(comment_masked, &CSS_NON_SELECTOR_RE);
     if !has_class_filter {
         masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
+        masked = mask_sass_module_members(&masked);
     }
     mask_css_module_global_scopes(masked)
 }

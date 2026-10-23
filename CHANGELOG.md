@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SCSS Modules no longer report Sass module members as unused classes.**
+  A namespaced function call such as `math.div(100px, 10)` or `utils.bar()`,
+  and a namespaced mixin such as `@include utils.baz`, gave a false
+  `unused-export` for `div`, `bar` and `baz`. The class scan now skips a
+  `.member` that follows a namespace and comes before `(`, and the mixin name
+  after `@include`. A compound selector such as `button.primary` still
+  exports `primary`. The extraction cache version changes, so the first run
+  after the upgrade parses each file again.
+  (Closes [#3839](https://github.com/fallow-rs/fallow/issues/3839))
+
 ## [3.35.0] - 2026-10-21
 
 ### Added

@@ -574,3 +574,38 @@ fn issue_540_nested_cascade_layers_do_not_export_sub_names() {
         .collect();
     assert_eq!(named, vec!["root", "pressed"], "phantom exports leaked");
 }
+
+fn scss_module_class_names(source: &str) -> Vec<String> {
+    parse_source_to_module(
+        FileId(0),
+        Path::new("Component.module.scss"),
+        source,
+        0,
+        false,
+    )
+    .exports
+    .iter()
+    .filter_map(|e| match &e.name {
+        ExportName::Named(n) => Some(n.clone()),
+        ExportName::Default => None,
+    })
+    .collect()
+}
+
+#[test]
+fn scss_module_namespaced_calls_are_not_classes() {
+    let named = scss_module_class_names(
+        "@use './utils';\n@use 'sass:math';\n\n.foo {\n  height: math.div(100px, 10);\n  background: utils.bar();\n  width: map.get($sizes, small);\n\n  @include utils.baz();\n  @include utils.qux;\n  @include my-lib.reset { color: red; }\n}\n",
+    );
+    assert_eq!(named, vec!["foo".to_string()]);
+}
+
+#[test]
+fn scss_module_compound_element_class_stays_a_class() {
+    let named = scss_module_class_names(
+        "button.primary { color: red; }\n.card { &.selected { color: blue; } }\ndiv.wide, a.link:hover { color: green; }\n",
+    );
+    for class in ["primary", "card", "selected", "wide", "link"] {
+        assert!(named.contains(&class.to_string()), "missing {class}");
+    }
+}

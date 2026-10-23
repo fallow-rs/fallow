@@ -27,6 +27,7 @@ pub(crate) mod cost;
 pub mod css;
 pub mod css_classes;
 pub mod css_in_js;
+mod css_mask;
 mod css_masked_bytes;
 pub mod css_metrics;
 mod css_module_classes;
