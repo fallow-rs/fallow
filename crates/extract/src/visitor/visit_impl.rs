@@ -5847,10 +5847,10 @@ fn unwrap_parens<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
 /// identifiers and static member chains (no call/new forms), so the catalogue
 /// matcher sees a clean dotted callee path. Returns `None` for dynamic dispatch,
 /// computed members, or aliased call forms (those count as blind spots).
-fn flatten_callee_path(expr: &Expression<'_>) -> Option<String> {
+fn flatten_callee_path(mut expr: &Expression<'_>) -> Option<String> {
     let mut properties = Vec::new();
-    let mut expr = expr;
     let root = loop {
+        crate::cost::walk_step();
         match unwrap_parens(expr) {
             Expression::Identifier(ident) => break ident.name.as_str(),
             Expression::StaticMemberExpression(member) => {

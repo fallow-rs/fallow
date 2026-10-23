@@ -985,6 +985,7 @@ fn jsx_member_path(member: &JSXMemberExpression<'_>) -> String {
     let mut properties = vec![member.property.name.as_str()];
     let mut object = &member.object;
     let root = loop {
+        crate::cost::walk_step();
         match object {
             JSXMemberExpressionObject::IdentifierReference(ident) => break ident.name.as_str(),
             JSXMemberExpressionObject::ThisExpression(_) => break "this",

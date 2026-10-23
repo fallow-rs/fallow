@@ -179,6 +179,7 @@ fn receiver_path(expression: &Expression<'_>) -> Option<(String, Span)> {
     let mut properties = Vec::new();
     let mut current = unwrap_static_expr(expression);
     let root = loop {
+        crate::cost::walk_step();
         if properties.len() > MAX_RECORDED_CHAIN_LINKS {
             return None;
         }

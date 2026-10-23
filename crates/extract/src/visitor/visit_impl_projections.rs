@@ -643,6 +643,7 @@ impl ModuleInfoExtractor {
         if links > MAX_RECORDED_CHAIN_LINKS {
             return None;
         }
+        crate::cost::walk_step();
         match unwrap_static_expr(expression) {
             Expression::Identifier(identifier) => {
                 let (value, entry) = self.direct_binding_value(identifier.name.as_str())?;

@@ -106,6 +106,15 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   that does not return `this`. A fact for each call would hold the steps before
   it, which is quadratic in the chain length. A cap would drop the credit for
   the steps past it.
+- `crates/extract/src/tests/linear_cost.rs` extracts each chain shape at 1000
+  and 4000 links and checks that the work grows by at most 5 times. Linear
+  work grows by 4 times and quadratic work by 16 times. The test reads two
+  meters from `crates/extract/src/cost.rs`: the bytes that the test allocator
+  gives to the thread, and the calls to `cost::walk_step`. A loop that walks a
+  chain, or that scans a list that grows with a chain, must call
+  `cost::walk_step` once for each step. A walk that does not allocate and does
+  not call it is not visible to the test. Add a shape for each new chain
+  context.
 - Bind framework heuristics to imported symbols or other provenance. A local
   function with the same name must not activate library-specific behavior.
 - Avoid filesystem and graph policy inside AST visitors.

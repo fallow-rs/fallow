@@ -23,6 +23,7 @@ pub mod cache;
 pub(crate) mod complexity;
 mod complexity_names;
 mod component_contracts;
+pub(crate) mod cost;
 pub mod css;
 pub mod css_classes;
 pub mod css_in_js;

@@ -514,6 +514,7 @@ fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
     let mut properties = Vec::new();
     let mut expr = expr;
     let root = loop {
+        crate::cost::walk_step();
         match unwrap_static_expr(expr) {
             Expression::Identifier(id) => break id.name.as_str(),
             Expression::StaticMemberExpression(member) => {

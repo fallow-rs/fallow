@@ -5,6 +5,7 @@ mod deep_shapes;
 mod effect;
 mod graphql;
 mod js_ts;
+mod linear_cost;
 mod mdx;
 mod nesting;
 mod regex_compile;

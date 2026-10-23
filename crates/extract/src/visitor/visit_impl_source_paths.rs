@@ -19,6 +19,7 @@ pub(super) fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
     let mut properties = Vec::new();
     let mut expr = expr;
     let root = loop {
+        crate::cost::walk_step();
         if properties.len() > MAX_RECORDED_CHAIN_LINKS {
             return None;
         }
@@ -83,7 +84,10 @@ fn tainted_source_path(expr: &Expression<'_>) -> Option<String> {
 }
 
 pub(super) fn push_unique_string(out: &mut Vec<String>, value: String) {
-    if !out.iter().any(|existing| existing == &value) {
+    if !out.iter().any(|existing| {
+        crate::cost::walk_step();
+        existing == &value
+    }) {
         out.push(value);
     }
 }
@@ -135,6 +139,7 @@ fn collect_binding_source_path_candidates(expr: &Expression<'_>, out: &mut Uniqu
     // each layer of `await await ... x` is quadratic.
     let mut expr = expr;
     loop {
+        crate::cost::walk_step();
         expr = match expr {
             Expression::ParenthesizedExpression(paren) => &paren.expression,
             Expression::TSAsExpression(ts_as) => &ts_as.expression,

@@ -1237,6 +1237,7 @@ fn collect_object_pattern_bindings(
 pub(super) fn playwright_test_callee_name(expr: &Expression<'_>) -> Option<String> {
     let mut current = expr;
     for _ in 0..=MAX_RECORDED_CHAIN_LINKS {
+        crate::cost::walk_step();
         match current {
             Expression::Identifier(ident) => return Some(ident.name.to_string()),
             Expression::StaticMemberExpression(member) => current = &member.object,

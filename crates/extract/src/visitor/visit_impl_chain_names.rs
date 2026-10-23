@@ -36,6 +36,7 @@ pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String>
     let mut links = Vec::new();
     let mut current = expr;
     let root = loop {
+        crate::cost::walk_step();
         if links.len() > MAX_RECORDED_CHAIN_LINKS {
             return None;
         }
@@ -114,6 +115,7 @@ pub(in crate::visitor) fn jsx_member_object_name(
     let mut properties = Vec::new();
     let mut object = object;
     let root = loop {
+        crate::cost::walk_step();
         if properties.len() > MAX_RECORDED_CHAIN_LINKS {
             return None;
         }
@@ -152,6 +154,7 @@ impl ModuleInfoExtractor {
         let mut methods_outermost_first = vec![member.property.name.as_str()];
         let mut current = &member.object;
         let root = loop {
+            crate::cost::walk_step();
             let Expression::CallExpression(call) = current else {
                 break None;
             };

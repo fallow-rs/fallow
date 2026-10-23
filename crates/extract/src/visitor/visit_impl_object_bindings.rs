@@ -2145,10 +2145,10 @@ impl ModuleInfoExtractor {
     }
 }
 
-fn direct_object_binding_expression_path(expression: &Expression<'_>) -> Option<String> {
+fn direct_object_binding_expression_path(mut expression: &Expression<'_>) -> Option<String> {
     let mut properties = Vec::new();
-    let mut expression = expression;
     let root = loop {
+        crate::cost::walk_step();
         expression = match expression {
             Expression::Identifier(identifier) => break identifier.name.as_str(),
             Expression::StaticMemberExpression(member) => {
