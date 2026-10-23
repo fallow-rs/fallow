@@ -36,7 +36,7 @@ oxc_semantic = "0.155"
 oxc_span = "0.155"
 oxc_str = "0.155"
 oxc_syntax = "0.155"
-oxc_coverage_instrument = "0.16.0"
+oxc_coverage_instrument = "0.17.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
 # brittle. Used by fallow-extract for CSS class/import extraction and analytics.
@@ -321,6 +321,3 @@ opt-level = "z"
 opt-level = "z"
 [profile.release.package.tracing-subscriber]
 opt-level = "z"
-
-[patch.crates-io]
-oxc_coverage_instrument = { path = "/private/tmp/claude-501/-Users-bartwaardenburg-Sites-fallow-2--claude-worktrees-twitter-bookmarks-fallow-1c300a/96b91b23-2b6c-462a-a500-0b494763a84d/scratchpad/instrument/crates/oxc_coverage_instrument" }
