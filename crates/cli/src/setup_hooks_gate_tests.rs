@@ -610,6 +610,82 @@ fn gate_block_message_removes_control_characters() {
     );
 }
 
+/// Some finding types have no `path` key. The shapes below come from real
+/// `fallow audit --format json` output. The message lists each of them with
+/// the location of its first site, under both gate modes.
+#[test]
+fn gate_block_message_lists_findings_without_a_path_key() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    let findings = serde_json::json!({
+        "unresolved_imports": [{
+            "finding_id": "dc1:unresolved-import:1", "path": "src/index.ts",
+            "specifier": "./nope", "line": 2, "col": 14
+        }],
+        "unlisted_dependencies": [{
+            "finding_id": "dc1:unlisted-dependency:1", "package_name": "missing-pkg",
+            "imported_from": [{ "path": "src/index.ts", "line": 1, "col": 0 }]
+        }],
+        "boundary_violations": [{
+            "finding_id": "dc1:boundary-violation:1",
+            "from_path": "src/ui/w.ts", "to_path": "src/db/q.ts", "from_zone": "ui",
+            "to_zone": "db", "import_specifier": "src/db/q.ts", "line": 1, "col": 9
+        }],
+        "duplicate_exports": [{
+            "finding_id": "dc1:duplicate-export:1", "export_name": "dup",
+            "locations": [
+                { "path": "src/a.ts", "line": 3, "col": 0 },
+                { "path": "src/b.ts", "line": 4, "col": 0 }
+            ]
+        }],
+        "prop_drilling_chains": [{
+            "finding_id": "dc1:prop-drilling:1", "prop": "user", "depth": 3,
+            "hops": [{ "file": "src/App.tsx", "line": 5, "component": "App" }]
+        }],
+        "thin_wrappers": [{
+            "finding_id": "dc1:thin-wrapper:1", "component": "Wrap", "file": "src/Wrap.tsx", "line": 8 }]
+    });
+    let expected = "verdict fail, 6 finding(s) caused the block:\n  \
+                    unresolved-import src/index.ts:2 ./nope\n  \
+                    unlisted-dependency src/index.ts:1 missing-pkg\n  \
+                    boundary-violation src/ui/w.ts:1 src/db/q.ts\n  \
+                    duplicate-export src/a.ts:3 dup\n  \
+                    prop-drilling src/App.tsx:5\n  \
+                    thin-wrapper src/Wrap.tsx:8\n";
+    for gate_mode in ["new-only", "all"] {
+        let mut dead_code = findings.clone();
+        for list in dead_code.as_object_mut().unwrap().values_mut() {
+            for finding in list.as_array_mut().unwrap() {
+                let finding = finding.as_object_mut().unwrap();
+                finding.insert("actions".into(), serde_json::json!([]));
+                finding.insert("effective_severity".into(), "error".into());
+                if gate_mode == "new-only" {
+                    finding.insert("introduced".into(), true.into());
+                }
+            }
+        }
+        let report = serde_json::json!({
+            "verdict": "fail",
+            "attribution": { "gate": gate_mode },
+            "dead_code": dead_code
+        });
+        std::fs::write(repo.join(STUB_REPORT_FILE), report.to_string()).unwrap();
+
+        let run = run_gate(&gate, &repo, &root.join("home"), &commit_payload(&repo));
+        let stderr = String::from_utf8_lossy(&run.output.stderr);
+        assert_eq!(run.output.status.code(), Some(2), "stderr={stderr}");
+        assert!(
+            stderr.contains(expected),
+            "gate={gate_mode} stderr={stderr}"
+        );
+    }
+}
+
 /// Under `gate = "all"` no finding carries `introduced`, so the message lists
 /// every finding that is not a warning. A long list stops at 50 lines.
 #[test]

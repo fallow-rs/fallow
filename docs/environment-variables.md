@@ -132,6 +132,17 @@ root, so the two runs can replace the graph cache of each other.
 | `FALLOW_INTEGRATION_SURFACE` | Telemetry `integration_surface` override for non-CLI surfaces (`mcp`/`lsp`/`vscode`/`napi`/`programmatic`). Set by the MCP server on the CLI it spawns. | auto-derived | `FALLOW_INTEGRATION_SURFACE=mcp` |
 | `FALLOW_MCP_TOOL` | Telemetry `mcp_tool` dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside `FALLOW_INTEGRATION_SURFACE=mcp`. | unset | `FALLOW_MCP_TOOL=check_health` |
 
+## Agent gate
+
+The agent gate script that `fallow agent install` writes reads these variables. The fallow binary does not read them. See [backwards-compatibility.md](backwards-compatibility.md).
+
+| Variable | Description | Default | Example |
+| --- | --- | --- | --- |
+| `FALLOW_GATE_REPORT` | Path of the full JSON report that the gate writes on a block. A relative path resolves against the audited tree. | `.fallow/gate-report.json` | `FALLOW_GATE_REPORT=/tmp/gate.json` |
+| `FALLOW_GATE_OUTPUT` | Set to `json` to print the full JSON report on stderr instead of the compact block message. | unset (compact message) | `FALLOW_GATE_OUTPUT=json` |
+| `FALLOW_GATE_MIN_VERSION` | Lowest fallow version that the gate accepts. Set it to the empty string to disable the check. | `2.85.0` | `FALLOW_GATE_MIN_VERSION=` |
+| `FALLOW_GATE_DEBUG` | Set to a non-empty value to log each command that the gate skips because it is not a git commit or push. | unset (off) | `FALLOW_GATE_DEBUG=1` |
+
 ## Editor
 
 | Variable | Description | Default | Example |
@@ -151,4 +162,4 @@ Telemetry is opt-in and off by default. See [telemetry.md](telemetry.md) for the
 
 ## Internal markers
 
-Fallow sets the following variables itself (telemetry sentinels, error markers, test/probe gates, and bundled-CI plumbing); they are not user knobs and you should not set them: `FALLOW_GITLAB_BASE_SHA`, `FALLOW_GITLAB_START_SHA`, `FALLOW_GITLAB_HEAD_SHA`, `FALLOW_COMMENT_ID`, `FALLOW_DIFF_FILTER` (set by the bundled Action/CI scripts), `FALLOW_PR_COMMENT_ENVELOPE_FILE`, `FALLOW_PR_DECISION_FILE`, `FALLOW_PR_DETAILS_FILE`, `FALLOW_GATE_MIN_VERSION`, `FALLOW_GATE_DEBUG`, `FALLOW_GATE_REPORT` and `FALLOW_GATE_OUTPUT` (consumed by the generated agent gate script, not the fallow binary; see [backwards-compatibility.md](backwards-compatibility.md)), `FALLOW_GATE_SCRIPT`, `FALLOW_GATE_POSIX_SUFFIX`, `FALLOW_GATE_WINDOWS_SUFFIX`, `FALLOW_MUTUALLY_EXCLUSIVE_SCOPE`, `FALLOW_NODE_ERROR`, `FALLOW_CONFIG_LOAD_FAILED`, `FALLOW_CWD_UNAVAILABLE`, `FALLOW_CHANGED_FILES_FAILED`, `FALLOW_CHANGED_WORKSPACES_FAILED`, `FALLOW_DEAD_CODE_FAILED`, `FALLOW_THREAD_POOL_INIT_FAILED`, `FALLOW_INVALID_CONFIG_PATH`, `FALLOW_INVALID_COVERAGE_PATH`, `FALLOW_INVALID_COVERAGE_ROOT`, `FALLOW_INVALID_DIFF_FILE`, `FALLOW_INVALID_ROOT`, `FALLOW_INVALID_THREADS`, `FALLOW_INVALID_WORKSPACE_PATTERN`, `FALLOW_WORKSPACE_PATTERN_UNMATCHED`, `FALLOW_WORKSPACE_SCOPE_EMPTY`, `FALLOW_WORKSPACES_NOT_FOUND`, `FALLOW_GENERIC_ATTR_PROBE`, `FALLOW_DUPES_ROLLING`, `FALLOW_OUTPUT_VARIANTS`, `FALLOW_STUB_MODE`, `FALLOW_TEST_SIGNAL_HELPER`, `FALLOW_MUTATION_E2E_REQUIRED` (see [quality-gates.md](development/quality-gates.md)), `FALLOW_RAYON_STACK_PROBE_CHILD`, and `FALLOW_PROGRAMMATIC_SHARED_DIFF_CHILD`.
+Fallow sets the following variables itself (telemetry sentinels, error markers, test/probe gates, and bundled-CI plumbing); they are not user knobs and you should not set them: `FALLOW_GITLAB_BASE_SHA`, `FALLOW_GITLAB_START_SHA`, `FALLOW_GITLAB_HEAD_SHA`, `FALLOW_COMMENT_ID`, `FALLOW_DIFF_FILTER` (set by the bundled Action/CI scripts), `FALLOW_PR_COMMENT_ENVELOPE_FILE`, `FALLOW_PR_DECISION_FILE`, `FALLOW_PR_DETAILS_FILE`, `FALLOW_GATE_SCRIPT`, `FALLOW_GATE_POSIX_SUFFIX`, `FALLOW_GATE_WINDOWS_SUFFIX`, `FALLOW_MUTUALLY_EXCLUSIVE_SCOPE`, `FALLOW_NODE_ERROR`, `FALLOW_CONFIG_LOAD_FAILED`, `FALLOW_CWD_UNAVAILABLE`, `FALLOW_CHANGED_FILES_FAILED`, `FALLOW_CHANGED_WORKSPACES_FAILED`, `FALLOW_DEAD_CODE_FAILED`, `FALLOW_THREAD_POOL_INIT_FAILED`, `FALLOW_INVALID_CONFIG_PATH`, `FALLOW_INVALID_COVERAGE_PATH`, `FALLOW_INVALID_COVERAGE_ROOT`, `FALLOW_INVALID_DIFF_FILE`, `FALLOW_INVALID_ROOT`, `FALLOW_INVALID_THREADS`, `FALLOW_INVALID_WORKSPACE_PATTERN`, `FALLOW_WORKSPACE_PATTERN_UNMATCHED`, `FALLOW_WORKSPACE_SCOPE_EMPTY`, `FALLOW_WORKSPACES_NOT_FOUND`, `FALLOW_GENERIC_ATTR_PROBE`, `FALLOW_DUPES_ROLLING`, `FALLOW_OUTPUT_VARIANTS`, `FALLOW_STUB_MODE`, `FALLOW_TEST_SIGNAL_HELPER`, `FALLOW_MUTATION_E2E_REQUIRED` (see [quality-gates.md](development/quality-gates.md)), `FALLOW_RAYON_STACK_PROBE_CHILD`, and `FALLOW_PROGRAMMATIC_SHARED_DIFF_CHILD`.

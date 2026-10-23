@@ -516,13 +516,22 @@ fi
 # shellcheck disable=SC2016 # The jq program uses its own $variables.
 GATE_FINDINGS_JQ='
 def warning: (.effective_severity // .severity // "") as $s | $s == "warn" or $s == "off";
+# Some finding types have no `path`, for example an unlisted dependency
+# (`imported_from`) or a boundary violation (`from_path`). The `introduced` key
+# and the location keys below make sure that the gate counts them.
 def finding: type == "object" and (.actions | type) == "array"
-  and (has("path") or has("files") or has("instances") or has("package_roots"));
-def location: .path // (.files // [])[0] // ((.instances // [])[0] // {}).file
+  and (has("introduced") or has("path") or has("from_path") or has("file")
+    or has("files") or has("instances") or has("locations")
+    or has("imported_from") or has("hops") or has("package_roots"));
+def lead($key): (.[$key] // [])[0] // {};
+def location: .path // .from_path // .file // (.files // [])[0]
+  // lead("instances").file // lead("locations").path
+  // lead("imported_from").path // lead("hops").file
   // (.package_roots // [])[0] // "?";
-def line: .line // ((.instances // [])[0] // {}).start_line;
+def line: .line // lead("instances").start_line // lead("locations").line
+  // lead("imported_from").line // lead("hops").line;
 def detail: .export_name // .package_name // .member_name // .entry_name // .name
-  // .url // .value // .message // "";
+  // .specifier // .import_specifier // .url // .value // .message // "";
 # The report holds names and paths from the audited tree. A control character
 # (C0, DEL, C1) or a Unicode line or paragraph separator in one of them could
 # split a line or send a terminal escape sequence, so each becomes a space.
