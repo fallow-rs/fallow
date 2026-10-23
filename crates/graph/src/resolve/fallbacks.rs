@@ -1778,29 +1778,6 @@ mod tests {
     }
 
     #[test]
-    fn package_map_targets_use_first_reachable_target() {
-        let root = PathBuf::from("/project");
-        let src_path = root.join("src/feature.ts");
-        let targets = vec![
-            "./dist/missing.js".to_string(),
-            "./src/feature.ts".to_string(),
-        ];
-
-        with_package_map_ctx(
-            root,
-            Some("pkg"),
-            fallow_config::PackageJson::default(),
-            &[(src_path, FileId(9))],
-            |ctx, manifest, _| {
-                assert_eq!(
-                    resolve_package_map_targets(ctx, manifest, &targets, None),
-                    Some(FileId(9))
-                );
-            },
-        );
-    }
-
-    #[test]
     fn package_map_lib_target_maps_to_source_when_absent() {
         let root = PathBuf::from("/project/packages/uses-lib");
         let feature = root.join("src/features/feature.ts");
@@ -1839,25 +1816,6 @@ mod tests {
                 assert_eq!(
                     resolve_package_map_target(ctx, manifest, "./lib/index.js", None),
                     Some(FileId(1))
-                );
-            },
-        );
-    }
-
-    #[test]
-    fn package_map_lib_mapping_ignores_lib_above_package_root() {
-        let root = PathBuf::from("/project/packages/lib");
-        let outer_src = PathBuf::from("/project/packages/src/index.ts");
-
-        with_package_map_ctx(
-            root,
-            Some("pkg"),
-            fallow_config::PackageJson::default(),
-            &[(outer_src, FileId(5))],
-            |ctx, manifest, _| {
-                assert_eq!(
-                    resolve_package_map_target(ctx, manifest, "./index.js", None),
-                    None
                 );
             },
         );

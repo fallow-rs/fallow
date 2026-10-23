@@ -73,3 +73,57 @@ pub(in crate::resolve) fn try_tsconfig_output_source(
     };
     lookup_internal_file_id(ctx, &source)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use fallow_types::discover::FileId;
+
+    use super::super::tests::with_package_map_ctx;
+    use super::super::{resolve_package_map_target, resolve_package_map_targets};
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn package_map_targets_use_first_reachable_target() {
+        let root = PathBuf::from("/project");
+        let src_path = root.join("src/feature.ts");
+        let targets = vec![
+            "./dist/missing.js".to_string(),
+            "./src/feature.ts".to_string(),
+        ];
+
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[(src_path, FileId(9))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_targets(ctx, manifest, &targets, None),
+                    Some(FileId(9))
+                );
+            },
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn package_map_lib_mapping_ignores_lib_above_package_root() {
+        let root = PathBuf::from("/project/packages/lib");
+        let outer_src = PathBuf::from("/project/packages/src/index.ts");
+
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[(outer_src, FileId(5))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_target(ctx, manifest, "./index.js", None),
+                    None
+                );
+            },
+        );
+    }
+}
