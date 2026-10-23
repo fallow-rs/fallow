@@ -3,7 +3,10 @@
 - **Fallow now parses with Oxc 0.155 and converts coverage with `oxc_coverage_instrument` 0.17.0.**
   A short TypeScript input that made the parser use seconds of time and
   gigabytes of memory (oxc-project/oxc#27637) now stops at its syntax error at
-  once. Analysis output for real projects does not change.
+  once. Analysis output for real projects does not change. A string with a
+  lone surrogate now keeps it as `\uXXXX`, so the extraction, graph and
+  duplication caches get a new version and the first run after the upgrade
+  is cold.
 
 ### Fixed
 
