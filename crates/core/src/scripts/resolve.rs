@@ -206,24 +206,29 @@ pub fn all_dependency_names(manifests: &[&fallow_config::PackageJson]) -> Vec<St
 /// `"@typescript/native": "npm:typescript@7"` declares only the alias, so the
 /// alias is the dependency in use.
 ///
-/// When `declared` also holds the aliased package under its own name, and
-/// that name is not itself an alias, the plain declaration provides the
-/// binary and the alias gets no credit. This keeps a side-by-side alias such
-/// as `"typescript-5": "npm:typescript@5"` reportable.
-pub fn credit_npm_aliases(
-    used: &mut FxHashSet<String>,
-    manifests: &[&fallow_config::PackageJson],
-    declared: &FxHashSet<String>,
-) {
-    let aliases: Vec<(String, String)> =
-        manifests.iter().flat_map(|pkg| pkg.npm_aliases()).collect();
-    let is_alias = |name: &str| aliases.iter().any(|(alias, _)| alias == name);
-    let credited: Vec<String> = aliases
-        .iter()
-        .filter(|(_, target)| used.contains(target))
-        .filter(|(_, target)| !declared.contains(target) || is_alias(target))
-        .map(|(alias, _)| alias.clone())
-        .collect();
+/// When the manifest that declares the alias also declares the aliased
+/// package under its own name, and that name is not itself an alias, the
+/// plain declaration provides the binary and the alias gets no credit. This
+/// keeps a side-by-side alias such as `"typescript-5": "npm:typescript@5"`
+/// reportable. A plain declaration in another workspace does not block the
+/// credit, because that workspace does not install the binary for the alias.
+pub fn credit_npm_aliases(used: &mut FxHashSet<String>, manifests: &[&fallow_config::PackageJson]) {
+    let mut credited: Vec<String> = Vec::new();
+    for pkg in manifests {
+        let aliases = pkg.npm_aliases();
+        if aliases.is_empty() {
+            continue;
+        }
+        let declared: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
+        let is_alias = |name: &str| aliases.iter().any(|(alias, _)| alias == name);
+        credited.extend(
+            aliases
+                .iter()
+                .filter(|(_, target)| used.contains(target))
+                .filter(|(_, target)| !declared.contains(target) || is_alias(target))
+                .map(|(alias, _)| alias.clone()),
+        );
+    }
     used.extend(credited);
 }
 
@@ -528,10 +533,20 @@ mod tests {
 
     fn credit(used: &[&str], dev_dependencies: &str) -> FxHashSet<String> {
         let pkg = workspace_package(&format!(r#"{{"devDependencies": {dev_dependencies}}}"#));
-        let names: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
         let mut used = declared(used);
-        credit_npm_aliases(&mut used, &[&pkg], &names);
+        credit_npm_aliases(&mut used, &[&pkg]);
         used
+    }
+
+    #[test]
+    fn npm_alias_is_credited_when_another_manifest_declares_the_target_plainly() {
+        let root = workspace_package(r#"{"devDependencies": {"typescript": "^5.0.0"}}"#);
+        let ws = workspace_package(
+            r#"{"devDependencies": {"@typescript/native": "npm:typescript@~7.0.2"}}"#,
+        );
+        let mut used = declared(&["typescript"]);
+        credit_npm_aliases(&mut used, &[&root, &ws]);
+        assert_eq!(used, declared(&["typescript", "@typescript/native"]));
     }
 
     #[test]

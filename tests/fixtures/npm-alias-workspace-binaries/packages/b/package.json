@@ -1,0 +1,12 @@
+{
+  "name": "b",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@typescript/native": "npm:typescript@~7.0.2"
+  }
+}

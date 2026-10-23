@@ -25,3 +25,21 @@ fn script_binary_credits_the_npm_alias_that_installs_it() {
         "a script binary credits the npm alias of the package that provides it"
     );
 }
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn plain_declaration_in_another_workspace_keeps_the_alias_credit() {
+    let root = fixture_path("npm-alias-workspace-binaries");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused.contains(&"@typescript/native"),
+        "a plain declaration in another workspace must not block the alias credit, got {unused:?}"
+    );
+}
