@@ -275,6 +275,7 @@ mod tests {
                     line: 7,
                     col: 0,
                     cyclomatic: 22,
+                    standard_cyclomatic: None,
                     cognitive: 18,
                     line_count: 40,
                     param_count: 1,

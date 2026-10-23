@@ -39,7 +39,8 @@ pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use glob_validation::compile_path_glob;
 pub use health::{
-    ChangeCouplingConfig, EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig,
+    ChangeCouplingConfig, CyclomaticPolicy, EmailMode, HealthConfig, HealthThresholdOverride,
+    OwnershipConfig,
 };
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
 pub use legacy_glob::{

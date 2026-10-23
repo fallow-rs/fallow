@@ -3373,6 +3373,17 @@
           "type": "integer",
           "description": "Global cyclomatic-complexity ceiling for this run."
         },
+        "cyclomatic_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CyclomaticPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cyclomatic policy of the gates (`health.cyclomaticPolicy`). Absent\nunder the default `standard` policy."
+        },
         "max_cognitive_threshold": {
           "type": "integer",
           "description": "Global cognitive-complexity ceiling for this run."
@@ -3519,7 +3530,14 @@
         },
         "cyclomatic": {
           "type": "integer",
-          "description": "Cyclomatic complexity of the function."
+          "description": "Cyclomatic complexity of the function, as the cyclomatic gate and the\nCRAP score read it. Under the `literal-membership` value of\n`health.cyclomaticPolicy`, this is the value after literal membership\nchains count as one predicate."
+        },
+        "standard_cyclomatic": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Standard `McCabe` cyclomatic complexity, present only when the\n`health.cyclomaticPolicy` value gave `cyclomatic` a different value."
         },
         "cognitive": {
           "type": "integer",
@@ -12184,7 +12202,14 @@
         },
         "cyclomatic": {
           "type": "integer",
-          "description": "Cyclomatic complexity of the function."
+          "description": "Cyclomatic complexity of the function, as the cyclomatic gate and the\nCRAP score read it. Under the `literal-membership` value of\n`health.cyclomaticPolicy`, this is the value after literal membership\nchains count as one predicate."
+        },
+        "standard_cyclomatic": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Standard `McCabe` cyclomatic complexity, present only when the\n`health.cyclomaticPolicy` value gave `cyclomatic` a different value."
         },
         "cognitive": {
           "type": "integer",
@@ -14870,6 +14895,10 @@
         "nesting": {
           "type": "integer",
           "description": "The nesting depth at the increment site (`0` when not nested). Lets a\nconsumer explain a cognitive `+3` as \"+1 base, +2 nesting\"."
+        },
+        "literal_membership": {
+          "type": "boolean",
+          "description": "This cyclomatic `||` increment is part of a literal membership chain:\nstrict equality checks of one identifier against primitive literals\n(`kind === \"a\" || kind === \"b\"`). The `literal-membership` value of\n`health.cyclomaticPolicy` removes these increments from the effective\ncyclomatic value. Omitted when `false`, and always `false` under the\ndefault `standard` policy."
         }
       },
       "required": [
@@ -34591,6 +34620,21 @@
         }
       ],
       "description": "Why a file counts for the `parse-error` gate, other than a parser error."
+    },
+    "CyclomaticPolicy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "standard",
+          "description": "Count every decision point, `&&`, `||`, and `??` operator (`McCabe`)."
+        },
+        {
+          "type": "string",
+          "const": "literal-membership",
+          "description": "Count a literal membership chain as one predicate. A chain such as\n`kind === \"a\" || kind === \"b\" || kind === \"c\"` adds no cyclomatic\nincrements for its `||` operators. Only strict equality checks of one\nidentifier against string, number, bigint, boolean, or `null` literals\nqualify. Member access, calls, mixed operators, and different operands\nkeep the standard count."
+        }
+      ],
+      "description": "How `fallow health` counts cyclomatic complexity for its gates.\n\nThe policy changes the cyclomatic value that the `maxCyclomatic` gate reads\nand the cyclomatic value in every CRAP score. It does not change the health\nscore, the complexity density, or the hotspot ranking: those keep the\nstandard count so that grades stay comparable across projects."
     }
   }
 }

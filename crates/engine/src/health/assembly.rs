@@ -434,6 +434,7 @@ fn build_health_summary(
         functions_analyzed: input.total_functions,
         functions_above_threshold: input.total_above_threshold,
         max_cyclomatic_threshold: input.max_cyclomatic,
+        cyclomatic_policy: None,
         max_cognitive_threshold: input.max_cognitive,
         max_crap_threshold: input.max_crap,
         max_unit_size_threshold: input.max_unit_size,

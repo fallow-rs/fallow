@@ -608,6 +608,7 @@ mod tests {
             line,
             col: 0,
             cyclomatic,
+            standard_cyclomatic: None,
             cognitive,
             line_count: 30,
             param_count: 1,

@@ -457,8 +457,9 @@ fn compute_crap_scores_istanbul(
             continue;
         }
         total += 1;
+        let cc = f64::from(ceilings.resolver.gate_cyclomatic(f));
         let (crap, coverage_pct, tier, source) =
-            crap_for_function(f, file_coverage, is_test_reachable, &mut matched);
+            crap_for_function(f, cc, file_coverage, is_test_reachable, &mut matched);
         let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
         ceilings.observe(f, crap_rounded, &mut signals);
@@ -489,6 +490,7 @@ fn compute_crap_scores_istanbul(
 )]
 fn crap_for_function(
     f: &fallow_types::extract::FunctionComplexity,
+    cc: f64,
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
     matched: &mut usize,
@@ -498,7 +500,6 @@ fn crap_for_function(
     fallow_output::CoverageTier,
     fallow_output::CoverageSource,
 ) {
-    let cc = f64::from(f.cyclomatic);
     let lookup = file_coverage.and_then(|fc| fc.lookup_function(f));
     if let Some(cov_pct) = lookup {
         *matched += 1;
@@ -546,7 +547,6 @@ const MAX_DIRECT_CALLER_EVIDENCE: usize = 5;
 /// - File is not test-reachable at all: 0%
 ///
 /// Applies the canonical CRAP formula with these estimates.
-/// Returns `(max_crap, count_above_threshold)`.
 /// Estimated CRAP result: score aggregates plus per-function data.
 #[derive(Debug)]
 struct EstimatedCrapResult {
@@ -583,7 +583,7 @@ fn compute_crap_scores_estimated(
         {
             continue;
         }
-        let cc = f64::from(f.cyclomatic);
+        let cc = f64::from(ceilings.resolver.gate_cyclomatic(f));
         // A context name is not an export name, also when it repeats the name
         // of the export that returns the function (`const load = () =>
         // Effect.gen(...)`), so the lookup uses the identity name.

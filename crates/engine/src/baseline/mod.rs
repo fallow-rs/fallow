@@ -4767,17 +4767,7 @@ mod tests {
             react_hook_profile: None,
             exceeded,
             severity,
-            effective_severity: None,
-            crap: None,
-            mutation: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         }
     }
 

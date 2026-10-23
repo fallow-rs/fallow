@@ -1269,6 +1269,10 @@
           "maximum": 65535,
           "default": 20
         },
+        "cyclomaticPolicy": {
+          "description": "How the cyclomatic gate counts complexity (default: `standard`).\n`literal-membership` counts a chain of strict equality checks of one\nidentifier against primitive literals (`kind === \"a\" || kind === \"b\"`)\nas one predicate. The policy applies to the `maxCyclomatic` gate and\nto every CRAP score, so the `maxCrap` gate reads the same value.\nFindings then report the standard value as `standard_cyclomatic`. The\nhealth score, complexity density, and hotspots keep the standard\ncount. Older fallow versions reject this key as unknown, so pair it\nwith `minimumVersion`.",
+          "$ref": "#/$defs/CyclomaticPolicy"
+        },
         "maxCognitive": {
           "description": "Maximum allowed cognitive complexity per function (default: 15).\nFunctions exceeding this threshold are reported. Governs findings\nonly, never the health score.",
           "type": "integer",
@@ -1361,6 +1365,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "CyclomaticPolicy": {
+      "description": "How `fallow health` counts cyclomatic complexity for its gates.\n\nThe policy changes the cyclomatic value that the `maxCyclomatic` gate reads\nand the cyclomatic value in every CRAP score. It does not change the health\nscore, the complexity density, or the hotspot ranking: those keep the\nstandard count so that grades stay comparable across projects.",
+      "oneOf": [
+        {
+          "description": "Count every decision point, `&&`, `||`, and `??` operator (`McCabe`).",
+          "type": "string",
+          "const": "standard"
+        },
+        {
+          "description": "Count a literal membership chain as one predicate. A chain such as\n`kind === \"a\" || kind === \"b\" || kind === \"c\"` adds no cyclomatic\nincrements for its `||` operators. Only strict equality checks of one\nidentifier against string, number, bigint, boolean, or `null` literals\nqualify. Member access, calls, mixed operators, and different operands\nkeep the standard count.",
+          "type": "string",
+          "const": "literal-membership"
+        }
+      ]
     },
     "HealthThresholdOverride": {
       "description": "Per-file or per-function health threshold override.",

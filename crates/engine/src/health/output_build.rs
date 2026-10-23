@@ -192,7 +192,8 @@ pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
         analysis_data.framework_health_facts,
     );
 
-    let report = build_health_report_from_pipeline(
+    let cyclomatic_policy = build.config.health.cyclomatic_policy;
+    let mut report = build_health_report_from_pipeline(
         opts,
         &action_ctx,
         build_health_report_pipeline_input(
@@ -204,6 +205,8 @@ pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
             framework_health,
         ),
     );
+    report.summary.cyclomatic_policy =
+        (!cyclomatic_policy.is_standard()).then_some(cyclomatic_policy);
 
     Ok(HealthOutputParts {
         report,

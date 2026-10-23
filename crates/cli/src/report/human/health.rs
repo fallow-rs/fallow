@@ -3230,16 +3230,7 @@ mod tests {
                     exceeded: fallow_output::ExceededThreshold::Both,
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
-                    crap: None,
-                    mutation: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -3283,16 +3274,7 @@ mod tests {
                     exceeded: fallow_output::ExceededThreshold::Cognitive,
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::Moderate,
-                    crap: None,
-                    mutation: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -3334,15 +3316,7 @@ mod tests {
             effective_severity: None,
             severity: fallow_output::FindingSeverity::High,
             crap: Some(90.0),
-            mutation: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         }
     }
 
@@ -3788,16 +3762,7 @@ mod tests {
                     exceeded: fallow_output::ExceededThreshold::Both,
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
-                    crap: None,
-                    mutation: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -3840,11 +3805,7 @@ mod tests {
                     coverage_pct: None,
                     coverage_tier: Some(fallow_output::CoverageTier::None),
                     coverage_source: Some(fallow_output::CoverageSource::Estimated),
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -3853,7 +3814,6 @@ mod tests {
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
                 coverage_model: Some(fallow_output::CoverageModel::StaticEstimated),
-                coverage_source_consistency: None,
                 ..Default::default()
             },
             ..Default::default()
@@ -3889,11 +3849,7 @@ mod tests {
                     coverage_pct: Some(40.0),
                     coverage_tier: Some(fallow_output::CoverageTier::Partial),
                     coverage_source: Some(fallow_output::CoverageSource::Istanbul),
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -3968,11 +3924,7 @@ mod tests {
                     coverage_pct: None,
                     coverage_tier: Some(fallow_output::CoverageTier::None),
                     coverage_source: Some(fallow_output::CoverageSource::Estimated),
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -4018,16 +3970,7 @@ mod tests {
                     exceeded: fallow_output::ExceededThreshold::Both,
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
-                    crap: None,
-                    mutation: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
                 fallow_output::ComplexityViolation {
@@ -4046,16 +3989,7 @@ mod tests {
                     exceeded: fallow_output::ExceededThreshold::Both,
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
-                    crap: None,
-                    mutation: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -5935,16 +5869,7 @@ mod tests {
                 exceeded: fallow_output::ExceededThreshold::Both,
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
-                crap: None,
-                mutation: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-                contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                ..Default::default()
             }
             .into(),
         ];
@@ -6057,16 +5982,7 @@ mod tests {
                 exceeded: fallow_output::ExceededThreshold::Cyclomatic,
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
-                crap: None,
-                mutation: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-                contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                ..Default::default()
             }
             .into(),
         ];
@@ -6098,16 +6014,7 @@ mod tests {
                 exceeded: fallow_output::ExceededThreshold::Cognitive,
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::High,
-                crap: None,
-                mutation: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-                contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                ..Default::default()
             }
             .into(),
         ];
@@ -6139,16 +6046,7 @@ mod tests {
                 exceeded: fallow_output::ExceededThreshold::Both,
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
-                crap: None,
-                mutation: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-                contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                ..Default::default()
             }
             .into(),
             fallow_output::ComplexityViolation {
@@ -6167,16 +6065,7 @@ mod tests {
                 exceeded: fallow_output::ExceededThreshold::Both,
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
-                crap: None,
-                mutation: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-                contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                ..Default::default()
             }
             .into(),
         ];
@@ -6208,16 +6097,7 @@ mod tests {
                 exceeded: fallow_output::ExceededThreshold::Both,
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
-                crap: None,
-                mutation: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-                contributions: Vec::new(),
-                effective_thresholds: None,
-                threshold_source: None,
+                ..Default::default()
             }
             .into(),
         ];
@@ -6325,9 +6205,7 @@ mod tests {
                 template_cyclomatic: 13,
                 template_cognitive: 12,
             }),
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         };
         let line = render_component_rollup_breakdown(&finding, &root)
             .expect("rollup payload should render a breakdown line");
@@ -6373,10 +6251,7 @@ mod tests {
                         fallow_output::CoverageSource::EstimatedComponentInherited,
                     ),
                     inherited_from: Some(owner),
-                    component_rollup: None,
-                    contributions: Vec::new(),
-                    effective_thresholds: None,
-                    threshold_source: None,
+                    ..Default::default()
                 }
                 .into(),
             ],
@@ -6424,16 +6299,7 @@ mod tests {
             exceeded: fallow_output::ExceededThreshold::Both,
             effective_severity: None,
             severity: fallow_output::FindingSeverity::High,
-            crap: None,
-            mutation: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         }
     }
 

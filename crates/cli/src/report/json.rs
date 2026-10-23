@@ -2843,9 +2843,7 @@ mod tests {
                         .ok()?,
                 })
             }),
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         }
     }
 
@@ -3075,12 +3073,7 @@ mod tests {
             mutation: None,
             coverage_pct: None,
             coverage_tier: tier,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         };
         let ctx = fallow_output::HealthActionContext {
             opts: action_opts,
@@ -3253,12 +3246,7 @@ mod tests {
             mutation: None,
             coverage_pct: None,
             coverage_tier: Some(fallow_output::CoverageTier::None),
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
+            ..Default::default()
         };
         let narrow_ctx = fallow_output::HealthActionContext {
             opts: fallow_output::HealthActionOptions::default(),

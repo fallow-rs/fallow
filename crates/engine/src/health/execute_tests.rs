@@ -68,6 +68,7 @@ fn make_fc_with_contributions(name: &str, cyclomatic: u16, cognitive: u16) -> Fu
         kind: ComplexityContributionKind::If,
         weight: 1,
         nesting: 0,
+        literal_membership: false,
     }];
     fc
 }
@@ -463,6 +464,7 @@ fn make_finding(name: &str, exceeded: ExceededThreshold) -> ComplexityViolation 
             | ExceededThreshold::All => 25,
             _ => 8,
         },
+        standard_cyclomatic: None,
         cognitive: match exceeded {
             ExceededThreshold::Cognitive
             | ExceededThreshold::Both
@@ -780,6 +782,7 @@ fn filter_complexity_findings_by_diff_keeps_hotspot_overlapping_diff_line() {
         line: 10,
         col: 0,
         cyclomatic: 30,
+        standard_cyclomatic: None,
         cognitive: 30,
         line_count: 110,
         param_count: 0,
@@ -821,6 +824,7 @@ fn filter_complexity_findings_by_diff_drops_finding_outside_diff() {
         line: 10,
         col: 0,
         cyclomatic: 30,
+        standard_cyclomatic: None,
         cognitive: 30,
         line_count: 5,
         param_count: 0,
@@ -862,6 +866,7 @@ fn filter_complexity_findings_by_diff_handles_zero_line_count() {
         line: 5,
         col: 0,
         cyclomatic: 30,
+        standard_cyclomatic: None,
         cognitive: 30,
         line_count: 0,
         param_count: 0,
@@ -2179,6 +2184,7 @@ fn make_class_finding(
         line,
         col: 0,
         cyclomatic,
+        standard_cyclomatic: None,
         cognitive,
         line_count: 20,
         param_count: 0,
@@ -2214,6 +2220,7 @@ fn make_template_finding(
         line,
         col: 0,
         cyclomatic,
+        standard_cyclomatic: None,
         cognitive,
         line_count: 30,
         param_count: 0,

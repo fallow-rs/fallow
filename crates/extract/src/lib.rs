@@ -43,6 +43,7 @@ pub mod inventory;
 pub mod js_text;
 mod jsdoc_attach;
 mod jsdoc_deprecated;
+mod literal_membership;
 pub mod mdx;
 mod module_info;
 mod module_parse;

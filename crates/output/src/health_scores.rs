@@ -406,8 +406,15 @@ pub struct ComplexityViolation {
     pub line: u32,
     /// 1-based column the function starts on.
     pub col: u32,
-    /// Cyclomatic complexity of the function.
+    /// Cyclomatic complexity of the function, as the cyclomatic gate and the
+    /// CRAP score read it. Under the `literal-membership` value of
+    /// `health.cyclomaticPolicy`, this is the value after literal membership
+    /// chains count as one predicate.
     pub cyclomatic: u16,
+    /// Standard `McCabe` cyclomatic complexity, present only when the
+    /// `health.cyclomaticPolicy` value gave `cyclomatic` a different value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard_cyclomatic: Option<u16>,
     /// Cognitive complexity of the function.
     pub cognitive: u16,
     /// Lines of code in the function body.
@@ -494,6 +501,41 @@ pub struct ComplexityViolation {
     /// Source of the effective thresholds. Omitted when thresholds are global.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_source: Option<ThresholdSource>,
+}
+
+/// An empty cyclomatic finding in the moderate band. Builders and tests start
+/// from it and set the fields they need.
+impl Default for ComplexityViolation {
+    fn default() -> Self {
+        Self {
+            path: std::path::PathBuf::new(),
+            name: String::new(),
+            line: 0,
+            col: 0,
+            cyclomatic: 0,
+            standard_cyclomatic: None,
+            cognitive: 0,
+            line_count: 0,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded: ExceededThreshold::Cyclomatic,
+            severity: FindingSeverity::Moderate,
+            effective_severity: None,
+            crap: None,
+            mutation: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
+        }
+    }
 }
 
 impl ComplexityViolation {
@@ -906,6 +948,10 @@ pub struct HealthSummary {
     pub functions_above_threshold: usize,
     /// Global cyclomatic-complexity ceiling for this run.
     pub max_cyclomatic_threshold: u16,
+    /// Cyclomatic policy of the gates (`health.cyclomaticPolicy`). Absent
+    /// under the default `standard` policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cyclomatic_policy: Option<fallow_config::CyclomaticPolicy>,
     /// Global cognitive-complexity ceiling for this run.
     pub max_cognitive_threshold: u16,
     /// Global CRAP-score ceiling for this run.
@@ -965,6 +1011,7 @@ impl Default for HealthSummary {
             functions_analyzed: 0,
             functions_above_threshold: 0,
             max_cyclomatic_threshold: 20,
+            cyclomatic_policy: None,
             max_cognitive_threshold: 15,
             max_crap_threshold: 30.0,
             max_unit_size_threshold: DEFAULT_MAX_UNIT_SIZE,

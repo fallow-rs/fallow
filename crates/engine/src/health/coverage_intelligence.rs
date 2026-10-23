@@ -866,6 +866,7 @@ mod tests {
             line,
             col: 0,
             cyclomatic: 20,
+            standard_cyclomatic: None,
             cognitive: 20,
             line_count: 20,
             param_count: 1,

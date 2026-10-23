@@ -68,6 +68,7 @@ mod group_by_issue_types_tests;
 mod grouping_fallback_tests;
 mod guard_tests;
 mod health_baseline_tests;
+mod health_cyclomatic_policy_tests;
 mod health_diagnostic_tests;
 mod health_group_trend_tests;
 mod health_mutation_report_tests;

@@ -1012,6 +1012,7 @@ mod tests {
                 | ExceededThreshold::All => 25,
                 _ => 8,
             },
+            standard_cyclomatic: None,
             cognitive: match exceeded {
                 ExceededThreshold::Cognitive
                 | ExceededThreshold::Both

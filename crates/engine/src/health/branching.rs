@@ -85,6 +85,7 @@ mod tests {
                     kind: ComplexityContributionKind::If,
                     weight: 1,
                     nesting: 0,
+                    literal_membership: false,
                 },
                 usize::from(branches),
             )

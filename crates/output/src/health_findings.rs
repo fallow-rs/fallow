@@ -1180,6 +1180,7 @@ mod crap_action_tests {
             line: 12,
             col: 2,
             cyclomatic: 16,
+            standard_cyclomatic: None,
             cognitive: 13,
             line_count: 20,
             param_count: 0,

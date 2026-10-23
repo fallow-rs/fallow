@@ -12,7 +12,7 @@ use super::threshold_overrides::{
     AppliedHealthThresholds, ComplexityFunctionContext, CrapFunctionContext,
     MeasuredThresholdMetrics, ThresholdOverrideResolver, ThresholdOverrideStateTracker,
 };
-use super::{react_hooks, scoring};
+use super::{cyclomatic_policy, react_hooks, scoring};
 
 /// Collect health findings from parsed modules, applying ignore, changed-since,
 /// and workspace filters. The returned `files_analyzed` / `total_functions`
@@ -116,7 +116,7 @@ pub(super) fn collect_findings_with_resolver(
                             function: &fc.name,
                             line: fc.line,
                             col: fc.col,
-                            cyclomatic: fc.cyclomatic,
+                            cyclomatic: input.threshold_resolver.gate_cyclomatic(fc),
                             cognitive: fc.cognitive,
                             line_count: Some(fc.line_count),
                             suppressed: true,
@@ -171,13 +171,15 @@ fn collect_complexity_finding(
 ) -> Option<ComplexityViolation> {
     let (applied_thresholds, matched_overrides) =
         input.threshold_resolver.resolve(relative, &fc.name);
+    let policy = input.threshold_resolver.cyclomatic_policy();
+    let cyclomatic = cyclomatic_policy::gate_cyclomatic(fc, policy);
     input.threshold_state_tracker.record_complexity(
         ComplexityFunctionContext {
             path,
             function: &fc.name,
             line: fc.line,
             col: fc.col,
-            cyclomatic: fc.cyclomatic,
+            cyclomatic,
             cognitive: fc.cognitive,
             line_count: Some(fc.line_count),
             suppressed: false,
@@ -187,14 +189,15 @@ fn collect_complexity_finding(
         applied_thresholds.effective,
     );
     let (exceeds_cyclomatic, exceeds_cognitive) =
-        complexity_exceeded(fc, applied_thresholds.effective)?;
+        complexity_exceeded(fc, policy, applied_thresholds.effective)?;
 
     Some(ComplexityViolation {
         path: path.to_path_buf(),
         name: fc.name.clone(),
         line: fc.line,
         col: fc.col,
-        cyclomatic: fc.cyclomatic,
+        cyclomatic,
+        standard_cyclomatic: cyclomatic_policy::standard_cyclomatic(fc, policy),
         cognitive: fc.cognitive,
         line_count: fc.line_count,
         param_count: fc.param_count,
@@ -206,7 +209,7 @@ fn collect_complexity_finding(
         effective_severity: None,
         severity: compute_finding_severity(
             fc.cognitive,
-            fc.cyclomatic,
+            cyclomatic,
             None,
             DEFAULT_COGNITIVE_HIGH,
             DEFAULT_COGNITIVE_CRITICAL,
@@ -220,7 +223,7 @@ fn collect_complexity_finding(
         coverage_source: None,
         inherited_from: None,
         component_rollup: None,
-        contributions: contributions_for(input.complexity_breakdown, fc),
+        contributions: contributions_for(input.complexity_breakdown, fc, policy),
         effective_thresholds: applied_thresholds
             .override_index
             .map(|_| applied_thresholds.effective),
@@ -232,11 +235,13 @@ fn collect_complexity_finding(
 
 /// Which complexity thresholds a function exceeds, or `None` when it exceeds
 /// neither. The health findings and the editor code lens both read this rule.
-pub(super) const fn complexity_exceeded(
+pub(super) fn complexity_exceeded(
     fc: &fallow_types::extract::FunctionComplexity,
+    policy: fallow_config::CyclomaticPolicy,
     effective: fallow_output::HealthEffectiveThresholds,
 ) -> Option<(bool, bool)> {
-    let exceeds_cyclomatic = fc.cyclomatic > effective.max_cyclomatic;
+    let exceeds_cyclomatic =
+        cyclomatic_policy::gate_cyclomatic(fc, policy) > effective.max_cyclomatic;
     let exceeds_cognitive = fc.cognitive > effective.max_cognitive;
     if exceeds_cyclomatic || exceeds_cognitive {
         Some((exceeds_cyclomatic, exceeds_cognitive))
@@ -251,9 +256,10 @@ pub(super) const fn complexity_exceeded(
 fn contributions_for(
     complexity_breakdown: bool,
     fc: &fallow_types::extract::FunctionComplexity,
+    policy: fallow_config::CyclomaticPolicy,
 ) -> Vec<fallow_types::extract::ComplexityContribution> {
     if complexity_breakdown {
-        fc.contributions.clone()
+        cyclomatic_policy::breakdown_contributions(fc, policy)
     } else {
         Vec::new()
     }
@@ -357,7 +363,7 @@ fn process_crap_findings_for_path(input: CrapPathProcessingInput<'_, '_, '_>) {
                 suppressed,
             },
             MeasuredThresholdMetrics {
-                cyclomatic: fc.cyclomatic,
+                cyclomatic: merge.threshold_resolver.gate_cyclomatic(fc),
                 cognitive: fc.cognitive,
                 crap: pf.crap,
             },
@@ -541,7 +547,7 @@ pub(super) fn record_template_crap_override_rows(input: &mut CrapFindingMergeInp
                     col: fc.col,
                     suppressed: false,
                 },
-                (fc.cyclomatic, fc.cognitive),
+                (input.threshold_resolver.gate_cyclomatic(fc), fc.cognitive),
                 &matched_overrides,
                 applied_thresholds.effective,
             );
@@ -612,14 +618,17 @@ fn merge_existing_crap_finding(
 }
 
 fn new_crap_finding(args: NewCrapFindingInput<'_, '_>) -> ComplexityViolation {
-    let exceeds_cyclomatic = args.fc.cyclomatic > args.applied_thresholds.effective.max_cyclomatic;
+    let policy = args.merge.threshold_resolver.cyclomatic_policy();
+    let cyclomatic = cyclomatic_policy::gate_cyclomatic(args.fc, policy);
+    let exceeds_cyclomatic = cyclomatic > args.applied_thresholds.effective.max_cyclomatic;
     let exceeds_cognitive = args.fc.cognitive > args.applied_thresholds.effective.max_cognitive;
     ComplexityViolation {
         path: args.path.to_path_buf(),
         name: args.fc.name.clone(),
         line: args.fc.line,
         col: args.fc.col,
-        cyclomatic: args.fc.cyclomatic,
+        cyclomatic,
+        standard_cyclomatic: cyclomatic_policy::standard_cyclomatic(args.fc, policy),
         cognitive: args.fc.cognitive,
         line_count: args.fc.line_count,
         param_count: args.fc.param_count,
@@ -631,7 +640,7 @@ fn new_crap_finding(args: NewCrapFindingInput<'_, '_>) -> ComplexityViolation {
         effective_severity: None,
         severity: compute_finding_severity(
             args.fc.cognitive,
-            args.fc.cyclomatic,
+            cyclomatic,
             Some(args.pf.crap),
             DEFAULT_COGNITIVE_HIGH,
             DEFAULT_COGNITIVE_CRITICAL,
@@ -649,7 +658,7 @@ fn new_crap_finding(args: NewCrapFindingInput<'_, '_>) -> ComplexityViolation {
             args.merge.template_inherit_provenance,
         ),
         component_rollup: None,
-        contributions: contributions_for(args.merge.complexity_breakdown, args.fc),
+        contributions: contributions_for(args.merge.complexity_breakdown, args.fc, policy),
         effective_thresholds: args
             .applied_thresholds
             .override_index

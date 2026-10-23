@@ -200,6 +200,35 @@ impl Default for ChangeCouplingConfig {
     }
 }
 
+/// How `fallow health` counts cyclomatic complexity for its gates.
+///
+/// The policy changes the cyclomatic value that the `maxCyclomatic` gate reads
+/// and the cyclomatic value in every CRAP score. It does not change the health
+/// score, the complexity density, or the hotspot ranking: those keep the
+/// standard count so that grades stay comparable across projects.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CyclomaticPolicy {
+    /// Count every decision point, `&&`, `||`, and `??` operator (`McCabe`).
+    #[default]
+    Standard,
+    /// Count a literal membership chain as one predicate. A chain such as
+    /// `kind === "a" || kind === "b" || kind === "c"` adds no cyclomatic
+    /// increments for its `||` operators. Only strict equality checks of one
+    /// identifier against string, number, bigint, boolean, or `null` literals
+    /// qualify. Member access, calls, mixed operators, and different operands
+    /// keep the standard count.
+    LiteralMembership,
+}
+
+impl CyclomaticPolicy {
+    /// Whether this is the default `standard` policy.
+    #[must_use]
+    pub const fn is_standard(&self) -> bool {
+        matches!(self, Self::Standard)
+    }
+}
+
 /// Configuration for complexity health metrics (`fallow health`).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -210,6 +239,18 @@ pub struct HealthConfig {
     /// (use `health.ignore` to remove a file from the score).
     #[serde(default = "default_max_cyclomatic")]
     pub max_cyclomatic: u16,
+
+    /// How the cyclomatic gate counts complexity (default: `standard`).
+    /// `literal-membership` counts a chain of strict equality checks of one
+    /// identifier against primitive literals (`kind === "a" || kind === "b"`)
+    /// as one predicate. The policy applies to the `maxCyclomatic` gate and
+    /// to every CRAP score, so the `maxCrap` gate reads the same value.
+    /// Findings then report the standard value as `standard_cyclomatic`. The
+    /// health score, complexity density, and hotspots keep the standard
+    /// count. Older fallow versions reject this key as unknown, so pair it
+    /// with `minimumVersion`.
+    #[serde(default, skip_serializing_if = "CyclomaticPolicy::is_standard")]
+    pub cyclomatic_policy: CyclomaticPolicy,
 
     /// Maximum allowed cognitive complexity per function (default: 15).
     /// Functions exceeding this threshold are reported. Governs findings
@@ -312,6 +353,7 @@ impl Default for HealthConfig {
     fn default() -> Self {
         Self {
             max_cyclomatic: default_max_cyclomatic(),
+            cyclomatic_policy: CyclomaticPolicy::Standard,
             max_cognitive: default_max_cognitive(),
             max_crap: default_max_crap(),
             crap_refactor_band: default_crap_refactor_band(),
@@ -507,6 +549,7 @@ mod tests {
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         assert!((config.max_crap - 15.5).abs() < f64::EPSILON);
         assert_eq!(config.max_cyclomatic, 20); // default
+        assert_eq!(config.cyclomatic_policy, CyclomaticPolicy::Standard);
         assert_eq!(config.max_cognitive, 15); // default
         assert_eq!(config.crap_refactor_band, 5); // default
     }
@@ -563,6 +606,7 @@ maxCognitive = 25
     fn health_config_json_roundtrip() {
         let config = HealthConfig {
             max_cyclomatic: 50,
+            cyclomatic_policy: CyclomaticPolicy::LiteralMembership,
             max_cognitive: 40,
             max_crap: 75.0,
             crap_refactor_band: 4,
@@ -589,6 +633,10 @@ maxCognitive = 25
         let json = serde_json::to_string(&config).unwrap();
         let restored: HealthConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.max_cyclomatic, 50);
+        assert_eq!(
+            restored.cyclomatic_policy,
+            CyclomaticPolicy::LiteralMembership
+        );
         assert!((restored.change_coupling.min_degree - 0.4).abs() < f64::EPSILON);
         assert_eq!(restored.max_cognitive, 40);
         assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);

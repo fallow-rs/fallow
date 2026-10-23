@@ -933,6 +933,15 @@ export type WorsenedMetricKind = ("cyclomatic" | "cognitive" | "crap" | "line_co
  */
 export type AuditGateExemption = "test-file"
 /**
+ * How `fallow health` counts cyclomatic complexity for its gates.
+ *
+ * The policy changes the cyclomatic value that the `maxCyclomatic` gate reads
+ * and the cyclomatic value in every CRAP score. It does not change the health
+ * score, the complexity density, or the hotspot ranking: those keep the
+ * standard count so that grades stay comparable across projects.
+ */
+export type CyclomaticPolicy = ("standard" | "literal-membership")
+/**
  * Coverage model used for CRAP score computation.
  */
 export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
@@ -8004,9 +8013,17 @@ line: number
  */
 col: number
 /**
- * Cyclomatic complexity of the function.
+ * Cyclomatic complexity of the function, as the cyclomatic gate and the
+ * CRAP score read it. Under the `literal-membership` value of
+ * `health.cyclomaticPolicy`, this is the value after literal membership
+ * chains count as one predicate.
  */
 cyclomatic: number
+/**
+ * Standard `McCabe` cyclomatic complexity, present only when the
+ * `health.cyclomaticPolicy` value gave `cyclomatic` a different value.
+ */
+standard_cyclomatic?: (number | null)
 /**
  * Cognitive complexity of the function.
  */
@@ -8322,6 +8339,15 @@ weight: number
  * consumer explain a cognitive `+3` as "+1 base, +2 nesting".
  */
 nesting: number
+/**
+ * This cyclomatic `||` increment is part of a literal membership chain:
+ * strict equality checks of one identifier against primitive literals
+ * (`kind === "a" || kind === "b"`). The `literal-membership` value of
+ * `health.cyclomaticPolicy` removes these increments from the effective
+ * cyclomatic value. Omitted when `false`, and always `false` under the
+ * default `standard` policy.
+ */
+literal_membership?: boolean
 }
 /**
  * Resolved thresholds used to evaluate a health finding.
@@ -8452,6 +8478,11 @@ functions_above_threshold: number
  * Global cyclomatic-complexity ceiling for this run.
  */
 max_cyclomatic_threshold: number
+/**
+ * Cyclomatic policy of the gates (`health.cyclomaticPolicy`). Absent
+ * under the default `standard` policy.
+ */
+cyclomatic_policy?: (CyclomaticPolicy | null)
 /**
  * Global cognitive-complexity ceiling for this run.
  */

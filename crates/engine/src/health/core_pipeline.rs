@@ -92,7 +92,8 @@ pub(super) fn prepare_health_core_sections<R>(
             crap: scope.max_crap,
             unit_size: config.health.max_unit_size,
         },
-    );
+    )
+    .with_cyclomatic_policy(config.health.cyclomatic_policy);
 
     let HealthAnalysisPrelude {
         analysis_data,

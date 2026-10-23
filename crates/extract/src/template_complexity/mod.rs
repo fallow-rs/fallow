@@ -413,6 +413,7 @@ pub(in crate::template_complexity) fn build_unit_complexity(
                 kind: raw.kind,
                 weight: raw.weight,
                 nesting: raw.nesting,
+                literal_membership: false,
             }
         })
         .collect();

@@ -29,6 +29,8 @@ pub mod cloud;
 /// One row per analysis subcommand: its JSON kinds and the surfaces that must
 /// know about it. Drift tests across the workspace read this table.
 pub mod command_surfaces;
+/// Per-construct complexity increments behind the complexity scores.
+pub mod complexity_contribution;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
 /// Shared duplicate-code output contracts.

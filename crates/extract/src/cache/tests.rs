@@ -1309,6 +1309,7 @@ fn module_to_cached_roundtrip_complexity() {
                         kind: ComplexityContributionKind::Await,
                         weight: 1,
                         nesting: 0,
+                        literal_membership: false,
                     },
                     ComplexityContribution {
                         line: 8,
@@ -1317,6 +1318,7 @@ fn module_to_cached_roundtrip_complexity() {
                         kind: ComplexityContributionKind::Then,
                         weight: 1,
                         nesting: 0,
+                        literal_membership: false,
                     },
                 ],
             },

@@ -34,6 +34,7 @@ pub(super) struct ThresholdOverrideMatch<'a> {
 pub(super) struct ThresholdOverrideResolver {
     entries: Vec<CompiledThresholdOverride>,
     pub(super) global: GlobalHealthThresholds,
+    cyclomatic_policy: fallow_config::CyclomaticPolicy,
 }
 
 impl ThresholdOverrideResolver {
@@ -68,7 +69,36 @@ impl ThresholdOverrideResolver {
                 }
             })
             .collect();
-        Self { entries, global }
+        Self {
+            entries,
+            global,
+            cyclomatic_policy: fallow_config::CyclomaticPolicy::Standard,
+        }
+    }
+
+    /// Set the cyclomatic policy (`health.cyclomaticPolicy`) of the gates.
+    #[must_use]
+    pub(super) const fn with_cyclomatic_policy(
+        mut self,
+        policy: fallow_config::CyclomaticPolicy,
+    ) -> Self {
+        self.cyclomatic_policy = policy;
+        self
+    }
+
+    /// The cyclomatic policy of the gates.
+    #[must_use]
+    pub(super) const fn cyclomatic_policy(&self) -> fallow_config::CyclomaticPolicy {
+        self.cyclomatic_policy
+    }
+
+    /// The cyclomatic value that the gates and CRAP read for `function`.
+    #[must_use]
+    pub(super) fn gate_cyclomatic(
+        &self,
+        function: &fallow_types::extract::FunctionComplexity,
+    ) -> u16 {
+        super::cyclomatic_policy::gate_cyclomatic(function, self.cyclomatic_policy)
     }
 
     #[must_use]

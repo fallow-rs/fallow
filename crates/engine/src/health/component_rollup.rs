@@ -252,6 +252,7 @@ fn make_component_rollup_violation(
         line: worst.line,
         col: worst.col,
         cyclomatic: totals.rollup_cyc,
+        standard_cyclomatic: None,
         cognitive: totals.rollup_cog,
         line_count: totals.rollup_lines,
         param_count: 0,

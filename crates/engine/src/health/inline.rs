@@ -20,7 +20,8 @@ pub struct InlineComplexity {
     pub line: u32,
     /// Zero-based column of the function declaration.
     pub col: u32,
-    /// Measured cyclomatic complexity.
+    /// Cyclomatic complexity as the gate reads it under
+    /// `health.cyclomaticPolicy`.
     pub cyclomatic: u16,
     /// Measured cognitive complexity.
     pub cognitive: u16,
@@ -60,7 +61,8 @@ pub fn inline_complexity(
             crap: config.health.max_crap,
             unit_size: config.health.max_unit_size,
         },
-    );
+    )
+    .with_cyclomatic_policy(config.health.cyclomatic_policy);
     let mut findings = Vec::new();
 
     for module in modules {
@@ -87,7 +89,11 @@ pub fn inline_complexity(
             }
             let (applied, _) = resolver.resolve(relative, &function.name);
             let Some((exceeds_cyclomatic, exceeds_cognitive)) =
-                super::findings::complexity_exceeded(function, applied.effective)
+                super::findings::complexity_exceeded(
+                    function,
+                    resolver.cyclomatic_policy(),
+                    applied.effective,
+                )
             else {
                 continue;
             };
@@ -102,7 +108,7 @@ pub fn inline_complexity(
                 name: function.name.clone(),
                 line: function.line,
                 col: function.col,
-                cyclomatic: function.cyclomatic,
+                cyclomatic: resolver.gate_cyclomatic(function),
                 cognitive: function.cognitive,
                 exceeds_cyclomatic,
                 exceeds_cognitive,

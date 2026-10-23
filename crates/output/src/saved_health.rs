@@ -250,6 +250,7 @@ impl From<SavedHealthFinding> for HealthFinding {
                 line: saved.line,
                 col: saved.col,
                 cyclomatic: saved.cyclomatic,
+                standard_cyclomatic: None,
                 cognitive: saved.cognitive,
                 line_count: saved.line_count,
                 param_count: saved.param_count,
