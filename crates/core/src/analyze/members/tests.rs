@@ -753,7 +753,7 @@ fn typed_fluent_chain_fact_credits_class_member() {
             vec![
                 make_factory_member("create"),
                 make_self_member("setProcessId"),
-                make_self_member("setSubject"),
+                make_member("setSubject", MemberKind::ClassMethod),
                 make_member("build", MemberKind::ClassMethod),
             ],
             Some(0),
@@ -771,7 +771,7 @@ fn typed_fluent_chain_fact_credits_class_member() {
         members: vec![
             make_factory_member("create"),
             make_self_member("setProcessId"),
-            make_self_member("setSubject"),
+            make_member("setSubject", MemberKind::ClassMethod),
             make_member("build", MemberKind::ClassMethod),
         ],
         super_class: None,
@@ -799,8 +799,7 @@ fn typed_fluent_chain_fact_credits_class_member() {
                 FluentChainMemberAccessFact {
                     root_object: "EventBuilder".to_string(),
                     root_method: "create".to_string(),
-                    chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
-                    member: "build".to_string(),
+                    steps: vec!["setProcessId".into(), "setSubject".into(), "build".into()],
                 },
             )]
             .into(),
@@ -818,10 +817,10 @@ fn typed_fluent_chain_fact_credits_class_member() {
     let indexes = MemberPassIndexes::build(&resolved_modules);
     propagate_fluent_chain_accesses(&graph, &resolved_modules, &indexes, &mut accessed_members);
 
-    let credited = accessed_members
-        .get(&ExportKey::new(FileId(1), "EventBuilder"))
-        .expect("fluent target class should be credited");
-    assert!(credited.contains("build"));
+    let credited = &accessed_members[&ExportKey::new(FileId(1), "EventBuilder")];
+    // No step after `setSubject`, which does not return `this`.
+    let expected = ["setProcessId", "setSubject"].map(String::from);
+    assert_eq!(*credited, FxHashSet::from_iter(expected));
 }
 
 #[test]
@@ -879,8 +878,8 @@ fn typed_fluent_chain_new_fact_credits_class_member() {
             semantic_facts: vec![SemanticFact::FluentChainNewMemberAccess(
                 FluentChainNewMemberAccessFact {
                     class_name: "OptionBuilder".to_string(),
-                    chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
-                    member: "build".to_string(),
+                    first_method: "addDefault".to_string(),
+                    steps: ["addFromCli", "build"].map(String::from).to_vec(),
                 },
             )]
             .into(),

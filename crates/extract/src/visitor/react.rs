@@ -982,12 +982,19 @@ fn jsx_component_tag_name(name: &JSXElementName<'_>) -> Option<String> {
 
 /// Flatten a JSX member-expression tag (`Foo.Bar.Baz`) into a dotted path.
 fn jsx_member_path(member: &JSXMemberExpression<'_>) -> String {
-    let object = match &member.object {
-        JSXMemberExpressionObject::IdentifierReference(ident) => ident.name.to_string(),
-        JSXMemberExpressionObject::MemberExpression(inner) => jsx_member_path(inner),
-        JSXMemberExpressionObject::ThisExpression(_) => "this".to_string(),
+    let mut properties = vec![member.property.name.as_str()];
+    let mut object = &member.object;
+    let root = loop {
+        match object {
+            JSXMemberExpressionObject::IdentifierReference(ident) => break ident.name.as_str(),
+            JSXMemberExpressionObject::ThisExpression(_) => break "this",
+            JSXMemberExpressionObject::MemberExpression(inner) => {
+                properties.push(inner.property.name.as_str());
+                object = &inner.object;
+            }
+        }
     };
-    format!("{object}.{}", member.property.name)
+    super::visit_impl::join_member_path(root, &properties)
 }
 
 /// Collect, for a JSX opening element:

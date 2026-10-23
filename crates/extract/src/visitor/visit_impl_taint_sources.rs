@@ -77,6 +77,10 @@ impl ModuleInfoExtractor {
             return;
         }
         for source_path in binding_source_path_candidates(expr) {
+            // At the cap each push scans the full set and records nothing.
+            if self.tainted_bindings_at_capacity() {
+                break;
+            }
             self.push_tainted_binding(
                 TaintedBinding {
                     local: name.to_string(),

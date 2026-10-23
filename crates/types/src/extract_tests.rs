@@ -156,16 +156,15 @@ fn typed_fact_helpers_collect_each_family() {
         SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
             root_object: "Builder".to_string(),
             root_method: "start".to_string(),
-            chain: vec!["next".to_string()],
-            member: "value".to_string(),
+            steps: vec!["next".to_string(), "value".to_string()],
         }),
     );
     push_semantic_fact(
         &mut module,
         SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
             class_name: "Builder".to_string(),
-            chain: vec!["next".to_string(), "finish".to_string()],
-            member: "done".to_string(),
+            first_method: "next".to_string(),
+            steps: vec!["finish".to_string(), "done".to_string()],
         }),
     );
 
@@ -192,8 +191,7 @@ fn typed_fact_helpers_collect_each_family() {
         vec![FluentChainMemberAccessFact {
             root_object: "Builder".to_string(),
             root_method: "start".to_string(),
-            chain: vec!["next".to_string()],
-            member: "value".to_string(),
+            steps: vec!["next".to_string(), "value".to_string()],
         }]
     );
     assert_eq!(
@@ -201,8 +199,8 @@ fn typed_fact_helpers_collect_each_family() {
             .fluent_chain_new_member_accesses(),
         vec![FluentChainNewMemberAccessFact {
             class_name: "Builder".to_string(),
-            chain: vec!["next".to_string(), "finish".to_string()],
-            member: "done".to_string(),
+            first_method: "next".to_string(),
+            steps: vec!["finish".to_string(), "done".to_string()],
         }]
     );
 }

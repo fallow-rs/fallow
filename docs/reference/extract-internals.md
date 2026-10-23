@@ -86,7 +86,12 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   and no projection for that link. Binding keys and member accesses use the
   same builders, so both sides stop at the same link. Without this cap, the
   time and the output for one chain grow with the square of its length. A new
-  per-link walk must use the same cap.
+  per-link walk must use the same cap. The taint source paths
+  (`visit_impl_source_paths.rs`) and the JSX tag receivers use it too.
+- Build a dotted path in a loop and join it once (`join_member_path`). A
+  recursive `format!` copies the whole path at each link, so one path of N
+  links costs O(N^2) bytes. Unwrap a run of wrappers (`await`, parentheses,
+  TS assertions) before a scan, not at each layer.
 - A function with more than `MAX_HASHED_FUNCTION_HEIGHT` (64) levels of nested
   functions below it gets no `source_hash`
   (`crates/extract/src/function_hash.rs`). Each function hashes its whole
@@ -95,9 +100,12 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   hashes that join them stay the same. The deepest real function measured has
   10 levels below it. The inventory computes columns with separate cursors for
   span starts and span ends, so nested functions on one line stay linear.
-- A fluent-chain fact keeps each step name once instead of a cap. The consumer
-  only checks that every step returns `this`, so order and repeats do not
-  matter, and a cap would drop the credit for the steps past it.
+- A fluent chain gives one fact, at its outermost call, with each step name
+  once in first-call order. The walk marks the inner calls, so they do not walk
+  again. The consumer credits each step up to and including the first step
+  that does not return `this`. A fact for each call would hold the steps before
+  it, which is quadratic in the chain length. A cap would drop the credit for
+  the steps past it.
 - Bind framework heuristics to imported symbols or other provenance. A local
   function with the same name must not activate library-specific behavior.
 - Avoid filesystem and graph policy inside AST visitors.
