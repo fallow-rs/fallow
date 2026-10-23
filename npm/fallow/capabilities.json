@@ -301,7 +301,7 @@
       "name": "--fail-on-issues",
       "type": "bool",
       "required": false,
-      "description": "Exit with code 1 if issues are found",
+      "description": "Exit 1 on issues, also where the default is 0: bare json, sarif, codeclimate and dupes",
       "possible_values": [
         "true",
         "false"

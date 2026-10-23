@@ -388,7 +388,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub ci: bool,
 
-    /// Exit with code 1 if issues are found
+    /// Exit 1 on issues, also where the default is 0: bare json, sarif, codeclimate and dupes
     #[arg(hide_short_help = true, long, global = true)]
     pub fail_on_issues: bool,
 
