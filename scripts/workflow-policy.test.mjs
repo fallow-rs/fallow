@@ -535,10 +535,10 @@ test("MSRV CI forces the Cargo.toml rust-version despite the repository toolchai
 test("MSRV CI fetches locked dependencies with patched Cargo before offline compilation", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const msrvJob = indentedBlock(workflow, "msrv", 2);
-  const fetch = "cargo +1.96.1 fetch --locked";
+  const fetch = "cargo +1.97.1 fetch --locked";
   const compile = "cargo check --workspace --locked --offline";
 
-  assert.match(msrvJob, /rustup toolchain install 1\.96\.1 --profile minimal --no-self-update/);
+  assert.match(msrvJob, /rustup toolchain install 1\.97\.1 --profile minimal --no-self-update/);
   assert.ok(msrvJob.includes(fetch), "patched Cargo fetches the existing lockfile");
   assert.ok(msrvJob.indexOf(fetch) < msrvJob.indexOf(compile), "fetch runs before compilation");
 });

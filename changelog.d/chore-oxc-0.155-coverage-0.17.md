@@ -6,7 +6,8 @@
   once. Analysis output for real projects does not change. A string with a
   lone surrogate now keeps it as `\uXXXX`, so the extraction, graph and
   duplication caches get a new version and the first run after the upgrade
-  is cold.
+  is cold. Oxc 0.155 needs Rust 1.97, so the minimum Rust version of the
+  Fallow crates goes from 1.96 to 1.97.
 
 ### Fixed
 
