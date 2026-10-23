@@ -414,6 +414,33 @@ impl PackageJson {
         .find_map(|deps| deps.get(name))
         .and_then(|spec| workspace_alias_name(spec))
     }
+
+    /// Every dependency that the manifest installs under an npm alias, as
+    /// `(alias, aliased package)` pairs.
+    ///
+    /// `"@typescript/native": "npm:typescript@~7.0.2"` installs the package
+    /// `typescript` in `node_modules/@typescript/native`, so the alias
+    /// provides the binaries of `typescript`.
+    #[must_use]
+    pub fn npm_aliases(&self) -> Vec<(String, String)> {
+        let mut aliases: Vec<(String, String)> = [
+            &self.dependencies,
+            &self.dev_dependencies,
+            &self.optional_dependencies,
+            &self.peer_dependencies,
+        ]
+        .into_iter()
+        .flatten()
+        .flat_map(|deps| deps.iter())
+        .filter_map(|(name, spec)| {
+            let target = npm_alias_name(spec)?;
+            (target != name).then(|| (name.clone(), target.to_string()))
+        })
+        .collect();
+        aliases.sort_unstable();
+        aliases.dedup();
+        aliases
+    }
 }
 
 /// The package name in a `workspace:<name>@<range>` dependency spec.
@@ -424,7 +451,23 @@ fn workspace_alias_name(spec: &str) -> Option<&str> {
     } else {
         rest.find('@')?
     };
-    let name = &rest[..separator];
+    valid_package_name(&rest[..separator])
+}
+
+/// The package name in an `npm:<name>@<range>` or `npm:<name>` dependency
+/// spec.
+fn npm_alias_name(spec: &str) -> Option<&str> {
+    let rest = spec.trim().strip_prefix("npm:")?;
+    let separator = if let Some(scoped) = rest.strip_prefix('@') {
+        scoped.find('@').map_or(rest.len(), |at| at + 1)
+    } else {
+        rest.find('@').unwrap_or(rest.len())
+    };
+    valid_package_name(&rest[..separator])
+}
+
+/// `name` when it has the shape of a package name: `name` or `@scope/name`.
+fn valid_package_name(name: &str) -> Option<&str> {
     let is_package_name = !name.is_empty()
         && !name.starts_with('.')
         && match name.strip_prefix('@') {
@@ -1035,6 +1078,35 @@ mod tests {
         let pkg: PackageJson =
             serde_json::from_str(r#"{"exports": {".": "./dist/index.js"}}"#).unwrap();
         assert!(pkg.exports_subdirectories().is_empty());
+    }
+
+    #[test]
+    fn npm_aliases_read_the_aliased_package_name() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "dependencies": {"plain": "npm:left-pad@^1.3.0", "range": "^1.0.0"},
+                "devDependencies": {
+                    "@typescript/native": "npm:typescript@~7.0.2",
+                    "typescript": "npm:@typescript/typescript6@^6.0.2",
+                    "bare": "npm:eslint",
+                    "same": "npm:same@1.0.0",
+                    "path": "npm:./local",
+                    "bad-scope": "npm:@scope@1.0.0",
+                    "workspace": "workspace:@scope/core@*"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            pkg.npm_aliases(),
+            [
+                ("@typescript/native", "typescript"),
+                ("bare", "eslint"),
+                ("plain", "left-pad"),
+                ("typescript", "@typescript/typescript6"),
+            ]
+            .map(|(alias, target)| (alias.to_string(), target.to_string()))
+        );
     }
 
     #[test]

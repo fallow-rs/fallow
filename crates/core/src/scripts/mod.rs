@@ -39,8 +39,8 @@ use command_wrappers::{command_wrapper_child_index, skip_command_wrappers};
 pub use config_tasks::config_task_scripts;
 use file_target_tools::file_target_tool;
 pub use resolve::{
-    DependencyBinaries, build_bin_to_package_map, project_bin_map, resolve_binary_to_packages,
-    resolve_known_dependency_binary,
+    DependencyBinaries, all_dependency_names, build_bin_to_package_map, credit_npm_aliases,
+    project_bin_map, resolve_binary_to_packages, resolve_known_dependency_binary,
 };
 pub use shell::command_substitutions;
 pub use workspace_selection::WorkspacePackages;

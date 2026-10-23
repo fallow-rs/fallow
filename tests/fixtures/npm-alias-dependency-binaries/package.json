@@ -1,0 +1,18 @@
+{
+  "name": "npm-alias-dependency-binaries",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "types": "tsc --noEmit",
+    "lint": "eslint .",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@typescript/native": "npm:typescript@~7.0.2",
+    "linter": "npm:eslint@^9.0.0",
+    "vite": "^7.0.0",
+    "vite-6": "npm:vite@^6.0.0",
+    "idle-alias": "npm:left-pad@^1.3.0"
+  }
+}

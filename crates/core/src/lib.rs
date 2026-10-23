@@ -2261,7 +2261,11 @@ fn analyze_all_scripts(
     workspace_pkgs: &[LoadedWorkspacePackage],
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
-    let all_dep_names = collect_all_dependency_names(root_pkg, workspace_pkgs);
+    let manifests: Vec<&PackageJson> = root_pkg
+        .into_iter()
+        .chain(workspace_pkgs.iter().map(|(_, ws_pkg)| ws_pkg))
+        .collect();
+    let all_dep_names = scripts::all_dependency_names(&manifests);
     let all_dep_set: FxHashSet<String> = all_dep_names.iter().cloned().collect();
     let workspace_packages =
         discover::collect_workspace_packages(&config.root, root_pkg, workspace_pkgs);
@@ -2291,12 +2295,16 @@ fn analyze_all_scripts(
         },
         plugin_result,
     );
+    scripts::credit_npm_aliases(
+        &mut plugin_result.script_used_packages,
+        &manifests,
+        &all_dep_set,
+    );
     plugin_result.dependency_binaries =
         scripts::DependencyBinaries::new(config.root.clone(), bin_map, all_dep_set);
-    plugin_result.dev_dependency_names = root_pkg
-        .into_iter()
-        .chain(workspace_pkgs.iter().map(|(_, ws_pkg)| ws_pkg))
-        .flat_map(PackageJson::dev_dependency_names)
+    plugin_result.dev_dependency_names = manifests
+        .iter()
+        .flat_map(|pkg| pkg.dev_dependency_names())
         .collect();
 
     plugin_result
@@ -2307,23 +2315,6 @@ fn analyze_all_scripts(
         .entry_point_roles
         .entry(SCRIPT_TEST_ENTRY_SOURCE.to_string())
         .or_insert(EntryPointRole::Test);
-}
-
-/// Gather sorted, deduped dependency names across the root and workspace packages.
-fn collect_all_dependency_names(
-    root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage],
-) -> Vec<String> {
-    let mut all_dep_names: Vec<String> = Vec::new();
-    if let Some(pkg) = root_pkg {
-        all_dep_names.extend(pkg.all_dependency_names());
-    }
-    for (_, ws_pkg) in workspace_pkgs {
-        all_dep_names.extend(ws_pkg.all_dependency_names());
-    }
-    all_dep_names.sort_unstable();
-    all_dep_names.dedup();
-    all_dep_names
 }
 
 /// The binaries, dependencies, and workspace packages that script analysis

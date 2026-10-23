@@ -186,6 +186,47 @@ pub fn resolve_binary_to_packages(
     candidates.iter().map(|pkg| (*pkg).to_string()).collect()
 }
 
+/// Gather sorted, deduped dependency names across the root and workspace
+/// manifests.
+#[must_use]
+pub fn all_dependency_names(manifests: &[&fallow_config::PackageJson]) -> Vec<String> {
+    let mut names: Vec<String> = manifests
+        .iter()
+        .flat_map(|pkg| pkg.all_dependency_names())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Credit each npm alias whose aliased package `used` already holds.
+///
+/// A script binary resolves to the package that ships it, for example `tsc`
+/// to `typescript`. A project that installs that package as
+/// `"@typescript/native": "npm:typescript@7"` declares only the alias, so the
+/// alias is the dependency in use.
+///
+/// When `declared` also holds the aliased package under its own name, and
+/// that name is not itself an alias, the plain declaration provides the
+/// binary and the alias gets no credit. This keeps a side-by-side alias such
+/// as `"typescript-5": "npm:typescript@5"` reportable.
+pub fn credit_npm_aliases(
+    used: &mut FxHashSet<String>,
+    manifests: &[&fallow_config::PackageJson],
+    declared: &FxHashSet<String>,
+) {
+    let aliases: Vec<(String, String)> =
+        manifests.iter().flat_map(|pkg| pkg.npm_aliases()).collect();
+    let is_alias = |name: &str| aliases.iter().any(|(alias, _)| alias == name);
+    let credited: Vec<String> = aliases
+        .iter()
+        .filter(|(_, target)| used.contains(target))
+        .filter(|(_, target)| !declared.contains(target) || is_alias(target))
+        .map(|(alias, _)| alias.clone())
+        .collect();
+    used.extend(credited);
+}
+
 /// Resolve a binary only when it is known to belong to a declared dependency.
 #[must_use]
 pub fn resolve_known_dependency_binary(
@@ -483,6 +524,41 @@ mod tests {
             &FxHashSet::default(),
         );
         assert_eq!(pkg, None);
+    }
+
+    fn credit(used: &[&str], dev_dependencies: &str) -> FxHashSet<String> {
+        let pkg = workspace_package(&format!(r#"{{"devDependencies": {dev_dependencies}}}"#));
+        let names: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
+        let mut used = declared(used);
+        credit_npm_aliases(&mut used, &[&pkg], &names);
+        used
+    }
+
+    #[test]
+    fn npm_alias_of_a_used_package_is_credited() {
+        let used = credit(
+            &["typescript"],
+            r#"{"@typescript/native": "npm:typescript@~7.0.2", "idle": "npm:left-pad@1"}"#,
+        );
+        assert_eq!(used, declared(&["typescript", "@typescript/native"]));
+    }
+
+    #[test]
+    fn npm_alias_is_credited_when_the_target_name_is_another_alias() {
+        let used = credit(
+            &["typescript"],
+            r#"{"@typescript/native": "npm:typescript@7", "typescript": "npm:@typescript/typescript6@6"}"#,
+        );
+        assert!(used.contains("@typescript/native"));
+    }
+
+    #[test]
+    fn npm_alias_is_not_credited_when_the_target_is_declared_plainly() {
+        let used = credit(
+            &["typescript"],
+            r#"{"typescript": "^7.0.2", "typescript-5": "npm:typescript@5"}"#,
+        );
+        assert_eq!(used, declared(&["typescript"]));
     }
 
     #[test]

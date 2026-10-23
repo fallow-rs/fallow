@@ -676,6 +676,8 @@ mod namespace_class_static_member;
 mod namespace_spy_call_member;
 #[path = "integration_test/node_modules_bin_path.rs"]
 mod node_modules_bin_path;
+#[path = "integration_test/npm_alias_dependency_binaries.rs"]
+mod npm_alias_dependency_binaries;
 #[path = "integration_test/osls_plugin.rs"]
 mod osls_plugin;
 #[path = "integration_test/pkg_utils_plugin.rs"]
