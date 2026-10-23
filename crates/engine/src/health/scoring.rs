@@ -1148,7 +1148,7 @@ impl IstanbulFileCoverage {
         function: &fallow_types::extract::FunctionComplexity,
     ) -> Option<f64> {
         if function.is_private_member {
-            return None;
+            return self.lookup_private(&function.name, function.line, function.col);
         }
         // A context name (`Command.make("setup")`, the name of the function
         // that returns `Effect.gen(...)`) is not the name that a coverage
@@ -1294,6 +1294,63 @@ impl IstanbulFileCoverage {
         window
     }
 
+    /// Coverage for a private class member, from a record with its own
+    /// `#name` only.
+    ///
+    /// The anonymous, header-span, and relocated fallbacks of [`Self::lookup`]
+    /// match on proximity, and the nearest record to a private member is often
+    /// the enclosing function or a public twin. The named step stays, but it
+    /// must find exactly one record: two `#name` records near the member (for
+    /// example a private getter and setter) give no coverage (#3816).
+    fn lookup_private(&self, name: &str, line: u32, col: u32) -> Option<f64> {
+        let exact_key = (name.to_string(), line, col);
+        if self.ambiguous_aliases.contains(&exact_key) {
+            return None;
+        }
+        if let Some(&function_index) = self.alias_index.get(&exact_key) {
+            return Some(self.functions[function_index].coverage_pct);
+        }
+        let target = IstanbulPosition::new(line, col);
+        let window = self.fuzz_window(target);
+        let signature_owners = self.header_spans_containing(target);
+        let mut candidates = self.named_candidates(name, target, &window, &signature_owners);
+        let (_, function_index) = candidates.next()?;
+        if candidates.next().is_some() {
+            return None;
+        }
+        Some(self.functions[function_index].coverage_pct)
+    }
+
+    /// Records in `window` named `name`, with their alias distance from
+    /// `target`.
+    ///
+    /// A function written inside another function's signature is a
+    /// different function from the one the signature belongs to, and both
+    /// sit within a line or two of the same position. Proximity cannot
+    /// tell them apart, so `signature_owners` (the records whose signature
+    /// covers `target`) decide which candidates are eligible at all.
+    fn named_candidates<'a>(
+        &'a self,
+        name: &'a str,
+        target: IstanbulPosition,
+        window: &'a [usize],
+        signature_owners: &'a [usize],
+    ) -> impl Iterator<Item = ((u32, u32), usize)> + 'a {
+        window
+            .iter()
+            .copied()
+            .filter(move |function_index| self.functions[*function_index].answers_to(name))
+            .filter_map(move |function_index| {
+                self.functions[function_index]
+                    .nearest_alias(target, None)
+                    .map(|distance| (distance, function_index))
+            })
+            .filter(move |(distance, function_index)| {
+                *distance == (0, 0)
+                    || !self.foreign_signature_blocks(signature_owners, *function_index, target)
+            })
+    }
+
     /// Look up coverage for a function by name, start line, and start column.
     ///
     /// Resolution order:
@@ -1337,26 +1394,9 @@ impl IstanbulFileCoverage {
 
         let target = IstanbulPosition::new(line, col);
         let window = self.fuzz_window(target);
-        // A function written inside another function's signature is a
-        // different function from the one the signature belongs to, and both
-        // sit within a line or two of the same position. Proximity cannot
-        // tell them apart, so the records whose signature covers this target
-        // decide which candidates below are eligible at all.
         let signature_owners = self.header_spans_containing(target);
-        if let Some(function) = window
-            .iter()
-            .copied()
-            .filter(|function_index| self.functions[*function_index].answers_to(name))
-            .filter_map(|function_index| {
-                let function = &self.functions[function_index];
-                function
-                    .nearest_alias(target, None)
-                    .map(|distance| (distance, function_index))
-            })
-            .filter(|(distance, function_index)| {
-                *distance == (0, 0)
-                    || !self.foreign_signature_blocks(&signature_owners, *function_index, target)
-            })
+        if let Some(function) = self
+            .named_candidates(name, target, &window, &signature_owners)
             .min_by_key(|(distance, _)| *distance)
             .map(|(_, function_index)| &self.functions[function_index])
         {
@@ -3313,6 +3353,10 @@ fn build_analysis_counts_snapshot(
 }
 
 #[cfg(test)]
+#[path = "scoring_private_member_tests.rs"]
+mod private_member_tests;
+
+#[cfg(test)]
 mod tests {
     use super::super::threshold_overrides::GlobalHealthThresholds;
     use super::*;
@@ -3347,7 +3391,7 @@ mod tests {
     }
 
     /// `compute_crap_scores_istanbul` with default-configuration ceilings.
-    fn istanbul_crap_default(
+    pub(super) fn istanbul_crap_default(
         complexity: &[fallow_types::extract::FunctionComplexity],
         file_coverage: Option<&IstanbulFileCoverage>,
         is_test_reachable: bool,
@@ -5787,7 +5831,7 @@ mod tests {
         assert!(!result.top_complex_fns.contains_key(&path_a));
     }
 
-    fn make_fn_complexity(cyclomatic: u16) -> fallow_types::extract::FunctionComplexity {
+    pub(super) fn make_fn_complexity(cyclomatic: u16) -> fallow_types::extract::FunctionComplexity {
         fallow_types::extract::FunctionComplexity {
             name: "test_fn".into(),
             is_private_member: false,
@@ -6404,7 +6448,7 @@ mod tests {
         assert!((ratio - 0.5).abs() < f64::EPSILON);
     }
 
-    fn write_single_file_istanbul_fixture(
+    pub(super) fn write_single_file_istanbul_fixture(
         coverage_path: &std::path::Path,
         source_path: &std::path::Path,
         fn_map: &serde_json::Value,
@@ -7510,89 +7554,6 @@ mod tests {
                 .iter()
                 .all(|alias| alias.position != IstanbulPosition::new(1, 7))
         );
-    }
-
-    /// No instrumenter emits an `fnMap` identity for a private class member,
-    /// so any candidate one reaches belongs to an enclosing function.
-    #[test]
-    fn private_class_member_never_takes_enclosing_coverage() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let source_path = temp.path().join("src/vault.js");
-        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
-        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
-
-        let coverage_path = temp.path().join("coverage-final.json");
-        write_single_file_istanbul_fixture(
-            &coverage_path,
-            &source_path,
-            &serde_json::json!({
-                "0": {
-                    "name": "(anonymous_0)",
-                    "line": 7,
-                    "decl": { "start": { "line": 1, "column": 24 }, "end": { "line": 1, "column": 25 } },
-                    "loc": { "start": { "line": 7, "column": 5 }, "end": { "line": 7, "column": 20 } }
-                }
-            }),
-            &serde_json::json!({ "0": 1 }),
-        );
-
-        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
-        let canonical_source = dunce::canonicalize(&source_path).unwrap();
-        let file_coverage = coverage.get(&canonical_source).unwrap();
-
-        // `#wipe` sits in the arrow's header span and the arrow ran, but the
-        // private member has no record of its own and never ran.
-        let mut private_member = make_fn_complexity(1);
-        private_member.name = "#wipe".to_string();
-        private_member.is_private_member = true;
-        private_member.line = 3;
-        private_member.col = 9;
-        let result = istanbul_crap_default(&[private_member], Some(file_coverage), false);
-        assert_eq!(result.matched, 0);
-        assert_eq!(
-            result.per_function[0].coverage_source,
-            fallow_output::CoverageSource::Estimated
-        );
-        assert_eq!(file_coverage.lookup("<arrow>", 1, 24), Some(100.0));
-    }
-
-    #[test]
-    fn quoted_hash_method_keeps_exact_istanbul_coverage() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let source_path = temp.path().join("src/vault.js");
-        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
-        std::fs::write(&source_path, "class Vault { '#wipe'() {} }\n").unwrap();
-
-        let coverage_path = temp.path().join("coverage-final.json");
-        write_single_file_istanbul_fixture(
-            &coverage_path,
-            &source_path,
-            &serde_json::json!({
-                "0": {
-                    "name": "#wipe",
-                    "line": 1,
-                    "decl": { "start": { "line": 1, "column": 14 }, "end": { "line": 1, "column": 21 } },
-                    "loc": { "start": { "line": 1, "column": 24 }, "end": { "line": 1, "column": 26 } }
-                }
-            }),
-            &serde_json::json!({ "0": 1 }),
-        );
-
-        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
-        let canonical_source = dunce::canonicalize(&source_path).unwrap();
-        let file_coverage = coverage.get(&canonical_source).unwrap();
-
-        let mut quoted_public_method = make_fn_complexity(1);
-        quoted_public_method.name = "#wipe".to_string();
-        quoted_public_method.line = 1;
-        quoted_public_method.col = 14;
-        let result = istanbul_crap_default(&[quoted_public_method], Some(file_coverage), false);
-        assert_eq!(result.matched, 1);
-        assert_eq!(
-            result.per_function[0].coverage_source,
-            fallow_output::CoverageSource::Istanbul
-        );
-        assert_eq!(result.per_function[0].coverage_pct, Some(100.0));
     }
 
     /// A decorated member's `decl` opens at the decorator and its `loc` opens
