@@ -95,6 +95,19 @@ impl ComplexityMetrics {
     fn same_values_and_lines(&self, other: &Self) -> bool {
         self.same_values(other) && self.line_count == other.line_count
     }
+
+    /// Whether both findings have the same cyclomatic and cognitive values.
+    /// The CRAP score is not compared, because it also changes when only the
+    /// coverage input changes (#3815).
+    const fn same_structure(&self, other: &Self) -> bool {
+        self.cyclomatic == other.cyclomatic && self.cognitive == other.cognitive
+    }
+
+    /// Whether both findings have the same cyclomatic and cognitive values and
+    /// the same line count.
+    const fn same_structure_and_lines(&self, other: &Self) -> bool {
+        self.same_structure(other) && self.line_count == other.line_count
+    }
 }
 
 /// Attribution of one head complexity finding against the base findings.
@@ -422,9 +435,15 @@ pub fn classify_complexity_findings(
 ///    findings inherited when a same-named finding is added, removed or
 ///    edited. Rule 1 runs for all head findings first, so an earlier head
 ///    finding cannot take the exact match of a later one.
-/// 3. The remaining head findings, in line order, take the remaining base
+/// 3. Each remaining head finding, in line order, takes an unmatched base
+///    finding with the same cyclomatic and cognitive values and the same line
+///    count, and then one with the same cyclomatic and cognitive values. The
+///    CRAP score is not compared in this rule, because a change of the
+///    coverage input changes the CRAP score of an unchanged function (#3815).
+///    The pair still compares the CRAP score, so CRAP growth stays visible.
+/// 4. The remaining head findings, in line order, take the remaining base
 ///    findings, in line order. Each pair compares the exceeded metrics.
-/// 4. A head finding without a base finding is introduced.
+/// 5. A head finding without a base finding is introduced.
 ///
 /// Every base finding matches at most one head finding, so a new same-named
 /// finding cannot hide behind an existing one. The rule does not identify
@@ -453,9 +472,11 @@ pub fn classify_complexity_attribution(
         };
         heads.sort_by_key(|&index| (findings[index].line, findings[index].col));
         let mut unmatched_bases: Vec<Option<&ComplexityMetrics>> = bases.iter().map(Some).collect();
-        let rules: [fn(&ComplexityMetrics, &ComplexityMetrics) -> bool; 2] = [
+        let rules: [fn(&ComplexityMetrics, &ComplexityMetrics) -> bool; 4] = [
             ComplexityMetrics::same_values_and_lines,
             ComplexityMetrics::same_values,
+            ComplexityMetrics::same_structure_and_lines,
+            ComplexityMetrics::same_structure,
         ];
         for rule in rules {
             for &index in &heads {
@@ -868,6 +889,82 @@ mod tests {
                 &[finding("run", 1, 30, 17), finding("run", 30, 21, 20)]
             ),
             [true, false]
+        );
+    }
+
+    /// An anonymous finding with a CRAP score from the given coverage source.
+    fn arrow(
+        line: u32,
+        cyclomatic: u16,
+        cognitive: u16,
+        crap: Option<f64>,
+        source: CoverageSource,
+    ) -> HealthFinding {
+        let mut finding = finding("<arrow>", line, MAX + 1, MAX + 1);
+        finding.violation.cyclomatic = cyclomatic;
+        finding.violation.cognitive = cognitive;
+        finding.violation.crap = crap;
+        finding.violation.coverage_source = crap.map(|_| source);
+        finding.violation.exceeded = ExceededThreshold::from_bools(
+            cyclomatic > MAX,
+            cognitive > MAX,
+            crap.is_some_and(|crap| crap >= 30.0),
+        );
+        finding
+    }
+
+    #[test]
+    fn unchanged_arrow_keeps_its_base_when_only_crap_changes() {
+        // Issue #3815: the CRAP score of an unchanged arrow went from an
+        // estimated score to a measured score. Its cyclomatic and cognitive
+        // values did not change, so it must keep its own base finding, not the
+        // first remaining base finding in line order.
+        let estimated = CoverageSource::Estimated;
+        let measured = CoverageSource::Istanbul;
+        let base = [
+            (122, 36, 37, 1332.0),
+            (284, 26, 28, 702.0),
+            (352, 9, 6, 90.0),
+            (560, 7, 6, 56.0),
+            (637, 30, 42, 930.0),
+            (732, 13, 5, 182.0),
+            (872, 13, 12, 182.0),
+            (889, 6, 2, 42.0),
+            (945, 5, 3, 30.0),
+            (972, 16, 4, 272.0),
+            (1017, 11, 13, 132.0),
+            (1184, 14, 15, 210.0),
+            (1202, 12, 5, 156.0),
+        ]
+        .into_iter()
+        .map(|(line, cyclomatic, cognitive, crap)| {
+            arrow(line, cyclomatic, cognitive, Some(crap), estimated)
+        })
+        .collect();
+        let head = [
+            arrow(128, 36, 37, Some(36.0), measured),
+            arrow(294, 27, 29, None, measured),
+            arrow(663, 30, 42, Some(30.0), measured),
+        ];
+        let classes = attribution(base, &head);
+        assert!(!classes[0].introduced);
+        assert!(!classes[2].introduced, "{:?}", classes[2]);
+        assert!(classes[2].worsened_metrics.is_empty());
+    }
+
+    #[test]
+    fn crap_growth_of_an_unchanged_arrow_still_compares() {
+        let measured = CoverageSource::Istanbul;
+        let classes = attribution(
+            vec![
+                arrow(10, 9, 6, Some(40.0), measured),
+                arrow(40, 30, 42, Some(30.0), measured),
+            ],
+            &[arrow(40, 30, 42, Some(60.0), measured)],
+        );
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Crap, 30.0, 60.0)]
         );
     }
 
