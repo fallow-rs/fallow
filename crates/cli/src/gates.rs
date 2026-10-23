@@ -716,6 +716,9 @@ pub struct CombinedGateInputs<'a> {
     /// The number of findings in the health section whose `complexity-*`
     /// rule is `error`, when it ran.
     pub health_blocking_findings: Option<usize>,
+    /// The coverage-gap gate of the health section when the `coverage-gaps`
+    /// rule is `error`: whether the run has gaps.
+    pub health_coverage_gaps: Option<bool>,
     /// The `parse-error` gate, when it is armed. The combined run applies it
     /// in every output format, so it keeps `enforced: true`.
     pub parse_error: Option<GateOutcome>,
@@ -727,9 +730,10 @@ pub struct CombinedGateInputs<'a> {
 /// The entries of a bare `fallow` run that `--fail-on-issues` enforces. The
 /// combined machine exit path applies these entries itself. The other enforced
 /// entries have their own place in the exit path.
-pub const FAIL_ON_ISSUES_GATES: [GateName; 4] = [
+pub const FAIL_ON_ISSUES_GATES: [GateName; 5] = [
     GateName::ErrorSeverityFindings,
     GateName::HealthFindings,
+    GateName::HealthCoverageGaps,
     GateName::DuplicationThreshold,
     GateName::DuplicationFindings,
 ];
@@ -754,8 +758,9 @@ pub fn fail_on_issues_exit_code(gates: Option<&GateOutcomes>) -> u8 {
 ///
 /// It carries the default exit rule of each section that ran:
 /// `error-severity-findings` for dead code and `health-findings` for health.
-/// Dupes has no default rule. With these rules in it, the `status` members say
-/// whether the human run of the same flags fails.
+/// Dupes has no default rule. A `coverage-gaps` rule at `error` adds the
+/// `health-coverage-gaps` entry. With these rules in it, the `status` members
+/// say whether the human run of the same flags fails.
 ///
 /// Without `--fail-on-issues`, the combined machine renderers exit 0 for every
 /// gate except the stale-baseline gate, the baseline-growth gate, the
@@ -806,6 +811,12 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
         gates.insert(
             GateName::HealthFindings,
             health_findings_outcome(blocking, input.fail_on_issues),
+        );
+    }
+    if let Some(has_gaps) = input.health_coverage_gaps {
+        gates.insert(
+            GateName::HealthCoverageGaps,
+            GateOutcome::new(status_of(has_gaps), input.fail_on_issues),
         );
     }
     gates.into_option()
@@ -1131,6 +1142,7 @@ mod tests {
             clone_groups: Some(3),
             error_findings: Some(1),
             health_blocking_findings: Some(1),
+            health_coverage_gaps: Some(true),
             parse_error: None,
             fail_on_issues,
         }
@@ -1165,6 +1177,7 @@ mod tests {
             clone_groups: Some(0),
             error_findings: Some(0),
             health_blocking_findings: Some(0),
+            health_coverage_gaps: Some(false),
             ..combined_inputs(true)
         })
         .expect("the combined run states its default rules");

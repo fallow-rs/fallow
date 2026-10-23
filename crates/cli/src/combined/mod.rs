@@ -745,7 +745,9 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         complexity: true,
         file_scores: true,
         coverage_gaps: false,
-        config_activates_coverage_gaps: false,
+        // Bare `fallow` includes health, so an enabled `coverage-gaps` rule
+        // reports and gates here exactly as it does on `fallow health`.
+        config_activates_coverage_gaps: true,
         hotspots: true,
         ownership: false,
         ownership_emails: None,
@@ -754,7 +756,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         css_deep: false,
         force_full: false,
         score_only_output: false,
-        enforce_coverage_gap_gate: false,
+        enforce_coverage_gap_gate: true,
         effort: None,
         score: opts.score || opts.trend || opts.trend_from.is_some(),
         // The flag reaches the health config here; the combined run applies

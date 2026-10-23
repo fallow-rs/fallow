@@ -914,6 +914,7 @@ fn enforce_human_section_rules(gates: &mut fallow_output::GateOutcomes) {
     for name in [
         GateName::ErrorSeverityFindings,
         GateName::HealthFindings,
+        GateName::HealthCoverageGaps,
         GateName::DuplicationThreshold,
     ] {
         if let Some(outcome) = gates.get(name).cloned() {
@@ -1360,8 +1361,9 @@ fn combined_identity_incomplete(
 /// [`machine_combined_fail_on_issues_code`] exits on them in every format.
 ///
 /// Combined mode accepts none of the health gate flags (`--min-score`,
-/// `--min-severity`, `--threshold`), so the health sub-analysis arms nothing
-/// but its default rule here.
+/// `--min-severity`, `--threshold`), so the health sub-analysis arms only its
+/// default rule and, when the `coverage-gaps` rule is `error`, the coverage-gap
+/// gate.
 fn combined_gate_outcomes(
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
@@ -1394,6 +1396,11 @@ fn combined_gate_outcomes(
         }),
         health_blocking_findings: health_result
             .map(|result| result.report.findings.iter().filter(|f| f.blocks()).count()),
+        health_coverage_gaps: health_result.and_then(|result| {
+            result
+                .should_fail_on_coverage_gaps
+                .then_some(result.coverage_gaps_has_findings)
+        }),
         parse_error: combined_parse_error_outcome(check_result, health_result),
         fail_on_issues: flags.fail_on_issues,
     })

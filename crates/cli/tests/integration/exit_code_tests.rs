@@ -5,7 +5,8 @@
 )]
 
 use crate::common::{
-    fallow_bin, parse_json, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw,
+    CommandOutput, fallow_bin, parse_json, run_fallow, run_fallow_combined, run_fallow_in_root,
+    run_fallow_raw,
 };
 
 #[test]
@@ -370,83 +371,84 @@ fn check_grouped_human_explain_renders_inline_descriptions() {
     );
 }
 
-#[test]
-fn combined_mode_config_enabled_coverage_gaps_stays_out_of_health_section() {
+/// Run bare `fallow` on the `coverage-gaps` fixture with the given
+/// `coverage-gaps` severity. The dead-code rules are off, so only the health
+/// section can decide the exit code.
+fn run_combined_with_coverage_gaps_rule(severity: &str, args: &[&str]) -> CommandOutput {
     let dir = tempfile::tempdir().expect("create temp dir");
     let config_path = dir.path().join("fallow.json");
     std::fs::write(
         &config_path,
-        r#"{
-  "rules": {
-    "coverage-gaps": "warn"
-  }
-}
-"#,
-    )
-    .expect("write config file");
-
-    let output = run_fallow_raw(&[
-        "--root",
-        crate::common::fixture_path("production-mode")
-            .to_str()
-            .expect("fixture path should be utf-8"),
-        "--config",
-        config_path.to_str().expect("config path should be utf-8"),
-        "--format",
-        "json",
-        "--quiet",
-    ]);
-    assert!(
-        output.code == 0 || output.code == 1,
-        "combined mode should not crash with config-enabled coverage gaps"
-    );
-
-    let json = parse_json(&output);
-    assert!(
-        json["health"].get("coverage_gaps").is_none(),
-        "combined mode should not leak coverage_gaps into the embedded health report"
-    );
-}
-
-#[test]
-fn combined_mode_hidden_coverage_gap_gate_does_not_fail() {
-    let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("fallow.json");
-    std::fs::write(
-        &config_path,
-        r#"{
-  "rules": {
-    "coverage-gaps": "error",
+        format!(
+            r#"{{
+  "rules": {{
+    "coverage-gaps": "{severity}",
     "unused-files": "off",
     "unused-dependencies": "off",
     "unused-exports": "off",
     "test-only-dependencies": "off"
-  }
-}
-"#,
+  }}
+}}
+"#
+        ),
     )
     .expect("write config file");
-
-    let output = run_fallow_raw(&[
+    let root = crate::common::fixture_path("coverage-gaps");
+    let mut full_args = vec![
         "--root",
-        crate::common::fixture_path("coverage-gaps")
-            .to_str()
-            .expect("fixture path should be utf-8"),
+        root.to_str().expect("fixture path should be utf-8"),
         "--config",
         config_path.to_str().expect("config path should be utf-8"),
-        "--format",
-        "json",
-        "--quiet",
-    ]);
-    assert_eq!(
-        output.code, 0,
-        "combined mode should not fail on hidden coverage-gap gates"
-    );
+    ];
+    full_args.extend_from_slice(args);
+    run_fallow_raw(&full_args)
+}
 
+#[test]
+fn combined_mode_reports_coverage_gaps_at_warn_without_failing() {
+    let output = run_combined_with_coverage_gaps_rule("warn", &["--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "a warn rule must not fail the run");
     let json = parse_json(&output);
     assert!(
-        json["health"].get("coverage_gaps").is_none(),
-        "combined mode should keep hidden coverage gaps out of the embedded health report"
+        json["health"].get("coverage_gaps").is_some(),
+        "an enabled coverage-gaps rule must reach the health section of bare fallow"
+    );
+    assert!(
+        json["gate_outcomes"].get("health-coverage-gaps").is_none(),
+        "a warn rule arms no coverage-gap gate"
+    );
+}
+
+#[test]
+fn combined_mode_fails_on_coverage_gaps_at_error() {
+    let human = run_combined_with_coverage_gaps_rule("error", &["--quiet"]);
+    assert_eq!(
+        human.code, 1,
+        "bare fallow must fail like `fallow health` when coverage-gaps is error, stderr:\n{}",
+        human.stderr
+    );
+
+    let json_run = run_combined_with_coverage_gaps_rule("error", &["--format", "json", "--quiet"]);
+    let json = parse_json(&json_run);
+    let gate = &json["gate_outcomes"]["health-coverage-gaps"];
+    assert_eq!(gate["status"], "fail", "the gate entry states the verdict");
+    assert_eq!(
+        gate["enforced"], false,
+        "the combined machine formats do not exit on findings without --fail-on-issues"
+    );
+    assert_eq!(json_run.code, 0);
+
+    let enforced = run_combined_with_coverage_gaps_rule(
+        "error",
+        &["--format", "json", "--quiet", "--fail-on-issues"],
+    );
+    assert_eq!(
+        enforced.code, 1,
+        "--fail-on-issues must fail the combined machine run on the coverage-gap gate"
+    );
+    assert_eq!(
+        parse_json(&enforced)["gate_outcomes"]["health-coverage-gaps"]["enforced"],
+        true
     );
 }
 

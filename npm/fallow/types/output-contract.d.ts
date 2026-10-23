@@ -16847,10 +16847,12 @@ elapsed_ms: ElapsedMs
 /**
  * The verdict of every gate this run evaluated, keyed by name. The CLI
  * always emits it, with the default exit rule of each section that ran
- * (`error-severity-findings`, `health-findings`). Without
+ * (`error-severity-findings`, `health-findings`). A `coverage-gaps` rule
+ * at `error` adds `health-coverage-gaps`. Without
  * `--fail-on-issues` or `--ci`, the machine formats of the combined run
  * exit 0 for findings, so most entries have `enforced: false`. With one of
- * these flags, the findings rules and `duplication-threshold` are
+ * these flags, the findings rules, `health-coverage-gaps` and
+ * `duplication-threshold` are
  * `enforced`, the dupes section adds an enforced `duplication-findings`
  * entry, and every format exits 1 when one fails. For the default
  * exit rules (`error-severity-findings`,
