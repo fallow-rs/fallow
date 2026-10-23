@@ -970,6 +970,14 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: node scripts/changelog-fragments.mjs check --base "origin/$BASE_REF"
+      # The checkout is the merge commit, and git merges two equal version
+      # bumps with no conflict. So compare the pull request head itself.
+      - name: Version bumps against the base
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-version-bumps.mjs --base "origin/$BASE_REF" --head "$HEAD_SHA"
       - name: Emitted version drift
         run: npm run check:emitted-versions
       - name: Install type-aware sidecar dependencies

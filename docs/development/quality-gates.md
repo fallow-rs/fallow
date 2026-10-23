@@ -679,6 +679,34 @@ brought in does not fail the merge. On `git commit --amend`, the step compares
 with the commit that the amend replaces, so it does not see growth that is
 already in that commit. The CI step is the authoritative check for amends.
 
+## Version bumps
+
+The `Version bumps against the base` step of the CI `JS Lint and Format` job
+checks each `*CACHE_VERSION` and `*SCHEMA_VERSION` constant in the Rust
+sources. The step reads the net change that the non-merge commits of the
+pull request make to each constant. It fails when the pull request head has
+the same value as the current base branch for such a constant. A merge of
+the base into the branch moves the merge base, so the step does not use the
+merge base. A removal and a bump that the branch reverts again do not count.
+
+This case occurs when two pull requests make the same bump, for example
+`CACHE_VERSION` from 372 to 373. Git merges two equal edits with no conflict,
+so the second merge keeps 373. A warm cache of the old format then matches
+the new version. To fix a failure, set the constant above the value on the
+base branch.
+
+```bash
+node scripts/check-version-bumps.mjs --base origin/main
+```
+
+The step compares the pull request head, not the merge commit of the
+checkout. The required checks do not require an up-to-date branch, so a
+green run can become stale when the base branch moves. A rebase that is not
+`scripts/ship-rebase.mjs` can drop an equal bump from the commit, and then
+the step cannot see the bump. `scripts/ship-rebase.mjs` compares the values
+before and after each rebase of the serial merge flow. Both scripts use
+`scripts/version-constants.mjs`.
+
 ## Evidence standard
 
 For a bug fix, prove the reproduction fails without the change, passes with the
