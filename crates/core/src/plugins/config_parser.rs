@@ -11,6 +11,11 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
 
+#[path = "config_parser_vite_plugin_call.rs"]
+mod vite_plugin_call;
+pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;
+use vite_plugin_call::is_plugin_binding_call;
+
 /// Extract all import source specifiers from JS/TS source code.
 #[must_use]
 pub(crate) fn extract_imports(source: &str, path: &Path) -> Vec<String> {
@@ -1233,19 +1238,6 @@ fn collect_plugin_import_bindings(program: &Program<'_>, package: &str) -> Plugi
     }
 
     imports
-}
-
-fn is_plugin_binding_call(call: &CallExpression<'_>, imports: &PluginImportBindings) -> bool {
-    match &call.callee {
-        Expression::Identifier(identifier) => imports
-            .callables
-            .iter()
-            .any(|name| name == identifier.name.as_str()),
-        Expression::StaticMemberExpression(member) if matches!(&member.object, Expression::Identifier(object) if imports.namespaces.iter().any(|name| name == object.name.as_str())) => {
-            member.property.name == "default"
-        }
-        _ => false,
-    }
 }
 
 fn collect_vite_react_babel_dependencies(options: &ObjectExpression<'_>, deps: &mut Vec<String>) {

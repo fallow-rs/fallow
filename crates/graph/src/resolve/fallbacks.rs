@@ -19,10 +19,13 @@ use super::types::{
 
 #[path = "fallbacks_relative_package_root.rs"]
 mod relative_package_root;
+#[path = "fallbacks_scss_paths.rs"]
+mod scss_paths;
 #[path = "fallbacks_workspace_package_asset.rs"]
 mod workspace_package_asset;
 
 pub(super) use relative_package_root::try_relative_package_root_source_fallback;
+use scss_paths::{find_scss_through_path_alias, lookup_scss_path};
 use workspace_package_asset::{exports_target_asset, workspace_package_asset};
 
 /// Return the post-prefix remainder when `specifier` matches the alias `prefix`
@@ -223,7 +226,7 @@ pub(super) fn try_scss_include_path_fallback(
     specifier: &str,
     from_style: bool,
 ) -> Option<ResolveResult> {
-    if ctx.scss_include_paths.is_empty() {
+    if ctx.scss_include_paths.is_empty() && ctx.path_aliases.is_empty() {
         return None;
     }
     let is_scss_importer = from_file
@@ -245,7 +248,7 @@ pub(super) fn try_scss_include_path_fallback(
             return Some(ResolveResult::InternalModule(file_id));
         }
     }
-    None
+    find_scss_through_path_alias(ctx, bare).map(ResolveResult::InternalModule)
 }
 
 /// Probe an SCSS include directory for a bare specifier, applying the standard
@@ -306,25 +309,6 @@ fn find_scss_in_dir(include_dir: &Path, bare: &str, ctx: &ResolveContext<'_>) ->
         let idx_plain = build(bare_path).join(format!("index{suffix}"));
         if let Some(fid) = lookup_scss_path(&idx_plain, ctx) {
             return Some(fid);
-        }
-    }
-    None
-}
-
-/// Look up an absolute candidate path in the file index, falling back to
-/// canonical path lookup for intra-project symlinks.
-fn lookup_scss_path(candidate: &Path, ctx: &ResolveContext<'_>) -> Option<FileId> {
-    if let Some(&file_id) = ctx.raw_path_to_id.get(candidate) {
-        return Some(file_id);
-    }
-    if let Some(canonical) = ctx.canonicalize_cache.get(candidate) {
-        if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
-            return Some(file_id);
-        }
-        if let Some(fallback) = ctx.canonical_fallback
-            && let Some(file_id) = fallback.get(&canonical)
-        {
-            return Some(file_id);
         }
     }
     None

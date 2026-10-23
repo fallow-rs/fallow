@@ -472,6 +472,8 @@ mod scoped_used_class_members;
 mod scss_partials;
 #[path = "integration_test/super_method_calls.rs"]
 mod super_method_calls;
+#[path = "integration_test/vite_sass_crediting.rs"]
+mod vite_sass_crediting;
 
 #[path = "integration_test/angular_template_members.rs"]
 mod angular_template_members;

@@ -1,0 +1,12 @@
+{
+  "name": "issue-3821-vuetify-config-file",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vuetify": "3.7.0"
+  },
+  "devDependencies": {
+    "vite": "7.0.0",
+    "vite-plugin-vuetify": "2.1.0"
+  }
+}

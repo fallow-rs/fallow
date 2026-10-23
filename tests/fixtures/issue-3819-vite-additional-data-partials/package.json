@@ -1,0 +1,9 @@
+{
+  "name": "issue-3819-vite-additional-data-partials",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "sass": "1.80.0",
+    "vite": "7.0.0"
+  }
+}

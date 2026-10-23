@@ -26,7 +26,10 @@ fn additional_data_entry_pattern(
     {
         return None;
     }
-    Some(normalized.to_string())
+    // Sass resolves `@use "src/styles/tokens"` to `_tokens.scss`, `tokens.scss`
+    // or a directory index. An entry pattern is a glob, so it must name the
+    // file that Sass loads, not the specifier text.
+    Some(local_style_candidate(root, normalized).unwrap_or_else(|| normalized.to_string()))
 }
 
 fn additional_data_package_name(
@@ -47,17 +50,16 @@ fn is_additional_data_package_import(
     if raw.starts_with('.') || raw.starts_with('/') || raw.contains(':') {
         return false;
     }
-    if local_style_candidate_exists(root, normalized) {
-        return false;
-    }
-    true
+    local_style_candidate(root, normalized).is_none()
 }
 
-fn local_style_candidate_exists(root: &std::path::Path, normalized: &str) -> bool {
+/// The root-relative path of the local style file that a preprocessor loads
+/// for `normalized`: the exact file, then `<name>.<ext>`, the `_<name>.<ext>`
+/// partial, and the `<name>/_index.<ext>` and `<name>/index.<ext>` indexes.
+fn local_style_candidate(root: &std::path::Path, normalized: &str) -> Option<String> {
     let path = std::path::Path::new(normalized);
-    let exact = root.join(path);
-    if exact.is_file() {
-        return true;
+    if root.join(path).is_file() {
+        return Some(normalized.to_string());
     }
 
     let has_style_ext = path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
@@ -67,24 +69,28 @@ fn local_style_candidate_exists(root: &std::path::Path, normalized: &str) -> boo
         )
     });
     if has_style_ext {
-        return false;
+        return None;
     }
 
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty());
+    let file_name = path.file_name().and_then(|name| name.to_str())?;
+    let parent = normalized
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .filter(|parent| !parent.is_empty());
     let with_parent =
-        |name: &str| parent.map_or_else(|| root.join(name), |parent| root.join(parent).join(name));
+        |name: &str| parent.map_or_else(|| name.to_string(), |p| format!("{p}/{name}"));
 
-    ["scss", "sass", "css", "less", "stylus"].iter().any(|ext| {
-        with_parent(&format!("{file_name}.{ext}")).is_file()
-            || with_parent(&format!("_{file_name}.{ext}")).is_file()
-            || root.join(path).join(format!("_index.{ext}")).is_file()
-            || root.join(path).join(format!("index.{ext}")).is_file()
-    })
+    ["scss", "sass", "css", "less", "stylus"]
+        .iter()
+        .flat_map(|ext| {
+            [
+                with_parent(&format!("{file_name}.{ext}")),
+                with_parent(&format!("_{file_name}.{ext}")),
+                format!("{normalized}/_index.{ext}"),
+                format!("{normalized}/index.{ext}"),
+            ]
+        })
+        .find(|candidate| root.join(candidate).is_file())
 }
 
 /// Credit the CSS implementation package named under one of the CSS keys.
@@ -111,6 +117,45 @@ fn add_css_implementation_dependency(
     }
 }
 
+/// Credit the Sass settings file that `vite-plugin-vuetify` loads from
+/// `styles.configFile`. No module imports that file, so it is an entry.
+fn add_vuetify_config_file(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+) {
+    let Some(raw) = config_parser::extract_vite_plugin_call_option_path(
+        source,
+        config_path,
+        "vite-plugin-vuetify",
+        &["styles", "configFile"],
+    ) else {
+        return;
+    };
+    // The plugin resolves the file against the Vite root: the `root` option
+    // when the config sets it, otherwise the config directory.
+    let base = vite_root(source, config_path, root).map_or_else(
+        || config_path.to_path_buf(),
+        |dir| root.join(dir).join("vite.config"),
+    );
+    if let Some(normalized) = config_parser::normalize_config_path(&raw, &base, root) {
+        result.push_entry_pattern(normalized);
+    }
+}
+
+/// The root-relative directory that the Vite `root` option names, if the
+/// config sets it.
+fn vite_root(
+    source: &str,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+) -> Option<String> {
+    let raw = config_parser::extract_config_path(source, config_path, &["root"])?;
+    let vite_root = config_parser::normalize_filesystem_config_path(&raw, config_path, root)?;
+    Some(vite_root.trim_end_matches('/').to_string())
+}
+
 /// Vite entries that sit under its root directory.
 const ROOT_ENTRY_PATTERNS: &[&str] = &[
     "src/main.{ts,tsx,js,jsx}",
@@ -129,12 +174,10 @@ fn add_root_entry_patterns(
     config_path: &std::path::Path,
     root: &std::path::Path,
 ) {
-    let Some(vite_root) = config_parser::extract_config_path(source, config_path, &["root"])
-        .and_then(|raw| config_parser::normalize_filesystem_config_path(&raw, config_path, root))
-    else {
+    let Some(vite_root) = vite_root(source, config_path, root) else {
         return;
     };
-    let vite_root = vite_root.trim_end_matches('/');
+    let vite_root = vite_root.as_str();
     let config_dir = config_path
         .parent()
         .and_then(|dir| dir.strip_prefix(root).ok())
@@ -263,6 +306,8 @@ define_plugin!(
         credit_dependency_lists(&mut result, source, config_path, &[]);
 
         add_css_implementation_dependency(&mut result, source, config_path);
+
+        add_vuetify_config_file(&mut result, source, config_path, root);
 
         for preprocessor in ["scss", "sass", "less", "stylus"] {
             let body = config_parser::extract_config_string_or_array(
@@ -1056,6 +1101,75 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_vuetify_styles_config_file_is_an_entry() {
+        let source = r"
+            import { defineConfig } from 'vite';
+            import vuetify from 'vite-plugin-vuetify';
+
+            export default defineConfig({
+                plugins: [vuetify({ styles: { configFile: './src/styles/settings.scss' } })],
+            });
+        ";
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/web/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            entry_pattern_strings(&result).contains(&"web/src/styles/settings.scss"),
+            "{:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn resolve_config_vuetify_config_file_is_read_against_the_vite_root() {
+        let source = r"
+            import path from 'path';
+            import { defineConfig } from 'vite';
+            import vuetify from 'vite-plugin-vuetify';
+
+            export default defineConfig(({ command }) => ({
+                root: path.resolve(__dirname, 'src'),
+                plugins: [vuetify({ styles: { configFile: 'settings.scss' } })],
+            }));
+        ";
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/dev/vite.config.mjs"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            entry_pattern_strings(&result).contains(&"dev/src/settings.scss"),
+            "{:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn resolve_config_ignores_config_file_of_a_local_vuetify_function() {
+        let source = r"
+            import { defineConfig } from 'vite';
+
+            const vuetify = (options) => ({ name: 'local', options });
+
+            export default defineConfig({
+                plugins: [vuetify({ styles: { configFile: 'src/styles/settings.scss' } })],
+            });
+        ";
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            !entry_pattern_strings(&result).contains(&"src/styles/settings.scss"),
+            "{:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
     fn resolve_config_additional_data_keeps_existing_local_style_entries() {
         let tmp = tempfile::tempdir().expect("create temp dir");
         std::fs::create_dir_all(tmp.path().join("src/styles")).expect("create styles dir");
@@ -1080,8 +1194,9 @@ mod tests {
             result
                 .entry_patterns
                 .iter()
-                .any(|rule| rule.pattern == "src/styles/tokens"),
-            "existing local style references should remain entry patterns"
+                .any(|rule| rule.pattern == "src/styles/_tokens.scss"),
+            "a local style reference should credit the partial that Sass loads: {:?}",
+            result.entry_patterns
         );
         assert!(
             !result.referenced_dependencies.contains(&"src".to_string()),
