@@ -609,3 +609,11 @@ fn scss_module_compound_element_class_stays_a_class() {
         assert!(named.contains(&class.to_string()), "missing {class}");
     }
 }
+
+#[test]
+fn scss_module_view_transition_class_arguments_are_not_classes() {
+    let named = scss_module_class_names(
+        ".foo {\n  view-transition-name: demo;\n}\n\n::view-transition-new(.demo) {\n  animation-duration: 200ms;\n}\n::view-transition-group(*.card.big) { }\n::view-transition-old(root) { }\n.after::view-transition-image-pair(.pair) { }\n",
+    );
+    assert_eq!(named, vec!["foo".to_string(), "after".to_string()]);
+}

@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after the upgrade parses each file again.
   (Closes [#3839](https://github.com/fallow-rs/fallow/issues/3839))
 
+- **CSS Modules no longer report view transition class names as unused
+  classes.** In `::view-transition-new(.demo)` and the other
+  `::view-transition-*()` pseudo-elements, `.demo` is a view transition class
+  and not an element class. The SCSS class scan exported it, and fallow then
+  gave a false `unused-export` for `demo`. The class scan now skips the
+  argument of these pseudo-elements. The extraction cache version changes, so
+  the first run after the upgrade parses each file again.
+  (Closes [#3840](https://github.com/fallow-rs/fallow/issues/3840))
+
 ## [3.35.0] - 2026-10-21
 
 ### Added

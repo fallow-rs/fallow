@@ -21,6 +21,13 @@ static SCSS_NAMESPACED_INCLUDE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r"@include\s+[a-zA-Z_][a-zA-Z0-9_-]*(\.)[a-zA-Z_][a-zA-Z0-9_-]*")
 });
 
+/// Regex to find the argument of a view transition pseudo-element such as
+/// `::view-transition-new(.demo)`. Group 1 is the argument. Its `.name`
+/// tokens are view transition class names, not element classes, so CSS
+/// Modules do not export them (issue #3840).
+static VIEW_TRANSITION_ARGUMENT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"::view-transition-[a-z-]+\(([^)]*)\)"));
+
 /// Mask every regex match in `src` with ASCII spaces (`0x20`) of equal byte
 /// length, so byte offsets in the returned string correspond 1:1 to byte
 /// offsets in the original.
@@ -66,4 +73,36 @@ fn mask_capture_with_whitespace(src: &str, re: &regex::Regex) -> String {
 pub fn mask_sass_module_members(src: &str) -> String {
     let masked = mask_capture_with_whitespace(src, &SCSS_NAMESPACED_CALL_RE);
     mask_capture_with_whitespace(&masked, &SCSS_NAMESPACED_INCLUDE_RE)
+}
+
+/// Mask the argument of `::view-transition-*()` pseudo-elements, so the class
+/// scan does not read a view transition class as an element class (issue
+/// #3840).
+pub fn mask_view_transition_arguments(src: &str) -> String {
+    mask_capture_with_whitespace(src, &VIEW_TRANSITION_ARGUMENT_RE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static COMMENT_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| crate::static_regex(r"(?s)/\*.*?\*/"));
+
+    #[test]
+    fn mask_with_whitespace_preserves_byte_length() {
+        let src = "/* hello */ .foo { }";
+        let masked = mask_with_whitespace(src, &COMMENT_RE);
+        assert_eq!(masked.len(), src.len());
+        assert!(masked.is_char_boundary(src.len()));
+    }
+
+    #[test]
+    fn mask_with_whitespace_preserves_offsets_around_multibyte() {
+        let src = "/* \u{2713} */ .foo { }";
+        let foo_offset = src.find(".foo").expect("`.foo` present");
+        let masked = mask_with_whitespace(src, &COMMENT_RE);
+        assert_eq!(masked.len(), src.len());
+        assert_eq!(masked.find(".foo"), Some(foo_offset));
+    }
 }

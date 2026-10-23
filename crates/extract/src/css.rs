@@ -18,7 +18,9 @@ use std::sync::LazyLock;
 use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
-use crate::css_mask::{mask_sass_module_members, mask_with_whitespace};
+use crate::css_mask::{
+    mask_sass_module_members, mask_view_transition_arguments, mask_with_whitespace,
+};
 use crate::css_module_classes::lightningcss_class_set;
 use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
 use fallow_types::discover::FileId;
@@ -770,6 +772,7 @@ fn scan_css_module_exports(
 
 fn mask_css_module_class_candidates(comment_masked: &str, has_class_filter: bool) -> String {
     let mut masked = mask_with_whitespace(comment_masked, &CSS_NON_SELECTOR_RE);
+    masked = mask_view_transition_arguments(&masked);
     if !has_class_filter {
         masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
         masked = mask_sass_module_members(&masked);
@@ -1878,23 +1881,6 @@ mod tests {
         let body = r#"@use "./src/styles/global.scss";"#;
         let imports = extract_css_imports(body, true);
         assert_eq!(imports, vec!["./src/styles/global.scss"]);
-    }
-
-    #[test]
-    fn mask_with_whitespace_preserves_byte_length() {
-        let src = "/* hello */ .foo { }";
-        let masked = mask_with_whitespace(src, &CSS_COMMENT_RE);
-        assert_eq!(masked.len(), src.len());
-        assert!(masked.is_char_boundary(src.len()));
-    }
-
-    #[test]
-    fn mask_with_whitespace_preserves_offsets_around_multibyte() {
-        let src = "/* \u{2713} */ .foo { }";
-        let foo_offset = src.find(".foo").expect("`.foo` present");
-        let masked = mask_with_whitespace(src, &CSS_COMMENT_RE);
-        assert_eq!(masked.len(), src.len());
-        assert_eq!(masked.find(".foo"), Some(foo_offset));
     }
 
     /// Resolve a span's start to (line, col) using the same primitives the
