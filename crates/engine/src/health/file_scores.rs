@@ -14,6 +14,7 @@ use crate::results::DeadCodeAnalysisArtifacts;
 use super::filters::filter_coverage_gaps;
 use super::hotspots;
 use super::scoring::{self, compute_file_scores};
+use super::test_reach::TestReachGraph;
 use super::{HealthError, HealthExecutionOptions};
 
 type FileScoreResult = (Option<scoring::FileScoreOutput>, Option<usize>, Option<f64>);
@@ -151,6 +152,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
         &mut analysis_output.results,
         input.config,
     );
+    let test_reach = TestReachGraph::for_production(input.config, input.file_paths);
     match compute_file_scores(
         scoring::FileScoreComputeInput {
             modules: input.modules,
@@ -160,6 +162,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
             root: &input.config.root,
             crap_thresholds: input.crap_thresholds,
             with_static_links: input.with_static_links,
+            test_reach: test_reach.as_ref(),
         },
         analysis_output,
     ) {

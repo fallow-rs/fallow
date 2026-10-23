@@ -63,6 +63,7 @@ pub mod scoring;
 pub mod styling_score;
 mod tailwind_theme;
 mod targets;
+mod test_reach;
 mod threshold_overrides;
 mod timings;
 mod vital_data;

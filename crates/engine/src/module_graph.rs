@@ -97,22 +97,76 @@ impl RetainedModuleGraph {
 ///
 /// This keeps health consumers on one contract while the graph crate owns the
 /// traversal and replacement-mask representation.
+///
+/// A view can read a second graph that holds the test files. Production mode
+/// keeps test files out of the analysis graph, so health reads test
+/// reachability from a graph of the full project. `file_map` then maps each
+/// analysis file id to the file id of the same path in that graph.
 #[derive(Clone, Copy)]
 pub(crate) struct StaticTestCoverage<'a> {
     graph: &'a ModuleGraph,
+    file_map: Option<&'a FxHashMap<FileId, FileId>>,
 }
 
 impl<'a> StaticTestCoverage<'a> {
     pub(crate) const fn new(graph: &'a ModuleGraph) -> Self {
-        Self { graph }
+        Self {
+            graph,
+            file_map: None,
+        }
+    }
+
+    /// Read test reachability from `graph`, a graph built over a different
+    /// file set. `file_map` maps the caller's file ids to the ids in `graph`.
+    pub(crate) const fn mapped(
+        graph: &'a ModuleGraph,
+        file_map: &'a FxHashMap<FileId, FileId>,
+    ) -> Self {
+        Self {
+            graph,
+            file_map: Some(file_map),
+        }
+    }
+
+    fn graph_file_id(self, file_id: FileId) -> Option<FileId> {
+        match self.file_map {
+            Some(file_map) => file_map.get(&file_id).copied(),
+            None => Some(file_id),
+        }
+    }
+
+    /// The export in the coverage graph that has the name of `export`.
+    fn graph_export<'b>(
+        self,
+        file_id: FileId,
+        export: &'b fallow_graph::graph::ExportSymbol,
+    ) -> Option<(FileId, &'b fallow_graph::graph::ExportSymbol)>
+    where
+        'a: 'b,
+    {
+        if self.file_map.is_none() {
+            return Some((file_id, export));
+        }
+        let graph_file_id = self.graph_file_id(file_id)?;
+        let node = self.graph.modules.get(graph_file_id.0 as usize)?;
+        node.exports
+            .iter()
+            .find(|candidate| candidate.name == export.name)
+            .map(|candidate| (graph_file_id, candidate))
     }
 
     pub(crate) fn covers_file(self, file_id: FileId) -> bool {
-        self.graph.is_test_reachable(file_id)
+        self.graph_file_id(file_id)
+            .is_some_and(|graph_file_id| self.graph.is_test_reachable(graph_file_id))
     }
 
-    pub(crate) fn covers_any_reference(self, export: &fallow_graph::graph::ExportSymbol) -> bool {
-        self.graph.is_any_test_reference_covered(export)
+    pub(crate) fn covers_any_reference(
+        self,
+        file_id: FileId,
+        export: &fallow_graph::graph::ExportSymbol,
+    ) -> bool {
+        self.graph_export(file_id, export)
+            .is_some_and(|(_, export)| self.graph.is_any_test_reference_covered(export))
     }
 
     /// Whether only tests that mock a module on the reference path reference
@@ -122,12 +176,16 @@ impl<'a> StaticTestCoverage<'a> {
         file_id: FileId,
         export: &fallow_graph::graph::ExportSymbol,
     ) -> bool {
-        self.graph.test_masking_state() == GraphTestMaskingState::Active
-            && self
-                .graph
-                .export_test_reach(file_id, export, &|_| false)
-                .reach
-                == GraphExportTestReach::MockedOnly
+        if self.graph.test_masking_state() != GraphTestMaskingState::Active {
+            return false;
+        }
+        self.graph_export(file_id, export)
+            .is_some_and(|(graph_file_id, export)| {
+                self.graph
+                    .export_test_reach(graph_file_id, export, &|_| false)
+                    .reach
+                    == GraphExportTestReach::MockedOnly
+            })
     }
 }
 
@@ -324,7 +382,7 @@ pub fn module_value_exports(graph: &RetainedModuleGraph) -> Vec<ModuleValueExpor
                     file_id: node.file_id,
                     name: export.name.to_string(),
                     span_start: export.span.start,
-                    test_referenced: test_coverage.covers_any_reference(export),
+                    test_referenced: test_coverage.covers_any_reference(node.file_id, export),
                 })
         })
         .collect()

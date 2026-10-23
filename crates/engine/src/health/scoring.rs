@@ -4,6 +4,7 @@ use crate::module_graph::StaticTestCoverage;
 
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
+use super::test_reach::build_test_referenced_exports;
 use super::threshold_overrides::ThresholdOverrideResolver;
 
 const MAX_FUNCTION_EVIDENCE: usize = 3;
@@ -742,7 +743,11 @@ fn template_inherit_context_from_importers(
         if test_coverage.covers_file(owner_node.file_id) {
             any_reachable = true;
             provenance.get_or_insert_with(|| (*owner_path).clone());
-            let refs = build_test_referenced_exports(&owner_node.exports, test_coverage);
+            let refs = build_test_referenced_exports(
+                owner_node.file_id,
+                &owner_node.exports,
+                test_coverage,
+            );
             combined_refs.extend(refs);
         }
     }
@@ -781,27 +786,6 @@ fn is_template_owner_path(path: &std::path::Path) -> bool {
                 "ts" | "tsx" | "mts" | "cts"
             )
         })
-}
-
-/// Build the set of export names that have at least one test-reachable reference.
-///
-/// This is the per-function signal: if an export named "foo" has a reference from
-/// a test-reachable module, the function "foo" is considered directly tested.
-fn build_test_referenced_exports(
-    exports: &[fallow_graph::graph::ExportSymbol],
-    test_coverage: StaticTestCoverage<'_>,
-) -> rustc_hash::FxHashSet<String> {
-    let mut set = rustc_hash::FxHashSet::default();
-    for export in exports {
-        if export.is_type_only {
-            continue;
-        }
-        let has_test_ref = test_coverage.covers_any_reference(export);
-        if has_test_ref {
-            set.insert(export.name.to_string());
-        }
-    }
-    set
 }
 
 fn collect_direct_callers(
@@ -2594,6 +2578,9 @@ pub(super) struct FileScoreComputeInput<'a> {
     /// Build the static edge index for change coupling. Only a run that reads
     /// the commit history needs it, so other runs skip the graph walk.
     pub(super) with_static_links: bool,
+    /// Graph of the full project that supplies test reachability when the
+    /// analysis graph has no test files (production mode).
+    pub(super) test_reach: Option<&'a super::test_reach::TestReachGraph>,
 }
 
 /// Compute per-file health scores using a pre-computed analysis output.
@@ -2613,9 +2600,13 @@ pub(super) fn compute_file_scores(
         root,
         crap_thresholds,
         with_static_links,
+        test_reach,
     } = input;
     let retained_graph = analysis_output.graph.ok_or("graph not available")?;
-    let test_coverage = retained_graph.static_test_coverage();
+    let test_coverage = test_reach.map_or_else(
+        || retained_graph.static_test_coverage(),
+        super::test_reach::TestReachGraph::static_test_coverage,
+    );
     let graph = retained_graph.as_graph();
     let results = &analysis_output.results;
 
@@ -3065,13 +3056,9 @@ fn compute_file_score_crap(
         CrapCoverageResolution::Istanbul { file_coverage } => {
             compute_istanbul_file_crap(module, file_coverage, is_test_reachable, ceilings)
         }
-        CrapCoverageResolution::StaticEstimated => compute_static_file_crap(
-            module,
-            &node.exports,
-            ctx.test_coverage,
-            is_test_reachable,
-            ceilings,
-        ),
+        CrapCoverageResolution::StaticEstimated => {
+            compute_static_file_crap(module, node, ctx.test_coverage, is_test_reachable, ceilings)
+        }
     }
 }
 
@@ -3108,12 +3095,12 @@ fn compute_istanbul_file_crap(
 
 fn compute_static_file_crap(
     module: &crate::source::ModuleInfo,
-    exports: &[fallow_graph::graph::ExportSymbol],
+    node: &fallow_graph::graph::ModuleNode,
     test_coverage: StaticTestCoverage<'_>,
     is_test_reachable: bool,
     ceilings: &CrapCeilingLookup<'_>,
 ) -> FileScoreCrap {
-    let test_refs = build_test_referenced_exports(exports, test_coverage);
+    let test_refs = build_test_referenced_exports(node.file_id, &node.exports, test_coverage);
     FileScoreCrap::estimated(compute_crap_scores_estimated(
         &module.complexity,
         &test_refs,
@@ -3511,6 +3498,7 @@ mod tests {
                     enforce_crap: true,
                 },
                 with_static_links: false,
+                test_reach: None,
             },
             analysis_output,
         )
@@ -6018,6 +6006,7 @@ mod tests {
                     enforce_crap: true,
                 },
                 with_static_links: false,
+                test_reach: None,
             },
             output,
         )
@@ -6087,6 +6076,7 @@ mod tests {
                     enforce_crap: true,
                 },
                 with_static_links: false,
+                test_reach: None,
             },
             output,
         )
@@ -8859,7 +8849,11 @@ mod tests {
     fn build_test_refs_empty() {
         let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
         let graph = fallow_graph::graph::ModuleGraph::build(&[], &[], &[]);
-        let refs = build_test_referenced_exports(&exports, StaticTestCoverage::new(&graph));
+        let refs = build_test_referenced_exports(
+            crate::discover::FileId(0),
+            &exports,
+            StaticTestCoverage::new(&graph),
+        );
         assert!(refs.is_empty());
     }
 

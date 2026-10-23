@@ -71,6 +71,7 @@ mod health_baseline_tests;
 mod health_diagnostic_tests;
 mod health_group_trend_tests;
 mod health_mutation_report_tests;
+mod health_production_crap_tests;
 mod health_score_baseline_summary_tests;
 mod health_tests;
 mod impact_store_schema_tests;

@@ -99,7 +99,7 @@ fn collect_untested_exports(
             continue;
         }
 
-        let has_test_dependency = test_coverage.covers_any_reference(export);
+        let has_test_dependency = test_coverage.covers_any_reference(node.file_id, export);
         if has_test_dependency {
             continue;
         }
