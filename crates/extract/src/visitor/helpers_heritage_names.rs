@@ -10,6 +10,7 @@ use crate::visitor::visit_impl::join_member_path;
 pub(super) fn extract_static_expression_name(expr: &Expression<'_>) -> Option<String> {
     let (mut properties, mut expr) = (Vec::new(), expr);
     while let Expression::StaticMemberExpression(member) = expr {
+        crate::cost::walk_step();
         properties.push(member.property.name.as_str());
         expr = &member.object;
     }
@@ -23,6 +24,7 @@ pub(super) fn extract_static_expression_name(expr: &Expression<'_>) -> Option<St
 pub(super) fn extract_type_name(name: &TSTypeName<'_>) -> Option<String> {
     let (mut properties, mut name) = (Vec::new(), name);
     while let TSTypeName::QualifiedName(qualified) = name {
+        crate::cost::walk_step();
         properties.push(qualified.right.name.as_str());
         name = &qualified.left;
     }

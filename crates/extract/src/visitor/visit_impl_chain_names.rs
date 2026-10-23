@@ -141,6 +141,7 @@ pub(super) fn type_name_member_path(name: &TSTypeName<'_>) -> Option<String> {
     let mut properties = Vec::new();
     let mut name = name;
     let root = loop {
+        crate::cost::walk_step();
         if properties.len() > MAX_RECORDED_CHAIN_LINKS {
             return None;
         }
@@ -170,6 +171,7 @@ pub fn push_member_tag_accesses(accesses: &mut Vec<MemberAccess>, dotted_tag: &s
     let mut end = dotted_tag.len();
     let mut object_links = dotted_tag.matches('.').count();
     while let Some(dot) = dotted_tag[..end].rfind('.') {
+        crate::cost::walk_step();
         object_links -= 1;
         let object = &dotted_tag[..dot];
         let member = &dotted_tag[dot + 1..end];
