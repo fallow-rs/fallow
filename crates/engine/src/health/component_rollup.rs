@@ -252,7 +252,11 @@ fn make_component_rollup_violation(
         line: worst.line,
         col: worst.col,
         cyclomatic: totals.rollup_cyc,
-        standard_cyclomatic: None,
+        // Template units never carry membership flags, so only the class half
+        // can change under `health.cyclomaticPolicy`.
+        standard_cyclomatic: worst
+            .standard_cyclomatic
+            .map(|standard| standard.saturating_add(template.cyclomatic)),
         cognitive: totals.rollup_cog,
         line_count: totals.rollup_lines,
         param_count: 0,

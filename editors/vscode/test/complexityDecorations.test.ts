@@ -211,6 +211,29 @@ describe("hoverForLine", () => {
     },
   );
 
+  it("skips flagged literal membership increments in the line breakdown", () => {
+    const flagged = (line: number): ComplexityContribution => ({
+      ...contribution(line, "cyclomatic", "logical-or", 1),
+      literal_membership: true,
+    });
+    const f = finding({
+      line: 10,
+      cyclomatic: 2,
+      standard_cyclomatic: 4,
+      contributions: [
+        contribution(12, "cyclomatic", "if", 1),
+        contribution(12, "cognitive", "if", 1),
+        flagged(12),
+        flagged(12),
+        contribution(12, "cognitive", "logical-or", 1),
+      ],
+    });
+    const value = hoverForLine([f], 12)?.value ?? "";
+    expect(value).toContain("+0 cyclomatic (literal membership)");
+    expect(value).not.toContain("|| · +1 cyclomatic");
+    expect(value).toContain("if · +1 cyclomatic");
+  });
+
   it("returns undefined on a line with neither a function nor a contribution", () => {
     const f = finding({ line: 10, contributions: [contribution(12, "cyclomatic", "if", 1)] });
     expect(hoverForLine([f], 99)).toBeUndefined();

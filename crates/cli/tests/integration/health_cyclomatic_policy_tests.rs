@@ -201,3 +201,84 @@ fn unknown_policy_value_is_a_config_error() {
         output.stdout.contains("cyclomaticPolicy") || output.stdout.contains("unknown variant")
     );
 }
+
+/// An Angular component whose worst method holds the `withBranches` chain.
+fn angular_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"policy-rollup","main":"src/main.ts","dependencies":{"@angular/core":"^19.0.0"}}"#,
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{ "health": { "maxCyclomatic": 3, "maxCognitive": 3, "maxCrap": 10000, "cyclomaticPolicy": "literal-membership" } }
+"#,
+    );
+    write(
+        root,
+        "src/main.ts",
+        "import { PickerComponent } from \"./picker.component\";\nexport { PickerComponent };\n",
+    );
+    write(
+        root,
+        "src/picker.component.html",
+        "@if (open) {\n  @for (item of items; track item) {\n    <span>{{ item }}</span>\n  }\n}\n",
+    );
+    write(
+        root,
+        "src/picker.component.ts",
+        r#"import { Component } from "@angular/core";
+
+@Component({
+  selector: "app-picker",
+  templateUrl: "./picker.component.html",
+})
+export class PickerComponent {
+  open = false;
+  items: string[] = [];
+
+  withBranches(kind: string, n: number): number {
+    if (kind === "a" || kind === "b" || kind === "c" || kind === "d" || kind === "e" || kind === "f" || kind === "g") {
+      return 0;
+    }
+    if (n > 1) { return 1; }
+    if (n > 2) { return 2; }
+    if (n > 3) { return 3; }
+    if (n > 4) { return 4; }
+    if (n > 5) { return 5; }
+    return 6;
+  }
+}
+"#,
+    );
+    dir
+}
+
+#[test]
+fn literal_membership_policy_reports_the_standard_value_on_the_component_rollup() {
+    let dir = angular_project();
+    let report = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--no-cache", "--format", "json", "--quiet"],
+    ));
+
+    let method = finding(&report, "withBranches").expect("class method finding");
+    assert_eq!(method["cyclomatic"], 7);
+    assert_eq!(method["standard_cyclomatic"], 13);
+
+    let rollup = finding(&report, "<component>").expect("component rollup finding");
+    let template_cyclomatic = rollup["component_rollup"]["template_cyclomatic"]
+        .as_u64()
+        .expect("template cyclomatic");
+    assert_eq!(rollup["component_rollup"]["class_cyclomatic"], 7);
+    assert_eq!(rollup["cyclomatic"].as_u64(), Some(7 + template_cyclomatic));
+    assert_eq!(
+        rollup["standard_cyclomatic"].as_u64(),
+        Some(13 + template_cyclomatic),
+        "the rollup must keep the standard value of its class half: {rollup:#}"
+    );
+}

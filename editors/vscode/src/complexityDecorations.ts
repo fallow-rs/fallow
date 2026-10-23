@@ -97,6 +97,15 @@ interface LineAggregate {
   readonly contributions: readonly ComplexityContribution[];
 }
 
+/**
+ * The weight a contribution adds to the cyclomatic value of its finding. The
+ * `literal-membership` policy removes the flagged increments of a literal
+ * membership chain from `finding.cyclomatic`, so the line sums skip them too.
+ * Under the default policy the flag is never set.
+ */
+const cyclomaticWeight = (c: ComplexityContribution): number =>
+  c.literal_membership === true ? 0 : c.weight;
+
 const aggregateByLine = (findings: readonly HealthFinding[]): Map<number, LineAggregate> => {
   const byLine = new Map<number, ComplexityContribution[]>();
   for (const finding of findings) {
@@ -115,7 +124,7 @@ const aggregateByLine = (findings: readonly HealthFinding[]): Map<number, LineAg
     let cognitive = 0;
     for (const c of contributions) {
       if (c.metric === "cyclomatic") {
-        cyclomatic += c.weight;
+        cyclomatic += cyclomaticWeight(c);
       } else {
         cognitive += c.weight;
       }
@@ -175,6 +184,10 @@ const lineHover = (aggregate: LineAggregate): vscode.MarkdownString => {
   md.appendMarkdown("**Complexity contributions on this line**\n\n");
   for (const c of aggregate.contributions) {
     const nesting = c.metric === "cognitive" && c.nesting > 0 ? ` (nesting ${c.nesting})` : "";
+    if (c.metric === "cyclomatic" && c.literal_membership === true) {
+      md.appendMarkdown(`- ${kindLabel(c.kind)} · +0 cyclomatic (literal membership)\n`);
+      continue;
+    }
     md.appendMarkdown(`- ${kindLabel(c.kind)} · +${c.weight} ${c.metric}${nesting}\n`);
   }
   return md;
