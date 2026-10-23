@@ -3324,7 +3324,8 @@ pub struct ComputedEnumKeyUseFact {
     pub key_member: String,
 }
 
-/// A member access on a fluent chain rooted at a static factory call.
+/// A fluent chain rooted at a static factory call, one fact per chain. A step is
+/// used when the root method is a factory and each earlier step returns `this`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FluentChainMemberAccessFact {
@@ -3332,22 +3333,21 @@ pub struct FluentChainMemberAccessFact {
     pub root_object: String,
     /// Static factory method that starts the fluent chain.
     pub root_method: String,
-    /// Intermediate fluent methods between the root method and final member.
-    pub chain: Vec<String>,
-    /// Member accessed at this chain step.
-    pub member: String,
+    /// The methods called after the root method, each once, in first-call order.
+    pub steps: Vec<String>,
 }
 
-/// A member access on a fluent chain rooted at a `new` expression.
+/// A fluent chain rooted at a `new` expression, one fact per chain. A step is
+/// used when the first method and each earlier step return `this`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FluentChainNewMemberAccessFact {
     /// Local imported class constructed by the `new` expression.
     pub class_name: String,
-    /// Intermediate fluent methods between construction and final member.
-    pub chain: Vec<String>,
-    /// Member accessed at this chain step.
-    pub member: String,
+    /// The method called on the new instance.
+    pub first_method: String,
+    /// The methods called after the first method, each once, in first-call order.
+    pub steps: Vec<String>,
 }
 
 /// A member access on a Playwright fixture object inside a test callback.
@@ -4077,7 +4077,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
+const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]

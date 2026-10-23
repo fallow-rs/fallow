@@ -634,6 +634,8 @@ pub(crate) struct ModuleInfoExtractor {
     package_resolve_sites: Vec<(String, Span)>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
+    /// Inner calls of a fluent chain that its outermost call already walked.
+    fluent_chain_inner_calls: FxHashSet<Span>,
     pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
     pending_vitest_mock_operations: Vec<PendingVitestMockOperation>,
     pub(crate) whole_object_uses: Vec<String>,
@@ -1994,7 +1996,7 @@ impl ModuleInfoExtractor {
     pub(crate) fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
         let mut current = member;
         loop {
-            if let Some(object_name) = jsx_member_object_name(&current.object)
+            if let Some(object_name) = visit_impl::jsx_member_object_name(&current.object)
                 && !self.namespace_like_binding_is_shadowed(&object_name)
             {
                 let object = self.qualify_this_scope(&object_name);
@@ -4116,21 +4118,6 @@ fn strip_this_scope_qualifier(spelling: &mut String) {
         *spelling = rebuilt;
     } else {
         *spelling = "this".to_string();
-    }
-}
-
-/// Flatten a JSX member-expression object to its dotted receiver spelling
-/// (`SC`, `A.B`, `this.helpers`), the JSX counterpart of
-/// `static_member_object_name`.
-fn jsx_member_object_name(object: &JSXMemberExpressionObject<'_>) -> Option<String> {
-    match object {
-        JSXMemberExpressionObject::IdentifierReference(ident) => Some(ident.name.to_string()),
-        JSXMemberExpressionObject::ThisExpression(_) => Some("this".to_string()),
-        JSXMemberExpressionObject::MemberExpression(inner) => Some(format!(
-            "{}.{}",
-            jsx_member_object_name(&inner.object)?,
-            inner.property.name
-        )),
     }
 }
 

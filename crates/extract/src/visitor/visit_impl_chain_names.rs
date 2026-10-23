@@ -5,6 +5,7 @@ use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
 use super::super::{ModuleInfoExtractor, SemanticFact};
+use super::visit_source_paths::join_member_path;
 use crate::{FluentChainMemberAccessFact, FluentChainNewMemberAccessFact};
 
 /// The most links a recorded receiver name holds (`a` plus 64 `.b`).
@@ -101,85 +102,113 @@ pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String>
     Some(name)
 }
 
+/// Flatten a JSX member-expression object to its dotted receiver spelling
+/// (`SC`, `A.B`, `this.helpers`), the JSX counterpart of
+/// `static_member_object_name`.
+///
+/// The visitor asks for this name at every level of a tag, so a name past
+/// `MAX_RECORDED_CHAIN_LINKS` links is `None`, like `static_member_object_name`.
+pub(in crate::visitor) fn jsx_member_object_name(
+    object: &JSXMemberExpressionObject<'_>,
+) -> Option<String> {
+    let mut properties = Vec::new();
+    let mut object = object;
+    let root = loop {
+        if properties.len() > MAX_RECORDED_CHAIN_LINKS {
+            return None;
+        }
+        match object {
+            JSXMemberExpressionObject::IdentifierReference(ident) => break ident.name.as_str(),
+            JSXMemberExpressionObject::ThisExpression(_) => break "this",
+            JSXMemberExpressionObject::MemberExpression(inner) => {
+                properties.push(inner.property.name.as_str());
+                object = &inner.object;
+            }
+        }
+    };
+    Some(join_member_path(root, &properties))
+}
+
 impl ModuleInfoExtractor {
-    /// Emit typed fluent-chain facts for chained calls.
+    /// Emit one typed fluent-chain fact for a chain of calls, at its outermost
+    /// call.
     ///
-    /// The consumer checks only that every step of the chain returns `this`, so
-    /// the fact keeps each step name once. A builder that repeats a method then
-    /// records a fact as large as its set of method names, not as long as the
-    /// chain, and no step past `MAX_RECORDED_CHAIN_LINKS` loses its credit.
+    /// The walk from the outermost call to the root marks each inner call, and
+    /// an inner call does not walk again, so a chain of N calls costs O(N). The
+    /// fact keeps each step name once, so its size is the set of method names,
+    /// not the chain length. A walk that finds no root marks the inner calls
+    /// too: their walks pass the same lower part of the chain and fail the same
+    /// way.
     pub(super) fn try_record_fluent_chain_access(&mut self, expr: &CallExpression<'_>) {
+        if self.fluent_chain_inner_calls.remove(&expr.span) {
+            return;
+        }
         let Expression::StaticMemberExpression(member) = &expr.callee else {
             return;
         };
         let Expression::CallExpression(_) = &member.object else {
             return;
         };
-        let this_method = member.property.name.as_str();
-        let mut steps = FluentChainSteps::default();
+        let mut methods_outermost_first = vec![member.property.name.as_str()];
         let mut current = &member.object;
-        loop {
+        let root = loop {
             let Expression::CallExpression(call) = current else {
-                return;
+                break None;
             };
             let Expression::StaticMemberExpression(inner_member) = &call.callee else {
-                return;
+                break None;
             };
-            if let Expression::Identifier(root_id) = &inner_member.object {
-                self.semantic_facts
-                    .push(SemanticFact::FluentChainMemberAccess(
-                        FluentChainMemberAccessFact {
-                            root_object: root_id.name.to_string(),
-                            root_method: inner_member.property.name.to_string(),
-                            chain: steps.into_chain(),
-                            member: this_method.to_string(),
-                        },
-                    ));
-                return;
+            let method = inner_member.property.name.as_str();
+            match &inner_member.object {
+                Expression::Identifier(root_id) => {
+                    break Some((ChainRoot::Factory(root_id.name.as_str()), method));
+                }
+                Expression::NewExpression(new_expr) => match &new_expr.callee {
+                    Expression::Identifier(class_id) => {
+                        break Some((ChainRoot::New(class_id.name.as_str()), method));
+                    }
+                    _ => break None,
+                },
+                object => {
+                    self.fluent_chain_inner_calls.insert(call.span);
+                    methods_outermost_first.push(method);
+                    current = object;
+                }
             }
-            steps.push(inner_member.property.name.as_str());
-            if let Expression::NewExpression(new_expr) = &inner_member.object
-                && let Expression::Identifier(class_id) = &new_expr.callee
-            {
-                self.semantic_facts
-                    .push(SemanticFact::FluentChainNewMemberAccess(
-                        FluentChainNewMemberAccessFact {
-                            class_name: class_id.name.to_string(),
-                            chain: steps.into_chain(),
-                            member: this_method.to_string(),
-                        },
-                    ));
-                return;
-            }
-            current = &inner_member.object;
-        }
-    }
-}
-
-/// The distinct step names of a fluent chain, collected from the outermost
-/// step inward.
-#[derive(Default)]
-struct FluentChainSteps<'b> {
-    names: Vec<&'b str>,
-    seen: FxHashSet<&'b str>,
-}
-
-impl<'b> FluentChainSteps<'b> {
-    fn push(&mut self, name: &'b str) {
-        // A builder chain often repeats the step it just called.
-        if self.names.last() != Some(&name) && self.seen.insert(name) {
-            self.names.push(name);
-        }
-    }
-
-    /// The step names from the root outward.
-    fn into_chain(self) -> Vec<String> {
-        self.names
+        };
+        let Some((root, first_method)) = root else {
+            return;
+        };
+        let mut seen = FxHashSet::default();
+        let steps = methods_outermost_first
             .iter()
             .rev()
-            .map(|name| (*name).to_string())
-            .collect()
+            .filter(|method| seen.insert(**method))
+            .map(|method| (*method).to_string())
+            .collect();
+        self.semantic_facts.push(match root {
+            ChainRoot::Factory(root_object) => {
+                SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+                    root_object: root_object.to_string(),
+                    root_method: first_method.to_string(),
+                    steps,
+                })
+            }
+            ChainRoot::New(class_name) => {
+                SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
+                    class_name: class_name.to_string(),
+                    first_method: first_method.to_string(),
+                    steps,
+                })
+            }
+        });
     }
+}
+
+/// The root of a fluent chain: `Root.factory()` or `new Class().method()`.
+enum ChainRoot<'b> {
+    Factory(&'b str),
+    New(&'b str),
 }
 
 #[cfg(all(test, not(miri)))]
@@ -230,6 +259,31 @@ mod tests {
             method_statement_name(&format!("(this.#a{middle}.c() as T)?.d;")),
             None
         );
+    }
+
+    /// The object name of the JSX member tag in `<a{links}.c />`.
+    fn jsx_tag_object_name(links: &str) -> Option<String> {
+        let allocator = oxc_allocator::Allocator::default();
+        let source = format!("<a{links}.c />;");
+        let parsed =
+            oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::jsx()).parse();
+        let Some(Statement::ExpressionStatement(statement)) = parsed.program.body.first() else {
+            panic!("expected an expression statement");
+        };
+        let Expression::JSXElement(element) = &statement.expression else {
+            panic!("expected a JSX element");
+        };
+        let JSXElementName::MemberExpression(member) = &element.opening_element.name else {
+            panic!("expected a member tag");
+        };
+        jsx_member_object_name(&member.object)
+    }
+
+    #[test]
+    fn jsx_member_object_name_stops_at_the_cap() {
+        let links = ".b".repeat(MAX_RECORDED_CHAIN_LINKS);
+        assert_eq!(jsx_tag_object_name(&links), Some(format!("a{links}")));
+        assert_eq!(jsx_tag_object_name(&format!("{links}.b")), None);
     }
 
     #[test]

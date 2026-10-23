@@ -100,6 +100,8 @@ mod visit_security_sinks;
 mod visit_server_actions;
 #[path = "visit_impl_signature.rs"]
 mod visit_signature;
+#[path = "visit_impl_source_paths.rs"]
+mod visit_source_paths;
 #[path = "visit_impl_spy_calls.rs"]
 mod visit_spy_calls;
 #[path = "visit_impl_structural.rs"]
@@ -111,6 +113,7 @@ mod visit_sveltekit_load;
 #[path = "visit_impl_taint_sources.rs"]
 mod visit_taint_sources;
 
+pub(super) use visit_chain_names::jsx_member_object_name;
 use visit_chain_names::static_member_object_name;
 pub(super) use visit_dynamic_imports::ComponentLoaderImport;
 pub(super) use visit_factory_returns::count_returns_in_statements;
@@ -125,6 +128,10 @@ use visit_package_resolution::*;
 use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
+pub(super) use visit_source_paths::join_member_path;
+use visit_source_paths::{
+    binding_source_path_candidates, flatten_member_path, push_unique_string, source_path_candidates,
+};
 pub(super) use visit_spy_calls::SpyApi;
 
 /// Array iteration methods whose callback's FIRST parameter is an element of the
@@ -3665,6 +3672,9 @@ impl<'a> ModuleInfoExtractor {
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_program(&mut self, program: &Program<'a>) {
+        // An SFC or Astro file visits each script with one extractor, and its
+        // spans can repeat, so a mark must not reach the next program.
+        self.fluent_chain_inner_calls.clear();
         self.record_top_level_runtime_statement(program);
         self.record_program_directives(program);
         self.is_server_action_module = visit_server_actions::is_server_action_module(program);
@@ -5838,15 +5848,19 @@ fn unwrap_parens<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
 /// matcher sees a clean dotted callee path. Returns `None` for dynamic dispatch,
 /// computed members, or aliased call forms (those count as blind spots).
 fn flatten_callee_path(expr: &Expression<'_>) -> Option<String> {
-    match unwrap_parens(expr) {
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
-        Expression::StaticMemberExpression(member) => Some(format!(
-            "{}.{}",
-            flatten_callee_path(&member.object)?,
-            member.property.name
-        )),
-        _ => None,
-    }
+    let mut properties = Vec::new();
+    let mut expr = expr;
+    let root = loop {
+        match unwrap_parens(expr) {
+            Expression::Identifier(ident) => break ident.name.as_str(),
+            Expression::StaticMemberExpression(member) => {
+                properties.push(member.property.name.as_str());
+                expr = &member.object;
+            }
+            _ => return None,
+        }
+    };
+    Some(visit_source_paths::join_member_path(root, &properties))
 }
 
 /// Root reference of a static callee without optional or computed members.
@@ -5875,118 +5889,6 @@ fn callee_method_name<'a>(
         return callee_path.rsplit_once('.').map(|(_, method)| method);
     }
     terminal_static_member_name(callee)
-}
-
-/// Flatten an expression to a dotted member path, unwrapping `await` and parens.
-/// Returns `None` for anything that is not an identifier-rooted static-member
-/// chain (call results, computed members, etc. are not flattened: a conservative
-/// miss, never a wrong source link).
-fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
-    match expr {
-        Expression::ParenthesizedExpression(paren) => flatten_member_path(&paren.expression),
-        Expression::AwaitExpression(await_expr) => flatten_member_path(&await_expr.argument),
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
-        // `import.meta` is a meta property, not a member chain; flattening it as
-        // `import.meta` lets `import.meta.env.X` reads be modeled as a source the
-        // same way `process.env.X` is (issue #890, Vite secrets).
-        Expression::ImportMeta(_) => Some("import.meta".to_string()),
-        Expression::NewTarget(_) => Some("new.target".to_string()),
-        Expression::StaticMemberExpression(member) => Some(format!(
-            "{}.{}",
-            flatten_member_path(&member.object)?,
-            member.property.name
-        )),
-        _ => None,
-    }
-}
-
-/// The source path for a DIRECT binding (`const id = req.query.id`): the OBJECT
-/// path of the member-access init, i.e. the chain with its final property
-/// dropped (`req.query`). A bare-identifier init (`const x = req`) has no object
-/// to drop and is not a source binding on its own (`None`). A PUBLIC env var
-/// (`process.env.NEXT_PUBLIC_X`, `import.meta.env.VITE_Y`) is build-inlined and
-/// is NOT a secret source, so it is dropped here (issue #890).
-fn tainted_source_path(expr: &Expression<'_>) -> Option<String> {
-    match expr {
-        Expression::ParenthesizedExpression(paren) => tainted_source_path(&paren.expression),
-        Expression::AwaitExpression(await_expr) => tainted_source_path(&await_expr.argument),
-        Expression::StaticMemberExpression(member) => {
-            if let Some(full) = flatten_member_path(expr)
-                && fallow_types::extract::is_public_env_path(&full)
-            {
-                return None;
-            }
-            flatten_member_path(&member.object)
-        }
-        _ => None,
-    }
-}
-
-fn push_unique_string(out: &mut Vec<String>, value: String) {
-    if !out.iter().any(|existing| existing == &value) {
-        out.push(value);
-    }
-}
-
-fn source_path_candidates(expr: &Expression<'_>) -> Vec<String> {
-    let mut out = Vec::new();
-    if let Some(path) = flatten_member_path(expr) {
-        push_unique_string(&mut out, path);
-    }
-    if let Some(path) = tainted_source_path(expr) {
-        push_unique_string(&mut out, path);
-    }
-    out
-}
-
-fn binding_source_path_candidates(expr: &Expression<'_>) -> Vec<String> {
-    let mut out = Vec::new();
-    collect_binding_source_path_candidates(expr, &mut out);
-    out
-}
-
-fn collect_binding_source_path_candidates(expr: &Expression<'_>, out: &mut Vec<String>) {
-    for path in source_path_candidates(expr) {
-        push_unique_string(out, path);
-    }
-
-    match expr {
-        Expression::ParenthesizedExpression(paren) => {
-            collect_binding_source_path_candidates(&paren.expression, out);
-        }
-        Expression::TSAsExpression(ts_as) => {
-            collect_binding_source_path_candidates(&ts_as.expression, out);
-        }
-        Expression::TSSatisfiesExpression(ts_sat) => {
-            collect_binding_source_path_candidates(&ts_sat.expression, out);
-        }
-        Expression::TSNonNullExpression(ts_non_null) => {
-            collect_binding_source_path_candidates(&ts_non_null.expression, out);
-        }
-        Expression::AwaitExpression(await_expr) => {
-            collect_binding_source_path_candidates(&await_expr.argument, out);
-        }
-        Expression::TemplateLiteral(template) => {
-            for expression in &template.expressions {
-                collect_binding_source_path_candidates(expression, out);
-            }
-        }
-        Expression::BinaryExpression(binary)
-            if binary.operator == oxc_ast::ast::BinaryOperator::Addition =>
-        {
-            collect_binding_source_path_candidates(&binary.left, out);
-            collect_binding_source_path_candidates(&binary.right, out);
-        }
-        Expression::ObjectExpression(object) => {
-            for property in &object.properties {
-                let ObjectPropertyKind::ObjectProperty(property) = property else {
-                    continue;
-                };
-                collect_binding_source_path_candidates(&property.value, out);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// Collect bare identifier references from a declarator initializer for the

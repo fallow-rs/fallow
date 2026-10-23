@@ -752,11 +752,33 @@ fn long_fluent_chain_records_each_step_name_once() {
         .semantic_facts
         .iter()
         .filter_map(|fact| match fact {
-            SemanticFact::FluentChainMemberAccess(access) => Some(access.chain.len()),
+            SemanticFact::FluentChainMemberAccess(access) => Some(access.steps.len()),
             _ => None,
         })
         .collect::<Vec<_>>();
-    // Each call past the root records the one distinct step name `b`.
-    assert_eq!(chains.len(), LONG_CHAIN_LINKS - 1);
-    assert!(chains.iter().all(|steps| *steps <= 1));
+    // One fact for the chain, with the one distinct step name `b`.
+    assert_eq!(chains, [1]);
+}
+
+#[test]
+fn long_fluent_chain_of_distinct_steps_records_one_linear_fact() {
+    let mut steps = String::new();
+    for step in 0..LONG_CHAIN_LINKS {
+        steps.push_str(".m");
+        steps.push_str(&step.to_string());
+        steps.push_str("()");
+    }
+    let info = parse_long_chain(format!(
+        "import {{ a }} from './a';\nexport const x = a{steps};\n"
+    ));
+    let chains = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::FluentChainMemberAccess(access) => Some(access.steps.len()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    // A fact for each call held the steps before it: O(N^2) step names.
+    assert_eq!(chains, [LONG_CHAIN_LINKS - 1]);
 }

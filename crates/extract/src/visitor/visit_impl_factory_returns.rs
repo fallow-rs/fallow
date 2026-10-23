@@ -8,6 +8,7 @@ use oxc_ast::ast::*;
 use oxc_span::Span;
 
 use super::super::{FactoryAssignedValue, ObjectPropValueRef};
+use super::visit_source_paths::join_member_path;
 use super::{new_expression_class_name, unwrap_static_expr};
 use crate::function_body::BodyRef;
 
@@ -510,15 +511,19 @@ fn flatten_object_shape(
 /// Flatten an identifier / static-member chain (`factory.ordersPage`) to a dotted
 /// path string, or `None` for any non-static-member shape.
 fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
-    match unwrap_static_expr(expr) {
-        Expression::Identifier(id) => Some(id.name.to_string()),
-        Expression::StaticMemberExpression(member) => Some(format!(
-            "{}.{}",
-            flatten_member_path(&member.object)?,
-            member.property.name
-        )),
-        _ => None,
-    }
+    let mut properties = Vec::new();
+    let mut expr = expr;
+    let root = loop {
+        match unwrap_static_expr(expr) {
+            Expression::Identifier(id) => break id.name.as_str(),
+            Expression::StaticMemberExpression(member) => {
+                properties.push(member.property.name.as_str());
+                expr = &member.object;
+            }
+            _ => return None,
+        }
+    };
+    Some(join_member_path(root, &properties))
 }
 
 /// The argument of the single `return` reachable in `statements` (through

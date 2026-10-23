@@ -646,13 +646,12 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
                 root_object: "EventBuilder".to_string(),
                 root_method: "create".to_string(),
-                chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
-                member: "build".to_string(),
+                steps: vec!["setProcessId".into(), "setSubject".into(), "build".into()],
             }),
             SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
                 class_name: "OptionBuilder".to_string(),
-                chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
-                member: "build".to_string(),
+                first_method: "addDefault".to_string(),
+                steps: vec!["addFromCli".to_string(), "build".to_string()],
             }),
             SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
                 test_name: "test".to_string(),
@@ -747,13 +746,12 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
                 root_object: "EventBuilder".to_string(),
                 root_method: "create".to_string(),
-                chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
-                member: "build".to_string(),
+                steps: vec!["setProcessId".into(), "setSubject".into(), "build".into()],
             }),
             SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
                 class_name: "OptionBuilder".to_string(),
-                chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
-                member: "build".to_string(),
+                first_method: "addDefault".to_string(),
+                steps: vec!["addFromCli".to_string(), "build".to_string()],
             }),
             SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
                 test_name: "test".to_string(),

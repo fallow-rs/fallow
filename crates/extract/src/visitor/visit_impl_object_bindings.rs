@@ -17,6 +17,7 @@ use super::super::{
     BindingTarget, ExportName, ExportedObjectInstancePropertyFact, ModuleInfoExtractor,
     ObjectBindingCandidate, SemanticFact,
 };
+use super::visit_source_paths::join_member_path;
 
 /// Per-module breadth cap on recorded object-binding targets (issue #1843
 /// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
@@ -2145,35 +2146,28 @@ impl ModuleInfoExtractor {
 }
 
 fn direct_object_binding_expression_path(expression: &Expression<'_>) -> Option<String> {
-    match expression {
-        Expression::Identifier(identifier) => Some(identifier.name.to_string()),
-        Expression::StaticMemberExpression(member) => Some(format!(
-            "{}.{}",
-            direct_object_binding_expression_path(&member.object)?,
-            member.property.name
-        )),
-        Expression::ComputedMemberExpression(member) => Some(format!(
-            "{}.{}",
-            direct_object_binding_expression_path(&member.object)?,
-            member.static_property_name()?
-        )),
-        Expression::ParenthesizedExpression(parenthesized) => {
-            direct_object_binding_expression_path(&parenthesized.expression)
-        }
-        Expression::TSAsExpression(assertion) => {
-            direct_object_binding_expression_path(&assertion.expression)
-        }
-        Expression::TSSatisfiesExpression(assertion) => {
-            direct_object_binding_expression_path(&assertion.expression)
-        }
-        Expression::TSNonNullExpression(assertion) => {
-            direct_object_binding_expression_path(&assertion.expression)
-        }
-        Expression::TSTypeAssertion(assertion) => {
-            direct_object_binding_expression_path(&assertion.expression)
-        }
-        _ => None,
-    }
+    let mut properties = Vec::new();
+    let mut expression = expression;
+    let root = loop {
+        expression = match expression {
+            Expression::Identifier(identifier) => break identifier.name.as_str(),
+            Expression::StaticMemberExpression(member) => {
+                properties.push(member.property.name.as_str());
+                &member.object
+            }
+            Expression::ComputedMemberExpression(member) => {
+                properties.push(member.static_property_name()?.as_str());
+                &member.object
+            }
+            Expression::ParenthesizedExpression(parenthesized) => &parenthesized.expression,
+            Expression::TSAsExpression(assertion) => &assertion.expression,
+            Expression::TSSatisfiesExpression(assertion) => &assertion.expression,
+            Expression::TSNonNullExpression(assertion) => &assertion.expression,
+            Expression::TSTypeAssertion(assertion) => &assertion.expression,
+            _ => return None,
+        };
+    };
+    Some(join_member_path(root, &properties))
 }
 
 #[cfg(all(test, not(miri)))]
