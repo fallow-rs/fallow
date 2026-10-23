@@ -385,9 +385,21 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
   `fallow setup-hooks`; controls the minimum fallow version the gate accepts;
   the default is hand-bumped each release, with the generated
   `crates/cli/src/setup_hooks/fallow-gate.sh` as the source of truth; empty
-  string disables) and `FALLOW_GATE_DEBUG` (any
+  string disables), `FALLOW_GATE_DEBUG` (any
   non-empty value makes the same script log a stderr notice when it skips a
-  command it does not classify as a `git commit` or `git push`)
+  command it does not classify as a `git commit` or `git push`),
+  `FALLOW_GATE_REPORT` (the path of the full JSON report that the script
+  writes on a block; the default is `.fallow/gate-report.json`, and a
+  relative path resolves against the audited tree) and `FALLOW_GATE_OUTPUT`
+  (`json` makes the script print the full JSON report on stderr on a block,
+  as scripts before the compact block message did; any other value keeps the
+  compact block message)
+- **Agent gate block message**: on a block, the generated `fallow-gate.sh`
+  writes to stderr the line `fallow-gate: blocked by fallow <version> at
+  <binary>`, a verdict line, one indented line per finding that caused the
+  block (`<kind> <path>:<line> <name>`, at most 50 lines, then a count of
+  the rest), and the line `fallow-gate: full report: <absolute path>`. The
+  exit codes do not change: 2 blocks, 0 passes or fails open.
 
 - **Saved baseline files state which command wrote them**: every baseline `--save-baseline` writes carries a top-level `kind` string of `dead-code`, `dupes` or `health`, spelled exactly as the matching envelope root kinds. Treat the token set as CLOSED PER RELEASE: one release writes only these three tokens, and a later release that adds a command that saves a baseline adds a token. That is why `baseline_staleness.saved_by` (below) is documented as an OPEN set: a reader must accept a token from a newer release. The member is additive and the file format is otherwise unchanged, in both directions. A baseline saved by an earlier release carries no `kind` and loads on all three commands exactly as it did, with the keys it carries deciding which format it is. A baseline saved by this release loads on a binary that predates the member, because no baseline format rejects unknown fields; a `kind` value a newer fallow writes loads too, because the member is never read back through the typed structs. The three formats' own key lists deliberately do not include `kind`: it is the one key all three write, so listing it would make every format declare every other one.
 
