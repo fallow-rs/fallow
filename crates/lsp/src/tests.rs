@@ -1655,6 +1655,15 @@ fn unmatched_config_patterns_are_diagnostics_on_the_config_entry() {
                 )),
                 Some(DiagnosticSeverity::INFORMATION),
             ),
+            // `@acme/lib` is imported, so `@acme/*` matched it but hid
+            // nothing (issue #3824).
+            (
+                "\"@acme/*\"".to_string(),
+                Some(NumberOrString::String(
+                    "ignore-dependencies-entry-redundant".to_string()
+                )),
+                Some(DiagnosticSeverity::INFORMATION),
+            ),
             (
                 "\"src/hiden.ts\"".to_string(),
                 Some(NumberOrString::String(

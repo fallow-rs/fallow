@@ -1,6 +1,7 @@
 mod boundaries;
 mod dependency_ignore;
 mod duplicates_config;
+mod entry_effect;
 mod entry_span;
 mod finding_ignore;
 mod flags;
@@ -33,6 +34,7 @@ pub use dependency_ignore::{IgnoreDependencyMatcher, is_dependency_glob};
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
 };
+pub use entry_effect::EntryEffectRecord;
 pub use entry_span::ConfigEntrySpan;
 pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};

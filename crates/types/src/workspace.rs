@@ -21,6 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::path_util::display_relative;
 use crate::serde_path;
 
+#[path = "workspace_config_entry.rs"]
+mod config_entry;
+
 /// Why the declared pnpm version ignores the `overrides` section of
 /// `pnpm-workspace.yaml`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -617,6 +620,30 @@ pub enum WorkspaceDiagnosticKind {
         /// The `ignoreFindings` entry, as written in the config.
         pattern: String,
     },
+    /// An `entry` pattern matched only files that another source (a
+    /// `package.json` field or script, a plugin, `dynamicallyLoaded`) makes
+    /// runtime entry points (issue #3824). Not for a pattern that matches no
+    /// file, nor a `--production` run. `path` is the root. Not degraded.
+    EntryPatternRedundant {
+        /// The `entry` pattern, as written in the config.
+        pattern: String,
+    },
+    /// An `ignoreDependencies` entry hid no dependency finding (issue #3824).
+    /// A glob that matches no declared dependency is
+    /// [`Self::IgnoreDependenciesGlobUnmatched`] instead. Same conditions as
+    /// that kind, and not a `--production` run. `path` is the root.
+    IgnoreDependenciesEntryRedundant {
+        /// The `ignoreDependencies` entry, as written in the config.
+        pattern: String,
+    },
+    /// An `ignorePatterns` glob excluded no file that the run would otherwise
+    /// analyze (issue #3824). Never a `!` exception, a glob that names a
+    /// hidden directory, or a `--production` run. A glob for build output has
+    /// an effect only after a build. `path` is the root. Not degraded.
+    IgnorePatternsEntryRedundant {
+        /// The `ignorePatterns` glob, as written in the config.
+        pattern: String,
+    },
     /// The dead-code baseline was saved in a different install state than
     /// this run: one of the two runs had `node_modules` and the other did not.
     /// Findings that need installed packages (dependency, unlisted,
@@ -679,26 +706,10 @@ impl WorkspaceDiagnosticKind {
             Self::FlagAgeUnavailable { .. } => "flag-age-unavailable",
             Self::IgnoreDependenciesGlobUnmatched { .. } => "ignore-dependencies-glob-unmatched",
             Self::IgnoreFindingsPatternUnmatched { .. } => "ignore-findings-pattern-unmatched",
+            Self::EntryPatternRedundant { .. } => "entry-pattern-redundant",
+            Self::IgnoreDependenciesEntryRedundant { .. } => "ignore-dependencies-entry-redundant",
+            Self::IgnorePatternsEntryRedundant { .. } => "ignore-patterns-entry-redundant",
             Self::BaselineInstallStateMismatch { .. } => "baseline-install-state-mismatch",
-        }
-    }
-
-    /// The config setting and the entry of an unmatched config pattern
-    /// (`ignoreDependencies` or `ignoreFindings`), or `None` for every other
-    /// kind.
-    ///
-    /// The human note, the SARIF configuration notifications and the Markdown
-    /// section all read the unmatched patterns through this one accessor.
-    #[must_use]
-    pub fn unmatched_config_pattern(&self) -> Option<(&'static str, &str)> {
-        match self {
-            Self::IgnoreDependenciesGlobUnmatched { pattern } => {
-                Some(("ignoreDependencies", pattern.as_str()))
-            }
-            Self::IgnoreFindingsPatternUnmatched { pattern } => {
-                Some(("ignoreFindings", pattern.as_str()))
-            }
-            _ => None,
         }
     }
 
@@ -739,6 +750,9 @@ impl WorkspaceDiagnosticKind {
             | Self::ChangeCouplingSkipped { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::EntryPatternRedundant { .. }
+            | Self::IgnoreDependenciesEntryRedundant { .. }
+            | Self::IgnorePatternsEntryRedundant { .. }
             | Self::NestedProjectRoot => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
@@ -908,6 +922,9 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::EntryPatternRedundant { .. }
+            | Self::IgnoreDependenciesEntryRedundant { .. }
+            | Self::IgnorePatternsEntryRedundant { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -970,6 +987,9 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::EntryPatternRedundant { .. }
+            | Self::IgnoreDependenciesEntryRedundant { .. }
+            | Self::IgnorePatternsEntryRedundant { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1034,6 +1054,9 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::EntryPatternRedundant { .. }
+            | Self::IgnoreDependenciesEntryRedundant { .. }
+            | Self::IgnorePatternsEntryRedundant { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1099,6 +1122,9 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. }
+            | Self::EntryPatternRedundant { .. }
+            | Self::IgnoreDependenciesEntryRedundant { .. }
+            | Self::IgnorePatternsEntryRedundant { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1846,6 +1872,11 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                  baseline findings as new. {remedy}, or save the baseline again in the same \
                  install state."
             )
+        }
+        WorkspaceDiagnosticKind::EntryPatternRedundant { .. }
+        | WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant { .. }
+        | WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant { .. } => {
+            config_entry::redundant_entry_message(kind)
         }
         WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched { pattern } => format!(
             "ignoreFindings pattern '{pattern}' matched no finding in this run, so it has no \

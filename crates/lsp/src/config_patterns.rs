@@ -1,5 +1,6 @@
-//! Config patterns that matched nothing (`ignoreFindings`,
-//! `ignoreDependencies`), as diagnostics on the config file.
+//! Config entries that had no effect, as diagnostics on the config file: the
+//! patterns that matched nothing (`ignoreFindings`, `ignoreDependencies`) and
+//! the redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`).
 //!
 //! The CLI reports these patterns in `workspace_diagnostics[]`. The editor
 //! marks the entry in the config file that declares it. A pattern whose entry
@@ -14,7 +15,7 @@ use ls_types::{
 };
 use rustc_hash::FxHashMap;
 
-/// One config pattern that matched nothing in the latest run.
+/// One config entry that had no effect in the latest run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnmatchedConfigPattern {
     /// The `workspace_diagnostics[]` kind, used as the diagnostic code.

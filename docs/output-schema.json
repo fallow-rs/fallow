@@ -13528,6 +13528,60 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "entry-pattern-redundant"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The `entry` pattern, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "An `entry` pattern matched only files that another source (a\n`package.json` field or script, a plugin, `dynamicallyLoaded`) makes\nruntime entry points (issue #3824). Not for a pattern that matches no\nfile, nor a `--production` run. `path` is the root. Not degraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ignore-dependencies-entry-redundant"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The `ignoreDependencies` entry, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "An `ignoreDependencies` entry hid no dependency finding (issue #3824).\nA glob that matches no declared dependency is\n[`Self::IgnoreDependenciesGlobUnmatched`] instead. Same conditions as\nthat kind, and not a `--production` run. `path` is the root."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ignore-patterns-entry-redundant"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The `ignorePatterns` glob, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "An `ignorePatterns` glob excluded no file that the run would otherwise\nanalyze (issue #3824). Never a `!` exception, a glob that names a\nhidden directory, or a `--production` run. A glob for build output has\nan effect only after a build. `path` is the root. Not degraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "baseline-install-state-mismatch"
             },
             "baseline_node_modules": {

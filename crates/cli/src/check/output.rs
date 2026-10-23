@@ -600,6 +600,7 @@ mod tests {
             legacy_glob_groups: Vec::new(),
             root: std::path::PathBuf::from("/project"),
             entry_patterns: vec![],
+            entry_pattern_effect: fallow_config::EntryEffectRecord::default(),
             ignore_patterns: fallow_config::IgnorePatternSet::empty(),
             user_ignore_pattern_count: 0,
             ignore_findings: fallow_config::FindingIgnoreMatcher::default(),

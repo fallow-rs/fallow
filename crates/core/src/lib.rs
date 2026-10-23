@@ -1202,7 +1202,7 @@ fn discover_analysis_entry_points(input: &AnalysisCoreSharedInput<'_>) -> TimedE
         plugin_result: input.plugin_result,
     });
     let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let summary = summarize_entry_points(&entry_points.all);
+    let summary = discover::summarize_entry_points(&entry_points.all);
     let count = entry_points.all.len();
 
     TimedEntryPoints {
@@ -2657,6 +2657,7 @@ fn discover_all_entry_points(
         })
         .collect();
     let mut skipped_entries = rustc_hash::FxHashMap::default();
+    let other_sources = root_discovery.non_manual_runtime_paths;
     entry_points.extend_runtime(root_discovery.entries);
     entry_points.extend_support(root_discovery.support_entries);
     for (path, count) in root_discovery.skipped_entries {
@@ -2706,6 +2707,7 @@ fn discover_all_entry_points(
         entry_points.extend_runtime(dynamic_entries);
     }
     spans.dynamic_ms = split_ms(&mut mark);
+    discover::record_entry_pattern_effect(input.config, input.files, &entry_points, other_sources);
 
     let deduped = entry_points.dedup();
     spans.dedup_ms = split_ms(&mut mark);
@@ -2721,33 +2723,6 @@ fn split_ms(mark: &mut Instant) -> f64 {
     let elapsed = now.duration_since(*mark).as_secs_f64() * 1000.0;
     *mark = now;
     elapsed
-}
-
-/// Summarize entry points by source category for user-facing output.
-fn summarize_entry_points(entry_points: &[discover::EntryPoint]) -> results::EntryPointSummary {
-    let mut counts: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
-    for ep in entry_points {
-        let category = match &ep.source {
-            discover::EntryPointSource::PackageJsonMain
-            | discover::EntryPointSource::PackageJsonModule
-            | discover::EntryPointSource::PackageJsonExports
-            | discover::EntryPointSource::PackageJsonBin
-            | discover::EntryPointSource::PackageJsonScript => "package.json",
-            discover::EntryPointSource::Plugin { .. } => "plugin",
-            discover::EntryPointSource::TestFile => "test file",
-            discover::EntryPointSource::DefaultIndex => "default index",
-            discover::EntryPointSource::ManualEntry => "manual entry",
-            discover::EntryPointSource::InfrastructureConfig => "config",
-            discover::EntryPointSource::DynamicallyLoaded => "dynamically loaded",
-        };
-        *counts.entry(category.to_string()).or_insert(0) += 1;
-    }
-    let mut by_source: Vec<(String, usize)> = counts.into_iter().collect();
-    by_source.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    results::EntryPointSummary {
-        total: entry_points.len(),
-        by_source,
-    }
 }
 
 fn append_package_file_asset_patterns(

@@ -158,8 +158,9 @@ pub(super) fn is_ignored_scan_dir(
 ) -> bool {
     let relative = dir.strip_prefix(root).unwrap_or(dir);
     let relative_str = relative.to_string_lossy().replace('\\', "/");
-    ignore_patterns.is_match(relative_str.as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/deno.json").as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/deno.jsonc").as_str())
+    // An exclusion silences an advisory, so `excludes` credits the glob.
+    ignore_patterns.excludes(relative_str.as_str())
+        || ignore_patterns.excludes(format!("{relative_str}/package.json").as_str())
+        || ignore_patterns.excludes(format!("{relative_str}/deno.json").as_str())
+        || ignore_patterns.excludes(format!("{relative_str}/deno.jsonc").as_str())
 }

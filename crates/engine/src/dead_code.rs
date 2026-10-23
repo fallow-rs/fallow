@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use fallow_config::{
-    ResolvedConfig, RulesConfig, Severity, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
-};
+use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::discover::StableFileKey;
 
 pub use crate::results::{
@@ -20,6 +18,10 @@ pub use crate::effective_severity::{
     RuleSeverity, SeveritySource, apply_effective_severities, findings_without_severity,
     promote_effective_warns,
 };
+
+#[path = "dead_code_config_patterns.rs"]
+mod config_patterns;
+pub use config_patterns::config_pattern_diagnostics;
 
 use crate::{
     EngineResult, change_scope::ChangeScope,
@@ -36,65 +38,6 @@ pub(crate) fn analyze_with_parse_result(
     modules: &[ModuleInfo],
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     analyze_dead_code_with_parse_result_from_config(config, modules)
-}
-
-/// `workspace_diagnostics[]` entries for the config patterns that matched
-/// nothing in the latest dead-code pass over `config`.
-///
-/// One entry per unmatched `ignoreFindings` pattern and, when
-/// `reports_dependencies` is true, one per unmatched `ignoreDependencies`
-/// glob, in config order. A surface passes `reports_dependencies = false` when
-/// its run does not report dependency findings (an issue-type filter without
-/// the dependency types, or a file scope), because a dependency glob is then
-/// not relevant to what the run shows.
-///
-/// The CLI, the programmatic API and the MCP typed path all build their
-/// envelope from this one function, and the human note reads the same
-/// entries, so every output states the same patterns.
-#[must_use]
-pub fn config_pattern_diagnostics(
-    config: &ResolvedConfig,
-    reports_dependencies: bool,
-) -> Vec<WorkspaceDiagnostic> {
-    let dependency_globs = if reports_dependencies && dependency_rules_on(&config.rules) {
-        config.ignore_dependencies.unmatched_globs()
-    } else {
-        Vec::new()
-    };
-    let finding_patterns = config.ignore_findings.unmatched_patterns();
-    finding_patterns
-        .into_iter()
-        .map(
-            |pattern| WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched {
-                pattern: pattern.to_owned(),
-            },
-        )
-        .chain(dependency_globs.into_iter().map(|pattern| {
-            WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
-                pattern: pattern.to_owned(),
-            }
-        }))
-        .map(|kind| {
-            WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)
-                .into_root_relative(&config.root)
-        })
-        .collect()
-}
-
-/// Whether at least one rule that `ignoreDependencies` controls is on. With
-/// every such rule off, the run reports no dependency finding at all.
-fn dependency_rules_on(rules: &RulesConfig) -> bool {
-    [
-        rules.unused_dependencies,
-        rules.unused_dev_dependencies,
-        rules.unused_optional_dependencies,
-        rules.unlisted_dependencies,
-        rules.type_only_dependencies,
-        rules.test_only_dependencies,
-        rules.dev_dependencies_in_production,
-    ]
-    .into_iter()
-    .any(|severity| severity != Severity::Off)
 }
 
 /// Write a stable `finding_id` onto every dead-code finding in `results`.
@@ -1325,6 +1268,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
     use fallow_types::output_dead_code::{
         BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
         PrivateTypeLeakFinding, UnlistedDependencyFinding, UnusedClassMemberFinding,

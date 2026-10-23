@@ -830,6 +830,24 @@ kind: "ignore-findings-pattern-unmatched"
  */
 pattern: string
 } | {
+kind: "entry-pattern-redundant"
+/**
+ * The `entry` pattern, as written in the config.
+ */
+pattern: string
+} | {
+kind: "ignore-dependencies-entry-redundant"
+/**
+ * The `ignoreDependencies` entry, as written in the config.
+ */
+pattern: string
+} | {
+kind: "ignore-patterns-entry-redundant"
+/**
+ * The `ignorePatterns` glob, as written in the config.
+ */
+pattern: string
+} | {
 kind: "baseline-install-state-mismatch"
 baseline_node_modules: NodeModulesState
 run_node_modules: NodeModulesState

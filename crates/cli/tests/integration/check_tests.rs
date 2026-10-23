@@ -1514,7 +1514,7 @@ fn unmatched_config_patterns(json: &serde_json::Value) -> Vec<(String, String)> 
         .flatten()
         .filter_map(|diagnostic| {
             let kind = diagnostic["kind"].as_str()?;
-            if !kind.starts_with("ignore-") {
+            if !kind.starts_with("ignore-") || !kind.ends_with("-unmatched") {
                 return None;
             }
             Some((kind.to_owned(), diagnostic["pattern"].as_str()?.to_owned()))
@@ -4516,5 +4516,199 @@ fn scope_workspaces_next_step_sees_config_pattern_workspaces() {
     assert!(
         steps.iter().any(|step| step["id"] == "scope-workspaces"),
         "expected a scope-workspaces step, got: {steps:?}"
+    );
+}
+
+/// `(kind, pattern)` of every redundant config entry in a JSON envelope.
+fn redundant_config_entries(json: &serde_json::Value) -> Vec<(String, String)> {
+    json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|diagnostic| {
+            let kind = diagnostic["kind"].as_str()?;
+            if !kind.ends_with("-redundant") {
+                return None;
+            }
+            Some((kind.to_owned(), diagnostic["pattern"].as_str()?.to_owned()))
+        })
+        .collect()
+}
+
+/// The project of issue #3824: each config entry repeats what fallow does
+/// without it, next to entries that do change the result.
+fn redundant_config_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    for directory in ["src", "scripts", "gen"] {
+        std::fs::create_dir_all(root.join(directory)).expect("create directory");
+    }
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts",
+            "dependencies":{"left-pad":"1.3.0","unused-dep":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import leftPad from \"left-pad\";\nimport chalk from \"chalk\";\nconsole.log(leftPad(\"x\", 3), chalk);\n",
+    )
+    .expect("write entry point");
+    std::fs::write(root.join("scripts/run.ts"), "console.log(1);\n").expect("write script");
+    std::fs::write(root.join("gen/out.ts"), "export const generated = 1;\n")
+        .expect("write generated file");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+            "entry": ["src/index.ts", "scripts/*.ts"],
+            "ignoreDependencies": ["left-pad", "unused-dep", "chalk"],
+            "ignorePatterns": ["dist/**", "gen/**"]
+        }"#,
+    )
+    .expect("write config");
+    dir
+}
+
+#[test]
+fn redundant_config_entries_are_reported_and_effective_entries_are_not() {
+    let dir = redundant_config_project();
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        redundant_config_entries(&json),
+        vec![
+            (
+                "entry-pattern-redundant".to_owned(),
+                "src/index.ts".to_owned()
+            ),
+            (
+                "ignore-dependencies-entry-redundant".to_owned(),
+                "left-pad".to_owned()
+            ),
+            (
+                "ignore-patterns-entry-redundant".to_owned(),
+                "dist/**".to_owned()
+            ),
+        ],
+        "scripts/*.ts adds an entry point, unused-dep hides an unused dependency, chalk hides an \
+         unlisted dependency and gen/** excludes a source file: {json}"
+    );
+
+    let human = run_fallow_in_root("dead-code", dir.path(), &[]);
+    for note in [
+        "Note: entry pattern matched only files that are entry points anyway: src/index.ts",
+        "Note: ignoreDependencies entry hid no dependency finding this run: left-pad",
+        "Note: ignorePatterns entry excluded no file that fallow would otherwise analyze this \
+         run: dist/**",
+    ] {
+        assert!(human.stderr.contains(note), "{note}\n{}", human.stderr);
+    }
+
+    let sarif = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "sarif", "--quiet"],
+    ));
+    let settings: Vec<&str> = sarif["runs"][0]["invocations"][0]["toolConfigurationNotifications"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|notification| notification["properties"]["setting"].as_str())
+        .collect();
+    assert_eq!(
+        settings,
+        vec!["entry", "ignoreDependencies", "ignorePatterns"],
+        "{sarif}"
+    );
+
+    let markdown = run_fallow_in_root("dead-code", dir.path(), &["--format", "markdown"]);
+    assert!(
+        markdown.stdout.contains("## Redundant config entries")
+            && markdown
+                .stdout
+                .contains("- `ignorePatterns`: `dist/**` had no effect in this run"),
+        "{}",
+        markdown.stdout
+    );
+}
+
+#[test]
+fn redundant_config_entries_are_not_reported_in_a_production_run() {
+    let dir = redundant_config_project();
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--production", "--format", "json", "--quiet"],
+    ));
+    assert!(redundant_config_entries(&json).is_empty(), "{json}");
+}
+
+#[test]
+fn redundant_ignore_dependencies_follow_the_dependency_report_gate() {
+    let dir = redundant_config_project();
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--unused-files", "--format", "json", "--quiet"],
+    ));
+    let kinds: Vec<String> = redundant_config_entries(&json)
+        .into_iter()
+        .map(|(kind, _)| kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["entry-pattern-redundant", "ignore-patterns-entry-redundant"],
+        "a run without dependency findings drops the dependency entries: {json}"
+    );
+}
+
+#[test]
+fn an_ignore_pattern_that_excludes_a_workspace_manifest_has_an_effect() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("packages/app/src")).expect("create app");
+    std::fs::create_dir_all(root.join("packages/old")).expect("create old");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"mono","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write root package");
+    std::fs::write(
+        root.join("packages/app/package.json"),
+        r#"{"name":"app","main":"src/index.ts"}"#,
+    )
+    .expect("write app package");
+    std::fs::write(
+        root.join("packages/app/src/index.ts"),
+        "export const a = 1;\n",
+    )
+    .expect("write app entry");
+    std::fs::write(
+        root.join("packages/old/package.json"),
+        r#"{"name":"old","dependencies":{"unused-dep":"1.0.0"}}"#,
+    )
+    .expect("write old package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"ignorePatterns": ["packages/old/**", "packages/gone/**"]}"#,
+    )
+    .expect("write config");
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        redundant_config_entries(&json),
+        vec![(
+            "ignore-patterns-entry-redundant".to_owned(),
+            "packages/gone/**".to_owned()
+        )],
+        "the glob that hides a workspace without source files still has an effect: {json}"
     );
 }

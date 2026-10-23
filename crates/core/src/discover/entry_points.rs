@@ -145,6 +145,8 @@ pub struct EntryPointDiscovery {
     /// Tooling entry points referenced only from non-runtime package scripts.
     pub support_entries: Vec<EntryPoint>,
     pub skipped_entries: FxHashMap<String, usize>,
+    /// Runtime entry paths from a source other than `entry`, before the dedup.
+    pub non_manual_runtime_paths: FxHashSet<PathBuf>,
 }
 
 impl EntryPointDiscovery {
@@ -620,7 +622,7 @@ fn apply_default_fallback(
 }
 
 /// Compute each file's path relative to `root` as a forward-slash-lossy string.
-fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<String> {
+pub(super) fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<String> {
     files
         .iter()
         .map(|f| {
@@ -1077,12 +1079,9 @@ pub fn discover_root_entry_points(
         discovery.entries = apply_default_fallback(files, &config.root, None);
     }
 
-    discovery.entries.sort_by(|a, b| a.path.cmp(&b.path));
-    discovery.entries.dedup_by(|a, b| a.path == b.path);
-    discovery
-        .support_entries
-        .sort_by(|a, b| a.path.cmp(&b.path));
-    discovery.support_entries.dedup_by(|a, b| a.path == b.path);
+    discovery.non_manual_runtime_paths = super::entry_report::non_manual_paths(&discovery.entries);
+    dedup_entry_paths(&mut discovery.entries);
+    dedup_entry_paths(&mut discovery.support_entries);
 
     discovery
 }

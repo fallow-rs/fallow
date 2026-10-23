@@ -1016,29 +1016,30 @@ struct FileVisitor<'a> {
 
 impl FileVisitor<'_> {
     /// Attribute one excluded candidate source file to the built-in pattern
-    /// that removed it, or to nothing when the project asked for the exclusion
-    /// itself (issue #2638).
+    /// that removed it (issue #2638), and credit the `ignorePatterns` globs
+    /// that removed any file that no built-in matches (issue #3824).
     ///
     /// Runs only on files `is_match` already rejected, so the kept-file path
     /// still pays a single boolean match.
-    fn record_default_ignore_exclusion(&mut self, relative: &Path) {
+    fn record_ignore_exclusion(&mut self, relative: &Path, is_source: bool) {
         // Cheap pre-filter, not a second rule: `**/node_modules/**` is in
         // UNREPORTED_DEFAULT_IGNORES, and it is also the one built-in that
         // fires on an entire dependency tree. Testing a path component beats
         // running the whole glob union over tens of thousands of files whose
         // attribution the report would then discard.
-        if relative
-            .components()
-            .any(|component| component.as_os_str() == OsStr::new("node_modules"))
+        if (!is_source && self.user_ignore_pattern_count == 0)
+            || relative
+                .components()
+                .any(|component| component.as_os_str() == OsStr::new("node_modules"))
         {
             return;
         }
         self.match_buf.clear();
         self.ignore_patterns
-            .matches_into(relative, &mut self.match_buf);
+            .excluded_matches_into(relative, &mut self.match_buf);
         // globset returns ascending indices, so the first match is both the
         // cheapest user-pattern test and the lowest-index built-in.
-        let Some(&first) = self.match_buf.first() else {
+        let Some(&first) = self.match_buf.first().filter(|_| is_source) else {
             return;
         };
         if first < self.user_ignore_pattern_count {
@@ -1073,9 +1074,7 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
             .strip_prefix(self.root)
             .unwrap_or_else(|_| entry.path());
         if self.ignore_patterns.is_match(relative) {
-            if has_source_extension(entry.path()) {
-                self.record_default_ignore_exclusion(relative);
-            }
+            self.record_ignore_exclusion(relative, has_source_extension(entry.path()));
             return ignore::WalkState::Continue;
         }
         if self
@@ -1551,6 +1550,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
         excluded_shared: &excluded_collected,
     };
     walk_builder.build_parallel().visit(&mut visitor_builder);
+    config.ignore_patterns.mark_walked();
 
     let mut raw = collected
         .into_inner()

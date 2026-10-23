@@ -897,8 +897,8 @@ pub(super) fn is_ignored_workspace_dir(
         return false;
     }
     let relative_str = relative_dir.to_string_lossy().replace('\\', "/");
-    ignore_patterns.is_match(relative_str.as_str())
-        || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
+    ignore_patterns.excludes(relative_str.as_str())
+        || ignore_patterns.excludes(format!("{relative_str}/package.json").as_str())
 }
 
 #[cfg(test)]

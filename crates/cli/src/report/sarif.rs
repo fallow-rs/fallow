@@ -154,8 +154,10 @@ fn annotate_type_aware_sarif_value(sarif: &mut serde_json::Value, type_aware: &s
     }
 }
 
-/// Add the config patterns that matched nothing (`ignoreDependencies`,
-/// `ignoreFindings`) to the first run as SARIF configuration notifications.
+/// Add the config entries that had no effect (unmatched `ignoreDependencies`
+/// and `ignoreFindings` patterns, redundant `entry`, `ignoreDependencies` and
+/// `ignorePatterns` entries) to the first run as SARIF configuration
+/// notifications.
 ///
 /// SARIF keeps findings in `results` and facts about the tool configuration in
 /// `invocations[].toolConfigurationNotifications`. An unmatched pattern is a

@@ -1,4 +1,5 @@
 mod entry_points;
+mod entry_report;
 mod infrastructure;
 mod orphan_declarations;
 mod parse_scripts;
@@ -19,6 +20,7 @@ pub(crate) use entry_points::{
     discover_workspace_package_entry_points, resolve_entry_path_with_discovered,
     resolve_entry_path_with_tracking, warn_skipped_entry_summary, workspace_runtime_script_seeds,
 };
+pub(crate) use entry_report::{record_entry_pattern_effect, summarize_entry_points};
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(crate) use infrastructure::discover_infrastructure_entry_points;
 pub(crate) use orphan_declarations::find_orphan_module_declaration_files;

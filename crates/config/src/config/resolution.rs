@@ -4,17 +4,19 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use globset::{Glob, GlobMatcher, GlobSetBuilder};
+use globset::{Glob, GlobMatcher};
 use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::boundaries::ResolvedBoundaryConfig;
 use super::duplicates_config::DuplicatesConfig;
+use super::entry_effect::EntryEffectRecord;
 use super::flags::FlagsConfig;
 use super::format::OutputFormat;
 use super::glob_validation::compile_path_glob;
 use super::health::HealthConfig;
+use super::ignore_patterns::compile_ignore_patterns;
 use super::mutation::MutationConfig;
 use super::resolve::ResolveConfig;
 use super::rules::{PartialRulesConfig, RulesConfig, Severity};
@@ -230,6 +232,10 @@ pub struct ResolvedConfig {
     /// choice and is reported nowhere, while an index at or above it names a
     /// built-in the user never asked for (issue #2638).
     pub user_ignore_pattern_count: usize,
+    /// Which [`Self::entry_patterns`] matched a file that no other runtime
+    /// entry source declares, in the latest entry point discovery (issue
+    /// #3824).
+    pub entry_pattern_effect: EntryEffectRecord,
     /// Post-analysis finding-path matcher built from `ignoreFindings`; hides
     /// findings without removing files from the module graph.
     pub ignore_findings: FindingIgnoreMatcher,
@@ -621,7 +627,7 @@ fn per_root_cache_subdir(root: &Path) -> String {
     }
 }
 
-fn normalize_user_glob_pattern(pattern: &str) -> &str {
+pub(super) fn normalize_user_glob_pattern(pattern: &str) -> &str {
     pattern.strip_prefix("./").unwrap_or(pattern)
 }
 
@@ -650,35 +656,6 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "**/*.min.cjs",
     "**/*.bundle.js",
 ];
-
-#[expect(
-    clippy::expect_used,
-    reason = "user glob patterns are validated before config resolution"
-)]
-fn compile_ignore_patterns(ignore_patterns: &[String]) -> (IgnorePatternSet, usize) {
-    let mut ignore_builder = GlobSetBuilder::new();
-    let mut user_pattern_count = 0;
-    let mut exceptions: Vec<&str> = Vec::new();
-    for pattern in ignore_patterns {
-        if let Some(body) = pattern.strip_prefix('!') {
-            exceptions.push(normalize_user_glob_pattern(body));
-            continue;
-        }
-        let normalized = normalize_user_glob_pattern(pattern);
-        ignore_builder.add(
-            compile_path_glob(normalized)
-                .expect("ignorePatterns entry was validated at config load time"),
-        );
-        user_pattern_count += 1;
-    }
-
-    for pattern in DEFAULT_IGNORE_PATTERNS {
-        ignore_builder.add(compile_path_glob(pattern).expect("default ignore pattern is valid"));
-    }
-
-    let set = IgnorePatternSet::new(ignore_builder.build().unwrap_or_default(), &exceptions);
-    (set, user_pattern_count)
-}
 
 #[expect(
     clippy::expect_used,
@@ -1052,6 +1029,7 @@ impl FallowConfig {
             entry_patterns: self.entry,
             ignore_patterns: compiled_ignores.patterns,
             user_ignore_pattern_count: compiled_ignores.user_pattern_count,
+            entry_pattern_effect: EntryEffectRecord::default(),
             ignore_findings: compiled_ignores.findings,
             output,
             cache_dir: cache.dir,

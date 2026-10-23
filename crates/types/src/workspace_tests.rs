@@ -961,6 +961,30 @@ fn unmatched_config_pattern_kinds_are_advisory_root_notes() {
             "ignoreFindings",
             "src/legcy/**",
         ),
+        (
+            WorkspaceDiagnosticKind::EntryPatternRedundant {
+                pattern: "src/index.ts".to_owned(),
+            },
+            "entry-pattern-redundant",
+            "entry",
+            "src/index.ts",
+        ),
+        (
+            WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant {
+                pattern: "left-pad".to_owned(),
+            },
+            "ignore-dependencies-entry-redundant",
+            "ignoreDependencies",
+            "left-pad",
+        ),
+        (
+            WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant {
+                pattern: "dist/**".to_owned(),
+            },
+            "ignore-patterns-entry-redundant",
+            "ignorePatterns",
+            "dist/**",
+        ),
     ] {
         let diag = WorkspaceDiagnostic::new(root, root.to_path_buf(), kind);
         assert_eq!(diag.kind.id(), id);
@@ -979,8 +1003,15 @@ fn unmatched_config_pattern_kinds_are_advisory_root_notes() {
         assert!(!diag.kind.is_source_discovery());
         assert!(diag.message.contains(setting), "{}", diag.message);
         assert!(diag.message.contains(pattern), "{}", diag.message);
+        assert_eq!(
+            diag.kind.is_redundant_config_entry(),
+            id.ends_with("-redundant"),
+            "{id}"
+        );
         assert!(
-            diag.message.contains("remove it from the config"),
+            diag.message
+                .to_lowercase()
+                .contains("remove it from the config"),
             "next step: {}",
             diag.message
         );

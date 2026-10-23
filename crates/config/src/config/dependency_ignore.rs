@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use rustc_hash::FxHashSet;
+use rustc_hash::FxHashMap;
 
 /// Characters that turn an `ignoreDependencies` entry into a glob.
 ///
@@ -24,18 +24,26 @@ pub fn is_dependency_glob(entry: &str) -> bool {
 /// `ignorePatterns`, matched against the package name.
 #[derive(Debug, Clone, Default)]
 pub struct IgnoreDependencyMatcher {
-    exact: FxHashSet<String>,
+    /// Exact package name to the config indices of the entries that name it.
+    exact: FxHashMap<String, Vec<usize>>,
     globs: GlobSet,
-    usage: Option<Arc<GlobUsage>>,
+    /// Config index of each glob in `globs`, in build order.
+    glob_entries: Vec<usize>,
+    usage: Option<Arc<EntryUsage>>,
 }
 
-/// Per-glob hit state, shared across clones of the resolved config.
+/// Per-entry hit state, shared across clones of the resolved config.
 #[derive(Debug)]
-struct GlobUsage {
-    patterns: Vec<String>,
+struct EntryUsage {
+    entries: Vec<String>,
+    /// Set when a glob entry matched a package name.
     matched: Vec<AtomicBool>,
+    /// Set when the entry hid a dependency finding that the run would
+    /// otherwise report.
+    suppressed: Vec<AtomicBool>,
     /// Set when the declared dependencies of a manifest were checked, so an
-    /// unmatched glob is a real signal and not only a skipped detector.
+    /// unmatched glob or an entry that hid nothing is a real signal and not
+    /// only a skipped detector.
     declared_checked: AtomicBool,
 }
 
@@ -53,33 +61,35 @@ impl IgnoreDependencyMatcher {
     )]
     #[must_use]
     pub fn compile(entries: &[String]) -> Self {
-        let mut exact = FxHashSet::default();
+        let mut exact: FxHashMap<String, Vec<usize>> = FxHashMap::default();
         let mut builder = GlobSetBuilder::new();
-        let mut patterns = Vec::new();
-        for entry in entries {
+        let mut glob_entries = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
             if is_dependency_glob(entry) {
                 builder.add(
                     Glob::new(entry)
                         .expect("ignoreDependencies glob was validated at config load time"),
                 );
-                patterns.push(entry.clone());
+                glob_entries.push(index);
             } else {
-                exact.insert(entry.clone());
+                exact.entry(entry.clone()).or_default().push(index);
             }
         }
         let globs = builder
             .build()
             .expect("ignoreDependencies globs were validated at config load time");
-        let usage = (!patterns.is_empty()).then(|| {
-            Arc::new(GlobUsage {
-                matched: patterns.iter().map(|_| AtomicBool::new(false)).collect(),
-                patterns,
+        let usage = (!entries.is_empty()).then(|| {
+            Arc::new(EntryUsage {
+                matched: entries.iter().map(|_| AtomicBool::new(false)).collect(),
+                suppressed: entries.iter().map(|_| AtomicBool::new(false)).collect(),
+                entries: entries.to_vec(),
                 declared_checked: AtomicBool::new(false),
             })
         });
         Self {
             exact,
             globs,
+            glob_entries,
             usage,
         }
     }
@@ -87,39 +97,77 @@ impl IgnoreDependencyMatcher {
     /// Whether no entries were configured.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.exact.is_empty() && self.usage.is_none()
+        self.usage.is_none()
+    }
+
+    /// Config indices of the entries that match `package_name`.
+    fn matching_entries(&self, package_name: &str) -> Vec<usize> {
+        let mut indices = self.exact.get(package_name).cloned().unwrap_or_default();
+        if !self.glob_entries.is_empty() {
+            indices.extend(
+                self.globs
+                    .matches(package_name)
+                    .into_iter()
+                    .filter_map(|glob_index| self.glob_entries.get(glob_index).copied()),
+            );
+        }
+        indices
     }
 
     /// Whether `package_name` is excluded by an exact entry or a glob entry.
     #[must_use]
     pub fn is_ignored(&self, package_name: &str) -> bool {
-        if self.exact.contains(package_name) {
+        if self.exact.contains_key(package_name) {
             return true;
         }
-        let Some(usage) = self.usage.as_deref() else {
+        if self.glob_entries.is_empty() {
             return false;
-        };
+        }
         let indices = self.globs.matches(package_name);
-        for &index in &indices {
-            if let Some(flag) = usage.matched.get(index) {
-                flag.store(true, Ordering::Relaxed);
+        if let Some(usage) = self.usage.as_deref() {
+            for &glob_index in &indices {
+                if let Some(flag) = self
+                    .glob_entries
+                    .get(glob_index)
+                    .and_then(|&index| usage.matched.get(index))
+                {
+                    flag.store(true, Ordering::Relaxed);
+                }
             }
         }
         !indices.is_empty()
     }
 
-    /// Like [`Self::is_ignored`] for a name declared in a `package.json`
-    /// dependency section. Only this check makes
-    /// [`Self::unmatched_globs`] report anything.
-    #[must_use]
-    pub fn is_declared_ignored(&self, package_name: &str) -> bool {
+    /// Record a name declared in a `package.json` dependency section. Only
+    /// this check makes [`Self::unmatched_globs`] and
+    /// [`Self::redundant_entries`] report anything.
+    pub fn note_declared(&self, package_name: &str) {
         if let Some(usage) = self.usage.as_deref() {
             usage.declared_checked.store(true, Ordering::Relaxed);
         }
-        self.is_ignored(package_name)
+        let _ = self.is_ignored(package_name);
     }
 
-    /// Forget the glob hits of an earlier analysis pass.
+    /// Whether an entry hides the finding that a detector found for
+    /// `package_name`. Call it only for a name that the detector reports when
+    /// no entry matches it: every matching entry is then recorded as one that
+    /// had an effect.
+    #[must_use]
+    pub fn suppresses(&self, package_name: &str) -> bool {
+        if !self.is_ignored(package_name) {
+            return false;
+        }
+        if let Some(usage) = self.usage.as_deref() {
+            for index in self.matching_entries(package_name) {
+                if let Some(flag) = usage.suppressed.get(index) {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        true
+    }
+
+    /// Forget the hits of an earlier analysis pass.
     ///
     /// A long-lived process (watch mode, the LSP, an engine session) keeps one
     /// resolved config for many passes. Each dead-code pass calls this first,
@@ -130,7 +178,7 @@ impl IgnoreDependencyMatcher {
             return;
         };
         usage.declared_checked.store(false, Ordering::Relaxed);
-        for flag in &usage.matched {
+        for flag in usage.matched.iter().chain(&usage.suppressed) {
             flag.store(false, Ordering::Relaxed);
         }
     }
@@ -141,19 +189,44 @@ impl IgnoreDependencyMatcher {
     /// checked, because such a run says nothing about a typo.
     #[must_use]
     pub fn unmatched_globs(&self) -> Vec<&str> {
-        let Some(usage) = self.usage.as_deref() else {
+        let Some(usage) = self.checked_usage() else {
             return Vec::new();
         };
-        if !usage.declared_checked.load(Ordering::Relaxed) {
-            return Vec::new();
-        }
-        usage
-            .patterns
+        self.glob_entries
             .iter()
-            .zip(&usage.matched)
-            .filter(|(_, matched)| !matched.load(Ordering::Relaxed))
-            .map(|(pattern, _)| pattern.as_str())
+            .filter(|&&index| !usage.matched[index].load(Ordering::Relaxed))
+            .map(|&index| usage.entries[index].as_str())
             .collect()
+    }
+
+    /// Entries that hid no dependency finding this run, in config order.
+    ///
+    /// A glob that matched no package name is left out, because
+    /// [`Self::unmatched_globs`] reports it. Empty when no declared
+    /// dependency was checked.
+    #[must_use]
+    pub fn redundant_entries(&self) -> Vec<&str> {
+        let Some(usage) = self.checked_usage() else {
+            return Vec::new();
+        };
+        let unmatched_glob = |index: usize| {
+            self.glob_entries.contains(&index) && !usage.matched[index].load(Ordering::Relaxed)
+        };
+        usage
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|&(index, _)| {
+                !usage.suppressed[index].load(Ordering::Relaxed) && !unmatched_glob(index)
+            })
+            .map(|(_, entry)| entry.as_str())
+            .collect()
+    }
+
+    fn checked_usage(&self) -> Option<&EntryUsage> {
+        self.usage
+            .as_deref()
+            .filter(|usage| usage.declared_checked.load(Ordering::Relaxed))
     }
 }
 
@@ -211,7 +284,7 @@ mod tests {
             m.unmatched_globs().is_empty(),
             "no declared dependency was checked yet"
         );
-        assert!(!m.is_declared_ignored("react"));
+        m.note_declared("react");
         assert_eq!(m.unmatched_globs(), vec!["@typo/*"]);
     }
 
@@ -219,23 +292,49 @@ mod tests {
     fn clones_share_glob_usage() {
         let m = matcher(&["@acme/*"]);
         let clone = m.clone();
-        assert!(clone.is_declared_ignored("@acme/lib"));
+        clone.note_declared("@acme/lib");
         assert!(m.unmatched_globs().is_empty());
     }
 
     #[test]
     fn reset_usage_forgets_hits_of_an_earlier_pass() {
-        let m = matcher(&["@acme/*"]);
-        assert!(m.is_declared_ignored("@acme/lib"));
+        let m = matcher(&["@acme/*", "lodash"]);
+        m.note_declared("@acme/lib");
+        assert!(m.suppresses("lodash"));
         assert!(m.unmatched_globs().is_empty());
+        assert_eq!(m.redundant_entries(), vec!["@acme/*"]);
 
         m.reset_usage();
         assert!(
-            m.unmatched_globs().is_empty(),
+            m.unmatched_globs().is_empty() && m.redundant_entries().is_empty(),
             "a pass that checked no declared dependency reports nothing"
         );
-        assert!(!m.is_declared_ignored("react"));
+        m.note_declared("react");
         assert_eq!(m.unmatched_globs(), vec!["@acme/*"]);
+        assert_eq!(m.redundant_entries(), vec!["lodash"]);
+    }
+
+    #[test]
+    fn redundant_entries_are_the_entries_that_hid_no_finding() {
+        let m = matcher(&["left-pad", "@acme/*", "@typo/*", "lodash", "react"]);
+        m.note_declared("left-pad");
+        m.note_declared("@acme/lib");
+        assert!(m.suppresses("lodash"));
+        assert!(!m.suppresses("vue"));
+        assert_eq!(
+            m.redundant_entries(),
+            vec!["left-pad", "@acme/*", "react"],
+            "an unmatched glob is reported by unmatched_globs instead"
+        );
+        assert_eq!(m.unmatched_globs(), vec!["@typo/*"]);
+    }
+
+    #[test]
+    fn a_suppressed_name_marks_every_matching_entry() {
+        let m = matcher(&["@acme/*", "@acme/lib", "@acme/{lib,ui}"]);
+        m.note_declared("@acme/lib");
+        assert!(m.suppresses("@acme/lib"));
+        assert!(m.redundant_entries().is_empty());
     }
 
     #[test]

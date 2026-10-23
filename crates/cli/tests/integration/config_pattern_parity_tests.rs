@@ -39,7 +39,9 @@ const fn carrier(format: &str) -> Carrier {
     }
 }
 
-/// A git project with one used `@acme/*` dependency, one unmatched
+/// A git project with one unused `@acme/*` dependency that the first
+/// `ignoreDependencies` glob suppresses (so it is neither unmatched nor
+/// redundant), one unmatched
 /// `ignoreDependencies` glob, one unmatched `ignoreFindings` pattern and one
 /// uncommitted change, so `fallow audit --base HEAD` has a scope.
 fn project() -> tempfile::TempDir {
@@ -60,11 +62,8 @@ fn project() -> tempfile::TempDir {
         ),
     )
     .expect("write config");
-    std::fs::write(
-        root.join("src/index.ts"),
-        "import '@acme/lib';\nexport const main = 1;\n",
-    )
-    .expect("write entry point");
+    std::fs::write(root.join("src/index.ts"), "export const main = 1;\n")
+        .expect("write entry point");
     std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;\n")
         .expect("write orphan file");
     git(root, &["init", "-q"]);

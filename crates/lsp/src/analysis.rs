@@ -160,7 +160,7 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     pub config_messages: &'a mut Vec<(MessageType, String)>,
     pub package_scopes: &'a mut Vec<PackageChangeScope>,
-    /// Config patterns that matched nothing in this run.
+    /// Config entries that had no effect in this run.
     pub unmatched_config_patterns: &'a mut Vec<UnmatchedConfigPattern>,
 }
 

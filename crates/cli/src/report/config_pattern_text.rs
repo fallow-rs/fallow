@@ -1,5 +1,6 @@
-//! The text of the unmatched config pattern entries (`ignoreFindings`,
-//! `ignoreDependencies`) outside JSON and SARIF.
+//! The text of the config entries that had no effect outside JSON and SARIF:
+//! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`) and the
+//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`).
 //!
 //! Every output reads the same `workspace_diagnostics[]` entries, and each
 //! format carries them in exactly one place:
@@ -43,69 +44,104 @@ pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFor
 }
 
 /// One note line per config setting with unmatched patterns, in the order
-/// `ignoreFindings`, `ignoreDependencies`.
+/// `ignoreFindings`, `ignoreDependencies`, then one note line per config
+/// setting with redundant entries, in the order `entry`,
+/// `ignoreDependencies`, `ignorePatterns`.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
-    let patterns_of = |wanted: &str| -> Vec<&str> {
+    let patterns_of = |kind: &str| -> Vec<&str> {
         diagnostics
             .iter()
+            .filter(|diagnostic| diagnostic.kind.id() == kind)
             .filter_map(|diagnostic| diagnostic.kind.unmatched_config_pattern())
-            .filter(|(setting, _)| *setting == wanted)
             .map(|(_, pattern)| pattern)
             .collect()
     };
-    let mut notes = Vec::new();
-    let findings = patterns_of("ignoreFindings");
-    if !findings.is_empty() {
-        let noun = if findings.len() == 1 {
-            "pattern"
-        } else {
-            "patterns"
-        };
-        notes.push(format!(
-            "Note: ignoreFindings {noun} matched no finding this run: {} (patterns are \
-             project-root-relative globs; check for typos).",
-            findings.join(", ")
-        ));
-    }
-    let dependencies = patterns_of("ignoreDependencies");
-    if !dependencies.is_empty() {
-        let noun = if dependencies.len() == 1 {
-            "glob"
-        } else {
-            "globs"
-        };
-        notes.push(format!(
-            "Note: ignoreDependencies {noun} matched no declared dependency this run: {} \
-             (globs match package names such as @scope/*; check for typos).",
-            dependencies.join(", ")
-        ));
-    }
+    let notes = [
+        (
+            "ignore-findings-pattern-unmatched",
+            ("ignoreFindings pattern", "ignoreFindings patterns"),
+            "matched no finding this run",
+            "patterns are project-root-relative globs; check for typos",
+        ),
+        (
+            "ignore-dependencies-glob-unmatched",
+            ("ignoreDependencies glob", "ignoreDependencies globs"),
+            "matched no declared dependency this run",
+            "globs match package names such as @scope/*; check for typos",
+        ),
+        (
+            "entry-pattern-redundant",
+            ("entry pattern", "entry patterns"),
+            "matched only files that are entry points anyway",
+            "remove from the config",
+        ),
+        (
+            "ignore-dependencies-entry-redundant",
+            ("ignoreDependencies entry", "ignoreDependencies entries"),
+            "hid no dependency finding this run",
+            "remove from the config",
+        ),
+        (
+            "ignore-patterns-entry-redundant",
+            ("ignorePatterns entry", "ignorePatterns entries"),
+            "excluded no file that fallow would otherwise analyze this run",
+            "remove from the config; a glob for build output has an effect only after a build",
+        ),
+    ];
     notes
-}
-
-/// The Markdown section that lists the unmatched patterns, or `None` when no
-/// pattern is unmatched. It starts with a blank line, so a caller appends it
-/// directly after the findings.
-#[must_use]
-pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
-    let lines = diagnostics
-        .iter()
-        .filter_map(|diagnostic| {
-            let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
+        .into_iter()
+        .filter_map(|(kind, (singular, plural), outcome, hint)| {
+            let patterns = patterns_of(kind);
+            if patterns.is_empty() {
+                return None;
+            }
+            let noun = if patterns.len() == 1 {
+                singular
+            } else {
+                plural
+            };
             Some(format!(
-                "- `{setting}`: `{pattern}` matched nothing in this run"
+                "Note: {noun} {outcome}: {} ({hint}).",
+                patterns.join(", ")
             ))
         })
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return None;
+        .collect()
+}
+
+/// The Markdown sections that list the unmatched patterns and the redundant
+/// entries, or `None` when there are none. The text starts with a blank line,
+/// so a caller appends it directly after the findings.
+#[must_use]
+pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
+    let lines = |redundant: bool, outcome: &str| -> Vec<String> {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.kind.is_redundant_config_entry() == redundant)
+            .filter_map(|diagnostic| {
+                let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
+                Some(format!("- `{setting}`: `{pattern}` {outcome}"))
+            })
+            .collect()
+    };
+    let unmatched = lines(false, "matched nothing in this run");
+    let redundant = lines(true, "had no effect in this run");
+    let mut sections = Vec::new();
+    if !unmatched.is_empty() {
+        sections.push(format!(
+            "\n## Unmatched config patterns\n\nThese entries had no effect. Fix a typo, or \
+             remove the entry from the config.\n\n{}",
+            unmatched.join("\n")
+        ));
     }
-    Some(format!(
-        "\n## Unmatched config patterns\n\nThese entries had no effect. Fix a typo, or \
-         remove the entry from the config.\n\n{}",
-        lines.join("\n")
-    ))
+    if !redundant.is_empty() {
+        sections.push(format!(
+            "\n## Redundant config entries\n\nThese entries matched, but fallow does the same \
+             without them. Remove the entry from the config.\n\n{}",
+            redundant.join("\n")
+        ));
+    }
+    (!sections.is_empty()).then(|| sections.join("\n"))
 }
 
 /// The unmatched config pattern entries of a saved JSON envelope.
@@ -185,6 +221,77 @@ mod tests {
             "{notes:?}"
         );
         assert!(stderr_notes(&[]).is_empty());
+    }
+
+    fn redundant_entries() -> Vec<WorkspaceDiagnostic> {
+        vec![
+            diagnostic(WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant {
+                pattern: "dist/**".to_owned(),
+            }),
+            diagnostic(WorkspaceDiagnosticKind::EntryPatternRedundant {
+                pattern: "src/index.ts".to_owned(),
+            }),
+            diagnostic(WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant {
+                pattern: "left-pad".to_owned(),
+            }),
+            diagnostic(WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant {
+                pattern: "lodash".to_owned(),
+            }),
+        ]
+    }
+
+    #[test]
+    fn stderr_notes_keep_unmatched_and_redundant_dependency_entries_apart() {
+        let mut diagnostics = redundant_entries();
+        diagnostics.push(glob("@typo/*"));
+        let notes = stderr_notes(&diagnostics);
+        assert_eq!(
+            notes,
+            vec![
+                "Note: ignoreDependencies glob matched no declared dependency this run: @typo/* \
+                 (globs match package names such as @scope/*; check for typos)."
+                    .to_owned(),
+                "Note: entry pattern matched only files that are entry points anyway: \
+                 src/index.ts (remove from the config)."
+                    .to_owned(),
+                "Note: ignoreDependencies entries hid no dependency finding this run: left-pad, \
+                 lodash (remove from the config)."
+                    .to_owned(),
+                "Note: ignorePatterns entry excluded no file that fallow would otherwise analyze \
+                 this run: dist/** (remove from the config; a glob for build output has an \
+                 effect only after a build)."
+                    .to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn markdown_lists_redundant_entries_in_their_own_section() {
+        let only_redundant = markdown_section(&redundant_entries()).expect("redundant entries");
+        assert!(
+            only_redundant.starts_with("\n## Redundant config entries\n"),
+            "{only_redundant}"
+        );
+        assert!(!only_redundant.contains("Unmatched"), "{only_redundant}");
+        assert!(
+            only_redundant.contains("- `entry`: `src/index.ts` had no effect in this run"),
+            "{only_redundant}"
+        );
+
+        let mut diagnostics = redundant_entries();
+        diagnostics.push(glob("@typo/*"));
+        let both = markdown_section(&diagnostics).expect("both sections");
+        let unmatched = both
+            .find("## Unmatched config patterns")
+            .expect("unmatched section");
+        let redundant = both
+            .find("## Redundant config entries")
+            .expect("redundant section");
+        assert!(unmatched < redundant, "{both}");
+        assert!(
+            !both[unmatched..redundant].contains("left-pad"),
+            "a redundant entry stays out of the unmatched section: {both}"
+        );
     }
 
     #[test]

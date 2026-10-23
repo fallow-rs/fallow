@@ -71,7 +71,7 @@ fn is_package_json_ignored_under(
     ignore_patterns: &fallow_config::IgnorePatternSet,
 ) -> bool {
     let relative = ws_pkg_path.strip_prefix(root).unwrap_or(ws_pkg_path);
-    ignore_patterns.is_match(relative)
+    ignore_patterns.excludes(relative)
 }
 
 /// Per-category configuration for unused dependency detection.
@@ -875,9 +875,8 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
     input
         .dep_names
         .into_iter()
-        // Checked first so every declared name reaches the matcher, which
-        // lets it report a glob that matches no declared dependency.
-        .filter(|dep| !input.shared.ignore_deps.is_declared_ignored(dep))
+        // Every declared name reaches the matcher, for the unmatched-glob check.
+        .inspect(|dep| input.shared.ignore_deps.note_declared(dep))
         .filter(|dep| !(input.is_used)(dep))
         .filter(|dep| !input.shared.script_used.contains(dep.as_str()))
         .filter(|dep| !input.category.check_implicit || !is_implicit_dependency(dep))
@@ -906,6 +905,8 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
                 .package_plugin_referenced
                 .contains(dep.as_str())
         })
+        // Last, so only an entry that hides a reported dependency gets credit.
+        .filter(|dep| !input.shared.ignore_deps.suppresses(dep))
         .map(|dep| {
             let line = input
                 .pkg_content
@@ -1722,14 +1723,15 @@ pub fn find_type_only_dependencies(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if config.ignore_dependencies.is_ignored(&dep) || production_peers.contains(&dep) {
+        if production_peers.contains(&dep) {
             continue;
         }
 
         let total_count = root_importers.of(&dep).len();
         let type_only_count = root_importers.type_only_of(&dep).len();
 
-        if total_count > 0 && type_only_count == total_count {
+        let reported = total_count > 0 && type_only_count == total_count;
+        if reported && !config.ignore_dependencies.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1862,11 +1864,12 @@ pub fn find_test_only_dependencies(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if ignore_deps.is_ignored(&dep) || production_peers.contains(&dep) {
+        if production_peers.contains(&dep) {
             continue;
         }
 
-        if dependency_is_test_only(&dep, graph, config, test_globs, &root_importers) {
+        let test_only = dependency_is_test_only(&dep, graph, config, test_globs, &root_importers);
+        if test_only && !ignore_deps.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -2023,9 +2026,6 @@ pub fn find_dev_dependencies_in_production(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if ignore_deps.is_ignored(&dep) {
-            continue;
-        }
         if runtime_provided.contains(dep.as_str()) {
             continue;
         }
@@ -2043,7 +2043,8 @@ pub fn find_dev_dependencies_in_production(
             continue;
         }
 
-        if dependency_has_prod_value_import(&dep, graph, config, workspaces) {
+        let prod_import = dependency_has_prod_value_import(&dep, graph, config, workspaces);
+        if prod_import && !ignore_deps.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -2500,7 +2501,7 @@ fn collect_unlisted_dependencies(ctx: &UnlistedDependencyContext<'_>) -> Vec<Unl
             continue;
         }
         let mut unlisted_sites = collect_unlisted_import_sites(package_name, file_ids, ctx);
-        if !unlisted_sites.is_empty() {
+        if !unlisted_sites.is_empty() && !ctx.ignore_deps.suppresses(package_name) {
             unlisted_sites.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
             unlisted_sites.dedup_by(|a, b| a.path == b.path);
             unlisted.insert(package_name.clone(), unlisted_sites);
@@ -2535,7 +2536,6 @@ struct UnlistedDependencyContext<'a> {
 fn should_skip_unlisted_package(package_name: &str, ctx: &UnlistedDependencyContext<'_>) -> bool {
     ((package_name != "bun" && is_builtin_module(package_name)) || is_path_alias(package_name))
         || is_virtual_module(package_name)
-        || ctx.ignore_deps.is_ignored(package_name)
         || (ctx.plugin_tooling.contains(package_name)
             && !package_has_file_scoped_provider(ctx.provided_dependency_rules, package_name))
         || ctx
