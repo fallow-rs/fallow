@@ -35,9 +35,13 @@ impl TestReachGraph {
         }
         let mut full_config = config.clone();
         full_config.production = false;
-        let session = AnalysisSession::from_resolved_config(full_config).ok()?;
-        let artifacts = session
-            .analyze_dead_code_retaining_files(false, true)
+        let artifacts = AnalysisSession::from_resolved_config(full_config)
+            .and_then(|session| session.analyze_dead_code_retaining_files(false, true))
+            .inspect_err(|error| {
+                tracing::warn!(
+                    "cannot build the full-project graph for production test reachability: {error}"
+                );
+            })
             .ok()?;
         let graph = artifacts.graph?;
         let files = artifacts.files?;
