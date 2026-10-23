@@ -34,7 +34,7 @@ pub(super) fn extract_type_name(name: &TSTypeName<'_>) -> Option<String> {
     Some(join_member_path(ident.name.as_str(), &properties))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 
