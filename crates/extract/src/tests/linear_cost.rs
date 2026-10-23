@@ -234,6 +234,26 @@ fn shapes() -> Vec<Shape> {
             "{REACT}export function C() {{ const [s] = useState({}); return s; }}\n",
             member("a", n)
         )),
+        shape!("extends", "a.ts", |n| format!(
+            "export class C extends {} {{}}\n",
+            member("a", n)
+        )),
+        shape!("implements", "a.ts", |n| format!(
+            "export class C implements {} {{}}\n",
+            member("A", n)
+        )),
+        shape!("interface extends", "a.ts", |n| format!(
+            "export interface I extends {} {{}}\n",
+            member("A", n)
+        )),
+        shape!("mdx member tag", "a.mdx", |n| format!(
+            "import * as a from './a'\n\n<{0}>x</{0}>\n",
+            member("a", n)
+        )),
+        shape!("astro member tag", "a.astro", |n| format!(
+            "---\nimport * as a from './a';\n---\n<{} />\n",
+            member("a", n)
+        )),
         shape!("test callee", "a.test.ts", |n| format!(
             "{}('t', () => {{}});\n",
             member("test", n)
