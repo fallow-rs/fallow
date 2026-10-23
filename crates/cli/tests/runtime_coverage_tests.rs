@@ -773,6 +773,98 @@ mod gated {
         );
     }
 
+    /// Write a project where `src/grade.test.ts` tests `grade`. Production
+    /// mode keeps the test file out of discovery.
+    fn write_tested_function_project(root: &Path, config: Option<&str>) {
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts","devDependencies":{"vitest":"3.2.0"}}"#,
+        )
+        .expect("write package.json");
+        fs::write(
+            root.join("src/grade.ts"),
+            "export function grade(score: number): string {\n  return score > 50 ? \"pass\" : \"fail\";\n}\n",
+        )
+        .expect("write grade.ts");
+        fs::write(
+            root.join("src/index.ts"),
+            "import { grade } from \"./grade\";\nconsole.log(grade(75));\n",
+        )
+        .expect("write index.ts");
+        fs::write(
+            root.join("src/grade.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { grade } from \"./grade\";\n\ntest(\"grade\", () => {\n  expect(grade(95)).toBe(\"pass\");\n});\n",
+        )
+        .expect("write grade.test.ts");
+        if let Some(config) = config {
+            fs::write(root.join(".fallowrc.json"), config).expect("write config");
+        }
+    }
+
+    /// Run `health --runtime-coverage` and return the test coverage evidence
+    /// for the `grade` function.
+    fn grade_test_coverage(harness: &Harness, root: &Path, production: bool) -> String {
+        let mut cmd = harness.fallow();
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("FALLOW_STUB_MODE", "findings-from-static");
+        cmd.arg("health")
+            .arg("--root")
+            .arg(root)
+            .arg("--runtime-coverage")
+            .arg(&harness.coverage_file)
+            .args(["--format", "json", "--quiet", "--no-cache"]);
+        if production {
+            cmd.arg("--production");
+        }
+        let (stdout, stderr, code) = run_with(cmd);
+        assert!(
+            code == 0 || code == 1,
+            "health must run; code={code}; stderr={stderr}"
+        );
+        let json: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("expected JSON output; err={err}; stdout={stdout}"));
+        let findings = json
+            .pointer("/runtime_coverage/findings")
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or_else(|| panic!("runtime coverage findings missing: {stdout}"));
+        let grade = findings
+            .iter()
+            .find(|finding| finding["function"] == "grade")
+            .unwrap_or_else(|| panic!("finding for `grade` missing: {stdout}"));
+        grade["evidence"]["test_coverage"]
+            .as_str()
+            .expect("test_coverage is a string")
+            .to_owned()
+    }
+
+    #[test]
+    fn production_runtime_coverage_credits_the_test_files() {
+        let harness = Harness::new();
+        let root = harness.tmp.path().join("tested-function-project");
+        write_tested_function_project(&root, None);
+
+        assert_eq!(grade_test_coverage(&harness, &root, false), "covered");
+        assert_eq!(
+            grade_test_coverage(&harness, &root, true),
+            "covered",
+            "production mode must still credit the test file in the runtime coverage evidence"
+        );
+    }
+
+    #[test]
+    fn production_runtime_coverage_credits_the_test_files_without_file_scores() {
+        let harness = Harness::new();
+        let root = harness.tmp.path().join("tested-function-project");
+        write_tested_function_project(&root, Some(r#"{"health":{"maxCrap":0}}"#));
+
+        assert_eq!(
+            grade_test_coverage(&harness, &root, true),
+            "covered",
+            "production mode must credit the test file when no file scores run"
+        );
+    }
+
     fn exit_code_case(mode: &str, expected: i32) {
         let harness = Harness::new();
         let mut cmd = harness.fallow();

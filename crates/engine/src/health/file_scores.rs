@@ -14,7 +14,7 @@ use crate::results::DeadCodeAnalysisArtifacts;
 use super::filters::filter_coverage_gaps;
 use super::hotspots;
 use super::scoring::{self, compute_file_scores};
-use super::test_reach::TestReachGraph;
+use super::test_reach::SharedTestReach;
 use super::{HealthError, HealthExecutionOptions};
 
 type FileScoreResult = (Option<scoring::FileScoreOutput>, Option<usize>, Option<f64>);
@@ -34,19 +34,28 @@ pub struct FileScoresAndChurnInput<'a> {
     pub(crate) needs_file_scores: bool,
     pub(crate) threshold_resolver: &'a super::threshold_overrides::ThresholdOverrideResolver,
     pub(crate) enforce_crap: bool,
+    /// Full-project graph for test reachability in production mode.
+    pub(crate) test_reach: &'a SharedTestReach<'a>,
 }
 
-pub fn compute_file_scores_and_churn(
+/// Compute file scores while git churn loads on a second thread.
+///
+/// `before_scores` runs on the calling thread after the churn thread starts
+/// and before file scoring. It returns its own result and the precomputed
+/// analysis for file scoring. The runtime coverage seam runs there, so the
+/// test reachability graph that it builds overlaps the churn load.
+pub fn compute_file_scores_and_churn<T>(
     input: FileScoresAndChurnInput<'_>,
-    precomputed_for_scores: Option<DeadCodeAnalysisArtifacts>,
-) -> Result<FileScoresAndChurn, HealthError> {
+    before_scores: impl FnOnce() -> Result<(T, Option<DeadCodeAnalysisArtifacts>), HealthError>,
+) -> Result<(FileScoresAndChurn, T), HealthError> {
     let needs_churn = input.opts.hotspots || input.opts.targets;
-    if input.needs_file_scores && needs_churn {
-        return std::thread::scope(|s| {
-            let churn_handle =
-                s.spawn(|| hotspots::fetch_churn_data(input.opts, &input.config.cache_dir));
-            let t = Instant::now();
-            let score_result = compute_filtered_file_scores(FileScoreInput {
+    std::thread::scope(|s| {
+        let churn_handle = needs_churn
+            .then(|| s.spawn(|| hotspots::fetch_churn_data(input.opts, &input.config.cache_dir)));
+        let (before, precomputed_for_scores) = before_scores()?;
+        let t = Instant::now();
+        let score_result = if input.needs_file_scores {
+            compute_filtered_file_scores(FileScoreInput {
                 config: input.config,
                 modules: input.modules,
                 file_paths: input.file_paths,
@@ -60,42 +69,20 @@ pub fn compute_file_scores_and_churn(
                     enforce_crap: input.enforce_crap,
                 },
                 with_static_links: needs_churn,
-            })?;
-            let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
-            let churn = churn_handle
+                test_reach: input.test_reach,
+            })?
+        } else {
+            (None, None, None)
+        };
+        let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let churn = match churn_handle {
+            Some(handle) => handle
                 .join()
-                .map_err(|_| HealthError::message("churn thread panicked", 2))?;
-            Ok((score_result, fs_ms, churn))
-        });
-    }
-
-    let t = Instant::now();
-    let score_result = if input.needs_file_scores {
-        compute_filtered_file_scores(FileScoreInput {
-            config: input.config,
-            modules: input.modules,
-            file_paths: input.file_paths,
-            changed_files: input.changed_files,
-            ws_roots: input.ws_roots,
-            ignore_set: input.ignore_set,
-            istanbul_coverage: input.istanbul_coverage,
-            pre_computed: precomputed_for_scores,
-            crap_thresholds: scoring::CrapScoreThresholds {
-                resolver: input.threshold_resolver,
-                enforce_crap: input.enforce_crap,
-            },
-            with_static_links: needs_churn,
-        })?
-    } else {
-        (None, None, None)
-    };
-    let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let churn = if needs_churn {
-        hotspots::fetch_churn_data(input.opts, &input.config.cache_dir)
-    } else {
-        None
-    };
-    Ok((score_result, fs_ms, churn))
+                .map_err(|_| HealthError::message("churn thread panicked", 2))?,
+            None => None,
+        };
+        Ok(((score_result, fs_ms, churn), before))
+    })
 }
 
 pub fn print_slow_churn_note(
@@ -137,6 +124,7 @@ struct FileScoreInput<'a> {
     pre_computed: Option<DeadCodeAnalysisArtifacts>,
     crap_thresholds: scoring::CrapScoreThresholds<'a>,
     with_static_links: bool,
+    test_reach: &'a SharedTestReach<'a>,
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, HealthError> {
@@ -152,7 +140,6 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
         &mut analysis_output.results,
         input.config,
     );
-    let test_reach = TestReachGraph::for_production(input.config, input.file_paths);
     match compute_file_scores(
         scoring::FileScoreComputeInput {
             modules: input.modules,
@@ -162,7 +149,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
             root: &input.config.root,
             crap_thresholds: input.crap_thresholds,
             with_static_links: input.with_static_links,
-            test_reach: test_reach.as_ref(),
+            test_reach: input.test_reach.get(),
         },
         analysis_output,
     ) {

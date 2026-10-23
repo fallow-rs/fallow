@@ -22,6 +22,8 @@
 //! - `"security-hot"`: response with `src/sink.ts::render` as a hot path
 //! - `"hot-from-static"`: every static function in the request becomes a hot
 //!   path with 1000 invocations and the request's function identity
+//! - `"findings-from-static"`: every static function in the request becomes a
+//!   finding whose `evidence.test_coverage` copies the request's `test_covered`
 //! - `"capture-quality-short"`: clean response with a short-window
 //!   `capture_quality` (`lazy_parse_warning = true`), exit 0
 //! - `"capture-quality-long"`: clean response with a long-window
@@ -36,7 +38,7 @@ use std::io::{Read, Write};
 use std::process::ExitCode;
 
 use fallow_cov_protocol::{
-    CaptureQuality, HotPath, PROTOCOL_VERSION, ReportVerdict, Request, Response, Summary,
+    CaptureQuality, Finding, HotPath, PROTOCOL_VERSION, ReportVerdict, Request, Response, Summary,
 };
 
 fn main() -> ExitCode {
@@ -68,6 +70,7 @@ fn main() -> ExitCode {
         ),
         "security-hot" => emit_security_hot_response(),
         "hot-from-static" => emit_hot_from_static_response(parsed),
+        "findings-from-static" => emit_findings_from_static_response(parsed),
         "malformed-stdout" => emit_bytes(b"definitely not JSON\n"),
         "empty-stdout" => ExitCode::SUCCESS,
         "enforce-license-gate" => enforce_license_gate(parsed),
@@ -219,6 +222,81 @@ fn emit_hot_from_static_response(request: Option<Request>) -> ExitCode {
         },
         findings: Vec::new(),
         hot_paths,
+        blast_radius: Vec::new(),
+        importance: Vec::new(),
+        watermark: None,
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
+    match serde_json::to_vec(&response) {
+        Ok(bytes) => emit_bytes(&bytes),
+        Err(err) => {
+            eprintln!("stub sidecar: failed to serialize response: {err}");
+            ExitCode::from(6)
+        }
+    }
+}
+
+fn emit_findings_from_static_response(request: Option<Request>) -> ExitCode {
+    let Some(request) = request else {
+        eprintln!("stub sidecar: failed to parse request");
+        return ExitCode::from(5);
+    };
+    let mut findings = Vec::new();
+    for file in &request.static_findings.files {
+        for function in &file.functions {
+            let test_coverage = if function.test_covered {
+                "covered"
+            } else {
+                "not_covered"
+            };
+            let static_status = if function.static_used {
+                "used"
+            } else {
+                "unused"
+            };
+            let finding: Finding = match serde_json::from_value(serde_json::json!({
+                "id": format!("fallow:prod:{}:{}", file.path, function.name),
+                "file": file.path,
+                "function": function.name,
+                "line": function.start_line,
+                "verdict": "review_required",
+                "invocations": 0,
+                "confidence": "low",
+                "evidence": {
+                    "static_status": static_status,
+                    "test_coverage": test_coverage,
+                    "v8_tracking": "tracked",
+                    "observation_days": 1,
+                    "deployments_observed": 1,
+                },
+            })) {
+                Ok(finding) => finding,
+                Err(err) => {
+                    eprintln!("stub sidecar: failed to build finding: {err}");
+                    return ExitCode::from(6);
+                }
+            };
+            findings.push(finding);
+        }
+    }
+    let count = findings.len() as u64;
+    let response = Response {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        verdict: ReportVerdict::ColdCodeDetected,
+        summary: Summary {
+            functions_tracked: count,
+            functions_hit: 0,
+            functions_unhit: count,
+            functions_untracked: 0,
+            coverage_percent: 0.0,
+            trace_count: 1,
+            period_days: 1,
+            deployments_seen: 1,
+            capture_quality: None,
+        },
+        findings,
+        hot_paths: Vec::new(),
         blast_radius: Vec::new(),
         importance: Vec::new(),
         watermark: None,

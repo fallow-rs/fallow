@@ -11,6 +11,7 @@
 pub mod coverage;
 pub mod mutation_report;
 pub mod optimization_target;
+mod runtime_static_signals;
 
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
 /// still address them through `crate::health::scoring`.
@@ -155,6 +156,7 @@ fn runtime_coverage_seam(
             codeowners_path: input.codeowners_path,
             quiet: input.quiet,
             output: input.output,
+            test_reach: input.test_reach,
         },
     )
 }
@@ -376,6 +378,7 @@ pub fn benchmark_execute_health_with_response(
                 codeowners_path: input.codeowners_path,
                 quiet: input.quiet,
                 output: input.output,
+                test_reach: input.test_reach,
             },
             |request, _quiet, output| {
                 let (response, len) =

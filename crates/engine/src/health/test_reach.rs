@@ -6,6 +6,9 @@
 //! module builds a graph of the full project, test files included, and maps
 //! the analysis file ids onto it. Findings still come from the production
 //! file set only.
+//!
+//! A health run builds this graph at most one time. File scoring and the
+//! runtime coverage signal index use the same graph.
 
 use std::path::Path;
 
@@ -17,7 +20,12 @@ use crate::module_graph::{RetainedModuleGraph, StaticTestCoverage};
 use crate::session::AnalysisSession;
 
 /// Graph of the full project plus a map from analysis file ids to its ids.
-pub(super) struct TestReachGraph {
+///
+/// The type is opaque. Downstream crates get it through the health seams and
+/// give it back to engine helpers such as
+/// [`crate::module_graph::module_value_exports_with_test_reach`].
+#[derive(Debug)]
+pub struct TestReachGraph {
     graph: RetainedModuleGraph,
     file_map: FxHashMap<FileId, FileId>,
 }
@@ -26,7 +34,7 @@ impl TestReachGraph {
     /// Build the graph when `config` is a production run. Returns `None`
     /// outside production mode, and also when the full-project analysis
     /// fails. In that case the caller keeps the analysis graph.
-    pub(super) fn for_production(
+    fn for_production(
         config: &ResolvedConfig,
         file_paths: &FxHashMap<FileId, &std::path::PathBuf>,
     ) -> Option<Self> {
@@ -60,8 +68,40 @@ impl TestReachGraph {
         Some(Self { graph, file_map })
     }
 
-    pub(super) fn static_test_coverage(&self) -> StaticTestCoverage<'_> {
+    pub(crate) fn static_test_coverage(&self) -> StaticTestCoverage<'_> {
         StaticTestCoverage::mapped(self.graph.as_graph(), &self.file_map)
+    }
+}
+
+/// The test reachability graph of one health run, built on first use.
+///
+/// File scoring and the runtime coverage seam share one instance. The first
+/// call to [`SharedTestReach::get`] builds the graph, and later calls reuse
+/// it. A run that does not call `get` builds nothing. Both callers run while
+/// git churn loads on a different thread, so the build overlaps that load.
+pub struct SharedTestReach<'a> {
+    config: &'a ResolvedConfig,
+    file_paths: &'a FxHashMap<FileId, &'a std::path::PathBuf>,
+    graph: std::cell::OnceCell<Option<TestReachGraph>>,
+}
+
+impl<'a> SharedTestReach<'a> {
+    pub const fn new(
+        config: &'a ResolvedConfig,
+        file_paths: &'a FxHashMap<FileId, &'a std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            config,
+            file_paths,
+            graph: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The graph, built on the first call. `None` outside production mode.
+    pub fn get(&self) -> Option<&TestReachGraph> {
+        self.graph
+            .get_or_init(|| TestReachGraph::for_production(self.config, self.file_paths))
+            .as_ref()
     }
 }
 

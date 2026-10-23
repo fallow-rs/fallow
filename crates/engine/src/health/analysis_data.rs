@@ -5,6 +5,7 @@ use fallow_config::ResolvedConfig;
 use crate::results::DeadCodeAnalysisArtifacts;
 
 use super::framework_health::FrameworkHealthFacts;
+use super::test_reach::SharedTestReach;
 use super::{
     FileScoresAndChurnInput, HealthError, HealthOptions, HealthSeams, RuntimeCoverageSeamInput,
 };
@@ -48,40 +49,52 @@ pub(super) fn prepare_health_analysis_data(
     let seams = input.seams;
     let mut shared_analysis =
         prepare_shared_health_analysis(&mut input, needs_analysis_output, seams)?;
+    // File scoring and the runtime coverage seam share one full-project graph.
+    let test_reach = SharedTestReach::new(input.config, input.file_paths);
 
-    let runtime_coverage = analyze_runtime_coverage(
-        RuntimeCoverageAnalysisScope {
-            opts: input.opts,
-            config: input.config,
-            modules: input.modules,
-            shared_analysis_output: shared_analysis.output.as_ref(),
-            istanbul_coverage: input.istanbul_coverage,
-            file_paths: input.file_paths,
-            ignore_set: input.ignore_set,
-            changed_files: input.changed_files,
-            ws_roots: input.ws_roots,
-        },
-        seams,
-    )?;
+    let framework_health_facts = shared_analysis.framework_health_facts.take();
+    let runtime_coverage_scope = RuntimeCoverageAnalysisScope {
+        opts: input.opts,
+        config: input.config,
+        modules: input.modules,
+        shared_analysis_output: None,
+        istanbul_coverage: input.istanbul_coverage,
+        file_paths: input.file_paths,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+        test_reach: &test_reach,
+    };
+    let needs_file_scores = input.needs_file_scores;
 
-    let precomputed_for_scores = shared_analysis.take_for_file_scores(input.needs_file_scores);
-
-    let (file_score_result, file_scores_ms, churn_fetch) = compute_file_scores_and_churn(
-        FileScoresAndChurnInput {
-            opts: input.opts,
-            config: input.config,
-            modules: input.modules,
-            file_paths: input.file_paths,
-            changed_files: input.changed_files,
-            ws_roots: input.ws_roots,
-            ignore_set: input.ignore_set,
-            istanbul_coverage: input.istanbul_coverage,
-            needs_file_scores: input.needs_file_scores,
-            threshold_resolver: input.threshold_resolver,
-            enforce_crap: input.enforce_crap,
-        },
-        precomputed_for_scores,
-    )?;
+    let ((file_score_result, file_scores_ms, churn_fetch), runtime_coverage) =
+        compute_file_scores_and_churn(
+            FileScoresAndChurnInput {
+                opts: input.opts,
+                config: input.config,
+                modules: input.modules,
+                file_paths: input.file_paths,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+                ignore_set: input.ignore_set,
+                istanbul_coverage: input.istanbul_coverage,
+                needs_file_scores: input.needs_file_scores,
+                threshold_resolver: input.threshold_resolver,
+                enforce_crap: input.enforce_crap,
+                test_reach: &test_reach,
+            },
+            || {
+                let runtime_coverage = analyze_runtime_coverage(
+                    RuntimeCoverageAnalysisScope {
+                        shared_analysis_output: shared_analysis.output.as_ref(),
+                        ..runtime_coverage_scope
+                    },
+                    seams,
+                )?;
+                let precomputed = shared_analysis.take_for_file_scores(needs_file_scores);
+                Ok((runtime_coverage, precomputed))
+            },
+        )?;
     let (git_churn_ms, git_churn_cache_hit) = churn_fetch
         .as_ref()
         .map_or((0.0, false), |cf| (cf.git_log_ms, cf.cache_hit));
@@ -95,7 +108,7 @@ pub(super) fn prepare_health_analysis_data(
         score_output,
         files_scored,
         average_maintainability,
-        framework_health_facts: shared_analysis.framework_health_facts,
+        framework_health_facts,
         file_scores_ms,
         git_churn_ms,
         git_churn_cache_hit,
@@ -135,6 +148,7 @@ struct RuntimeCoverageAnalysisScope<'a> {
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
+    test_reach: &'a SharedTestReach<'a>,
 }
 
 fn analyze_runtime_coverage(
@@ -165,6 +179,7 @@ fn analyze_runtime_coverage(
             codeowners_path: input.config.codeowners.as_deref(),
             quiet: input.opts.quiet,
             output: input.opts.output,
+            test_reach: input.test_reach.get(),
         },
     )
     .map(Some)

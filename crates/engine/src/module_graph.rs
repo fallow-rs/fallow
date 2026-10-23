@@ -368,7 +368,23 @@ impl From<GraphFocusFileFactsPaths> for FocusFileFactsPaths {
 /// internals to downstream crates.
 #[must_use]
 pub fn module_value_exports(graph: &RetainedModuleGraph) -> Vec<ModuleValueExport> {
-    let test_coverage = graph.static_test_coverage();
+    module_value_exports_with_test_reach(graph, None)
+}
+
+/// Return value exports of `graph` with test-reference state.
+///
+/// When `test_reach` is given, test-reference state comes from that
+/// full-project graph. Production mode needs this because its analysis graph
+/// has no test files.
+#[must_use]
+pub fn module_value_exports_with_test_reach(
+    graph: &RetainedModuleGraph,
+    test_reach: Option<&crate::health::TestReachGraph>,
+) -> Vec<ModuleValueExport> {
+    let test_coverage = test_reach.map_or_else(
+        || graph.static_test_coverage(),
+        crate::health::TestReachGraph::static_test_coverage,
+    );
     let graph = graph.as_graph();
 
     graph

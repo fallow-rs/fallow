@@ -35,6 +35,7 @@ use crate::health::optimization_target::{
     FunctionStart, InnerIterationIndex, InnerIterations, StaticCost, StaticTarget,
     attach_optimization_targets,
 };
+use crate::health::runtime_static_signals::{StaticSignalIndex, build_static_signal_index};
 use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
 use fallow_engine::health::RuntimeCoverageOptions;
@@ -88,17 +89,6 @@ struct PreparedCoverageSources {
     sources: Vec<CoverageSource>,
     inner_iterations: InnerIterationIndex,
     _temp_dir: Option<TempDir>,
-}
-
-#[derive(Default)]
-struct StaticSignalIndex {
-    unused_files: FxHashSet<PathBuf>,
-    exported_names: FxHashMap<PathBuf, FxHashSet<String>>,
-    exported_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
-    unused_export_names: FxHashMap<PathBuf, FxHashSet<String>>,
-    unused_export_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
-    test_referenced_export_names: FxHashMap<PathBuf, FxHashSet<String>>,
-    test_referenced_export_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -288,6 +278,8 @@ pub(super) struct RuntimeCoverageAnalysisInput<'a> {
     pub codeowners_path: Option<&'a str>,
     pub quiet: bool,
     pub output: OutputFormat,
+    /// Full-project graph for test reachability in production mode.
+    pub test_reach: Option<&'a fallow_engine::health::TestReachGraph>,
 }
 
 /// Emit the CLI error document (byte-identical to [`emit_error`]) and return the
@@ -318,9 +310,13 @@ pub(super) fn analyze_with_transport(
     let prepared_sources = prepare_coverage_sources(&options.path).map_err(|message| {
         emit_printed(&message, RUNTIME_COVERAGE_INPUT_EXIT_CODE, input.output)
     })?;
-    let static_signals =
-        build_static_signal_index(input.modules, input.analysis_output, input.file_paths)
-            .map_err(|message| emit_printed(&message, 2, input.output))?;
+    let static_signals = build_static_signal_index(
+        input.modules,
+        input.analysis_output,
+        input.file_paths,
+        input.test_reach,
+    )
+    .map_err(|message| emit_printed(&message, 2, input.output))?;
     let (request, locations) =
         build_request(options, input, &static_signals, prepared_sources.sources);
     let response = transport(&request, input.quiet, input.output)?;
@@ -1001,96 +997,6 @@ fn assemble_request(
             window_seconds: None,
             instances_observed: None,
         },
-    }
-}
-
-fn build_static_signal_index(
-    modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
-    file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
-) -> Result<StaticSignalIndex, String> {
-    let graph = analysis_output
-        .graph
-        .as_ref()
-        .ok_or_else(|| "analysis graph not available for runtime coverage".to_owned())?;
-    let mut index = StaticSignalIndex::default();
-    index_dead_code_signals(&mut index, analysis_output);
-
-    let module_by_id: FxHashMap<_, _> = modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-    for export in fallow_engine::module_graph::module_value_exports(graph) {
-        let Some(&path) = file_paths.get(&export.file_id) else {
-            continue;
-        };
-        index_graph_value_export(
-            &mut index,
-            &export,
-            module_by_id.get(&export.file_id).copied(),
-            path,
-        );
-    }
-
-    Ok(index)
-}
-
-/// Seed the signal index with unused-file and unused-export dead-code signals.
-fn index_dead_code_signals(
-    index: &mut StaticSignalIndex,
-    analysis_output: &fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
-) {
-    for file in &analysis_output.results.unused_files {
-        index.unused_files.insert(file.file.path.clone());
-    }
-    for export in &analysis_output.results.unused_exports {
-        index
-            .unused_export_names
-            .entry(export.export.path.clone())
-            .or_default()
-            .insert(export.export.export_name.clone());
-        index
-            .unused_export_lines
-            .entry(export.export.path.clone())
-            .or_default()
-            .insert(export.export.line);
-    }
-}
-
-/// Index one graph value export, including test-referenced state.
-fn index_graph_value_export(
-    index: &mut StaticSignalIndex,
-    export: &fallow_engine::module_graph::ModuleValueExport,
-    module: Option<&fallow_types::extract::ModuleInfo>,
-    path: &Path,
-) {
-    index
-        .exported_names
-        .entry(path.to_path_buf())
-        .or_default()
-        .insert(export.name.clone());
-
-    if let Some(module) = module {
-        let (line, _) =
-            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span_start);
-        index
-            .exported_lines
-            .entry(path.to_path_buf())
-            .or_default()
-            .insert(line);
-
-        if export.test_referenced {
-            index
-                .test_referenced_export_names
-                .entry(path.to_path_buf())
-                .or_default()
-                .insert(export.name.clone());
-            index
-                .test_referenced_export_lines
-                .entry(path.to_path_buf())
-                .or_default()
-                .insert(line);
-        }
     }
 }
 
@@ -3585,6 +3491,7 @@ mod tests {
                 codeowners_path: None,
                 quiet: true,
                 output: OutputFormat::Json,
+                test_reach: None,
             },
             &StaticSignalIndex::default(),
             vec![],
@@ -3637,8 +3544,9 @@ mod tests {
         let analysis_output = session
             .analyze_dead_code_with_parsed_modules(&modules)
             .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
-        let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
-            .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
+        let static_signals =
+            build_static_signal_index(&modules, &analysis_output, &file_paths, None)
+                .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
         let app_path = src_dir.join("app.ts");
         let tested_line = modules
             .iter()
@@ -3695,6 +3603,7 @@ mod tests {
                 codeowners_path: None,
                 quiet: true,
                 output: OutputFormat::Json,
+                test_reach: None,
             },
             &static_signals,
             vec![],
@@ -3806,6 +3715,7 @@ mod tests {
                 codeowners_path: None,
                 quiet: true,
                 output: OutputFormat::Json,
+                test_reach: None,
             },
             &StaticSignalIndex::default(),
             vec![],

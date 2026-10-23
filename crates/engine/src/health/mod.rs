@@ -91,6 +91,7 @@ pub use runner::{
     UngroupedHealthSession, run_ungrouped_health_with_session,
     run_ungrouped_health_with_session_artifacts,
 };
+pub use test_reach::TestReachGraph;
 use vital_data::{HealthVitalData, HealthVitalDataInput, prepare_health_vital_data};
 use vital_signs_scope::{
     SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
@@ -243,6 +244,9 @@ pub struct RuntimeCoverageSeamInput<'a> {
     pub quiet: bool,
     /// Output format the seam should render its own diagnostics in.
     pub output: OutputFormat,
+    /// Full-project graph for test reachability in production mode. `None`
+    /// outside production mode: then `analysis_output` holds the test files.
+    pub test_reach: Option<&'a TestReachGraph>,
 }
 
 /// CLI-supplied callbacks the command-neutral health pipeline needs.
