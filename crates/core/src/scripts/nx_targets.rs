@@ -37,7 +37,10 @@ const INLINE_BYTE_BUDGET: usize = 256 * 1024;
 /// script: a path in it would point at the wrong file.
 #[must_use]
 pub fn run_commands_scripts(project_json: &str, project_root: &str) -> FxHashMap<String, String> {
-    let Ok(project) = serde_json::from_str::<Value>(project_json) else {
+    // Nx reads `project.json` as JSONC, so comments and trailing commas are
+    // valid there.
+    let source = project_json.trim_start_matches('\u{FEFF}');
+    let Ok(project) = fallow_config::jsonc::parse_to_value::<Value>(source) else {
         return FxHashMap::default();
     };
     let Some(targets) = project.get("targets").and_then(Value::as_object) else {
@@ -360,6 +363,18 @@ mod tests {
     fn run_script_targets_are_not_commands() {
         let json = r#"{"targets":{"s":{"executor":"nx:run-script","options":{"script":"build"}}}}"#;
         assert!(scripts(json, "").is_empty());
+    }
+
+    #[test]
+    fn reads_a_project_json_with_comments() {
+        let json = "\u{FEFF}{\n  // Generates the fixtures\n  \"targets\": {\n    /* block */\n    \"generate\": {\n      \"executor\": \"nx:run-commands\",\n      \"options\": { \"command\": \"node scripts/generate.js\", \"cwd\": \"{projectRoot}\" },\n    },\n  },\n}";
+        assert_eq!(
+            scripts(json, "packages/app"),
+            vec![(
+                "generate".to_string(),
+                "node scripts/generate.js".to_string()
+            )]
+        );
     }
 
     #[test]
