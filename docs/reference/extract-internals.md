@@ -130,6 +130,11 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   the shape of the old single-statement body. The duplication token visitor
   keeps the old tokens for concise bodies, `import.meta`, `new.target` and
   qualified interface heritage names.
+- String literal values, `static_property_name()` and
+  `PropertyKey::static_name()` are `JSStr` (WTF-8) since Oxc 0.155. `JSStr`
+  has no `Display`. Convert it with `fallow_extract::JsText::text()`
+  (`crates/extract/src/js_text.rs`) at the point of use. A well-formed value
+  stays borrowed, and a lone surrogate is written as `\uXXXX`.
 - `visit_formal_parameter` also visits the parameters of type-only
   signatures: function types, overloads, `declare function`, and interface
   or abstract methods. Code in these signatures never runs. A parameter hook
