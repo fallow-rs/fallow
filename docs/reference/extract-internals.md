@@ -87,7 +87,9 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   same builders, so both sides stop at the same link. Without this cap, the
   time and the output for one chain grow with the square of its length. A new
   per-link walk must use the same cap. The taint source paths
-  (`visit_impl_source_paths.rs`) and the JSX tag receivers use it too.
+  (`visit_impl_source_paths.rs`), the JSX tag receivers, the interface
+  heritage names, and the dotted tags of the Astro and MDX text scans
+  (`push_member_tag_accesses`) use it too.
 - Build a dotted path in a loop and join it once (`join_member_path`). A
   recursive `format!` copies the whole path at each link, so one path of N
   links costs O(N^2) bytes. Unwrap a run of wrappers (`await`, parentheses,

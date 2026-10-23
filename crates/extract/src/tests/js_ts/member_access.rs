@@ -782,3 +782,67 @@ fn long_fluent_chain_of_distinct_steps_records_one_linear_fact() {
     // A fact for each call held the steps before it: O(N^2) step names.
     assert_eq!(chains, [LONG_CHAIN_LINKS - 1]);
 }
+
+/// The deepest receiver and the number of member accesses that `info` holds.
+fn receiver_output_bound(info: &fallow_types::extract::ModuleInfo) -> (Option<usize>, usize) {
+    let longest = info
+        .member_accesses
+        .iter()
+        .map(|access| access.object.matches('.').count())
+        .max();
+    (longest, info.member_accesses.len())
+}
+
+#[test]
+fn long_heritage_type_name_records_a_bounded_receiver_output() {
+    let info = parse_long_chain(format!(
+        "export interface X extends a{} {{}}\n",
+        ".b".repeat(LONG_CHAIN_LINKS)
+    ));
+    assert_eq!(
+        receiver_output_bound(&info),
+        (Some(RECORDED_LINKS), RECORDED_LINKS + 1)
+    );
+}
+
+#[test]
+fn long_jsx_member_tag_records_a_bounded_receiver_output() {
+    let source = format!("export const x = <a{} />;\n", ".b".repeat(LONG_CHAIN_LINKS));
+    let info = std::thread::Builder::new()
+        .stack_size(1 << 30)
+        .spawn(move || parse_tsx(&source))
+        .expect("spawn the extraction thread")
+        .join()
+        .expect("extraction must not panic");
+    assert_eq!(
+        receiver_output_bound(&info),
+        (Some(RECORDED_LINKS), RECORDED_LINKS + 1)
+    );
+}
+
+#[test]
+fn long_text_member_tag_records_a_bounded_receiver_output() {
+    let tag = format!("a{}", ".b".repeat(LONG_CHAIN_LINKS));
+    for (path, source) in [
+        (
+            "test.mdx",
+            format!("import * as a from './a'\n\n<{tag}>x</{tag}>\n"),
+        ),
+        (
+            "test.astro",
+            format!("---\nimport * as a from './a';\n---\n<{tag} />\n"),
+        ),
+    ] {
+        let info = std::thread::Builder::new()
+            .stack_size(1 << 30)
+            .spawn(move || crate::tests::parse_at_path(path, &source))
+            .expect("spawn the extraction thread")
+            .join()
+            .expect("extraction must not panic");
+        assert_eq!(
+            receiver_output_bound(&info),
+            (Some(RECORDED_LINKS), RECORDED_LINKS + 1),
+            "{path}"
+        );
+    }
+}

@@ -6,6 +6,7 @@ use requirements::{BindingRequirements, RequirementArena};
 use std::cell::{Cell, RefCell};
 pub(crate) mod react;
 mod visit_impl;
+pub(crate) use visit_impl::push_member_tag_accesses;
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionBody, BindingPattern, CallExpression,
@@ -4118,28 +4119,6 @@ fn strip_this_scope_qualifier(spelling: &mut String) {
         *spelling = rebuilt;
     } else {
         *spelling = "this".to_string();
-    }
-}
-
-/// Record the member accesses a dotted component tag name implies, one per
-/// nesting level (`A.B.C` records `{A.B, C}` then `{A, B}`), for template
-/// pipelines that scan markup as text instead of visiting a JSX AST (Astro
-/// markup, MDX bodies; issue #2355). This is the text counterpart of
-/// `record_jsx_member_tag_accesses`, so namespace-import narrowing sees the
-/// same stream from every pipeline. A name without a dot records nothing.
-pub(crate) fn push_member_tag_accesses(accesses: &mut Vec<MemberAccess>, dotted_tag: &str) {
-    let mut end = dotted_tag.len();
-    while let Some(dot) = dotted_tag[..end].rfind('.') {
-        let object = &dotted_tag[..dot];
-        let member = &dotted_tag[dot + 1..end];
-        if object.is_empty() || member.is_empty() {
-            return;
-        }
-        accesses.push(MemberAccess {
-            object: object.to_string(),
-            member: member.to_string(),
-        });
-        end = dot;
     }
 }
 

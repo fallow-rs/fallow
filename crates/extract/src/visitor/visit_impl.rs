@@ -114,7 +114,8 @@ mod visit_sveltekit_load;
 mod visit_taint_sources;
 
 pub(super) use visit_chain_names::jsx_member_object_name;
-use visit_chain_names::static_member_object_name;
+pub use visit_chain_names::push_member_tag_accesses;
+use visit_chain_names::{static_member_object_name, type_name_member_path};
 pub(super) use visit_dynamic_imports::ComponentLoaderImport;
 pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
@@ -6053,20 +6054,6 @@ fn push_ident(name: &str, out: &mut Vec<String>) {
 /// leaves. A bare-identifier init (`const { id } = req`) yields `req`.
 fn destructure_source_path(expr: &Expression<'_>) -> Option<String> {
     flatten_member_path(expr)
-}
-
-/// The name path of a type name, spelled as `static_member_object_name`
-/// spells the same member expression (`a`, `a.b`, `this`).
-fn type_name_member_path(name: &TSTypeName<'_>) -> Option<String> {
-    match name {
-        TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
-        TSTypeName::ThisExpression(_) => Some("this".to_string()),
-        TSTypeName::QualifiedName(qualified) => Some(format!(
-            "{}.{}",
-            type_name_member_path(&qualified.left)?,
-            qualified.right.name
-        )),
-    }
 }
 
 fn subclass_receiver_reference<'a, 'b>(

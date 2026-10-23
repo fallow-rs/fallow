@@ -6,7 +6,7 @@ use rustc_hash::FxHashSet;
 
 use super::super::{ModuleInfoExtractor, SemanticFact};
 use super::visit_source_paths::join_member_path;
-use crate::{FluentChainMemberAccessFact, FluentChainNewMemberAccessFact};
+use crate::{FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, MemberAccess};
 
 /// The most links a recorded receiver name holds (`a` plus 64 `.b`).
 ///
@@ -129,6 +129,61 @@ pub(in crate::visitor) fn jsx_member_object_name(
         }
     };
     Some(join_member_path(root, &properties))
+}
+
+/// The name path of a type name, spelled as `static_member_object_name`
+/// spells the same member expression (`a`, `a.b`, `this`).
+///
+/// The heritage walk asks for this name at every level of a qualified name, so
+/// a path past `MAX_RECORDED_CHAIN_LINKS` links is `None`, like
+/// `static_member_object_name`.
+pub(super) fn type_name_member_path(name: &TSTypeName<'_>) -> Option<String> {
+    let mut properties = Vec::new();
+    let mut name = name;
+    let root = loop {
+        if properties.len() > MAX_RECORDED_CHAIN_LINKS {
+            return None;
+        }
+        match name {
+            TSTypeName::IdentifierReference(ident) => break ident.name.as_str(),
+            TSTypeName::ThisExpression(_) => break "this",
+            TSTypeName::QualifiedName(qualified) => {
+                properties.push(qualified.right.name.as_str());
+                name = &qualified.left;
+            }
+        }
+    };
+    Some(join_member_path(root, &properties))
+}
+
+/// Record the member accesses a dotted component tag name implies, one per
+/// nesting level (`A.B.C` records `{A.B, C}` then `{A, B}`), for template
+/// pipelines that scan markup as text instead of visiting a JSX AST (Astro
+/// markup, MDX bodies; issue #2355). This is the text counterpart of
+/// `record_jsx_member_tag_accesses`, so namespace-import narrowing sees the
+/// same stream from every pipeline. A name without a dot records nothing.
+///
+/// A level whose object has more than `MAX_RECORDED_CHAIN_LINKS` links
+/// records nothing, the same cap that `jsx_member_object_name` applies, so
+/// the output of a long tag does not grow with the square of its length.
+pub fn push_member_tag_accesses(accesses: &mut Vec<MemberAccess>, dotted_tag: &str) {
+    let mut end = dotted_tag.len();
+    let mut object_links = dotted_tag.matches('.').count();
+    while let Some(dot) = dotted_tag[..end].rfind('.') {
+        object_links -= 1;
+        let object = &dotted_tag[..dot];
+        let member = &dotted_tag[dot + 1..end];
+        if object.is_empty() || member.is_empty() {
+            return;
+        }
+        if object_links <= MAX_RECORDED_CHAIN_LINKS {
+            accesses.push(MemberAccess {
+                object: object.to_string(),
+                member: member.to_string(),
+            });
+        }
+        end = dot;
+    }
 }
 
 impl ModuleInfoExtractor {
@@ -287,6 +342,17 @@ mod tests {
         let links = ".b".repeat(MAX_RECORDED_CHAIN_LINKS);
         assert_eq!(jsx_tag_object_name(&links), Some(format!("a{links}")));
         assert_eq!(jsx_tag_object_name(&format!("{links}.b")), None);
+    }
+
+    #[test]
+    fn push_member_tag_accesses_stops_at_the_cap() {
+        let links = ".b".repeat(MAX_RECORDED_CHAIN_LINKS);
+        let mut accesses = Vec::new();
+        push_member_tag_accesses(&mut accesses, &format!("a{links}.b.c"));
+        let objects: Vec<&str> = accesses.iter().map(|a| a.object.as_str()).collect();
+        assert_eq!(objects.len(), MAX_RECORDED_CHAIN_LINKS + 1);
+        assert_eq!(objects.first().copied(), Some(format!("a{links}").as_str()));
+        assert_eq!(objects.last().copied(), Some("a"));
     }
 
     #[test]
