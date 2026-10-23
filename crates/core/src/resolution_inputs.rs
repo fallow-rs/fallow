@@ -58,7 +58,77 @@ pub fn resolution_inputs_hash(
         content.hash(&mut hasher);
     }
 
+    let mut entry_targets = package_entry_target_states(root, workspaces);
+    entry_targets.sort_unstable();
+    entry_targets.len().hash(&mut hasher);
+    for target in &entry_targets {
+        target.hash(&mut hasher);
+    }
+
     hasher.finish()
+}
+
+/// `package.json` fields whose paths the resolver follows for a package
+/// import. `exports` is read separately because it nests.
+const PACKAGE_ENTRY_FIELDS: &[&str] = &["main", "module", "types", "typings"];
+
+/// Return `(path, exists)` for every static entry path that the project and
+/// workspace `package.json` files name.
+///
+/// The resolver follows an entry that exists on disk (often build output that
+/// discovery ignores) and maps an entry that is absent back to source. A build
+/// that creates or removes the output changes the import target without an
+/// edit to a source file or a manifest, so the existence of each entry keys
+/// the mode too.
+fn package_entry_target_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, bool)> {
+    let mut states = Vec::new();
+    let package_dirs = std::iter::once(root).chain(workspaces.iter().map(|ws| ws.root.as_path()));
+    for dir in package_dirs {
+        let Ok(content) = std::fs::read(dir.join("package.json")) else {
+            continue;
+        };
+        let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let mut targets = Vec::new();
+        for field in PACKAGE_ENTRY_FIELDS {
+            if let Some(serde_json::Value::String(target)) = manifest.get(*field) {
+                targets.push(target.as_str());
+            }
+        }
+        if let Some(exports) = manifest.get("exports") {
+            collect_export_targets(exports, &mut targets);
+        }
+        for target in targets {
+            if target.contains('*') {
+                continue;
+            }
+            let relative = target.strip_prefix("./").unwrap_or(target);
+            if relative.is_empty() || relative.starts_with('/') {
+                continue;
+            }
+            let path = dir.join(relative);
+            states.push((portable_key(root, &path), path.exists()));
+        }
+    }
+    states
+}
+
+fn collect_export_targets<'a>(value: &'a serde_json::Value, targets: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(target) => targets.push(target),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_export_targets(item, targets);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_export_targets(item, targets);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_input_files(
