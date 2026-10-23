@@ -28,6 +28,7 @@ pub mod css_classes;
 pub mod css_in_js;
 mod css_masked_bytes;
 pub mod css_metrics;
+mod css_module_classes;
 pub mod effect_facts;
 pub mod federation_runtime;
 pub mod flags;
@@ -112,6 +113,7 @@ pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
 pub use nesting::{
     MAX_NESTING_DEPTH, exceeds_nesting_limit, parse_bounded, parse_bounded_or_default,
+    parse_style_bounded,
 };
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,

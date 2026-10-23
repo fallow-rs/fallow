@@ -63,7 +63,8 @@ const SPECIFICITY_COMPONENT_MASK: u32 = 0x3FF;
 
 /// Compute structural CSS analytics for a standard-CSS stylesheet source.
 ///
-/// Returns `None` only on a hard parse failure; with error recovery on,
+/// Returns `None` on a hard parse failure and on a stylesheet that nests
+/// brackets too deep for the parser stack; with error recovery on,
 /// individual malformed rules are skipped and the rest of the sheet still
 /// contributes. Callers must gate by extension and NOT pass `.scss` sources:
 /// Sass syntax is not standard CSS and recovers into an inaccurate partial
@@ -71,6 +72,10 @@ const SPECIFICITY_COMPONENT_MASK: u32 = 0x3FF;
 /// `:global()` selectors are understood.
 #[must_use]
 pub fn compute_css_analytics(source: &str) -> Option<CssAnalytics> {
+    crate::parse_style_bounded(source, || css_analytics_unbounded(source)).flatten()
+}
+
+fn css_analytics_unbounded(source: &str) -> Option<CssAnalytics> {
     let options = ParserOptions {
         error_recovery: true,
         css_modules: Some(lightningcss::css_modules::Config::default()),
@@ -206,6 +211,10 @@ impl Visitor<'_> for FirstRgbColorCollector {
 /// normalize it to RGB. Supports hex, named colors, rgb(), hsl(), and hwb().
 #[must_use]
 pub fn parse_css_color_rgb(value: &str) -> Option<(f64, f64, f64)> {
+    crate::parse_style_bounded(value, || css_color_rgb_unbounded(value)).flatten()
+}
+
+fn css_color_rgb_unbounded(value: &str) -> Option<(f64, f64, f64)> {
     if let Ok(color) = CssColor::parse_string(value)
         && let Some(rgb) = concrete_rgb(&color)
     {

@@ -1,0 +1,3 @@
+### Fixed
+
+- **A deeply nested stylesheet no longer risks a stack overflow in the CSS parser.** CSS Modules class extraction, `fallow health --css` analytics and color parsing now check the bracket depth before they call the CSS parser, and they run the parse on a stack sized for the stylesheet. A stylesheet past the limit falls back to the plain class scan, or is left out of the CSS analytics. The depth check now reads a stylesheet with CSS rules: a `//` inside `url(//host/a.png)`, a CSS escape or an unquoted `url()` body no longer hides the rest of a minified file. The extraction cache version changes, so the first run after the upgrade parses every file again. OSS-Fuzz found this.
