@@ -316,12 +316,87 @@ gate_git_identity() {
 }
 SESSION_IDENTITY="$(gate_git_identity "$BASE_DIR" || true)"
 
+# Returns 0 only when the strict push in STRICT_ARGS, run in the linked
+# worktree $1, cannot send the branch of the session. All of these must hold:
+# - The options are only -u, -q, --set-upstream, --force-with-lease and
+#   --force-if-includes.
+# - The words after the options are [<repository>] [<refspec>...]. The source
+#   of each refspec (without a leading + and before the first :) is not empty.
+#   For each source, git rev-parse --symbolic-full-name in $1 gives the same
+#   ref as for HEAD in $1, and that ref is not the session branch. A commit
+#   name, `feat~0` or `@{-1}` gives no ref, so it fails.
+# - A push without a refspec needs push.default (read in $1) unset or one of
+#   simple, current, upstream and nothing, and no remote with a push or mirror
+#   setting.
+# Every other result and every git error return 1. The function runs in a
+# subshell, so an error under set -u also returns 1 and the session is
+# audited.
+gate_push_spares_session() (
+  local target="$1" word src ref head session_ref push_default rc
+  local positionals=0 refspecs=0
+  if ! head="$(git -C "$target" rev-parse --symbolic-full-name HEAD 2>/dev/null)"; then
+    return 1
+  fi
+  [ -n "$head" ] || return 1
+  # Exit 1 means a detached HEAD: no session branch, so no ref can match it.
+  if session_ref="$(git -C "$BASE_DIR" symbolic-ref -q HEAD 2>/dev/null)"; then
+    :
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || return 1
+    session_ref=""
+  fi
+  [ "$head" != "$session_ref" ] || return 1
+  for word in ${STRICT_ARGS[@]+"${STRICT_ARGS[@]}"}; do
+    case "$word" in
+      -u | -q | --set-upstream | --force-with-lease | --force-if-includes) continue ;;
+      -*) return 1 ;;
+    esac
+    positionals=$((positionals + 1))
+    # The first word is the repository.
+    [ "$positionals" -gt 1 ] || continue
+    refspecs=$((refspecs + 1))
+    src="${word#+}"
+    src="${src%%:*}"
+    case "$src" in
+      '' | -*) return 1 ;;
+    esac
+    if ! ref="$(git -C "$target" rev-parse --symbolic-full-name "$src" 2>/dev/null)"; then
+      return 1
+    fi
+    [ -n "$ref" ] && [ "$ref" = "$head" ] && [ "$ref" != "$session_ref" ] || return 1
+  done
+  if [ "$refspecs" -eq 0 ]; then
+    # Exit 1 means that push.default is not set.
+    if push_default="$(git -C "$target" config --get push.default 2>/dev/null)"; then
+      :
+    else
+      rc=$?
+      [ "$rc" -eq 1 ] || return 1
+      push_default=""
+    fi
+    case "$push_default" in
+      '' | simple | current | upstream | nothing) ;;
+      *) return 1 ;;
+    esac
+    # Exit 1 means that no remote has a push or mirror setting.
+    if git -C "$target" config --get-regexp '^remote\..*\.(push|mirror)$' >/dev/null 2>&1; then
+      return 1
+    else
+      rc=$?
+      [ "$rc" -eq 1 ] || return 1
+    fi
+  fi
+  return 0
+)
+
 # Returns 0 when git reports another work tree for a directory than for the
 # session directory: both the top level and the git directory differ. With
 # `push` as the second argument, the common git directory must differ too,
 # because linked worktrees share refs: a push from one of them can send the
-# branch or tags of the session. A directory in the same work tree, or a git
-# error, returns 1.
+# branch or tags of the session. The one exception is a push that
+# gate_push_spares_session accepts. A directory in the same work tree, or a
+# git error, returns 1.
 gate_other_work_tree() {
   local identity top git_dir common session_top session_git_dir session_common rest
   [ -n "$SESSION_IDENTITY" ] || return 1
@@ -336,7 +411,7 @@ gate_other_work_tree() {
   session_common="${rest#*"$GATE_NL"}"
   [ "$top" != "$session_top" ] && [ "$git_dir" != "$session_git_dir" ] || return 1
   if [ "${2:-}" = push ] && [ "$common" = "$session_common" ]; then
-    return 1
+    gate_push_spares_session "$1" || return 1
   fi
   return 0
 }
@@ -354,7 +429,8 @@ gate_other_work_tree() {
 # gate_inert_option are allowed; a quoted word is allowed only as the value of
 # `-m` or `--message`. Nothing else is allowed: no other operator, expansion,
 # redirection, environment prefix or git option such as `-c`. Each directory
-# must exist. Returns 1 for any other command.
+# must exist. For a push, the words after the subcommand follow, one on each
+# line. Returns 1 for any other command.
 gate_allowlisted_target() {
   local cmd="$1" rest dir="$BASE_DIR" subcommand word
   # The letters are listed, not given as a range, so that no locale can make
@@ -363,7 +439,7 @@ gate_allowlisted_target() {
   local sq_dir=$'\'[^\'\n]*\'' dq_dir=$'"[^"$`\\\\\n]*"'
   local sq_arg="'[^']*'" dq_arg='"[^"$`\\]*"'
   local blank=$'[ \t]' sp re word_re dir_re arg_re
-  local -a words=()
+  local -a words=() args=()
   sp="$blank+"
   dir_re="($plain|$sq_dir|$dq_dir)"
   arg_re="($plain|$sq_arg|$dq_arg)"
@@ -401,8 +477,12 @@ gate_allowlisted_target() {
         ;;
       *:-*) gate_inert_option "$subcommand" "$word" || return 1 ;;
     esac
+    args+=("$word")
   done
   printf '%s\n%s\n' "$subcommand" "$dir"
+  if [ "$subcommand" = push ] && [ "${#args[@]}" -gt 0 ]; then
+    printf '%s\n' "${args[@]}"
+  fi
 }
 
 # Options of `git commit` and `git push` that do not run a command, read a
@@ -414,7 +494,7 @@ gate_inert_option() {
       commit:-S | commit:-S* | commit:--gpg-sign | commit:--gpg-sign=* | commit:--no-gpg-sign | \
       commit:-q | commit:--quiet | commit:-n | commit:--no-verify) return 0 ;;
     push:-u | push:--set-upstream | push:-f | push:--force | push:--force-with-lease | \
-      push:--force-with-lease=* | push:--tags | push:--follow-tags | push:--dry-run | \
+      push:--force-with-lease=* | push:--force-if-includes | push:--tags | push:--follow-tags | push:--dry-run | \
       push:-n | push:-v | push:--verbose | push:-q | push:--quiet | push:--no-verify | \
       push:-d | push:--delete) return 0 ;;
   esac
@@ -483,16 +563,29 @@ add_audit_root() {
 # work tree, so a command that the scan reads wrong can only add audits.
 STRICT_SUBCOMMAND=""
 TARGET_DIR=""
+STRICT_ARGS=()
 if STRICT="$(gate_allowlisted_target "$CMD")"; then
   STRICT_SUBCOMMAND="${STRICT%%"$GATE_NL"*}"
-  TARGET_DIR="${STRICT#*"$GATE_NL"}"
+  STRICT_REST="${STRICT#*"$GATE_NL"}"
+  TARGET_DIR="${STRICT_REST%%"$GATE_NL"*}"
+  if [ "$STRICT_REST" != "$TARGET_DIR" ]; then
+    while IFS= read -r STRICT_WORD; do
+      STRICT_ARGS+=("$STRICT_WORD")
+    done <<<"${STRICT_REST#*"$GATE_NL"}"
+  fi
 fi
+# The session audit stays on until every check for the target passes.
+AUDIT_SESSION=1
 if [ -n "$TARGET_DIR" ] && gate_other_work_tree "$TARGET_DIR" "$STRICT_SUBCOMMAND"; then
+  AUDIT_SESSION=0
+fi
+if [ "$AUDIT_SESSION" -eq 0 ]; then
   add_audit_root "$TARGET_DIR"
 else
   add_audit_root "$BASE_DIR"
   # A strict push from a linked worktree of the same repository can send the
-  # refs of the session, so it audits both trees.
+  # refs of the session, so it audits both trees, unless
+  # gate_push_spares_session accepted it above.
   if [ -n "$TARGET_DIR" ] && gate_other_work_tree "$TARGET_DIR"; then
     add_audit_root "$TARGET_DIR"
   fi

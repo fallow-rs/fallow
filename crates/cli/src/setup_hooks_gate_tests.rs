@@ -1450,7 +1450,7 @@ fn gate_resolves_the_strict_target_physically() {
         ),
         (
             "push with names",
-            "git -C ../../wt-c push -u --force-with-lease origin HEAD:main".to_owned(),
+            "git -C ../../wt-c push -u --force origin HEAD:main".to_owned(),
             vec![a, c],
         ),
         (
@@ -1559,6 +1559,306 @@ fn gate_resolves_git_c_physically_through_a_symlink() {
     assert_cases(&trees, &cases);
 }
 
+/// Two linked worktrees on their own branches: the session works in `a` on
+/// `feat-a` with untracked build output, and `b` holds `feat-b`.
+fn branch_worktrees() -> TwoWorktrees {
+    let trees = two_worktrees();
+    git(&trees.a, &["switch", "-q", "-c", "feat-a"]);
+    git(&trees.b, &["switch", "-q", "-c", "feat-b"]);
+    std::fs::write(trees.a.join("build-output.js"), "export const x = 1;\n").unwrap();
+    trees
+}
+
+/// The full path of the host git.
+fn host_git() -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|dir| dir.join("git"))
+        .find(|path| path.is_file())
+        .expect("git on PATH")
+}
+
+/// Runs a strict push from worktree `b` with a session in `a/src`.
+/// `fail` names a word: each git call with that word fails with exit 128.
+fn run_linked_push(trees: &TwoWorktrees, command: &str, fail: &str) -> GateRun {
+    use std::os::unix::fs::PermissionsExt;
+
+    let session = trees.a.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    let wrapper_dir = trees.root.join("git-wrapper");
+    std::fs::create_dir_all(&wrapper_dir).unwrap();
+    for (name, body) in [
+        (
+            "git",
+            format!(
+                "#!/bin/sh\ncase \" $* \" in *\"$GIT_STUB_FAIL\"*) exit 128 ;; esac\nexec '{}' \"$@\"\n",
+                host_git().display()
+            ),
+        ),
+        ("fallow", STUB_FALLOW.to_owned()),
+    ] {
+        let path = wrapper_dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        wrapper_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    run_gate_with_env(
+        &trees.gate,
+        &trees.main,
+        &trees.root.join("home"),
+        &command_payload(&session, command),
+        &[("PATH", path.as_str()), ("GIT_STUB_FAIL", fail)],
+    )
+}
+
+/// A config key and value to set before a case runs.
+type ConfigSetting<'a> = Option<(&'a str, &'a str)>;
+
+/// A word that no git call of the gate holds.
+const NO_FAILURE: &str = " no-such-word ";
+
+/// Sets a value in the shared config of the repository of `trees`.
+fn set_config(trees: &TwoWorktrees, key: &str, value: &str) {
+    git(&trees.main, &["config", key, value]);
+}
+
+/// A strict push from a linked worktree that cannot send the session branch
+/// audits only that worktree, also with untracked build output in the
+/// session tree.
+#[test]
+fn gate_audits_only_the_worktree_for_a_push_of_its_own_branch() {
+    if skip_without_tools() {
+        return;
+    }
+    let cases: &[(&str, &str, ConfigSetting)] = &[
+        ("branch", "git -C '../../wt b' push origin feat-b", None),
+        ("-u", "git -C '../../wt b' push -u origin feat-b", None),
+        (
+            "--set-upstream -q",
+            "git -C '../../wt b' push --set-upstream -q origin feat-b",
+            None,
+        ),
+        ("HEAD", "git -C '../../wt b' push origin HEAD", None),
+        (
+            "HEAD to the branch",
+            "git -C '../../wt b' push origin HEAD:refs/heads/feat-b",
+            None,
+        ),
+        (
+            "--force-with-lease",
+            "git -C '../../wt b' push --force-with-lease origin feat-b",
+            None,
+        ),
+        (
+            "--force-with-lease --force-if-includes",
+            "git -C '../../wt b' push --force-with-lease --force-if-includes origin +feat-b",
+            None,
+        ),
+        (
+            "no refspec, push.default simple",
+            "git -C '../../wt b' push",
+            Some(("push.default", "simple")),
+        ),
+        (
+            "no refspec, push.default unset",
+            "git -C '../../wt b' push origin",
+            None,
+        ),
+        ("cd", "cd '../../wt b' && git push origin feat-b", None),
+    ];
+    for (case, command, config) in cases {
+        let trees = branch_worktrees();
+        if let Some((key, value)) = config {
+            set_config(&trees, key, value);
+        }
+        let run = run_linked_push(&trees, command, NO_FAILURE);
+        assert_eq!(
+            run.output.status.code(),
+            Some(0),
+            "{case}: stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+        assert_eq!(
+            run.audit_dirs,
+            [trees.b.as_path()],
+            "{case}: {command:?} must audit only the worktree; stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+    }
+}
+
+/// A strict push from a linked worktree that can send the session branch, or
+/// that the gate cannot prove safe, keeps the session audit. A git that fails
+/// during the check also keeps it.
+#[test]
+fn gate_keeps_the_session_audit_for_a_linked_push_it_cannot_prove() {
+    if skip_without_tools() {
+        return;
+    }
+    let session_sha = {
+        let trees = branch_worktrees();
+        git_rev_parse(&trees.a, "HEAD")
+    };
+    assert!(!session_sha.is_empty());
+    let sha_command = format!("git -C '../../wt b' push origin {session_sha}:refs/heads/x");
+    let cases: Vec<(&str, &str, ConfigSetting, &str)> = vec![
+        (
+            "session branch",
+            "git -C '../../wt b' push origin feat-a",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "session branch as a full ref",
+            "git -C '../../wt b' push origin refs/heads/feat-a",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "session branch with +",
+            "git -C '../../wt b' push origin +feat-a",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "session branch to another name",
+            "git -C '../../wt b' push origin feat-a:x",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "HEAD and the session branch",
+            "git -C '../../wt b' push origin HEAD feat-a",
+            None,
+            NO_FAILURE,
+        ),
+        ("a commit name", sha_command.as_str(), None, NO_FAILURE),
+        (
+            "an empty source",
+            "git -C '../../wt b' push origin :x",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "a source that reads as an option",
+            "git -C '../../wt b' push origin +--all",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "push.default matching",
+            "git -C '../../wt b' push",
+            Some(("push.default", "matching")),
+            NO_FAILURE,
+        ),
+        (
+            "remote push setting",
+            "git -C '../../wt b' push origin",
+            Some(("remote.origin.push", "refs/heads/*:refs/heads/*")),
+            NO_FAILURE,
+        ),
+        (
+            "remote mirror setting",
+            "git -C '../../wt b' push",
+            Some(("remote.origin.mirror", "true")),
+            NO_FAILURE,
+        ),
+        (
+            "--all",
+            "git -C '../../wt b' push --all origin",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "--mirror",
+            "git -C '../../wt b' push --mirror origin",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "--tags",
+            "git -C '../../wt b' push --tags origin",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "--force-with-lease=<ref>",
+            "git -C '../../wt b' push --force-with-lease=x origin feat-b",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "--force",
+            "git -C '../../wt b' push --force origin feat-b",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "cd and the session branch",
+            "cd '../../wt b' && git push origin feat-a",
+            None,
+            NO_FAILURE,
+        ),
+        (
+            "git fails for symbolic-ref",
+            "git -C '../../wt b' push origin feat-b",
+            None,
+            " symbolic-ref ",
+        ),
+        (
+            "git fails for --symbolic-full-name",
+            "git -C '../../wt b' push origin feat-b",
+            None,
+            " --symbolic-full-name ",
+        ),
+        (
+            "git fails for config",
+            "git -C '../../wt b' push",
+            None,
+            " config ",
+        ),
+        (
+            "git fails for config --get-regexp",
+            "git -C '../../wt b' push",
+            None,
+            " --get-regexp ",
+        ),
+    ];
+    for (case, command, config, fail) in cases {
+        let trees = branch_worktrees();
+        if let Some((key, value)) = config {
+            set_config(&trees, key, value);
+        }
+        let run = run_linked_push(&trees, command, fail);
+        assert_eq!(
+            run.output.status.code(),
+            Some(0),
+            "{case}: stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+        // A form outside the strict grammar (`--all`, `--mirror`) goes to the
+        // word scan, which cannot split the quoted path of `wt b`. So `b` can
+        // be missing there; the session audit is what this test proves.
+        let expected: &[&Path] = if command
+            .split(' ')
+            .any(|word| word == "--all" || word == "--mirror")
+        {
+            &[trees.a.as_path()]
+        } else {
+            &[trees.a.as_path(), trees.b.as_path()]
+        };
+        assert_eq!(
+            run.audit_dirs,
+            expected,
+            "{case}: {command:?} must audit the session; stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+    }
+}
+
 /// The gate script on main before the target support, for the differential
 /// test.
 const MAIN_GATE_SCRIPT: &str = include_str!("setup_hooks/fallow-gate.main.sh");
@@ -1570,7 +1870,6 @@ const DIFFERENTIAL_COMMANDS: &[&str] = &[
     "git -C '../../wt b' push origin main",
     "git -C ../../main push origin feat-a",
     "git -C '../../wt b' push --tags",
-    "cd ../../wt-c && git push",
     "git -C .. commit -m x",
     "git -C ../../main commit -m x",
     "cd ../../main && git commit -m x",
@@ -1604,6 +1903,53 @@ const DIFFERENTIAL_COMMANDS: &[&str] = &[
     "git log --oneline",
     "git status",
 ];
+
+/// Reviewed commands for which the new gate audits less than main. Each one
+/// has its own exact expectation in
+/// `gate_audits_only_the_target_for_the_narrowed_commands`, and the
+/// differential test skips it.
+const NARROWED_COMMANDS: &[&str] = &[
+    // Worktree `c` is detached, so a push without a refspec sends no branch
+    // of the session.
+    "cd ../../wt-c && git push",
+    "git -C ../../wt-c push -u --force-with-lease origin HEAD:main",
+];
+
+#[test]
+fn gate_audits_only_the_target_for_the_narrowed_commands() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let c = trees.c.as_path();
+    let cases: Vec<(&str, String, Vec<&Path>)> = NARROWED_COMMANDS
+        .iter()
+        .map(|command| ("narrowed", (*command).to_owned(), vec![c]))
+        .collect();
+    assert_cases(&trees, &cases);
+
+    // Each narrowed command must still audit less than main, so the list
+    // stays exact.
+    let session = trees.a.join("src");
+    let home = trees.root.join("home");
+    let new_gate = rendered_gate_script();
+    for command in NARROWED_COMMANDS {
+        let payload = command_payload(&session, command);
+        std::fs::write(&trees.gate, MAIN_GATE_SCRIPT).unwrap();
+        let main_run = run_gate(&trees.gate, &trees.main, &home, &payload);
+        std::fs::write(&trees.gate, &new_gate).unwrap();
+        let new_run = run_gate(&trees.gate, &trees.main, &home, &payload);
+        assert!(
+            main_run
+                .audit_dirs
+                .iter()
+                .any(|dir| !new_run.audit_dirs.contains(dir)),
+            "{command:?}: not narrowed; main={:?} new={:?}",
+            main_run.audit_dirs,
+            new_run.audit_dirs
+        );
+    }
+}
 
 /// The output of `git rev-parse <flag>` in a directory.
 fn git_rev_parse(dir: &Path, flag: &str) -> String {
@@ -1643,6 +1989,9 @@ fn assert_never_less_than_main(
 ) {
     let new_gate = rendered_gate_script();
     for command in commands {
+        if NARROWED_COMMANDS.contains(command) {
+            continue;
+        }
         let payload = command_payload(session, command);
         std::fs::write(gate, MAIN_GATE_SCRIPT).unwrap();
         let main_run = run_gate(gate, process_dir, home, &payload);
