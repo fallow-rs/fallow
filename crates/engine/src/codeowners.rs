@@ -34,6 +34,18 @@ use std::path::Path;
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
+/// Wildcards (`*`, `?`, `[`, `{`) allowed in one CODEOWNERS pattern.
+///
+/// Real CODEOWNERS patterns use a few wildcards. A pattern with thousands
+/// of them makes each lookup build a large lazy DFA.
+const MAX_RULE_WILDCARDS: usize = 32;
+
+/// Wildcards allowed across all patterns of one CODEOWNERS file.
+///
+/// The `GlobSet` matches all patterns in one automaton, so lookup time grows
+/// with the wildcard total. Large public CODEOWNERS files stay below 400.
+const MAX_FILE_WILDCARDS: usize = 4096;
+
 /// Parsed CODEOWNERS file for ownership lookup.
 #[derive(Debug)]
 pub struct CodeOwners {
@@ -267,6 +279,7 @@ struct CodeOwnersParser {
     current_section: Option<String>,
     current_section_owners: Vec<String>,
     has_sections: bool,
+    wildcards: usize,
 }
 
 impl CodeOwnersParser {
@@ -283,6 +296,7 @@ impl CodeOwnersParser {
             current_section: None,
             current_section_owners: Vec::new(),
             has_sections: false,
+            wildcards: 0,
         }
     }
 
@@ -311,6 +325,22 @@ impl CodeOwnersParser {
         owner_count: u32,
         negate: bool,
     ) -> Result<(), String> {
+        let wildcards = pattern
+            .bytes()
+            .filter(|b| matches!(b, b'*' | b'?' | b'[' | b'{'))
+            .count();
+        if wildcards > MAX_RULE_WILDCARDS {
+            return Err(format!(
+                "CODEOWNERS pattern '{pattern}' has more than {MAX_RULE_WILDCARDS} wildcards"
+            ));
+        }
+        self.wildcards += wildcards;
+        if self.wildcards > MAX_FILE_WILDCARDS {
+            return Err(format!(
+                "CODEOWNERS file has more than {MAX_FILE_WILDCARDS} wildcards in its patterns"
+            ));
+        }
+
         let rule_idx = self.owners.len();
         for glob_pattern in translate_pattern(&pattern) {
             let glob = GlobBuilder::new(&glob_pattern)
@@ -607,6 +637,27 @@ mod tests {
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(co.owners.len(), 1);
         assert_eq!(co.owners[0], "@owner");
+    }
+
+    #[test]
+    fn parse_rejects_rule_with_too_many_wildcards() {
+        let content = format!("{} @owner\n", "*a".repeat(33));
+        let err = CodeOwners::parse(&content).unwrap_err();
+        assert!(err.contains("more than 32 wildcards"), "{err}");
+    }
+
+    #[test]
+    fn parse_rejects_file_with_too_many_wildcards() {
+        let rule = format!("{} @owner\n", "*a".repeat(16));
+        let err = CodeOwners::parse(&rule.repeat(257)).unwrap_err();
+        assert!(err.contains("more than 4096 wildcards"), "{err}");
+    }
+
+    #[test]
+    fn parse_accepts_wildcards_at_the_limits() {
+        let rule = format!("{} @owner\n", "*a".repeat(32));
+        let co = CodeOwners::parse(&rule.repeat(128)).unwrap();
+        assert_eq!(co.owners.len(), 128);
     }
 
     #[test]

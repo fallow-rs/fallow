@@ -586,6 +586,10 @@ after every gate set the exit code.
   not read a `GlobSet` match index as a rule index, because last-match-wins
   compares rule indexes. The globs use `literal_separator`, so `docs/*`
   matches the direct children of `docs` only.
+  The `GlobSet` matches all rules in one automaton, and its lookup time grows
+  with the number of wildcards in the file. `CodeOwners::parse` rejects a
+  pattern with more than `MAX_RULE_WILDCARDS` wildcards and a file with more
+  than `MAX_FILE_WILDCARDS`. Large public CODEOWNERS files use fewer than 400.
 
 - A stderr warning that repeats a `workspace_diagnostics[]` entry, or that
   describes the analysis inputs, uses the tracing target
