@@ -21,6 +21,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "check:knowledge-architecture"]],
   ["npm", ["run", "check:agent-adapters"]],
   ["node", ["scripts/check-file-size.mjs", "--base", "origin/main"]],
+  ["node", ["scripts/changelog-fragments.mjs", "check", "--base", "origin/main"]],
   ["cargo", ["fmt", "--all", "--", "--check"]],
   ["cargo", ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]],
   [
@@ -129,7 +130,7 @@ test("verification stops at the first failed command", () => {
   );
 });
 
-test("the large file growth step runs when the base ref exists", () => {
+test("the base ref steps run when the base ref exists", () => {
   const executed = [];
   const checkedRefs = [];
   const exitCode = runVerification("fast", {
@@ -146,11 +147,12 @@ test("the large file growth step runs when the base ref exists", () => {
   });
 
   assert.equal(exitCode, 0);
-  assert.deepEqual(checkedRefs, ["origin/main"]);
+  assert.deepEqual(checkedRefs, ["origin/main", "origin/main"]);
   assert.ok(executed.includes("Large file growth"));
+  assert.ok(executed.includes("Changelog fragments"));
 });
 
-test("the large file growth step is skipped when the base ref is missing", () => {
+test("the base ref steps are skipped when the base ref is missing", () => {
   const executed = [];
   let output = "";
   const exitCode = runVerification("fast", {
@@ -167,8 +169,10 @@ test("the large file growth step is skipped when the base ref is missing", () =>
 
   assert.equal(exitCode, 0);
   assert.ok(!executed.includes("Large file growth"));
-  assert.equal(executed.length, commandsForMode("fast").length - 1);
+  assert.ok(!executed.includes("Changelog fragments"));
+  assert.equal(executed.length, commandsForMode("fast").length - 2);
   assert.match(output, /Large file growth: skipped, because origin\/main does not exist/u);
+  assert.match(output, /Changelog fragments: skipped, because origin\/main does not exist/u);
   assert.match(output, /git fetch origin main/u);
 });
 

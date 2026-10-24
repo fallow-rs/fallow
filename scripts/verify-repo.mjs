@@ -31,6 +31,14 @@ const FAST_COMMANDS = [
     requiresRef: BASE_REF,
   },
   {
+    // CI runs the same rule in the "Changelog fragments" step. Entries go to
+    // changelog.d/, never to the [Unreleased] section of CHANGELOG.md.
+    label: "Changelog fragments",
+    command: "node",
+    args: ["scripts/changelog-fragments.mjs", "check", "--base", BASE_REF],
+    requiresRef: BASE_REF,
+  },
+  {
     label: "Rust formatting",
     command: "cargo",
     args: ["fmt", "--all", "--", "--check"],

@@ -575,9 +575,12 @@ sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
 node scripts/check-miri-cfg.mjs
 node scripts/check-file-size.mjs --staged
+sh scripts/hook-changelog-fragments.sh
 npm run lint:js
 npm run fmt:js:check
 ```
+
+Write changelog entries to `changelog.d/<branch>.md`, never to `CHANGELOG.md`.
 
 The JavaScript checks run only when staged files touch a lintable JavaScript or
 TypeScript scope. `typos`, Python, and Node checks run only when the matching

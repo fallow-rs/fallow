@@ -29,6 +29,8 @@ Deliver the requested change through the native Fallow lifecycle.
    companion repositories synchronized. Follow the test evidence rules in
    `docs/development/quality-gates.md`. For a bug, get a command that fails
    before you change code; after a restart, suspect the `.fallow/` cache first.
+   Write changelog entries to `changelog.d/<branch>.md`, never to
+   `CHANGELOG.md`.
 8. Run every applicable gate from `docs/development/quality-gates.md`.
 9. Run the reviewer set selected by
    `docs/development/review-routing.md`. Resolve every block.

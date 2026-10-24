@@ -61,6 +61,14 @@ hooks {
         glob = List("**/*.rs", "**/*.mjs", "**/*.ts")
         check = "if command -v node >/dev/null 2>&1; then node scripts/check-file-size.mjs --staged; else sh scripts/hook-tool-hint.sh node; fi"
       }
+      // Changelog entries go to changelog.d/, never to [Unreleased] in
+      // CHANGELOG.md. The step reads the working tree, not the staged blob,
+      // because stash is off. CI enforces the committed result. A release
+      // `collect` commit skips it with HK_SKIP_STEPS=changelog-fragments.
+      ["changelog-fragments"] {
+        glob = List("CHANGELOG.md", "changelog.d/**")
+        check = "if command -v node >/dev/null 2>&1; then sh scripts/hook-changelog-fragments.sh; else sh scripts/hook-tool-hint.sh node; fi"
+      }
       // The `lint:js` script in package.json holds the scope list. The helper
       // reads it from there, so this step holds no copy of the list.
       ["js-lint"] {

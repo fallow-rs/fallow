@@ -145,6 +145,9 @@ invariants in this file.
    fragment in `changelog.d/` into `[Unreleased]` and deletes the fragment
    files. Pull requests write fragments instead of `CHANGELOG.md`, so a merge
    of one pull request cannot make another conflict in the changelog.
+   Commit the `collect` result only together with the new version heading,
+   because the `changelog-fragments` hook and CI step fail an emptied or
+   changed `[Unreleased]` section without it.
    Verify the complete `[Unreleased]` changelog against the commit range,
    issues, discussions, and external contributors since the prior tag. Ground
    public names, flags, rule IDs, and contributor handles in source or GitHub,

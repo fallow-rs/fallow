@@ -224,7 +224,33 @@ test("check --base fails a branch that edits [Unreleased]", (t) => {
   });
   assert.throws(
     () => run(repo, "check", "--base", "main"),
-    /this branch changes the \[Unreleased\] section\. Move the new entries to a file in changelog\.d\//u,
+    /this branch changes the \[Unreleased\] section\. Write changelog entries to a file in changelog\.d\//u,
+  );
+});
+
+test("check --base names the migrate command and the release escape", (t) => {
+  const repo = createRepo(t);
+  repo.commit("chore: base", { "CHANGELOG.md": changelog() });
+  repo.git("checkout", "--quiet", "-b", "feat");
+  repo.commit("feat: entry in the changelog", {
+    "CHANGELOG.md": changelog("### Added", "", "- **Direct entry.**", ""),
+  });
+  assert.throws(
+    () => run(repo, "check", "--base", "main"),
+    (error) =>
+      error.message.includes("Fix: node scripts/changelog-fragments.mjs migrate --base main") &&
+      error.message.includes("HK_SKIP_STEPS=changelog-fragments"),
+  );
+});
+
+test("check --base with a ref that does not resolve gives a clear error", (t) => {
+  const repo = createRepo(t);
+  repo.commit("chore: base", { "CHANGELOG.md": changelog() });
+  assert.throws(
+    () => run(repo, "check", "--base", "origin/main"),
+    (error) =>
+      error.message.startsWith("--base origin/main does not resolve to a commit.") &&
+      !error.message.includes("Command failed"),
   );
 });
 

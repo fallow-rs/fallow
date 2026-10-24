@@ -214,6 +214,28 @@ const VERSION_HEADING = /^## \[\d+\.\d+\.\d+\]/gmu;
 
 const versionHeadings = (changelog) => new Set(changelog.match(VERSION_HEADING) ?? []);
 
+const refExists = (root, ref) => {
+  try {
+    git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The merge base of HEAD and `base`, or a clear error when `base` does not resolve. */
+const forkPointOf = (root, base) => {
+  if (!refExists(root, base)) {
+    throw new Error(
+      `--base ${base} does not resolve to a commit. Fetch it (git fetch origin main) or pass another ref.`,
+    );
+  }
+  return git(root, ["merge-base", "HEAD", base]).trim();
+};
+
+/** The hook step that a release `collect` commit skips, see hk.pkl. */
+const HOOK_STEP = "changelog-fragments";
+
 /**
  * A pull request that edits `[Unreleased]` brings back the conflicts that the
  * fragments remove, so the check compares the section with the fork point of
@@ -223,7 +245,7 @@ const versionHeadings = (changelog) => new Set(changelog.match(VERSION_HEADING) 
  * either.
  */
 const checkUnreleasedUnchanged = (root, base) => {
-  const forkPoint = git(root, ["merge-base", "HEAD", base]).trim();
+  const forkPoint = forkPointOf(root, base);
   const changelog = readFileSync(join(root, CHANGELOG), "utf8");
   const current = unreleasedSection(changelog).body.trim();
   if (current === unreleasedAt(root, forkPoint)) {
@@ -235,7 +257,11 @@ const checkUnreleasedUnchanged = (root, base) => {
     return [];
   }
   return [
-    `${CHANGELOG}: this branch changes the [Unreleased] section. Move the new entries to a file in ${FRAGMENT_DIR}/ (see ${FRAGMENT_DIR}/${README}) and restore the section as it is on ${base}.`,
+    [
+      `${CHANGELOG}: this branch changes the [Unreleased] section. Write changelog entries to a file in ${FRAGMENT_DIR}/ (see ${FRAGMENT_DIR}/${README}), not to ${CHANGELOG}.`,
+      `  Fix: node scripts/changelog-fragments.mjs migrate --base ${base}`,
+      `  Release \`collect\` commit only: set HK_SKIP_STEPS=${HOOK_STEP}. The release commit adds the version heading and passes.`,
+    ].join("\n"),
   ];
 };
 
@@ -319,7 +345,7 @@ const migrateForkPoint = (root, base) => {
   if (base === undefined) {
     throw new Error(`migrate needs --base <ref>\n\n${USAGE}`);
   }
-  return git(root, ["merge-base", "HEAD", base]).trim();
+  return forkPointOf(root, base);
 };
 
 const migrate = (root, options, log) => {
