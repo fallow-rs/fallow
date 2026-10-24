@@ -343,8 +343,11 @@ impl CodeOwnersParser {
 
         let rule_idx = self.owners.len();
         for glob_pattern in translate_pattern(&pattern) {
+            // A backslash escapes the next character on every platform, as in
+            // gitignore. The globset default turns escapes off on Windows.
             let glob = GlobBuilder::new(&glob_pattern)
                 .literal_separator(true)
+                .backslash_escape(true)
                 .build()
                 .map_err(|e| format!("invalid CODEOWNERS pattern '{pattern}': {e}"))?;
             self.builder.add(glob);
@@ -415,11 +418,11 @@ fn parse_codeowners_line(line: &str, current_section_owners: &[String]) -> Parse
         (false, line)
     };
 
-    let mut parts = rest.split_whitespace();
-    let Some(pattern) = parts.next() else {
+    let (pattern, owners_text) = split_pattern(rest);
+    if pattern.is_empty() {
         return ParsedCodeOwnersLine::Skip;
-    };
-    let inline_owners = parts.collect::<Vec<_>>();
+    }
+    let inline_owners = owners_text.split_whitespace().collect::<Vec<_>>();
 
     let (owner, owner_count) = if negate {
         (String::new(), 0)
@@ -443,6 +446,24 @@ fn parse_codeowners_line(line: &str, current_section_owners: &[String]) -> Parse
         owner_count,
         negate,
     }
+}
+
+/// Split a rule line at the first whitespace that a backslash does not escape.
+///
+/// GitLab writes a space in a path as `\ `, for example
+/// `/docs/Security\ Release.md @owner`.
+fn split_pattern(line: &str) -> (&str, &str) {
+    let mut escaped = false;
+    for (idx, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch.is_whitespace() {
+            return (&line[..idx], &line[idx..]);
+        }
+    }
+    (line, "")
 }
 
 /// Parse a GitLab CODEOWNERS section header.
@@ -986,6 +1007,28 @@ src/components/
             Some(("@default", "*"))
         );
         assert_eq!(co.owner_and_rule_of(Path::new("src/vendor/lib.js")), None);
+    }
+
+    #[test]
+    fn escaped_space_stays_in_pattern() {
+        let content = "* @default\n/docs/Security\\ Release.md @security @release\n";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(
+            co.owner_and_rule_of(Path::new("docs/Security Release.md")),
+            Some(("@security", "/docs/Security\\ Release.md"))
+        );
+        assert_eq!(
+            co.owner_count_of(Path::new("docs/Security Release.md")),
+            Some(2)
+        );
+        assert_eq!(co.owner_of(Path::new("docs/Security")), Some("@default"));
+    }
+
+    #[test]
+    fn escaped_hash_is_a_pattern() {
+        let content = "\\#notes.md @owner\n";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(co.owner_of(Path::new("#notes.md")), Some("@owner"));
     }
 
     #[test]
