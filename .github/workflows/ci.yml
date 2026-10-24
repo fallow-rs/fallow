@@ -1092,6 +1092,10 @@ jobs:
           # cp will fail loud here instead of silently shipping a stale
           # schema to npm consumers. Refs #440.
           diff schema.json npm/fallow/schema.json
+          # Same invariant for the rule-pack schema, bundled so rule packs
+          # can use a local, version-matched $schema. Refs #3851.
+          cp rule-pack-schema.json npm/fallow/rule-pack-schema.json
+          diff rule-pack-schema.json npm/fallow/rule-pack-schema.json
           npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
           node <<'NODE'
           const fs = require('fs');
@@ -1111,6 +1115,7 @@ jobs:
             'skills/fallow-setup/references/configure-and-install.md',
             'skills/fallow-setup/references/tooling-detection.md',
             'schema.json',
+            'rule-pack-schema.json',
             'capabilities.json',
             'issue-registry.json',
           ];

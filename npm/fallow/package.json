@@ -54,6 +54,7 @@
     "./scripts/*": "./scripts/*",
     "./skills/*": "./skills/*",
     "./schema.json": "./schema.json",
+    "./rule-pack-schema.json": "./rule-pack-schema.json",
     "./capabilities.json": "./capabilities.json",
     "./issue-registry.json": "./issue-registry.json"
   },
@@ -72,6 +73,7 @@
     "types",
     "README.md",
     "schema.json",
+    "rule-pack-schema.json",
     "capabilities.json",
     "issue-registry.json"
   ],
