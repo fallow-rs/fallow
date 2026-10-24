@@ -1509,7 +1509,7 @@ jobs:
           node .github/scripts/prepare-platform-package-docs.mjs --license
           node .github/scripts/prepare-platform-package-docs.mjs --check
           for dir in npm/*/ crates/napi/npm/*/ crates/napi/; do
-            name=$(PKG_PATH="${dir}package.json" node -p 'require(process.env.PKG_PATH).name')
+            name=$(PKG_PATH="$GITHUB_WORKSPACE/${dir}package.json" node -p 'require(process.env.PKG_PATH).name')
             case "$name" in
               @fallow-cli/*) diff LICENSE "${dir}LICENSE" ;;
             esac

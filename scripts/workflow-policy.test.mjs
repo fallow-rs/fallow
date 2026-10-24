@@ -3,6 +3,7 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  mkdirSync,
   mkdtempSync,
   copyFileSync,
   writeFileSync,
@@ -3057,4 +3058,43 @@ test("the Dependabot caller pins the org-wide workflow and passes only what it n
     /^\s+(?:contents|id-token): write$/mu,
     "only the App token may push",
   );
+});
+
+test("release reads each platform package name from a path that Node resolves as a file", () => {
+  const job = indentedBlock(readWorkflow(".github/workflows/release.yml"), "npm-prep", 2);
+  const step = workflowSteps(job).find((text) =>
+    text.startsWith("name: Bundle README and LICENSE into platform packages"),
+  );
+  assert.ok(step, "missing the platform package docs step");
+  // The two node commands need the full repository. The package loop needs only
+  // the package manifests and the LICENSE files.
+  const loop = step
+    .split("\n")
+    .filter((line) => !line.includes("prepare-platform-package-docs.mjs"))
+    .slice(2)
+    .map((line) => line.replace(/^ {10}/u, ""))
+    .join("\n");
+  const root = mkdtempSync(join(tmpdir(), "fallow-platform-docs-"));
+  try {
+    writeFileSync(join(root, "LICENSE"), "MIT License\n");
+    for (const [dir, name] of [
+      ["npm/darwin-arm64", "@fallow-cli/darwin-arm64"],
+      ["npm/fallow", "fallow"],
+      ["crates/napi/npm/darwin-arm64", "@fallow-cli/fallow-node-darwin-arm64"],
+      ["crates/napi", "@fallow-cli/fallow-node"],
+    ]) {
+      const path = join(root, dir);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, "package.json"), JSON.stringify({ name }));
+      if (name.startsWith("@fallow-cli/")) writeFileSync(join(path, "LICENSE"), "MIT License\n");
+    }
+    const result = runProcess("bash", ["-e", "-c", loop], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_WORKSPACE: root },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
