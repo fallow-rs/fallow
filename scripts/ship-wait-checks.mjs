@@ -65,6 +65,11 @@ const MINUTE = 60 * SECOND;
 // request can get fewer checks than --min-checks. When the checks stay
 // complete and unchanged this long, no further check comes, and the wait ends.
 const SETTLE_MS = 10 * MINUTE;
+// A pull request check set without a pass is not complete. The
+// dependabot-auto-merge workflow skips at once on each pull request, so
+// right after a push the only check can be a skip, before ci.yml registers
+// its jobs.
+const PASS_BUCKET = "pass";
 // GitHub creates all push runs of a commit together, and a new run is pending.
 // So a complete set of runs contains all push runs. The short settle time catches a
 // run that a completed run starts, for example through workflow_run.
@@ -93,17 +98,21 @@ Options:
                           run of the commit counts as one check.
   --repo <owner/name>     The repository (default: the repository of the
                           working directory).
-  --min-checks <count>    The count of checks that must exist (--pr default:
-                          1). Use the check count of a recent complete run.
-                          With --commit, the option is not necessary. When
-                          that count of runs is complete, the wait ends
-                          before the settle time.
+  --min-checks <count>    The count of checks that must exist. Use the
+                          check count of a recent complete run. With --pr
+                          and no --min-checks, the count is 1, and the
+                          checks must stay complete and unchanged for
+                          ${COMMIT_SETTLE_MS / MINUTE} minutes before the wait passes. With
+                          --commit, the option is not necessary. When that
+                          count of runs is complete, the wait ends before
+                          the settle time.
   --required              Wait for the required checks only (--pr only).
                           When the repository reports no required checks,
                           wait for all checks.
   --head <sha>            Wait until the pull request head is this full
                           40-character SHA (--pr only). Right after a push,
                           GitHub can still report the checks of the old head.
+                          Without --head, the script prints a warning.
   --follow-main           When the only failures are cancelled runs, wait
                           for the newest commit of ${FOLLOW_REF} instead,
                           if it contains the given commit (--commit only).
@@ -123,6 +132,11 @@ branch, because GitHub then starts no pull_request workflows.
 With --pr, path filters can start fewer checks than --min-checks. When the
 checks stay complete and unchanged for ${SETTLE_MS / MINUTE} minutes, the wait ends below the
 count.
+
+With --pr, a set of checks without a passed check is not complete. Some
+workflows skip at once on each pull request, before the CI workflow starts
+its jobs. Such a set never passes. When it stays unchanged for ${SETTLE_MS / MINUTE} minutes,
+the wait ends with exit code 0 and says that no check passed.
 
 With --follow-main, the script runs "git fetch ${FOLLOW_REMOTE} ${FOLLOW_BRANCH}" in the
 working directory, so it does not work with --repo. The wait moves to a
@@ -167,6 +181,38 @@ const checkSignature = (checks) =>
     .toSorted()
     .join("\n");
 
+const hasBucket = (checks, bucket) => checks.some((check) => check.bucket === bucket);
+const hasFailure = (checks) => checks.some(({ bucket }) => FAILED_BUCKETS.has(bucket));
+
+/** The status of a complete set that reached `minChecks`, or null. */
+const countedStatus = (checks, unchangedMs, { requirePass, stableMs }) => {
+  if (hasFailure(checks)) {
+    return "fail";
+  }
+  const passed = !requirePass || hasBucket(checks, PASS_BUCKET);
+  return passed && unchangedMs >= stableMs ? "pass" : null;
+};
+
+/**
+ * The end status of one read of the checks, or null when the wait goes on.
+ * `unchangedMs` is the time since the check set last changed.
+ */
+const completedStatus = (checks, unchangedMs, options) => {
+  if (hasBucket(checks, "pending")) {
+    return null;
+  }
+  const counted =
+    checks.length >= options.minChecks ? countedStatus(checks, unchangedMs, options) : null;
+  if (counted !== null) {
+    return counted;
+  }
+  const settled = options.settleMs !== null && checks.length > 0 && unchangedMs >= options.settleMs;
+  if (!settled) {
+    return null;
+  }
+  return hasFailure(checks) ? "fail" : "settled";
+};
+
 /**
  * Read the checks until at least `minChecks` exist and none is pending.
  *
@@ -176,6 +222,10 @@ const checkSignature = (checks) =>
  * With `settleMs`, checks that stay complete and unchanged for that time end
  * the wait below `minChecks` with the status `settled`. Without it, too few
  * checks wait until the timeout.
+ * With `requirePass`, a complete set without a `pass` check does not pass. It
+ * can only end `settled` through `settleMs`. With `stableMs`, a complete set
+ * passes only after it stays unchanged for that time. A failed check fails
+ * the wait at once.
  * Returns `{ status, checks }` where `status` is `pass`, `settled`, `fail`,
  * `conflict`, `timeout` or `error`. After a failed read of the checks, the
  * delay to the next read doubles from `intervalMs` up to `READ_RETRY_MAX_MS`.
@@ -187,6 +237,8 @@ export const waitForChecks = async ({
   readChecks,
   readMergeable = null,
   settleMs = null,
+  requirePass = false,
+  stableMs = 0,
   minChecks,
   intervalMs,
   timeoutMs,
@@ -215,15 +267,14 @@ export const waitForChecks = async ({
         signature = nextSignature;
         changedAt = now();
       }
-      const pending = checks.some(({ bucket }) => bucket === "pending");
-      const failed = checks.some(({ bucket }) => FAILED_BUCKETS.has(bucket));
-      if (checks.length >= minChecks && !pending) {
-        return { status: failed ? "fail" : "pass", checks };
-      }
-      const settled =
-        settleMs !== null && checks.length > 0 && !pending && now() - changedAt >= settleMs;
-      if (settled) {
-        return { status: failed ? "fail" : "settled", checks };
+      const status = completedStatus(checks, now() - changedAt, {
+        minChecks,
+        requirePass,
+        stableMs,
+        settleMs,
+      });
+      if (status !== null) {
+        return { status, checks };
       }
     } else {
       readErrors += 1;
@@ -266,6 +317,23 @@ export const waitForCommitRuns = ({ minChecks = null, ...options }) =>
     ...options,
     minChecks: minChecks ?? Number.POSITIVE_INFINITY,
     settleMs: COMMIT_SETTLE_MS,
+  });
+
+/**
+ * Wait for the checks of a pull request. A complete set needs at least one
+ * `pass` check, because a set of skips only is not complete. Without
+ * `minChecks`, the count is 1, and a complete set passes only after it stays
+ * unchanged for `COMMIT_SETTLE_MS`. An explicit `minChecks` passes as soon as
+ * that count is complete. The settle time is `SETTLE_MS` by default. The
+ * other options and the result are the same as for `waitForChecks`.
+ */
+export const waitForPullRequestChecks = ({ minChecks = null, settleMs = SETTLE_MS, ...options }) =>
+  waitForChecks({
+    ...options,
+    minChecks: minChecks ?? 1,
+    settleMs,
+    requirePass: true,
+    stableMs: minChecks === null ? COMMIT_SETTLE_MS : 0,
   });
 
 /** True when the checks contain a cancelled run and no real failure. */
@@ -870,15 +938,12 @@ const validateHead = ({ head, pr }) => {
 };
 
 /**
- * The --min-checks count. A pull request wait defaults to 1. A commit wait
- * defaults to null, because the runs that GitHub created are the expected set.
+ * The --min-checks count, or null when the option is absent. A pull request
+ * wait then uses a count of 1 and a stable set (`waitForPullRequestChecks`).
+ * A commit wait uses the runs that GitHub created as the expected set.
  */
-const minChecksOption = (value, pr) => {
-  if (value !== undefined) {
-    return positiveInteger("--min-checks", value);
-  }
-  return pr === null ? null : 1;
-};
+const minChecksOption = (value) =>
+  value === undefined ? null : positiveInteger("--min-checks", value);
 
 const parseOptions = (argv) => {
   const { values } = parseArgs({
@@ -934,7 +999,7 @@ const parseOptions = (argv) => {
     head: values.head,
     required: values.required,
     followMain: values["follow-main"],
-    minChecks: minChecksOption(values["min-checks"], pr),
+    minChecks: minChecksOption(values["min-checks"]),
     intervalMs: positiveInteger("--interval", values.interval) * SECOND,
     timeoutMs: positiveInteger("--timeout", values.timeout) * MINUTE,
     errorWindowMs: positiveInteger("--error-window", values["error-window"]) * SECOND,
@@ -1048,6 +1113,9 @@ const compareWithMain = (result, { readMainCommits, readMainChecks }) => {
   return { ...result, checks, status: shared ? "shared-with-main" : "fail" };
 };
 
+const HEAD_WARNING =
+  "Warning: --pr without --head. Right after a push, GitHub can still report the checks of the old head. Give --head <full sha> of the pushed tip.";
+
 const EXIT_CODES = {
   pass: 0,
   settled: 0,
@@ -1086,9 +1154,11 @@ export const reportChecks = (
   const headline = {
     pass: `${label}: all checks passed (${summary}).`,
     settled:
-      minChecks === null
-        ? `${label}: all ${checks.length} runs passed, and no run started or changed for ${settleMinutes} minutes (${summary}).`
-        : `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMinutes} minutes (${summary}).`,
+      commit === null && !checks.some(({ bucket }) => bucket === PASS_BUCKET)
+        ? `${label}: no check passed, and no check started or changed for ${settleMinutes} minutes (${summary}). The CI workflow can still be missing.`
+        : minChecks === null
+          ? `${label}: all ${checks.length} runs passed, and no run started or changed for ${settleMinutes} minutes (${summary}).`
+          : `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMinutes} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
     "shared-with-main": `${label}: checks failed, and each failed check also fails on ${FOLLOW_BRANCH} (${summary}). Wait for the fix on ${FOLLOW_BRANCH}, merge ${FOLLOW_BRANCH} into the branch, push, and wait again.`,
     timeout:
@@ -1153,11 +1223,13 @@ const main = async () => {
     const result = await waitForCommitRuns({ ...options, readChecks: ghRunsReader(options) });
     return reportChecks(result, { ...options, settleMs: COMMIT_SETTLE_MS });
   }
-  const result = await waitForChecks({
+  if (options.head === undefined) {
+    console.error(HEAD_WARNING);
+  }
+  const result = await waitForPullRequestChecks({
     ...options,
     readChecks: ghChecksReader(options),
     readMergeable: ghMergeableReader(options),
-    settleMs: SETTLE_MS,
   });
   return reportChecks(compareWithMain(result, ghMainReaders(options)), options);
 };

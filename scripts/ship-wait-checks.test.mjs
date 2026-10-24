@@ -17,6 +17,7 @@ import {
   reportChecks,
   waitForChecks,
   waitForCommitRuns,
+  waitForPullRequestChecks,
 } from "./ship-wait-checks.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
@@ -241,6 +242,87 @@ test("pull request checks that stay complete for the settle window end the wait 
 
   assert.equal(result.status, "settled");
   assert.equal(script.reads(), 4);
+});
+
+const waitPr = (script, { minChecks, timeoutMs = 10 * INTERVAL_MS, settleMs } = {}) =>
+  waitForPullRequestChecks({
+    ...script,
+    minChecks,
+    settleMs,
+    intervalMs: INTERVAL_MS,
+    timeoutMs,
+    warn: () => {},
+  });
+
+// The dependabot-auto-merge workflow skips at once on each pull request, so
+// right after a push its skip can be the only check.
+const autoMergeSkip = check("dependabot-auto-merge", "skipping");
+
+test("a pull request set of skips only does not pass with --min-checks 1", async () => {
+  const script = scripted([
+    { ok: true, checks: [autoMergeSkip] },
+    { ok: true, checks: [autoMergeSkip] },
+    { ok: true, checks: [autoMergeSkip, check("CI", "pending")] },
+    { ok: true, checks: [autoMergeSkip, check("CI", "pass")] },
+  ]);
+
+  const result = await waitPr(script, { minChecks: 1, settleMs: 10 * INTERVAL_MS });
+
+  assert.equal(result.status, "pass");
+  assert.equal(script.reads(), 4);
+});
+
+test("a pull request set of skips only ends settled after the settle time, not pass", async () => {
+  const script = scripted([{ ok: true, checks: [autoMergeSkip] }]);
+
+  const result = await waitPr(script, { minChecks: 1, settleMs: 3 * INTERVAL_MS });
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label: "PR 7", minChecks: 1, settleMs: 3 * INTERVAL_MS },
+    (line) => lines.push(line),
+  );
+
+  assert.equal(result.status, "settled");
+  assert.equal(script.reads(), 4);
+  assert.equal(code, 0);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^PR 7: no check passed, and no check started or changed/u);
+});
+
+test("a failed pull request check fails at once also without a passed check", async () => {
+  const script = scripted([{ ok: true, checks: [autoMergeSkip, check("CI", "fail")] }]);
+
+  const result = await waitPr(script, { minChecks: 1 });
+
+  assert.equal(result.status, "fail");
+  assert.equal(script.reads(), 1);
+});
+
+test("without --min-checks, a pull request set passes only after it stays unchanged", async () => {
+  const done = [autoMergeSkip, check("CI", "pass")];
+  const script = scripted([
+    { ok: true, checks: [autoMergeSkip, check("CI", "pass")] },
+    { ok: true, checks: [...done, check("Bench", "pending")] },
+    { ok: true, checks: [...done, check("Bench", "pass")] },
+  ]);
+
+  const result = await waitPr(script, { timeoutMs: 200 * INTERVAL_MS });
+
+  // The set changes for the last time at the third read (2 seconds). The
+  // stable time then ends at 122 seconds, the 123rd read.
+  assert.equal(result.status, "pass");
+  assert.equal(result.checks.length, 3);
+  assert.equal(script.reads(), 2 + COMMIT_SETTLE_MS / INTERVAL_MS + 1);
+});
+
+test("an explicit --min-checks passes a pull request set at once", async () => {
+  const script = scripted([{ ok: true, checks: [autoMergeSkip, check("CI", "pass")] }]);
+
+  const result = await waitPr(script, { minChecks: 2 });
+
+  assert.equal(result.status, "pass");
+  assert.equal(script.reads(), 1);
 });
 
 test("a new or changed run starts the settle window again", async () => {
@@ -543,6 +625,12 @@ const checkRun = (name, status, conclusion) => ({
   detailsUrl: `https://example.invalid/current/${name}`,
 });
 
+// Without --min-checks, a pull request set must stay unchanged for
+// COMMIT_SETTLE_MS before it passes. The CLI tests read each state once, so
+// they give --min-checks 1 unless the test sets its own count.
+const withMinChecks = (args) =>
+  args.includes("--min-checks") ? args : ["--min-checks", "1", ...args];
+
 const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) => {
   const root = mkdtempSync(join(tmpdir(), "ship-wait-checks-"));
   try {
@@ -583,7 +671,18 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) 
     );
     const result = spawnSync(
       process.execPath,
-      [SCRIPT, "--pr", "7", "--interval", "1", "--timeout", "1", "--error-window", "1", ...args],
+      [
+        SCRIPT,
+        "--pr",
+        "7",
+        "--interval",
+        "1",
+        "--timeout",
+        "1",
+        "--error-window",
+        "1",
+        ...withMinChecks(args),
+      ],
       { env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH}` }, encoding: "utf8" },
     );
     const calls = existsSync(join(root, "calls.json"))
@@ -1434,8 +1533,10 @@ test("--head waits until the pull request reports the pushed commit", fakeGhOpti
   };
   const stale = runWithFakeGh(fixture);
   assert.equal(stale.status, 1, "without --head, the rollup of the old head decides");
+  assert.match(stale.stderr, /Warning: --pr without --head\./u);
   const result = runWithFakeGh(fixture, ["--head", newHead]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.doesNotMatch(result.stderr, /without --head/u);
   assert.equal(rollupReads(result.calls).length, 2);
 });
 

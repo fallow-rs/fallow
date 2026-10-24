@@ -112,6 +112,13 @@ test("each commit that conflicts on the manifest gets a regenerated manifest", (
   );
   repo.git("fetch", "--quiet", "origin");
   assert.equal(repo.git("rev-parse", "origin/feat"), tip);
+  const waitScript = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
+  assert.ok(
+    result.output.includes(
+      `\n  node ${waitScript} --pr <number> --head ${tip} --repo fallow-rs/docs\n`,
+    ),
+    result.output,
+  );
 });
 
 test("a commit that only changed the manifest is skipped when it becomes empty", (t) => {

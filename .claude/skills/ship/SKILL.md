@@ -136,11 +136,16 @@ Use these scripts for each pull request, one at a time:
      cache bump gets the value of `main` + 1.
 
    The option needs Git 2.40 or later.
-2. Wait for CI. Set `--min-checks` to the check count of a recent complete
-   run. Without this guard, a read right after the push can show no
-   pending check. Set `--head` to the pushed tip, which the rebase script
-   prints. Right after a push, GitHub can still report the checks of the
-   old head.
+2. Wait for CI. The rebase script prints the wait command after the push.
+   Set `--head` to the pushed tip. Right after a push, GitHub can still
+   report the checks of the old head, so the script warns when `--head` is
+   absent. Set `--min-checks` to the check count of a recent complete run.
+   Without `--min-checks`, the count is 1, and the checks must stay
+   complete and unchanged for 2 minutes before the wait passes. A set of
+   checks without a passed check never passes. The dependabot-auto-merge
+   workflow skips at once on each pull request, before `ci.yml` starts its
+   jobs. Such a set ends after 10 minutes with exit code 0 and the line
+   "no check passed". Then look at the checks before you merge.
 
    ```bash
    node scripts/ship-wait-checks.mjs --pr <number> --head <full sha> --min-checks <count>

@@ -620,8 +620,31 @@ const KEEPALIVE_SSH_COMMAND = "ssh -o ServerAliveInterval=30 -o ServerAliveCount
 export const pushSshEnv = (env, configuredSshCommand) =>
   env.GIT_SSH_COMMAND || configuredSshCommand ? {} : { GIT_SSH_COMMAND: KEEPALIVE_SSH_COMMAND };
 
+/** The wait command of the main repository, relative to its root. */
+const DEFAULT_WAIT_CHECKS = { script: "scripts/ship-wait-checks.mjs", repo: null };
+
+/**
+ * The command that waits for the checks of a pushed tip. `pr` is null for
+ * `--branch`, and the command then holds a `<number>` placeholder. With
+ * `repo`, the command adds `--repo`.
+ */
+const waitChecksCommand = ({ script, repo }, { pr, newTip }) =>
+  [
+    "node",
+    script,
+    "--pr",
+    pr ?? "<number>",
+    "--head",
+    newTip,
+    ...(repo === null ? [] : ["--repo", repo]),
+  ].join(" ");
+
 /** With `push`, push HEAD with a lease on `oldTip` (see `leasePushArgs`). */
-const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip, top, hooks }) => {
+const pushIfAsked = (
+  cwd,
+  log,
+  { push, remote, branch, base, oldTip, newTip, top, hooks, pr, waitChecks },
+) => {
   if (!push) {
     return;
   }
@@ -641,7 +664,7 @@ const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip, top
   });
   log(`Pushed ${branch} with a lease on ${oldTip.slice(0, 12)}.`);
   // Right after a push, GitHub can still report the checks of the old head.
-  log(`Wait for the checks of this push with ship-wait-checks.mjs --head ${newTip}.`);
+  log(`Wait for the checks of this push:\n  ${waitChecksCommand(waitChecks, { pr, newTip })}`);
 };
 
 /**
@@ -704,12 +727,21 @@ export const checkRebase = (
  *   the exit code, for example with `checkRebase`. `rebased` holds
  *   `{ branch, oldBase, oldTip, baseTip, upstream, newTip, worktree }`.
  *
+ * - `waitChecks`, when given, is `{ script, repo }` for the wait command
+ *   that the push prints (see `waitChecksCommand`). The default is the
+ *   script of the main repository without `--repo`.
+ *
  * When the checks pass, push when `options.push` is set and remove the
  * worktree. After a stop, a failed check or a failed command, keep the
  * worktree and print its path and the next commands. Returns the exit
  * code, or throws for a failed command.
  */
-export const shipBranch = (cwd, log, options, { resolveConflicts, afterRebase, check }) => {
+export const shipBranch = (
+  cwd,
+  log,
+  options,
+  { resolveConflicts, afterRebase, check, waitChecks = DEFAULT_WAIT_CHECKS },
+) => {
   const { branch, remote } = branchHead(cwd, options);
   const refs = fetchBranch(cwd, { ...options, headRemote: remote, branch });
   const hooks = hookConfig(cwd);
@@ -733,7 +765,7 @@ export const shipBranch = (cwd, log, options, { resolveConflicts, afterRebase, c
       return code;
     }
     pushing = true;
-    pushIfAsked(worktree, log, { ...target, newTip });
+    pushIfAsked(worktree, log, { ...target, newTip, waitChecks });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${message}\n${keptWorktreeReport(target, { push: pushing })}`, {

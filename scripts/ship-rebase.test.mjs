@@ -722,7 +722,33 @@ test("--push updates the branch with a lease on the old tip", (t) => {
   );
   repo.git("fetch", "--quiet", "origin");
   assert.equal(repo.git("rev-parse", "origin/feat"), newTipOf(result));
-  assert.match(result.output, new RegExp(`--head ${newTipOf(result)}\\.`, "u"));
+  assert.match(
+    result.output,
+    new RegExp(
+      `\\n  node scripts/ship-wait-checks\\.mjs --pr <number> --head ${newTipOf(result)}\\n`,
+      "u",
+    ),
+  );
+});
+
+test("--pr --push prints a wait command with the pull request number", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog() },
+    onMain: (r) => r.commit("feat: main change", { "CHANGELOG.md": changelog("- Main entry.") }),
+    onBranch: (r) =>
+      r.commit("feat: branch change", { "CHANGELOG.md": changelog("- Branch entry.") }),
+  });
+
+  const result = repo.runNode(SCRIPT, ["--pr", "12", "--push"], sameRepoGh(repo));
+
+  assert.equal(result.status, 0, result.output);
+  assert.match(
+    result.output,
+    new RegExp(
+      `\\n  node scripts/ship-wait-checks\\.mjs --pr 12 --head ${newTipOf(result)}\\n`,
+      "u",
+    ),
+  );
 });
 
 test("--push fails when the remote branch moved after the fetch", (t) => {
@@ -922,6 +948,18 @@ test("the script ignores an inherited GIT_DIR and GIT_WORK_TREE", (t) => {
 });
 
 // A `gh` stand-in that prints the view of a pull request from a fork.
+/** A `gh` stub for a pull request whose branch `feat` is in `origin`. */
+const sameRepoGh = (repo) => {
+  const bin = join(repo.root, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "gh"),
+    `#!/bin/sh\necho '{"headRefName":"feat","isCrossRepository":false,"maintainerCanModify":false,"headRepository":{"name":"fallow"},"headRepositoryOwner":{"login":"fallow-rs"}}'\n`,
+  );
+  chmodSync(join(bin, "gh"), 0o755);
+  return { PATH: `${bin}${delimiter}${process.env.PATH}` };
+};
+
 const forkGh = (repo) => {
   const bin = join(repo.root, "bin");
   mkdirSync(bin);

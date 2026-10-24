@@ -15,6 +15,12 @@ import { checkRebase, git, run, shipBranch, shipMain } from "./ship-git.mjs";
 
 const MANIFEST = "public-content-manifest.json";
 const GENERATOR = "scripts/public-content.mjs";
+// The docs pull request runs its checks in fallow-rs/docs, and the wait
+// script lives next to this script in the fallow repository.
+const DOCS_WAIT_CHECKS = {
+  script: fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url)),
+  repo: "fallow-rs/docs",
+};
 
 const USAGE = `Usage: node <fallow>/scripts/ship-docs-rebase.mjs (--pr <number> | --branch <name>) [options]
 
@@ -115,6 +121,7 @@ const shipDocsRebase = (cwd, options, log = console.log) => {
   return shipBranch(cwd, log, options, {
     resolveConflicts: regenerateManifest,
     afterRebase: () => {},
+    waitChecks: DOCS_WAIT_CHECKS,
     // The generator check covers the manifest, so the tree check leaves it out.
     check: (worktree, rebased) =>
       checkRebase(worktree, log, options, rebased, {
