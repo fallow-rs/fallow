@@ -19,9 +19,9 @@ name = "fallow-multicall"
 path = "src/main.rs"
 
 [dependencies]
-fallow-cli = { version = "3.35.0", path = "../cli" }
-fallow-lsp = { version = "3.35.0", path = "../lsp" }
-fallow-mcp = { version = "3.35.0", path = "../mcp" }
+fallow-cli = { version = "3.36.0", path = "../cli" }
+fallow-lsp = { version = "3.36.0", path = "../lsp" }
+fallow-mcp = { version = "3.36.0", path = "../mcp" }
 
 [target.'cfg(target_env = "musl")'.dependencies]
 mimalloc = { workspace = true }

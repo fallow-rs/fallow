@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-similar-code-linux-x64-musl",
-  "version": "3.35.0",
+  "version": "3.36.0",
   "description": "Fallow similar-code sidecar binary for Linux x64 (musl)",
   "license": "MIT",
   "repository": {

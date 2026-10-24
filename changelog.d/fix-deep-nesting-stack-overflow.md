@@ -1,3 +1,0 @@
-### Fixed
-
-- **A file with deeply nested brackets no longer aborts the run.** A source with thousands of nested `(`, `[`, `{` or template substitutions overflowed the parser stack, and the stack overflow killed the whole `fallow` process. Fallow now measures the nesting before it parses a file. A file past the limit shows as a file that failed to parse, `fallow dupes` finds no clones in it, and the analysis of the other files continues. Brackets inside strings, comments and template text do not count. The extraction and duplication cache versions change, so the first run after the upgrade parses every file again. OSS-Fuzz found this.

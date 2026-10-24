@@ -7,6 +7,358 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.36.0] - 2026-10-24
+
+### Added
+
+- **Built-in dotenv CLI plugin support.** `fallow migrate` now maps the
+  `dotenv` plugin key. Scripts invoking `dotenvx` credit `@dotenvx/dotenvx`,
+  and `dotenvx run -- <command>` credits the wrapped command, as
+  `varlock run --` already does. Thanks
+  [@VariableVince](https://github.com/VariableVince) for the patch in
+  [#3771](https://github.com/fallow-rs/fallow/pull/3771).
+  (Closes [#3762](https://github.com/fallow-rs/fallow/issues/3762))
+
+- **Experimental tsrs backend for type-aware analysis.** Set `FALLOW_TYPE_AWARE_BACKEND=tsrs` to run the semantic pass on [tsrs](https://github.com/oxc-project/tsrs), the Rust port of the TypeScript 7 checker, instead of TypeScript-Go. Install the pinned `tsrs` version next to `fallow-type-aware`. `fallow type-aware status` and `_meta.type_aware` report the backend that ran. TypeScript-Go stays the default.
+
+- **`health.cyclomaticPolicy: "literal-membership"` counts a literal
+  membership chain as one predicate.** A chain such as
+  `kind === "a" || kind === "b" || kind === "c"` then adds no cyclomatic
+  increments for its `||` operators. Only strict equality checks of one
+  identifier against string, number, bigint, boolean, or `null` literals
+  qualify. The policy applies to the `maxCyclomatic` gate and to every CRAP
+  score. Findings report the policy value as `cyclomatic` and the standard
+  value as `standard_cyclomatic`, the summary names the policy, and
+  `--complexity-breakdown` marks the chain operators with
+  `literal_membership`. The default stays `standard`. The health score,
+  complexity density, and hotspots keep the standard count. The parse cache
+  version changes because the cached breakdown has the new flag.
+  (Closes [#3781](https://github.com/fallow-rs/fallow/issues/3781))
+
+- **Fallow reports config entries that match something but change nothing in the dead-code run.** Three new kinds in `workspace_diagnostics[].kind` carry these entries, each with the config entry in `pattern`:
+  - `entry-pattern-redundant`: an `entry` pattern whose matched files are all runtime entry points from another source, for example `package.json` fields and scripts, a plugin, an infrastructure config or `dynamicallyLoaded`.
+  - `ignore-dependencies-entry-redundant`: an `ignoreDependencies` entry that hid no dependency finding. A glob that matches no declared dependency keeps the `ignore-dependencies-glob-unmatched` kind and is not reported twice.
+  - `ignore-patterns-entry-redundant`: an `ignorePatterns` glob that excluded no file that a built-in ignore, `.gitignore` or the file type filter does not already skip. A glob for build output has an effect only after a build, and the message says so.
+
+  The entries reach JSON, SARIF `toolConfigurationNotifications[]`, the stderr note in human, compact, CodeClimate and `github-annotations`, and the LSP information diagnostic on the config entry. Markdown, `github-summary`, the PR comments and the review summary add a separate `Redundant config entries` section after `Unmatched config patterns`. A `--production` run reports none of the three kinds, because that run checks fewer files and dependency sections. No exit code changes, and no `schema_version` changes, because `workspace_diagnostics[].kind` is an open set.
+  (Closes [#3824](https://github.com/fallow-rs/fallow/issues/3824))
+
+### Changed
+
+- **Every platform npm package now ships a `LICENSE` file and a full README.**
+  This covers the `@fallow-cli/<platform>` CLI binaries, the
+  `@fallow-cli/fallow-similar-code-<platform>` sidecar binaries, the
+  `@fallow-cli/fallow-node-<platform>` addons and `@fallow-cli/fallow-node`.
+  The README names the platform and the package to install instead, and says
+  how the binary is verified. The `fallow-similar-code` platform packages now
+  also have a description.
+
+- **A file that nests too deep to parse has its own workspace diagnostic.** Fallow does not parse a file that nests brackets past the parser cap, or that needs more stack than fallow reserves. Such a file was reported as `source-parse-degraded`, with a message about parser errors, although the file can be valid code. It is now reported as `source-nesting-too-deep`, with the cap in `limit`. The message says that `fallow fix` holds back its actions while the file is reachable, and that `ignoreFindings` takes a generated file out of the run. The file still counts for the `parse-error` gate, and its item in `gate_outcomes["parse-error"].files` carries the new optional `reason: "nesting-too-deep"`. The human report, the GitHub Action and the GitLab template name that reason instead of "1 parser error". `workspace_diagnostics[].kind` is an open set, so no schema version changes, but a consumer that filters on `source-parse-degraded` must also match `source-nesting-too-deep` to keep seeing these files.
+
+- **Fallow now parses with Oxc 0.155 and converts coverage with `oxc_coverage_instrument` 0.17.0.**
+  A short TypeScript input that made the parser use seconds of time and
+  gigabytes of memory (oxc-project/oxc#27637) now stops at its syntax error at
+  once. Analysis output for real projects does not change. A string with a
+  lone surrogate now keeps it as `\uXXXX`, so the extraction, graph and
+  duplication caches get a new version and the first run after the upgrade
+  is cold. Oxc 0.155 needs Rust 1.97, so the minimum Rust version of the
+  Fallow crates goes from 1.96 to 1.97.
+
+- **The agent gate prints a short block message.** When the gate that
+  `fallow agent install` and `fallow hooks install --target agent` write
+  blocks a `git commit` or `git push`, stderr now holds one line for each
+  finding that caused the block, the verdict, and the path of the full JSON
+  report. Under the default `gate = "new-only"` the list holds only the
+  introduced findings, so inherited findings no longer fill the context of
+  the agent. The full report goes to `.fallow/gate-report.json` in the
+  audited tree. Set `FALLOW_GATE_REPORT` to write it to another path, or
+  `FALLOW_GATE_OUTPUT=json` to print the full report on stderr as before.
+  The exit codes do not change. Run `fallow agent install` again to update an
+  installed gate. Thanks [@ankoor7](https://github.com/ankoor7) for the report.
+  (Closes [#3725](https://github.com/fallow-rs/fallow/issues/3725))
+
+### Fixed
+
+- **`fallow dead-code --type-aware` no longer confirms a used class member or
+  export as unused when a shorthand name reads it.** The type-aware check now
+  finds a class member that a shorthand destructure reads, for example
+  `const { run } = service`, `({ run }: Service) => run()` or
+  `({ run } = service)`, and a renamed assignment destructure, for example
+  `({ run: local } = service)`. It also finds an export that a shorthand object
+  property reads, for example `{ value }`, and an export that a destructure of
+  a namespace import reads, for example `const { value } = ns`. Before this
+  fix, a used member that only a parameter destructure or an assignment
+  destructure read could get a guarded `remove-class-member` fix. For an
+  array or loop assignment destructure, and for a nested assignment
+  destructure with a default value, the check now abstains with
+  `dynamic-member-access`.
+
+- **`fallow health` counts runtime code in modules that export only types.**
+  Top-level calls, assignments, `await`, and runtime declarations keep a module
+  in coverage gaps. Pure type and ambient declarations remain excluded. The
+  extraction cache version is bumped so warm caches pick up the new facts.
+  Thanks [@xiaofeilovecoding](https://github.com/xiaofeilovecoding) for the
+  patch in [#3578](https://github.com/fallow-rs/fallow/pull/3578).
+  (Closes [#3549](https://github.com/fallow-rs/fallow/issues/3549))
+
+- **`unused-class-members` credits members that a parameter destructure or a destructuring assignment reads.** Without `--type-aware`, `({ m }: Service) => m()` and `({ m } = service)` did not credit `Service.m`, so Fallow reported a used member as unused. Fallow now credits these reads in the same way as `const { m } = service`. The parameter form works for arrow functions, function declarations and methods, with renamed keys, defaults and nested type literals such as `({ svc: { m } }: { svc: Service })`. A rest element still marks the whole class as used.
+
+- **The GitHub Action no longer fails `command: audit` on a default shallow checkout.** On a `pull_request` event, a depth-1 checkout of the merge commit has no merge base with the PR base, so `fallow audit --changed-since` exited 2 with "no merge base". The Action now fetches the smallest history that gives a merge base: the base commit, then the parents of the merge commit, then a bounded deepen. A failed fetch does not fail the job. `fetch-depth: 0` stays the recommended setup.
+
+- **The napi-rs plugin finds a generated loader in a subdirectory.** A build with `napi build --cwd binding` writes the loader to `binding/index.cjs`, but the `napi` config stays in the package manifest. Fallow read only the package directory, so it reported each platform package of the loader as an unlisted dependency. Fallow now also reads the direct subdirectories of the package, except `node_modules`, `target`, `dist`, `build`, `out`, hidden directories, and directories with more than 32 script files. The WASI workers and `browser.js` next to such a loader count as generated too.
+
+- **CI scripts named outside a `run` value are no longer unused files.** Fallow now reads three more GitHub Actions forms. A step that runs only `${{ matrix.<path> }}` runs the values of that key path in the matrix of its job. An `actions/github-script` step loads the files after `${process.env.GITHUB_WORKSPACE}/` or `${{ github.workspace }}/`, and the files of `require('./path')`. A step `env` entry whose whole value is `${{ github.action_path }}` or another workspace anchor makes `"$NAME/script.mjs"` resolve like that anchor.
+
+- **`fallow dead-code` no longer reports the dependencies of a gitignored workspace member.** A pnpm workspace can declare a directory that CI fills with a clone of an upstream repository, for example `vite` or `rolldown`. Source discovery does not read the files of a gitignored member, so the run cannot prove that its dependencies are unused. The member stays a workspace for imports and catalog references.
+
+- **A `workspace:<name>@<range>` dependency alias resolves to the aliased workspace package.** With `"vite": "workspace:@scope/core@*"`, an import of `vite/pack` resolves through the `exports` map of `@scope/core`. Before, a workspace member with the name `vite` took the import, and the import was unresolved when that member had no `./pack` export.
+
+- **`unused-class-members` credits members that a nested destructure reads.** Without `--type-aware`, `({ k: { m } } = { k: service })`, `({ k: { m } } = holder)` and `({ k: { m } = service } = {})` did not credit `Service.m`, so Fallow reported a used member as unused. The `const` forms had the same gap. Fallow now follows a nested pattern into an object literal property, a default value and a static member path. The member path form reads `holder.k.m` in the same way as the member expression, so it credits a member only when Fallow knows the class of `holder.k`.
+
+- **`fallow dead-code --type-aware` no longer confirms an export as unused when
+  a namespace object can read it.** The type-aware check now credits an export
+  that a static read of a namespace object reads, for example
+  `({ value } = ns)`, `const { "value": local } = ns`,
+  `function run({ value } = ns)`, `(ns as typeof ns).value`,
+  `outer.inner.value` after `export * as inner`, and `m.value` after
+  `import m = require("./values")`. When the check cannot prove which exports
+  a namespace use reads, for example `console.log(ns)`, `const copy = ns`,
+  `export { ns }`, `const { ...rest } = ns`, `ns[key]` or
+  `module.exports = require("./values")`, it now abstains with
+  `dynamic-behavior` for every export of that module, also the exports that a
+  barrel re-exports. A destructure that can read a nested namespace, for
+  example `const { inner } = outer`, abstains for the exports of the nested
+  module. A dynamic import, for example `import("./barrel")`, now also
+  abstains for the exports that the barrel re-exports. Before this fix, such an
+  export could get a `confirmed-no-static-references` decision.
+
+- **`fallow dead-code --type-aware` abstains for a class member that a computed
+  destructure key can read.** `const { [key]: run } = service` and
+  `({ [key]: run } = service)` now give `dynamic-member-access`, as
+  `service[key]` already did. A string key, for example
+  `const { "run": local } = service`, now credits the member.
+
+- **tsconfig `paths` aliases that point into `node_modules` no longer become unlisted dependencies.** A `paths` entry such as `"@components/*": ["./node_modules/some-theme/src/components/*"]` made Fallow report `@components/shared` as an unlisted dependency, because Fallow credited the specifier text and not the package that the alias resolves into. Fallow now treats each specifier that a `paths` pattern of the nearest tsconfig matches as an alias, as TypeScript does, and credits the package of the resolved file. This is also true when a real package has the same name as the pattern. A `paths` entry onto a declaration file, such as `"react": ["./node_modules/@types/react"]`, still credits `react`. Without an install, an alias into a package directory that does not exist credits that package and is not an unresolved import.
+
+- **A file with deeply nested brackets no longer aborts the run.** A source with thousands of nested `(`, `[`, `{` or template substitutions overflowed the parser stack, and the stack overflow killed the whole `fallow` process. Fallow now measures the nesting before it parses a file. A file past the limit shows as a file that failed to parse, `fallow dupes` finds no clones in it, and the analysis of the other files continues. Brackets inside strings, comments and template text do not count. The extraction and duplication cache versions change, so the first run after the upgrade parses every file again. OSS-Fuzz found this.
+
+- **`unused-class-members` no longer reports a used member as unused when one of these destructure forms is its only read.** This applies with and without `--type-aware`. In each example, `Service.m` is now used:
+  - A `for...of` destructure, such as `for (const { k: { m } } of [{ k: service }])`, `for ({ m } of [service])`, `for (const { m } of services)` with `services: Service[]` or `for (const { m } of [...services])`.
+  - A parameter destructure with a default value, such as `function run({ m } = service)` or `function run({ k: { m } } = { k: service })`.
+  - A parameter annotated with `typeof`, such as `({ k: { m } }: typeof holder)` or `({ k: { m } }: { k: typeof service })`.
+  - A getter or a spread in the source object, such as `{ get k() { return service } }` or `{ ...holder }`.
+
+- **`unused-class-members` no longer credits a class through a local shadow.** Without `--type-aware`, a module instance `const service = new Service()` gave credit to `Service.m` for `service.m`, `service['m']`, `const { m } = service` and `({ m }: typeof service)` inside a function that declares its own `service`. Fallow then missed an unused member. Fallow now ignores this credit when the nested `service` provably holds no class instance: an object literal of functions and primitives, a primitive or function value, or a parameter whose type annotation is a primitive, literal or function type. A type literal or a named type gives no proof, because a class instance can satisfy it. A class instance that the nested scope declares keeps its credit.
+  (Closes [#3798](https://github.com/fallow-rs/fallow/issues/3798))
+
+- **`unused-class-members` no longer reports a used member as unused when a destructure of an imported instance or of a class field is its only read.** This applies with and without `--type-aware`. In each example, `Service.m` is now used:
+  - A destructure of an instance from another module, such as `const { m } = service` after `import { service } from './service'`.
+  - A destructure of a class field, such as `const { m } = this.service` in a class with `constructor(private service: Service)`.
+  - The assignment, parameter default and `typeof` forms of these destructures, such as `({ m } = service)`, `run({ m } = this.service)` and `({ m }: typeof service) => m()`.
+
+- **`unused-exports` no longer reports the exports of a namespace import as unused when a destructure with a computed key reads it.** A computed key, such as `const { [name]: value } = ns`, can read any export, so all exports of `ns` are now used.
+
+- **The language server and the MCP `decision_surface` tool no longer abort on nesting that the CLI survives.** Both ran analysis on threads with a 2 MiB stack, so a deeply nested file overflowed that stack and stopped the process. The language server now gives its analysis threads the 16 MiB stack of the CLI workers. Its Tokio runtime uses two worker threads, because analysis runs on the blocking threads and the Rayon pool. `decision_surface` and `run_decision_surface` now parse on the analysis worker pool, as the other tools do. Their thread count now follows the `threads` option.
+
+- **Deep nesting without brackets no longer aborts a run.** TypeScript generics, JSX elements, `class extends`, ternaries, arrows, assignment chains and long member or call chains could overflow the stack, and the whole process stopped. Each parse of a source file now runs on a stack that is sized from the length of the file. A file up to about 15 KB still parses on the analysis worker. A larger file parses on its own thread with a stack of that size. This applies to every analysis that parses a file: dead code, duplication, health, similar code, mutation testing and the config file plugins.
+
+- **Deeply nested arrow functions no longer make extraction quadratic.** Each function hashed its whole source text for runtime coverage, so a chain of nested arrows took time that grew with the square of its length. 160000 levels took about 17 seconds. A function with more than 64 levels of nested functions below it now gets no `source_hash`. Real code stays far below that, so every real function keeps the same hash. The coverage inventory also computes columns in linear time for nested functions on one line, and it no longer sends the hash of empty input for a span that it cannot read.
+
+- **A very large file no longer parses on a stack that is too small.** The parse stack cap is now 64 GiB on 64-bit targets, which a source over 64 MB reaches in a release build. A file that needs more stack is reported as a failed parse, like a file with too deeply nested brackets. Before, such a file got a capped stack and could stop the run.
+
+- **A deeply nested stylesheet no longer risks a stack overflow in the CSS parser.** CSS Modules class extraction, `fallow health --css` analytics and color parsing now check the bracket depth before they call the CSS parser, and they run the parse on a stack sized for the stylesheet. A stylesheet past the limit falls back to the plain class scan, or is left out of the CSS analytics. The depth check now reads a stylesheet with CSS rules: a `//` inside `url(//host/a.png)`, a CSS escape or an unquoted `url()` body no longer hides the rest of a minified file. The extraction cache version changes, so the first run after the upgrade parses every file again. OSS-Fuzz found this.
+
+- **Bare `fallow` now applies the `coverage-gaps` rule, as `fallow health` does.** Before, the combined run did not compute coverage gaps, so a `coverage-gaps` rule at `error` never failed it. Now an enabled rule shows the gaps in the health section, and a rule at `error` makes the human run exit 1. The JSON `gate_outcomes` object gets a `health-coverage-gaps` entry. Like the other findings rules of the combined run, the machine formats exit 1 on it only with `--fail-on-issues` or `--ci`. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3823](https://github.com/fallow-rs/fallow/issues/3823))
+
+- **A suppression that only `--production` needs is no longer reported stale
+  in a run without `--production`.** Production mode excludes test files. An
+  export that only a test file imports is unused there, so its
+  `fallow-ignore-next-line unused-export` comment is necessary. A run without
+  `--production` credits the test import and does not use the comment. That
+  run now keeps the comment out of `stale-suppression` when every reference to
+  the export comes from a file that production mode excludes. The comment
+  stays stale when a package entry that production mode keeps re-exports the
+  export. This applies to `unused-export` and `unused-type`. Thanks
+  [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Closes [#3825](https://github.com/fallow-rs/fallow/issues/3825))
+
+- **Vite projects no longer report Sass files that Vite loads without an import as unused.**
+  Three cases caused false findings. An `@use` in
+  `css.preprocessorOptions.scss.additionalData` now credits the file that Sass
+  loads when the specifier has no extension, leaves out the `_` of a partial, or
+  names a directory with an `_index` or `index` file (#3819). An `@use` in a Sass
+  file now resolves through a Vite `resolve.alias` entry, with the Sass partial
+  and directory-index rules. Before, Fallow reported the import as unresolved
+  and the target partial as unused (#3820). The Sass settings file that
+  `vite-plugin-vuetify` reads from `styles.configFile` is now an entry. Fallow
+  reads the path relative to the Vite `root` (#3821). Thanks
+  [@Smrtnyk](https://github.com/Smrtnyk) for the three reports.
+  (Closes [#3819](https://github.com/fallow-rs/fallow/issues/3819), [#3820](https://github.com/fallow-rs/fallow/issues/3820), [#3821](https://github.com/fallow-rs/fallow/issues/3821))
+
+- **A private class method now takes coverage from its own `#name` record.**
+  Before, `fallow health --coverage` always reported a private method
+  (`#name() {}`) as `estimated`, also when the coverage data had a record for
+  that method. Fallow now uses a record that has the same `#name` near the
+  method. A record at the exact position of the method is used first. Near
+  the method, the record must be the only one with that name. Fallow does not
+  give a private method the coverage of the function that holds it or of a
+  public method. istanbul-lib-instrument writes no record for a private
+  method, so its reports do not change.
+  Thanks [@Jerc92](https://github.com/Jerc92) for the report.
+  (Refs [#3816](https://github.com/fallow-rs/fallow/issues/3816))
+
+- **A script that an Nx `run-commands` target runs is no longer reported as an unused file when `project.json` contains a comment.**
+  Fallow now reads `project.json` as JSONC, as Nx does. Line comments, block
+  comments and trailing commas no longer hide the target commands. Thanks to
+  [@Pajn](https://github.com/Pajn) for the report and the clear reproduction.
+  (Closes [#3704](https://github.com/fallow-rs/fallow/issues/3704))
+
+- **`fallow audit --gate new-only` no longer reports an unchanged anonymous function as introduced when only its CRAP score changes.** When a file has several anonymous functions, audit matches each head finding to a base finding. Before this fix, a CRAP change from estimated to measured coverage stopped the unchanged function from matching its own base finding. The line-order fallback then paired it with a different, smaller function, and audit reported it as introduced. Audit now also matches on the cyclomatic and cognitive values without the CRAP score before it uses line order. The matched pair still compares the CRAP score. Thanks [@Jerc92](https://github.com/Jerc92) for the report and the reproduction.
+  (Closes [#3815](https://github.com/fallow-rs/fallow/issues/3815))
+
+- **A workspace import now keeps its credit when the package `exports` point into `dist/src/` and the build output exists.** A package with tsconfig `rootDir: "./"` and `outDir: "./dist"` emits `src/index.ts` as `dist/src/index.js`. Fallow now uses the `rootDir` and `outDir` of the package tsconfig to map that output back to `src/index.ts`. Before, the imported exports were reported as unused after a build. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3817](https://github.com/fallow-rs/fallow/issues/3817))
+
+- **A warm cache now gives the same result as `--no-cache` after the build output of a workspace package appears or goes away.** The graph cache key now includes whether each static entry path in the project and workspace `package.json` files exists on disk. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3818](https://github.com/fallow-rs/fallow/issues/3818))
+
+- **`fallow health --production` no longer marks tested functions as untested in the CRAP estimate.**
+  Production mode keeps test files out of the analysis. The static coverage
+  estimate used the same file set, so it found no tests. Each function with a
+  cyclomatic complexity of 6 or more then failed the default `maxCrap` of 30.
+  Coverage gaps also reported tested files and exports as untested. Fallow now
+  reads test reachability from a graph of the full project, and findings still
+  come only from production files. A production run now gives the same CRAP
+  scores and coverage gaps as a full run for the files that it analyzes. A
+  production health run builds this second graph, so it takes more time.
+  Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report and the
+  reproduction. (Closes [#3822](https://github.com/fallow-rs/fallow/issues/3822))
+
+- **The `--fail-on-issues` help text now says where the flag changes the exit code.**
+  Bare `fallow` in a json, sarif or codeclimate format and `fallow dupes` exit
+  0 on issues unless `--fail-on-issues` or `--ci` is set. The human, compact
+  and markdown formats of a bare run, and the standalone analysis commands,
+  already exit 1 on error-severity issues. The exit codes do not change.
+  Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Refs [#3826](https://github.com/fallow-rs/fallow/issues/3826))
+
+- **`fallow health --production --runtime-coverage` no longer reports tested functions as `not_covered`.**
+  The fix for #3822 gave the CRAP estimate and the coverage gaps the test files
+  in production mode. The runtime coverage evidence still used the production
+  graph, which has no test files, so `evidence.test_coverage` was
+  `not_covered` for each function. The runtime coverage evidence now reads
+  test reachability from the same full-project graph. A production health run
+  builds this graph one time and uses it for file scores and for runtime
+  coverage. A production run with runtime coverage and without file scores
+  (for example `--complexity` with `maxCrap: 0`) now builds this graph too, so
+  it takes more time.
+
+- **An executed private class method now gets its measured coverage from native V8 coverage.**
+  Before, `fallow health --coverage <NODE_V8_COVERAGE dir>` reported a private
+  method (`#name() {}`) as `estimated` and gave it a CRAP finding, also when
+  Node ran every path of the method. Its public twin with the same body was
+  measured and had no finding. The V8 converter now writes a record for each
+  private method (`#name`, `get #name`, `set #name`) with its own call count,
+  and Fallow uses that record. A private method that did not run stays at 0%.
+  Thanks [@Jerc92](https://github.com/Jerc92) for the report.
+  (Closes [#3816](https://github.com/fallow-rs/fallow/issues/3816))
+
+- **A script binary now credits the npm alias that installs it.** A
+  dependency such as `"@typescript/native": "npm:typescript@~7.0.2"` provides
+  the binaries of `typescript`, so a `tsc` script no longer reports the alias
+  as unused. When the same manifest also declares the aliased package under
+  its own name, that declaration provides the binary, and an alias that
+  nothing else uses is still reported. A plain declaration in another
+  workspace does not change the result. Thanks
+  [@waldoluisribeiro](https://github.com/waldoluisribeiro) for the report. (Closes [#3844](https://github.com/fallow-rs/fallow/issues/3844))
+
+- **SCSS Modules no longer report Sass module members as unused classes.**
+  A namespaced function call such as `math.div(100px, 10)` or `utils.bar()`,
+  and a namespaced mixin such as `@include utils.baz`, gave a false
+  `unused-export` for `div`, `bar` and `baz`. The class scan now skips a
+  `.member` that follows a namespace and comes before `(`, and the mixin name
+  after `@include`. In `.module.sass` files, the scan also skips the mixin
+  name in the `+utils.baz` include shorthand. A compound selector such as
+  `button.primary` still
+  exports `primary`. The extraction cache version changes, so the first run
+  after the upgrade parses each file again.
+  (Closes [#3839](https://github.com/fallow-rs/fallow/issues/3839))
+
+- **CSS Modules no longer report view transition class names as unused
+  classes.** In `::view-transition-new(.demo)` and the other
+  `::view-transition-*()` pseudo-elements, `.demo` is a view transition class
+  and not an element class. The SCSS class scan exported it, and fallow then
+  gave a false `unused-export` for `demo`. The class scan now skips the
+  argument of these pseudo-elements. The extraction cache version changes, so
+  the first run after the upgrade parses each file again.
+  (Closes [#3840](https://github.com/fallow-rs/fallow/issues/3840))
+
+- **The agent gate audits only the worktree for a push that cannot send the
+  session branch.** A strict `git push` from a linked worktree of the session
+  repository also audited the session tree, because linked worktrees share
+  refs. Untracked build output in the session thus blocked every push from a
+  clean worktree. The gate now audits only the worktree when git shows that
+  the push cannot send the session branch: the options are only `-u`, `-q`,
+  `--set-upstream`, `--force-with-lease` and `--force-if-includes`, each
+  refspec source is the checked-out branch of the worktree and not the
+  session branch, and a push without a refspec has `push.default` unset or
+  `simple`, `current`, `upstream` or `nothing` and no remote `push` or
+  `mirror` setting. Any other push from a linked worktree, and any git error
+  during the check, keeps the session audit. The strict push form now also
+  accepts `--force-if-includes`. Run `fallow agent install` again to update an
+  installed gate.
+
+- **A CODEOWNERS file with thousands of wildcards no longer stalls ownership lookups.**
+  All CODEOWNERS rules match in one automaton, and its lookup time grows with
+  the number of wildcards (`*`, `?`, `[`, `{`). A 4 KB file with one
+  `*a*a*a…` pattern took seconds for each lookup. Fallow now rejects a
+  pattern with more than 32 wildcards, or a file with more than 4096, with an
+  error that names the limit. Large public CODEOWNERS files use fewer than
+  400. OSS-Fuzz found this.
+
+- **A CODEOWNERS pattern with an escaped space now parses.**
+  GitLab writes a space in a path as `\ `, for example
+  `/docs/Security\ Release.md @owner`. Before, Fallow split the line at that
+  space, and `--group-by owner` and `--group-by section` failed with
+  "dangling '\'". GitLab's own CODEOWNERS file failed in this way. On Windows, a
+  backslash in a pattern is now an escape, as on other platforms, and no
+  longer a path separator. Thus `\ ` and `\#` now work on Windows too.
+
+### Performance
+
+- **Very long member chains extract much faster.** Extraction built the dotted name of a member chain again at each link, and each build copied the name once per link. A file with a chain of 4000 links (`a.b.b.b...`) took several seconds to extract. Fallow now builds each name in one pass, so the same file takes a fraction of a second. Real code does not have chains this long, but generated or hostile input can. The extraction output does not change.
+
+- **Public API entry resolution no longer resolves every module path again for each missed package entry.**
+  A package entry that exists on disk but is not in the module graph, such as
+  an extensionless `bin` script, made Fallow resolve the real path of each
+  module in the package. Fallow did this again for each candidate path that it
+  probed. Fallow now builds the canonical module index one time for each
+  package and resolves each parent directory one time. On a large project,
+  this removes several seconds from `fallow dead-code` and from the
+  `--type-aware` refinement. The results do not change.
+
+- **A very long member chain no longer makes extraction slow and large.** For a chain such as `a.b.b.b` with thousands of links, each link recorded the full name of its receiver, so the time and the cached output grew with the square of the chain length. Fallow now records a receiver name only up to 64 links. A link deeper than that records no member access. A fluent builder chain such as `new Builder().a().b()` now records each step name once, so a long chain keeps the credit for all of its steps, and a chain that repeats a method stays small. The extraction cache version changes, so the first run after the upgrade parses every file again. OSS-Fuzz found this.
+
+- **Long member, `await`, `+`, JSX tag and fluent call chains are now linear
+  to analyze.** A file with a chain of many thousand links took minutes, or
+  used gigabytes of memory, because several path builders copied the whole
+  path at each link or scanned a growing list at each step. For example,
+  160000 nested `await` took 33 seconds and now take 0.04 seconds, and a
+  fluent chain of 4000 calls with different method names used 700 MB. A
+  fluent chain now gives one fact for the chain instead of one fact for each
+  call. A taint source path or a JSX tag receiver longer than 64 links is not
+  recorded, the same limit that member access names use. The cache version
+  changes, so the first run after the upgrade parses all files again.
+
+- **Long heritage names and long dotted component tags in Astro and MDX files
+  are now linear to analyze.** Each level of `interface X extends a.b.c...` or
+  `<a.b.c... />` recorded the full name of its receiver, so the time and the
+  output grew with the square of the name length. For example, an interface
+  heritage name of 20000 links took 110 seconds and now takes 0.08 seconds. A
+  receiver longer than 64 links is not recorded, the same limit that member
+  access names use. The names of `class C extends a.b.c...` and
+  `implements A.B.C...` are now built once, instead of a copy of the name at
+  each link. The cache version changes, so the first run after the upgrade
+  parses all files again.
+
 ## [3.35.0] - 2026-10-21
 
 ### Added
@@ -15754,7 +16106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.35.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.36.0...HEAD
+[3.36.0]: https://github.com/fallow-rs/fallow/compare/v3.35.0...v3.36.0
 [3.35.0]: https://github.com/fallow-rs/fallow/compare/v3.34.1...v3.35.0
 [3.34.1]: https://github.com/fallow-rs/fallow/compare/v3.34.0...v3.34.1
 [3.34.0]: https://github.com/fallow-rs/fallow/compare/v3.33.1...v3.34.0

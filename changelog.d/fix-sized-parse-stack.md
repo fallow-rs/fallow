@@ -1,3 +1,0 @@
-### Fixed
-
-- **Deep nesting without brackets no longer aborts a run.** TypeScript generics, JSX elements, `class extends`, ternaries, arrows, assignment chains and long member or call chains could overflow the stack, and the whole process stopped. Each parse of a source file now runs on a stack that is sized from the length of the file. A file up to about 15 KB still parses on the analysis worker. A larger file parses on its own thread with a stack of that size. This applies to every analysis that parses a file: dead code, duplication, health, similar code, mutation testing and the config file plugins.

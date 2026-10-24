@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.35.0",
+  "version": "3.36.0",
   "mcpName": "io.github.fallow-rs/fallow",
   "description": "Codebase intelligence for TypeScript and JavaScript: health, complexity, duplication, architecture, styling drift, and unused code from one graph. CLI, LSP, and MCP server. Zero config for over 100 frameworks.",
   "license": "MIT",
@@ -89,14 +89,14 @@
     "@tanstack/intent": "0.5.5"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "3.35.0",
-    "@fallow-cli/darwin-x64": "3.35.0",
-    "@fallow-cli/linux-x64-gnu": "3.35.0",
-    "@fallow-cli/linux-arm64-gnu": "3.35.0",
-    "@fallow-cli/linux-x64-musl": "3.35.0",
-    "@fallow-cli/linux-arm64-musl": "3.35.0",
-    "@fallow-cli/win32-arm64-msvc": "3.35.0",
-    "@fallow-cli/win32-x64-msvc": "3.35.0",
-    "fallow-type-aware": "3.35.0"
+    "@fallow-cli/darwin-arm64": "3.36.0",
+    "@fallow-cli/darwin-x64": "3.36.0",
+    "@fallow-cli/linux-x64-gnu": "3.36.0",
+    "@fallow-cli/linux-arm64-gnu": "3.36.0",
+    "@fallow-cli/linux-x64-musl": "3.36.0",
+    "@fallow-cli/linux-arm64-musl": "3.36.0",
+    "@fallow-cli/win32-arm64-msvc": "3.36.0",
+    "@fallow-cli/win32-x64-msvc": "3.36.0",
+    "fallow-type-aware": "3.36.0"
   }
 }
