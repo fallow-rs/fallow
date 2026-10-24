@@ -654,6 +654,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_counts_every_wildcard_kind() {
+        let content = format!("!{} @owner\n", "{a,b}?[x]".repeat(11));
+        let err = CodeOwners::parse(&content).unwrap_err();
+        assert!(err.contains("more than 32 wildcards"), "{err}");
+    }
+
+    #[test]
     fn parse_accepts_wildcards_at_the_limits() {
         let rule = format!("{} @owner\n", "*a".repeat(32));
         let co = CodeOwners::parse(&rule.repeat(128)).unwrap();
