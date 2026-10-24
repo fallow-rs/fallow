@@ -1025,6 +1025,28 @@ src/components/
     }
 
     #[test]
+    fn split_pattern_edge_cases() {
+        assert_eq!(split_pattern("foo\\\\ @o"), ("foo\\\\", " @o"));
+        assert_eq!(split_pattern("foo\\\tbar @o"), ("foo\\\tbar", " @o"));
+        assert_eq!(
+            split_pattern("caf\u{e9}\\ menu @o"),
+            ("caf\u{e9}\\ menu", " @o")
+        );
+        assert_eq!(split_pattern("foo\\"), ("foo\\", ""));
+        assert_eq!(split_pattern("foo\t@o"), ("foo", "\t@o"));
+    }
+
+    #[test]
+    fn negated_rule_with_escaped_space() {
+        let content = "* @default\n!docs/Security\\ Release.md\n";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(co.owner_of(Path::new("docs/Security Release.md")), None);
+        assert_eq!(co.owner_of(Path::new("docs/other.md")), Some("@default"));
+    }
+
+    // GitHub documents that `\#` does not escape a comment. Gitignore
+    // accepts it, so Fallow reads it as a pattern.
+    #[test]
     fn escaped_hash_is_a_pattern() {
         let content = "\\#notes.md @owner\n";
         let co = CodeOwners::parse(content).unwrap();
