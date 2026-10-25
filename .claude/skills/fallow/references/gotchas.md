@@ -181,6 +181,8 @@ Error-severity findings can trigger exit code 1. Default severity varies by rule
 
 Exit code 1 always means that an enforced gate failed. A load warning or a workspace diagnostic (for example `node-modules-missing` or a tsconfig `extends` that does not resolve) never changes the exit code. The only exceptions are `source-parse-degraded` and `source-nesting-too-deep` with `--fail-on-parse-error`. To find the gate, read `gate_outcomes` in the JSON output and look for an entry with `status: "fail"` and `enforced: true`. Under `--quiet` and in every machine format, fallow also prints one stderr line that names the failed gates, for example `[X] Exit code 1: gate health-findings (3 at or above error) failed.` On `health`, the `complexity-*` rules default to `error`, so each complexity finding fails the run. Set them to `warn` or pass `--report-only` to report without a failure.
 
+Bare `fallow` in a machine format (`json`, `sarif`, `codeclimate`, the GitHub formats, and the comment and review formats) exits 0 on findings. `fallow dead-code --format json` exits 1 on the same findings. The bare machine run reports only, because the GitHub Action and the GitLab template read its JSON output and not its exit code. Its `gate_outcomes` entries then have `status: "fail"` and `enforced: false`, and stderr has one line, also under `--quiet`, for example `[W] Exit code 0: gate error-severity-findings (2 at or above error) failed, but bare fallow does not enforce it in --format json. To exit 1 on it, pass --fail-on-issues.` To gate on a bare machine run, pass `--fail-on-issues` or `--ci`.
+
 ---
 
 ## `--fail-on-issues` Promotes Warn to Error

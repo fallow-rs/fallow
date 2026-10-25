@@ -639,6 +639,55 @@ fn a_failing_run_says_so_in_json_without_the_exit_code() {
     assert_eq!(entry["enforced"], Value::Bool(true));
 }
 
+/// The stderr line of a bare machine run that exits 0 on a failing gate (#3826).
+fn unenforced_line(output: &CommandOutput) -> Option<&str> {
+    output
+        .stderr
+        .lines()
+        .find(|line| line.starts_with("[W] Exit code 0:"))
+}
+
+/// A bare machine run that exits 0 on a failing findings gate says so on
+/// stderr, also under `--quiet`, and names the flag that enforces the gate.
+/// Without the line, the exit code and the `dead-code` exit code of the same
+/// findings disagree with no explanation (#3826).
+#[test]
+fn a_bare_machine_run_names_the_failing_gate_it_does_not_enforce() {
+    let project = orphan_project(2);
+    let root = root_arg(&project);
+    for format in COMBINED_ZERO_EXIT_FORMATS {
+        let output = run(&["--root", root, "--format", format, "--quiet"]);
+        assert_eq!(output.code, 0, "{format}: {}", output.stderr);
+        let line = unenforced_line(&output)
+            .unwrap_or_else(|| panic!("{format} prints the line: {}", output.stderr));
+        assert!(
+            line.contains("gate error-severity-findings (2 at or above error) failed")
+                && line.contains(&format!("--format {format}"))
+                && line.contains("--fail-on-issues"),
+            "{format}: {line}"
+        );
+    }
+}
+
+/// The line is for the runs that exit 0 on a failing gate only: a run that
+/// enforces the gate, a run that fails no gate and a human run print none.
+#[test]
+fn the_unenforced_gate_line_stays_off_when_no_gate_is_left_unenforced() {
+    let failing = orphan_project(2);
+    let root = root_arg(&failing);
+    let gated = run(&["--root", root, "--format", "json", "--fail-on-issues"]);
+    assert_eq!(gated.code, 1, "{}", gated.stderr);
+    assert_eq!(unenforced_line(&gated), None, "{}", gated.stderr);
+    let human = run(&["--root", root, "--quiet"]);
+    assert_eq!(human.code, 1, "{}", human.stderr);
+    assert_eq!(unenforced_line(&human), None, "{}", human.stderr);
+
+    let clean = orphan_project(0);
+    let output = run(&["--root", root_arg(&clean), "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(unenforced_line(&output), None, "{}", output.stderr);
+}
+
 /// Bare `fallow` applies a dupes baseline and a health baseline, so each
 /// section equals the standalone command with the same baseline.
 #[test]

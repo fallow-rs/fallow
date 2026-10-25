@@ -878,10 +878,13 @@ pub(super) fn print_combined_exit_reason(
     health_result: Option<&HealthResult>,
     code: u8,
 ) {
+    let machine = combined_machine_format(opts.output);
     if code == 0 {
+        if machine && !opts.fail_on_issues {
+            print_unenforced_gates_line(opts, check_result, dupes_result, health_result);
+        }
         return;
     }
-    let machine = combined_machine_format(opts.output);
     let mut gates = combined_gate_outcomes(
         check_result,
         dupes_result,
@@ -903,6 +906,36 @@ pub(super) fn print_combined_exit_reason(
         output: opts.output,
         own_lines: &own_lines,
     });
+}
+
+/// Print the line that names the failing findings gates a bare machine run
+/// exits 0 on. Printed also under `--quiet`, like the exit-reason line: an
+/// agent that runs `--format json --quiet` is the reader who sees only the
+/// exit code.
+fn print_unenforced_gates_line(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) {
+    let gates = combined_gate_outcomes(
+        check_result,
+        dupes_result,
+        health_result,
+        CombinedGateFlags {
+            fail_on_stale_baseline: opts.fail_on_stale_baseline,
+            fail_on_issues: false,
+        },
+    );
+    if let Some(line) = crate::report::gate_outcome_text::unenforced_gates_line(
+        gates.as_ref(),
+        opts.output.flag_label(),
+    ) {
+        eprintln!(
+            "{}",
+            crate::report::human_status_line(crate::report::HumanStatus::Warning, line)
+        );
+    }
 }
 
 /// The section prints of the human path fail the run on the findings rules

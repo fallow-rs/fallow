@@ -136,6 +136,15 @@ sets `exit_reason: false` on the section print options. The bare combined run
 also sets it to false on each section, and prints one line for the whole run
 after every gate set the exit code.
 
+A bare machine run without `--fail-on-issues` publishes the
+`FAIL_ON_ISSUES_GATES` entries with `enforced: false` and exits 0 on them.
+When such a run exits 0 and one of these entries fails, the combined printer
+prints a `[W] Exit code 0:` line from
+`report::gate_outcome_text::unenforced_gates_line`. The line names the gates,
+the `--format` value and `--fail-on-issues`. It is printed also under
+`--quiet`. A run that exits 1 for another gate does not print it, because the
+line states exit code 0.
+
 ## High-value paths
 
 - `crates/cli/src/audit.rs`: the CLI runners and the review brief of the
