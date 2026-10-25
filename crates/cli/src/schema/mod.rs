@@ -121,10 +121,13 @@ fn output_formats_schema() -> Vec<String> {
 
 fn exit_codes_schema() -> serde_json::Value {
     let entries = [
-        (0, "Success (no error-severity issues found)"),
+        (
+            0,
+            "Success: no enforced gate failed. Bare fallow in a machine format (json, sarif, codeclimate, the GitHub formats, the comment and review formats) does not enforce findings without --fail-on-issues, so it exits 0 on findings. Read gate_outcomes: status \"fail\" with enforced false is a failing gate that did not set the exit code",
+        ),
         (
             1,
-            "Error-severity issues found (per rules config, or --fail-on-issues promotes warn to error)",
+            "An enforced gate failed, for example error-severity findings (per rules config, or --fail-on-issues promotes warn to error). This is an analysis result, not a tool failure",
         ),
         (
             2,

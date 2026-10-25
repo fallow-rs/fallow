@@ -6995,8 +6995,8 @@
     "github-summary"
   ],
   "exit_codes": {
-    "0": "Success (no error-severity issues found)",
-    "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn to error)",
+    "0": "Success: no enforced gate failed. Bare fallow in a machine format (json, sarif, codeclimate, the GitHub formats, the comment and review formats) does not enforce findings without --fail-on-issues, so it exits 0 on findings. Read gate_outcomes: status \"fail\" with enforced false is a failing gate that did not set the exit code",
+    "1": "An enforced gate failed, for example error-severity findings (per rules config, or --fail-on-issues promotes warn to error). This is an analysis result, not a tool failure",
     "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}",
     "3": "Requested resource unavailable: config --path found no config, or a license is missing, invalid, or beyond its offline hard-fail window",
     "4": "Runtime coverage sidecar is unavailable, unverifiable, protocol-incompatible, or terminated unexpectedly",
