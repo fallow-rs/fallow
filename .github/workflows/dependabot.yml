@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.event == 'pull_request')
-    uses: fallow-rs/.github/.github/workflows/dependabot.yml@2fe02ef95c178680b3f568146cd10ec3a0849af9 # main
+    uses: fallow-rs/.github/.github/workflows/dependabot.yml@29e3a17bd0d1c1a6f792f62643702b20dc48b2e1 # main
     permissions:
       actions: write
       checks: read

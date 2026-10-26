@@ -1000,6 +1000,8 @@ test("release credential jobs run in the main-only release environment", () => {
   for (const name of jobNames) {
     const job = indentedBlock(workflow, name, 2);
     const inEnvironment = /^ {4}environment: release$/mu.test(job);
+    const inSigningEnvironment =
+      name === "authenticode" && /^ {4}environment: windows-signing$/mu.test(job);
     const holdsCredentials =
       /\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)/u.test(job) || /^\s+id-token: write$/mu.test(job);
 
@@ -1007,14 +1009,17 @@ test("release credential jobs run in the main-only release environment", () => {
       environmentJobs.push(name);
     }
     assert.ok(
-      !holdsCredentials || inEnvironment,
+      !holdsCredentials || inEnvironment || inSigningEnvironment,
       `${name} holds publication credentials outside the release environment`,
     );
-    assert.doesNotMatch(job, /^ {4}environment:(?! release$)/mu);
+    if (!inSigningEnvironment) {
+      assert.doesNotMatch(job, /^ {4}environment:(?! release$)/mu);
+    }
   }
 
   assert.deepEqual(environmentJobs.toSorted(), credentialJobs);
   assert.match(procedure, /environments\/release\/deployment-branch-policies/u);
+  assert.match(procedure, /environments\/windows-signing\/deployment-branch-policies/u);
   assert.match(procedure, /exists at both levels; delete the repository copy/u);
   assert.match(procedure, /unprotected by the release environment/u);
   assert.match(security, /Its deployment branch policy admits `main` only/u);
@@ -1600,30 +1605,6 @@ test("no PGO workflow sets a global RUSTFLAGS that drops the Windows stack flags
       /(?<![A-Za-z0-9_])(?:RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS)\s*[:=]/mu,
       `${file} must not set a global RUSTFLAGS`,
     );
-  }
-});
-
-// cc forwards the rustc profile flags to Apple clang, whose raw profile format
-// differs from the Rust profiler runtime (rust-lang/cc-rs#1986). Remove with #3285.
-test("PGO workflows keep the macOS C code out of the profile", () => {
-  for (const file of ["release.yml", "pgo-validate.yml"]) {
-    const steps = workflowSteps(readWorkflow(join(".github/workflows", file)));
-    const generate = steps.find((step) => step.startsWith("name: Build instrumented"));
-    const resolve = steps.find((step) => step.startsWith("name: Resolve PGO build flags"));
-    for (const [step, flag, sink] of [
-      [generate, "-fno-profile-generate", /export "/u],
-      [resolve, "-fno-profile-use", /" >> "\$GITHUB_ENV"/u],
-    ]) {
-      assert.ok(step, `${file} needs the step that sets ${flag}`);
-      assert.match(step, /\*-apple-darwin\)/u);
-      for (const name of ["CFLAGS", "CXXFLAGS"]) {
-        const line = step
-          .split("\n")
-          .find((l) => l.includes(`${name}_\${FALLOW_TARGET//-/_}=${flag}`));
-        assert.ok(line, `${file} must set ${name}_<target>=${flag}`);
-        assert.match(line, sink);
-      }
-    }
   }
 });
 
@@ -2479,7 +2460,7 @@ test("release build dependencies never receive the binary signing credential", (
     "dependency execution must run outside the signing environment",
   );
   const signing = indentedBlock(workflow, "sign", 2);
-  assert.match(signing, /needs: build/u);
+  assert.match(signing, /needs: \[build, authenticode\]/u);
   assert.match(signing, /environment: release/u);
   assert.doesNotMatch(
     signing,
@@ -2505,6 +2486,62 @@ test("release build dependencies never receive the binary signing credential", (
       `${consumer} must wait for signed artifacts`,
     );
   }
+});
+
+test("Windows binaries get an Authenticode signature before packaging", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const build = indentedBlock(workflow, "build", 2);
+  const authenticode = indentedBlock(workflow, "authenticode", 2);
+  assert.match(authenticode, /needs: build/u);
+  assert.match(authenticode, /^ {4}environment: windows-signing$/mu);
+  assert.equal(
+    workflow.match(/environment: windows-signing/gu)?.length,
+    1,
+    "only the Authenticode job may request the signing identity",
+  );
+  assert.match(authenticode, /permissions:\n\s+contents: read\n\s+id-token: write\n/u);
+  assert.doesNotMatch(
+    authenticode,
+    /secrets\.|actions\/checkout|npm (?:ci|install)|cargo |cache@/u,
+    "the Authenticode runner must not read secrets or run repository code",
+  );
+  assert.match(authenticode, /uses: Azure\/artifact-signing-action@[0-9a-f]{40} #/u);
+  assert.match(authenticode, /case "\$\{WINDOWS_SIGNING_MODE:-off\}" in/u);
+
+  const windowsBuilds = Array.from(
+    build.matchAll(/- target: (\S+-pc-windows-msvc)\n(?:\s+\w+: .+\n)*?\s+npm_dir: (\S+)/gu),
+    (match) => `${match[2]} ${match[1]}`,
+  );
+  const signedBuilds = Array.from(
+    authenticode.matchAll(/- npm_dir: (\S+)\n\s+target: (\S+)/gu),
+    (match) => `${match[1]} ${match[2]}`,
+  );
+  assert.deepEqual(signedBuilds.toSorted(), windowsBuilds.toSorted());
+
+  for (const name of [
+    "fallow",
+    "fallow-multicall",
+    "fallow-lsp",
+    "fallow-mcp",
+    "fallow-similar-code",
+  ]) {
+    assert.match(
+      authenticode,
+      new RegExp(String.raw`\\payload\\${name}-\$\{\{ matrix\.npm_dir \}\}\.exe`, "u"),
+    );
+  }
+  assert.match(authenticode, /\\napi\\fallow-node\.\$\{\{ matrix\.npm_dir \}\}\.node/u);
+  for (const artifact of [
+    "unsigned-binaries-${{ matrix.npm_dir }}",
+    "napi-${{ matrix.npm_dir }}",
+    "fallow-${{ matrix.target }}",
+  ]) {
+    assert.ok(
+      authenticode.includes(`name: ${artifact}\n`),
+      `${artifact} must be replaced by its signed copy`,
+    );
+  }
+  assert.equal(authenticode.match(/overwrite: true/gu)?.length, 3);
 });
 
 test("npm publishing uses only environment-scoped trusted publishing", () => {
@@ -2701,11 +2738,13 @@ test("release preflight checks secrets for the active publisher modes", () => {
     repoSecrets,
     envSecrets,
     client = "18767c00-8be6-4496-8b73-e2cccd03a87a",
+    windowsSigningMode = "authenticode",
   ) => {
     const shell = `gh() {
       case "$*" in
         *custom_branch_policies*) echo true ;;
         *deployment-branch-policies*) echo main ;;
+        *"variable list"*"--env windows-signing"*) printf '%s' "$TEST_SIGNING_VARIABLES" ;;
         *"variable list"*) printf '%s' "$TEST_VARIABLES" ;;
         *"secret list"*"--env release"*) printf '%s' "$TEST_ENV_SECRETS" ;;
         *"secret list"*) printf '%s' "$TEST_REPO_SECRETS" ;;
@@ -2723,6 +2762,9 @@ ${block}`;
           { name: "VSCE_AZURE_CLIENT_ID", value: client },
           { name: "VSCE_AZURE_TENANT_ID", value: "3e942fa4-e6cf-44a2-b0ef-dc2b0c6c3761" },
         ]),
+        TEST_SIGNING_VARIABLES: JSON.stringify([
+          { name: "WINDOWS_SIGNING_MODE", value: windowsSigningMode },
+        ]),
         TEST_REPO_SECRETS: repoSecrets.join("\n"),
         TEST_ENV_SECRETS: envSecrets.join("\n"),
       },
@@ -2731,6 +2773,9 @@ ${block}`;
   const signing = "ED25519_BINARY_SIGNING_PRIVATE_KEY";
   const azure = run("azure", "oidc", [], [signing]);
   assert.equal(azure.status, 0, azure.stderr);
+  const client = "18767c00-8be6-4496-8b73-e2cccd03a87a";
+  assert.equal(run("azure", "oidc", [], [signing], client, "off").status, 0);
+  assert.notEqual(run("azure", "oidc", [], [signing], client, "invalid").status, 0);
   assert.equal(run("oidc", "oidc", [], [signing]).status, 0);
   assert.notEqual(run("azure", "oidc", [], [signing], "invalid").status, 0);
   assert.notEqual(run("invalid", "oidc", [], [signing]).status, 0);
