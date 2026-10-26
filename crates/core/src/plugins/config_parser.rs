@@ -7,10 +7,12 @@ use std::path::{Path, PathBuf};
 use fallow_extract::{JsText, visitor::extract_import_from_callable};
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
-use oxc_ast_visit::{Visit, walk};
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
 
+#[path = "config_parser_const_inline.rs"]
+mod const_inline;
+use const_inline::holds_one_stable_object;
 #[path = "config_parser_vite_plugin_call.rs"]
 mod vite_plugin_call;
 pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;
@@ -1168,6 +1170,10 @@ pub(crate) fn parent_relative_config_path(
 /// parentheses to produce an AST compatible with `find_config_object`. The native
 /// JSON source type in Oxc produces a different AST structure that our helpers
 /// don't handle.
+///
+/// Before the extraction, a JavaScript or TypeScript program gets the literal
+/// value of each stable same-file constant in the property values and array
+/// elements that name it, so `projects: [UNIT]` reads like an inline object.
 pub(crate) fn extract_from_source<T: Send>(
     source: &str,
     path: &Path,
@@ -1176,13 +1182,20 @@ pub(crate) fn extract_from_source<T: Send>(
     let is_json = path
         .extension()
         .is_some_and(|ext| ext == "json" || ext == "jsonc");
-    let walk = |parsed: &oxc_parser::ParserReturn<'_>| extractor(&parsed.program);
     if is_json {
         let wrapped = wrap_json_as_expression(source);
-        return fallow_extract::parse_bounded_or_default(&wrapped, SourceType::mjs(), walk);
+        return fallow_extract::parse_bounded_or_default(&wrapped, SourceType::mjs(), |parsed| {
+            extractor(&parsed.program)
+        });
     }
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    fallow_extract::parse_bounded_or_default(source, source_type, walk)
+    fallow_extract::parse_bounded(source, || {
+        let allocator = oxc_allocator::Allocator::default();
+        let mut parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+        const_inline::inline_value_constants(&allocator, &mut parsed.program, source.len());
+        extractor(&parsed.program)
+    })
+    .flatten()
 }
 
 /// Wrap JSON or JSONC source in parentheses so Oxc parses it as one JavaScript
@@ -1707,86 +1720,6 @@ pub(crate) fn find_stable_binding_init<'a>(
         return None;
     }
     find_variable_init_expression(program, name)
-}
-
-/// Whether one top-level `const` or `let` is the only binding of `name` in the
-/// program, and no expression writes to it or to one of its members.
-fn holds_one_stable_object(program: &Program<'_>, name: &str) -> bool {
-    if !declares_top_level_const_or_let(program, name) {
-        return false;
-    }
-    let mut usage = NameUsage::new(name);
-    usage.visit_program(program);
-    usage.bindings == 1 && usage.writes == 0
-}
-
-/// Whether a top-level `const` or `let` statement declares `name`. A `var` is
-/// function scoped and hoisted, so a later statement can hold its value.
-fn declares_top_level_const_or_let(program: &Program<'_>, name: &str) -> bool {
-    top_level_variable_declarations(program).any(|decl| {
-        matches!(
-            decl.kind,
-            VariableDeclarationKind::Const | VariableDeclarationKind::Let
-        ) && decl.declarations.iter().any(|declarator| {
-            matches!(&declarator.id, BindingPattern::BindingIdentifier(id) if id.name == name)
-        })
-    })
-}
-
-/// What one program does with one name: the number of bindings that declare it,
-/// and the number of expressions that write to it or to one of its members.
-struct NameUsage<'n> {
-    name: &'n str,
-    bindings: usize,
-    writes: usize,
-    write_depth: usize,
-}
-
-impl<'n> NameUsage<'n> {
-    const fn new(name: &'n str) -> Self {
-        Self {
-            name,
-            bindings: 0,
-            writes: 0,
-            write_depth: 0,
-        }
-    }
-}
-
-impl<'a> Visit<'a> for NameUsage<'_> {
-    fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
-        if identifier.name == self.name {
-            self.bindings += 1;
-        }
-    }
-
-    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-        if self.write_depth > 0 && identifier.name == self.name {
-            self.writes += 1;
-        }
-    }
-
-    fn visit_assignment_target(&mut self, target: &AssignmentTarget<'a>) {
-        self.write_depth += 1;
-        walk::walk_assignment_target(self, target);
-        self.write_depth -= 1;
-    }
-
-    fn visit_update_expression(&mut self, expression: &UpdateExpression<'a>) {
-        self.write_depth += 1;
-        walk::walk_update_expression(self, expression);
-        self.write_depth -= 1;
-    }
-
-    fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
-        if expression.operator != UnaryOperator::Delete {
-            walk::walk_unary_expression(self, expression);
-            return;
-        }
-        self.write_depth += 1;
-        walk::walk_unary_expression(self, expression);
-        self.write_depth -= 1;
-    }
 }
 
 /// Resolve a config object that is passed as a NAMED CONST to a wrapper call:
