@@ -3,7 +3,9 @@
 // Wait until the checks of a pull request, or the workflow runs of a commit,
 // are complete. Right after a push, GitHub can report no checks or only the
 // first few, and "nothing pending" is then true too early. For a pull request,
-// the --min-checks guard waits until at least that count of checks exists. For
+// include queued workflows before they register any checks. Known optional
+// workflows remain excluded in required-only mode.
+// The --min-checks guard waits until at least that count of checks exists. For
 // a commit, the runs that GitHub created are the expected set, and the wait
 // ends when they stay complete for a short settle time. GitHub starts no
 // pull_request workflow for a pull request that conflicts with its base, so
@@ -85,6 +87,10 @@ const USAGE = `Usage: node scripts/ship-wait-checks.mjs (--pr <number> | --commi
 Wait until a pull request has at least --min-checks checks and none of them
 is pending. Then print a summary of the checks. With --commit, wait for the
 workflow runs of a commit instead, for example a merge commit on main.
+
+Pull request waits also discover unfinished workflows on the reported head,
+including workflows queued before any jobs exist. With --required, a workflow
+with registered checks is ignored when none of its checks is selected.
 
 With --commit, the expected set is the set of runs that GitHub created for
 the commit. Path filters decide which workflows a push starts, so the count
@@ -672,7 +678,7 @@ const currentRollupChecks = (rollup, readRun, names) => {
  * for duplicate or canceled workflow checks; `{ fresh: true }` also requests
  * current run status. `names` limits checks to the required selection.
  */
-export const parseGhPrRollup = (
+const parseGhPrRollup = (
   { error, status, stdout, stderr },
   { readRun = null, names = null } = {},
 ) => {
@@ -847,13 +853,108 @@ const HEAD_UPDATE_PENDING = {
   checks: [{ name: "pull request head update", bucket: "pending" }],
 };
 
-/** Read the rollup of the pull request head, or a pending check for a stale head. */
-const readHeadRollup = (args, { head, readRun, names }) => {
+/** Read PR workflows that can be queued before any check is registered. */
+const readPrWorkflows = ({ head, repo }) => {
+  const args = [
+    "run",
+    "list",
+    "--commit",
+    head,
+    "--event",
+    "pull_request",
+    "--limit",
+    String(RUN_LIST_LIMIT),
+    "--json",
+    "databaseId,workflowDatabaseId,workflowName,status,url,headSha,event",
+  ];
+  if (repo !== null) args.push("--repo", repo);
+  const read = parseGhApi(spawnSync("gh", args, { encoding: "utf8" }));
+  if (!read.ok) return read;
+  if (
+    !Array.isArray(read.data) ||
+    read.data.some(
+      (run) =>
+        !Number.isSafeInteger(run?.databaseId) ||
+        run.databaseId <= 0 ||
+        !Number.isSafeInteger(run.workflowDatabaseId) ||
+        run.workflowDatabaseId <= 0 ||
+        typeof run.workflowName !== "string" ||
+        typeof run.status !== "string" ||
+        typeof run.event !== "string" ||
+        !FULL_SHA_PATTERN.test(run.headSha) ||
+        typeof run.url !== "string" ||
+        GITHUB_RUN_URL_PATTERN.exec(run.url)?.[3] !== String(run.databaseId),
+    )
+  )
+    return { ok: false, error: "gh printed invalid pull-request workflow runs" };
+  return {
+    ok: true,
+    runs: read.data.filter((run) => run.headSha === head && run.event === "pull_request"),
+  };
+};
+
+/** Match required checks across attempts of the same workflow, using immutable IDs. */
+const requiredWorkflowSelector = ({ checks, registered, readRun, head }) => {
+  let selectedWorkflows = null;
+  return (run) => {
+    const belongs = (link) =>
+      typeof link === "string" && (link === run.url || link.startsWith(`${run.url}/`));
+    const known = registered.some((check) => belongs(check.detailsUrl ?? check.targetUrl));
+    if (!known || checks.some((check) => belongs(check.link))) return { ok: true, required: true };
+    if (selectedWorkflows === null) {
+      selectedWorkflows = new Set();
+      for (const check of checks) {
+        const metadata = readRun(check.link);
+        if (!metadata.ok) return metadata;
+        if (metadata.run?.head === head) selectedWorkflows.add(metadata.run.workflowId);
+      }
+    }
+    return { ok: true, required: selectedWorkflows.has(run.workflowDatabaseId) };
+  };
+};
+
+/** Keep unregistered jobs pending without adding completed passes to the check count. */
+const pendingWorkflowChecks = (runs, { names, ...context }) => {
+  const selectRequired = requiredWorkflowSelector(context);
+  const checks = [];
+  for (const run of runs) {
+    if (run.status === "completed") continue;
+    if (names !== null) {
+      const selected = selectRequired(run);
+      if (!selected.ok) return selected;
+      if (!selected.required) continue;
+    }
+    checks.push({
+      name: `${run.workflowName} workflow (${run.databaseId})`,
+      bucket: "pending",
+      link: run.url,
+    });
+  }
+  return { ok: true, checks };
+};
+
+/** Read current-head checks together with workflows that have not registered checks. */
+const readHeadRollup = (args, { head, readRun, names, repo }) => {
   const view = spawnSync("gh", args, { encoding: "utf8" });
   if (head !== null && isStaleHead(view, head)) {
     return HEAD_UPDATE_PENDING;
   }
-  return parseGhPrRollup(view, { readRun, names });
+  const current = parseGhPrRollup(view, { readRun, names });
+  if (!current.ok) return current;
+  const actualHead = reportedHead(view.stdout);
+  if (!FULL_SHA_PATTERN.test(actualHead)) {
+    return { ok: false, error: "gh printed an invalid pull-request head" };
+  }
+  const workflows = readPrWorkflows({ head: actualHead, repo });
+  if (!workflows.ok) return workflows;
+  const pending = pendingWorkflowChecks(workflows.runs, {
+    names,
+    checks: current.checks,
+    registered: JSON.parse(view.stdout).statusCheckRollup ?? [],
+    readRun,
+    head: actualHead,
+  });
+  return pending.ok ? { ok: true, checks: [...current.checks, ...pending.checks] } : pending;
 };
 
 /**
@@ -898,11 +999,11 @@ const ghChecksReader = ({ pr, repo, required, head = null, log = console.log }) 
         return { ok: false, error: "gh printed invalid required-check selection" };
       }
       if (selected.checks.length === 0) {
-        return fallback(() => readHeadRollup(args, { head, readRun, names: null }));
+        return fallback(() => readHeadRollup(args, { head, readRun, names: null, repo }));
       }
     }
     const names = selected === null ? null : new Set(selected.checks.map(({ name }) => name));
-    const current = readHeadRollup(args, { head, readRun, names });
+    const current = readHeadRollup(args, { head, readRun, names, repo });
     if (!current.ok || selected === null) {
       return current;
     }
