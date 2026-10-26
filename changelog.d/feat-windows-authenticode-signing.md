@@ -1,0 +1,3 @@
+### Security
+
+- **The Windows binaries now carry an Authenticode signature from Fallow B.V.** Windows 11 Smart App Control blocked `fallow.exe` from the npm package, because the file had no Authenticode signature and no reputation (Code Integrity event 3077). The release now signs every Fallow Windows file before packaging: the CLI, LSP, MCP, multicall and similar-code executables and the Node addon. The signed files ship in the GitHub release archives, the npm packages and the VS Code extension. The Ed25519 signatures do not change. Thanks [@Rednas83](https://github.com/Rednas83) for the report. (Closes [#3807](https://github.com/fallow-rs/fallow/issues/3807))
