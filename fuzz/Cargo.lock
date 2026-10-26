@@ -661,7 +661,7 @@ checksum = "120339709b24832c07464b0838828361b735d793c409b8ca3147db0dae601542"
 
 [[package]]
 name = "fallow-config"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "deser-value",
  "deser-yaml",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-engine"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "bitcode",
  "colored",
@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "dashmap",
  "dunce",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mutation"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-output"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -864,7 +864,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.35.0"
+version = "3.36.0"
 dependencies = [
  "bitcode",
  "oxc_span",
