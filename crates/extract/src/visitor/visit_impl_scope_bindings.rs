@@ -340,6 +340,15 @@ impl ModuleInfoExtractor {
         let BindingPattern::BindingIdentifier(id) = &declarator.id else {
             return;
         };
+        // A lexical loop head binding at module level is not a module binding.
+        if self.sink_literal_name_is_shadowed(id.name.as_str()) {
+            return;
+        }
+        let enum_prefix = static_enum_member_key(id.name.as_str(), "");
+        if self.module_static_sink_literals.contains_key(&enum_prefix) {
+            self.module_static_sink_literals
+                .retain(|key, _| !key.starts_with(&enum_prefix));
+        }
         if decl.kind != VariableDeclarationKind::Const {
             self.module_static_sink_literals.remove(id.name.as_str());
             return;
@@ -353,13 +362,17 @@ impl ModuleInfoExtractor {
     }
 
     /// Record a string enum member as a module-scope sink literal. The key
-    /// `Enum.MEMBER` cannot collide with a plain identifier binding.
+    /// `Enum.MEMBER` cannot collide with a plain identifier binding. The marker
+    /// key `Enum.` lets a later binding of the same name drop the members.
     pub(in crate::visitor) fn record_static_enum_member_literal(
         &mut self,
         enum_name: &str,
         member_name: &str,
         value: String,
     ) {
+        self.module_static_sink_literals
+            .entry(static_enum_member_key(enum_name, ""))
+            .or_insert(SinkLiteralValue::Null);
         self.module_static_sink_literals.insert(
             static_enum_member_key(enum_name, member_name),
             SinkLiteralValue::String(value),
@@ -374,12 +387,26 @@ impl ModuleInfoExtractor {
         let Expression::Identifier(object) = unwrap_static_expr(object) else {
             return None;
         };
-        if self.nested_scope_shadows(object.name.as_str()) {
+        if member.is_empty()
+            || self.namespace_depth > 0
+            || self.sink_literal_name_is_shadowed(object.name.as_str())
+        {
             return None;
         }
         self.module_static_sink_literals
             .get(&static_enum_member_key(object.name.as_str(), member))
             .cloned()
+    }
+
+    /// Whether a nested scope declares `name`. The direct object binding roots
+    /// also hold catch parameters, loop head bindings, and namespace locals,
+    /// which `nested_declaration_stack` does not track.
+    fn sink_literal_name_is_shadowed(&self, name: &str) -> bool {
+        self.nested_scope_shadows(name)
+            || self
+                .scoped_direct_object_binding_roots
+                .iter()
+                .any(|roots| roots.contains(name))
     }
 
     pub(super) fn static_sink_literal_value(
@@ -390,7 +417,9 @@ impl ModuleInfoExtractor {
             return Some(value);
         }
         match unwrap_static_expr(expr) {
-            Expression::Identifier(ident) if !self.nested_scope_shadows(ident.name.as_str()) => {
+            Expression::Identifier(ident)
+                if !self.sink_literal_name_is_shadowed(ident.name.as_str()) =>
+            {
                 self.module_static_sink_literals
                     .get(ident.name.as_str())
                     .cloned()

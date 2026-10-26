@@ -1188,26 +1188,95 @@ fn html_sink_template_with_string_enum_member_is_not_non_literal() {
     );
 }
 
-#[test]
-fn html_sink_template_with_unresolved_enum_member_stays_non_literal() {
-    let info = parse(
-        r#"enum MetaName { BUILD_NUMBER = "build-number", DYNAMIC = getName() }
-        function render(MetaName: Record<string, string>) {
-            document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.BUILD_NUMBER}">`);
-        }
-        document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.DYNAMIC}">`);
-        document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.MISSING}">`);"#,
-    );
-
-    let count = info
+/// Receivers of the `insertAdjacentHTML` sinks in `source`, in source order.
+/// Each receiver must appear at the recorded sink span start.
+fn html_sink_receivers(source: &str) -> Vec<String> {
+    let info = parse(source);
+    let mut sinks: Vec<_> = info
         .security_sinks
         .iter()
-        .filter(|s| s.callee_path.ends_with("insertAdjacentHTML"))
-        .count();
-    assert_eq!(
-        count, 3,
-        "shadowed, computed, and unknown enum members must stay non-literal"
+        .filter(|s| s.callee_path.ends_with(".insertAdjacentHTML"))
+        .collect();
+    sinks.sort_by_key(|s| s.span_start);
+    sinks
+        .into_iter()
+        .map(|sink| {
+            let receiver = sink
+                .callee_path
+                .trim_end_matches(".insertAdjacentHTML")
+                .to_string();
+            assert!(
+                source[sink.span_start as usize..].starts_with(&receiver),
+                "sink span for {receiver} must start at its receiver"
+            );
+            receiver
+        })
+        .collect()
+}
+
+#[test]
+fn html_sink_template_with_unresolved_enum_member_stays_non_literal() {
+    let receivers = html_sink_receivers(
+        r#"enum MetaName { BUILD_NUMBER = "build-number", DYNAMIC = getName() }
+        el0.insertAdjacentHTML("beforeend", `<meta name="${MetaName.BUILD_NUMBER}">`);
+        function render(MetaName: Record<string, string>) {
+            el1.insertAdjacentHTML("beforeend", `<meta name="${MetaName.BUILD_NUMBER}">`);
+        }
+        el2.insertAdjacentHTML("beforeend", `<meta name="${MetaName.DYNAMIC}">`);
+        el3.insertAdjacentHTML("beforeend", `<meta name="${MetaName.MISSING}">`);"#,
     );
+
+    assert_eq!(receivers, ["el1", "el2", "el3"]);
+}
+
+#[test]
+fn html_sink_template_with_shadowed_enum_name_stays_non_literal() {
+    let receivers = html_sink_receivers(
+        r#"enum E { A = "a" }
+        el0.insertAdjacentHTML("beforeend", `${E.A}`);
+        try { f(); } catch (E) { el1.insertAdjacentHTML("beforeend", `${E.A}`); }
+        for (const E of xs) { el2.insertAdjacentHTML("beforeend", `${E.A}`); }
+        for (const E in o) { el3.insertAdjacentHTML("beforeend", `${E.A}`); }
+        for (let E = next(); E; E = next()) { el4.insertAdjacentHTML("beforeend", `${E.A}`); }
+        for (const E of xs) el5.insertAdjacentHTML("beforeend", `${E.A}`);
+        { const E = { A: input }; el6.insertAdjacentHTML("beforeend", `${E.A}`); }
+        const render = (E) => el7.insertAdjacentHTML("beforeend", `${E.A}`);
+        namespace N { const E = { A: input }; el8.insertAdjacentHTML("beforeend", `${E.A}`); }
+        function g(x) { for (const y of x) { ok1.insertAdjacentHTML("beforeend", `${E.A}`); } }
+        try { f(); } catch (err) { ok2.insertAdjacentHTML("beforeend", `${E["A"]}`); }"#,
+    );
+
+    assert_eq!(
+        receivers,
+        ["el1", "el2", "el3", "el4", "el5", "el6", "el7", "el8"]
+    );
+}
+
+#[test]
+fn html_sink_template_with_shadowed_const_stays_non_literal() {
+    let receivers = html_sink_receivers(
+        r#"const C = "a";
+        el0.insertAdjacentHTML("beforeend", `${C}`);
+        try { f(); } catch (C) { el1.insertAdjacentHTML("beforeend", `${C}`); }
+        for (const C of xs) { el2.insertAdjacentHTML("beforeend", `${C}`); }
+        for (const C in o) el3.insertAdjacentHTML("beforeend", `${C}`);
+        for (let C = next(); C; C = next()) { el4.insertAdjacentHTML("beforeend", `${C}`); }
+        const h = (x) => { ok1.insertAdjacentHTML("beforeend", `${C}`); };"#,
+    );
+
+    assert_eq!(receivers, ["el1", "el2", "el3", "el4"]);
+}
+
+#[test]
+fn html_sink_template_with_redeclared_enum_name_stays_non_literal() {
+    let receivers = html_sink_receivers(
+        r#"enum E { A = "a" }
+        el0.insertAdjacentHTML("beforeend", `${E.A}`);
+        var E = { A: input };
+        el1.insertAdjacentHTML("beforeend", `${E.A}`);"#,
+    );
+
+    assert_eq!(receivers, ["el1"]);
 }
 
 #[test]
