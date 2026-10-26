@@ -89,6 +89,31 @@ fn nested_helpers_stop_at_the_depth_limit() {
 }
 
 #[test]
+fn wide_diamond_of_helpers_is_analyzed_once_per_helper() {
+    let dir = tempfile::tempdir().unwrap();
+    let last = MAX_SCRIPT_INDIRECTION_DEPTH - 1;
+    let fan_out = 16;
+    for level in 0..last {
+        let calls = format!("./l{}.sh", level + 1);
+        let body = vec![calls; fan_out].join("; ");
+        write(dir.path(), &format!("l{level}.sh"), &format!("{body}\n"));
+    }
+    write(dir.path(), &format!("l{last}.sh"), "leaf-cli\n");
+    let start = std::time::Instant::now();
+    let result = analyze(dir.path(), "bash l0.sh");
+    assert!(
+        result.used_packages.contains("leaf-cli"),
+        "the leaf of the diamond is credited"
+    );
+    // Without the visited set this is 16^7 helper analyses.
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "a helper diamond is analyzed once per helper: {:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
 fn helper_outside_the_project_or_in_node_modules_is_not_read() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "outside.sh", "outside-cli\n");

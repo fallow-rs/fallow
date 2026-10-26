@@ -52,6 +52,9 @@ const HELPER_DIR_FORMS: &[&str] = &[
 /// The most helper files that one analysis reads.
 pub(super) const MAX_HELPER_FILES: usize = 256;
 
+/// The most helper analyses of one analysis, cache hits included.
+pub(super) const MAX_HELPER_EXPANSIONS: usize = 4096;
+
 /// The largest helper file that Fallow reads.
 pub(super) const MAX_HELPER_BYTES: u64 = 1024 * 1024;
 
@@ -80,6 +83,7 @@ pub(super) struct ShellHelperFiles {
     project_root: Option<PathBuf>,
     lines: Mutex<FxHashMap<PathBuf, Option<CommandLines>>>,
     reads: AtomicUsize,
+    expansions: AtomicUsize,
 }
 
 impl ShellHelperFiles {
@@ -88,6 +92,11 @@ impl ShellHelperFiles {
             project_root: project_root.canonicalize().ok(),
             ..Self::default()
         }
+    }
+
+    /// Count one helper analysis. `false` once the analysis budget is spent.
+    fn take_expansion(&self) -> bool {
+        self.expansions.fetch_add(1, Ordering::Relaxed) < MAX_HELPER_EXPANSIONS
     }
 
     fn command_lines(&self, path: &Path) -> Option<CommandLines> {
@@ -161,6 +170,9 @@ struct HelperWalk<'a, 'c> {
     base: PathBuf,
     /// The helpers on the current path.
     stack: Vec<PathBuf>,
+    /// The smallest depth at which this walk analyzed each helper and
+    /// directory. A helper that several commands run is analyzed once.
+    visited: FxHashMap<(PathBuf, PathBuf), usize>,
 }
 
 impl<'a, 'c> HelperWalk<'a, 'c> {
@@ -188,14 +200,22 @@ impl<'a, 'c> HelperWalk<'a, 'c> {
             project_root,
             base,
             stack: Vec::new(),
+            visited: FxHashMap::default(),
         })
     }
 
     /// Analyze the commands of `helper`, which runs in `cwd`.
     fn accumulate_helper(&mut self, helper: &Path, cwd: &Path, result: &mut ScriptAnalysis) {
-        if self.stack.len() >= MAX_SCRIPT_INDIRECTION_DEPTH
-            || self.stack.iter().any(|open| open == helper)
-        {
+        let depth = self.stack.len();
+        if depth >= MAX_SCRIPT_INDIRECTION_DEPTH || self.stack.iter().any(|open| open == helper) {
+            return;
+        }
+        let key = (helper.to_path_buf(), cwd.to_path_buf());
+        if self.visited.get(&key).is_some_and(|&seen| seen <= depth) {
+            return;
+        }
+        self.visited.insert(key, depth);
+        if !self.files.take_expansion() {
             return;
         }
         let Some(lines) = self.files.command_lines(helper) else {
