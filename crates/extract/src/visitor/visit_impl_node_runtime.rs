@@ -9,12 +9,16 @@ use crate::{DynamicImportInfo, ImportedName};
 use fallow_types::extract::ImportLoadKind;
 
 use super::super::ModuleInfoExtractor;
+use super::super::declarations::ModulePathBinding;
 use super::{
     collect_pino_config_targets, extract_object_pattern_bindings, is_child_process_source,
     is_meta_url_arg, is_node_path_source, is_node_url_source, loader_hook_exports_for_source,
     local_fork_source, new_url_import_source, node_module_register_specifier,
     normalize_module_file_relative_path, pino_factory_callee_name,
 };
+
+/// The CommonJS globals that name a path of the current module.
+const MODULE_PATH_GLOBALS: &[&str] = &["__filename", "__dirname"];
 
 impl ModuleInfoExtractor {
     fn is_pino_factory_binding(&self, local_name: &str) -> bool {
@@ -187,23 +191,39 @@ impl ModuleInfoExtractor {
         if !self.is_module_scope() {
             return;
         }
-        if self.is_current_module_dir_expression(expr) {
-            self.current_module_dir_bindings.insert(name.to_string());
-            return;
-        }
-        let Expression::CallExpression(call) = expr else {
+        let binding = if self.is_current_module_dir_expression(expr) {
+            ModulePathBinding::Directory
+        } else if self.is_current_module_file_expression(expr) {
+            ModulePathBinding::File
+        } else if MODULE_PATH_GLOBALS.contains(&name) {
+            ModulePathBinding::Other
+        } else {
             return;
         };
-        let Some(first_arg) = call.arguments.first() else {
-            return;
-        };
-        if !is_meta_url_arg(first_arg) {
-            return;
-        }
+        self.current_module_path_bindings
+            .insert(name.to_string(), binding);
+    }
 
-        if self.is_file_url_to_path_callee(&call.callee) {
-            self.current_module_file_path_bindings
-                .insert(name.to_string());
+    /// What `name` holds at the current scope when it names a path of the
+    /// current module. The CommonJS globals `__filename` and `__dirname`
+    /// count unless an import or a declaration rebinds them.
+    fn module_path_binding(&self, name: &str) -> Option<ModulePathBinding> {
+        if self.nested_scope_shadows(name) {
+            return None;
+        }
+        if let Some(binding) = self.current_module_path_bindings.get(name) {
+            return Some(*binding);
+        }
+        let imported = self.imports.iter().any(|import| import.local_name == name)
+            || self
+                .require_calls
+                .iter()
+                .any(|require| require.local_name.as_deref() == Some(name));
+        match name {
+            _ if imported => None,
+            "__filename" => Some(ModulePathBinding::File),
+            "__dirname" => Some(ModulePathBinding::Directory),
+            _ => None,
         }
     }
 
@@ -211,13 +231,16 @@ impl ModuleInfoExtractor {
     /// imported name or through the `url` namespace.
     fn is_file_url_to_path_callee(&self, callee: &Expression<'_>) -> bool {
         match callee {
-            Expression::Identifier(ident) => self
-                .node_url_file_url_to_path_bindings
-                .contains(ident.name.as_str()),
+            Expression::Identifier(ident) => {
+                self.node_url_file_url_to_path_bindings
+                    .contains(ident.name.as_str())
+                    && !self.nested_scope_shadows(ident.name.as_str())
+            }
             Expression::StaticMemberExpression(member) => {
                 member.property.name == "fileURLToPath"
                     && matches!(&member.object, Expression::Identifier(obj)
-                        if self.node_url_file_url_to_path_bindings.contains(obj.name.as_str()))
+                        if self.node_url_file_url_to_path_bindings.contains(obj.name.as_str())
+                            && !self.nested_scope_shadows(obj.name.as_str()))
             }
             _ => false,
         }
@@ -235,14 +258,12 @@ impl ModuleInfoExtractor {
                     && !self.nested_scope_shadows(object.name.as_str()))
     }
 
-    /// Whether `expr` is the file path of the current module:
-    /// `fileURLToPath(import.meta.url)` or a binding of it.
+    /// Whether `expr` is the file path of the current module: `__filename`,
+    /// `fileURLToPath(import.meta.url)`, or a binding of one of them.
     fn is_current_module_file_expression(&self, expr: &Expression<'_>) -> bool {
         match expr {
             Expression::Identifier(ident) => {
-                self.current_module_file_path_bindings
-                    .contains(ident.name.as_str())
-                    && !self.nested_scope_shadows(ident.name.as_str())
+                self.module_path_binding(ident.name.as_str()) == Some(ModulePathBinding::File)
             }
             Expression::CallExpression(call) => {
                 self.is_file_url_to_path_callee(&call.callee)
@@ -258,9 +279,7 @@ impl ModuleInfoExtractor {
     fn is_current_module_dir_expression(&self, expr: &Expression<'_>) -> bool {
         match expr {
             Expression::Identifier(ident) => {
-                let name = ident.name.as_str();
-                !self.nested_scope_shadows(name)
-                    && (name == "__dirname" || self.current_module_dir_bindings.contains(name))
+                self.module_path_binding(ident.name.as_str()) == Some(ModulePathBinding::Directory)
             }
             Expression::StaticMemberExpression(member) => {
                 member.property.name == "dirname"
@@ -351,12 +370,11 @@ impl ModuleInfoExtractor {
         {
             return Vec::new();
         }
-        let Some(Argument::Identifier(base)) = call.arguments.first() else {
-            return Vec::new();
-        };
-        if !self
-            .current_module_file_path_bindings
-            .contains(base.name.as_str())
+        if !call
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .is_some_and(|base| self.is_current_module_file_expression(base))
         {
             return Vec::new();
         }
