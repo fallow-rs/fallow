@@ -9,7 +9,7 @@ Use this file when editing `crates/extract/**`.
 - `parse.rs`: Oxc parser setup and semantic pass handling.
 - `cache/`: incremental parse-cache types, conversion, storage, and eviction.
 - `complexity.rs`: cyclomatic and cognitive complexity extraction.
-- `sfc.rs`, `astro.rs`, `mdx.rs`, `css.rs`, `graphql.rs`: embedded language extraction.
+- `sfc.rs`, `astro/mod.rs`, `mdx.rs`, `css.rs`, `graphql.rs`: embedded language extraction.
 - `sfc_template/`: Vue and Svelte template-visible usage tracking.
 
 ## Rules
