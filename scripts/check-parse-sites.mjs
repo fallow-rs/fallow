@@ -26,6 +26,7 @@ const BOUNDED_CALL = /\bparse_bounded\(/;
  * bounded parse of a whole file, so it runs on the sized stack.
  */
 export const PARSE_SITES = {
+  "crates/core/src/plugins/config_parser.rs": { calls: 1, kind: "bounded" },
   "crates/engine/src/duplication_detector/tokenize/mod.rs": { calls: 4, kind: "bounded" },
   "crates/engine/src/search_visibility.rs": { calls: 2, kind: "bounded" },
   "crates/extract/src/alchemy.rs": { calls: 1, kind: "nested" },
