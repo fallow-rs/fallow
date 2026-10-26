@@ -700,14 +700,18 @@ mod tests {
 
     #[test]
     fn long_patterns_do_not_multiply_lookup_resources_by_rule_count() {
+        use std::fmt::Write as _;
+
         let mut content = String::from("[Files] @files\n/docs/escaped\\ file.md @escaped\n");
         for index in 0..256 {
-            content.push_str(&format!("file{index}?\n"));
+            writeln!(content, "file{index}?").expect("writing to a String cannot fail");
         }
         let literal = "a".repeat(65_536);
-        content.push_str(&format!(
-            "[Long] @long\n{literal}*\"\n[Overrides] @override\n!file0x\nfile1x\n"
-        ));
+        writeln!(
+            content,
+            "[Long] @long\n{literal}*\"\n[Overrides] @override\n!file0x\nfile1x"
+        )
+        .expect("writing to a String cannot fail");
         let owners = CodeOwners::parse(&content).unwrap();
         let start = std::time::Instant::now();
         for _ in 0..5 {
