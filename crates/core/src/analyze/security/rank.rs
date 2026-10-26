@@ -14,9 +14,12 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::extract::{ExportName, ModuleInfo};
 use fallow_types::output::{FixAction, FixActionType, IssueAction};
-use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
+use fallow_types::output_dead_code::{
+    BoundaryViolationFinding, UnusedExportFinding, UnusedFileFinding,
+};
 use fallow_types::results::{
     SecurityAttackSurfaceEntry, SecurityCandidateBoundary, SecurityDeadCodeContext,
     SecurityDeadCodeKind, SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding,
@@ -78,6 +81,71 @@ pub fn annotate_dead_code_cross_links(
             unused_exports,
         );
     }
+}
+
+/// Keep the unused files and unused exports that the rule pass will report.
+///
+/// The cross-links run before the per-path `overrides` remove dead-code
+/// findings (issue #3853), so the links must apply the same per-path rules.
+/// Only findings in files with a security candidate are checked.
+pub fn reportable_dead_code_for_cross_links(
+    config: &ResolvedConfig,
+    findings: &[SecurityFinding],
+    unused_files: &[UnusedFileFinding],
+    unused_exports: &[UnusedExportFinding],
+) -> (Vec<UnusedFileFinding>, Vec<UnusedExportFinding>) {
+    let sink_paths: FxHashSet<&Path> = findings
+        .iter()
+        .map(|finding| finding.path.as_path())
+        .collect();
+    let mut rules_by_path: FxHashMap<&Path, RulesConfig> = FxHashMap::default();
+    let mut is_on = |path: &Path, pick: fn(&RulesConfig) -> Severity| {
+        let Some(&sink_path) = sink_paths.get(path) else {
+            return false;
+        };
+        let rules = rules_by_path
+            .entry(sink_path)
+            .or_insert_with(|| config.resolve_rules_for_path(sink_path));
+        pick(rules) != Severity::Off
+    };
+    let unused_files = unused_files
+        .iter()
+        .filter(|finding| is_on(&finding.file.path, |rules| rules.unused_files))
+        .cloned()
+        .collect();
+    let unused_exports = unused_exports
+        .iter()
+        .filter(|finding| is_on(&finding.export.path, |rules| rules.unused_exports))
+        .cloned()
+        .collect();
+    (unused_files, unused_exports)
+}
+
+/// Map each file on a boundary violation to its lowest `(from, to)` zone pair.
+pub fn boundary_crossings_by_file(
+    boundary_violations: &[BoundaryViolationFinding],
+) -> FxHashMap<PathBuf, (String, String)> {
+    let mut boundary_crossings: FxHashMap<PathBuf, (String, String)> = FxHashMap::default();
+    for violation in boundary_violations {
+        let zones = (
+            violation.violation.from_zone.clone(),
+            violation.violation.to_zone.clone(),
+        );
+        for path in [
+            violation.violation.from_path.clone(),
+            violation.violation.to_path.clone(),
+        ] {
+            boundary_crossings
+                .entry(path)
+                .and_modify(|existing| {
+                    if zones < *existing {
+                        *existing = zones.clone();
+                    }
+                })
+                .or_insert_with(|| zones.clone());
+        }
+    }
+    boundary_crossings
 }
 
 fn annotate_finding_dead_code(

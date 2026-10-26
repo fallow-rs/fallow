@@ -2311,15 +2311,21 @@ fn annotate_security_findings(
     ctx: &SecurityDetectionContext<'_, '_>,
     results: &mut AnalysisResults,
 ) {
+    let (unused_files, unused_exports) = security::reportable_dead_code_for_cross_links(
+        ctx.config,
+        &results.security_findings,
+        &results.unused_files,
+        &results.unused_exports,
+    );
     security::annotate_dead_code_cross_links(
         ctx.graph,
         ctx.modules,
         ctx.line_offsets_by_file,
-        &results.unused_files,
-        &results.unused_exports,
+        &unused_files,
+        &unused_exports,
         &mut results.security_findings,
     );
-    let boundary_crossings = boundary_crossings_by_file(&results.boundary_violations);
+    let boundary_crossings = security::boundary_crossings_by_file(&results.boundary_violations);
     security::rank_security_findings(
         &security::SecurityRankingInput {
             graph: ctx.graph,
@@ -2331,33 +2337,6 @@ fn annotate_security_findings(
         },
         &mut results.security_findings,
     );
-}
-
-fn boundary_crossings_by_file(
-    boundary_violations: &[BoundaryViolationFinding],
-) -> FxHashMap<std::path::PathBuf, (String, String)> {
-    let mut boundary_crossings: FxHashMap<std::path::PathBuf, (String, String)> =
-        FxHashMap::default();
-    for violation in boundary_violations {
-        let zones = (
-            violation.violation.from_zone.clone(),
-            violation.violation.to_zone.clone(),
-        );
-        for path in [
-            violation.violation.from_path.clone(),
-            violation.violation.to_path.clone(),
-        ] {
-            boundary_crossings
-                .entry(path)
-                .and_modify(|existing| {
-                    if zones < *existing {
-                        *existing = zones.clone();
-                    }
-                })
-                .or_insert_with(|| zones.clone());
-        }
-    }
-    boundary_crossings
 }
 
 fn run_unused_file_detector(
