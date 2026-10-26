@@ -390,17 +390,20 @@ impl CodeOwnersParser {
     fn finish(self) -> Result<CodeOwners, String> {
         let mut globs = Vec::new();
         let mut offset = 0;
-        while offset < self.globs.len() {
+        let mut remaining = self.globs.into_iter().peekable();
+        while remaining.peek().is_some() {
             let mut builder = GlobSetBuilder::new();
             let mut regex_bytes: usize = 0;
             let mut count = 0;
-            for glob in &self.globs[offset..] {
+            while let Some(glob) = remaining.next_if(|glob| {
                 let next_bytes = regex_bytes.saturating_add(glob.regex().len());
                 if count > 0 && next_bytes.saturating_mul(count + 1) > MAX_MATCHER_COST {
-                    break;
+                    return false;
                 }
                 regex_bytes = next_bytes;
-                builder.add(glob.clone());
+                true
+            }) {
+                builder.add(glob);
                 count += 1;
             }
             globs.push(CodeOwnersMatcher {
