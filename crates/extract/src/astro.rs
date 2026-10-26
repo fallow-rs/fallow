@@ -34,26 +34,16 @@ use fallow_types::discover::FileId;
 static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)\A\s*---[ \t]*\r?\n(?P<body>.*?\r?\n)---"));
 
-/// Regex matching `<script>` blocks in the Astro template body. Captures the
-/// attribute list and the body so callers can decide whether to follow `src=`
-/// or parse the inline body as TypeScript.
-static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
-    )
-});
+mod blocks;
 
-/// Regex matching opening `<script>` tags in the Astro template body.
-static SCRIPT_OPEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
-});
-
-/// Regex matching `<style>` blocks in the Astro template body.
-static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
-    )
-});
+static SCRIPT_PREFIX_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?i)<script\b"));
+static SCRIPT_CLOSE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?i)</script>"));
+static STYLE_PREFIX_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?i)<style\b"));
+static STYLE_CLOSE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?i)</style>"));
 
 /// Regex detecting and capturing a `src` attribute on a script tag.
 static SRC_ATTR_RE: LazyLock<regex::Regex> =
@@ -100,14 +90,14 @@ static DEFINE_VARS_RE: LazyLock<regex::Regex> =
 fn build_masked_ranges(template: &str) -> Vec<(usize, usize)> {
     let mut masked: Vec<(usize, usize)> = Vec::new();
     masked.extend(
-        SCRIPT_BLOCK_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
+        blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE))
+            .into_iter()
+            .map(|block| (block.start, block.end)),
     );
     masked.extend(
-        STYLE_BLOCK_RE
-            .find_iter(template)
-            .map(|m| (m.start(), m.end())),
+        blocks::scan(template, &STYLE_PREFIX_RE, Some(&STYLE_CLOSE_RE))
+            .into_iter()
+            .map(|block| (block.start, block.end)),
     );
     masked.extend(
         HTML_COMMENT_RE
@@ -495,14 +485,14 @@ pub fn extract_astro_template_regions(source: &str) -> Vec<SourceRegion> {
         ranges.push((frontmatter.start(), frontmatter.end()));
     }
     ranges.extend(
-        SCRIPT_BLOCK_RE
-            .find_iter(source)
-            .map(|m| (m.start(), m.end())),
+        blocks::scan(source, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE))
+            .into_iter()
+            .map(|block| (block.start, block.end)),
     );
     ranges.extend(
-        STYLE_BLOCK_RE
-            .find_iter(source)
-            .map(|m| (m.start(), m.end())),
+        blocks::scan(source, &STYLE_PREFIX_RE, Some(&STYLE_CLOSE_RE))
+            .into_iter()
+            .map(|block| (block.start, block.end)),
     );
     ranges.extend(
         HTML_COMMENT_RE
@@ -521,23 +511,17 @@ pub fn extract_astro_style_regions(source: &str) -> Vec<SourceRegion> {
         .map(|m| (m.start(), m.end()))
         .collect();
 
-    STYLE_BLOCK_RE
-        .captures_iter(source)
-        .filter(|cap| {
-            let start = cap.get(0).map_or(0, |m| m.start());
-            !comment_ranges
-                .iter()
-                .any(|&(cs, ce)| start >= cs && start < ce)
-        })
-        .filter_map(|cap| {
-            let body = cap.name("body")?;
-            let text = body.as_str();
+    blocks::scan(source, &STYLE_PREFIX_RE, Some(&STYLE_CLOSE_RE))
+        .into_iter()
+        .filter(|block| !pos_in_comment(&comment_ranges, block.start))
+        .filter_map(|block| {
+            let text = &source[block.body.clone()];
             if text.trim().is_empty() {
                 return None;
             }
             Some(SourceRegion {
                 body: text.to_string(),
-                byte_offset: body.start(),
+                byte_offset: block.body.start,
             })
         })
         .collect()
@@ -789,9 +773,7 @@ fn extend_imports_from_template(
 
 /// Whether `pos` falls inside any HTML comment range.
 fn pos_in_comment(comment_ranges: &[(usize, usize)], pos: usize) -> bool {
-    comment_ranges
-        .iter()
-        .any(|&(start, end)| pos >= start && pos < end)
+    pos_in_ranges(comment_ranges, pos)
 }
 
 /// Append `<script src="...">` processed-script references from the template.
@@ -801,18 +783,15 @@ fn extend_processed_script_src_imports(
     template_offset: usize,
     comment_ranges: &[(usize, usize)],
 ) {
-    for cap in SCRIPT_OPEN_RE.captures_iter(template) {
-        let Some(open) = cap.get(0) else {
-            continue;
-        };
-        if pos_in_comment(comment_ranges, open.start()) {
+    for open in blocks::scan(template, &SCRIPT_PREFIX_RE, None) {
+        if pos_in_comment(comment_ranges, open.start) {
             continue;
         }
-        let attrs = cap.name("attrs").map_or("", |m| m.as_str());
-        if let Some((raw, source_span)) = processed_script_src_with_span(attrs, cap.name("attrs")) {
+        let attrs = &template[open.attrs.clone()];
+        if let Some((raw, source_span)) = processed_script_src_with_span(attrs, open.attrs.start) {
             let tag_span = Span::new(
-                (template_offset + open.start()) as u32,
-                (template_offset + open.end()) as u32,
+                (template_offset + open.start) as u32,
+                (template_offset + open.end) as u32,
             );
             imports.push(ImportInfo {
                 source: normalize_asset_url(raw),
@@ -839,21 +818,15 @@ fn extend_inline_script_imports(
     template_offset: usize,
     comment_ranges: &[(usize, usize)],
 ) {
-    for cap in SCRIPT_BLOCK_RE.captures_iter(template) {
-        let Some(open) = cap.get(0) else {
-            continue;
-        };
-        if pos_in_comment(comment_ranges, open.start()) {
+    for open in blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE)) {
+        if pos_in_comment(comment_ranges, open.start) {
             continue;
         }
-        let attrs = cap.name("attrs").map_or("", |m| m.as_str());
+        let attrs = &template[open.attrs.clone()];
         if !attrs.trim().is_empty() {
             continue;
         }
-        let Some(body_match) = cap.name("body") else {
-            continue;
-        };
-        let body = body_match.as_str();
+        let body = &template[open.body.clone()];
         if body.trim().is_empty() {
             continue;
         }
@@ -862,16 +835,13 @@ fn extend_inline_script_imports(
         let parser_return = Parser::new(&allocator, body, SourceType::ts()).parse();
         let mut inline_extractor = ModuleInfoExtractor::new();
         inline_extractor.visit_program(&parser_return.program);
-        let extraction = ExtractionResult::contiguous(body, template_offset + body_match.start());
+        let extraction = ExtractionResult::contiguous(body, template_offset + open.body.start);
         inline_extractor.remap_spans_with(|span| extraction.remap_span(span));
         imports.append(&mut inline_extractor.imports);
     }
 }
 
-fn processed_script_src_with_span<'a>(
-    attrs: &'a str,
-    attrs_match: Option<regex::Match<'_>>,
-) -> Option<(&'a str, Span)> {
+fn processed_script_src_with_span(attrs: &str, attrs_start: usize) -> Option<(&str, Span)> {
     let cap = SRC_ATTR_RE.captures(attrs)?;
     let src_match = cap.name("src")?;
     let src = src_match.as_str().trim();
@@ -886,7 +856,6 @@ fn processed_script_src_with_span<'a>(
         return None;
     }
 
-    let attrs_start = attrs_match.map_or(0, |m| m.start());
     Some((
         src,
         Span::new(
@@ -900,6 +869,47 @@ fn processed_script_src_with_span<'a>(
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_unclosed_astro_attributes_remain_fast() {
+        use std::time::{Duration, Instant};
+
+        let source = "<style'<style>x</style>'".repeat(20_000);
+        let start = Instant::now();
+        let styles = extract_astro_style_regions(&source);
+        let template = extract_astro_template_regions(&source);
+        assert_eq!(styles.len(), 20_000);
+        assert_eq!(styles[0].body, "x");
+        assert_eq!(styles[0].byte_offset, 14);
+        assert_eq!(template[0].body, "<style'");
+        assert_eq!(template[0].byte_offset, 0);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "repeated unclosed Astro attributes exceeded the extraction budget"
+        );
+    }
+
+    #[test]
+    fn astro_regions_preserve_quoted_delimiters_and_unicode_tag_boundaries() {
+        let source =
+            "<styleé>skip</style>é<style media='x > y'>.item{}</style><ſtyle>x{}</ſtyle><style";
+        let styles = extract_astro_style_regions(source);
+        assert_eq!(
+            styles
+                .iter()
+                .map(|region| (region.body.as_str(), region.byte_offset))
+                .collect::<Vec<_>>(),
+            vec![(".item{}", 44), ("x{}", 67)]
+        );
+        let template = extract_astro_template_regions(source);
+        assert_eq!(
+            template
+                .iter()
+                .map(|region| (region.body.as_str(), region.byte_offset))
+                .collect::<Vec<_>>(),
+            vec![("<styleé>skip</style>é", 0), ("<style", 79)]
+        );
+    }
 
     #[test]
     fn is_astro_file_positive() {
@@ -1341,14 +1351,14 @@ mod tests {
         // `find_iter` passes.
         let mut raw: Vec<(usize, usize)> = Vec::new();
         raw.extend(
-            SCRIPT_BLOCK_RE
-                .find_iter(template)
-                .map(|m| (m.start(), m.end())),
+            blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE))
+                .into_iter()
+                .map(|block| (block.start, block.end)),
         );
         raw.extend(
-            STYLE_BLOCK_RE
-                .find_iter(template)
-                .map(|m| (m.start(), m.end())),
+            blocks::scan(template, &STYLE_PREFIX_RE, Some(&STYLE_CLOSE_RE))
+                .into_iter()
+                .map(|block| (block.start, block.end)),
         );
         raw.extend(
             HTML_COMMENT_RE
