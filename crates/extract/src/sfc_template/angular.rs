@@ -22,7 +22,8 @@ use fallow_types::extract::SinkSite;
 use crate::MemberAccess;
 use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};
 
-use super::scanners::{scan_curly_section, scan_html_tag};
+use super::recovery::RecoveryScanner;
+use super::scanners::scan_curly_section;
 
 /// Result of scanning an Angular template for member references.
 #[derive(Debug, Default)]
@@ -166,6 +167,7 @@ fn collect_angular_template_refs_inner(
 
 struct AngularTemplateScanner<'a> {
     source: &'a str,
+    recovery: RecoveryScanner<'a>,
     refs: AngularTemplateRefs,
     scopes: Vec<Vec<String>>,
     /// Component field name -> array element class, so a `@for` / `*ngFor` over a
@@ -192,6 +194,7 @@ impl<'a> AngularTemplateScanner<'a> {
     ) -> Self {
         Self {
             source,
+            recovery: RecoveryScanner::new(source),
             refs: AngularTemplateRefs::default(),
             scopes: vec![Vec::new()],
             component_field_array_types,
@@ -261,7 +264,7 @@ impl<'a> AngularTemplateScanner<'a> {
     }
 
     fn scan_tag(&mut self, index: usize) -> usize {
-        let Some((tag, next_index)) = scan_html_tag(self.source, index) else {
+        let Some((tag, next_index)) = self.recovery.html_tag(index) else {
             return index + 1;
         };
         let mut iter_ctx = IterationTypingCtx {

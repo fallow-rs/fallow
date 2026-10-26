@@ -1,6 +1,7 @@
 //! Caller facts from the shared quote-aware markup scanner.
 
-use super::scanners::{is_html_tag_start, scan_curly_section, scan_html_tag};
+use super::recovery::RecoveryScanner;
+use super::scanners::is_html_tag_start;
 use super::shared::{ParsedAttr, kebab_to_camel_case, parse_tag_attrs};
 use crate::js_text::JsText;
 use fallow_types::extract::{
@@ -16,6 +17,7 @@ pub fn collect(
     aliases: &[fallow_types::extract::ComponentAliasBinding],
 ) -> ComponentContractFacts {
     let mut facts = ComponentContractFacts::default();
+    let mut scanner = RecoveryScanner::new(source);
     let interpolation = interpolation_brace_len(framework);
     let mut cursor = 0;
     while cursor < source.len() {
@@ -25,11 +27,11 @@ pub fn collect(
             break;
         };
         let start = cursor + relative;
-        if let Some(next) = skip_non_tag(source, start, interpolation, framework) {
+        if let Some(next) = skip_non_tag(source, start, interpolation, framework, &mut scanner) {
             cursor = next;
             continue;
         }
-        let Some((tag, end)) = scan_html_tag(source, start) else {
+        let Some((tag, end)) = scanner.html_tag(start) else {
             facts.incomplete_frameworks.push(framework);
             break;
         };
@@ -116,6 +118,7 @@ fn skip_non_tag(
     start: usize,
     interpolation: Option<usize>,
     framework: ComponentFramework,
+    scanner: &mut RecoveryScanner<'_>,
 ) -> Option<usize> {
     if source.as_bytes()[start] == b'{' {
         let len = interpolation?;
@@ -133,7 +136,7 @@ fn skip_non_tag(
         return Some(
             source[start..]
                 .starts_with(&"{{"[..len])
-                .then(|| scan_curly_section(source, start, len, len))
+                .then(|| scanner.curly_section(start, len))
                 .flatten()
                 .map_or(start + 1, |(_, end)| end),
         );
