@@ -48,6 +48,12 @@ import {
   targetName,
 } from "./symbol-targets.mjs";
 import { analyzeTypeCoupling } from "./type-coupling.mjs";
+import {
+  MODULE_SOURCE_EXTENSIONS,
+  isSupportedSemanticQuery,
+  semanticOpenFiles,
+  semanticOpenProjects,
+} from "./semantic-input.mjs";
 
 const { SignatureKind, SymbolFlags } = sync;
 const {
@@ -493,8 +499,6 @@ const importTypeSpecifier = (node) => {
   return literal && isStringLiteralLikeNode(literal) ? literal : undefined;
 };
 
-const MODULE_SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
-
 const lexicalModuleIdentityForText = (project, sourceFile, specifierText) => {
   if (!specifierText?.startsWith(".")) return undefined;
   const resolved = path.resolve(path.dirname(sourceFile.fileName), specifierText);
@@ -748,11 +752,11 @@ const selectSymbolContext = (
   query,
   allowDefaultFallback,
 ) => {
-  if (!DECLARATION_KINDS.has(query.symbol.declarationKind)) {
+  if (!isSupportedSemanticQuery(query) || !DECLARATION_KINDS.has(query.symbol.declarationKind)) {
     return symbolResolutionError(
       query,
       "unsupported-syntax",
-      "Use a supported declaration kind or retain the syntactic finding.",
+      "Use a supported TypeScript or JavaScript declaration or retain the syntactic finding.",
     );
   }
   let owners = owningProjectContexts(statesByProject, query.symbol.absolutePath);
@@ -1725,8 +1729,10 @@ const emptySemanticAnalysis = (queries) => ({
   results: queries.map((query) =>
     unavailable(
       query,
-      "no-project",
-      "Pass an explicit tsconfig with --type-aware-project and retry.",
+      isSupportedSemanticQuery(query) ? "no-project" : "unsupported-syntax",
+      isSupportedSemanticQuery(query)
+        ? "Pass an explicit tsconfig with --type-aware-project and retry."
+        : "Use a supported TypeScript or JavaScript declaration or retain the syntactic finding.",
     ),
   ),
   phaseTimings: { project_setup: 0, diagnostics: 0, semantic_queries: 0 },
@@ -1955,15 +1961,6 @@ const emptyRequestedAnalysis = () => ({
   phaseTimings: { project_setup: 0, diagnostics: 0, semantic_queries: 0 },
   warnings: [],
 });
-
-const semanticOpenFiles = (queries) =>
-  queries.filter((query) => query.symbol).map((query) => query.symbol.absolutePath);
-
-const semanticOpenProjects = (root, projects) => {
-  if (projects.length > 0) return projects.map((project) => project.absolutePath);
-  const conventionalProject = path.join(root, "tsconfig.json");
-  return existsSync(conventionalProject) ? [conventionalProject] : [];
-};
 
 const semanticProjectSelection = (snapshot, openProjects, openFiles, allowDefaultFallback) => {
   const explicitProjects = openProjects
