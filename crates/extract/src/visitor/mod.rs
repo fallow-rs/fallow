@@ -969,8 +969,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// module binding that is `Other`/unresolved/a conflicting class (e.g.
     /// `poison() { api = {} as any }`) makes the strict export abstain, since it
     /// can leave the binding holding a non-class at return time. Declarations
-    /// (which introduce a separate binding) are intentionally excluded. See #1441
-    /// (Part A).
+    /// (which introduce a separate binding) are intentionally excluded. See #1441 (Part A).
     identifier_write_values: FxHashMap<String, Vec<FactoryAssignedValue>>,
     /// Alias factory function (by local name) -> classified right-hand sides of
     /// assignments to its RETURNED identifier, collected from that function's OWN
@@ -984,6 +983,7 @@ pub(crate) struct ModuleInfoExtractor {
     node_path_namespace_bindings: FxHashSet<String>,
     node_url_file_url_to_path_bindings: FxHashSet<String>,
     current_module_file_path_bindings: FxHashSet<String>,
+    current_module_dir_bindings: FxHashSet<String>,
     child_process_fork_target_bindings: FxHashMap<String, Vec<String>>,
     static_string_bindings: FxHashMap<String, Vec<String>>,
     static_string_arrays: FxHashMap<String, Vec<String>>,

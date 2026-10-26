@@ -187,6 +187,10 @@ impl ModuleInfoExtractor {
         if !self.is_module_scope() {
             return;
         }
+        if self.is_current_module_dir_expression(expr) {
+            self.current_module_dir_bindings.insert(name.to_string());
+            return;
+        }
         let Expression::CallExpression(call) = expr else {
             return;
         };
@@ -197,7 +201,16 @@ impl ModuleInfoExtractor {
             return;
         }
 
-        let is_file_url_to_path = match &call.callee {
+        if self.is_file_url_to_path_callee(&call.callee) {
+            self.current_module_file_path_bindings
+                .insert(name.to_string());
+        }
+    }
+
+    /// Whether `callee` is `fileURLToPath` from `node:url`, called by its
+    /// imported name or through the `url` namespace.
+    fn is_file_url_to_path_callee(&self, callee: &Expression<'_>) -> bool {
+        match callee {
             Expression::Identifier(ident) => self
                 .node_url_file_url_to_path_bindings
                 .contains(ident.name.as_str()),
@@ -207,11 +220,65 @@ impl ModuleInfoExtractor {
                         if self.node_url_file_url_to_path_bindings.contains(obj.name.as_str()))
             }
             _ => false,
-        };
+        }
+    }
 
-        if is_file_url_to_path {
-            self.current_module_file_path_bindings
-                .insert(name.to_string());
+    /// Whether `callee` is one of the `names` functions of the `node:path`
+    /// namespace, such as `path.join`.
+    fn is_node_path_call(&self, callee: &Expression<'_>, names: &[&str]) -> bool {
+        let Expression::StaticMemberExpression(member) = callee else {
+            return false;
+        };
+        names.contains(&member.property.name.as_str())
+            && matches!(&member.object, Expression::Identifier(object)
+                if self.node_path_namespace_bindings.contains(object.name.as_str())
+                    && !self.nested_scope_shadows(object.name.as_str()))
+    }
+
+    /// Whether `expr` is the file path of the current module:
+    /// `fileURLToPath(import.meta.url)` or a binding of it.
+    fn is_current_module_file_expression(&self, expr: &Expression<'_>) -> bool {
+        match expr {
+            Expression::Identifier(ident) => {
+                self.current_module_file_path_bindings
+                    .contains(ident.name.as_str())
+                    && !self.nested_scope_shadows(ident.name.as_str())
+            }
+            Expression::CallExpression(call) => {
+                self.is_file_url_to_path_callee(&call.callee)
+                    && call.arguments.first().is_some_and(is_meta_url_arg)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `expr` is the directory of the current module: `__dirname`,
+    /// `import.meta.dirname`, `path.dirname(<current module file>)`, or a
+    /// binding of one of them.
+    fn is_current_module_dir_expression(&self, expr: &Expression<'_>) -> bool {
+        match expr {
+            Expression::Identifier(ident) => {
+                let name = ident.name.as_str();
+                !self.nested_scope_shadows(name)
+                    && (name == "__dirname" || self.current_module_dir_bindings.contains(name))
+            }
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == "dirname"
+                    && matches!(&member.object, Expression::ImportMeta(_))
+            }
+            Expression::CallExpression(call) => {
+                self.is_node_path_call(&call.callee, &["dirname"])
+                    && call.arguments.len() == 1
+                    && call
+                        .arguments
+                        .first()
+                        .and_then(Argument::as_expression)
+                        .is_some_and(|arg| self.is_current_module_file_expression(arg))
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.is_current_module_dir_expression(&paren.expression)
+            }
+            _ => false,
         }
     }
 
@@ -266,6 +333,9 @@ impl ModuleInfoExtractor {
     }
 
     fn child_process_fork_sources_from_call(&self, call: &CallExpression<'_>) -> Vec<String> {
+        if let Some(source) = self.module_dir_join_source(call) {
+            return local_fork_source(&source).into_iter().collect();
+        }
         let Expression::StaticMemberExpression(member) = &call.callee else {
             return Vec::new();
         };
@@ -297,6 +367,53 @@ impl ModuleInfoExtractor {
             .and_then(|source| local_fork_source(&source))
             .into_iter()
             .collect()
+    }
+
+    /// Resolve `path.join(<module dir>, 'a', 'b.js')` and the same call of
+    /// `path.resolve` to a specifier relative to the current module. Every
+    /// segment after the directory must be a relative string literal.
+    fn module_dir_join_source(&self, call: &CallExpression<'_>) -> Option<String> {
+        if !self.is_node_path_call(&call.callee, &["join", "resolve"]) {
+            return None;
+        }
+        let (base, segments) = call.arguments.split_first()?;
+        if !base
+            .as_expression()
+            .is_some_and(|base| self.is_current_module_dir_expression(base))
+        {
+            return None;
+        }
+        let mut parts: Vec<String> = Vec::new();
+        let mut parents = 0_usize;
+        for segment in segments {
+            let Argument::StringLiteral(lit) = segment else {
+                return None;
+            };
+            let text = lit.value.text();
+            if text.starts_with('/') {
+                return None;
+            }
+            for part in text.split(['/', '\\']) {
+                match part {
+                    "" | "." => {}
+                    ".." => {
+                        if parts.pop().is_none() {
+                            parents += 1;
+                        }
+                    }
+                    _ => parts.push(part.to_string()),
+                }
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        let prefix = if parents == 0 {
+            "./".to_string()
+        } else {
+            "../".repeat(parents)
+        };
+        Some(format!("{prefix}{}", parts.join("/")))
     }
 
     pub(super) fn try_record_child_process_fork(&mut self, expr: &CallExpression<'_>) {

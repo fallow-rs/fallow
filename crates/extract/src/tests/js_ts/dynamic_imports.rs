@@ -1560,6 +1560,70 @@ fn child_process_fork_credits_new_url_runner_binding() {
 }
 
 #[test]
+fn child_process_fork_credits_path_join_of_module_directory() {
+    let sources = dynamic_sources(
+        "import { fork } from 'child_process';\n\
+         import path from 'path';\n\
+         import { fileURLToPath } from 'url';\n\
+         const CHILD = path.join(\n\
+           path.dirname(fileURLToPath(import.meta.url)),\n\
+           'WinnerReplayChild.ts',\n\
+         );\n\
+         export function replay() { return fork(CHILD, []); }",
+    );
+
+    assert_eq!(sources, vec!["./WinnerReplayChild.ts".to_string()]);
+}
+
+#[test]
+fn child_process_fork_credits_module_directory_binding() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import * as path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const __filename = fileURLToPath(import.meta.url);\n\
+         const here = path.dirname(__filename);\n\
+         fork(path.resolve(here, 'workers', 'child.ts'));",
+    );
+
+    assert_eq!(sources, vec!["./workers/child.ts".to_string()]);
+}
+
+#[test]
+fn child_process_fork_credits_dirname_globals() {
+    let sources = dynamic_sources(
+        "const { fork } = require('child_process');\n\
+         const path = require('path');\n\
+         fork(path.join(__dirname, '../shared/child.js'));\n\
+         fork(path.join(import.meta.dirname, 'esm-child.js'));",
+    );
+
+    assert_eq!(
+        sources,
+        vec![
+            "../shared/child.js".to_string(),
+            "./esm-child.js".to_string()
+        ]
+    );
+}
+
+#[test]
+fn child_process_fork_skips_computed_module_directory_joins() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const dir = path.dirname(fileURLToPath(import.meta.url));\n\
+         fork(path.join(dir, name));\n\
+         fork(path.join(process.cwd(), 'cwd-child.js'));\n\
+         fork(path.join(dir, '..'));\n\
+         function run(__dirname) { fork(path.join(__dirname, 'param-child.js')); }",
+    );
+
+    assert!(sources.is_empty(), "{sources:?}");
+}
+
+#[test]
 fn unrelated_fork_call_is_not_credited() {
     let sources = dynamic_sources(
         "import { fork } from './process-utils';\n\
