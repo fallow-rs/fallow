@@ -1170,6 +1170,47 @@ fn network_sink_captures_literal_url_destination() {
 }
 
 #[test]
+fn html_sink_template_with_string_enum_member_is_not_non_literal() {
+    let info = parse(
+        r#"enum MetaName { BUILD_NUMBER = "build-number" }
+        const NAME = "build-number";
+        document.head.insertAdjacentHTML("beforeend", `<meta name="${NAME}">`);
+        document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.BUILD_NUMBER}">`);
+        document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName["BUILD_NUMBER"]}">`);"#,
+    );
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|s| s.callee_path.ends_with("insertAdjacentHTML")),
+        "a string enum member must resolve like a const string"
+    );
+}
+
+#[test]
+fn html_sink_template_with_unresolved_enum_member_stays_non_literal() {
+    let info = parse(
+        r#"enum MetaName { BUILD_NUMBER = "build-number", DYNAMIC = getName() }
+        function render(MetaName: Record<string, string>) {
+            document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.BUILD_NUMBER}">`);
+        }
+        document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.DYNAMIC}">`);
+        document.head.insertAdjacentHTML("beforeend", `<meta name="${MetaName.MISSING}">`);"#,
+    );
+
+    let count = info
+        .security_sinks
+        .iter()
+        .filter(|s| s.callee_path.ends_with("insertAdjacentHTML"))
+        .count();
+    assert_eq!(
+        count, 3,
+        "shadowed, computed, and unknown enum members must stay non-literal"
+    );
+}
+
+#[test]
 fn network_sink_dynamic_url_has_no_literal_destination() {
     let info = parse(r"const t = process.env.SECRET; fetch(buildUrl(), { headers: { x: t } });");
     let sink = info

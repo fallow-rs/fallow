@@ -42,6 +42,13 @@ impl ModuleInfoExtractor {
                 }
                 TSEnumMemberName::ComputedTemplateString(_) => continue,
             };
+            if !enumd.declare {
+                self.record_static_enum_member_literal(
+                    enumd.id.name.as_str(),
+                    &member_name,
+                    value.value.text().into_owned(),
+                );
+            }
             self.semantic_facts
                 .push(SemanticFact::StringEnumMemberValue(
                     StringEnumMemberValueFact {

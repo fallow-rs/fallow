@@ -352,6 +352,36 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Record a string enum member as a module-scope sink literal. The key
+    /// `Enum.MEMBER` cannot collide with a plain identifier binding.
+    pub(in crate::visitor) fn record_static_enum_member_literal(
+        &mut self,
+        enum_name: &str,
+        member_name: &str,
+        value: String,
+    ) {
+        self.module_static_sink_literals.insert(
+            static_enum_member_key(enum_name, member_name),
+            SinkLiteralValue::String(value),
+        );
+    }
+
+    fn static_enum_member_value(
+        &self,
+        object: &Expression<'_>,
+        member: &str,
+    ) -> Option<SinkLiteralValue> {
+        let Expression::Identifier(object) = unwrap_static_expr(object) else {
+            return None;
+        };
+        if self.nested_scope_shadows(object.name.as_str()) {
+            return None;
+        }
+        self.module_static_sink_literals
+            .get(&static_enum_member_key(object.name.as_str(), member))
+            .cloned()
+    }
+
     pub(super) fn static_sink_literal_value(
         &self,
         expr: &Expression<'_>,
@@ -364,6 +394,16 @@ impl ModuleInfoExtractor {
                 self.module_static_sink_literals
                     .get(ident.name.as_str())
                     .cloned()
+            }
+            Expression::StaticMemberExpression(member) => {
+                self.static_enum_member_value(&member.object, member.property.name.as_str())
+            }
+            Expression::ComputedMemberExpression(member) => {
+                let Expression::StringLiteral(property) = unwrap_static_expr(&member.expression)
+                else {
+                    return None;
+                };
+                self.static_enum_member_value(&member.object, &property.value.text())
             }
             Expression::UnaryExpression(unary)
                 if unary.operator == UnaryOperator::UnaryNegation
@@ -682,4 +722,8 @@ impl ModuleInfoExtractor {
             .cloned()
             .unwrap_or_default()
     }
+}
+
+fn static_enum_member_key(enum_name: &str, member_name: &str) -> String {
+    format!("{enum_name}.{member_name}")
 }
