@@ -63,6 +63,7 @@ fn scan_delimited_section(
     let mut state = DelimitedScanState::default();
 
     while index < bytes.len() {
+        crate::cost::walk_step();
         let byte = bytes[index];
 
         if let Some(next_index) = state.consume_context(bytes, index, byte) {
@@ -214,6 +215,7 @@ pub(super) fn scan_html_tag(source: &str, start: usize) -> Option<(&str, usize)>
     let mut escape = false;
 
     while index < bytes.len() {
+        crate::cost::walk_step();
         let byte = bytes[index];
         if escape {
             escape = false;

@@ -847,18 +847,35 @@ mod tests {
 
     #[test]
     fn incomplete_vue_tags_preserve_prior_usage_without_repeated_scanning() {
-        let source = format!(
-            "<template><Used/>{}</template><template><After/></template>",
-            "<a{".repeat(20_000)
-        );
-        let start = std::time::Instant::now();
-        let usage = collect_template_usage(&source, &imported(&["Used", "After"]));
-        assert!(usage.used_bindings.contains("Used"));
-        assert!(usage.used_bindings.contains("After"));
+        const TAG_COUNTS: [usize; 2] = [128, 512];
+        const MAX_SCAN_STEPS_PER_SOURCE_BYTE: usize = 16;
+        const CONTROL: &str = "{ready}";
+
+        let (section, control) =
+            crate::cost::measure(|| super::scan_curly_section(CONTROL, 0, 1, 1));
+        assert_eq!(section, Some(("ready", CONTROL.len())));
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(5),
-            "incomplete Vue tags exceeded the extraction budget"
+            control.walk_steps >= "ready".len(),
+            "delimiter scans must record work"
         );
+
+        for repeated_tags in TAG_COUNTS {
+            let source = format!(
+                "<template><Used/>{}</template><template><After/></template>",
+                "<a{".repeat(repeated_tags)
+            );
+            let (usage, work) = crate::cost::measure(|| {
+                collect_template_usage(&source, &imported(&["Used", "After"]))
+            });
+            assert!(usage.used_bindings.contains("Used"));
+            assert!(usage.used_bindings.contains("After"));
+            assert!(
+                work.walk_steps <= MAX_SCAN_STEPS_PER_SOURCE_BYTE * source.len(),
+                "incomplete Vue tags exceeded the linear scan budget: {} steps for {} source bytes",
+                work.walk_steps,
+                source.len()
+            );
+        }
     }
 
     fn bound_targets(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {

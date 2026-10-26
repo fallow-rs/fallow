@@ -87,6 +87,7 @@ fn section_ends(source: &str) -> Vec<SectionEnds> {
     let mut block_after_next = missing;
 
     for index in (0..bytes.len()).rev() {
+        crate::cost::walk_step();
         let byte = bytes[index];
         let next = ends[index + 1];
         let quote = match byte {
@@ -126,7 +127,7 @@ fn section_ends(source: &str) -> Vec<SectionEnds> {
         ends[index] = SectionEnds { tag, ..expression };
 
         let previous_quotes = quotes;
-        for (slot, marker) in [b'\'', b'"', b'`'].into_iter().enumerate() {
+        for (slot, &marker) in b"'\"`".iter().enumerate() {
             if byte == b'\\' {
                 quotes[slot] = escaped_quotes[slot];
             } else if byte == marker {
