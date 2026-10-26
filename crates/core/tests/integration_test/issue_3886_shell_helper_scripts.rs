@@ -1,10 +1,10 @@
-//! Issue #3886: a package script that runs a project-local shell helper
-//! credits the packages and seeds the entry files that the helper runs.
+//! Issue #3886: a package script or CI step that runs a project-local shell
+//! helper credits the packages and seeds the entry files that the helper runs.
 
 use super::common::{create_config, fixture_path};
 
 #[test]
-fn shell_helpers_run_by_package_scripts_credit_their_commands() {
+fn shell_helpers_run_by_scripts_and_ci_credit_their_commands() {
     let root = fixture_path("issue-3886-shell-helper-scripts");
     let results =
         fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
@@ -14,10 +14,23 @@ fn shell_helpers_run_by_package_scripts_credit_their_commands() {
         .iter()
         .map(|finding| finding.dep.package_name.as_str())
         .collect();
-    for used in ["report-tool", "nested-tool", "exec-tool", "cd-tool"] {
+    for (used, why) in [
+        ("report-tool", "a package script runs the helper with bash"),
+        ("nested-tool", "a helper runs a nested helper"),
+        ("exec-tool", "a package script runs the helper directly"),
+        ("cd-tool", "a command after cd still credits its package"),
+        (
+            "ws-tool",
+            "a workspace script runs a helper of the repository",
+        ),
+        (
+            "ci-tool",
+            "a CI step runs a helper in its working-directory",
+        ),
+    ] {
         assert!(
             !unused_deps.contains(&used),
-            "{used} runs in a shell helper: {unused_deps:?}"
+            "{used}: {why}: {unused_deps:?}"
         );
     }
     assert!(
@@ -38,12 +51,10 @@ fn shell_helpers_run_by_package_scripts_credit_their_commands() {
                 .replace('\\', "/")
         })
         .collect();
-    assert!(
-        !unused_files.contains(&"src/generate.ts".to_string()),
-        "a file that a helper runs with tsx is an entry: {unused_files:?}"
-    );
-    assert!(
-        unused_files.contains(&"src/after-cd.ts".to_string()),
-        "a path after `cd` is relative to another directory: {unused_files:?}"
-    );
+    // `src/generate.ts`, `src/release-entry.ts` (after `cd "$(dirname "$0")/.."`),
+    // `packages/web/src/ws-entry.ts` and `tools/src/ci-entry.ts` are helper
+    // entries. `chmod +x` and `shellcheck` take a helper path but add nothing.
+    // `src/after-cd.ts` stays unused, because the helper runs it after
+    // `cd packages`.
+    assert_eq!(unused_files, vec!["src/after-cd.ts".to_string()]);
 }

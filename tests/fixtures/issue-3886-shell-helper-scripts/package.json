@@ -4,13 +4,19 @@
   "main": "src/index.ts",
   "scripts": {
     "build": "bash scripts/build.sh",
-    "release": "./scripts/release.sh --dry-run"
+    "release": "./scripts/release.sh --dry-run",
+    "prepare": "chmod +x scripts/build.sh",
+    "lint:sh": "shellcheck scripts/build.sh scripts/nested.sh"
   },
   "devDependencies": {
     "cd-tool": "1.0.0",
+    "ci-tool": "1.0.0",
     "exec-tool": "1.0.0",
     "nested-tool": "1.0.0",
     "report-tool": "1.0.0",
     "unused-tool": "1.0.0"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

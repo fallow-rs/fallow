@@ -49,9 +49,24 @@ impl WorkspacePackage {
 #[derive(Debug, Default)]
 pub struct WorkspacePackages {
     packages: Vec<WorkspacePackage>,
+    /// The shell helper files that the commands of the project run, read
+    /// once for the whole analysis.
+    shell_helpers: super::shell_helpers::ShellHelperFiles,
 }
 
 impl WorkspacePackages {
+    /// Set the project root: the boundary and cache of shell helper files.
+    #[must_use]
+    pub fn with_project_root(mut self, project_root: &std::path::Path) -> Self {
+        self.shell_helpers = super::shell_helpers::ShellHelperFiles::new(project_root);
+        self
+    }
+
+    /// The shell helper files of the project.
+    pub(super) const fn shell_helpers(&self) -> &super::shell_helpers::ShellHelperFiles {
+        &self.shell_helpers
+    }
+
     /// Add a workspace package. `dir` is relative to the project root.
     #[expect(
         clippy::disallowed_types,

@@ -951,7 +951,7 @@ pub fn collect_workspace_packages(
             .replace('\\', "/");
         packages.add(&ws.name, &dir, ws_pkg.scripts.as_ref());
     }
-    std::sync::Arc::new(packages)
+    std::sync::Arc::new(packages.with_project_root(project_root))
 }
 
 /// The scripts of each package that a runtime script of another package

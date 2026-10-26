@@ -1,0 +1,11 @@
+{
+  "name": "web",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "bash ../../scripts/ws-build.sh"
+  },
+  "devDependencies": {
+    "ws-tool": "1.0.0"
+  }
+}

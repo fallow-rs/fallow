@@ -44,6 +44,7 @@ pub use resolve::{
     project_bin_map, resolve_binary_to_packages, resolve_known_dependency_binary,
 };
 pub use shell::command_substitutions;
+use shell::is_builtin_command;
 pub use workspace_selection::WorkspacePackages;
 use workspace_selection::{PackageSelector, WorkspacePackage, relative_dir};
 
@@ -720,6 +721,8 @@ pub struct ScriptCatalog {
     /// The directory of the package whose commands this catalog resolves,
     /// relative to the project root. Empty for the root package.
     package_dir: String,
+    /// The directory in which the commands run, for the shell helpers they name.
+    helper_base: shell_helpers::HelperBase,
 }
 
 impl ScriptCatalog {
@@ -731,6 +734,7 @@ impl ScriptCatalog {
         ambiguous: FxHashSet::with_hasher(rustc_hash::FxBuildHasher),
         workspaces: None,
         package_dir: String::new(),
+        helper_base: shell_helpers::HelperBase::Package,
     };
 
     /// Attach the workspace packages of the project. `package_dir` is the
@@ -1407,7 +1411,6 @@ where
             bin_map,
             &context,
             &mut result,
-            &mut shell_helpers::HelperWalk::default(),
         );
     }
 
@@ -2926,50 +2929,6 @@ pub fn looks_like_script_file(token: &str) -> bool {
         return false;
     }
     token.contains('/') || token.starts_with("./") || token.starts_with("../")
-}
-
-/// Check if a command is a shell built-in (not an npm package).
-fn is_builtin_command(cmd: &str) -> bool {
-    matches!(
-        cmd,
-        "echo"
-            | "cat"
-            | "cp"
-            | "mv"
-            | "rm"
-            | "mkdir"
-            | "rmdir"
-            | "ls"
-            | "cd"
-            | "pwd"
-            | "test"
-            | "true"
-            | "false"
-            | "exit"
-            | "export"
-            | "source"
-            | "which"
-            | "chmod"
-            | "chown"
-            | "touch"
-            | "find"
-            | "grep"
-            | "sed"
-            | "awk"
-            | "xargs"
-            | "tee"
-            | "sort"
-            | "uniq"
-            | "wc"
-            | "head"
-            | "tail"
-            | "sleep"
-            | "wait"
-            | "kill"
-            | "sh"
-            | "bash"
-            | "zsh"
-    )
 }
 
 #[cfg(test)]
