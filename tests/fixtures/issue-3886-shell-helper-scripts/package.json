@@ -1,0 +1,16 @@
+{
+  "name": "issue-3886-shell-helper-scripts",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "release": "./scripts/release.sh --dry-run"
+  },
+  "devDependencies": {
+    "cd-tool": "1.0.0",
+    "exec-tool": "1.0.0",
+    "nested-tool": "1.0.0",
+    "report-tool": "1.0.0",
+    "unused-tool": "1.0.0"
+  }
+}

@@ -22,6 +22,7 @@ mod node_test;
 pub mod nx_targets;
 mod resolve;
 mod shell;
+mod shell_helpers;
 pub mod vite_plus;
 mod workspace_selection;
 
@@ -1378,7 +1379,8 @@ pub fn analyze_scripts_with_dependency_context(
 /// (`npm run lint -- --format gha`) is resolved to that script's body with the
 /// call-site arguments appended, so binaries and flag values behind the
 /// indirection are credited. The file arguments of a command that `ignored`
-/// lists are not entry files.
+/// lists are not entry files. A command that runs a project-local shell helper
+/// (`bash scripts/build.sh`) also analyzes the commands of that helper.
 #[must_use]
 pub fn analyze_commands_with_context<'a, I>(
     commands: I,
@@ -1399,7 +1401,14 @@ where
     };
 
     for command in commands {
-        accumulate_command_with_context(command, root, bin_map, &context, &mut result);
+        shell_helpers::accumulate_command_and_helpers(
+            command,
+            root,
+            bin_map,
+            &context,
+            &mut result,
+            &mut shell_helpers::HelperWalk::default(),
+        );
     }
 
     result.dedupe_paths();
@@ -1440,23 +1449,6 @@ fn accumulate_command(
         bin_map,
         parse_script(command),
         IgnoredCommandEntries::NONE,
-        result,
-    );
-}
-
-fn accumulate_command_with_context(
-    command: &str,
-    root: &Path,
-    bin_map: &FxHashMap<String, String>,
-    context: &ScriptCommandContext<'_>,
-    result: &mut ScriptAnalysis,
-) {
-    accumulate_parsed_commands(
-        command,
-        root,
-        bin_map,
-        parse_script_with_context(command, root, bin_map, context),
-        context.ignored,
         result,
     );
 }
@@ -2901,7 +2893,7 @@ fn looks_like_file_path(token: &str) -> bool {
 
     const EXTENSIONS: &[&str] = &[
         ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".json", ".yaml", ".yml",
-        ".toml",
+        ".toml", ".sh", ".bash",
     ];
     if EXTENSIONS.iter().any(|ext| token.ends_with(ext)) {
         return true;

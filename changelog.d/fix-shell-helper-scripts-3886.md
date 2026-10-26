@@ -1,0 +1,3 @@
+### Fixed
+
+- **Package scripts and CI steps that run a local shell helper now credit the commands of that helper.** For `bash scripts/build.sh` or `./scripts/release.sh`, Fallow reads the helper without running it. A binary that the helper runs makes its package used, and a file that the helper runs with `tsx` or `node` becomes an entry. Fallow follows nested helpers and stops at a cycle. It does not read a helper outside the package directory or in `node_modules`. After a `cd`, the remaining commands of the helper credit packages but do not add entries. (Closes [#3886](https://github.com/fallow-rs/fallow/issues/3886))
