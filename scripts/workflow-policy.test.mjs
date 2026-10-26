@@ -984,6 +984,7 @@ test("release credential jobs run in the main-only release environment", () => {
   const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
   const security = readFileSync("docs/development/release-security.md", "utf8");
   const credentialJobs = [
+    "authenticode",
     "npm-publish",
     "publish-crates",
     "publisher-auth-check",
@@ -2479,7 +2480,7 @@ test("release build dependencies never receive the binary signing credential", (
     "dependency execution must run outside the signing environment",
   );
   const signing = indentedBlock(workflow, "sign", 2);
-  assert.match(signing, /needs: build/u);
+  assert.match(signing, /needs: \[build, authenticode\]/u);
   assert.match(signing, /environment: release/u);
   assert.doesNotMatch(
     signing,
@@ -2505,6 +2506,57 @@ test("release build dependencies never receive the binary signing credential", (
       `${consumer} must wait for signed artifacts`,
     );
   }
+});
+
+test("Windows binaries get an Authenticode signature before packaging", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const build = indentedBlock(workflow, "build", 2);
+  const authenticode = indentedBlock(workflow, "authenticode", 2);
+  assert.match(authenticode, /needs: build/u);
+  assert.match(authenticode, /environment: release/u);
+  assert.match(authenticode, /permissions:\n\s+contents: read\n\s+id-token: write\n/u);
+  assert.doesNotMatch(
+    authenticode,
+    /secrets\.|actions\/checkout|npm (?:ci|install)|cargo |cache@/u,
+    "the Authenticode runner must not read secrets or run repository code",
+  );
+  assert.match(authenticode, /uses: Azure\/artifact-signing-action@[0-9a-f]{40} #/u);
+  assert.match(authenticode, /case "\$\{WINDOWS_SIGNING_MODE:-off\}" in/u);
+
+  const windowsBuilds = Array.from(
+    build.matchAll(/- target: (\S+-pc-windows-msvc)\n(?:\s+\w+: .+\n)*?\s+npm_dir: (\S+)/gu),
+    (match) => `${match[2]} ${match[1]}`,
+  );
+  const signedBuilds = Array.from(
+    authenticode.matchAll(/- npm_dir: (\S+)\n\s+target: (\S+)/gu),
+    (match) => `${match[1]} ${match[2]}`,
+  );
+  assert.deepEqual(signedBuilds.toSorted(), windowsBuilds.toSorted());
+
+  for (const name of [
+    "fallow",
+    "fallow-multicall",
+    "fallow-lsp",
+    "fallow-mcp",
+    "fallow-similar-code",
+  ]) {
+    assert.match(
+      authenticode,
+      new RegExp(String.raw`\\payload\\${name}-\$\{\{ matrix\.npm_dir \}\}\.exe`, "u"),
+    );
+  }
+  assert.match(authenticode, /\\napi\\fallow-node\.\$\{\{ matrix\.npm_dir \}\}\.node/u);
+  for (const artifact of [
+    "unsigned-binaries-${{ matrix.npm_dir }}",
+    "napi-${{ matrix.npm_dir }}",
+    "fallow-${{ matrix.target }}",
+  ]) {
+    assert.ok(
+      authenticode.includes(`name: ${artifact}\n`),
+      `${artifact} must be replaced by its signed copy`,
+    );
+  }
+  assert.equal(authenticode.match(/overwrite: true/gu)?.length, 3);
 });
 
 test("npm publishing uses only environment-scoped trusted publishing", () => {

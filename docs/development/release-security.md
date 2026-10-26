@@ -12,6 +12,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `release-context` | Bind the dispatch to `main`, the release version, and an absent tag | Read only |
 | `pgo-profile` | Build an instrumented binary, train the PGO profile on pinned public fixtures, and upload only the profile | Read only |
 | `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
+| `authenticode` | Add an Authenticode signature to the Windows executables and NAPI addons, then replace their build artifacts | Artifact Signing OIDC |
 | `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
 | `validate` | Reusable release validation, including the similar-code sidecar dependency audit | Read only |
 | `musl-smoke` | Run the exact unsigned musl binaries in a digest-pinned Alpine container on x64 and arm64 | Read only |
@@ -71,6 +72,44 @@ The frozen `@vscode/vsce@4.0.0` supports `--oidc`, requesting audience
 authority. Their graphs and binary signing keys are independent of this mode
 selection. Account policies, mode activation, legacy-token revocation and
 real publication require separate owner actions.
+
+## Windows Authenticode signing
+
+Windows Smart App Control and SmartScreen block an unsigned executable that
+has no reputation. They do not know the Ed25519 signature that `sign` adds. The
+`authenticode` job signs every Fallow Windows file with Azure Artifact Signing:
+the CLI, multicall, LSP, MCP and similar-code executables, and the NAPI addon.
+The certificate subject is `Fallow B.V.`. The job never signs third-party
+files, such as the TypeScript binary in the type-aware VSIX.
+
+`WINDOWS_SIGNING_MODE` in the protected `release` environment selects the
+mode. `off`, or no value, keeps the build artifacts unchanged and prints a
+warning. `authenticode` requires these nonsecret variables in the same
+environment:
+
+| Variable | Value |
+|---|---|
+| `WINDOWS_SIGNING_CLIENT_ID` | Client ID of the Entra app with the Certificate Profile Signer role |
+| `WINDOWS_SIGNING_TENANT_ID` | Tenant ID of that app and of the Artifact Signing account |
+| `WINDOWS_SIGNING_ENDPOINT` | Regional account endpoint, for example `https://neu.codesigning.azure.net/` |
+| `WINDOWS_SIGNING_ACCOUNT` | Artifact Signing account name |
+| `WINDOWS_SIGNING_PROFILE` | Public Trust certificate profile name |
+
+The Entra app federates with issuer
+`https://token.actions.githubusercontent.com`, subject
+`repo:fallow-rs/fallow:environment:release` and audience
+`api://AzureADTokenExchange`. The repository uses the default OIDC subject, so
+the subject must not use the immutable ID format. The app holds only the
+Artifact Signing Certificate Profile Signer role on the signing account.
+
+The job runs after `build` and before `sign`. It downloads the raw payload,
+the NAPI addon and the release archive, and checks that each archive entry has
+the same bytes as the raw payload. After signing, it requires a valid,
+timestamped signature with `O=Fallow B.V.` on every file. It then rebuilds the
+archive from the signed files and uploads all three artifacts again under their
+build names. `sign`, `npm-prep`, `vscode-prep` and `release-assets` therefore
+read only signed Windows files. Authenticode changes the file bytes, so it must
+come before the Ed25519 signature and before every checksum.
 
 ## Marketplace Entra federation
 
@@ -175,8 +214,9 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 
 ## Invariants
 
-- Run every credential-bearing job in the `release` environment: `sign`
-  (binary signing key), `publish-crates`, `npm-publish`, and both VSIX
+- Run every credential-bearing job in the `release` environment:
+  `authenticode` (Artifact Signing OIDC), `sign` (binary signing key),
+  `publish-crates`, `npm-publish`, and both VSIX
   publisher jobs. Its deployment branch policy admits `main` only. The ref
   check in `release-context` is part of the workflow file, so it stops a
   mistaken dispatch but not an edited copy of the workflow on another ref; the
