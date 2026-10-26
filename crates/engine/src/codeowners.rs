@@ -32,7 +32,7 @@
 
 use std::path::Path;
 
-use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+use globset::{Candidate, Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 
 /// Wildcards (`*`, `?`, `[`, `{`) allowed in one CODEOWNERS pattern.
 ///
@@ -42,17 +42,25 @@ const MAX_RULE_WILDCARDS: usize = 32;
 
 /// Wildcards allowed across all patterns of one CODEOWNERS file.
 ///
-/// The `GlobSet` matches all patterns in one automaton, so lookup time grows
-/// with the wildcard total. Large public CODEOWNERS files stay below 400.
+/// Bound the total work required to compile patterns. Large public CODEOWNERS
+/// files stay below 400 wildcards.
 const MAX_FILE_WILDCARDS: usize = 4096;
+
+/// Target regex-source bytes times glob count in one matcher batch.
+///
+/// Regex fallback caches multiply automaton states by capture slots for every
+/// pattern. Batch this product, rather than only counting wildcards, so long
+/// literals cannot multiply the cache cost of every other ownership rule.
+/// A larger single glob remains valid and compiles in its own batch.
+const MAX_MATCHER_COST: usize = 8 * 1024 * 1024;
 
 /// Parsed CODEOWNERS file for ownership lookup.
 #[derive(Debug)]
 pub struct CodeOwners {
-    /// Primary owner per rule, indexed by glob position in the `GlobSet`.
+    /// Primary owner per rule, indexed through `glob_rules`.
     /// Empty string for negation rules (see `is_negation`).
     owners: Vec<String>,
-    /// Number of owners matched by each rule, indexed by glob position.
+    /// Number of owners matched by each rule, indexed through `glob_rules`.
     /// Zero for negation rules.
     owner_counts: Vec<u32>,
     /// Original CODEOWNERS pattern per rule (e.g. `/src/` or `*.ts`).
@@ -70,11 +78,17 @@ pub struct CodeOwners {
     section_owners: Vec<Vec<String>>,
     /// Whether the file contains at least one GitLab section header.
     has_sections: bool,
-    /// Compiled glob patterns for matching. One rule can compile to more than
-    /// one glob, so a glob index is not a rule index (see `glob_rules`).
-    globs: GlobSet,
-    /// Rule index per glob position in `globs`.
+    /// Ordered batches keep regex fallback caches independent of other batches.
+    globs: Vec<CodeOwnersMatcher>,
+    /// Rule index per translated glob, across all matcher batches.
     glob_rules: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct CodeOwnersMatcher {
+    globs: GlobSet,
+    /// Position of the batch's first glob in `CodeOwners::glob_rules`.
+    glob_offset: usize,
 }
 
 /// Standard locations to probe for a CODEOWNERS file, in priority order.
@@ -143,13 +157,18 @@ impl CodeOwners {
     /// Index of the last CODEOWNERS rule that matches the path, if any.
     ///
     /// CODEOWNERS resolves ownership with last-match-wins, so the highest
-    /// rule index wins, independent of the glob that matched.
+    /// rule index wins. Batches retain glob order, so the first matching batch
+    /// in reverse order contains the winning rule.
     fn last_matching_rule(&self, relative_path: &Path) -> Option<usize> {
-        self.globs
-            .matches(relative_path)
-            .into_iter()
-            .map(|glob_idx| self.glob_rules[glob_idx])
-            .max()
+        let candidate = Candidate::new(relative_path);
+        self.globs.iter().rev().find_map(|batch| {
+            batch
+                .globs
+                .matches_candidate(&candidate)
+                .into_iter()
+                .map(|idx| self.glob_rules[batch.glob_offset + idx])
+                .max()
+        })
     }
 
     /// Look up the primary owner of a file path (relative to project root).
@@ -268,7 +287,7 @@ impl CodeOwners {
 }
 
 struct CodeOwnersParser {
-    builder: GlobSetBuilder,
+    globs: Vec<Glob>,
     glob_rules: Vec<usize>,
     owners: Vec<String>,
     owner_counts: Vec<u32>,
@@ -285,7 +304,7 @@ struct CodeOwnersParser {
 impl CodeOwnersParser {
     fn new() -> Self {
         Self {
-            builder: GlobSetBuilder::new(),
+            globs: Vec::new(),
             glob_rules: Vec::new(),
             owners: Vec::new(),
             owner_counts: Vec::new(),
@@ -350,7 +369,7 @@ impl CodeOwnersParser {
                 .backslash_escape(true)
                 .build()
                 .map_err(|e| format!("invalid CODEOWNERS pattern '{pattern}': {e}"))?;
-            self.builder.add(glob);
+            self.globs.push(glob);
             self.glob_rules.push(rule_idx);
         }
 
@@ -369,10 +388,29 @@ impl CodeOwnersParser {
     }
 
     fn finish(self) -> Result<CodeOwners, String> {
-        let globs = self
-            .builder
-            .build()
-            .map_err(|e| format!("failed to compile CODEOWNERS patterns: {e}"))?;
+        let mut globs = Vec::new();
+        let mut offset = 0;
+        while offset < self.globs.len() {
+            let mut builder = GlobSetBuilder::new();
+            let mut regex_bytes: usize = 0;
+            let mut count = 0;
+            for glob in &self.globs[offset..] {
+                let next_bytes = regex_bytes.saturating_add(glob.regex().len());
+                if count > 0 && next_bytes.saturating_mul(count + 1) > MAX_MATCHER_COST {
+                    break;
+                }
+                regex_bytes = next_bytes;
+                builder.add(glob.clone());
+                count += 1;
+            }
+            globs.push(CodeOwnersMatcher {
+                globs: builder
+                    .build()
+                    .map_err(|e| format!("failed to compile CODEOWNERS patterns: {e}"))?,
+                glob_offset: offset,
+            });
+            offset += count;
+        }
 
         Ok(CodeOwners {
             owners: self.owners,
@@ -658,6 +696,46 @@ mod tests {
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(co.owners.len(), 1);
         assert_eq!(co.owners[0], "@owner");
+    }
+
+    #[test]
+    fn long_patterns_do_not_multiply_lookup_resources_by_rule_count() {
+        let mut content = String::from("[Files] @files\n/docs/escaped\\ file.md @escaped\n");
+        for index in 0..256 {
+            content.push_str(&format!("file{index}?\n"));
+        }
+        let literal = "a".repeat(65_536);
+        content.push_str(&format!(
+            "[Long] @long\n{literal}*\"\n[Overrides] @override\n!file0x\nfile1x\n"
+        ));
+        let owners = CodeOwners::parse(&content).unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..5 {
+            for index in 2..256 {
+                assert_eq!(
+                    owners.owner_of(Path::new(&format!("file{index}x"))),
+                    Some("@files")
+                );
+            }
+            assert_eq!(
+                owners.owner_of(Path::new(&format!("{literal}suffix\""))),
+                Some("@long")
+            );
+            assert_eq!(owners.owner_of(Path::new("file0x")), None);
+            assert_eq!(owners.owner_of(Path::new("file1x")), Some("@override"));
+            assert_eq!(
+                owners.owner_of(Path::new("docs/escaped file.md")),
+                Some("@escaped")
+            );
+            assert_eq!(
+                owners.section_of(Path::new("file1x")),
+                Some(Some("Overrides"))
+            );
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "ownership lookup exceeded its resource regression budget"
+        );
     }
 
     #[test]
