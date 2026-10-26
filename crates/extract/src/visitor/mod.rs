@@ -401,6 +401,8 @@ struct ContextualParameterTypes {
 
 enum FunctionTypeAliasBinding {
     Function(ContextualParameterTypes),
+    /// `type X = ReturnType<typeof useFooStore>`, mapped to `useFooStore`.
+    Store(String),
     ClassSelf,
     NonFunction,
 }
@@ -1160,13 +1162,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// as the store (`(s: X)` or `(props: { store: X })`) bind to the factory so
     /// `s.member` / `props.store.member` credit the store member through the
     /// existing `binding_target_names` remap (issue #1489 Case 2). Working state
-    /// only; never persisted.
-    ///
-    /// Resolution is source-order-dependent (recorded during the walk, the same
-    /// constraint as class type-param resolution): an alias declared BELOW its
-    /// first consuming param is not in the map yet when the param is processed,
-    /// so that one ordering keeps the false positive. The inline
-    /// `ReturnType<typeof useStore>` annotation needs no alias and is unaffected.
+    /// only; never persisted. An alias in a function body or block is a
+    /// `FunctionTypeAliasBinding::Store` in `function_type_alias_scopes`.
     type_alias_store_factory: FxHashMap<String, String>,
     /// SvelteKit `load()` return-object keys harvested from a `load` export.
     /// Basename-gated to page-load producers in `parse.rs` (cleared for any

@@ -19,11 +19,16 @@ fn type_is_shadowed(
     scopes: &[FxHashMap<String, FunctionTypeAliasBinding>],
     type_name: &str,
 ) -> bool {
-    scopes
-        .iter()
-        .rev()
-        .find_map(|scope| scope.get(type_name))
+    nearest_type_binding(scopes, type_name)
         .is_some_and(|binding| !matches!(binding, FunctionTypeAliasBinding::ClassSelf))
+}
+
+/// The binding of `type_name` in the nearest function or block scope.
+pub(super) fn nearest_type_binding<'s>(
+    scopes: &'s [FxHashMap<String, FunctionTypeAliasBinding>],
+    type_name: &str,
+) -> Option<&'s FunctionTypeAliasBinding> {
+    scopes.iter().rev().find_map(|scope| scope.get(type_name))
 }
 
 #[derive(Default)]
@@ -121,14 +126,17 @@ impl ModuleInfoExtractor {
                 .values()
                 .filter_map(|param| {
                     let type_name = param.type_name.as_deref()?;
-                    if type_is_shadowed(type_alias_scopes, type_name) {
-                        return None;
-                    }
                     // `type CounterStore = ReturnType<typeof useCounterStore>`:
-                    // credit the store factory, not the local alias.
-                    let object = store_aliases
-                        .get(type_name)
-                        .map_or(type_name, String::as_str);
+                    // credit the store factory, not the local alias. A
+                    // nearer alias of the same name in a function body or
+                    // block wins over the module alias.
+                    let object = match nearest_type_binding(type_alias_scopes, type_name) {
+                        Some(FunctionTypeAliasBinding::Store(factory)) => factory.as_str(),
+                        Some(FunctionTypeAliasBinding::ClassSelf) | None => store_aliases
+                            .get(type_name)
+                            .map_or(type_name, String::as_str),
+                        Some(_) => return None,
+                    };
                     Some((param, object))
                 })
                 .flat_map(|(param, type_name)| {
@@ -424,10 +432,16 @@ impl ModuleInfoExtractor {
         for statement in statements {
             let (name, binding) = match statement {
                 Statement::TSTypeAliasDeclaration(alias) => {
-                    let binding = Self::function_type_alias_params(alias).map_or(
-                        FunctionTypeAliasBinding::NonFunction,
-                        FunctionTypeAliasBinding::Function,
-                    );
+                    let binding = if let Some(factory) =
+                        Self::store_factory_from_return_type(&alias.type_annotation)
+                    {
+                        FunctionTypeAliasBinding::Store(factory)
+                    } else {
+                        Self::function_type_alias_params(alias).map_or(
+                            FunctionTypeAliasBinding::NonFunction,
+                            FunctionTypeAliasBinding::Function,
+                        )
+                    };
                     (alias.id.name.as_str(), binding)
                 }
                 Statement::TSInterfaceDeclaration(interface) => (
@@ -517,9 +531,9 @@ impl ModuleInfoExtractor {
             if let Some(binding) = scope.get(name) {
                 return match binding {
                     FunctionTypeAliasBinding::Function(params) => Some(params),
-                    FunctionTypeAliasBinding::ClassSelf | FunctionTypeAliasBinding::NonFunction => {
-                        None
-                    }
+                    FunctionTypeAliasBinding::Store(_)
+                    | FunctionTypeAliasBinding::ClassSelf
+                    | FunctionTypeAliasBinding::NonFunction => None,
                 };
             }
         }

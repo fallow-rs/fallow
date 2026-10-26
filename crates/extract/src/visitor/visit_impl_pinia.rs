@@ -8,8 +8,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::MemberAccess;
 use crate::js_text::JsText;
+use crate::visitor::FunctionTypeAliasBinding;
 use fallow_types::extract::{MemberInfo, MemberKind};
 
+use super::visit_structural::nearest_type_binding;
 use super::{
     BindingTarget, ModuleInfoExtractor, extract_arrow_return_expr,
     extract_function_body_final_return_expr, static_member_object_name, unwrap_paren_expr,
@@ -404,19 +406,23 @@ impl ModuleInfoExtractor {
         if let TSType::TSTypeReference(type_ref) = ty
             && let TSTypeName::IdentifierReference(ident) = &type_ref.type_name
         {
-            return self
-                .type_alias_store_factory
-                .get(ident.name.as_str())
-                .cloned();
+            return self.store_factory_for_type_name(ident.name.as_str());
         }
         None
     }
 
     /// Resolve a bare type-reference name (`CounterStore`) to its store factory
     /// via a recorded `type CounterStore = ReturnType<typeof useCounterStore>`
-    /// alias.
+    /// alias. An alias in the nearest function body or block wins over a
+    /// module alias, and another local type of that name shadows it.
     pub(super) fn store_factory_for_type_name(&self, type_name: &str) -> Option<String> {
-        self.type_alias_store_factory.get(type_name).cloned()
+        match nearest_type_binding(&self.function_type_alias_scopes, type_name) {
+            Some(FunctionTypeAliasBinding::Store(factory)) => Some(factory.clone()),
+            Some(FunctionTypeAliasBinding::ClassSelf) | None => {
+                self.type_alias_store_factory.get(type_name).cloned()
+            }
+            Some(_) => None,
+        }
     }
 
     fn store_name_from_refs_arg<'a>(&self, arg: &'a Argument<'_>) -> Option<&'a str> {
