@@ -4,6 +4,6 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {
         let _ = fallow_core::extract::extract_mdx_statements(s);
-        let _ = fallow_core::extract::extract_mdx_statements_mapped(s);
+        let _ = fallow_extract::extract_mdx_statements_mapped(s);
     }
 });
