@@ -691,11 +691,11 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         envelope["kind"].as_str(),
         Some("dead-code" | "architecture")
     ) {
-        normalize_historical_prop_count(&mut envelope)?;
+        normalize_historical_component_counts(&mut envelope)?;
     }
     for key in ["check", "dead_code"] {
         if let Some(section) = envelope.get_mut(key) {
-            normalize_historical_prop_count(section)?;
+            normalize_historical_component_counts(section)?;
         }
     }
     let grouped_by = envelope
@@ -761,7 +761,7 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         }
     }
     if !current_schema {
-        normalize_historical_prop_count(&mut envelope)?;
+        normalize_historical_component_counts(&mut envelope)?;
     }
     Ok(SavedEnvelope {
         envelope,
@@ -860,7 +860,7 @@ fn validate_current_grouped_dead_code(
             root_total != previous_grouped_total,
         )?;
         for group in groups {
-            normalize_historical_prop_count(group)?;
+            normalize_historical_component_counts(group)?;
         }
         root.insert("total_issues".to_owned(), current_grouped_total.into());
     }
@@ -895,7 +895,7 @@ fn reject_current_component_counters(
 
 /// Earlier schema-10 producers excluded some explicit component-health errors
 /// from totals. Positive summary counters distinguish the current policies.
-fn normalize_historical_prop_count(envelope: &mut serde_json::Value) -> Result<(), String> {
+fn normalize_historical_component_counts(envelope: &mut serde_json::Value) -> Result<(), String> {
     let Some(declared) = envelope
         .get("total_issues")
         .and_then(serde_json::Value::as_u64)

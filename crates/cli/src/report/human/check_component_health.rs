@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use fallow_config::RulesConfig;
 use fallow_types::results::AnalysisResults;
 
 use super::{
@@ -8,15 +7,10 @@ use super::{
     format_prop_drilling_chain, format_thin_wrapper, prop_drilling_anchor,
 };
 
-/// Render the three opt-in React/Preact component-health grouped sections
-/// (prop-drilling, thin-wrapper, duplicate-prop-shape). Each defaults to `off`,
-/// so an empty collection renders nothing. Extracted from `build_policy_section`
-/// to keep that function under the unit-size ceiling.
 pub(super) fn push_react_component_health_sections(
     lines: &mut Vec<String>,
     results: &AnalysisResults,
     root: &Path,
-    _rules: &RulesConfig,
 ) {
     build_human_grouped_section(GroupedSectionInput {
         lines,

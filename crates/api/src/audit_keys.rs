@@ -35,6 +35,12 @@ pub struct AuditFindingRecord {
     pub effective_severity: Severity,
 }
 
+fn is_counted_dead_code_finding(collection: &str, severity: Severity) -> bool {
+    severity != Severity::Off
+        && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&collection)
+            || severity == Severity::Error)
+}
+
 /// Exhaustive dead-code comparison ledger shared by audit verdict and output.
 #[derive(Debug, Clone, Default)]
 pub struct DeadCodeAuditLedger {
@@ -77,9 +83,7 @@ impl DeadCodeAuditLedger {
         self.records
             .iter()
             .filter(|record| {
-                record.effective_severity != Severity::Off
-                    && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&record.collection)
-                        || record.effective_severity == Severity::Error)
+                is_counted_dead_code_finding(record.collection, record.effective_severity)
             })
             .count()
     }
@@ -121,10 +125,7 @@ impl DeadCodeAuditLedger {
             if record.introduced && !head_syntactic.contains(&record.stable_key) {
                 record.introduced = false;
                 self.introduced_keys.remove(&record.stable_key);
-                if record.effective_severity != Severity::Off
-                    && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&record.collection)
-                        || record.effective_severity == Severity::Error)
-                {
+                if is_counted_dead_code_finding(record.collection, record.effective_severity) {
                     self.inherited_keys.insert(record.stable_key.clone());
                 }
             }
@@ -845,11 +846,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
                 self.classifications += 1;
             }
             let introduced = self.base.is_some_and(|base| !base.contains(&key));
-            if effective_severity != Severity::Off
-                && self.base.is_some()
-                && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&collection)
-                    || effective_severity == Severity::Error)
-            {
+            if self.base.is_some() && is_counted_dead_code_finding(collection, effective_severity) {
                 if introduced {
                     self.introduced_keys.insert(key.clone());
                 } else {

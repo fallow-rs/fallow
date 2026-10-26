@@ -8,11 +8,6 @@ use super::{
     retain_unsuppressed, thin_wrapper::find_thin_wrappers,
 };
 
-/// Populate `thin_wrappers` when the rule is enabled. The rule defaults to `off`
-/// (opt-in health signal), so this is dormant by default: the located
-/// per-wrapper records appear only once the user sets `thin-wrapper` to
-/// `warn`/`error`. Gated on the project declaring `react` / `react-dom` / `next`
-/// / `preact` inside the detector (see [`find_thin_wrappers`]).
 pub(super) fn populate_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
     if input.config.rules.thin_wrapper == Severity::Off
         && !input.config.overrides.iter().any(|override_config| {
@@ -42,7 +37,6 @@ fn collect_thin_wrapper_findings(
         input.line_offsets_by_file,
     );
     if scan.components_scanned > 0 {
-        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
         tracing::info!(
             components_scanned = scan.components_scanned,
             thin_wrappers = scan.wrappers.len(),
@@ -56,14 +50,7 @@ fn collect_thin_wrapper_findings(
         .collect()
 }
 
-/// Populate `duplicate_prop_shapes` when the rule is enabled. The rule defaults
-/// to `off` (opt-in structural-refactor health signal), so this is dormant by
-/// default: the located per-component records appear only once the user sets
-/// `duplicate-prop-shape` to `warn`/`error`. Gated on the project declaring
-/// `react` / `react-dom` / `next` / `preact` inside the detector (see
-/// [`find_duplicate_prop_shapes`]).
-///
-/// Multi-file suppress model (copied from route-collision): a per-member finding
+/// Multi-file suppress model: a per-member finding
 /// is dropped by a line-level (`// fallow-ignore-next-line duplicate-prop-shape`
 /// at its component definition) or a file-level
 /// (`// fallow-ignore-file duplicate-prop-shape`) suppress, but the suppressed
@@ -90,7 +77,6 @@ pub(super) fn populate_duplicate_prop_shape_findings(
         input.line_offsets_by_file,
     );
     if scan.components_scanned > 0 {
-        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
         tracing::info!(
             components_scanned = scan.components_scanned,
             duplicate_prop_shapes = scan.groups.len(),

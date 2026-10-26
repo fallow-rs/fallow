@@ -2069,7 +2069,7 @@ fn push_component_io_sections(
         format_detail: &format_unused_component_prop,
     });
 
-    push_react_component_health_sections(lines, results, root, rules);
+    push_react_component_health_sections(lines, results, root);
 
     build_human_grouped_section(GroupedSectionInput {
         lines,
