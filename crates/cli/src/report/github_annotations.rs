@@ -341,6 +341,7 @@ fn collect_check(env: &Value, pm: PackageManager, out: &mut Vec<Annotation>) {
     collect_check_suppressions(env, out);
     collect_check_catalog(env, out);
     collect_prop_drilling(env, out);
+    collect_component_shapes(env, out);
 }
 
 fn collect_prop_drilling(env: &Value, out: &mut Vec<Annotation>) {
@@ -367,6 +368,41 @@ fn collect_prop_drilling(env: &Value, out: &mut Vec<Annotation>) {
                 u(item, "depth")
             ),
         );
+    }
+}
+
+fn collect_component_shapes(env: &Value, out: &mut Vec<Annotation>) {
+    for (collection, title) in [
+        ("thin_wrappers", "Thin wrapper"),
+        ("duplicate_prop_shapes", "Duplicate prop shape"),
+    ] {
+        for item in arr(env, collection).filter(|item| s(item, "effective_severity") == "error") {
+            let description = if collection == "thin_wrappers" {
+                format!(
+                    "Component '{}' only forwards its props to '{}'. Consider inlining it at its call sites.",
+                    s(item, "component"),
+                    s(item, "child_component")
+                )
+            } else {
+                format!(
+                    "Component '{}' shares its prop shape with {} components. Consider a shared Props type.",
+                    s(item, "component"),
+                    u(item, "group_size").saturating_sub(1)
+                )
+            };
+            push(
+                out,
+                AnnotationLevel::Error,
+                s(item, "file"),
+                Anchor {
+                    line: Some(u(item, "line")),
+                    col: None,
+                    ..no_anchor(item)
+                },
+                title.to_owned(),
+                description,
+            );
+        }
     }
 }
 

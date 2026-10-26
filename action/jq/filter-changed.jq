@@ -23,6 +23,8 @@ def filter_check:
       end
     ))
   else . end) |
+  (if .thin_wrappers then .thin_wrappers |= map(select(.file | in_changed)) else . end) |
+  (if .duplicate_prop_shapes then .duplicate_prop_shapes |= map(select(.file | in_changed)) else . end) |
   (if .unused_files         then .unused_files         |= map(select(.path | in_changed))      else . end) |
   (if .unused_exports       then .unused_exports       |= map(select(.path | in_changed))      else . end) |
   (if .unused_types         then .unused_types         |= map(select(.path | in_changed))      else . end) |
@@ -179,7 +181,9 @@ def filter_check:
       (.unproduced_catch_tags // [] | length) +
       (.unprovided_injects // [] | length) +
       (.unused_load_data_keys // [] | length) +
-      (.prop_drilling_chains // [] | map(select(.effective_severity == "error")) | length)
+      (.prop_drilling_chains // [] | map(select(.effective_severity == "error")) | length) +
+      (.thin_wrappers // [] | map(select(.effective_severity == "error")) | length) +
+      (.duplicate_prop_shapes // [] | map(select(.effective_severity == "error")) | length)
     )
   else . end);
 

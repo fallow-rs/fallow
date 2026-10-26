@@ -1223,6 +1223,8 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
     CheckSummary {
         total_issues: results.total_issues(),
         prop_drilling_chains: results.enforced_prop_drilling_count(),
+        thin_wrappers: results.enforced_thin_wrapper_count(),
+        duplicate_prop_shapes: results.enforced_duplicate_prop_shape_count(),
         unused_files: results.unused_files.len(),
         unused_exports: results.unused_exports.len(),
         unused_types: results.unused_types.len(),

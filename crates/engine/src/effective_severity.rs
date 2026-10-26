@@ -24,7 +24,7 @@
 //!
 //! Policy violations carry their own `severity`. Prop-drilling resolves the
 //! source hop and gates only at explicit error severity. Warning chains stay
-//! advisory under strict flags. Thin-wrapper and duplicate-prop-shape never gate.
+//! advisory under strict flags. Thin-wrapper and duplicate-prop-shape follow the same policy.
 
 use std::path::Path;
 
@@ -32,19 +32,20 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::output_dead_code::{
     AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
     BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
-    DevDependencyInProductionFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
-    EffectiveSeverity, EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EffectiveSeverity, EmptyCatalogGroupFinding, GatedFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
-    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
-    UnusedComponentEmitFinding, UnusedComponentInputFinding, UnusedComponentOutputFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
-    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use fallow_types::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -166,6 +167,8 @@ macro_rules! project_level {
 }
 
 file_scoped! {
+    ThinWrapperFinding => wrapper.file, thin_wrapper;
+    DuplicatePropShapeFinding => shape.file, duplicate_prop_shape;
     UnusedFileFinding => file.path, unused_files;
     UnusedExportFinding => export.path, unused_exports;
     UnusedTypeFinding => export.path, unused_types;
@@ -304,7 +307,7 @@ pub fn apply_effective_severities(results: &mut AnalysisResults, config: &Resolv
         finding.set_effective_severity(gate(severity));
     });
     apply_prop_drilling_severities(results, config);
-    apply_non_gating_severities(results, &config.rules);
+    apply_component_shape_severities(results, config);
 }
 
 pub fn apply_prop_drilling_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
@@ -316,39 +319,46 @@ pub fn apply_prop_drilling_severities(results: &mut AnalysisResults, config: &Re
     });
 }
 
-/// Write the rule severity onto each thin-wrapper and
-/// duplicate-prop-shape finding.
-///
-/// The analysis reads only the base rules for these types, so the value is
-/// the base rule. These findings never gate the run: the exit-code check and
-/// `--fail-on-issues` skip them.
-fn apply_non_gating_severities(results: &mut AnalysisResults, rules: &RulesConfig) {
-    set_all(&mut results.thin_wrappers, rules.thin_wrapper);
-    set_all(
-        &mut results.duplicate_prop_shapes,
-        rules.duplicate_prop_shape,
-    );
+/// Resolve source-owned component health severities without promoting warnings.
+fn apply_component_shape_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
+    let source = SeveritySource::from_config(config);
+    retain_component_findings(&mut results.thin_wrappers, &source);
+    retain_component_findings(&mut results.duplicate_prop_shapes, &source);
 }
 
-fn set_all<T: GatedFinding>(findings: &mut [T], rule: Severity) {
-    for finding in findings {
-        finding.set_effective_severity(gate(rule));
-    }
+fn retain_component_findings<T: GatedRuleFinding>(
+    findings: &mut Vec<T>,
+    source: &SeveritySource<'_>,
+) {
+    findings.retain_mut(|finding| {
+        let severity = finding.rule_severity(source);
+        finding.set_effective_severity(gate(severity));
+        severity != Severity::Off
+    });
 }
 
 /// The number of gated dead-code findings in `results` that carry no saved
 /// severity, for example in a report from an older version. A renderer then
 /// takes their level from the configured rules.
 ///
-/// Policy violations carry their own severity and do not count. Thin-wrapper
-/// and duplicate-prop-shape findings always remain advisory.
+/// Policy violations carry their own severity and do not count.
 #[must_use]
 pub fn findings_without_severity(mut results: AnalysisResults) -> usize {
     let mut missing = results
         .prop_drilling_chains
         .iter()
         .filter(|finding| finding.effective_severity.is_none())
-        .count();
+        .count()
+        + results
+            .thin_wrappers
+            .iter()
+            .filter(|finding| finding.effective_severity.is_none())
+            .count()
+        + results
+            .duplicate_prop_shapes
+            .iter()
+            .filter(|finding| finding.effective_severity.is_none())
+            .count();
     for_each_gated_finding(&mut results, &mut |finding| {
         if finding.effective_severity().is_none() {
             missing += 1;
@@ -407,7 +417,11 @@ fn count_findings_up_to(
         limit,
         total: 0,
     };
-    if severity == Severity::Error && tally.add(&results.prop_drilling_chains) {
+    if severity == Severity::Error
+        && (tally.add(&results.prop_drilling_chains)
+            || tally.add(&results.thin_wrappers)
+            || tally.add(&results.duplicate_prop_shapes))
+    {
         return tally.total;
     }
     if !tally.add(&results.policy_violations) {

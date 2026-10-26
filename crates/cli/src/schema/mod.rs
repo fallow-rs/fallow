@@ -1318,6 +1318,8 @@ mod tests {
         let rows = schema["issue_types"].as_array().unwrap();
 
         let expected: FxHashSet<&str> = TOTAL_ISSUE_RESULT_KEYS.iter().copied().collect();
+        assert!(expected.contains("duplicate_prop_shapes"));
+        assert!(expected.contains("thin_wrappers"));
         let mut counted = FxHashSet::default();
         let mut advisory = FxHashSet::default();
 
@@ -1410,10 +1412,7 @@ mod tests {
         }
 
         assert_eq!(expected, counted);
-        assert_eq!(
-            FxHashSet::from_iter(["duplicate_prop_shapes", "thin_wrappers"]),
-            advisory
-        );
+        assert!(advisory.is_empty());
     }
 
     #[test]
@@ -1429,10 +1428,20 @@ mod tests {
             .map(|row| row["id"].as_str().unwrap())
             .collect();
 
-        assert_eq!(
-            FxHashSet::from_iter(["duplicate-prop-shape", "thin-wrapper"]),
-            missing
-        );
+        assert!(missing.is_empty());
+        for (code, check_name) in [
+            ("duplicate-prop-shape", "fallow/duplicate-prop-shape"),
+            ("thin-wrapper", "fallow/thin-wrapper"),
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| row["id"].as_str() == Some(code))
+                .expect("component-health rule must be present");
+            assert_eq!(
+                row["codeclimate_check_names"],
+                serde_json::json!([check_name])
+            );
+        }
 
         for row in rows {
             if row["command"].as_str() == Some("dead-code")

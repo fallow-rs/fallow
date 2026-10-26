@@ -53,19 +53,6 @@ fn severity_to_sarif_level(s: Severity) -> &'static str {
     }
 }
 
-/// The CI severity of a type that never gates the exit code.
-///
-/// Thin-wrapper and duplicate-prop-shape findings are health
-/// signals: they never fail the run. An `error` rule is capped at `warn`, so
-/// a CI system that reads the level never shows an error for a run that
-/// passed. `off` stays `off`.
-const fn non_gating_severity(rule: Severity) -> Severity {
-    match rule {
-        Severity::Error => Severity::Warn,
-        other => other,
-    }
-}
-
 /// The SARIF level for one finding: its saved severity when the finding
 /// carries one, otherwise the configured rule severity (a saved report from an
 /// older version has no saved severity).
@@ -87,18 +74,6 @@ fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
         Severity::Error | Severity::Warn => severity_to_sarif_level(s),
         Severity::Off => "none",
-    }
-}
-
-/// The SARIF level of a finding type that never gates the exit code: its
-/// saved level, capped at `warning` (see [`non_gating_severity`]).
-///
-/// The cap applies to the saved severity too, because a saved `error` of
-/// these types still never failed the run.
-fn non_gating_level(finding: &impl GatedFinding, rule: Severity) -> &'static str {
-    match finding_level(finding, non_gating_severity(rule)) {
-        "error" => "warning",
-        level => level,
     }
 }
 
@@ -1279,8 +1254,8 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-server-action" => rules.unused_server_actions,
         "unused-load-data-key" => rules.unused_load_data_keys,
         "prop-drilling" => rules.prop_drilling,
-        "thin-wrapper" => non_gating_severity(rules.thin_wrapper),
-        "duplicate-prop-shape" => non_gating_severity(rules.duplicate_prop_shape),
+        "thin-wrapper" => rules.thin_wrapper,
+        "duplicate-prop-shape" => rules.duplicate_prop_shape,
         "route-collision" => rules.route_collision,
         "dynamic-segment-name-conflict" => rules.dynamic_segment_name_conflict,
         "stale-suppression" => rules.stale_suppressions,
@@ -1940,7 +1915,7 @@ fn push_component_shape_sarif_results(
         |c| sarif_prop_drilling_fields(&c.chain, root, finding_level(c, rules.prop_drilling)),
     );
     push_sarif_results(sarif_results, &results.thin_wrappers, snippets, |w| {
-        sarif_thin_wrapper_fields(&w.wrapper, root, non_gating_level(w, rules.thin_wrapper))
+        sarif_thin_wrapper_fields(&w.wrapper, root, finding_level(w, rules.thin_wrapper))
     });
     push_sarif_results(
         sarif_results,
@@ -1950,7 +1925,7 @@ fn push_component_shape_sarif_results(
             sarif_duplicate_prop_shape_fields(
                 &d.shape,
                 root,
-                non_gating_level(d, rules.duplicate_prop_shape),
+                finding_level(d, rules.duplicate_prop_shape),
             )
         },
     );

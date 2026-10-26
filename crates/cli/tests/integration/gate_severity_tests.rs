@@ -345,37 +345,72 @@ fn prop_drilling_explain_defines_enforced_counter_for_flat_and_grouped_output() 
     }
 }
 
+fn component_signal_project(rule: &str, severity: &str) -> tempfile::TempDir {
+    let project = crate::common::copy_fixture(rule);
+    let mut rules = serde_json::to_value(fallow_config::RulesConfig::default()).unwrap();
+    for value in rules.as_object_mut().unwrap().values_mut() {
+        *value = Value::String("off".to_owned());
+    }
+    rules[rule] = Value::String(severity.to_owned());
+    write(
+        project.path(),
+        ".fallowrc.json",
+        &serde_json::json!({"rules": rules}).to_string(),
+    );
+    project
+}
+
 #[test]
 fn other_component_signals_remain_advisory_under_strict_flags() {
-    for (fixture, rule, key) in [
-        ("thin-wrapper", "thin-wrapper", "thin_wrappers"),
-        (
-            "duplicate-prop-shape",
-            "duplicate-prop-shape",
-            "duplicate_prop_shapes",
-        ),
+    for (rule, key, expected_findings) in [
+        ("thin-wrapper", "thin_wrappers", 1),
+        ("duplicate-prop-shape", "duplicate_prop_shapes", 3),
     ] {
-        let project = crate::common::copy_fixture(fixture);
-        let mut rules = serde_json::to_value(fallow_config::RulesConfig::default()).unwrap();
-        for rule in rules.as_object_mut().unwrap().values_mut() {
-            *rule = Value::String("off".to_owned());
-        }
-        rules[rule] = Value::String("error".to_owned());
-        write(
-            project.path(),
-            ".fallowrc.json",
-            &serde_json::json!({"rules":rules}).to_string(),
-        );
+        let project = component_signal_project(rule, "warn");
         let output = dead_code(project.path(), "json", &["--fail-on-issues"]);
         let report = parse_json(&output);
-        assert!(!report[key].as_array().unwrap().is_empty(), "{fixture}");
-        assert_eq!(output.code, 0, "{fixture}: {}", output.stdout);
+        let findings = report[key].as_array().unwrap();
+        assert_eq!(findings.len(), expected_findings, "{rule}");
+        for finding in findings {
+            assert_eq!(finding["effective_severity"], "warn", "{rule}");
+        }
+        assert_eq!(output.code, 0, "{rule}: {}", output.stdout);
         assert_eq!(report["total_issues"], 0);
-        assert_eq!(
-            parse_json(&dead_code(project.path(), "sarif", &["--fail-on-issues"]))["runs"][0]["results"]
-                [0]["level"],
-            "warning"
-        );
+        let sarif = dead_code(project.path(), "sarif", &["--fail-on-issues"]);
+        assert_eq!(sarif.code, 0, "{rule}: {}", sarif.stdout);
+        let report = parse_json(&sarif);
+        let findings = report["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(findings.len(), expected_findings, "{rule}");
+        for finding in findings {
+            assert_eq!(finding["level"], "warning", "{rule}");
+        }
+    }
+}
+
+#[test]
+fn explicit_component_errors_gate_under_strict_flags() {
+    for (rule, key, expected_findings) in [
+        ("thin-wrapper", "thin_wrappers", 1),
+        ("duplicate-prop-shape", "duplicate_prop_shapes", 3),
+    ] {
+        let project = component_signal_project(rule, "error");
+        let output = dead_code(project.path(), "json", &["--fail-on-issues"]);
+        let report = parse_json(&output);
+        let findings = report[key].as_array().unwrap();
+        assert_eq!(findings.len(), expected_findings, "{rule}");
+        for finding in findings {
+            assert_eq!(finding["effective_severity"], "error", "{rule}");
+        }
+        assert_eq!(output.code, 1, "{rule}: {}", output.stdout);
+        assert_eq!(report["total_issues"], expected_findings);
+        let sarif = dead_code(project.path(), "sarif", &["--fail-on-issues"]);
+        assert_eq!(sarif.code, 1, "{rule}: {}", sarif.stdout);
+        let report = parse_json(&sarif);
+        let findings = report["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(findings.len(), expected_findings, "{rule}");
+        for finding in findings {
+            assert_eq!(finding["level"], "error", "{rule}");
+        }
     }
 }
 

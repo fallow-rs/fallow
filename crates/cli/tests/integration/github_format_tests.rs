@@ -1494,8 +1494,7 @@ fn summary_has_no_em_dashes() {
 
 /// The counted dead-code result rows: exactly the set the shell guard gates
 /// (`counts_in_total == true`). Prop-drilling participates when explicitly
-/// enforced. Thin-wrapper and duplicate-prop-shape remain advisory and are
-/// excluded from native CI reports.
+/// enforced, as do thin-wrapper and duplicate-prop-shape errors.
 fn counted_dead_code_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
     ISSUE_RESULT_META.iter().filter(|meta| meta.counts_in_total)
 }
@@ -1504,7 +1503,7 @@ fn counted_dead_code_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
 /// mirrors the shell drift guard's gated set size (verified equal by running
 /// `action/tests/issuekind-drift-guard.sh`); bump it in lockstep when a counted
 /// IssueKind lands so the Rust guard and the shell guard keep agreeing.
-const COUNTED_DEAD_CODE_KINDS: usize = 49;
+const COUNTED_DEAD_CODE_KINDS: usize = 51;
 
 /// Sentinel path embedded per kind so an annotation for that kind is uniquely
 /// identifiable in the rendered stream. `snt/` + the unique `result_key` +
@@ -1523,6 +1522,13 @@ fn dead_code_finding(result_key: &str) -> Value {
         "prop_drilling_chains" => json!({
             "prop": "user", "depth": 3, "effective_severity": "error",
             "hops": [{"file": path, "line": 1, "component": "Page"}],
+        }),
+        "thin_wrappers" => json!({
+            "file": path, "line": 1, "component": "Wrapper", "child_component": "Child", "effective_severity": "error",
+        }),
+        "duplicate_prop_shapes" => json!({
+            "file": path, "line": 1, "component": "Field", "shape": ["value", "error", "label", "helpText"],
+            "group_size": 3, "sharing_components": [], "effective_severity": "error",
         }),
         "unlisted_dependencies" => json!({
             "package_name": "pkg",

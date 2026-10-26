@@ -18,6 +18,11 @@
 //! json` envelope, which keeps `fallow report --from` output byte-identical
 //! to the direct format run.
 
+#[path = "github_summary_component_health.rs"]
+mod component_health;
+
+use component_health::{component_shape_sections, prop_drilling_section};
+
 use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
@@ -236,6 +241,12 @@ fn backtick_join(item: &Value, key: &str) -> String {
 
 const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
     ("Prop drilling", "prop_drilling_chains", "prop-drilling"),
+    ("Thin wrappers", "thin_wrappers", "thin-wrapper"),
+    (
+        "Duplicate prop shapes",
+        "duplicate_prop_shapes",
+        "duplicate-prop-shape",
+    ),
     ("Unused files", "unused_files", "unused-files"),
     ("Unused exports", "unused_exports", "unused-exports"),
     ("Unused types", "unused_types", "unused-types"),
@@ -464,7 +475,8 @@ fn dead_code_category_table(env: &Value) -> String {
         .filter_map(|(name, key, anchor)| {
             let n = arr(env, key)
                 .filter(|item| {
-                    *key != "prop_drilling_chains" || s(item, "effective_severity") == "error"
+                    !fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(key)
+                        || s(item, "effective_severity") == "error"
                 })
                 .count();
             (n > 0).then(|| format!("| [{name}]({}) | {n} |", dead_code_docs(anchor)))
@@ -1274,29 +1286,6 @@ fn check_tips(env: &Value) -> String {
     tips
 }
 
-#[must_use]
-fn prop_drilling_section(env: &Value) -> String {
-    let rows = arr(env, "prop_drilling_chains")
-        .filter(|item| s(item, "effective_severity") == "error")
-        .filter_map(|item| {
-            let source = arr(item, "hops").next()?;
-            Some(format!(
-                "| {} | {} | {} |",
-                markdown_table_code_span(s(source, "file")),
-                code_cell(item, "prop"),
-                u(item, "depth")
-            ))
-        })
-        .collect::<Vec<_>>();
-    if rows.is_empty() {
-        return String::new();
-    }
-    format!(
-        "\n### Prop drilling\n\n| Source | Prop | Components |\n|:-------|:-----|-----------:|\n{}\n\nReview composition, colocation or context, or suppress the source prop declaration.\n",
-        rows.join("\n")
-    )
-}
-
 fn render_check_summary(env: &Value) -> String {
     let elapsed = num(env, "elapsed_ms");
     let total_issues = u(env, "total_issues");
@@ -1317,6 +1306,7 @@ fn render_check_summary(env: &Value) -> String {
         }
     }
     sections.push_str(&prop_drilling_section(env));
+    sections.push_str(&component_shape_sections(env));
     let issue_noun = if total_issues == 1 { "issue" } else { "issues" };
     format!(
         "# Fallow Analysis\n\n> [!WARNING]\n> **{total_issues} {issue_noun}** found \u{b7} {elapsed}ms\n\n| Category | Count |\n|----------|------:|\n{}\n\n---\n{sections}{}",
@@ -2491,19 +2481,7 @@ fn audit_dead_code_rows(dead_code: &Value) -> Vec<AuditRow> {
     audit_rows_frameworks(dead_code, &mut rows);
     audit_rows_from_table(dead_code, AUDIT_COMPONENT_ROWS, &mut rows);
     audit_rows_from_table(dead_code, AUDIT_HYGIENE_ROWS, &mut rows);
-    for item in arr(dead_code, "prop_drilling_chains")
-        .filter(|item| s(item, "effective_severity") == "error")
-    {
-        let Some(source) = arr(item, "hops").next() else {
-            continue;
-        };
-        rows.push(audit_row(
-            "Prop drilling",
-            markdown_table_code_span(s(source, "file")),
-            code_cell(item, "prop"),
-            item,
-        ));
-    }
+    component_health::push_audit_component_health_rows(dead_code, &mut rows);
     rows
 }
 

@@ -3,6 +3,7 @@ mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
 mod bundle_externalization;
+mod component_health;
 mod deprecated_exports;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
@@ -68,18 +69,17 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-    DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
-    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnproducedCatchTagFinding,
-    UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
-    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
-    UnusedComponentEmitFinding, UnusedComponentInputFinding, UnusedComponentOutputFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEffectLayerFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    DuplicateExportFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
+    UnproducedCatchTagFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEffectLayerFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
     UnusedTaggedErrorFinding, UnusedTypeFinding,
 };
@@ -90,7 +90,7 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use duplicate_prop_shape::find_duplicate_prop_shapes;
+use component_health::{populate_duplicate_prop_shape_findings, populate_thin_wrapper_findings};
 use dynamic_segment_name_conflict::find_dynamic_segment_name_conflicts;
 use invalid_client_exports::find_invalid_client_exports;
 use members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
@@ -101,7 +101,6 @@ use re_export_cycles::find_re_export_cycles;
 use react_intel::compute_react_component_intel;
 use render_fan_in::compute_render_fan_in;
 use route_collision::find_route_collisions;
-use thin_wrapper::find_thin_wrappers;
 use unprovided_inject::{UnprovidedInjectInput, find_unprovided_injects};
 use unrendered_component::{
     LitUnrenderedInput, find_unrendered_angular_components, find_unrendered_components,
@@ -1540,94 +1539,6 @@ fn collect_prop_drilling_findings(
         .into_iter()
         .map(PropDrillingChainFinding::with_actions)
         .collect()
-}
-
-/// Populate `thin_wrappers` when the rule is enabled. The rule defaults to `off`
-/// (opt-in health signal), so this is dormant by default: the located
-/// per-wrapper records appear only once the user sets `thin-wrapper` to
-/// `warn`/`error`. Gated on the project declaring `react` / `react-dom` / `next`
-/// / `preact` inside the detector (see [`find_thin_wrappers`]).
-fn populate_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    if input.config.rules.thin_wrapper == Severity::Off {
-        return;
-    }
-    let findings = collect_thin_wrapper_findings(input);
-    input.results.thin_wrappers =
-        retain_unsuppressed(input, findings, IssueKind::ThinWrapper, |f| {
-            Some((f.wrapper.file.as_path(), f.wrapper.line))
-        });
-}
-
-fn collect_thin_wrapper_findings(
-    input: &FrameworkSpecificFindingsInput<'_>,
-) -> Vec<ThinWrapperFinding> {
-    let scan = find_thin_wrappers(
-        input.graph,
-        input.modules,
-        input.resolved_modules,
-        input.declared_deps,
-        input.line_offsets_by_file,
-    );
-    if scan.components_scanned > 0 {
-        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
-        tracing::info!(
-            components_scanned = scan.components_scanned,
-            thin_wrappers = scan.wrappers.len(),
-            "React detected, {} component(s) scanned for thin wrappers",
-            scan.components_scanned
-        );
-    }
-    scan.wrappers
-        .into_iter()
-        .map(ThinWrapperFinding::with_actions)
-        .collect()
-}
-
-/// Populate `duplicate_prop_shapes` when the rule is enabled. The rule defaults
-/// to `off` (opt-in structural-refactor health signal), so this is dormant by
-/// default: the located per-component records appear only once the user sets
-/// `duplicate-prop-shape` to `warn`/`error`. Gated on the project declaring
-/// `react` / `react-dom` / `next` / `preact` inside the detector (see
-/// [`find_duplicate_prop_shapes`]).
-///
-/// Multi-file suppress model (copied from route-collision): a per-member finding
-/// is dropped by a line-level (`// fallow-ignore-next-line duplicate-prop-shape`
-/// at its component definition) or a file-level
-/// (`// fallow-ignore-file duplicate-prop-shape`) suppress, but the suppressed
-/// member STILL appears in its siblings' `sharing_components`, because the
-/// `sharing_components` roster is built at emit time (before this filter) and
-/// the group is real regardless of suppression.
-fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    if input.config.rules.duplicate_prop_shape == Severity::Off {
-        return;
-    }
-    let scan = find_duplicate_prop_shapes(
-        input.graph,
-        input.modules,
-        input.declared_deps,
-        input.line_offsets_by_file,
-    );
-    if scan.components_scanned > 0 {
-        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
-        tracing::info!(
-            components_scanned = scan.components_scanned,
-            duplicate_prop_shapes = scan.groups.len(),
-            "React detected, {} component(s) scanned for duplicate prop shapes",
-            scan.components_scanned
-        );
-    }
-    // A suppression drops THIS member only. Its slot in the siblings'
-    // `sharing_components` is unaffected, because the roster was built at emit
-    // time.
-    let findings = scan
-        .groups
-        .into_iter()
-        .map(DuplicatePropShapeFinding::with_actions)
-        .collect();
-    input.results.duplicate_prop_shapes =
-        retain_unsuppressed(input, findings, IssueKind::DuplicatePropShape, |f| {
-            Some((f.shape.file.as_path(), f.shape.line))
-        });
 }
 
 /// Build the raw (as-discovered) module-path -> `FileId` index.

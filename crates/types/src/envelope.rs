@@ -115,6 +115,12 @@ pub struct CheckSummary {
     /// Prop chains whose saved effective severity explicitly enforces error policy.
     #[serde(default, skip_serializing_if = "zero_count")]
     pub prop_drilling_chains: usize,
+    /// Thin wrappers whose saved effective severity explicitly enforces error policy.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub thin_wrappers: usize,
+    /// Duplicate prop shapes whose saved effective severity explicitly enforces error policy.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub duplicate_prop_shapes: usize,
     /// Unused source files.
     pub unused_files: usize,
     /// Unused value exports.

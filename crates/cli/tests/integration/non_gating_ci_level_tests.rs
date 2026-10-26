@@ -3,13 +3,7 @@
     reason = "integration tests use expect to keep fixture setup concise"
 )]
 
-//! Thin-wrapper and duplicate-prop-shape findings never gate
-//! the exit code. Their CI level is capped at `warning`, so a CI system that
-//! reads the level never shows an error for a run that passed.
-//!
-//! SARIF carries these findings at level `warning` for an `error` and a `warn`
-//! rule, and the SARIF rule default follows. CodeClimate and GitHub
-//! annotations do not carry these findings at all.
+//! Component health findings stay advisory at warning severity and enforce errors.
 
 use crate::common::{CommandOutput, fixture_path, parse_json, run_fallow_raw};
 use serde_json::Value;
@@ -48,10 +42,11 @@ fn run(command: &str, rule: &str, level: &str, format: &str) -> CommandOutput {
     ]);
     let output = run_fallow_raw(&args);
     assert_eq!(
-        output.code, 0,
-        "`{command}` with {rule}={level} --format {format} must pass, because the type never \
-         gates\nstdout:\n{}\nstderr:\n{}",
-        output.stdout, output.stderr
+        output.code,
+        i32::from(command == "dead-code" && level == "error"),
+        "`{command}` with {rule}={level} --format {format} must match the enforced exit policy\nstdout:\n{}\nstderr:\n{}",
+        output.stdout,
+        output.stderr
     );
     output
 }
@@ -82,7 +77,7 @@ fn sarif_default_level(sarif: &Value, rule_id: &str) -> String {
 }
 
 #[test]
-fn sarif_caps_non_gating_types_at_warning() {
+fn sarif_component_levels_follow_configured_enforcement() {
     for command in ["dead-code", ""] {
         for (rule, rule_id) in TYPES {
             for level in LEVELS {
@@ -94,12 +89,14 @@ fn sarif_caps_non_gating_types_at_warning() {
                     "`{command}` {rule}={level}: the fixture must produce a finding"
                 );
                 assert!(
-                    levels.iter().all(|found| found == "warning"),
-                    "`{command}` {rule}={level}: SARIF levels {levels:?}, expected warning"
+                    levels
+                        .iter()
+                        .all(|found| found == if level == "error" { "error" } else { "warning" }),
+                    "`{command}` {rule}={level}: SARIF levels {levels:?}, expected configured severity"
                 );
                 assert_eq!(
                     sarif_default_level(&sarif, rule_id),
-                    "warning",
+                    if level == "error" { "error" } else { "warning" },
                     "`{command}` {rule}={level}: SARIF rule default level"
                 );
             }
@@ -108,7 +105,7 @@ fn sarif_caps_non_gating_types_at_warning() {
 }
 
 #[test]
-fn codeclimate_and_annotations_carry_no_non_gating_finding() {
+fn codeclimate_and_annotations_carry_only_enforced_component_findings() {
     for (rule, rule_id) in TYPES {
         for level in LEVELS {
             let output = run("dead-code", rule, level, "codeclimate");
@@ -119,12 +116,22 @@ fn codeclimate_and_annotations_carry_no_non_gating_finding() {
                 .iter()
                 .filter(|issue| issue["check_name"] == rule_id)
                 .count();
-            assert_eq!(matching, 0, "{rule}={level}: CodeClimate issues");
+            assert_eq!(
+                matching,
+                if level == "warn" {
+                    0
+                } else if rule == "thin-wrapper" {
+                    1
+                } else {
+                    3
+                },
+                "{rule}={level}: CodeClimate issues"
+            );
 
             let output = run("dead-code", rule, level, "github-annotations");
             assert!(
-                !output.stdout.contains("::error"),
-                "{rule}={level}: annotations must hold no error line:\n{}",
+                output.stdout.contains("::error") == (level == "error"),
+                "{rule}={level}: annotations must match the error policy:\n{}",
                 output.stdout
             );
         }

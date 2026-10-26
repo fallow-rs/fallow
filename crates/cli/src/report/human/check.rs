@@ -1,3 +1,8 @@
+#[path = "check_component_health.rs"]
+mod component_health;
+
+use component_health::push_react_component_health_sections;
+
 use crate::report::sink::outln;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -1855,56 +1860,6 @@ fn push_architecture_sections(
         root,
         total_issues,
     );
-}
-
-/// Render the three opt-in React/Preact component-health grouped sections
-/// (prop-drilling, thin-wrapper, duplicate-prop-shape). Each defaults to `off`,
-/// so an empty collection renders nothing. Extracted from `build_policy_section`
-/// to keep that function under the unit-size ceiling.
-fn push_react_component_health_sections(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-) {
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.prop_drilling_chains,
-        title: "Prop drilling",
-        level: if results.enforced_prop_drilling_count() > 0 {
-            crate::report::Level::Error
-        } else {
-            crate::report::Level::Warn
-        },
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: prop_drilling_anchor,
-        format_detail: &format_prop_drilling_chain,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.thin_wrappers,
-        title: "Thin wrappers",
-        level: severity_to_level(rules.thin_wrapper),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |w: &fallow_types::output_dead_code::ThinWrapperFinding| w.wrapper.file.as_path(),
-        format_detail: &format_thin_wrapper,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.duplicate_prop_shapes,
-        title: "Duplicate prop shapes",
-        level: severity_to_level(rules.duplicate_prop_shape),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |d: &fallow_types::output_dead_code::DuplicatePropShapeFinding| {
-            d.shape.file.as_path()
-        },
-        format_detail: &format_duplicate_prop_shape,
-    });
 }
 
 /// Build the Policy category (rule-pack findings). Separate from Structure
@@ -3766,8 +3721,8 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
 /// holds only these signals must still render.
 fn has_component_health_signals(results: &AnalysisResults) -> bool {
     results.prop_drilling_chains.len() > results.enforced_prop_drilling_count()
-        || !results.thin_wrappers.is_empty()
-        || !results.duplicate_prop_shapes.is_empty()
+        || results.thin_wrappers.len() > results.enforced_thin_wrapper_count()
+        || results.duplicate_prop_shapes.len() > results.enforced_duplicate_prop_shape_count()
 }
 
 fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {

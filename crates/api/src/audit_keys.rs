@@ -4,6 +4,11 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+#[path = "audit_keys_collection.rs"]
+mod collection;
+
+use collection::AuditCollection;
+
 use fallow_config::{ResolvedConfig, Severity};
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::identity::{IdentifiedFinding, IdentityPaths, dead_code_occurrence_keys};
@@ -66,14 +71,14 @@ impl DeadCodeAuditLedger {
     }
 
     /// Number of counted findings whose effective severity is not off.
-    /// Advisory prop chains remain available in the records.
+    /// Advisory component findings remain available in the records.
     #[must_use]
     pub fn visible_count(&self) -> usize {
         self.records
             .iter()
             .filter(|record| {
                 record.effective_severity != Severity::Off
-                    && (record.collection != "prop_drilling_chains"
+                    && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&record.collection)
                         || record.effective_severity == Severity::Error)
             })
             .count()
@@ -117,7 +122,7 @@ impl DeadCodeAuditLedger {
                 record.introduced = false;
                 self.introduced_keys.remove(&record.stable_key);
                 if record.effective_severity != Severity::Off
-                    && (record.collection != "prop_drilling_chains"
+                    && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&record.collection)
                         || record.effective_severity == Severity::Error)
                 {
                     self.inherited_keys.insert(record.stable_key.clone());
@@ -196,8 +201,8 @@ impl DeadCodeAuditLedger {
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
             prop_drilling_chains,
-            thin_wrappers: _thin_wrappers,
-            duplicate_prop_shapes: _duplicate_prop_shapes,
+            thin_wrappers,
+            duplicate_prop_shapes,
             export_usages: _export_usages,
             entry_point_summary: _entry_point_summary,
             render_fan_in: _render_fan_in,
@@ -219,6 +224,8 @@ impl DeadCodeAuditLedger {
         }
 
         annotate!(prop_drilling_chains, "prop_drilling_chains");
+        annotate!(thin_wrappers, "thin_wrappers");
+        annotate!(duplicate_prop_shapes, "duplicate_prop_shapes");
         annotate!(unused_files, "unused_files");
         annotate!(unused_exports, "unused_exports");
         annotate!(unused_types, "unused_types");
@@ -677,13 +684,8 @@ impl DeadCodeKeyCollector<'_> {
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
             prop_drilling_chains,
-            // Thin wrappers are a dormant health signal (rule defaults to `off`); a
-            // candidate-for-inlining record, not a dead-code attribution key.
-            thin_wrappers: _thin_wrappers,
-            // Duplicate prop shapes are a dormant multi-file health signal (rule
-            // defaults to `off`); a missing-abstraction record, not a dead-code
-            // attribution key.
-            duplicate_prop_shapes: _duplicate_prop_shapes,
+            thin_wrappers,
+            duplicate_prop_shapes,
             // Export usages and entry-point summary are metadata, not issue
             // collections; no key needed.
             export_usages: _export_usages,
@@ -698,6 +700,8 @@ impl DeadCodeKeyCollector<'_> {
         } = results;
 
         self.add_items(AuditCollection::PropDrillingChains, prop_drilling_chains);
+        self.add_items(AuditCollection::ThinWrappers, thin_wrappers);
+        self.add_items(AuditCollection::DuplicatePropShapes, duplicate_prop_shapes);
         self.add_core_findings(
             unused_files,
             unused_exports,
@@ -766,168 +770,6 @@ impl DeadCodeKeyCollector<'_> {
             route_collisions,
             dynamic_segment_name_conflicts,
         });
-    }
-}
-
-#[derive(Clone, Copy)]
-enum AuditCollection {
-    PropDrillingChains,
-    UnusedFiles,
-    UnusedExports,
-    UnusedTypes,
-    PrivateTypeLeaks,
-    DeprecatedExportsInUse,
-    UnusedDependencies,
-    UnusedDevDependencies,
-    UnusedOptionalDependencies,
-    UnusedEnumMembers,
-    UnusedClassMembers,
-    UnusedStoreMembers,
-    UnresolvedImports,
-    UnlistedDependencies,
-    DuplicateExports,
-    TypeOnlyDependencies,
-    TestOnlyDependencies,
-    DevDependenciesInProduction,
-    CircularDependencies,
-    ReExportCycles,
-    PackageCycles,
-    BoundaryViolations,
-    BoundaryCoverageViolations,
-    BoundaryCallViolations,
-    PolicyViolations,
-    StaleSuppressions,
-    UnusedCatalogEntries,
-    EmptyCatalogGroups,
-    UnresolvedCatalogReferences,
-    UnusedDependencyOverrides,
-    MisconfiguredDependencyOverrides,
-    InvalidClientExports,
-    MixedClientServerBarrels,
-    MisplacedDirectives,
-    UnprovidedInjects,
-    UnrenderedComponents,
-    RouteCollisions,
-    DynamicSegmentNameConflicts,
-    UnusedComponentProps,
-    AbsentComponentProps,
-    UnusedComponentEmits,
-    UnusedComponentInputs,
-    UnusedComponentOutputs,
-    UnusedSvelteEvents,
-    UnusedEffectLayers,
-    UnusedTaggedErrors,
-    UnproducedCatchTags,
-    UnusedServerActions,
-    UnusedLoadDataKeys,
-}
-
-impl AuditCollection {
-    #[cfg(test)]
-    const ALL: [Self; 49] = [
-        Self::PropDrillingChains,
-        Self::UnusedFiles,
-        Self::UnusedExports,
-        Self::UnusedTypes,
-        Self::PrivateTypeLeaks,
-        Self::DeprecatedExportsInUse,
-        Self::UnusedDependencies,
-        Self::UnusedDevDependencies,
-        Self::UnusedOptionalDependencies,
-        Self::UnusedEnumMembers,
-        Self::UnusedClassMembers,
-        Self::UnusedStoreMembers,
-        Self::UnresolvedImports,
-        Self::UnlistedDependencies,
-        Self::DuplicateExports,
-        Self::TypeOnlyDependencies,
-        Self::TestOnlyDependencies,
-        Self::DevDependenciesInProduction,
-        Self::CircularDependencies,
-        Self::ReExportCycles,
-        Self::PackageCycles,
-        Self::BoundaryViolations,
-        Self::BoundaryCoverageViolations,
-        Self::BoundaryCallViolations,
-        Self::PolicyViolations,
-        Self::StaleSuppressions,
-        Self::UnusedCatalogEntries,
-        Self::EmptyCatalogGroups,
-        Self::UnresolvedCatalogReferences,
-        Self::UnusedDependencyOverrides,
-        Self::MisconfiguredDependencyOverrides,
-        Self::InvalidClientExports,
-        Self::MixedClientServerBarrels,
-        Self::MisplacedDirectives,
-        Self::UnprovidedInjects,
-        Self::UnrenderedComponents,
-        Self::RouteCollisions,
-        Self::DynamicSegmentNameConflicts,
-        Self::UnusedComponentProps,
-        Self::AbsentComponentProps,
-        Self::UnusedComponentEmits,
-        Self::UnusedComponentInputs,
-        Self::UnusedComponentOutputs,
-        Self::UnusedSvelteEvents,
-        Self::UnusedEffectLayers,
-        Self::UnusedTaggedErrors,
-        Self::UnproducedCatchTags,
-        Self::UnusedServerActions,
-        Self::UnusedLoadDataKeys,
-    ];
-
-    const fn json_key(self) -> &'static str {
-        match self {
-            Self::PropDrillingChains => "prop_drilling_chains",
-            Self::UnusedFiles => "unused_files",
-            Self::UnusedExports => "unused_exports",
-            Self::UnusedTypes => "unused_types",
-            Self::PrivateTypeLeaks => "private_type_leaks",
-            Self::DeprecatedExportsInUse => "deprecated_exports_in_use",
-            Self::UnusedDependencies => "unused_dependencies",
-            Self::UnusedDevDependencies => "unused_dev_dependencies",
-            Self::UnusedOptionalDependencies => "unused_optional_dependencies",
-            Self::UnusedEnumMembers => "unused_enum_members",
-            Self::UnusedClassMembers => "unused_class_members",
-            Self::UnusedStoreMembers => "unused_store_members",
-            Self::UnresolvedImports => "unresolved_imports",
-            Self::UnlistedDependencies => "unlisted_dependencies",
-            Self::DuplicateExports => "duplicate_exports",
-            Self::TypeOnlyDependencies => "type_only_dependencies",
-            Self::TestOnlyDependencies => "test_only_dependencies",
-            Self::DevDependenciesInProduction => "dev_dependencies_in_production",
-            Self::CircularDependencies => "circular_dependencies",
-            Self::ReExportCycles => "re_export_cycles",
-            Self::PackageCycles => "package_cycles",
-            Self::BoundaryViolations => "boundary_violations",
-            Self::BoundaryCoverageViolations => "boundary_coverage_violations",
-            Self::BoundaryCallViolations => "boundary_call_violations",
-            Self::PolicyViolations => "policy_violations",
-            Self::StaleSuppressions => "stale_suppressions",
-            Self::UnusedCatalogEntries => "unused_catalog_entries",
-            Self::EmptyCatalogGroups => "empty_catalog_groups",
-            Self::UnresolvedCatalogReferences => "unresolved_catalog_references",
-            Self::UnusedDependencyOverrides => "unused_dependency_overrides",
-            Self::MisconfiguredDependencyOverrides => "misconfigured_dependency_overrides",
-            Self::InvalidClientExports => "invalid_client_exports",
-            Self::MixedClientServerBarrels => "mixed_client_server_barrels",
-            Self::MisplacedDirectives => "misplaced_directives",
-            Self::UnprovidedInjects => "unprovided_injects",
-            Self::UnrenderedComponents => "unrendered_components",
-            Self::RouteCollisions => "route_collisions",
-            Self::DynamicSegmentNameConflicts => "dynamic_segment_name_conflicts",
-            Self::UnusedComponentProps => "unused_component_props",
-            Self::AbsentComponentProps => "absent_component_props",
-            Self::UnusedComponentEmits => "unused_component_emits",
-            Self::UnusedComponentInputs => "unused_component_inputs",
-            Self::UnusedComponentOutputs => "unused_component_outputs",
-            Self::UnusedSvelteEvents => "unused_svelte_events",
-            Self::UnusedEffectLayers => "unused_effect_layers",
-            Self::UnusedTaggedErrors => "unused_tagged_errors",
-            Self::UnproducedCatchTags => "unproduced_catch_tags",
-            Self::UnusedServerActions => "unused_server_actions",
-            Self::UnusedLoadDataKeys => "unused_load_data_keys",
-        }
     }
 }
 
@@ -1005,7 +847,8 @@ impl<'a> DeadCodeKeyCollector<'a> {
             let introduced = self.base.is_some_and(|base| !base.contains(&key));
             if effective_severity != Severity::Off
                 && self.base.is_some()
-                && (collection != "prop_drilling_chains" || effective_severity == Severity::Error)
+                && (!fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(&collection)
+                    || effective_severity == Severity::Error)
             {
                 if introduced {
                     self.introduced_keys.insert(key.clone());
@@ -1566,6 +1409,8 @@ pub fn retain_introduced_dead_code(
     }
     retain!(
         prop_drilling_chains,
+        thin_wrappers,
+        duplicate_prop_shapes,
         unused_files,
         unused_exports,
         unused_types,
@@ -1694,11 +1539,8 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
         // Prop chains use source identities and occurrence-aware audit filtering.
         prop_drilling_chains: _prop_drilling_chains,
-        // Thin wrappers are a dormant health signal (rule defaults to `off`);
-        // no dead-code key and not base-filtered here.
+        // Component health findings use source identities and occurrence-aware filtering.
         thin_wrappers: _thin_wrappers,
-        // Duplicate prop shapes are a dormant multi-file health signal (rule
-        // defaults to `off`); no dead-code key and not base-filtered here.
         duplicate_prop_shapes: _duplicate_prop_shapes,
         // Export usages and entry-point summary are metadata, not issue
         // collections; no key needed.
@@ -1769,6 +1611,8 @@ pub fn annotate_dead_code_json(
     }
     annotate!(
         prop_drilling_chains,
+        thin_wrappers,
+        duplicate_prop_shapes,
         unused_files,
         unused_exports,
         unused_types,
@@ -4001,6 +3845,27 @@ mod tests {
                             line: 4,
                             component: "Page".to_owned(),
                         }],
+                    },
+                )],
+                thin_wrappers: vec![ThinWrapperFinding::with_actions(ThinWrapper {
+                    file: root.join("src/page.ts"),
+                    line: 4,
+                    component: "Wrapper".to_owned(),
+                    child_component: "Child".to_owned(),
+                })],
+                duplicate_prop_shapes: vec![DuplicatePropShapeFinding::with_actions(
+                    DuplicatePropShape {
+                        file: root.join("src/page.ts"),
+                        line: 5,
+                        component: "Field".to_owned(),
+                        shape: vec![
+                            "value".to_owned(),
+                            "error".to_owned(),
+                            "helpText".to_owned(),
+                            "label".to_owned(),
+                        ],
+                        group_size: 3,
+                        sharing_components: vec![],
                     },
                 )],
                 ..effect_results(&root)

@@ -6163,6 +6163,14 @@
           "type": "integer",
           "description": "Prop chains whose saved effective severity explicitly enforces error policy."
         },
+        "thin_wrappers": {
+          "type": "integer",
+          "description": "Thin wrappers whose saved effective severity explicitly enforces error policy."
+        },
+        "duplicate_prop_shapes": {
+          "type": "integer",
+          "description": "Duplicate prop shapes whose saved effective severity explicitly enforces error policy."
+        },
         "unused_files": {
           "type": "integer",
           "description": "Unused source files."
@@ -19190,7 +19198,7 @@
               "type": "null"
             }
           ],
-          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
+          "description": "Rule severity of this finding. Explicit errors enforce analysis gates;\nwarnings stay advisory, including under strict flags. Saved reports\nretain this value for CI levels without the original config. Absent\nin output from older versions. Not part of finding identity, baseline\nkeys or fingerprints."
         }
       },
       "required": [
@@ -19269,7 +19277,7 @@
               "type": "null"
             }
           ],
-          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
+          "description": "Rule severity of this finding. Explicit errors enforce analysis gates;\nwarnings stay advisory, including under strict flags. Saved reports\nretain this value for CI levels without the original config. Absent\nin output from older versions. Not part of finding identity, baseline\nkeys or fingerprints."
         }
       },
       "required": [

@@ -108,11 +108,16 @@ macro_rules! with_baseline_fields {
             route_collisions,
             dynamic_segment_name_conflicts,
             prop_drilling_chains,
+            thin_wrappers,
+            duplicate_prop_shapes,
         )
     };
 }
 
+mod finding_counts;
 mod install_state;
+
+use finding_counts::{baseline_finding_count, cascade_hidden_matches};
 mod prune;
 
 pub use install_state::{install_state_diagnostic, saved_node_modules_state};
@@ -716,6 +721,12 @@ pub struct BaselineData {
     /// Reviewed prop chains, keyed by source component and prop with occurrence matching.
     #[serde(default)]
     prop_drilling_chains: Vec<String>,
+    /// Reviewed thin wrappers, keyed by source component with occurrence matching.
+    #[serde(default)]
+    thin_wrappers: Vec<String>,
+    /// Reviewed duplicate prop shapes, keyed by component and significant shape.
+    #[serde(default)]
+    duplicate_prop_shapes: Vec<String>,
 }
 
 impl BaselineData {
@@ -845,6 +856,8 @@ impl BaselineData {
             route_collisions: file_exports.route_collisions,
             dynamic_segment_name_conflicts: file_exports.dynamic_segment_name_conflicts,
             prop_drilling_chains: Vec::new(),
+            thin_wrappers: Vec::new(),
+            duplicate_prop_shapes: Vec::new(),
         }
     }
 
@@ -905,6 +918,8 @@ impl BaselineData {
             + self.route_collisions.len()
             + self.dynamic_segment_name_conflicts.len()
             + self.prop_drilling_chains.len()
+            + self.thin_wrappers.len()
+            + self.duplicate_prop_shapes.len()
     }
 }
 
@@ -2408,30 +2423,6 @@ pub fn apply_dead_code_baseline(
     })
 }
 
-fn baseline_finding_count(results: &crate::results::AnalysisResults) -> usize {
-    results.total_issues() - results.enforced_prop_drilling_count()
-        + results.prop_drilling_chains.len()
-}
-
-/// Baseline entries that match a finding of the unused-file cascade filter.
-///
-/// Such a finding still exists: the report hides it because its file is an
-/// unused file. Its baseline entry therefore still describes the project and
-/// must not count as stale. The hidden findings sit in unused files and the
-/// reported ones do not, so no entry can match both.
-fn cascade_hidden_matches(
-    results: &crate::results::AnalysisResults,
-    baseline: &BaselineData,
-    root: &Path,
-) -> usize {
-    if results.cascade.hidden.is_empty() {
-        return 0;
-    }
-    let hidden = results.cascade.hidden.to_results();
-    let before = hidden.total_issues();
-    before.saturating_sub(filter_new_issues(hidden, baseline, root).total_issues())
-}
-
 /// Baseline data for duplication comparison.
 ///
 /// New baselines key every clone group by `<fingerprint>:<instance count>` in
@@ -3884,6 +3875,8 @@ mod tests {
             route_collisions: vec![],
             dynamic_segment_name_conflicts: vec![],
             prop_drilling_chains: vec![],
+            thin_wrappers: vec![],
+            duplicate_prop_shapes: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -3960,6 +3953,8 @@ mod tests {
             route_collisions: vec![],
             dynamic_segment_name_conflicts: vec![],
             prop_drilling_chains: vec![],
+            thin_wrappers: vec![],
+            duplicate_prop_shapes: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -4023,6 +4018,8 @@ mod tests {
             route_collisions: vec![],
             dynamic_segment_name_conflicts: vec![],
             prop_drilling_chains: vec![],
+            thin_wrappers: vec![],
+            duplicate_prop_shapes: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

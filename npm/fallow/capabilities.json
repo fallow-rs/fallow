@@ -4536,9 +4536,11 @@
       "sarif_rule_ids": [
         "fallow/thin-wrapper"
       ],
-      "codeclimate_check_names": null,
+      "codeclimate_check_names": [
+        "fallow/thin-wrapper"
+      ],
       "ts_alias": null,
-      "counts_in_total": false,
+      "counts_in_total": true,
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line thin-wrapper",
@@ -4570,9 +4572,11 @@
       "sarif_rule_ids": [
         "fallow/duplicate-prop-shape"
       ],
-      "codeclimate_check_names": null,
+      "codeclimate_check_names": [
+        "fallow/duplicate-prop-shape"
+      ],
       "ts_alias": null,
-      "counts_in_total": false,
+      "counts_in_total": true,
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line duplicate-prop-shape",

@@ -20,6 +20,7 @@ mod http_stub;
 mod sign;
 
 mod absent_component_prop_tests;
+mod advisory_component_gate_tests;
 mod agent_tests;
 mod architecture_tests;
 mod audit_analysis_selection_tests;

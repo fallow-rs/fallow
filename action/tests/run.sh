@@ -3809,6 +3809,15 @@ PROP_EMPTY=$(jq '.prop_drilling_chains[0].hops=[]' <<< "$PROP_CHECK")
 PROP_SCOPED=$(jq --argjson changed '["src/main.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_EMPTY")
 assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$PROP_SCOPED")" '[1,1]' "prop scope: empty-hop imported error stays counted without fabricated path"
 
+# Component health errors count after changed-file filtering; warnings remain advisory.
+COMPONENT_CHECK='{"total_issues":2,"thin_wrappers":[{"file":"src/Wrapper.tsx","effective_severity":"error"}],"duplicate_prop_shapes":[{"file":"src/Field.tsx","effective_severity":"error"},{"file":"src/Other.tsx","effective_severity":"warn"}]}'
+COMPONENT_SCOPED=$(jq --argjson changed '["src/Wrapper.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$COMPONENT_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.thin_wrappers|length),(.duplicate_prop_shapes|length)]' <<< "$COMPONENT_SCOPED")" '[1,1,0]' "component scope: wrapper errors retain their own anchor and total"
+COMPONENT_SCOPED=$(jq --argjson changed '["src/Field.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$COMPONENT_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.thin_wrappers|length),(.duplicate_prop_shapes|length)]' <<< "$COMPONENT_SCOPED")" '[1,0,1]' "component scope: duplicate shape errors retain their own anchor and total"
+COMPONENT_SCOPED=$(jq --argjson changed '["src/Other.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$COMPONENT_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.thin_wrappers|length),(.duplicate_prop_shapes|length)]' <<< "$COMPONENT_SCOPED")" '[0,0,1]' "component scope: shape warnings remain visible and advisory"
+
 # --- IssueKind summary drift guard ---
 #
 # A new fallow dead-code IssueKind must be wired into every GitHub jq surface

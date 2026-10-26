@@ -1747,7 +1747,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Thin wrappers",
         docs_anchor: "thin-wrapper",
         result_key: "thin_wrappers",
-        counts_in_total: false,
+        counts_in_total: true,
     },
     IssueResultMeta {
         code: "duplicate-prop-shape",
@@ -1758,7 +1758,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Duplicate prop shapes",
         docs_anchor: "duplicate-prop-shape",
         result_key: "duplicate_prop_shapes",
-        counts_in_total: false,
+        counts_in_total: true,
     },
 ];
 
@@ -2276,15 +2276,5 @@ mod tests {
             .map(|meta| meta.result_key)
             .collect();
         assert_eq!(from_total, from_meta);
-    }
-
-    #[test]
-    fn advisory_result_keys_are_explicitly_excluded_from_total() {
-        let expected = BTreeSet::from(["duplicate_prop_shapes", "thin_wrappers"]);
-        let from_meta: BTreeSet<&str> = result_issue_metas()
-            .filter(|meta| !meta.counts_in_total)
-            .map(|meta| meta.result_key)
-            .collect();
-        assert_eq!(expected, from_meta);
     }
 }
