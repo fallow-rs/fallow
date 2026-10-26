@@ -9878,6 +9878,41 @@ fn angular_inject_alias_property_records_instance_binding() {
 }
 
 #[test]
+fn method_declared_return_type_records_call_instance_binding() {
+    // Issue #3868: `manager.current().member` resolves through the declared
+    // return type of `current()`. Static, private, and method-generic returns
+    // record no binding.
+    let info = parse(
+        r"
+        import type { Tool } from './tool';
+        import { Widget } from './widget';
+
+        export class Manager {
+            current(): Tool | undefined { return undefined; }
+            widget(): Widget { return new Widget(); }
+            static make(): Widget { return new Widget(); }
+            private hidden(): Widget { return new Widget(); }
+            pick<T>(): T { return undefined as T; }
+        }
+        ",
+    );
+
+    let bindings = info
+        .class_heritage
+        .iter()
+        .find(|heritage| heritage.export_name == "Manager")
+        .map(|heritage| heritage.instance_bindings.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        bindings,
+        vec![
+            ("current()".to_string(), "Tool".to_string()),
+            ("widget()".to_string(), "Widget".to_string()),
+        ]
+    );
+}
+
+#[test]
 fn non_angular_inject_property_does_not_record_instance_binding() {
     let info = parse(
         r"

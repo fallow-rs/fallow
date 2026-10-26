@@ -658,6 +658,8 @@ mod issue_3324_nested_package;
 mod issue_3490_entry_glob_star_segment;
 #[path = "integration_test/issue_3817_workspace_dist_src_exports.rs"]
 mod issue_3817_workspace_dist_src_exports;
+#[path = "integration_test/issue_3868_method_return_type_member.rs"]
+mod issue_3868_method_return_type_member;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
