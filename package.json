@@ -48,8 +48,8 @@
     "typescript": "7.0.2"
   },
   "devDependencies": {
-    "@commitlint/cli": "21.2.3",
-    "@commitlint/config-conventional": "21.2.3",
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
     "@tanstack/intent": "0.5.5",
     "oxfmt": "0.73.0",
     "oxlint": "1.88.0"
