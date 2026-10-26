@@ -866,14 +866,16 @@ jobs:
   # not the Ed25519 signature that `sign` adds. This job signs every Fallow
   # Windows executable and NAPI addon before any packaging job reads them, and
   # replaces the build artifacts with the signed copies under the same names.
-  # The build job stays outside the release environment, so only this fresh
-  # runner can request a signature. Third-party binaries are never signed here.
-  # `WINDOWS_SIGNING_MODE=off` (or unset) keeps the artifacts unchanged.
+  # The signing app trusts only the `windows-signing` environment subject. The
+  # publisher jobs in `release` run third-party tools with `id-token: write`,
+  # so a shared subject would let that code request a Fallow B.V. signature.
+  # Third-party binaries are never signed here. `WINDOWS_SIGNING_MODE=off` (or
+  # unset) keeps the artifacts unchanged.
   authenticode:
     name: Authenticode (${{ matrix.npm_dir }})
     if: ${{ !inputs.auth_check }}
     needs: build
-    environment: release
+    environment: windows-signing
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:

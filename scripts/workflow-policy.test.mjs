@@ -984,7 +984,6 @@ test("release credential jobs run in the main-only release environment", () => {
   const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
   const security = readFileSync("docs/development/release-security.md", "utf8");
   const credentialJobs = [
-    "authenticode",
     "npm-publish",
     "publish-crates",
     "publisher-auth-check",
@@ -1001,6 +1000,8 @@ test("release credential jobs run in the main-only release environment", () => {
   for (const name of jobNames) {
     const job = indentedBlock(workflow, name, 2);
     const inEnvironment = /^ {4}environment: release$/mu.test(job);
+    const inSigningEnvironment =
+      name === "authenticode" && /^ {4}environment: windows-signing$/mu.test(job);
     const holdsCredentials =
       /\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)/u.test(job) || /^\s+id-token: write$/mu.test(job);
 
@@ -1008,10 +1009,12 @@ test("release credential jobs run in the main-only release environment", () => {
       environmentJobs.push(name);
     }
     assert.ok(
-      !holdsCredentials || inEnvironment,
+      !holdsCredentials || inEnvironment || inSigningEnvironment,
       `${name} holds publication credentials outside the release environment`,
     );
-    assert.doesNotMatch(job, /^ {4}environment:(?! release$)/mu);
+    if (!inSigningEnvironment) {
+      assert.doesNotMatch(job, /^ {4}environment:(?! release$)/mu);
+    }
   }
 
   assert.deepEqual(environmentJobs.toSorted(), credentialJobs);
@@ -2513,7 +2516,12 @@ test("Windows binaries get an Authenticode signature before packaging", () => {
   const build = indentedBlock(workflow, "build", 2);
   const authenticode = indentedBlock(workflow, "authenticode", 2);
   assert.match(authenticode, /needs: build/u);
-  assert.match(authenticode, /environment: release/u);
+  assert.match(authenticode, /^ {4}environment: windows-signing$/mu);
+  assert.equal(
+    workflow.match(/environment: windows-signing/gu)?.length,
+    1,
+    "only the Authenticode job may request the signing identity",
+  );
   assert.match(authenticode, /permissions:\n\s+contents: read\n\s+id-token: write\n/u);
   assert.doesNotMatch(
     authenticode,

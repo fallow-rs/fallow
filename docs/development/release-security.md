@@ -12,7 +12,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `release-context` | Bind the dispatch to `main`, the release version, and an absent tag | Read only |
 | `pgo-profile` | Build an instrumented binary, train the PGO profile on pinned public fixtures, and upload only the profile | Read only |
 | `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
-| `authenticode` | Add an Authenticode signature to the Windows executables and NAPI addons, then replace their build artifacts | Artifact Signing OIDC |
+| `authenticode` | Add an Authenticode signature to the Windows executables and NAPI addons, then replace their build artifacts | Artifact Signing OIDC in `windows-signing` |
 | `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
 | `validate` | Reusable release validation, including the similar-code sidecar dependency audit | Read only |
 | `musl-smoke` | Run the exact unsigned musl binaries in a digest-pinned Alpine container on x64 and arm64 | Read only |
@@ -82,8 +82,13 @@ the CLI, multicall, LSP, MCP and similar-code executables, and the NAPI addon.
 The certificate subject is `Fallow B.V.`. The job never signs third-party
 files, such as the TypeScript binary in the type-aware VSIX.
 
-`WINDOWS_SIGNING_MODE` in the protected `release` environment selects the
-mode. `off`, or no value, keeps the build artifacts unchanged and prints a
+The job runs in its own `windows-signing` environment, not in `release`. The
+publisher jobs in `release` run third-party tools with `id-token: write`. With
+a shared subject, a compromised tool could request a signature as Fallow B.V.
+The `windows-signing` deployment branch policy admits `main` only, and no
+other job may use the environment.
+
+`WINDOWS_SIGNING_MODE` in the `windows-signing` environment selects the mode. `off`, or no value, keeps the build artifacts unchanged and prints a
 warning. `authenticode` requires these nonsecret variables in the same
 environment:
 
@@ -97,7 +102,7 @@ environment:
 
 The Entra app federates with issuer
 `https://token.actions.githubusercontent.com`, subject
-`repo:fallow-rs/fallow:environment:release` and audience
+`repo:fallow-rs/fallow:environment:windows-signing` and audience
 `api://AzureADTokenExchange`. The repository uses the default OIDC subject, so
 the subject must not use the immutable ID format. The app holds only the
 Artifact Signing Certificate Profile Signer role on the signing account.
@@ -214,9 +219,8 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 
 ## Invariants
 
-- Run every credential-bearing job in the `release` environment:
-  `authenticode` (Artifact Signing OIDC), `sign` (binary signing key),
-  `publish-crates`, `npm-publish`, and both VSIX
+- Run every credential-bearing job in the `release` environment: `sign`
+  (binary signing key), `publish-crates`, `npm-publish`, and both VSIX
   publisher jobs. Its deployment branch policy admits `main` only. The ref
   check in `release-context` is part of the workflow file, so it stops a
   mistaken dispatch but not an edited copy of the workflow on another ref; the
@@ -237,6 +241,9 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   crates.io accepts an environment claim when a config sets none, and rejects a
   token without the matching claim once it does, so the pin is what stops an
   edited workflow on another ref from publishing crates over OIDC.
+- Run `authenticode` alone in the `windows-signing` environment, with a
+  main-only deployment branch policy. The Entra signing app trusts only that
+  environment subject.
 - Keep `pgo-profile` outside the `release` environment and without
   credentials. It installs the dependencies of public fixtures with
   `--ignore-scripts`. It uploads only the merged `.profdata` file, as the
