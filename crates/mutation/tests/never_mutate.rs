@@ -192,3 +192,69 @@ keep = e - 1;
 "#;
     assert_only_in_control(source, TS, "keep = e - 1");
 }
+
+/// A pure condition whose branches hold only logging calls gives no mutant
+/// (issue #3719). A changed test can only change which message is logged.
+#[test]
+fn pure_logging_only_conditions() {
+    let source = r#"
+export const countItems = (count: 0 | 1 | 2): 0 | 1 | 2 => {
+  if (count > 0) {
+    console.info("Items", count);
+  }
+  if (items.length >= limit && !quiet) console.warn("full");
+  if (state?.mode === "debug") {
+    console.debug("mode", state.mode);
+    debug("state");
+  } else if (count < 2) {
+    console.log("low");
+  } else {
+    console.error?.("high");
+  }
+  return keep - 1;
+};
+"#;
+    assert_only_in_control(source, TS, "keep - 1");
+}
+
+/// A condition keeps its mutants when the test can have an effect, when a
+/// branch does more than logging, or when no branch logs.
+#[test]
+fn conditions_with_effects_or_other_statements_keep_mutants() {
+    let source = r"
+if (check(a > 0)) console.info(a);
+if (b > 0) { console.info(b); total += 1; }
+if (c > 0) console.info(c); else total = 0;
+if ((seen = d) > 0) console.info(seen);
+if (e++ > 0) console.info(e);
+if (await ready(f > 0)) console.info(f);
+if (new Gate(g > 0).open) console.info(g);
+if (h > 0) {}
+if (i > 0) { console.info(i); if (j > 0) total -= 1; }
+";
+    let result = common::run(source, TS);
+    for test in [
+        "check(a > 0)",
+        "b > 0",
+        "c > 0",
+        "(seen = d) > 0",
+        "e++ > 0",
+        "await ready(f > 0)",
+        "new Gate(g > 0).open",
+        "h > 0",
+        "i > 0",
+    ] {
+        let Some(start) = source.find(test) else {
+            panic!("the test {test:?} is not in the source");
+        };
+        let start = start as u32;
+        let end = start + test.len() as u32;
+        assert!(
+            result
+                .mutants
+                .iter()
+                .any(|mutant| mutant.span.0 >= start && mutant.span.1 <= end),
+            "the condition {test:?} lost its mutants"
+        );
+    }
+}

@@ -13,7 +13,9 @@
 //!
 //! The logging rule is broad: a `console.*` or `debug(...)` call gives no
 //! mutant at all. This covers each expression in its arguments (strings,
-//! arithmetic, updates, callbacks), and the call statement itself.
+//! arithmetic, updates, callbacks), and the call statement itself. An `if`
+//! statement with a pure test and only logging calls in its branches gives
+//! no mutant either (see `logging_only`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -906,7 +908,7 @@ fn key_name(key: &PropertyKey<'_>) -> Option<String> {
 ///
 /// The check reads the callee through parentheses and TypeScript wrappers,
 /// so `(console.log as any)(x)` is a logging call too.
-fn is_logging_callee(callee: &Expression<'_>) -> bool {
+pub fn is_logging_callee(callee: &Expression<'_>) -> bool {
     let callee = callee_without_wrappers(callee);
     if callee.is_specific_id("debug") {
         return true;
@@ -1509,6 +1511,9 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_if_statement(&mut self, it: &IfStatement<'a>) {
+        if crate::logging_only::is_logging_only_if(it) {
+            return;
+        }
         walk::walk_if_statement(self, it);
         self.negate(&it.test);
     }
