@@ -265,9 +265,15 @@ fn credit_config_specifier(
     specifier: &str,
 ) {
     if is_local_specifier(specifier) {
-        result
-            .setup_files
-            .push(resolve_config_relative_path(config_path, root, specifier));
+        let path = resolve_config_relative_path(config_path, root, specifier);
+        // Oxlint loads the default export of a local plugin file (issue #3871).
+        if let Ok(relative) = path.strip_prefix(root) {
+            result.push_entry_export_credit(
+                config_parser::path_to_config_string(relative),
+                ["default"],
+            );
+        }
+        result.setup_files.push(path);
     } else if is_package_specifier(specifier) {
         result
             .referenced_dependencies

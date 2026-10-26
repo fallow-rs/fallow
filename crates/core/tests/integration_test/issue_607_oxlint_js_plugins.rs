@@ -72,6 +72,33 @@ fn oxlint_ts_config_credits_object_specifiers_and_local_plugins() {
 }
 
 #[test]
+fn local_js_plugin_default_export_is_used_with_include_entry_exports() {
+    // Issue #3871: oxlint loads the default export of a local jsPlugins file.
+    let root = fixture_path("issue-607-oxlint-ts-config");
+    let mut config = create_config(root);
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let plugin_exports: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .filter(|export| {
+            export
+                .export
+                .path
+                .ends_with(std::path::Path::new("plugins/local-plugin.js"))
+        })
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+
+    assert_eq!(
+        plugin_exports,
+        vec!["unusedHelper"],
+        "only the named export of the local plugin stays reportable"
+    );
+}
+
+#[test]
 fn ultracite_selected_js_plugins_credit_only_selected_dependencies() {
     let root = fixture_path("ultracite-oxlint-js-plugins");
     let config = create_config(root);
