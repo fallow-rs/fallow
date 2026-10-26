@@ -1019,6 +1019,7 @@ test("release credential jobs run in the main-only release environment", () => {
 
   assert.deepEqual(environmentJobs.toSorted(), credentialJobs);
   assert.match(procedure, /environments\/release\/deployment-branch-policies/u);
+  assert.match(procedure, /environments\/windows-signing\/deployment-branch-policies/u);
   assert.match(procedure, /exists at both levels; delete the repository copy/u);
   assert.match(procedure, /unprotected by the release environment/u);
   assert.match(security, /Its deployment branch policy admits `main` only/u);
@@ -2761,11 +2762,13 @@ test("release preflight checks secrets for the active publisher modes", () => {
     repoSecrets,
     envSecrets,
     client = "18767c00-8be6-4496-8b73-e2cccd03a87a",
+    windowsSigningMode = "authenticode",
   ) => {
     const shell = `gh() {
       case "$*" in
         *custom_branch_policies*) echo true ;;
         *deployment-branch-policies*) echo main ;;
+        *"variable list"*"--env windows-signing"*) printf '%s' "$TEST_SIGNING_VARIABLES" ;;
         *"variable list"*) printf '%s' "$TEST_VARIABLES" ;;
         *"secret list"*"--env release"*) printf '%s' "$TEST_ENV_SECRETS" ;;
         *"secret list"*) printf '%s' "$TEST_REPO_SECRETS" ;;
@@ -2783,6 +2786,9 @@ ${block}`;
           { name: "VSCE_AZURE_CLIENT_ID", value: client },
           { name: "VSCE_AZURE_TENANT_ID", value: "3e942fa4-e6cf-44a2-b0ef-dc2b0c6c3761" },
         ]),
+        TEST_SIGNING_VARIABLES: JSON.stringify([
+          { name: "WINDOWS_SIGNING_MODE", value: windowsSigningMode },
+        ]),
         TEST_REPO_SECRETS: repoSecrets.join("\n"),
         TEST_ENV_SECRETS: envSecrets.join("\n"),
       },
@@ -2791,6 +2797,9 @@ ${block}`;
   const signing = "ED25519_BINARY_SIGNING_PRIVATE_KEY";
   const azure = run("azure", "oidc", [], [signing]);
   assert.equal(azure.status, 0, azure.stderr);
+  const client = "18767c00-8be6-4496-8b73-e2cccd03a87a";
+  assert.equal(run("azure", "oidc", [], [signing], client, "off").status, 0);
+  assert.notEqual(run("azure", "oidc", [], [signing], client, "invalid").status, 0);
   assert.equal(run("oidc", "oidc", [], [signing]).status, 0);
   assert.notEqual(run("azure", "oidc", [], [signing], "invalid").status, 0);
   assert.notEqual(run("invalid", "oidc", [], [signing]).status, 0);
