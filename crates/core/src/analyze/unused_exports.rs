@@ -25,6 +25,8 @@ use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 #[path = "unused_exports_adapter.rs"]
 mod adapter;
 use adapter::aliased_import_adapters;
+#[path = "unused_exports_cjs.rs"]
+mod cjs;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
@@ -651,13 +653,7 @@ fn unused_export_candidate_is_skipped(
         return true;
     }
 
-    let credited = |name: &str| {
-        ConfigExportCredit::credits(match_ctx.config_credited_exports, name)
-            || is_export_ignored(name, match_ctx.matching_ignore, match_ctx.matching_plugin)
-    };
-    // A tool that loads a CommonJS file reads `module.exports` as its default
-    // export, so a `default` credit covers every key of that object (#3876).
-    credited(export_str) || (module.has_cjs_exports() && credited("default"))
+    cjs::is_credited(module, export_str, match_ctx)
 }
 
 fn build_unused_export(
