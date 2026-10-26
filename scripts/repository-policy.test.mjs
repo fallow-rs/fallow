@@ -86,6 +86,19 @@ const quotedBenchmarkNumbers = (document) => [
   ),
 ];
 
+test("isolated publishers and the mutation runner receive dependency updates", () => {
+  const config = readFileSync(".github/dependabot.yml", "utf8");
+  for (const directory of [
+    "/.github/publishers/marketplace",
+    "/.github/publishers/open-vsx",
+    "/tools/mutation-runner",
+  ]) {
+    const update = dependabotUpdate(config, "npm", directory);
+    assert.match(update, /interval: weekly/u, directory);
+    assert.match(update, /default-days: 7/u, directory);
+  }
+});
+
 test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
   const config = readFileSync(".github/dependabot.yml", "utf8");
   const update = dependabotUpdate(config, "cargo", "/fuzz");
@@ -504,8 +517,9 @@ test("VS Code public release verification stays exact and credential-free", () =
   const verifier = readFileSync("scripts/vscode-public-verify.mjs", "utf8");
   const releaseSecurity = readFileSync("docs/development/release-security.md", "utf8");
   const releaseProcedure = readFileSync("docs/development/release-procedure.md", "utf8");
-  assert.equal(vscodePackage.devDependencies["@vscode/vsce"], "4.0.0");
-  assert.equal(vscodePackage.devDependencies.ovsx, "1.2.0");
+  for (const cli of ["@vscode/vsce", "ovsx"]) {
+    assert.match(vscodePackage.devDependencies[cli], /^\d+\.\d+\.\d+$/u, cli);
+  }
   assert.match(verifier, /from "\.\.\/editors\/vscode\/scripts\/vsix-targets\.mjs"/u);
   assert.match(verifier, /VSIX_VARIANTS\.map\(\(\{ target \}\) => target\)/u);
   assert.match(verifier, /marketplace\.visualstudio\.com\/.*extensionquery/u);

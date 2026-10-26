@@ -20,7 +20,7 @@ const MUTATION_LIB = fileURLToPath(
 /** The Vitest majors that the suite runs against, and their npm package names. */
 export const VITEST_MAJORS = [
   { packageName: "vitest", version: "5.0.4" },
-  { packageName: "vitest4", version: "4.1.11" },
+  { packageName: "vitest4", version: "4.1.12" },
 ];
 
 /**
