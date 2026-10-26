@@ -933,10 +933,8 @@ pub fn sweep_reusable_caches_with_report(
     let mut report = SweepReport::default();
 
     // Legacy pass: deregister reusable caches left REGISTERED by pre-#1815
-    // fallow (the reporter's `git worktree list` backlog). This is what makes
-    // those entries vanish on the first post-upgrade audit; the `--expire=now`
-    // prune is retained ONLY here to also sweep any admin entry orphaned by a
-    // crash in the transient registration window.
+    // fallow (the reporter's `git worktree list` backlog). Each entry is
+    // deregistered individually so unavailable user worktrees stay registered.
     legacy_registered_pass(repo_root, mode, sizes, now, &mut report);
 
     // Primary pass: visit this requested root's cache plus legacy SHA-suffixed
@@ -1027,8 +1025,7 @@ fn entry_probe_metadata(path: &Path, now: SystemTime) -> (Option<u64>, Option<Pa
 /// are removed because the root-owned cache cannot reuse them. Under
 /// [`SweepMode::DryRun`] only the read-only halves run
 /// (`list_audit_worktrees`, `audit_worktree_is_registered`): registered
-/// entries are reported without locks, deregistration, removal, or the
-/// trailing `git worktree prune`.
+/// entries are reported without locks, deregistration, or removal.
 fn legacy_registered_pass(
     repo_root: &Path,
     mode: SweepMode,
@@ -1045,7 +1042,6 @@ fn legacy_registered_pass(
         .collect();
     let mut size_map = measure_entry_sizes(sizes, candidates.iter());
     let owned_path = reusable_audit_worktree_path(repo_root);
-    let mut deregistered = false;
     for path in candidates {
         let pass = if paths_equal(&path, &owned_path) {
             SweepPass::Owned
@@ -1087,7 +1083,7 @@ fn legacy_registered_pass(
                 let head = is_current_path
                     .then(|| legacy_reusable_sha(&path))
                     .flatten();
-                if unregister_worktree_checked(repo_root, &path).is_err() {
+                if unregister_legacy_worktree_checked(repo_root, &path).is_err() {
                     report.push(SweepEntry {
                         path,
                         pass,
@@ -1098,7 +1094,7 @@ fn legacy_registered_pass(
                     });
                     continue;
                 }
-                let disposition = if is_current_path {
+                if is_current_path {
                     if let Some(head) = head {
                         let _ = write_reusable_sha(&path, &head);
                     }
@@ -1112,9 +1108,7 @@ fn legacy_registered_pass(
                     SweepDisposition::RemoveFailed
                 } else {
                     SweepDisposition::ReclaimedLegacyRegistered
-                };
-                deregistered = true;
-                disposition
+                }
             }
         };
         report.push(SweepEntry {
@@ -1125,14 +1119,6 @@ fn legacy_registered_pass(
             owner_root,
             size_bytes,
         });
-    }
-    if deregistered {
-        let mut command = Command::new("git");
-        command
-            .args(["worktree", "prune", "--expire=now"])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let _ = command.output();
     }
 }
 
@@ -1893,6 +1879,22 @@ pub fn unregister_worktree(repo_root: &Path, path: &Path) -> std::io::Result<()>
     unregister_worktree_checked(repo_root, path)
 }
 
+fn unregister_legacy_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
+    if path.try_exists()? {
+        return unregister_worktree_checked(repo_root, path);
+    }
+    // Without a checkout gitfile, Git's own registry identifies the owned entry.
+    remove_audit_worktree(repo_root, path);
+    if list_audit_worktrees(repo_root)
+        .is_some_and(|paths| !paths.iter().any(|entry| paths_equal(entry, path)))
+    {
+        return Ok(());
+    }
+    Err(std::io::Error::other(
+        "could not deregister missing legacy audit worktree",
+    ))
+}
+
 fn unregister_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
     if !path.exists() {
         return Ok(());
@@ -2080,17 +2082,9 @@ pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
 /// fallow binary), which races the fixture's own assertions.
 pub fn sweep_orphan_audit_worktrees_in(repo_root: &Path, temp_root: &Path) {
     // Legacy pass: deregister dead-pid non-reusable worktrees left REGISTERED
-    // by pre-#1815 fallow (or by a crash in the transient registration
-    // window). The `--expire=now` prune, retained only here, also sweeps any
-    // now-dangling admin entry.
-    if deregister_legacy_orphan_worktrees(repo_root) {
-        let mut command = Command::new("git");
-        command
-            .args(["worktree", "prune", "--expire=now"])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let _ = command.output();
-    }
+    // by pre-#1815 fallow (or by a crash in the transient registration window).
+    // Git removes only the selected owned entry, including a missing checkout.
+    deregister_legacy_orphan_worktrees(repo_root);
 
     // Primary pass: remove unregistered dead-pid worktree DIRECTORIES via a
     // temp-dir prefix scan. A dead PID means the owning process is gone
@@ -2101,12 +2095,11 @@ pub fn sweep_orphan_audit_worktrees_in(repo_root: &Path, temp_root: &Path) {
 }
 
 /// Deregister dead-pid non-reusable worktrees left REGISTERED by pre-#1815
-/// fallow or by a crash mid-registration. Returns `true` when any were removed.
-fn deregister_legacy_orphan_worktrees(repo_root: &Path) -> bool {
+/// fallow or by a crash mid-registration.
+fn deregister_legacy_orphan_worktrees(repo_root: &Path) {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
-        return false;
+        return;
     };
-    let mut removed_any = false;
     for path in worktrees {
         if !is_fallow_audit_worktree_path(&path)
             || is_reusable_audit_worktree_path(&path)
@@ -2116,9 +2109,7 @@ fn deregister_legacy_orphan_worktrees(repo_root: &Path) -> bool {
         }
         remove_audit_worktree(repo_root, &path);
         let _ = std::fs::remove_dir_all(&path);
-        removed_any = true;
     }
-    removed_any
 }
 
 /// Enumerate unregistered non-reusable worktree DIRECTORY paths owned by a
@@ -2310,6 +2301,10 @@ impl Drop for BaseWorktree {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
+
+#[cfg(test)]
+#[path = "base_worktree_cleanup_tests.rs"]
+mod cleanup_tests;
 
 #[cfg(test)]
 mod tests {
