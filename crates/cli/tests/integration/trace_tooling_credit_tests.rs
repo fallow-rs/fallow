@@ -17,6 +17,7 @@ const CATALOGUE_FIXTURE: &str = "catalogue-cli-credit";
 const CATALOGUE_WORKSPACES_FIXTURE: &str = "catalogue-cli-credit-workspaces";
 const OWN_PEER_FIXTURE: &str = "dev-dependency-listed-as-own-peer";
 const NEAREST_MANIFEST_FIXTURE: &str = "root-dependency-nearest-manifest-credit";
+const TYPE_AWARE_FIXTURE: &str = "type-aware-backend-credit";
 
 fn trace(package: &str) -> Value {
     trace_in(FIXTURE, package)
@@ -260,4 +261,20 @@ fn the_trace_agrees_with_the_report_for_every_dev_dependency() {
     assert_trace_agrees_with_report(TYPES_FIXTURE);
     assert_trace_agrees_with_report(CATALOGUE_FIXTURE);
     assert_trace_agrees_with_report(OWN_PEER_FIXTURE);
+}
+
+/// Fallow loads the type-aware backend packages at run time. No script or
+/// import names them, so the catalogue credits them by name. See #3873.
+#[test]
+fn the_type_aware_backend_packages_are_credited_as_tooling() {
+    for package in ["tsrs", "fallow-type-aware"] {
+        let traced = trace_in(TYPE_AWARE_FIXTURE, package);
+        assert_eq!(traced["is_used"], true, "{package}: {traced:#}");
+        assert_eq!(
+            traced["tooling_credit"],
+            json!({ "reason": "known-tooling" }),
+            "{package}: {traced:#}"
+        );
+    }
+    assert_trace_agrees_with_report(TYPE_AWARE_FIXTURE);
 }

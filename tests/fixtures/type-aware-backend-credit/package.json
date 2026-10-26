@@ -1,0 +1,16 @@
+{
+  "name": "type-aware-backend-credit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "fallow": "FALLOW_TYPE_AWARE_BACKEND=tsrs fallow --type-aware"
+  },
+  "devDependencies": {
+    "fallow": "^3.36.0",
+    "fallow-type-aware": "^3.36.0",
+    "is-number": "^7.0.0",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929"
+  }
+}
