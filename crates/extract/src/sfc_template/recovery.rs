@@ -4,22 +4,26 @@ use super::scanners::{scan_curly_section, scan_html_tag};
 pub(super) struct RecoveryScanner<'a> {
     source: &'a str,
     ends: Option<Vec<SectionEnds>>,
+    needs_recovery: bool,
 }
 
 impl<'a> RecoveryScanner<'a> {
     pub(super) fn new(source: &'a str) -> Self {
-        Self { source, ends: None }
+        Self {
+            source,
+            ends: None,
+            needs_recovery: false,
+        }
     }
 
     pub(super) fn html_tag(&mut self, start: usize) -> Option<(&'a str, usize)> {
+        self.prepare_recovery();
         if let Some(ends) = &self.ends {
             let end = ends[start + 1].tag;
             return (end < self.source.len()).then(|| (&self.source[start..=end], end + 1));
         }
         let result = scan_html_tag(self.source, start);
-        if result.is_none() {
-            self.ends = Some(section_ends(self.source));
-        }
+        self.needs_recovery = result.is_none();
         result
     }
 
@@ -28,6 +32,7 @@ impl<'a> RecoveryScanner<'a> {
         start: usize,
         brace_len: usize,
     ) -> Option<(&'a str, usize)> {
+        self.prepare_recovery();
         if let Some(ends) = &self.ends {
             let body_start = start + brace_len;
             let end = if brace_len == 1 {
@@ -39,10 +44,16 @@ impl<'a> RecoveryScanner<'a> {
                 .then(|| (&self.source[body_start..end], end + brace_len));
         }
         let result = scan_curly_section(self.source, start, brace_len, brace_len);
-        if result.is_none() {
-            self.ends = Some(section_ends(self.source));
-        }
+        self.needs_recovery = result.is_none();
         result
+    }
+
+    fn prepare_recovery(&mut self) {
+        // Callers that stop after a failed scan do not need recovery storage.
+        if self.needs_recovery {
+            self.ends = Some(section_ends(self.source));
+            self.needs_recovery = false;
+        }
     }
 }
 
@@ -138,6 +149,37 @@ fn section_ends(source: &str) -> Vec<SectionEnds> {
 #[cfg(test)]
 mod tests {
     use super::RecoveryScanner;
+
+    #[test]
+    fn first_failed_scan_keeps_allocation_free_recovery_available() {
+        const PADDING: usize = 4096;
+        const MAX_BYTES_PER_SOURCE_BYTE: usize = 32;
+        let prefix = "<broken{";
+        let tag = "<Used/>";
+        let source = format!("{prefix}{}{tag} {{ready}}", "a".repeat(PADDING));
+        let tag_start = prefix.len() + PADDING;
+
+        for curly in [false, true] {
+            let mut scanner = RecoveryScanner::new(&source);
+            let (result, work) = crate::cost::measure(|| {
+                if curly {
+                    scanner.curly_section(prefix.len() - 1, 1)
+                } else {
+                    scanner.html_tag(0)
+                }
+            });
+            assert!(result.is_none());
+            assert_eq!(work.allocated_bytes, 0, "a caller may stop after failure");
+
+            let (recovered, work) = crate::cost::measure(|| scanner.html_tag(tag_start));
+            assert_eq!(recovered, Some((tag, tag_start + tag.len())));
+            assert!(work.allocated_bytes <= MAX_BYTES_PER_SOURCE_BYTE * source.len());
+            assert_eq!(
+                scanner.curly_section(tag_start + tag.len() + 1, 1),
+                Some(("ready", source.len()))
+            );
+        }
+    }
 
     #[test]
     fn recovery_preserves_nested_sections_quotes_and_comments() {
