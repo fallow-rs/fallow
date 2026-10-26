@@ -1,0 +1,3 @@
+### Added
+
+- **`fallow health --css` reads server-side template files as class references.** Before, a class that only a Shopify `.liquid` section applied was reported as an `unreferenced-css-class`. Fallow now reads files with the extensions `liquid`, `njk`, `hbs`, `handlebars`, `twig`, and `blade.php`, and any class-like word in them counts as used. A class prefix before a `{{` echo, as in `grid--{{ columns }}`, also counts. The new top-level `markupExtensions` key adds other template extensions, for example `["tpl", "erb"]`. These files do not join source discovery, so they never become unused files. Thanks [@james2doyle](https://github.com/james2doyle) for the report. (Closes [#3917](https://github.com/fallow-rs/fallow/issues/3917))

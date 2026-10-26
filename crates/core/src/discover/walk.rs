@@ -2830,7 +2830,6 @@ mod tests {
                 production: false.into(),
                 plugins: vec![],
                 rule_packs: vec![],
-                dynamically_loaded: vec![],
                 overrides: vec![],
                 regression: None,
                 audit: fallow_config::AuditConfig::default(),
@@ -2846,6 +2845,7 @@ mod tests {
                 auto_imports: false,
                 fail_on_parse_error: false,
                 cache: fallow_config::CacheConfig::default(),
+                ..Default::default()
             }
             .resolve(root, OutputFormat::Human, 1, true, true, None)
         }

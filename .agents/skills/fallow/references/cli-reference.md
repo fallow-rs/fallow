@@ -2664,6 +2664,7 @@ preset = "bulletproof"
 - `publicPackages`: workspace packages that are public libraries; exported API surface from these packages is not flagged as unused
 - `entry`: glob patterns for files that are manual entry points. A single `*` stays within one path segment; use `**` to match across directories
 - `dynamicallyLoaded`: glob patterns for files loaded at runtime (plugin dirs, locale files); treated as always-used. A single `*` stays within one path segment; use `**` to match across directories
+- `markupExtensions`: file extensions without the dot (for example `["tpl", "erb"]`) of server-side template files whose text counts as CSS class references for `unreferenced-css-class` in `fallow health --css`. `liquid`, `njk`, `hbs`, `handlebars`, `twig`, and `blade.php` are always read. These files never join discovery or the module graph. Script and stylesheet extensions are a config error
 - Path globs in other fields (`ignorePatterns`, `ignoreFindings`, `overrides[].files`, `ignoreExports[].file`, `duplicates.ignore`, `health.ignore`, boundary zones, rule-pack and `framework[]` globs) use the same rule: a single `*` stays within one path segment. Write `**/*.test.ts` to match test files at any depth
 - `cache.dir`: override the persistent extraction cache directory. `FALLOW_CACHE_DIR` wins over this config field, and `--no-cache` disables caching entirely
 - `cache.maxSizeMb`: cap the serialized extraction cache size in megabytes. `FALLOW_CACHE_MAX_SIZE` wins over this config field

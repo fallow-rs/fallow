@@ -33,6 +33,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
+        markup_extensions: vec![],
         overrides: vec![],
         regression: None,
         audit: fallow_config::AuditConfig::default(),

@@ -706,6 +706,8 @@ pub(super) struct CssReferenceSurface {
     css_module_bracket_properties: rustc_hash::FxHashSet<String>,
     dynamic_prefixes_reversed: SortedPrefixLookup,
     dynamic_literals: rustc_hash::FxHashSet<String>,
+    /// Extensions of the server-side template files the surface read, sorted.
+    template_extensions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -734,6 +736,7 @@ struct CssReferenceSurfaceBuilder {
     dynamic_corpus: String,
     source_corpus: String,
     dynamic_interpolants: rustc_hash::FxHashSet<String>,
+    template_extensions: std::collections::BTreeSet<String>,
 }
 
 impl CssReferenceSurfaceBuilder {
@@ -758,11 +761,16 @@ impl CssReferenceSurfaceBuilder {
             css_module_bracket_properties,
             dynamic_prefixes_reversed: SortedPrefixLookup::new(dynamic_prefixes_reversed),
             dynamic_literals,
+            template_extensions: self.template_extensions.into_iter().collect(),
         }
     }
 }
 
 impl CssReferenceSurface {
+    pub(super) fn template_extensions(&self) -> &[String] {
+        &self.template_extensions
+    }
+
     fn references(&self, class: &str) -> bool {
         self.static_tokens.contains(class)
             || self.dynamic_class_referenced(class)
@@ -807,7 +815,10 @@ impl CssReferenceSurface {
     }
 }
 
-const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
+/// Text that follows a class prefix when the rest of the class is computed:
+/// JavaScript template literals and concatenation, plus the `{{` echo of
+/// template languages (`grid--{{ columns }}` in Liquid, Nunjucks, Blade).
+const INTERP_MARKERS: [&str; 7] = ["${", "' +", "'+", "\" +", "\"+", "` +", "{{"];
 
 fn css_module_property_alias(class: &str) -> Option<String> {
     if !class.contains('-') {
@@ -1117,7 +1128,10 @@ fn collect_markdown_reference_surface_dir(
     for entry in entries.flatten() {
         let path = entry.path();
         let relative = path.strip_prefix(&config.root).unwrap_or(&path);
-        if ignore_set.is_match(relative) || is_skipped_markdown_reference_path(relative) {
+        if ignore_set.is_match(relative)
+            || config.ignore_patterns.is_match(relative)
+            || is_skipped_markdown_reference_path(relative)
+        {
             continue;
         }
         let Ok(file_type) = entry.file_type() else {
@@ -1129,6 +1143,7 @@ fn collect_markdown_reference_surface_dir(
         }
         let extension = path.extension().and_then(|ext| ext.to_str());
         if !matches!(extension, Some("md" | "mdx")) {
+            collect_template_reference_surface_file(surface, &path, config);
             continue;
         }
         let Ok(source) = std::fs::read_to_string(&path) else {
@@ -1149,6 +1164,31 @@ fn collect_markdown_reference_surface_dir(
     }
 }
 
+/// A server-side template file (Liquid, Nunjucks, Blade, and the extensions in
+/// `markupExtensions`) applies classes through syntax that no scanner here
+/// models (`{% if %}`, `@class([...])`, `class="{{ x }}"`). Its whole text
+/// therefore joins the dynamic corpus, so any class-like word in it counts as
+/// referenced (issue #3917).
+fn collect_template_reference_surface_file(
+    surface: &mut CssReferenceSurfaceBuilder,
+    path: &std::path::Path,
+    config: &ResolvedConfig,
+) {
+    let Some(extension) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| fallow_config::template_markup_extension(name, &config.markup_extensions))
+    else {
+        return;
+    };
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    surface.template_extensions.insert(extension.to_owned());
+    surface.dynamic_corpus.push_str(&source);
+    surface.dynamic_corpus.push('\n');
+}
+
 fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
     relative.components().any(|component| {
         let std::path::Component::Normal(name) = component else {
@@ -1165,6 +1205,7 @@ fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
                     | "dist"
                     | "build"
                     | "target"
+                    | "vendor"
                     | "coverage"
                     | ".turbo"
                     | ".cache"
@@ -1203,7 +1244,10 @@ fn push_unreferenced_css_class_candidates(
             && !class_matches_dependency_prefix(&class, dependency_prefixes)
         {
             out.push(UnreferencedCssClass {
-                actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
+                actions: vec![CssCandidateAction::verify_unreferenced_class(
+                    &class,
+                    reference_surface.template_extensions(),
+                )],
                 class,
                 path: rel.to_string(),
                 line,
@@ -1311,6 +1355,34 @@ mod tests {
         assert!(!surface.references("active"));
         assert!(!surface.references("other-danger"));
         assert!(!surface.references("selecting"));
+    }
+
+    #[test]
+    fn template_files_are_dynamic_references_with_echo_prefixes() {
+        let surface = reference_surface(&[
+            (
+                "sections/banner.liquid",
+                "<div class=\"banner__content--{{ position }}\">{% render 'card-icon' %}</div>",
+            ),
+            (
+                "resources/views/card.blade.php",
+                "<div @class(['card-wrapper', 'card-wrapper--open' => $open])></div>",
+            ),
+            (
+                "vendor/theme/menu.liquid",
+                "<div class=\"vendor-menu\"></div>",
+            ),
+            ("notes/ignored.tpl", "<div class=\"custom-tpl\"></div>"),
+        ]);
+
+        assert!(surface.references("banner__content--top"));
+        assert!(surface.references("card-icon"));
+        assert!(surface.references("card-wrapper"));
+        assert!(surface.references("card-wrapper--open"));
+        assert!(!surface.references("vendor-menu"));
+        assert!(!surface.references("custom-tpl"));
+        assert!(!surface.references("banner__media"));
+        assert_eq!(surface.template_extensions(), ["blade.php", "liquid"]);
     }
 
     #[test]

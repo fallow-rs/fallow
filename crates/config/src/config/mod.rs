@@ -10,6 +10,7 @@ pub mod glob_validation;
 mod health;
 mod ignore_patterns;
 mod legacy_glob;
+mod markup_extensions;
 mod mutation;
 mod parsing;
 mod resolution;
@@ -48,6 +49,9 @@ pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
 pub use legacy_glob::{
     LegacyGlobGroup, LegacyGlobNarrowing, find_legacy_glob_narrowings, has_single_segment_wildcard,
     suggest_cross_directory_rewrite,
+};
+pub use markup_extensions::{
+    DEFAULT_MARKUP_EXTENSIONS, resolve_markup_extensions, template_markup_extension,
 };
 pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
 pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
@@ -473,6 +477,14 @@ pub struct FallowConfig {
     /// An array of project-root-relative glob patterns for files loaded at runtime by a mechanism the static graph cannot see (dynamic path resolution, config-driven loading); matching files are seeded as entry points so they and their imports stay reachable. Empty by default; set it (e.g. `["plugins/**/*.ts", "locales/**/*.json"]`) for plugin or locale trees pulled in dynamically. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub dynamically_loaded: Vec<String>,
+
+    /// An array of file extensions, without the leading dot, for server-side template files whose text counts as CSS class references for the `unreferenced-css-class` finding of `fallow health --css`. These files are read as text only: they do not join source discovery or the module graph, so they never become unused files and their imports are not followed. A class name anywhere in such a file counts as used. The extensions `liquid`, `njk`, `hbs`, `handlebars`, `twig`, and `blade.php` are always read; set this (e.g. `["tpl", "erb"]`) for other template languages. An extension matches the end of a file name, so `blade.php` matches `welcome.blade.php`. Values may contain only letters, digits, `.`, `-`, and `_`; script and stylesheet extensions such as `js`, `ts`, and `css` are a config error. Matching files under `ignorePatterns`, `health.ignore`, `node_modules`, `vendor`, and build output directories are skipped.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "markup_extensions::deserialize_markup_extensions"
+    )]
+    pub markup_extensions: Vec<String>,
 
     /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten rules for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict); inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override (fallow warns during analysis and points to the right mechanism: top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for the others). A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]

@@ -780,15 +780,27 @@ impl CssCandidateAction {
     /// Verify action for an unreferenced global CSS class: name the surfaces the
     /// in-project scan does NOT cover (the class could be applied from there) and
     /// ship a read-only token search to double-check before removing.
+    ///
+    /// `template_extensions` names the server-side template files the scan
+    /// also read (for example `liquid`), so the text and the search cover them.
     #[must_use]
-    pub fn verify_unreferenced_class(name: &str) -> Self {
+    pub fn verify_unreferenced_class(name: &str, template_extensions: &[String]) -> Self {
+        let templates = if template_extensions.is_empty() {
+            String::new()
+        } else {
+            let listed: Vec<String> = template_extensions
+                .iter()
+                .map(|extension| format!(".{extension}"))
+                .collect();
+            format!(", plus {} templates", listed.join(", "))
+        };
         Self {
             kind: CssCandidateActionType::VerifyUnused,
             auto_fixable: false,
             description: format!(
-                "Confirm no HTML email, server-rendered template, or CMS content applies the \"{name}\" class before removing it (fallow scanned in-project JS/TS/HTML/Vue/Svelte/Astro/Markdown markup)."
+                "Confirm no HTML email, server-rendered template, or CMS content applies the \"{name}\" class before removing it (fallow scanned in-project JS/TS/HTML/Vue/Svelte/Astro/Markdown markup{templates})."
             ),
-            command: safe_token_search(name),
+            command: safe_token_search_with(name, template_extensions),
         }
     }
 
@@ -984,13 +996,32 @@ fn theme_token_search(namespace: &str, name: &str) -> Option<String> {
 /// the name is not a plain CSS identifier, so the emitted command is always
 /// shell-safe without quoting tricks.
 fn safe_token_search(name: &str) -> Option<String> {
+    safe_token_search_with(name, &[])
+}
+
+/// [`safe_token_search`] that also searches files with the given extensions.
+/// An extension with a byte outside `[A-Za-z0-9._-]` is left out, so the
+/// command stays safe to paste into a shell.
+fn safe_token_search_with(name: &str, extra_extensions: &[String]) -> Option<String> {
     let is_plain = !name.is_empty()
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     is_plain.then(|| {
+        let mut extra = String::new();
+        for extension in extra_extensions {
+            let is_safe = !extension.is_empty()
+                && extension
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+            if is_safe {
+                extra.push_str(" --include='*.");
+                extra.push_str(extension);
+                extra.push('\'');
+            }
+        }
         format!(
-            "grep -rnw '{name}' --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' --include='*.vue' --include='*.svelte' --include='*.astro' --include='*.html' --include='*.md' --include='*.mdx' ."
+            "grep -rnw '{name}' --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' --include='*.vue' --include='*.svelte' --include='*.astro' --include='*.html' --include='*.md' --include='*.mdx'{extra} ."
         )
     })
 }
