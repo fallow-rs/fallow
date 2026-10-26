@@ -1,8 +1,9 @@
 //! Destructured object bindings (`const { a: { b } = fallback } = source`).
 //!
 //! Each default re-walks its left pattern against the fallback, so nested
-//! defaults double the work at every level. A budget bounds those extra walks.
-//! Siblings do not double the work, so a wide pattern does not use the budget.
+//! defaults double the work at every level. A budget on the visited pattern
+//! nodes of one declaration bounds the walk. It is far above the size of a
+//! pattern that a person writes, so a wide pattern keeps all of its credits.
 
 use oxc_ast::ast::{BindingPattern, Expression, ObjectPattern, ObjectPropertyKind};
 
@@ -10,11 +11,15 @@ use super::super::ModuleInfoExtractor;
 use super::{DirectObjectBindingScope, direct_object_binding_expression_path};
 use crate::js_text::JsText;
 
-/// Upper bound on the extra walks that defaults cause in one declaration.
-const MAX_OBJECT_PATTERN_STEPS: usize = 1024;
+/// Upper bound on the pattern nodes that one declaration visits.
+const MAX_OBJECT_PATTERN_STEPS: usize = 1 << 16;
 
 fn take_step(budget: &mut usize) -> bool {
-    let Some(rest) = budget.checked_sub(1) else {
+    take_steps(budget, 1)
+}
+
+fn take_steps(budget: &mut usize, steps: usize) -> bool {
+    let Some(rest) = budget.checked_sub(steps) else {
         return false;
     };
     *budget = rest;
@@ -40,6 +45,9 @@ impl ModuleInfoExtractor {
         source_path: &str,
         budget: &mut usize,
     ) {
+        if !take_step(budget) {
+            return;
+        }
         for property in &pattern.properties {
             let Some(property_name) = property.key.static_name() else {
                 continue;
@@ -58,6 +66,9 @@ impl ModuleInfoExtractor {
         source_path: &str,
         budget: &mut usize,
     ) {
+        if !take_step(budget) {
+            return;
+        }
         match pattern {
             BindingPattern::BindingIdentifier(binding) => {
                 self.copy_direct_object_binding_targets(source_path, binding.name.as_str());
@@ -67,13 +78,11 @@ impl ModuleInfoExtractor {
             }
             BindingPattern::AssignmentPattern(assignment) => {
                 self.record_direct_object_binding_pattern(&assignment.left, source_path, budget);
-                if take_step(budget) {
-                    self.record_direct_object_binding_fallback(
-                        &assignment.left,
-                        &assignment.right,
-                        budget,
-                    );
-                }
+                self.record_direct_object_binding_fallback(
+                    &assignment.left,
+                    &assignment.right,
+                    budget,
+                );
             }
             BindingPattern::ArrayPattern(_) => {}
         }
@@ -85,6 +94,9 @@ impl ModuleInfoExtractor {
         fallback: &Expression<'_>,
         budget: &mut usize,
     ) {
+        if !take_step(budget) {
+            return;
+        }
         match pattern {
             BindingPattern::BindingIdentifier(binding) => match fallback {
                 Expression::NewExpression(new_expression) => {
@@ -117,6 +129,14 @@ impl ModuleInfoExtractor {
             },
             BindingPattern::ObjectPattern(pattern) => match fallback {
                 Expression::ObjectExpression(object) => {
+                    // Each pattern property scans the fallback properties.
+                    let lookups = pattern
+                        .properties
+                        .len()
+                        .saturating_mul(object.properties.len());
+                    if !take_steps(budget, lookups) {
+                        return;
+                    }
                     for property in &pattern.properties {
                         let Some(property_name) = property.key.static_name() else {
                             continue;
@@ -145,13 +165,11 @@ impl ModuleInfoExtractor {
             },
             BindingPattern::AssignmentPattern(assignment) => {
                 self.record_direct_object_binding_fallback(&assignment.left, fallback, budget);
-                if take_step(budget) {
-                    self.record_direct_object_binding_fallback(
-                        &assignment.left,
-                        &assignment.right,
-                        budget,
-                    );
-                }
+                self.record_direct_object_binding_fallback(
+                    &assignment.left,
+                    &assignment.right,
+                    budget,
+                );
             }
             BindingPattern::ArrayPattern(_) => {}
         }
