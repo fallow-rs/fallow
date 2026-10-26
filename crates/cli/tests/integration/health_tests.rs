@@ -7100,6 +7100,33 @@ fn health_css_unreferenced_class_credits_dynamic_status_literals() {
 }
 
 #[test]
+fn health_css_unreferenced_class_credits_plain_ts_dom_class_apis() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"dom-classes"}"#);
+    write_file(
+        &root.join("src/dom.css"),
+        ".panel-assigned{}\n.panel-added{}\n.panel-attribute{}\n.panel-object{}\n.panel-jsx{}\n.panel-kind-wide{}\n.panel-helper{}\n.panel-unused{}\n",
+    );
+    // Plain `.ts` DOM code applies classes through DOM class APIs. A plain
+    // string (`panel-helper`) that no class API receives stays uncredited.
+    write_file(
+        &root.join("src/dom.ts"),
+        "import './dom.css';\nexport const helper = 'panel-helper';\nexport function buildPanel(kind: string): HTMLElement {\n  const el = document.createElement('div');\n  el.className = 'panel-assigned';\n  el.classList.add('panel-added');\n  el.setAttribute('class', 'panel-attribute');\n  el.classList.toggle(`panel-kind-${kind}`, true);\n  return el;\n}\nexport const panelAttributes = { class: 'panel-object' };\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "import { buildPanel } from './dom';\nexport function App() {\n  return <div className=\"panel-jsx\" ref={(node) => node?.appendChild(buildPanel('wide'))} />;\n}\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["panel-helper".to_string(), "panel-unused".to_string()],
+        "classes applied through DOM class APIs in plain .ts files are credited"
+    );
+}
+
+#[test]
 fn health_css_font_face_credited_by_custom_property_value() {
     let dir = tempdir().unwrap();
     let root = dir.path();

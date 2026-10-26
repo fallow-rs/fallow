@@ -1087,7 +1087,9 @@ fn collect_css_reference_surface_file(
     };
     surface.source_corpus.push_str(&source);
     surface.source_corpus.push('\n');
-    let is_markup_surface = extension.is_some_and(is_markup_source_extension);
+    let is_markup_surface = extension.is_some_and(is_markup_source_extension)
+        || (matches!(extension, Some("js" | "mjs" | "cjs")) && has_jsx_class_attribute(&source));
+    collect_dom_class_reference_surface(surface, &source);
     if !is_markup_surface {
         return;
     }
@@ -1104,6 +1106,34 @@ fn collect_css_reference_surface_file(
     if scan.has_dynamic {
         collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
         surface.dynamic_corpus.push_str(&source);
+        surface.dynamic_corpus.push('\n');
+    }
+}
+
+/// True when a `.js` file holds JSX: a `className` attribute after whitespace
+/// whose value is a quoted string or an expression container. Such a file is a
+/// markup surface, the same as a `.jsx` file. A DOM property assignment
+/// (`el.className = ...`) does not count.
+fn has_jsx_class_attribute(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    source.match_indices("className=").any(|(start, attr)| {
+        start
+            .checked_sub(1)
+            .is_some_and(|before| bytes[before].is_ascii_whitespace())
+            && matches!(bytes.get(start + attr.len()), Some(b'{' | b'"' | b'\''))
+    })
+}
+
+/// Credit the classes that a source file applies through DOM class APIs
+/// (`className =`, `classList.*`, `setAttribute('class', ...)`, `class:`
+/// object properties). For a plain JS/TS file, only those values count, not
+/// every string in the file.
+fn collect_dom_class_reference_surface(surface: &mut CssReferenceSurfaceBuilder, source: &str) {
+    let scan = crate::css::scan_dom_class_values(source);
+    surface.static_tokens.extend(scan.static_tokens);
+    for value in scan.dynamic_values {
+        collect_dynamic_class_interpolants(&value, &mut surface.dynamic_interpolants);
+        surface.dynamic_corpus.push_str(&value);
         surface.dynamic_corpus.push('\n');
     }
 }
@@ -1419,5 +1449,55 @@ mod tests {
         assert!(surface.references("navigation-item"));
         assert!(!surface.references("button-secondary"));
         assert!(!surface.references("navigation-link"));
+    }
+
+    #[test]
+    fn plain_ts_dom_class_apis_credit_only_their_values() {
+        let surface = reference_surface(&[(
+            "src/dom.ts",
+            r"
+                export const helper = 'panel-helper';
+                export const build = (el: HTMLElement, kind: string) => {
+                    el.className = 'panel-assigned';
+                    el.classList.toggle(`panel-kind-${kind}`, true);
+                    return { class: 'panel-object' };
+                };
+            ",
+        )]);
+
+        assert!(surface.references("panel-assigned"));
+        assert!(surface.references("panel-object"));
+        assert!(surface.references("panel-kind-wide"));
+        assert!(!surface.references("panel-helper"));
+    }
+
+    #[test]
+    fn js_file_with_jsx_is_a_markup_surface() {
+        let surface = reference_surface(&[(
+            "src/CodeBlock.js",
+            r"
+                const extra = 'code-block-extra';
+                export const CodeBlock = () => <code className={styles.codeBlockLines} />;
+            ",
+        )]);
+
+        assert!(surface.references("codeBlockLines"));
+        assert!(surface.references("code-block-extra"));
+    }
+
+    #[test]
+    fn markup_file_credits_dom_class_api_values() {
+        // The quoted-token scan splits `gallery__item` at `_`. The DOM class
+        // API value keeps the whole class.
+        let surface = reference_surface(&[(
+            "src/Gallery.tsx",
+            r#"
+                const attrs = { className: 'gallery__item' };
+                export const Gallery = () => <figure className="gallery-frame" />;
+            "#,
+        )]);
+
+        assert!(surface.references("gallery__item"));
+        assert!(surface.references("gallery-frame"));
     }
 }

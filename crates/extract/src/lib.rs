@@ -31,6 +31,7 @@ mod css_mask;
 mod css_masked_bytes;
 pub mod css_metrics;
 mod css_module_classes;
+pub mod dom_classes;
 pub mod effect_facts;
 pub mod federation_runtime;
 pub mod flags;
@@ -113,6 +114,7 @@ pub use css_in_js::{
     css_in_js_token_defs, css_in_js_virtual_stylesheet,
 };
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
+pub use dom_classes::{DomClassScan, scan_dom_class_values};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use js_text::JsText;
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
