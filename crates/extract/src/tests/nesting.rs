@@ -180,3 +180,42 @@ fn nested_object_destructure_assignment_defaults_cost_linear_work() {
         "declare const s: any;\nlet m: unknown;\n({pattern} = s);\n"
     ));
 }
+
+/// Elements before the class instance in the wide destructure sources. Far
+/// past any per-walk step count, so a shared step budget loses the last one.
+const WIDE_ELEMENTS: usize = 1_500;
+
+/// Whether `info` reads `member` of the local class `Service`.
+fn reads_service_member(info: &ModuleInfo, member: &str) -> bool {
+    info.member_accesses
+        .iter()
+        .any(|access| access.object == "Service" && access.member == member)
+}
+
+#[test]
+fn wide_for_of_destructure_credits_the_last_element() {
+    let others = "{ viaWideForOf: () => {} }, ".repeat(WIDE_ELEMENTS);
+    let source = format!(
+        "export class Service {{ viaWideForOf() {{}} }}\nconst service = new Service();\n\
+         for (const {{ viaWideForOf }} of [{others}service]) viaWideForOf();\n"
+    );
+    let info = parse("src/index.ts", &source);
+    assert!(reads_service_member(&info, "viaWideForOf"));
+}
+
+#[test]
+fn wide_array_destructure_credits_the_last_element() {
+    let holes = ", ".repeat(WIDE_ELEMENTS);
+    let others = "{}, ".repeat(WIDE_ELEMENTS);
+    let wrapped = "[{}], ".repeat(WIDE_ELEMENTS);
+    let source = format!(
+        "export class Service {{ viaWideArray() {{}} viaWideNested() {{}} }}\n\
+         const service = new Service();\n\
+         const [{holes}{{ viaWideArray }}] = [{others}service];\n\
+         for (const [{{ viaWideNested }}] of [{wrapped}[service]]) viaWideNested();\n\
+         viaWideArray();\n"
+    );
+    let info = parse("src/index.ts", &source);
+    assert!(reads_service_member(&info, "viaWideArray"));
+    assert!(reads_service_member(&info, "viaWideNested"));
+}
