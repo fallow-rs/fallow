@@ -19,6 +19,9 @@ use super::super::{
 use super::visit_source_paths::join_member_path;
 use crate::js_text::JsText;
 
+#[path = "visit_impl_object_binding_patterns.rs"]
+mod patterns;
+
 /// Per-module breadth cap on recorded object-binding targets (issue #1843
 /// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
 /// `const obj = { key: ident }` and `const obj = { key: new Class() }` channels.
@@ -1302,120 +1305,6 @@ impl ModuleInfoExtractor {
                 }
                 _ => {}
             }
-        }
-    }
-
-    fn record_direct_object_binding_destructure(
-        &mut self,
-        pattern: &ObjectPattern<'_>,
-        init: &Expression<'_>,
-    ) {
-        let Some(source_path) = direct_object_binding_expression_path(init) else {
-            return;
-        };
-        self.record_direct_object_binding_object_pattern(pattern, &source_path);
-    }
-
-    fn record_direct_object_binding_object_pattern(
-        &mut self,
-        pattern: &ObjectPattern<'_>,
-        source_path: &str,
-    ) {
-        for property in &pattern.properties {
-            let Some(property_name) = property.key.static_name() else {
-                continue;
-            };
-            self.record_direct_object_binding_pattern(
-                &property.value,
-                &format!("{source_path}.{}", property_name.text()),
-            );
-        }
-    }
-
-    fn record_direct_object_binding_pattern(
-        &mut self,
-        pattern: &BindingPattern<'_>,
-        source_path: &str,
-    ) {
-        match pattern {
-            BindingPattern::BindingIdentifier(binding) => {
-                self.copy_direct_object_binding_targets(source_path, binding.name.as_str());
-            }
-            BindingPattern::ObjectPattern(pattern) => {
-                self.record_direct_object_binding_object_pattern(pattern, source_path);
-            }
-            BindingPattern::AssignmentPattern(assignment) => {
-                self.record_direct_object_binding_pattern(&assignment.left, source_path);
-                self.record_direct_object_binding_fallback(&assignment.left, &assignment.right);
-            }
-            BindingPattern::ArrayPattern(_) => {}
-        }
-    }
-
-    fn record_direct_object_binding_fallback(
-        &mut self,
-        pattern: &BindingPattern<'_>,
-        fallback: &Expression<'_>,
-    ) {
-        match pattern {
-            BindingPattern::BindingIdentifier(binding) => match fallback {
-                Expression::NewExpression(new_expression) => {
-                    if let Some(class_name) = self.direct_new_expression_class_name(new_expression)
-                    {
-                        self.record_direct_object_binding_target(
-                            binding.name.as_str(),
-                            binding.name.to_string(),
-                            class_name,
-                            DirectObjectBindingScope::BindingOwner,
-                        );
-                    }
-                }
-                Expression::ObjectExpression(object) => {
-                    self.record_direct_object_binding_targets_at_path(
-                        binding.name.as_str(),
-                        binding.name.as_str(),
-                        object,
-                        DirectObjectBindingScope::BindingOwner,
-                    );
-                }
-                fallback => {
-                    if let Some(fallback_path) = direct_object_binding_expression_path(fallback) {
-                        self.copy_direct_object_binding_targets(
-                            &fallback_path,
-                            binding.name.as_str(),
-                        );
-                    }
-                }
-            },
-            BindingPattern::ObjectPattern(pattern) => match fallback {
-                Expression::ObjectExpression(object) => {
-                    for property in &pattern.properties {
-                        let Some(property_name) = property.key.static_name() else {
-                            continue;
-                        };
-                        let Some(value) = object.properties.iter().rev().find_map(|candidate| {
-                            let ObjectPropertyKind::ObjectProperty(candidate) = candidate else {
-                                return None;
-                            };
-                            (candidate.key.static_name().as_ref() == Some(&property_name))
-                                .then_some(&candidate.value)
-                        }) else {
-                            continue;
-                        };
-                        self.record_direct_object_binding_fallback(&property.value, value);
-                    }
-                }
-                fallback => {
-                    if let Some(fallback_path) = direct_object_binding_expression_path(fallback) {
-                        self.record_direct_object_binding_object_pattern(pattern, &fallback_path);
-                    }
-                }
-            },
-            BindingPattern::AssignmentPattern(assignment) => {
-                self.record_direct_object_binding_fallback(&assignment.left, fallback);
-                self.record_direct_object_binding_fallback(&assignment.left, &assignment.right);
-            }
-            BindingPattern::ArrayPattern(_) => {}
         }
     }
 

@@ -8,6 +8,7 @@ mod js_ts;
 mod linear_cost;
 mod mdx;
 mod nesting;
+mod object_pattern_defaults;
 mod regex_compile;
 mod sfc;
 
