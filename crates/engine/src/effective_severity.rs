@@ -464,13 +464,11 @@ impl SeverityTally<'_, '_> {
         self.total >= self.limit
     }
 }
-
 fn visit<T: GatedRuleFinding>(findings: &mut [T], f: &mut dyn FnMut(&mut dyn GatedRuleFinding)) {
     for finding in findings {
         f(finding);
     }
 }
-
 /// Visit every finding that carries a gate severity.
 ///
 /// The destructure has no `..`, so a new field on [`AnalysisResults`] fails to
@@ -549,6 +547,7 @@ fn for_each_gated_finding(
         entry_point_summary: _,
         render_fan_in: _,
         react_component_intel: _,
+        semantic_reachable_files: _,
         semantic_framework_contracts: _,
         // Security findings belong to `fallow security` and its own gate.
         security_findings: _,
@@ -678,6 +677,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         entry_point_summary: _,
         render_fan_in: _,
         react_component_intel: _,
+        semantic_reachable_files: _,
         semantic_framework_contracts: _,
         security_findings: _,
         security_unresolved_edge_files: _,

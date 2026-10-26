@@ -709,7 +709,6 @@ pub(crate) fn filter_results_by_path_scope(
     retain_security_and_workspace_findings(results, scope);
     retain_framework_findings_by_changed_files(results, scope);
 }
-
 fn classify_changed_file_filter_fields(results: &AnalysisResults) {
     let AnalysisResults {
         unused_files: _unused_files,
@@ -778,6 +777,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         entry_point_summary: _entry_point_summary,
         render_fan_in: _render_fan_in,
         react_component_intel: _react_component_intel,
+        semantic_reachable_files: _,
         semantic_framework_contracts: _semantic_framework_contracts,
     } = results;
 }

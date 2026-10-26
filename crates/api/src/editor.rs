@@ -620,11 +620,9 @@ impl EditorAnalysisSession {
     /// Run dead-code and duplication analysis, optionally focusing duplication
     /// to files the editor already resolved as changed.
     ///
-    /// Dead-code still runs with full graph context, and the dead-code
-    /// findings keep full scope until the type-aware pass has run. That pass
-    /// reads `unused_files` as its set of unreachable files. After the pass,
-    /// call [`Self::apply_change_scope`] to narrow the dead-code findings and
-    /// clone groups of this project.
+    /// Dead-code retains full graph context and semantic evidence scope.
+    /// After type-aware refinement, call [`Self::apply_change_scope`] to narrow
+    /// the findings and clone groups of this project.
     ///
     /// # Errors
     ///
@@ -653,12 +651,9 @@ impl EditorAnalysisSession {
     /// resolved change scope, with the engine functions that the CLI, MCP and
     /// Node API use.
     ///
-    /// Call it after the type-aware pass. That pass reads `unused_files` as
-    /// its set of unreachable files, so a scope before it drops evidence from
-    /// unused files outside the changed set. A multi-root editor session
-    /// merges several projects, and each project has its own
-    /// `ignoreFindings`. So the scope runs per project, where the config is
-    /// known, and not after the merge.
+    /// Apply scope after type-aware refinement so added findings are scoped
+    /// too. Each project in a multi-root editor session has its own
+    /// `ignoreFindings`, so apply scope per project before merging.
     pub fn apply_change_scope(
         &self,
         output: &mut EditorProjectAnalysisOutput,
@@ -789,12 +784,9 @@ impl EditorAnalysisOutput {
 
     /// Drop findings and clone groups that do not touch any changed file.
     ///
-    /// Each project narrows its dead-code findings with its own config in
-    /// [`EditorAnalysisSession::apply_change_scope`], after the
-    /// type-aware pass. The scope must come after that pass, because the pass
-    /// reads `unused_files` as its set of unreachable files. This filter then
-    /// narrows the clone groups of the merged output. For the dead-code
-    /// findings, it changes nothing.
+    /// Each project scopes dead-code findings with its own config in
+    /// [`EditorAnalysisSession::apply_change_scope`]. This merged-output filter
+    /// narrows clone groups and preserves the already scoped findings.
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
         fallow_engine::changed_files::filter_results_by_changed_files(
             &mut self.results,
@@ -960,9 +952,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// The type-aware pass reads `unused_files` as its set of unreachable
-    /// files. So the analysis keeps an unused file outside the changed set,
-    /// and the scope removes it only when the caller applies it.
+    /// Analysis retains the full project until the caller applies change scope.
     #[test]
     fn changed_files_scope_runs_after_the_analysis_keeps_all_unused_files() {
         let temp = tempfile::tempdir().expect("temp project");
@@ -1247,9 +1237,7 @@ pub(crate) mod tests {
     #[test]
     fn merge_results_covers_all_fields() {
         let mut output = EditorAnalysisOutput::default();
-
         output.merge_results(merge_test_source_with_all_fields());
-
         let target = &output.results;
 
         assert_eq!(target.unused_files.len(), 1);
@@ -1333,6 +1321,7 @@ pub(crate) mod tests {
         assert_eq!(target.duplicate_prop_shapes.len(), 1);
         assert_eq!(target.active_suppressions.len(), 1);
         assert_eq!(target.semantic_framework_contracts.len(), 1);
+        assert!(target.semantic_reachable_files.contains(Path::new("/f.ts")));
         assert_eq!(target.security_unresolved_callee_sites, 3);
         assert_eq!(target.unused_component_props_exempted, 1);
     }
@@ -2082,6 +2071,7 @@ pub(crate) mod tests {
                 hooks: super::editor_results::ReactHookSummary::default(),
                 props: Vec::new(),
             }],
+            semantic_reachable_files: std::iter::once("/f.ts".into()).collect(),
             semantic_framework_contracts: vec![fallow_types::semantic::SemanticFrameworkContract {
                 framework: "lit".to_string(),
                 package: "lit".to_string(),

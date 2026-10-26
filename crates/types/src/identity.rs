@@ -433,7 +433,6 @@ impl FamilyVisitor for RetainPass<'_> {
         });
     }
 }
-
 #[expect(
     clippy::too_many_lines,
     reason = "one exhaustive list of finding families; splitting it would lose the compile-time guard"
@@ -512,6 +511,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         entry_point_summary: _,
         render_fan_in: _,
         react_component_intel: _,
+        semantic_reachable_files: _,
         semantic_framework_contracts: _,
     } = results;
 

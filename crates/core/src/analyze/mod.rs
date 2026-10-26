@@ -32,6 +32,7 @@ mod render_fan_in;
 mod route_collision;
 mod route_tree;
 mod security;
+mod semantic_scope;
 mod server_only;
 mod thin_wrapper;
 mod unprovided_inject;
@@ -898,11 +899,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         declared_deps: input.declared_deps,
         collect_usages: input.collect_usages,
     });
-    if input.config.type_aware.enabled {
-        results.semantic_framework_contracts = plugin_result.map_or_else(Vec::new, |plugins| {
-            plugins.framework_class_member_contracts.clone()
-        });
-    }
+    semantic_scope::attach(&mut results, input.graph, input.config, plugin_result);
     results
 }
 

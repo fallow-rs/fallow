@@ -618,25 +618,17 @@ pub struct AnalysisResults {
     /// Skipped during serialization: rendered separately in JSON output.
     #[serde(skip)]
     pub entry_point_summary: Option<EntryPointSummary>,
-    /// Per-component render fan-in (JSX render SITES + distinct parents) plus the
-    /// precomputed concentration aggregates. DESCRIPTIVE blast-radius signal, not
-    /// an issue type: the component-graph analogue of module fan-in. `None` on
-    /// non-React projects (the dep gate fails and `render_edges` is empty).
-    /// Skipped during serialization (internal carrier, like
-    /// [`Self::export_usages`]); the public surface is the `VitalSigns`
-    /// aggregate, so bare `fallow` / `audit` never serialize it. See
-    /// [`RenderFanInMetric`].
+    /// Internal component render metrics, exposed through health aggregates.
     #[serde(skip)]
     pub render_fan_in: Option<RenderFanInMetric>,
-    /// Per-component React render/prop/hook intelligence. DESCRIPTIVE ambient
-    /// editor context (LSP code lens + per-prop hover), NOT an issue type: it is
-    /// never in `total_issues`. Empty on non-React projects (the dep gate fails
-    /// and `component_functions` is empty). Skipped during serialization
-    /// (in-process LSP carrier, like [`Self::render_fan_in`]); bare `fallow` /
-    /// `audit` never serialize it and the JSON / schema surface is unchanged.
-    /// See [`ReactComponentIntel`].
+    /// Internal component intelligence used by editor overlays.
     #[serde(skip)]
     pub react_component_intel: Vec<ReactComponentIntel>,
+    /// Reachable files in the discovery scope, captured before report filters.
+    /// Empty or deserialized scope cannot grant semantic usage credit.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub semantic_reachable_files: rustc_hash::FxHashSet<PathBuf>,
     /// Plugin-owned framework contracts carried only into the optional
     /// semantic reconciliation pass.
     #[serde(skip)]
@@ -812,6 +804,7 @@ struct AnalysisResultsMetadataMergeParts {
     entry_point_summary: Option<EntryPointSummary>,
     render_fan_in: Option<RenderFanInMetric>,
     react_component_intel: Vec<ReactComponentIntel>,
+    semantic_reachable_files: rustc_hash::FxHashSet<PathBuf>,
     semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
@@ -901,6 +894,7 @@ fn split_merge_parts(
         entry_point_summary,
         render_fan_in,
         react_component_intel,
+        semantic_reachable_files,
         semantic_framework_contracts,
     } = other;
 
@@ -980,6 +974,7 @@ fn split_merge_parts(
             entry_point_summary,
             render_fan_in,
             react_component_intel,
+            semantic_reachable_files,
             semantic_framework_contracts,
         },
     )
@@ -1304,6 +1299,7 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         entry_point_summary: _entry_point_summary,
         render_fan_in: _render_fan_in,
         react_component_intel: _react_component_intel,
+        semantic_reachable_files: _semantic_reachable_files,
         semantic_framework_contracts: _semantic_framework_contracts,
     } = results;
 }
@@ -1538,6 +1534,8 @@ impl AnalysisResults {
     }
 
     fn merge_metadata_and_security(&mut self, parts: AnalysisResultsMetadataMergeParts) {
+        self.semantic_reachable_files
+            .extend(parts.semantic_reachable_files);
         self.feature_flags.extend(parts.feature_flags);
         self.security_findings.extend(parts.security_findings);
         self.security_unresolved_edge_files += parts.security_unresolved_edge_files;

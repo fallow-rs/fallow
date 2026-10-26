@@ -101,7 +101,6 @@ impl DeadCodeAuditLedger {
             .iter()
             .any(|record| record.introduced && record.effective_severity == Severity::Error)
     }
-
     /// Whether an introduced finding has effective warning severity.
     #[must_use]
     pub fn has_introduced_warnings(&self) -> bool {
@@ -109,7 +108,6 @@ impl DeadCodeAuditLedger {
             .iter()
             .any(|record| record.introduced && record.effective_severity == Severity::Warn)
     }
-
     /// Demote introduced findings that have no syntactic counterpart in the
     /// current head run to inherited (advisory) status.
     ///
@@ -131,7 +129,6 @@ impl DeadCodeAuditLedger {
             }
         }
     }
-
     /// Persist comparison membership into existing typed output fields.
     ///
     /// `StaleSuppression` is the sole legacy finding without a typed
@@ -208,6 +205,7 @@ impl DeadCodeAuditLedger {
             entry_point_summary: _entry_point_summary,
             render_fan_in: _render_fan_in,
             react_component_intel: _react_component_intel,
+            semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
         } = results;
 
@@ -697,6 +695,7 @@ impl DeadCodeKeyCollector<'_> {
             // Per-component React intel is a descriptive ambient-editor carrier,
             // not an issue collection; no attribution key needed.
             react_component_intel: _react_component_intel,
+            semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
         } = results;
 
@@ -1549,6 +1548,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         // Per-component React intel is a descriptive ambient-editor carrier, not
         // an issue collection; no key needed.
         react_component_intel: _react_component_intel,
+        semantic_reachable_files: _,
         semantic_framework_contracts: _semantic_framework_contracts,
     } = results;
 }

@@ -1466,7 +1466,7 @@ fn lsp_changed_since_scopes_editor_project_analysis_before_duplication() {
     let merge = single_call_site(&source, "merge_project_output(");
     assert!(
         refine < scope && scope < merge,
-        "LSP must narrow dead-code findings after the type-aware pass, which reads `unused_files`, and before the merge"
+        "LSP must scope findings added by type-aware refinement before merging projects"
     );
 }
 
