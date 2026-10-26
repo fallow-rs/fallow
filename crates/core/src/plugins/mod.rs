@@ -1963,7 +1963,7 @@ mod trace_provenance;
 mod used_export_names;
 mod used_export_rule;
 
-pub(crate) use used_export_rule::ConfigExportCredit;
+pub(crate) use used_export_rule::{ConfigExportCredit, is_export_ignored};
 pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};
 
 pub(crate) use module_federation::runtime_remotes;

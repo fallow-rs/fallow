@@ -18,7 +18,7 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use crate::plugins::ConfigExportCredit;
+use crate::plugins::{ConfigExportCredit, is_export_ignored};
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
@@ -173,20 +173,6 @@ fn matchers_for_module<'a>(
         .map(|rule| rule.exports.as_slice())
         .collect();
     (mi, mp)
-}
-
-/// Check whether an export name is covered by config ignore rules or plugin rules.
-fn is_export_ignored(
-    export_name: &str,
-    matching_ignore: &[&[String]],
-    matching_plugin: &[&[&str]],
-) -> bool {
-    matching_ignore
-        .iter()
-        .any(|exports| exports.iter().any(|e| e == "*" || e == export_name))
-        || matching_plugin
-            .iter()
-            .any(|exports| exports.contains(&"*") || exports.contains(&export_name))
 }
 
 fn local_export_binding_name(export: &ExportInfo) -> Option<&str> {
@@ -665,12 +651,13 @@ fn unused_export_candidate_is_skipped(
         return true;
     }
 
-    ConfigExportCredit::credits(match_ctx.config_credited_exports, export_str)
-        || is_export_ignored(
-            export_str,
-            match_ctx.matching_ignore,
-            match_ctx.matching_plugin,
-        )
+    let credited = |name: &str| {
+        ConfigExportCredit::credits(match_ctx.config_credited_exports, name)
+            || is_export_ignored(name, match_ctx.matching_ignore, match_ctx.matching_plugin)
+    };
+    // A tool that loads a CommonJS file reads `module.exports` as its default
+    // export, so a `default` credit covers every key of that object (#3876).
+    credited(export_str) || (module.has_cjs_exports() && credited("default"))
 }
 
 fn build_unused_export(
