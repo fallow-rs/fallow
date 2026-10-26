@@ -809,6 +809,68 @@ test("protocol v7 resolves checker-inferred public return types", () => {
   }
 });
 
+test("api-surface reads type arguments only from type references and keeps stderr clean", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    const plain = Array.from(
+      { length: 8 },
+      (_, index) =>
+        `interface Options${index} { value: string }\n` +
+        `export function run${index}(options: Options${index}): string { return options.value; }\n`,
+    );
+    write(
+      root,
+      "src/model.ts",
+      [
+        "interface Item { id: string }",
+        "export interface Box<T> { value: T }",
+        'export const makeBox = (): Box<Item> => ({ value: { id: "a" } });',
+        "",
+      ].join("\n"),
+    );
+    write(
+      root,
+      "src/index.ts",
+      [...plain, 'import { makeBox } from "./model";', "export const boxed = makeBox();", ""].join(
+        "\n",
+      ),
+    );
+
+    const result = spawnSync(executable, {
+      cwd: sidecarRoot,
+      input: JSON.stringify(
+        semanticRequest(root, [
+          {
+            id: 125,
+            operation: "api-surface",
+            entry_points: ["src/index.ts"],
+            private_leak_candidates: [],
+          },
+        ]),
+      ),
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    const api = JSON.parse(result.stdout).results[0];
+    assert.equal(api.status, "complete");
+    const referenced = (name) =>
+      api.data.entries
+        .find((entry) => entry.exposed.exported_name === name)
+        .referenced_types.map((reference) => reference.declaration.local_name);
+    assert.deepEqual(referenced("run0"), ["Options0"]);
+    assert.deepEqual(referenced("boxed").sort(), ["Box", "Item"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 resolves checker-inferred generic constraints", () => {
   const root = makeProject();
   try {

@@ -1407,16 +1407,16 @@ const signatureTypes = (project, type, anchor) =>
 
 const checkerTypeChildren = (project, type, anchor, hasNamedDeclaration) => {
   if (type.isTypeParameter()) {
-    const constraint = safeCheckerValue(
-      () => project.checker.getConstraintOfTypeParameter(type),
-      undefined,
-    );
+    const constraint = safeCheckerValue(() => project.checker.getConstraintOfTypeParameter(type));
     return constraint ? [constraint] : [];
   }
   const structural = [
     ...(type.getTypes() ?? []),
     ...safeCheckerValue(() => type.getAliasTypeArguments(), []),
-    ...safeCheckerValue(() => project.checker.getTypeArguments(type), []),
+    // On tsrs, this call panics to stderr for a type that is not a reference.
+    ...(type.isTypeReference()
+      ? safeCheckerValue(() => project.checker.getTypeArguments(type), [])
+      : []),
   ].filter(Boolean);
   if (hasNamedDeclaration) return structural;
   const direct = [...structural, ...signatureTypes(project, type, anchor)];

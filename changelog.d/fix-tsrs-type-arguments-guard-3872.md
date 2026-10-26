@@ -1,0 +1,3 @@
+### Fixed
+
+- **Type-aware refinement on the `tsrs` backend no longer fails on public APIs with many non-generic interfaces.** The semantic sidecar asked the checker for the type arguments of every type in the public API walk. On `tsrs`, each call on a type that is not a type reference panicked and wrote the panic to stderr. With enough such interfaces, stderr went past its 16384-byte limit and Fallow dropped the type-aware result. The sidecar now asks for type arguments only on type references, so `tsrs` gives the same result as `typescript-go`. Thanks to [@Smrtnyk](https://github.com/Smrtnyk) for the report and the reproduction. (Closes [#3872](https://github.com/fallow-rs/fallow/issues/3872))
