@@ -653,7 +653,7 @@ mod end_to_end {
 
         let runner = report.runner.as_ref().expect("a runner ran");
         assert_eq!(runner.name, "vitest");
-        assert_eq!(runner.version, "5.0.4");
+        assert_eq!(runner.version, "5.0.5");
         assert_eq!(runner.runtime.name, "node");
         assert_eq!(
             report.completion.status,
@@ -1066,7 +1066,7 @@ mod end_to_end {
         let files = [
             (
                 "package.json",
-                r#"{"name":"mutation-discovery-repro","private":true,"type":"module","scripts":{"test":"vitest run","test:integration":"vitest run --config vitest.integration.config.mjs"},"devDependencies":{"vitest":"5.0.4"}}"#
+                r#"{"name":"mutation-discovery-repro","private":true,"type":"module","scripts":{"test":"vitest run","test:integration":"vitest run --config vitest.integration.config.mjs"},"devDependencies":{"vitest":"5.0.5"}}"#
                     .to_owned(),
             ),
             (
