@@ -513,7 +513,7 @@ pub fn extract_astro_style_regions(source: &str) -> Vec<SourceRegion> {
 
     blocks::scan(source, &STYLE_PREFIX_RE, Some(&STYLE_CLOSE_RE))
         .into_iter()
-        .filter(|block| !pos_in_comment(&comment_ranges, block.start))
+        .filter(|block| !pos_in_ranges(&comment_ranges, block.start))
         .filter_map(|block| {
             let text = &source[block.body.clone()];
             if text.trim().is_empty() {
@@ -771,11 +771,6 @@ fn extend_imports_from_template(
     extend_inline_script_imports(imports, template, template_offset, &comment_ranges);
 }
 
-/// Whether `pos` falls inside any HTML comment range.
-fn pos_in_comment(comment_ranges: &[(usize, usize)], pos: usize) -> bool {
-    pos_in_ranges(comment_ranges, pos)
-}
-
 /// Append `<script src="...">` processed-script references from the template.
 fn extend_processed_script_src_imports(
     imports: &mut Vec<ImportInfo>,
@@ -784,7 +779,7 @@ fn extend_processed_script_src_imports(
     comment_ranges: &[(usize, usize)],
 ) {
     for open in blocks::scan(template, &SCRIPT_PREFIX_RE, None) {
-        if pos_in_comment(comment_ranges, open.start) {
+        if pos_in_ranges(comment_ranges, open.start) {
             continue;
         }
         let attrs = &template[open.attrs.clone()];
@@ -819,7 +814,7 @@ fn extend_inline_script_imports(
     comment_ranges: &[(usize, usize)],
 ) {
     for open in blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE)) {
-        if pos_in_comment(comment_ranges, open.start) {
+        if pos_in_ranges(comment_ranges, open.start) {
             continue;
         }
         let attrs = &template[open.attrs.clone()];
@@ -1347,8 +1342,6 @@ mod tests {
     fn astro_masked_ranges_match_linear_reference() {
         let template = MASKED_MIX_TEMPLATE;
 
-        // Old masking: a linear scan over the three raw (unsorted, overlapping)
-        // `find_iter` passes.
         let mut raw: Vec<(usize, usize)> = Vec::new();
         raw.extend(
             blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE))
