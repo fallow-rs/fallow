@@ -141,3 +141,42 @@ fn a_hash_or_at_url_prefix_does_not_hide_nesting() {
         );
     }
 }
+
+/// Depth of the nested destructure defaults. Work that doubles at each level
+/// does not end in the time limit at this depth.
+const DEFAULT_DEPTH: usize = 40;
+
+/// Extract `source` on another thread and fail when it does not end in time.
+fn assert_extracts_in_time(source: String) {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let info = parse("src/index.ts", &source);
+        let _ = done.send(info.parse_error_count);
+    });
+    let errors = finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("extraction must end in time");
+    assert_eq!(errors, 0);
+}
+
+#[test]
+fn nested_array_destructure_defaults_cost_linear_work() {
+    let mut pattern = String::from("{ m }");
+    for _ in 0..DEFAULT_DEPTH {
+        pattern = format!("[{pattern} = [s]]");
+    }
+    assert_extracts_in_time(format!(
+        "declare const s: any;\nconst {pattern} = [s];\nfor (const {pattern} of [[s]]) {{}}\n"
+    ));
+}
+
+#[test]
+fn nested_object_destructure_assignment_defaults_cost_linear_work() {
+    let mut pattern = String::from("{ m }");
+    for _ in 0..DEFAULT_DEPTH {
+        pattern = format!("{{ k: {pattern} = s }}");
+    }
+    assert_extracts_in_time(format!(
+        "declare const s: any;\nlet m: unknown;\n({pattern} = s);\n"
+    ));
+}

@@ -27,11 +27,14 @@ impl<'a> ModuleInfoExtractor {
         // can be resolved through `binding_target_names`; record the access at
         // the destructuring site instead. This is the object-pattern parity
         // of the existing `instance.member` path (see #2560).
+        let work = &mut DestructureWork::default();
         match &declarator.id {
             BindingPattern::ObjectPattern(pattern) => {
-                self.record_object_destructure(DestructureObject::Binding(pattern), init);
+                self.record_object_destructure(DestructureObject::Binding(pattern), init, work);
             }
-            BindingPattern::ArrayPattern(pattern) => self.record_array_destructure(pattern, init),
+            BindingPattern::ArrayPattern(pattern) => {
+                self.record_array_destructure(pattern, init, work);
+            }
             _ => {}
         }
     }
@@ -42,15 +45,21 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: &BindingPattern<'a>,
         source: &Expression<'a>,
+        work: &mut DestructureWork,
     ) {
+        if !work.take() {
+            return;
+        }
         match pattern {
             BindingPattern::ObjectPattern(pattern) => {
-                self.record_object_destructure(DestructureObject::Binding(pattern), source);
+                self.record_object_destructure(DestructureObject::Binding(pattern), source, work);
             }
-            BindingPattern::ArrayPattern(pattern) => self.record_array_destructure(pattern, source),
+            BindingPattern::ArrayPattern(pattern) => {
+                self.record_array_destructure(pattern, source, work);
+            }
             BindingPattern::AssignmentPattern(assignment) => {
-                self.record_binding_destructure(&assignment.left, source);
-                self.record_binding_destructure(&assignment.left, &assignment.right);
+                self.record_binding_destructure(&assignment.left, source, work);
+                self.record_binding_destructure(&assignment.left, &assignment.right, work);
             }
             BindingPattern::BindingIdentifier(_) => {}
         }
@@ -60,7 +69,15 @@ impl<'a> ModuleInfoExtractor {
     /// index of an array literal. A spread can move each later element to
     /// another index, so no element at or after a spread is a source. A
     /// default value stays a source at each index.
-    fn record_array_destructure(&mut self, pattern: &ArrayPattern<'a>, source: &Expression<'a>) {
+    fn record_array_destructure(
+        &mut self,
+        pattern: &ArrayPattern<'a>,
+        source: &Expression<'a>,
+        work: &mut DestructureWork,
+    ) {
+        if !work.take() {
+            return;
+        }
         let values = match unwrap_static_expr(source) {
             Expression::ArrayExpression(array) => &array.elements[..],
             _ => &[],
@@ -73,10 +90,12 @@ impl<'a> ModuleInfoExtractor {
                 continue;
             };
             match value.and_then(ArrayExpressionElement::as_expression) {
-                Some(value) if !after_spread => self.record_binding_destructure(element, value),
+                Some(value) if !after_spread => {
+                    self.record_binding_destructure(element, value, work);
+                }
                 _ => {
                     if let BindingPattern::AssignmentPattern(assignment) = element {
-                        self.record_binding_destructure(&assignment.left, &assignment.right);
+                        self.record_binding_destructure(&assignment.left, &assignment.right, work);
                     }
                 }
             }
@@ -90,7 +109,11 @@ impl<'a> ModuleInfoExtractor {
         expr: &AssignmentExpression<'a>,
     ) {
         if let AssignmentTarget::ObjectAssignmentTarget(target) = &expr.left {
-            self.record_object_destructure(DestructureObject::Assignment(target), &expr.right);
+            self.record_object_destructure(
+                DestructureObject::Assignment(target),
+                &expr.right,
+                &mut DestructureWork::default(),
+            );
         }
     }
 
@@ -102,21 +125,25 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         source: &Expression<'a>,
+        work: &mut DestructureWork,
     ) {
+        if !work.take() {
+            return;
+        }
         let source = unwrap_static_expr(source);
         if let Expression::ObjectExpression(object) = source {
-            self.record_literal_destructure(pattern, object);
+            self.record_literal_destructure(pattern, object, work);
             return;
         }
         let Some(path) = static_member_object_name(source) else {
-            self.record_nested_entries(&pattern.entries(), None);
+            self.record_nested_entries(&pattern.entries(), None, work);
             return;
         };
         let ident = match source {
             Expression::Identifier(ident) => Some(&**ident),
             _ => None,
         };
-        self.record_source_path_destructure(pattern, &path, ident);
+        self.record_source_path_destructure(pattern, &path, ident, work);
     }
 
     /// `const { m } = holder` reads `holder.m`. A local class instance credits
@@ -128,12 +155,13 @@ impl<'a> ModuleInfoExtractor {
         pattern: DestructureObject<'_, 'a>,
         path: &str,
         source: Option<&IdentifierReference<'_>>,
+        work: &mut DestructureWork,
     ) {
         let entries = pattern.entries();
         if let Some(BindingTarget::Class(class_name)) = self.resolve_bound_object_name(path) {
             let keys: Vec<_> = entries.iter().map(|entry| entry.key.clone()).collect();
             self.credit_destructured_class_members(&class_name, source, &keys, pattern.has_rest());
-            self.record_nested_entries(&entries, Some(path));
+            self.record_nested_entries(&entries, Some(path), work);
             return;
         }
         if pattern.has_rest() || entries.iter().any(|entry| entry.key.is_none()) {
@@ -143,10 +171,10 @@ impl<'a> ModuleInfoExtractor {
             if !self.imported_root_is_shadowed(path) {
                 self.record_whole_object_identifier_use(path);
             }
-            self.record_nested_entries(&entries, Some(path));
+            self.record_nested_entries(&entries, Some(path), work);
             return;
         }
-        self.record_path_destructure(pattern, path);
+        self.record_path_destructure(pattern, path, work);
     }
 
     /// Whether the root of `path` is an import local that a nested declaration
@@ -160,16 +188,21 @@ impl<'a> ModuleInfoExtractor {
 
     /// Credit the nested patterns of `entries`. Each one reads its default and,
     /// when the source has a static `path`, the member `path.key`.
-    fn record_nested_entries(&mut self, entries: &[DestructureEntry<'_, 'a>], path: Option<&str>) {
+    fn record_nested_entries(
+        &mut self,
+        entries: &[DestructureEntry<'_, 'a>],
+        path: Option<&str>,
+        work: &mut DestructureWork,
+    ) {
         for entry in entries {
             let Some(nested) = entry.nested else {
                 continue;
             };
             if let Some(default) = entry.default {
-                self.record_object_destructure(nested, default);
+                self.record_object_destructure(nested, default, work);
             }
             if let (Some(path), Some(key)) = (path, entry.key.as_deref()) {
-                self.record_path_destructure(nested, &format!("{path}.{key}"));
+                self.record_path_destructure(nested, &format!("{path}.{key}"), work);
             }
         }
     }
@@ -182,10 +215,11 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         object: &ObjectExpression<'a>,
+        work: &mut DestructureWork,
     ) {
         for property in &object.properties {
             if let ObjectPropertyKind::SpreadProperty(spread) = property {
-                self.record_object_destructure(pattern, &spread.argument);
+                self.record_object_destructure(pattern, &spread.argument, work);
             }
         }
         for entry in pattern.entries() {
@@ -193,14 +227,14 @@ impl<'a> ModuleInfoExtractor {
                 continue;
             };
             if let Some(default) = entry.default {
-                self.record_object_destructure(nested, default);
+                self.record_object_destructure(nested, default, work);
             }
             if let Some(value) = entry
                 .key
                 .as_deref()
                 .and_then(|key| object_literal_property_value(object, key))
             {
-                self.record_object_destructure(nested, value);
+                self.record_object_destructure(nested, value, work);
             }
         }
     }
@@ -208,17 +242,25 @@ impl<'a> ModuleInfoExtractor {
     /// A nested pattern under a static source path reads the same members as
     /// the equivalent member expression, so each key goes through the
     /// `path.key` access path that `visit_static_member_expression` uses.
-    fn record_path_destructure(&mut self, pattern: DestructureObject<'_, 'a>, path: &str) {
+    fn record_path_destructure(
+        &mut self,
+        pattern: DestructureObject<'_, 'a>,
+        path: &str,
+        work: &mut DestructureWork,
+    ) {
+        if !work.take() {
+            return;
+        }
         for entry in pattern.entries() {
             if let (Some(nested), Some(default)) = (entry.nested, entry.default) {
-                self.record_object_destructure(nested, default);
+                self.record_object_destructure(nested, default, work);
             }
             let Some(key) = entry.key.as_deref() else {
                 continue;
             };
             self.record_named_member_access(path, key);
             if let Some(nested) = entry.nested {
-                self.record_path_destructure(nested, &format!("{path}.{key}"));
+                self.record_path_destructure(nested, &format!("{path}.{key}"), work);
             }
         }
     }
@@ -245,7 +287,11 @@ impl<'a> ModuleInfoExtractor {
                 self.record_typed_member_destructuring(pattern, &type_annotation.type_annotation);
             }
             if let Some(initializer) = param.initializer.as_deref() {
-                self.record_object_destructure(DestructureObject::Binding(pattern), initializer);
+                self.record_object_destructure(
+                    DestructureObject::Binding(pattern),
+                    initializer,
+                    &mut DestructureWork::default(),
+                );
             }
         }
     }
@@ -279,6 +325,7 @@ impl<'a> ModuleInfoExtractor {
             }
             _ => return,
         };
+        let work = &mut DestructureWork::default();
         let iterable = unwrap_static_expr(&stmt.right);
         let Expression::ArrayExpression(array) = iterable else {
             self.record_iterable_element_destructure(pattern, iterable);
@@ -288,7 +335,7 @@ impl<'a> ModuleInfoExtractor {
             if let ArrayExpressionElement::SpreadElement(spread) = element {
                 self.record_iterable_element_destructure(pattern, &spread.argument);
             } else if let Some(element) = element.as_expression() {
-                self.record_object_destructure(pattern, element);
+                self.record_object_destructure(pattern, element, work);
             }
         }
     }
@@ -303,9 +350,10 @@ impl<'a> ModuleInfoExtractor {
         let Expression::ArrayExpression(array) = unwrap_static_expr(iterable) else {
             return;
         };
+        let work = &mut DestructureWork::default();
         for element in &array.elements {
             if let Some(element) = element.as_expression() {
-                self.record_array_destructure(pattern, element);
+                self.record_array_destructure(pattern, element, work);
             }
         }
     }
@@ -334,7 +382,12 @@ impl<'a> ModuleInfoExtractor {
     /// `({ k: { m } }: typeof holder)` destructures the type of the value
     /// `holder`, so it reads the same members as `const { k: { m } } = holder`.
     fn record_typeof_destructure(&mut self, pattern: &ObjectPattern<'a>, path: &str) {
-        self.record_source_path_destructure(DestructureObject::Binding(pattern), path, None);
+        self.record_source_path_destructure(
+            DestructureObject::Binding(pattern),
+            path,
+            None,
+            &mut DestructureWork::default(),
+        );
     }
 
     /// `({ member }: Service) => ...` reads `Service.member`. The annotation is
@@ -422,6 +475,31 @@ impl<'a> ModuleInfoExtractor {
                 member: member.to_string(),
             });
         }
+    }
+}
+
+/// The most destructure steps that one destructure records. A pattern with a
+/// default at each level is walked once for the source and once for the
+/// default, so the steps double at each level. The cap bounds that cost.
+const MAX_DESTRUCTURE_STEPS: usize = 1024;
+
+/// The destructure steps that one destructure has left.
+struct DestructureWork(usize);
+
+impl Default for DestructureWork {
+    fn default() -> Self {
+        Self(MAX_DESTRUCTURE_STEPS)
+    }
+}
+
+impl DestructureWork {
+    /// Use one step. Returns `false` when no step is left.
+    fn take(&mut self) -> bool {
+        let Some(left) = self.0.checked_sub(1) else {
+            return false;
+        };
+        self.0 = left;
+        true
     }
 }
 
