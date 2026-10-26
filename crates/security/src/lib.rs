@@ -76,6 +76,11 @@ struct RawMatcher {
     sink_shape: String,
     callee_patterns: Vec<String>,
     arg_index: u32,
+    /// Optional variadic gate: when `true`, the row also matches every
+    /// argument after `arg_index`. Lets `path.join` / `path.resolve` inspect
+    /// each path segment, not only the first one (issue #3712).
+    #[serde(default)]
+    variadic: bool,
     evidence_template: String,
     #[serde(default)]
     import_provenance: Option<String>,
@@ -307,6 +312,9 @@ pub struct Matcher {
     pub sink_shape: SinkShape,
     pub callee_patterns: Vec<CalleePattern>,
     pub arg_index: u32,
+    /// Whether the row also matches every argument after `arg_index`. A
+    /// variadic row reports at most one candidate per call.
+    pub variadic: bool,
     pub evidence_template: String,
     pub import_provenance: Option<String>,
     /// Framework enabler package gate (issue #861). `None` = global row.
@@ -413,6 +421,13 @@ impl Matcher {
     #[must_use]
     pub fn first_matching_pattern(&self, callee_path: &str) -> Option<&CalleePattern> {
         self.callee_patterns.iter().find(|p| p.matches(callee_path))
+    }
+
+    /// Whether a captured argument position is admitted by this matcher. A
+    /// variadic row admits `arg_index` and every later position.
+    #[must_use]
+    pub fn admits_arg_index(&self, arg_index: u32) -> bool {
+        arg_index == self.arg_index || (self.variadic && arg_index > self.arg_index)
     }
 
     /// Whether a captured argument shape is admitted by this matcher. `None`
@@ -786,6 +801,7 @@ fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
         sink_shape,
         callee_patterns,
         arg_index: entry.arg_index,
+        variadic: entry.variadic,
         evidence_template: entry.evidence_template,
         import_provenance: entry.import_provenance,
         enabler,
@@ -1107,6 +1123,26 @@ mod tests {
             );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
         }
+    }
+
+    #[test]
+    fn path_join_row_admits_every_path_segment() {
+        let row = catalogue()
+            .matchers()
+            .iter()
+            .find(|m| m.id == "path-traversal" && m.first_matching_pattern("path.join").is_some())
+            .expect("path.join row exists");
+        assert!(row.variadic, "path.join must inspect every segment (#3712)");
+        assert!(row.admits_arg_index(0));
+        assert!(row.admits_arg_index(3));
+
+        let rename_destination = catalogue()
+            .matchers()
+            .iter()
+            .find(|m| m.id == "path-traversal" && m.arg_index == 1)
+            .expect("fs.rename destination row exists");
+        assert!(!rename_destination.admits_arg_index(0));
+        assert!(!rename_destination.admits_arg_index(2));
     }
 
     #[test]

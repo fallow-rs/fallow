@@ -351,7 +351,14 @@ impl ModuleInfoExtractor {
         }
         if decl.kind != VariableDeclarationKind::Const {
             self.module_static_sink_literals.remove(id.name.as_str());
+            self.module_trusted_path_bindings.remove(id.name.as_str());
             return;
+        }
+        if self.is_trusted_static_path_expr(init) {
+            self.module_trusted_path_bindings
+                .insert(id.name.to_string());
+        } else {
+            self.module_trusted_path_bindings.remove(id.name.as_str());
         }
         if let Some(value) = self.static_sink_literal_value(init) {
             self.module_static_sink_literals

@@ -295,7 +295,7 @@ type TaintedSinkSource<'a> = (&'a str, &'a str, Option<u32>);
 
 fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str, &str)>) -> bool {
     matcher.sink_shape == sink.sink_shape
-        && matcher.arg_index == sink.arg_index
+        && matcher.admits_arg_index(sink.arg_index)
         && (sink.arg_is_non_literal || matcher.is_literal_aware())
         && matcher.admits_arg_kind(sink.arg_kind)
         && matcher.literal_value_satisfied(sink.arg_literal.as_ref())
@@ -645,6 +645,11 @@ fn collect_module_tainted_sinks(
         run.context.request_receivers,
     );
 
+    // A variadic row (`path.join` segments, #3712) can admit several arguments
+    // of one call. Keep one candidate per call and row, and prefer a
+    // source-backed argument over a source-free one.
+    let mut variadic_calls: FxHashMap<(u32, *const Matcher), usize> = FxHashMap::default();
+
     for sink in &module.security_sinks {
         let Some((matcher, source)) = match_tainted_sink(run, module, sink, &tainted_locals) else {
             continue;
@@ -663,7 +668,7 @@ fn collect_module_tainted_sinks(
             continue;
         }
 
-        findings.push(build_tainted_sink_finding(&TaintedSinkFindingInput {
+        let finding = build_tainted_sink_finding(&TaintedSinkFindingInput {
             matcher,
             sink,
             node,
@@ -671,7 +676,23 @@ fn collect_module_tainted_sinks(
             sink_line_col: (line, col),
             line_offsets_by_file: run.line_offsets_by_file,
             file_id,
-        }));
+        });
+        if !matcher.variadic {
+            findings.push(finding);
+            continue;
+        }
+        match variadic_calls.entry((sink.span_start, std::ptr::from_ref(matcher))) {
+            std::collections::hash_map::Entry::Occupied(slot) => {
+                let existing = &mut findings[*slot.get()];
+                if finding.source_backed && !existing.source_backed {
+                    *existing = finding;
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(findings.len());
+                findings.push(finding);
+            }
+        }
     }
 }
 

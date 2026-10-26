@@ -637,6 +637,66 @@ fn path_traversal_url_guard_still_fires() {
     assert_candidate(&results, "src/url-guard.ts", "path-traversal", 22);
 }
 
+#[test]
+fn path_traversal_trusted_module_relative_base_does_not_fire() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    let module_root: Vec<_> = results
+        .security_findings
+        .iter()
+        .filter(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/module-root.ts")
+        })
+        .map(|f| (f.line, f.category.clone()))
+        .collect();
+    assert!(
+        module_root.is_empty(),
+        "module-relative paths from trusted bases and literal segments must not be flagged: {module_root:?}"
+    );
+}
+
+#[test]
+fn path_traversal_untrusted_url_against_module_base_still_fires() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_candidate(
+        &results,
+        "src/module-root-url-input.ts",
+        "path-traversal",
+        22,
+    );
+    assert_candidate(
+        &results,
+        "src/module-root-file-url.ts",
+        "path-traversal",
+        22,
+    );
+}
+
+#[test]
+fn path_traversal_dynamic_later_segment_fires() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_candidate(
+        &results,
+        "src/later-segment-resolve.ts",
+        "path-traversal",
+        22,
+    );
+    assert_candidate(&results, "src/later-segment-join.ts", "path-traversal", 22);
+    assert_candidate(&results, "src/trusted-base-input.ts", "path-traversal", 22);
+}
+
+#[test]
+fn path_traversal_reports_one_candidate_per_call() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_eq!(
+        anchored_count(&results, "src/multi-dynamic.ts"),
+        1,
+        "two dynamic segments in one path.join call must produce one candidate"
+    );
+}
+
 // ── open-redirect (CWE-601), ungated (broad tier) ────────────────────────────
 
 #[test]

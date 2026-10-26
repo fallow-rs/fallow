@@ -1124,12 +1124,12 @@ pub(crate) struct ModuleInfoExtractor {
     module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,
     /// Nested lexical sanitizer binding stack for functions and blocks.
     sanitizer_binding_stack: Vec<FxHashMap<String, Option<SanitizerScope>>>,
-    /// Module-scope literal-backed string allowlists. `false` means the name
-    /// shadows an outer allowlist but is not trusted itself.
+    /// Module-scope literal-backed string allowlists; `false` shadows without trust.
     module_literal_allowlist_bindings: FxHashMap<String, bool>,
-    /// Module-scope literal constants that can be propagated into security sink
-    /// argument classification.
+    /// Module-scope literal constants for security sink argument classification.
     module_static_sink_literals: FxHashMap<String, SinkLiteralValue>,
+    /// Module-scope `const` locals bound to a trusted module-relative path.
+    module_trusted_path_bindings: FxHashSet<String>,
     /// Nested lexical literal allowlist bindings.
     literal_allowlist_binding_stack: Vec<FxHashMap<String, bool>>,
     /// Module-scope locals initialized from risky literal regex patterns.
@@ -1332,7 +1332,7 @@ pub(crate) struct PendingTypedReactProps {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SecurityPathSinkBinding {
     span_start: u32,
-    arg_index: u32,
+    arg_count: u32,
 }
 
 impl ModuleInfoExtractor {
