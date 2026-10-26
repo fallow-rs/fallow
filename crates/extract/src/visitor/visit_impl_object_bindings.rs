@@ -2087,13 +2087,13 @@ impl ModuleInfoExtractor {
             };
 
             let binding_path = format!("{object_path}.{}", key_name.text());
-            match &prop.value {
+            match super::visit_member_destructuring::object_property_value(prop) {
                 // Per-module breadth cap (issue #1843 follow-up): the guard stops
                 // recording once at capacity so a pathological object literal
                 // cannot grow the candidate set (and its O(n^2) fixpoint resolver)
                 // without bound. At capacity the arm falls through to the no-op
                 // `_ =>` arm, identical to skipping the push.
-                Expression::Identifier(ident)
+                Some(Expression::Identifier(ident))
                     if self.object_binding_target_count() < MAX_OBJECT_BINDING_TARGETS =>
                 {
                     // The candidate gives this placement a precise path, which
@@ -2113,7 +2113,7 @@ impl ModuleInfoExtractor {
                         source_name: ident.name.to_string(),
                     });
                 }
-                Expression::ObjectExpression(child) => {
+                Some(Expression::ObjectExpression(child)) => {
                     self.record_object_binding_targets_at_path(root_name, &binding_path, child);
                 }
                 _ => {}

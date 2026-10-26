@@ -172,3 +172,59 @@ const {
   svc: { viaSpreadLiteral },
 } = { ...{ svc: service } };
 viaSpreadLiteral();
+
+for (const [{ viaForOfNestedArray }] of [[service]]) {
+  viaForOfNestedArray();
+}
+
+const [{ viaArrayDecl }] = [service];
+viaArrayDecl();
+
+const [, { viaArraySkip }] = [noop, service];
+viaArraySkip();
+
+const [{ viaArrayDefault } = service]: Service[] = [];
+viaArrayDefault();
+
+const [, { deadArrayIndex }] = [service, { deadArrayIndex: noop }];
+deadArrayIndex();
+
+const [{ deadArraySpread }] = [...[{ deadArraySpread: noop }], service];
+deadArraySpread();
+
+const getterSource = {
+  get svc() {
+    return service;
+  },
+};
+const {
+  svc: { viaHeldGetter },
+} = getterSource;
+viaHeldGetter();
+getterSource.svc.viaHeldGetterMember();
+
+const otherGetterSource = {
+  get svc() {
+    return { deadGetterOther: noop };
+  },
+};
+const {
+  svc: { deadGetterOther },
+} = otherGetterSource;
+deadGetterOther();
+
+class ThisGetterOwner {
+  svc = service;
+
+  read(): void {
+    const {
+      svc: { deadThisGetter },
+    } = {
+      get svc() {
+        return this.svc;
+      },
+    };
+    deadThisGetter();
+  }
+}
+new ThisGetterOwner().read();

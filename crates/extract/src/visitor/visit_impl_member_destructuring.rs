@@ -27,8 +27,59 @@ impl<'a> ModuleInfoExtractor {
         // can be resolved through `binding_target_names`; record the access at
         // the destructuring site instead. This is the object-pattern parity
         // of the existing `instance.member` path (see #2560).
-        if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
-            self.record_object_destructure(DestructureObject::Binding(pattern), init);
+        match &declarator.id {
+            BindingPattern::ObjectPattern(pattern) => {
+                self.record_object_destructure(DestructureObject::Binding(pattern), init);
+            }
+            BindingPattern::ArrayPattern(pattern) => self.record_array_destructure(pattern, init),
+            _ => {}
+        }
+    }
+
+    /// Credit the members that a binding pattern element reads from `source`.
+    /// A default value is a second possible source.
+    fn record_binding_destructure(
+        &mut self,
+        pattern: &BindingPattern<'a>,
+        source: &Expression<'a>,
+    ) {
+        match pattern {
+            BindingPattern::ObjectPattern(pattern) => {
+                self.record_object_destructure(DestructureObject::Binding(pattern), source);
+            }
+            BindingPattern::ArrayPattern(pattern) => self.record_array_destructure(pattern, source),
+            BindingPattern::AssignmentPattern(assignment) => {
+                self.record_binding_destructure(&assignment.left, source);
+                self.record_binding_destructure(&assignment.left, &assignment.right);
+            }
+            BindingPattern::BindingIdentifier(_) => {}
+        }
+    }
+
+    /// `const [{ m }] = [instance]` reads `m` from the element at the same
+    /// index of an array literal. A spread can move each later element to
+    /// another index, so no element at or after a spread is a source. A
+    /// default value stays a source at each index.
+    fn record_array_destructure(&mut self, pattern: &ArrayPattern<'a>, source: &Expression<'a>) {
+        let values = match unwrap_static_expr(source) {
+            Expression::ArrayExpression(array) => &array.elements[..],
+            _ => &[],
+        };
+        let mut after_spread = false;
+        for (index, element) in pattern.elements.iter().enumerate() {
+            let value = values.get(index);
+            after_spread |= matches!(value, Some(ArrayExpressionElement::SpreadElement(_)));
+            let Some(element) = element else {
+                continue;
+            };
+            match value.and_then(ArrayExpressionElement::as_expression) {
+                Some(value) if !after_spread => self.record_binding_destructure(element, value),
+                _ => {
+                    if let BindingPattern::AssignmentPattern(assignment) = element {
+                        self.record_binding_destructure(&assignment.left, &assignment.right);
+                    }
+                }
+            }
         }
     }
 
@@ -216,6 +267,10 @@ impl<'a> ModuleInfoExtractor {
                     Some(BindingPattern::ObjectPattern(pattern)) => {
                         DestructureObject::Binding(pattern)
                     }
+                    Some(BindingPattern::ArrayPattern(pattern)) => {
+                        self.record_for_of_array_destructure(pattern, &stmt.right);
+                        return;
+                    }
                     _ => return,
                 }
             }
@@ -234,6 +289,23 @@ impl<'a> ModuleInfoExtractor {
                 self.record_iterable_element_destructure(pattern, &spread.argument);
             } else if let Some(element) = element.as_expression() {
                 self.record_object_destructure(pattern, element);
+            }
+        }
+    }
+
+    /// `for (const [{ m }] of [[instance]])` destructures each element of an
+    /// array literal with the array pattern.
+    fn record_for_of_array_destructure(
+        &mut self,
+        pattern: &ArrayPattern<'a>,
+        iterable: &Expression<'a>,
+    ) {
+        let Expression::ArrayExpression(array) = unwrap_static_expr(iterable) else {
+            return;
+        };
+        for element in &array.elements {
+            if let Some(element) = element.as_expression() {
+                self.record_array_destructure(pattern, element);
             }
         }
     }
@@ -451,14 +523,24 @@ fn object_literal_property_value<'b, 'a>(
         if !property.key.static_name().is_some_and(|name| name == key) {
             return None;
         }
-        match property.kind {
-            PropertyKind::Init => Some(&property.value),
-            PropertyKind::Get => getter_return_value(&property.value),
-            PropertyKind::Set => None,
-        }
+        object_property_value(property)
     })
 }
 
+/// The value that reading an object literal property gives: the value of a
+/// plain property, or the value that a getter returns. A setter gives none.
+pub(in crate::visitor) fn object_property_value<'b, 'a>(
+    property: &'b ObjectProperty<'a>,
+) -> Option<&'b Expression<'a>> {
+    match property.kind {
+        PropertyKind::Init => Some(&property.value),
+        PropertyKind::Get => getter_return_value(&property.value),
+        PropertyKind::Set => None,
+    }
+}
+
+/// The value that a getter `get key() { return value }` gives, when its body
+/// is that one return statement.
 fn getter_return_value<'b, 'a>(value: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
     let Expression::FunctionExpression(getter) = value else {
         return None;
