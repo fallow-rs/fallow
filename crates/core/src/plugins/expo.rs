@@ -5,6 +5,9 @@
 
 use std::path::Path;
 
+use oxc_ast::ast::{ArrayExpressionElement, Expression, Program};
+use rustc_hash::FxHashSet;
+
 use super::{Plugin, PluginResult, config_parser};
 
 const ENABLERS: &[&str] = &["expo"];
@@ -73,7 +76,8 @@ impl Plugin for ExpoPlugin {
 ///
 /// Expo loads each entry by name at prebuild time, so the source never imports
 /// it. An entry is a string or a `[name, options]` tuple. A bare name is a
-/// package. A relative name is a local plugin file.
+/// package. A relative name is a local plugin file. The list, a spread, or an
+/// entry can come from a stable local binding.
 pub(super) fn add_config_plugins(
     result: &mut PluginResult,
     source: &str,
@@ -81,15 +85,99 @@ pub(super) fn add_config_plugins(
     root: &Path,
 ) {
     for plugins_path in CONFIG_PLUGIN_PATHS {
-        let names = config_parser::extract_config_string_array(source, config_path, plugins_path)
-            .into_iter()
-            .chain(config_parser::extract_config_array_tuple_heads(
-                source,
-                config_path,
-                plugins_path,
-            ));
-        for name in names {
+        for name in config_plugin_names(source, config_path, plugins_path) {
             add_config_plugin(result, name.trim(), config_path, root);
+        }
+    }
+}
+
+/// The name of each entry in the plugin list at `plugins_path`. An entry is a
+/// string or the first string of a `[name, options]` tuple.
+///
+/// The list, a spread argument, an entry, or a tuple head can be a top-level
+/// `const` or `let` binding that the program never writes to. A spread of an
+/// array literal adds its entries, and a conditional spread adds the entries of
+/// each branch. Any other expression adds no entry, so a dynamic value never
+/// counts as proof of a missing plugin.
+fn config_plugin_names(source: &str, config_path: &Path, plugins_path: &[&str]) -> Vec<String> {
+    config_parser::extract_from_source(source, config_path, |program| {
+        let config = config_parser::find_config_object(program)?;
+        let plugins = config_parser::get_nested_expression(config, plugins_path)?;
+        let mut entries = StaticPluginEntries {
+            program,
+            followed: FxHashSet::default(),
+            names: Vec::new(),
+        };
+        entries.collect_array(plugins);
+        Some(entries.names)
+    })
+    .unwrap_or_default()
+}
+
+/// Collects the static entry names of a plugin list and follows stable local
+/// bindings. Each binding is followed once, so a binding that refers to itself
+/// ends the walk.
+struct StaticPluginEntries<'a> {
+    program: &'a Program<'a>,
+    followed: FxHashSet<&'a str>,
+    names: Vec<String>,
+}
+
+impl<'a> StaticPluginEntries<'a> {
+    /// The expression that `expr` holds, through parentheses, type assertions
+    /// and stable top-level bindings.
+    fn resolve(&mut self, expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+        let mut expr = expr.get_inner_expression();
+        while let Expression::Identifier(id) = expr {
+            if !self.followed.insert(id.name.as_str()) {
+                return None;
+            }
+            expr = config_parser::find_stable_binding_init(self.program, &id.name)?
+                .get_inner_expression();
+        }
+        Some(expr)
+    }
+
+    fn collect_array(&mut self, expr: &'a Expression<'a>) {
+        let Some(Expression::ArrayExpression(array)) = self.resolve(expr) else {
+            return;
+        };
+        for element in &array.elements {
+            if let ArrayExpressionElement::SpreadElement(spread) = element {
+                self.collect_spread(&spread.argument);
+            } else if let Some(entry) = element.as_expression() {
+                self.collect_entry(entry);
+            }
+        }
+    }
+
+    fn collect_spread(&mut self, expr: &'a Expression<'a>) {
+        match self.resolve(expr) {
+            Some(array @ Expression::ArrayExpression(_)) => self.collect_array(array),
+            Some(Expression::ConditionalExpression(conditional)) => {
+                self.collect_spread(&conditional.consequent);
+                self.collect_spread(&conditional.alternate);
+            }
+            Some(Expression::LogicalExpression(logical)) => self.collect_spread(&logical.right),
+            _ => {}
+        }
+    }
+
+    fn collect_entry(&mut self, expr: &'a Expression<'a>) {
+        let name = match self.resolve(expr) {
+            Some(Expression::ArrayExpression(tuple)) => tuple
+                .elements
+                .first()
+                .and_then(ArrayExpressionElement::as_expression)
+                .and_then(|head| self.resolve(head))
+                .and_then(config_parser::expression_to_string),
+            Some(entry) => config_parser::expression_to_string(entry),
+            None => None,
+        };
+        if let Some(name) = name
+            && !self.names.contains(&name)
+        {
+            self.names.push(name);
         }
     }
 }
@@ -107,4 +195,80 @@ fn add_config_plugin(result: &mut PluginResult, name: &str, config_path: &Path, 
     result
         .referenced_dependencies
         .push(crate::resolve::extract_package_name(name));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn credited(source: &str) -> Vec<String> {
+        let result = ExpoPlugin.resolve_config(
+            Path::new("/project/app.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        let mut deps = result.referenced_dependencies;
+        deps.sort();
+        deps
+    }
+
+    #[test]
+    fn credits_plugins_from_a_direct_array() {
+        let source = r#"export default { plugins: ["plugin-a", ["plugin-b", {}]] };"#;
+        assert_eq!(credited(source), ["plugin-a", "plugin-b"]);
+    }
+
+    #[test]
+    fn credits_plugins_from_a_local_binding() {
+        let source = r#"
+            const plugins = ["plugin-a", ["plugin-b", { enabled: true }]];
+            export default { plugins };
+        "#;
+        assert_eq!(credited(source), ["plugin-a", "plugin-b"]);
+    }
+
+    #[test]
+    fn credits_plugins_from_a_binding_under_expo() {
+        let source = r#"
+            const plugins = ["plugin-a"];
+            export default { expo: { name: "app", plugins: plugins } };
+        "#;
+        assert_eq!(credited(source), ["plugin-a"]);
+    }
+
+    #[test]
+    fn credits_plugins_from_spreads_and_bound_entries() {
+        let source = r#"
+            const shared = ["plugin-a"];
+            const sentry = ["plugin-b", { organization: "example" }];
+            const camera = "plugin-c";
+            export default {
+                plugins: [...shared, sentry, camera, ...["plugin-d"], ...(isDev ? ["plugin-e"] : [])],
+            };
+        "#;
+        assert_eq!(
+            credited(source),
+            ["plugin-a", "plugin-b", "plugin-c", "plugin-d", "plugin-e"]
+        );
+    }
+
+    #[test]
+    fn skips_reassigned_and_dynamic_bindings() {
+        let source = r#"
+            let plugins = ["plugin-a"];
+            plugins = ["plugin-b"];
+            const other = loadPlugins();
+            export default { plugins, expo: { plugins: other } };
+        "#;
+        assert!(credited(source).is_empty());
+    }
+
+    #[test]
+    fn stops_on_a_self_referencing_binding() {
+        let source = r#"
+            const plugins = [...plugins, "plugin-a"];
+            export default { plugins };
+        "#;
+        assert_eq!(credited(source), ["plugin-a"]);
+    }
 }
