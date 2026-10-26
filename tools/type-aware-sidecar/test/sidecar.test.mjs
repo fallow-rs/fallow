@@ -865,7 +865,7 @@ test("api-surface reads type arguments only from type references and keeps stder
         .find((entry) => entry.exposed.exported_name === name)
         .referenced_types.map((reference) => reference.declaration.local_name);
     assert.deepEqual(referenced("run0"), ["Options0"]);
-    assert.deepEqual(referenced("boxed").sort(), ["Box", "Item"]);
+    assert.deepEqual(referenced("boxed").toSorted(), ["Box", "Item"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
