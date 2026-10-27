@@ -154,14 +154,22 @@ cancelled, or when --follow-main reaches the maximum count of moves, 2 for
 invalid input, failed reads for the full --error-window, a timeout, a failed read
 of ${FOLLOW_REF}, or an ${FOLLOW_REF} that does not contain the given commit,
 3 when the pull request conflicts with its base branch, 4 when each failed
-check of the pull request also fails on ${FOLLOW_BRANCH} (--pr only).
+check also fails on ${FOLLOW_BRANCH}.
 
 With --pr, the script compares each failed check with the newest completed
 run of the same check name on the newest ${MAIN_COMMIT_LIMIT} commits of ${FOLLOW_BRANCH}. A check that
 also fails on ${FOLLOW_BRANCH} gets the line "FAIL (also on ${FOLLOW_BRANCH} <sha>)". When all failed
 checks fail on ${FOLLOW_BRANCH} too, the exit code is 4: wait for the fix on ${FOLLOW_BRANCH}, merge
 ${FOLLOW_BRANCH} into the branch, push, and wait again. A cancelled check, or a failed
-check that ${FOLLOW_BRANCH} does not have, keeps exit code 1.`;
+check that ${FOLLOW_BRANCH} does not have, keeps exit code 1.
+
+With --commit, the script compares each failed check in the same way with
+the ${MAIN_COMMIT_LIMIT} commits before the given commit. With --follow-main, these are
+still the commits before the given commit, not before the newer commit that
+the wait moved to. A check that also failed before the commit gets the same
+line, and when all failed checks failed before, the exit code is 4: the
+failure does not come from the commit. A cancelled or running run on ${FOLLOW_BRANCH} does not count,
+so the comparison moves to an older commit.`;
 
 const formatSeconds = (ms) => {
   const seconds = Math.round(ms / SECOND);
@@ -1143,11 +1151,56 @@ const parseGhCheckRuns = (result, name) => {
 const ghApi = (endpoint) => spawnSync("gh", ["api", endpoint], { encoding: "utf8" });
 
 /**
- * The readers of main for `compareWithMain`. Without --repo, gh fills in the
+ * The commits before `commit`, newest first, from a `gh api .../commits`
+ * result that starts at `commit`.
+ */
+const parseEarlierCommits = (result, commit) => {
+  const read = parseGhCommits(result);
+  if (!read.ok) {
+    return read;
+  }
+  if (read.shas[0] !== commit) {
+    return { ok: false, error: `the history of ${shortSha(commit)} does not start at it` };
+  }
+  return { ok: true, shas: read.shas.slice(1) };
+};
+
+/** The completed workflow runs of `name` on `sha`, as checks. */
+const completedRuns = (sha, name, readRuns) => {
+  const read = readRuns(sha);
+  if (!read.ok) {
+    return read;
+  }
+  return {
+    ok: true,
+    checks: read.checks.filter((check) => check.name === name && check.bucket !== "pending"),
+  };
+};
+
+/**
+ * The readers of main for `compareWithMain`. With --pr, the comparison reads
+ * the job check runs of the newest commits of main. With --commit, it reads
+ * the workflow runs of the commits before the given commit, because a commit
+ * wait reports workflow runs. So a failure that main had before the merge
+ * does not count against the merge. Without --repo, gh fills in the
  * `{owner}/{repo}` placeholder from the repository of the working directory.
  */
-const ghMainReaders = ({ repo }, api = ghApi) => {
+export const ghMainReaders = (
+  { repo = null, commit = null },
+  api = ghApi,
+  readRuns = (sha) => ghRunsReader({ commit: sha, repo })(),
+) => {
   const base = `repos/${repo ?? "{owner}/{repo}"}`;
+  if (commit !== null) {
+    return {
+      readMainCommits: () =>
+        parseEarlierCommits(
+          api(`${base}/commits?sha=${commit}&per_page=${MAIN_COMMIT_LIMIT + 1}`),
+          commit,
+        ),
+      readMainChecks: (sha, name) => completedRuns(sha, name, readRuns),
+    };
+  }
   return {
     readMainCommits: () =>
       parseGhCommits(api(`${base}/commits?sha=${FOLLOW_BRANCH}&per_page=${MAIN_COMMIT_LIMIT}`)),
@@ -1163,8 +1216,9 @@ const ghMainReaders = ({ repo }, api = ghApi) => {
 
 /**
  * The newest of `shas` with a completed run of `name`, when all its completed
- * runs of `name` fail, else null. Returns `{ ok: true, sha }` or
- * `{ ok: false, error }`.
+ * runs of `name` fail, else null. A cancelled run does not count, because a
+ * newer push to main cancels the runs of the older commits. Returns
+ * `{ ok: true, sha }` or `{ ok: false, error }`.
  */
 const mainFailure = (name, shas, readMainChecks) => {
   for (const sha of shas) {
@@ -1172,15 +1226,16 @@ const mainFailure = (name, shas, readMainChecks) => {
     if (!read.ok) {
       return read;
     }
-    if (read.checks.length > 0) {
-      return { ok: true, sha: read.checks.every(({ bucket }) => bucket === "fail") ? sha : null };
+    const finished = read.checks.filter(({ bucket }) => bucket !== "cancel");
+    if (finished.length > 0) {
+      return { ok: true, sha: finished.every(({ bucket }) => bucket === "fail") ? sha : null };
     }
   }
   return { ok: true, sha: null };
 };
 
 /**
- * Compare the failed checks of a failed pull request wait with main.
+ * Compare the failed checks of a failed pull request or commit wait with main.
  *
  * `readMainCommits()` returns `{ ok: true, shas }`, newest first.
  * `readMainChecks(sha, name)` returns the completed runs of `name` on `sha`
@@ -1189,7 +1244,7 @@ const mainFailure = (name, shas, readMainChecks) => {
  * `shared-with-main` when every failed or cancelled check has `main`. A
  * failed read keeps the result and adds `mainError`.
  */
-const compareWithMain = (result, { readMainCommits, readMainChecks }) => {
+export const compareWithMain = (result, { readMainCommits, readMainChecks }) => {
   if (result.status !== "fail") {
     return result;
   }
@@ -1261,7 +1316,10 @@ export const reportChecks = (
           ? `${label}: all ${checks.length} runs passed, and no run started or changed for ${settleMinutes} minutes (${summary}).`
           : `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMinutes} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
-    "shared-with-main": `${label}: checks failed, and each failed check also fails on ${FOLLOW_BRANCH} (${summary}). Wait for the fix on ${FOLLOW_BRANCH}, merge ${FOLLOW_BRANCH} into the branch, push, and wait again.`,
+    "shared-with-main":
+      commit === null
+        ? `${label}: checks failed, and each failed check also fails on ${FOLLOW_BRANCH} (${summary}). Wait for the fix on ${FOLLOW_BRANCH}, merge ${FOLLOW_BRANCH} into the branch, push, and wait again.`
+        : `${label}: checks failed, and each failed check also failed on an earlier commit of ${FOLLOW_BRANCH} (${summary}). The failure does not come from this commit.`,
     timeout:
       minChecks === null
         ? `${label}: timed out with ${checks.length} checks (${summary}).`
@@ -1314,7 +1372,7 @@ const main = async () => {
       readHead: gitHeadReader(runGit),
       isAncestor: gitAncestorChecker(runGit),
     });
-    return reportChecks(result, {
+    return reportChecks(compareWithMain(result, ghMainReaders(options)), {
       ...options,
       label: commitLabel(result.commit),
       settleMs: COMMIT_SETTLE_MS,
@@ -1322,7 +1380,10 @@ const main = async () => {
   }
   if (options.commit !== null) {
     const result = await waitForCommitRuns({ ...options, readChecks: ghRunsReader(options) });
-    return reportChecks(result, { ...options, settleMs: COMMIT_SETTLE_MS });
+    return reportChecks(compareWithMain(result, ghMainReaders(options)), {
+      ...options,
+      settleMs: COMMIT_SETTLE_MS,
+    });
   }
   if (options.head === undefined) {
     console.error(HEAD_WARNING);

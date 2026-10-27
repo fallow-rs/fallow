@@ -38,6 +38,12 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    failed job, confirm that the branch contains the current base
    (`git merge-base --is-ancestor origin/main HEAD`). A second identical
    failure is a defect, not a flake: diagnose it instead of a third retry.
+   The script compares each failed run with the same workflow on the
+   commits before the merged commit. A run that also failed there gets the
+   line `FAIL (also on main <sha>)`. When all failed runs failed before,
+   the script stops with exit code 4: the failure does not come from your
+   merge, so do not report it as yours. Exit code 1 means that at least
+   one failure is new.
 7. Inspect the merged tree for conflict markers and generated drift. Then
    run `git diff <reviewed head> <merge commit>`. A pull request that merged
    after your last rebase shows there, also when it did not conflict. Read

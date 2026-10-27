@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   COMMIT_SETTLE_MS,
+  compareWithMain,
   followMain,
+  ghMainReaders,
   parseGhChecks,
   parseGhMergeable,
   parseGhRuns,
@@ -1792,4 +1794,94 @@ test("a cancelled check next to a shared failure keeps exit code 1", fakeGhOptio
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /FAIL \(also on main dddddddddddd\): Cargo Deny/u);
   assert.match(result.stdout, /^ {2}CANCEL: Tests/mu);
+});
+
+const MERGE = "a".repeat(40);
+const PARENT = "b".repeat(40);
+const GRANDPARENT = "c".repeat(40);
+const commitHistory = `repos/{owner}/{repo}/commits?sha=${MERGE}&per_page=11`;
+// A fake `gh api`: each endpoint returns its JSON, and an unknown endpoint fails.
+const fakeApi = (responses) => (endpoint) =>
+  endpoint in responses
+    ? { status: 0, stdout: JSON.stringify(responses[endpoint]), stderr: "" }
+    : { status: 1, stdout: "", stderr: `unexpected endpoint ${endpoint}` };
+const history = (...shas) => fakeApi({ [commitHistory]: shas.map((sha) => ({ sha })) });
+// The workflow runs of each earlier commit, as `gh run list --commit` reports them.
+const fakeRuns = (runsBySha) => (sha) =>
+  sha in runsBySha ? { ok: true, checks: runsBySha[sha] } : { ok: false, error: "no runs" };
+const commitReaders = (api, runsBySha) =>
+  ghMainReaders({ commit: MERGE }, api, fakeRuns(runsBySha));
+const failedCommit = (...checks) => ({ status: "fail", checks });
+const reportCommit = (result) => {
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label: "Commit aaaaaaaaaaaa", minChecks: null, commit: MERGE },
+    (line) => lines.push(line),
+    (line) => lines.push(line),
+  );
+  return { code, lines };
+};
+
+test("a commit run that also failed on the parent commit exits with code 4", () => {
+  const result = compareWithMain(
+    failedCommit(check("Benchmarks", "fail"), check("CI", "pass")),
+    commitReaders(history(MERGE, PARENT, GRANDPARENT), {
+      [PARENT]: [check("Benchmarks", "fail"), check("CI", "pass")],
+    }),
+  );
+  const { code, lines } = reportCommit(result);
+
+  assert.equal(code, 4, lines.join("\n"));
+  assert.match(lines[0], /each failed check also failed on an earlier commit of main/u);
+  assert.match(lines[1], /FAIL \(also on main bbbbbbbbbbbb\): Benchmarks/u);
+});
+
+test("a commit run that passed on the parent commit stays a failure of the commit", () => {
+  const result = compareWithMain(
+    failedCommit(check("CI", "fail")),
+    commitReaders(history(MERGE, PARENT), { [PARENT]: [check("CI", "pass")] }),
+  );
+  const { code, lines } = reportCommit(result);
+
+  assert.equal(code, 1, lines.join("\n"));
+  assert.match(lines[1], /^ {2}FAIL: CI/u);
+});
+
+test("a cancelled or running run on an earlier commit moves the comparison to an older commit", () => {
+  const result = compareWithMain(
+    failedCommit(check("Benchmarks", "fail")),
+    commitReaders(history(MERGE, PARENT, GRANDPARENT), {
+      [PARENT]: [check("Benchmarks", "cancel"), check("Benchmarks", "pending")],
+      [GRANDPARENT]: [check("Benchmarks", "fail")],
+    }),
+  );
+
+  assert.equal(result.status, "shared-with-main");
+  assert.equal(result.checks[0].main, GRANDPARENT);
+});
+
+test("a commit history that does not start at the commit counts as a failed read", () => {
+  const result = compareWithMain(
+    failedCommit(check("Benchmarks", "fail")),
+    commitReaders(history(PARENT, GRANDPARENT), {}),
+  );
+  const { code, lines } = reportCommit(result);
+
+  assert.equal(code, 1, lines.join("\n"));
+  assert.match(lines.at(-1), /Read of the main checks failed/u);
+});
+
+test("a pull request comparison with a cancelled newest main run uses the older run", () => {
+  const api = fakeApi({
+    [MAIN_COMMITS]: [{ sha: NEWEST_MAIN }, { sha: OLDER_MAIN }],
+    [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "cancelled"),
+    [mainCheckEndpoint(OLDER_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "failure"),
+  });
+  const result = compareWithMain(
+    failedCommit(check("Cargo Deny", "fail")),
+    ghMainReaders({ repo: null }, api),
+  );
+
+  assert.equal(result.checks[0].main, OLDER_MAIN);
 });
