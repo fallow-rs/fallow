@@ -2,7 +2,6 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
-use fallow_engine::changed_files::clear_ambient_git_env;
 use fallow_types::results::AnalysisResults;
 
 use super::counts::{
@@ -47,12 +46,8 @@ pub struct RegressionOpts<'a> {
 /// Check whether a path is likely gitignored by running `git check-ignore`.
 /// Returns `false` if git is unavailable or the check fails (conservative).
 fn is_likely_gitignored(path: &Path, root: &Path) -> bool {
-    let mut command = std::process::Command::new("git");
-    command
-        .args(["check-ignore", "-q"])
-        .arg(path)
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = fallow_engine::changed_files::git_command_in(root);
+    command.args(["check-ignore", "-q"]).arg(path);
     command.output().is_ok_and(|o| o.status.success())
 }
 

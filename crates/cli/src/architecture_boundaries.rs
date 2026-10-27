@@ -1226,6 +1226,8 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
 #[test]
 fn cli_does_not_own_git_ref_or_root_detection() {
     let base_worktree_path = "crates/cli/src/base_worktree.rs";
+    let spawns_git =
+        |src: &str| src.contains("Command::new(\"git\")") || src.contains("git_command_in(");
     for source_path in rust_sources_under(["crates/cli/src"]) {
         if source_path == "crates/cli/src/architecture_boundaries.rs" {
             continue;
@@ -1258,7 +1260,7 @@ fn cli_does_not_own_git_ref_or_root_detection() {
             continue;
         }
         assert!(
-            !source.contains("Command::new(\"git\")")
+            !spawns_git(&source)
                 || CLI_GIT_SPAWN_OWNERS
                     .iter()
                     .any(|(owner, _)| *owner == source_path),
@@ -1271,7 +1273,7 @@ fn cli_does_not_own_git_ref_or_root_detection() {
         let source = read_source_without_line_comments(owner)
             .unwrap_or_else(|error| panic!("read {owner}: {error}"));
         assert!(
-            source.contains("Command::new(\"git\")"),
+            spawns_git(&source),
             "{owner} no longer spawns git; remove its CLI_GIT_SPAWN_OWNERS entry"
         );
     }
@@ -1729,14 +1731,11 @@ fn engine_owns_churn_without_core_adapter() {
             "engine churn must not route through legacy backend path {forbidden}"
         );
     }
-    // Every engine-owned git spawn goes through the `git_env` wrapper, which
-    // clears the ambient repository-state variables and closes stdin. The run
-    // clock reads HEAD's committer timestamp through the same wrapper, so it is
-    // held to the same rule as the churn log itself.
+    // Every engine-owned git spawn, churn and the run clock too, uses `git_env`.
     for source in ["crates/engine/src/churn.rs", "crates/engine/src/clock.rs"] {
         let text = read_source_without_line_comments(source).expect("read engine git source");
         assert!(
-            text.contains("crate::git_env::git_command()"),
+            text.contains("crate::git_env::git_command("),
             "{source} git subprocesses must go through the git_env wrapper"
         );
     }

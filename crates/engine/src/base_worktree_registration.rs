@@ -420,9 +420,50 @@ mod tests {
             crate::changed_files::resolve_git_toplevel(&snapshot.join("pkg")).is_err(),
             "changed-file probes must not find the nested bare repository"
         );
+        for dir in [snapshot.to_path_buf(), snapshot.join("pkg")] {
+            let status = crate::git_env::git_command(&dir)
+                .args(["status", "--porcelain"])
+                .output()
+                .expect("git command starts")
+                .status;
+            assert!(
+                !status.success(),
+                "the shared Git wrapper found a repository"
+            );
+        }
         assert!(
             !marker.exists(),
             "a config from the base commit ran a command"
+        );
+    }
+
+    /// The shared Git wrapper also refuses a bare repository that Git would
+    /// find on its own outside a snapshot, and keeps ordinary checkouts.
+    #[cfg(unix)]
+    #[test]
+    fn shared_git_wrapper_refuses_implicit_bare_repositories() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = committed_repo(temp.path());
+        let marker = temp.path().join("fsmonitor-ran");
+        let bare = temp.path().join("bare");
+        write_crafted_gitdir(&bare, &marker);
+        fs::create_dir_all(repo.join("sub")).expect("create subdirectory");
+
+        let run = |dir: &Path| {
+            crate::git_env::git_command(dir)
+                .args(["status", "--porcelain"])
+                .output()
+                .expect("git command starts")
+                .status
+                .success()
+        };
+
+        assert!(!run(&bare), "an implicit bare repository must be refused");
+        assert!(!marker.exists());
+        assert!(run(&repo), "an ordinary checkout must keep working");
+        assert!(
+            run(&repo.join("sub")),
+            "a checkout subdirectory must keep working"
         );
     }
 

@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write};
-use fallow_engine::changed_files::clear_ambient_git_env;
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
 use fallow_types::serde_path;
 use serde::{Deserialize, Serialize};
@@ -1326,10 +1325,10 @@ fn default_trial_email() -> Option<String> {
 }
 
 fn git_config_email() -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(["config", "user.email"]);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
+    let output = fallow_engine::changed_files::git_command_in(std::path::Path::new("."))
+        .args(["config", "user.email"])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

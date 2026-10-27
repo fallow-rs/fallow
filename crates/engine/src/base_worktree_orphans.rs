@@ -6,20 +6,10 @@
 //! this cleanup before they create a new snapshot (issue #3885).
 
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::Command;
 
-use crate::git_env::clear_ambient_git_env;
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "engine-owned git spawn wrapper for base snapshot cleanup in the host repository"
-)]
-fn git_in(repo_root: &Path) -> Command {
-    let mut command = Command::new("git");
-    command.current_dir(repo_root);
-    clear_ambient_git_env(&mut command);
-    command
-}
+use crate::git_env::git_command as git_in;
 
 /// Remove a registered Fallow base snapshot with `git worktree remove --force`.
 pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {

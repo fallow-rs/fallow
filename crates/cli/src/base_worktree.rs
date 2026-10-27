@@ -1,10 +1,14 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
+
+#[cfg(test)]
+use fallow_engine::changed_files::clear_ambient_git_env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use fallow_engine::changed_files::clear_ambient_git_env;
+use fallow_engine::changed_files::git_command_in;
 pub use fallow_engine::repo_refs::materialize_base_dependency_context;
 #[cfg(test)]
 use fallow_engine::repo_refs::parse_worktree_gitdir;
@@ -1917,9 +1921,8 @@ fn repair_unregistered_git_stub(path: &Path) -> bool {
 }
 
 pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(["rev-parse", rev]).current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = git_command_in(root);
+    command.args(["rev-parse", rev]);
     let output = command.output().ok()?;
     if !output.status.success() {
         return None;
@@ -1928,11 +1931,8 @@ pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
 }
 
 pub fn git_toplevel(root: &Path) -> Option<PathBuf> {
-    let mut command = Command::new("git");
-    command
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = git_command_in(root);
+    command.args(["rev-parse", "--show-toplevel"]);
     let output = command.output().ok()?;
     if !output.status.success() {
         return None;

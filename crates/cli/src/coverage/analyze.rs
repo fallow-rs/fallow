@@ -2,12 +2,13 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+#[cfg(test)]
+use std::process::Command;
+use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::function_identity_id;
-use fallow_engine::changed_files::clear_ambient_git_env;
 use fallow_engine::source::inventory::{
     InventoryComplexity, InventoryEntry, walk_source_with_complexity,
 };
@@ -401,12 +402,10 @@ fn checked_repo(repo: &str, source: &str) -> Result<String, CloudError> {
 }
 
 fn git_origin_project_id(root: &Path) -> Option<String> {
-    let mut command = Command::new("git");
-    command
+    let output = fallow_engine::changed_files::git_command_in(root)
         .args(["remote", "get-url", "origin"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

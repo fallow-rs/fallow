@@ -3,9 +3,7 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use fallow_engine::changed_files::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Whether the head run can stand in for the base snapshot.
@@ -147,14 +145,12 @@ impl BaseFileReader {
     /// available. The caller then treats the files as not reusable.
     #[must_use]
     pub fn spawn(root: &Path) -> Option<Self> {
-        let mut command = Command::new("git");
+        let mut command = fallow_engine::changed_files::git_command_in(root);
         command
             .args(["cat-file", "--batch"])
-            .current_dir(root)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
-        clear_ambient_git_env(&mut command);
         let mut child = fallow_process::ScopedChild::spawn(&mut command).ok()?;
         let stdin = child.take_stdin()?;
         let stdout = child.take_stdout()?;

@@ -20,7 +20,6 @@ pub mod clones;
 pub mod text;
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_engine::changed_files::RenamedFile;
@@ -176,12 +175,10 @@ impl BaseSource {
 /// resolve one. The changed-file list uses the merge base too, so a base
 /// branch that moved on does not read as a change of this branch.
 pub(crate) fn merge_base(root: &Path, base_ref: &str) -> String {
-    let mut command = Command::new("git");
+    let mut command = fallow_engine::changed_files::git_command_in(root);
     command
         .args(["merge-base", "--end-of-options", base_ref, "HEAD"])
-        .current_dir(root)
         .stderr(std::process::Stdio::null());
-    fallow_engine::changed_files::clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()

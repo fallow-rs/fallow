@@ -13,11 +13,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
-use fallow_engine::changed_files::{
-    ChangedFilesError, clear_ambient_git_env, resolve_git_toplevel,
-};
+use fallow_engine::changed_files::{ChangedFilesError, resolve_git_toplevel};
 use sha2::{Digest, Sha256};
 
 /// The most ignored files that a start snapshot fingerprints. The run checks
@@ -211,7 +208,7 @@ pub fn snapshot(
         Err(ChangedFilesError::NotARepository) => return Ok(None),
         Err(error) => return Err(error.describe()),
     };
-    let mut command = Command::new("git");
+    let mut command = fallow_engine::changed_files::git_command_in(&toplevel);
     command.args([
         "status",
         "--porcelain=v1",
@@ -222,8 +219,6 @@ pub fn snapshot(
     if start.is_none() {
         command.arg("--ignored=matching");
     }
-    command.current_dir(&toplevel).stdin(Stdio::null());
-    clear_ambient_git_env(&mut command);
     let output = fallow_process::output(&mut command)
         .map_err(|error| format!("cannot run git status: {error}"))?;
     if !output.status.success() {
@@ -260,6 +255,10 @@ pub fn snapshot(
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
+    use fallow_engine::changed_files::clear_ambient_git_env;
+
     use super::*;
 
     fn git(root: &Path, args: &[&str]) {

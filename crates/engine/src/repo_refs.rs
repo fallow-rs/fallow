@@ -1584,17 +1584,9 @@ fn base_worktree_name(nanos: u128) -> String {
     format!("fallow-audit-base-{}-{nanos}-{seq}", std::process::id())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "canonical engine-owned git spawn wrapper for repository refs"
-)]
+/// Repository probes run in `root` through the shared engine Git wrapper.
 fn git_command(root: &Path) -> Command {
-    let mut command = Command::new("git");
-    crate::changed_files::clear_ambient_git_env(&mut command);
-    confine_git_to_host(&mut command, root);
-    // Repository probes never consume input and must not retain an embedder's protocol stdin.
-    command.stdin(Stdio::null()).arg("-C").arg(root);
-    command
+    crate::git_env::git_command(root)
 }
 
 /// Run `git <args>` in `root` and return trimmed, non-empty stdout, or `None`

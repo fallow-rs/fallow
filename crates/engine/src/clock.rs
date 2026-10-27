@@ -192,7 +192,7 @@ fn env_epoch_secs() -> Option<u64> {
 }
 
 fn head_commit_epoch_secs(root: &Path) -> Option<u64> {
-    let output = crate::git_env::git_command()
+    let output = crate::git_env::git_command(root)
         .args(["log", "-1", "--format=%ct", "HEAD"])
         .current_dir(root)
         .stderr(Stdio::null())

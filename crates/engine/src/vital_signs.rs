@@ -6,8 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::git_env::clear_ambient_git_env;
-
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
 
@@ -638,16 +636,9 @@ pub(crate) fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
 }
 
 /// Get the current git branch name.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "trusted git spawn with ambient repo-state env stripped, matching the core git spawn policy"
-)]
 fn git_branch(root: &Path) -> Option<String> {
-    let mut command = std::process::Command::new("git");
-    command
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = crate::git_env::git_command(root);
+    command.args(["rev-parse", "--abbrev-ref", "HEAD"]);
     command
         .output()
         .ok()

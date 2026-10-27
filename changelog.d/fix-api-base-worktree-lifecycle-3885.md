@@ -15,4 +15,6 @@
   repository, and Git then read its config. That config can run commands, for
   example through `core.fsmonitor`. The `.git` file now names an absolute path
   that cannot exist, and each Git command that Fallow runs inside a snapshot
-  gets a `GIT_DIR` that does not exist.
+  gets a `GIT_DIR` that does not exist. Every Git command that Fallow starts
+  also sets `safe.bareRepository=explicit`, so Git does not use a directory
+  shaped as a bare repository that it finds on its own.

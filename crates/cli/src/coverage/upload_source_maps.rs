@@ -7,11 +7,10 @@
 use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::time::SystemTime;
 
 use colored::Colorize as _;
-use fallow_engine::changed_files::clear_ambient_git_env;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -220,12 +219,10 @@ fn package_json_repository_name(root: &Path) -> Option<String> {
 }
 
 fn git_origin_repo_name(root: &Path) -> Option<String> {
-    let mut command = Command::new("git");
-    command
+    let output = fallow_engine::changed_files::git_command_in(root)
         .args(["remote", "get-url", "origin"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
