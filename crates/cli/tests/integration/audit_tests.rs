@@ -704,10 +704,23 @@ fn audit_cache_prune_excludes_deregistered_current_path_from_reclaimed_bytes() {
         current_path.is_dir(),
         "the deregistered current-path cache must stay warm on disk",
     );
-    assert_eq!(
-        fs::read_to_string(current_path.join(".git")).expect(".git stub should be readable"),
-        "gitdir: fallow-audit-unregistered\n",
-        "the current-path cache must be deregistered in place",
+    let stub = fs::read_to_string(current_path.join(".git")).expect(".git stub should be readable");
+    let stub_gitdir = std::path::PathBuf::from(
+        stub.strip_prefix("gitdir: ")
+            .and_then(|rest| rest.strip_suffix('\n'))
+            .expect("the stub is a gitfile"),
+    );
+    assert!(
+        stub_gitdir.ends_with(".git/fallow-audit-unregistered")
+            && fs::canonicalize(
+                stub_gitdir
+                    .parent()
+                    .and_then(std::path::Path::parent)
+                    .unwrap()
+            )
+            .ok()
+                == fs::canonicalize(&current_path).ok(),
+        "the current-path cache must be deregistered in place: {stub}",
     );
     assert!(
         !released_path.is_dir(),

@@ -17,10 +17,8 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{EngineError, EngineResult};
 
-pub use crate::base_worktree_registration::{
-    UNREGISTERED_GITDIR_STUB, deregister_base_worktree, parse_worktree_gitdir,
-    trusted_base_worktree_admin_dir, write_unregistered_gitdir_stub,
-};
+pub use crate::base_worktree_orphans::*;
+pub use crate::base_worktree_registration::*;
 
 const RAW_MATERIALIZATION_MARKER: &str = "fallow-raw-materialized-v1";
 
@@ -112,6 +110,7 @@ impl TemporaryBaseWorktree {
         base_ref: &str,
         workspace_patterns: &[String],
     ) -> EngineResult<Self> {
+        sweep_orphan_audit_worktrees(repo_root);
         let path = base_worktree_path()?;
         create_detached_base_worktree(repo_root, &path, base_ref)?;
         if let Err(error) = deregister_base_worktree(repo_root, &path) {
@@ -1592,6 +1591,7 @@ fn base_worktree_name(nanos: u128) -> String {
 fn git_command(root: &Path) -> Command {
     let mut command = Command::new("git");
     crate::changed_files::clear_ambient_git_env(&mut command);
+    confine_git_to_host(&mut command, root);
     // Repository probes never consume input and must not retain an embedder's protocol stdin.
     command.stdin(Stdio::null()).arg("-C").arg(root);
     command

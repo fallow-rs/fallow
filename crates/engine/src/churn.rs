@@ -578,12 +578,9 @@ fn is_shallow_clone(root: &Path) -> bool {
 #[must_use]
 pub fn is_git_repo(root: &Path) -> bool {
     let mut command = git_command();
-    command
-        .args(["rev-parse", "--git-dir"])
-        .current_dir(root)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command.status().is_ok_and(|s| s.success())
+    crate::base_worktree_registration::confine_git_to_host(&mut command, root);
+    command.args(["rev-parse", "--git-dir"]).current_dir(root);
+    command.output().is_ok_and(|output| output.status.success())
 }
 
 /// Maximum size of a churn cache file (64 MB). The incremental cache stores

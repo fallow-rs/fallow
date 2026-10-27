@@ -10,21 +10,112 @@
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-/// Invalid gitdir pointer written into `<snapshot>/.git` after Fallow
-/// deregisters a base snapshot.
+/// Last segment of the gitdir that the stub of a deregistered snapshot names.
+const UNREGISTERED_GITDIR_NAME: &str = "fallow-audit-unregistered";
+
+/// Stub of older versions. Its gitdir is relative, so Git resolves it inside
+/// the snapshot, where the untrusted base commit can supply a directory of
+/// that name with its own config. It is recognized only to replace it.
+const LEGACY_UNREGISTERED_GITDIR_STUB: &str = "gitdir: fallow-audit-unregistered\n";
+
+/// Prefix of every admin entry and snapshot directory that Fallow creates.
+const FALLOW_BASE_WORKTREE_PREFIX: &str = "fallow-audit-base-";
+
+/// Gitfile contents written into `<snapshot>/.git` after Fallow deregisters
+/// a base snapshot.
 ///
 /// The `.git` file is REPLACED, never deleted: both discovery walkers use the
 /// `ignore` crate with `require_git` on, whose gitignore handling is gated on
 /// `<root>/.git` existing. Deleting the gitfile would silently stop the base
 /// pass from honoring `.gitignore`, inflating base findings and skewing
-/// audit's introduced-vs-inherited split. The stub keeps gitignore parity
-/// while pointing at a nonexistent gitdir, so any stray `git` command inside
-/// the snapshot fails loudly instead of operating on the host repo.
-pub const UNREGISTERED_GITDIR_STUB: &str = "gitdir: fallow-audit-unregistered\n";
+/// audit's introduced-vs-inherited split.
+///
+/// The stub names the absolute path `<snapshot>/.git/fallow-audit-unregistered`.
+/// That path can never exist, because `<snapshot>/.git` is this regular file,
+/// and the committed tree cannot supply a `.git` entry. So a `git` command in
+/// the snapshot fails and never reads a config from the untrusted base commit.
+#[must_use]
+pub fn unregistered_gitdir_stub(snapshot: &Path) -> String {
+    let gitdir = snapshot.join(".git").join(UNREGISTERED_GITDIR_NAME);
+    format!("gitdir: {}\n", gitdir.display())
+}
 
-/// Prefix of every admin entry and snapshot directory that Fallow creates.
-const FALLOW_BASE_WORKTREE_PREFIX: &str = "fallow-audit-base-";
+/// Return whether `contents` is the stub of a deregistered snapshot at
+/// `snapshot`, in the current or the legacy form.
+#[must_use]
+pub fn is_unregistered_gitdir_stub(snapshot: &Path, contents: &str) -> bool {
+    if contents == LEGACY_UNREGISTERED_GITDIR_STUB {
+        return true;
+    }
+    let Some(gitdir) = parse_worktree_gitdir(contents) else {
+        return false;
+    };
+    let Some(gitfile) = gitdir
+        .file_name()
+        .is_some_and(|name| name == UNREGISTERED_GITDIR_NAME)
+        .then(|| gitdir.parent())
+        .flatten()
+    else {
+        return false;
+    };
+    if gitfile.file_name().is_none_or(|name| name != ".git") {
+        return false;
+    }
+    gitfile
+        .parent()
+        .is_some_and(|owner| owner == snapshot || same_existing_path(owner, snapshot))
+}
+
+fn same_existing_path(left: &Path, right: &Path) -> bool {
+    match (dunce::canonicalize(left), dunce::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// Return the deregistered snapshot that contains `dir`, if any.
+///
+/// The walk stops at the first `.git` entry. A Fallow stub marks a snapshot.
+/// Any other `.git` entry is an ordinary repository boundary.
+#[must_use]
+pub fn enclosing_unregistered_snapshot(dir: &Path) -> Option<PathBuf> {
+    let dir = std::path::absolute(dir).ok()?;
+    for candidate in dir.ancestors() {
+        let gitfile = candidate.join(".git");
+        let Ok(metadata) = fs::symlink_metadata(&gitfile) else {
+            continue;
+        };
+        if !is_regular_file(&metadata) {
+            return None;
+        }
+        let contents = fs::read_to_string(&gitfile).ok()?;
+        return is_unregistered_gitdir_stub(candidate, &contents).then(|| candidate.to_path_buf());
+    }
+    None
+}
+
+/// Keep a `git` command that runs in `cwd` from discovering a repository
+/// inside a deregistered base snapshot.
+///
+/// The snapshot holds the untrusted base commit. It can contain a directory
+/// that looks like a bare repository, and Git would read its config. When
+/// `cwd` is inside a snapshot, the command gets a `GIT_DIR` that does not
+/// exist and a `GIT_CEILING_DIRECTORIES` at the snapshot parent, so Git stops
+/// with "not a git repository". Outside a snapshot, the command is unchanged.
+pub fn confine_git_to_host(command: &mut Command, cwd: &Path) {
+    let Some(snapshot) = enclosing_unregistered_snapshot(cwd) else {
+        return;
+    };
+    command.env(
+        "GIT_DIR",
+        snapshot.join(".git").join(UNREGISTERED_GITDIR_NAME),
+    );
+    if let Some(parent) = snapshot.parent() {
+        command.env("GIT_CEILING_DIRECTORIES", parent);
+    }
+}
 
 /// Deregister a Fallow base snapshot from Git while KEEPING its directory.
 ///
@@ -32,8 +123,9 @@ const FALLOW_BASE_WORKTREE_PREFIX: &str = "fallow-audit-base-";
 /// pointer, rather than a global `git worktree prune`, so a user's unrelated
 /// prunable worktrees are never collaterally deregistered and Git's
 /// name-collision admin suffixing (`<name>1`) is handled for free. The `.git`
-/// gitfile is REPLACED with [`UNREGISTERED_GITDIR_STUB`], never deleted.
-/// A missing directory and an already deregistered snapshot are success.
+/// gitfile is REPLACED with [`unregistered_gitdir_stub`], never deleted.
+/// A missing directory and an already deregistered snapshot are success. A
+/// legacy stub is replaced with the current one.
 ///
 /// # Errors
 ///
@@ -53,8 +145,11 @@ pub fn deregister_base_worktree(repo_root: &Path, path: &Path) -> std::io::Resul
         ));
     }
     let contents = fs::read_to_string(&gitfile)?;
-    if contents == UNREGISTERED_GITDIR_STUB {
-        return Ok(());
+    if is_unregistered_gitdir_stub(path, &contents) {
+        if contents == unregistered_gitdir_stub(path) {
+            return Ok(());
+        }
+        return write_unregistered_gitdir_stub(&gitfile);
     }
     let Some(admin_dir) = trusted_base_worktree_admin_dir(repo_root, path) else {
         return Err(std::io::Error::new(
@@ -70,8 +165,8 @@ pub fn deregister_base_worktree(repo_root: &Path, path: &Path) -> std::io::Resul
     write_unregistered_gitdir_stub(&gitfile)
 }
 
-/// Write [`UNREGISTERED_GITDIR_STUB`] into `gitfile`, creating it when it is
-/// missing.
+/// Write the [`unregistered_gitdir_stub`] of the snapshot that owns `gitfile`
+/// into `gitfile`, creating it when it is missing.
 ///
 /// # Errors
 ///
@@ -93,8 +188,15 @@ pub fn write_unregistered_gitdir_stub(gitfile: &Path) -> std::io::Result<()> {
         }
         Err(error) => return Err(error),
     }
+    let snapshot = gitfile.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "audit worktree .git entry has no parent directory",
+        )
+    })?;
+    let stub = unregistered_gitdir_stub(snapshot);
     let mut file = options.open(gitfile)?;
-    file.write_all(UNREGISTERED_GITDIR_STUB.as_bytes())?;
+    file.write_all(stub.as_bytes())?;
     file.sync_all()
 }
 
@@ -217,7 +319,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(worktree.path().join(".git")).expect("read gitfile"),
-            UNREGISTERED_GITDIR_STUB,
+            unregistered_gitdir_stub(worktree.path()),
             "the gitfile stays as a stub so gitignore handling still applies"
         );
 
@@ -248,5 +350,107 @@ mod tests {
         deregister_base_worktree(&repo, &destination).expect("snapshot deregisters");
         assert_eq!(registered_worktrees(&repo).len(), 1);
         assert!(destination.join("tracked.txt").is_file());
+    }
+
+    /// Write a directory that Git accepts as a repository, whose config runs
+    /// `marker` as the fsmonitor hook.
+    fn write_crafted_gitdir(dir: &Path, marker: &Path) {
+        fs::create_dir_all(dir.join("objects")).expect("create objects");
+        fs::create_dir_all(dir.join("refs")).expect("create refs");
+        fs::write(dir.join("objects/.keep"), "").expect("write objects keep");
+        fs::write(dir.join("refs/.keep"), "").expect("write refs keep");
+        fs::write(dir.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");
+        fs::write(
+            dir.join("config"),
+            format!(
+                "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = \"touch '{}'; false\"\n",
+                marker.display()
+            ),
+        )
+        .expect("write config");
+    }
+
+    fn raw_git_status(cwd: &Path, confine: bool) -> bool {
+        let mut command = Command::new("git");
+        crate::changed_files::clear_ambient_git_env(&mut command);
+        if confine {
+            confine_git_to_host(&mut command, cwd);
+        }
+        command
+            .args(["status", "--porcelain"])
+            .current_dir(cwd)
+            .output()
+            .expect("git command starts")
+            .status
+            .success()
+    }
+
+    /// The base commit is untrusted. A top-level `fallow-audit-unregistered/`
+    /// or a nested directory shaped as a bare repository must never become
+    /// the repository of a `git` command inside the snapshot.
+    #[cfg(unix)]
+    #[test]
+    fn crafted_gitdirs_in_the_base_commit_are_never_read() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = committed_repo(temp.path());
+        let marker = temp.path().join("fsmonitor-ran");
+        write_crafted_gitdir(&repo.join(UNREGISTERED_GITDIR_NAME), &marker);
+        write_crafted_gitdir(&repo.join("pkg"), &marker);
+        git(&repo, &["add", "-f", "."]);
+        git(&repo, &["commit", "-m", "crafted"]);
+
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
+            .expect("temporary worktree should be created");
+        let snapshot = worktree.path();
+        assert!(
+            snapshot
+                .join(UNREGISTERED_GITDIR_NAME)
+                .join("config")
+                .is_file()
+        );
+
+        assert!(
+            !raw_git_status(snapshot, false),
+            "Git at the snapshot root must not find a repository"
+        );
+        assert!(!raw_git_status(&snapshot.join("pkg"), true));
+        assert!(!crate::churn::is_git_repo(snapshot));
+        assert!(!crate::churn::is_git_repo(&snapshot.join("pkg")));
+        assert!(
+            crate::changed_files::resolve_git_toplevel(&snapshot.join("pkg")).is_err(),
+            "changed-file probes must not find the nested bare repository"
+        );
+        assert!(
+            !marker.exists(),
+            "a config from the base commit ran a command"
+        );
+    }
+
+    /// The stub keeps `.gitignore` handling of the base pass, which needs a
+    /// `.git` entry at the walk root.
+    #[test]
+    fn unregistered_snapshot_keeps_gitignore_handling() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = committed_repo(temp.path());
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
+            .expect("temporary worktree should be created");
+        fs::create_dir_all(worktree.path().join("ignored")).expect("create ignored dir");
+        fs::write(worktree.path().join("ignored/skip.ts"), "").expect("write ignored file");
+
+        let walked: Vec<PathBuf> = ignore::WalkBuilder::new(worktree.path())
+            .build()
+            .filter_map(Result::ok)
+            .map(|entry| entry.into_path())
+            .collect();
+
+        assert!(walked.iter().any(|path| path.ends_with("tracked.txt")));
+        assert!(
+            !walked.iter().any(|path| path.ends_with("ignored/skip.ts")),
+            "the base walk must honor .gitignore: {walked:?}"
+        );
+        assert_eq!(
+            enclosing_unregistered_snapshot(&worktree.path().join("ignored")).as_deref(),
+            Some(worktree.path())
+        );
     }
 }

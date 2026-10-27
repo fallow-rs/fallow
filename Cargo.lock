@@ -1326,6 +1326,7 @@ dependencies = [
  "fallow-graph",
  "fallow-mutation",
  "fallow-output",
+ "fallow-process",
  "fallow-security",
  "fallow-types",
  "globset",
@@ -1351,6 +1352,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "windows-sys 0.61.2",
  "xxhash-rust",
 ]
 

@@ -236,7 +236,7 @@ fn deregistration_rejects_admin_entry_from_another_repository() {
     );
     assert_eq!(
         std::fs::read_to_string(candidate.join(".git")).unwrap(),
-        UNREGISTERED_GITDIR_STUB
+        unregistered_gitdir_stub(&candidate)
     );
 }
 

@@ -21,6 +21,7 @@ fallow-core = { workspace = true }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }
 fallow-mutation = { workspace = true }
+fallow-process = { workspace = true }
 fallow-output = { workspace = true }
 fallow-security = { workspace = true }
 fallow-types = { workspace = true }
@@ -50,6 +51,9 @@ xxhash-rust = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
 
 [features]
 codspeed = []
