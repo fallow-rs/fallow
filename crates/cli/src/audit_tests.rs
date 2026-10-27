@@ -320,7 +320,7 @@ fn audit_orphan_sweep_removes_dead_pid_worktree() {
     assert!(worktree_path.is_dir());
     assert!(worktree_is_registered_with_git(&repo, &worktree_path));
 
-    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path(), std::time::Duration::ZERO);
 
     assert!(
         !worktree_path.exists(),
@@ -360,7 +360,7 @@ fn audit_orphan_sweep_keeps_live_pid_worktree() {
         ],
     );
 
-    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path(), std::time::Duration::ZERO);
 
     assert!(
         worktree_path.is_dir(),
@@ -1924,7 +1924,7 @@ fn orphan_sweep_removes_unregistered_dead_pid_dir() {
     fs::create_dir_all(&dir).expect("orphan dir should be created");
     fs::write(dir.join(".git"), "gitdir: fallow-audit-unregistered\n").expect("stub should write");
 
-    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path(), std::time::Duration::ZERO);
 
     assert!(
         !dir.exists(),

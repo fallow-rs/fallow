@@ -85,10 +85,7 @@ pub struct ResolvedAuditBase {
 }
 
 /// Temporary detached snapshot for comparing audit results against a base ref.
-///
-/// The snapshot is deregistered from Git before [`Self::create`] returns, so
-/// Git-aware tools do not list it while the base analysis runs. `Drop` only
-/// removes the directory.
+/// [`Self::create`] deregisters it from Git, and `Drop` removes the directory.
 #[derive(Debug)]
 pub struct TemporaryBaseWorktree {
     path: PathBuf,
@@ -2545,6 +2542,7 @@ mod tests {
                 .is_none(),
             "an uninitialized gitlink directory must remain empty"
         );
+        // No index after deregistration: `base_worktree_registration` checks it.
 
         let path = worktree.path().to_path_buf();
         drop(worktree);

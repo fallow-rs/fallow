@@ -467,6 +467,60 @@ mod tests {
         );
     }
 
+    /// A project whose `.git` is a gitfile into a bare clone (the bare-clone
+    /// worktree layout) keeps working with `safe.bareRepository=explicit`,
+    /// for repository probes and for a base snapshot.
+    #[test]
+    fn bare_clone_worktree_layout_keeps_working() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let source = committed_repo(temp.path());
+        let bare = temp.path().join("bare.git");
+        let linked = temp.path().join("linked");
+        let parent = temp.path();
+        git(
+            parent,
+            &[
+                "clone",
+                "--quiet",
+                "--bare",
+                source.to_str().expect("UTF-8"),
+                "bare.git",
+            ],
+        );
+        git(
+            &bare,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                linked.to_str().expect("UTF-8"),
+                "main",
+            ],
+        );
+        assert!(
+            fs::symlink_metadata(linked.join(".git"))
+                .expect("gitfile")
+                .is_file()
+        );
+
+        let toplevel = crate::git_env::git_command(&linked)
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .expect("git command starts");
+        assert!(toplevel.status.success(), "{toplevel:?}");
+        assert!(crate::churn::is_git_repo(&linked));
+        assert!(crate::changed_files::resolve_git_toplevel(&linked).is_ok());
+
+        let worktree = TemporaryBaseWorktree::create(&linked, "HEAD", &[])
+            .expect("base snapshot from a bare-clone worktree");
+        assert!(worktree.path().join("tracked.txt").is_file());
+        assert_eq!(
+            registered_worktrees(&bare).len(),
+            2,
+            "only the bare clone and its linked worktree stay registered"
+        );
+    }
+
     /// The stub keeps `.gitignore` handling of the base pass, which needs a
     /// `.git` entry at the walk root.
     #[test]

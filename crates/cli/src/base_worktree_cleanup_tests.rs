@@ -191,7 +191,7 @@ fn legacy_orphan_cleanup_preserves_unrelated_unavailable_registration() {
     std::fs::rename(&unrelated, &parked).unwrap();
     assert_unavailable_registration_preserved(&repo, &unrelated, &unrelated_admin);
 
-    sweep_orphan_audit_worktrees_in(&repo, temp.path());
+    sweep_orphan_audit_worktrees_in(&repo, temp.path(), std::time::Duration::ZERO);
 
     assert!(
         !candidate.exists() && !owned_admin.exists(),

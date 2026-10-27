@@ -4,7 +4,9 @@
   The API, the MCP `audit` tool, and the decision surface now remove the Git
   registration of the base snapshot before the base analysis starts, as
   `fallow audit` does. They also remove the snapshots that a stopped process
-  left behind. A snapshot whose owner process can still run stays.
+  left behind. A snapshot stays when its owner process can still run, when
+  Fallow cannot inspect that process, or when the snapshot is younger than one
+  minute.
   (Closes [#3885](https://github.com/fallow-rs/fallow/issues/3885))
 
 ### Security

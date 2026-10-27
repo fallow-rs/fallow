@@ -1631,6 +1631,8 @@ mod tests {
         let repo = tempfile::tempdir().expect("tempdir");
         run_git(repo.path(), &["init", "--quiet", "--bare"]);
         assert!(resolve_git_common_dir_and_toplevel(repo.path()).is_err());
-        assert!(resolve_git_common_dir(repo.path()).is_ok());
+        // Fallow Git commands pass safe.bareRepository=explicit, so the single
+        // probe also refuses a bare repository that Git finds on its own.
+        assert!(resolve_git_common_dir(repo.path()).is_err());
     }
 }

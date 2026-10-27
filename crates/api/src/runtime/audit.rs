@@ -1855,7 +1855,9 @@ mod tests {
     }
 
     /// #3885: a programmatic audit removes the snapshots of a dead owner,
-    /// registered or not, and keeps the snapshot of a live owner.
+    /// registered or not, and keeps the snapshot of a live owner. The dead
+    /// owner's snapshots are made older than the age floor of the cleanup.
+    #[cfg(unix)]
     #[test]
     fn audit_removes_snapshots_of_dead_owners_only() {
         const DEAD_PID: u32 = 99_999_998;
@@ -1900,6 +1902,14 @@ mod tests {
                 "HEAD",
             ],
         );
+        let old = std::time::SystemTime::now()
+            - fallow_engine::repo_refs::ORPHAN_MIN_AGE
+            - std::time::Duration::from_secs(60);
+        for dir in [&dead, &dead_registered, &alive] {
+            std::fs::File::open(dir)
+                .and_then(|handle| handle.set_modified(old))
+                .expect("age the leftover");
+        }
         assert_eq!(registered_worktree_count(&root), 2);
         let options = AuditOptions {
             analysis: AnalysisOptions {
