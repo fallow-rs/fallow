@@ -130,7 +130,7 @@ impl ModuleInfoExtractor {
         if self.is_process_cwd_call(call) {
             return PathTrust::TrustedBase;
         }
-        let is_path_helper = (self.is_file_url_to_path_callee(&call.callee)
+        let is_path_helper = (self.is_trusted_file_url_to_path_callee(&call.callee)
             && call.arguments.len() == 1)
             || (!call.arguments.is_empty()
                 && TRUSTED_PATH_METHODS
@@ -170,7 +170,7 @@ impl ModuleInfoExtractor {
             && !self.local_declaration_names.contains("process")
     }
 
-    fn is_file_url_to_path_callee(&self, callee: &Expression<'_>) -> bool {
+    fn is_trusted_file_url_to_path_callee(&self, callee: &Expression<'_>) -> bool {
         match unwrap_static_expr(callee) {
             Expression::Identifier(ident) => {
                 ident.name == FILE_URL_TO_PATH && !self.nested_scope_shadows(FILE_URL_TO_PATH)
