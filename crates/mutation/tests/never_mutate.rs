@@ -211,10 +211,26 @@ export const countItems = (count: 0 | 1 | 2): 0 | 1 | 2 => {
   } else {
     console.error?.("high");
   }
+  if (count === 2) console["log"](`n=${count}`);
   return keep - 1;
 };
 "#;
     assert_only_in_control(source, TS, "keep - 1");
+}
+
+/// True when a `relational-operator` mutant replaces the `>` of `marker`, the
+/// first occurrence of a `<name> > 0` comparison in `source`.
+fn comparison_keeps_mutants(source: &str, marker: &str) -> bool {
+    let Some(start) = source.find(marker) else {
+        panic!("the marker {marker:?} is not in the source");
+    };
+    let Some(offset) = marker.find('>') else {
+        panic!("the marker {marker:?} has no comparison");
+    };
+    let operator = (start + offset) as u32;
+    common::run(source, TS).mutants.iter().any(|mutant| {
+        mutant.operator == Operator::RelationalOperator && mutant.span == (operator, operator + 1)
+    })
 }
 
 /// A condition keeps its mutants when the test can have an effect, when a
@@ -222,39 +238,54 @@ export const countItems = (count: 0 | 1 | 2): 0 | 1 | 2 => {
 #[test]
 fn conditions_with_effects_or_other_statements_keep_mutants() {
     let source = r"
-if (check(a > 0)) console.info(a);
-if (b > 0) { console.info(b); total += 1; }
-if (c > 0) console.info(c); else total = 0;
-if ((seen = d) > 0) console.info(seen);
-if (e++ > 0) console.info(e);
-if (await ready(f > 0)) console.info(f);
-if (new Gate(g > 0).open) console.info(g);
-if (h > 0) {}
-if (i > 0) { console.info(i); if (j > 0) total -= 1; }
+if (c01 > 0 && check()) console.info(c01);
+if (c02 > 0) { console.info(c02); total += 1; }
+if (c03 > 0) console.info(c03); else total = 0;
+if (c04 > 0 && (seen = d)) console.info(seen);
+if (c05 > 0 && e++) console.info(e);
+if (c06 > 0 && await ready()) console.info(c06);
+if (c07 > 0 && new Gate().open) console.info(c07);
+if (c08 > 0) {}
+if (c09 > 0) { console.info(c09); if (j) total -= 1; }
+if (c10 > 0) console.log(1); else if (b) console.log(2); else total++;
+function r() { if (c11 > 0) return console.log(1); }
+function t() { if (c12 > 0) throw console.log(1); }
+if (c13 > 0) console.log(...items);
+if (c14 > 0 && tag`x`) console.log(1);
+if (c15 > 0) console.log(tag`x`);
+if ((check(), c16 > 0)) console.log(1);
+if (c17 > 0 && a?.b()) console.log(1);
+if (c18 > 0) console[pick()]('x');
 ";
-    let result = common::run(source, TS);
-    for test in [
-        "check(a > 0)",
-        "b > 0",
-        "c > 0",
-        "(seen = d) > 0",
-        "e++ > 0",
-        "await ready(f > 0)",
-        "new Gate(g > 0).open",
-        "h > 0",
-        "i > 0",
+    for marker in [
+        "c01 > 0", "c02 > 0", "c03 > 0", "c04 > 0", "c05 > 0", "c06 > 0", "c07 > 0", "c08 > 0",
+        "c09 > 0", "c10 > 0", "c11 > 0", "c12 > 0", "c13 > 0", "c14 > 0", "c15 > 0", "c16 > 0",
+        "c17 > 0", "c18 > 0",
     ] {
-        let Some(start) = source.find(test) else {
-            panic!("the test {test:?} is not in the source");
-        };
-        let start = start as u32;
-        let end = start + test.len() as u32;
         assert!(
-            result
-                .mutants
-                .iter()
-                .any(|mutant| mutant.span.0 >= start && mutant.span.1 <= end),
-            "the condition {test:?} lost its mutants"
+            comparison_keeps_mutants(source, marker),
+            "the condition {marker:?} lost its mutants"
         );
     }
+}
+
+/// A local or imported `console` or `debug` can have effects, so a condition
+/// that calls it keeps its mutants. The other name stays a global.
+#[test]
+fn shadowed_logging_names_keep_their_conditions() {
+    let source = r"
+import debug from 'debug';
+const log = debug('app');
+if (c01 > 0) debug('x');
+if (c02 > 0) console.log('y');
+";
+    assert!(comparison_keeps_mutants(source, "c01 > 0"));
+    assert!(!comparison_keeps_mutants(source, "c02 > 0"));
+
+    let source = r"
+function report(console: { log(message: string): void }) {
+  if (c03 > 0) console.log('z');
+}
+";
+    assert!(comparison_keeps_mutants(source, "c03 > 0"));
 }

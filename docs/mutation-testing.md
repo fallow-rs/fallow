@@ -247,17 +247,23 @@ mutant either: a changed test can only change which message is logged. The
 rule needs all of these conditions:
 
 - the test is pure: names, `this`, literals, templates, member reads, and
-  unary, binary, logical and conditional operators. A call, `new`, an
-  assignment, an update, `delete`, `await`, `yield` or a function keeps each
-  mutant;
+  unary, binary, logical and `? :` operators. A call, an optional call, `new`,
+  an assignment, an update, `delete`, `await`, `yield`, a tagged template, a
+  comma expression or a function keeps each mutant;
 - the consequent is a logging call statement, or a non-empty block of them;
 - the alternate is absent, a logging call statement, a non-empty block of
   them, or an `else if` that meets the same conditions;
-- each argument of each logging call is pure, with no spread.
+- each argument of each logging call is pure, with no spread;
+- the callee is the global `console` or `debug`. A computed key, as in
+  `console[name]`, must be pure. A file that declares or imports a binding
+  named `console` or `debug` keeps each condition that calls that name.
 
-A branch with another statement, an empty branch, a nested `if` and a
-conditional expression keep each mutant. A getter or a `valueOf` method that
-the test reads can still have an effect. The rule accepts this risk.
+A branch with another statement, a `return` or a `throw`, an empty branch
+and a nested `if` keep each mutant. The rule reads only `if` statements, so a
+logging call in a `? :` expression or after `&&` keeps the mutants of its
+test. A test can still have an effect through a getter, a `valueOf` method,
+a Proxy trap that `in` reaches, or a `Symbol.hasInstance` method that
+`instanceof` calls. The rule accepts this risk.
 
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has

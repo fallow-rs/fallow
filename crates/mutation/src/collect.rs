@@ -119,6 +119,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         counted_loop_tests: BTreeSet::new(),
         known_arrays,
         filtered_lookups,
+        logging_globals: crate::logging_only::LoggingGlobals::scan(program, source),
         const_declaration: false,
         const_initializer: false,
     };
@@ -166,6 +167,8 @@ struct Collector<'s> {
     /// Conditional tests whose `true` mutant is equivalent. See
     /// `FilteredLookups`.
     filtered_lookups: BTreeSet<(u32, u32)>,
+    /// Which logging names are the globals. See `logging_only`.
+    logging_globals: crate::logging_only::LoggingGlobals,
     /// True while the visitor is in the declarators of a `const`
     /// declaration.
     const_declaration: bool,
@@ -908,7 +911,7 @@ fn key_name(key: &PropertyKey<'_>) -> Option<String> {
 ///
 /// The check reads the callee through parentheses and TypeScript wrappers,
 /// so `(console.log as any)(x)` is a logging call too.
-pub fn is_logging_callee(callee: &Expression<'_>) -> bool {
+fn is_logging_callee(callee: &Expression<'_>) -> bool {
     let callee = callee_without_wrappers(callee);
     if callee.is_specific_id("debug") {
         return true;
@@ -926,7 +929,7 @@ fn is_require_callee(callee: &Expression<'_>) -> bool {
 /// The callee without parentheses and TypeScript expression wrappers, at any
 /// depth. Type stripping keeps the reference, so `(o?.m as any)()` calls `m`
 /// with `this` set to `o`, the same as `(o?.m)()`.
-fn callee_without_wrappers<'e, 'a>(callee: &'e Expression<'a>) -> &'e Expression<'a> {
+pub fn callee_without_wrappers<'e, 'a>(callee: &'e Expression<'a>) -> &'e Expression<'a> {
     match callee {
         Expression::ParenthesizedExpression(inner) => callee_without_wrappers(&inner.expression),
         Expression::TSAsExpression(inner) => callee_without_wrappers(&inner.expression),
@@ -1511,7 +1514,7 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_if_statement(&mut self, it: &IfStatement<'a>) {
-        if crate::logging_only::is_logging_only_if(it) {
+        if crate::logging_only::is_logging_only_if(it, self.logging_globals) {
             return;
         }
         walk::walk_if_statement(self, it);
