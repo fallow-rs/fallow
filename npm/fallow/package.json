@@ -68,6 +68,7 @@
   "files": [
     "bin",
     "scripts",
+    "!scripts/*.test.js",
     "skills",
     "!skills/_artifacts",
     "types",
