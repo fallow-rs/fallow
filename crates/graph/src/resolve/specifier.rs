@@ -541,9 +541,7 @@ fn tsconfig_applies_to_file(
         return false;
     };
     // `references` paths are joined verbatim, so the directory can carry `./`
-    // and `..` segments. Normalize once: the `include`/`exclude` globs are
-    // built from this string and a literal `./` or `..` never matches a
-    // normalized file path.
+    // and `..` segments that a normalized file path never has.
     let tsconfig_dir = normalize_path_lexically(tsconfig_path.parent().unwrap_or(root));
     let tsconfig_dir = tsconfig_dir.as_path();
     if let Some(files) = json.get("files").and_then(Value::as_array) {
@@ -594,13 +592,10 @@ fn has_glob_meta(value: &str) -> bool {
         .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']' | b'{'))
 }
 
+/// Join a tsconfig `files`, `include` or `exclude` entry to its directory
+/// without `./` and `..`, as the globs match path text (issue #3946).
 fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
-    let path = Path::new(path);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        base_dir.join(path)
-    }
+    normalize_path_lexically(&base_dir.join(path))
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
@@ -2192,6 +2187,10 @@ fn try_tsconfig_root_dirs(
 }
 
 #[cfg(test)]
+#[path = "specifier_tsconfig_include_tests.rs"]
+mod tsconfig_include_tests;
+
+#[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -3215,7 +3214,7 @@ mod tests {
 
     /// Build a `ResolveContext` rooted at `root` with empty lookup tables and
     /// hand it to `f`. Enough for helpers that only read tsconfigs from disk.
-    fn with_ctx_at_root<F: FnOnce(&ResolveContext<'_>)>(root: &Path, f: F) {
+    pub(super) fn with_ctx_at_root<F: FnOnce(&ResolveContext<'_>)>(root: &Path, f: F) {
         with_ctx_at_root_and_files(root, &[], f);
     }
 
