@@ -679,9 +679,8 @@ fn resume_line(resume: &MutationResumeOutput) -> String {
     if resume.rejected > 0 {
         let _ = write!(
             line,
-            ", {} {} again because {} changed",
+            ", {} not reused from the journal because {} changed",
             resume.rejected,
-            plural(resume.rejected, "mutant ran", "mutants ran"),
             plural(resume.rejected, "its inputs", "their inputs")
         );
     }

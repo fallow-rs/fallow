@@ -110,6 +110,40 @@ fn a_project_without_tests_reports_no_coverage_without_a_companion() {
     assert_eq!(report.summary.coverage, Some(0.0));
 }
 
+/// A complete run that starts no test runner never reads the journal, so it
+/// must not remove the interrupted journal of another scope.
+#[test]
+fn a_resume_without_a_test_run_keeps_the_journal_of_another_scope() {
+    let project = small_project();
+    let cache = project.path().join(".fallow");
+    fs::create_dir_all(cache.join("mutation")).expect("dir");
+    fs::write(cache.join(".gitignore"), "*\n").expect("write");
+    let journal = cache.join("mutation/journal.jsonl");
+    let text = "{\"journal_format\":1}\n{\"id\":\"m1\",\"key\":\"k1\",\"status\":\"killed\"}\n";
+    fs::write(&journal, text).expect("write");
+    commit_all(project.path());
+
+    let mut resumed = options(project.path(), MutationRunScope::All);
+    resumed.resume = true;
+    let report = run_mutation(&resumed).expect("run");
+    assert!(report.runner.is_none());
+    assert_eq!(
+        report.completion.status,
+        fallow_output::MutationCompletionStatus::Complete
+    );
+    let resume = report.resume.as_ref().expect("the resume facts");
+    assert_eq!(
+        resume.note.as_deref(),
+        Some("the run read no journal, because no mutant needs a test run")
+    );
+    assert!(
+        !crate::mutation::remove_finished_mutation_journal(&resumed.analysis, &report)
+            .expect("settle"),
+        "a run that did not write the journal does not remove it"
+    );
+    assert_eq!(fs::read_to_string(&journal).expect("kept"), text);
+}
+
 /// A `node:test` project with a Vue component. The test does not import the
 /// component, because Node cannot load it.
 fn component_project(runner: &str) -> tempfile::TempDir {

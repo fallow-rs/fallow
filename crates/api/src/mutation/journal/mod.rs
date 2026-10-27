@@ -35,6 +35,14 @@ pub const JOURNAL_FILE: &str = "journal.jsonl";
 pub const JOURNAL_FORMAT: u32 = 1;
 /// The length of a run directory hash in a mismatch message.
 const SHOWN_HASH_LEN: usize = 12;
+/// The largest journal that `--resume` reads. A line is about 200 bytes, so
+/// this is far above the 20000 entries of the result cache.
+const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
+/// The file name of a journal that the run did not read.
+const UNREAD_FILE: &str = "journal.jsonl.unread";
+/// A temporary journal file older than this belongs to a run that ended
+/// before its rename. A newer one can belong to a live run.
+const STALE_TEMPORARY: std::time::Duration = std::time::Duration::from_hours(1);
 
 /// The fingerprint of a run. A journal resumes only a run with an equal
 /// fingerprint. The run limits (`--max-mutants`, `--time-budget`,
@@ -141,23 +149,39 @@ enum ReadOutcome {
     Entries(Vec<Line>),
     /// No usable journal. The text says why.
     Missing(String),
+    /// A journal that the run did not read: too large, or an IO error. The
+    /// run moves it aside and does not erase it. The text says why.
+    Unread(String),
     Mismatch(JournalMismatch),
 }
 
-fn read_journal(path: &Path, header: &JournalHeader) -> ReadOutcome {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
+/// Reads the journal at `path`. The size check comes before the read, so a
+/// journal over `max_bytes` is never read into memory. Each line is parsed
+/// as bytes, so a last line that an interrupt cut inside a multibyte
+/// character is one bad line, not a bad file.
+fn read_journal(path: &Path, header: &JournalHeader, max_bytes: u64) -> ReadOutcome {
+    match std::fs::metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return ReadOutcome::Missing("no journal exists".to_owned());
         }
         Err(error) => {
-            return ReadOutcome::Missing(format!("the journal does not read ({error})"));
+            return ReadOutcome::Unread(format!("the journal does not read ({error})"));
+        }
+        Ok(metadata) if metadata.len() > max_bytes => {
+            return ReadOutcome::Unread(format!("the journal is larger than {max_bytes} bytes"));
+        }
+        Ok(_) => {}
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return ReadOutcome::Unread(format!("the journal does not read ({error})"));
         }
     };
-    let mut lines = text.lines();
+    let mut lines = bytes.split(|&byte| byte == b'\n');
     let Some(stored) = lines
         .next()
-        .and_then(|line| serde_json::from_str::<JournalHeader>(line).ok())
+        .and_then(|line| serde_json::from_slice::<JournalHeader>(line).ok())
     else {
         return ReadOutcome::Missing("the journal has no valid header".to_owned());
     };
@@ -168,7 +192,7 @@ fn read_journal(path: &Path, header: &JournalHeader) -> ReadOutcome {
     // The last line for an id wins: a mutant that ran again after a key
     // change appends a newer line.
     let mut entries: FxHashMap<String, Line> = FxHashMap::default();
-    for line in lines.filter_map(|line| serde_json::from_str::<Line>(line).ok()) {
+    for line in lines.filter_map(|line| serde_json::from_slice::<Line>(line).ok()) {
         if is_final(line.status) {
             entries.insert(line.id.clone(), line);
         }
@@ -178,6 +202,37 @@ fn read_journal(path: &Path, header: &JournalHeader) -> ReadOutcome {
     ReadOutcome::Entries(entries)
 }
 
+/// Removes each temporary journal file in `dir` that is older than
+/// [`STALE_TEMPORARY`]. A run that ended between its write and its rename
+/// leaves one. A newer file can belong to a concurrent live run, so it
+/// stays.
+fn remove_stale_temporaries(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let prefix = format!("{JOURNAL_FILE}.");
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with(&prefix)
+            && Path::new(name.as_ref())
+                .extension()
+                .is_some_and(|extension| extension == "tmp"))
+        {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > STALE_TEMPORARY);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Writes the header and `entries` to a temporary file, renames it to
 /// `path`, and opens `path` to append. The rename drops a cut last line, so
 /// each appended line starts on a new line.
@@ -185,6 +240,7 @@ fn write_start(path: &Path, header: &JournalHeader, entries: &[Line]) -> Result<
     let fail = |error: &dyn std::fmt::Display| format!("cannot write {}: {error}", path.display());
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| fail(&error))?;
+        remove_stale_temporaries(parent);
     }
     let mut text = serde_json::to_string(header).map_err(|error| fail(&error))?;
     text.push('\n');
@@ -255,22 +311,48 @@ impl Journal {
         keys: Arc<ResultCache>,
         resume: bool,
     ) -> Result<Opened, JournalMismatch> {
+        Self::open_capped(mutation_cache, header, keys, resume, MAX_JOURNAL_BYTES)
+    }
+
+    /// [`Journal::open`] with the largest journal that `--resume` reads.
+    fn open_capped(
+        mutation_cache: &Path,
+        header: &JournalHeader,
+        keys: Arc<ResultCache>,
+        resume: bool,
+        max_bytes: u64,
+    ) -> Result<Opened, JournalMismatch> {
         let path = Self::path(mutation_cache);
+        let fresh = |reason: &str| format!("the run started from the beginning, because {reason}");
+        let mut start_error = None;
         let (entries, note) = if resume {
-            match read_journal(&path, header) {
+            match read_journal(&path, header, max_bytes) {
                 ReadOutcome::Entries(entries) => (entries, None),
-                ReadOutcome::Missing(reason) => (
-                    Vec::new(),
-                    Some(format!(
-                        "the run started from the beginning, because {reason}"
-                    )),
-                ),
+                ReadOutcome::Missing(reason) => (Vec::new(), Some(fresh(&reason))),
+                ReadOutcome::Unread(reason) => {
+                    // Never erase a journal that the run did not read.
+                    let aside = mutation_cache.join(UNREAD_FILE);
+                    if let Err(error) = std::fs::rename(&path, &aside) {
+                        start_error = Some(format!(
+                            "cannot move the unread journal {} aside: {error}",
+                            path.display()
+                        ));
+                    }
+                    let note = format!("{reason}; the run moved it to {UNREAD_FILE}");
+                    (Vec::new(), Some(fresh(&note)))
+                }
                 ReadOutcome::Mismatch(mismatch) => return Err(mismatch),
             }
         } else {
             (Vec::new(), None)
         };
-        let (file, write_error) = match write_start(&path, header, &entries) {
+        // A journal that could not move aside stays as it is, and this run
+        // writes no journal.
+        let started = match start_error {
+            Some(error) => Err(error),
+            None => write_start(&path, header, &entries),
+        };
+        let (file, write_error) = match started {
             Ok(file) => (Some(file), None),
             Err(error) => (None, Some(error)),
         };

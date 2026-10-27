@@ -20065,8 +20065,11 @@ not_keyed: string[]
  */
 export interface MutationResumeOutput {
 /**
- * The path of the outcome journal, relative to the project root when it
- * is inside the root.
+ * The path of the outcome journal, relative to the project root. When
+ * the cache directory is outside the root, the path is absolute: the
+ * report has no other cache path, so no other rule applies. The file
+ * stays only when the run did not complete. A run with
+ * `completion.status: complete` removes it.
  */
 journal: string
 /**
@@ -20075,7 +20078,9 @@ journal: string
 reused: number
 /**
  * The journal results whose key does not match this run, because an
- * input of the mutant changed. These mutants ran again.
+ * input of the mutant changed. These results were not reused from the
+ * journal. The mutant ran again, or its status came from the result
+ * cache.
  */
 rejected: number
 /**
@@ -20397,7 +20402,8 @@ changed_paths: string[]
  */
 export interface MutationRunIssue {
 /**
- * A stable kebab-case code: `runtime-error`, `static-map-miss`,
+ * A stable kebab-case code: `cache-write-failed`,
+ * `journal-write-failed`, `runtime-error`, `static-map-miss`,
  * `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
  * or `worktree-check-failed`.
  */

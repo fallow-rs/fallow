@@ -294,12 +294,7 @@ fn plan_for(
         Some(operators) => Some(operators.clone()),
         None => config_operators(&session)?,
     };
-    let operator_names = operators.as_ref().map(|operators| {
-        operators
-            .iter()
-            .map(|operator| operator.as_str().to_owned())
-            .collect()
-    });
+    let operator_names = operators.as_deref().map(operator_names);
     let request = MutationPlanRequest {
         scope,
         operators,
@@ -649,18 +644,42 @@ fn shown_path(root: &Path, path: &Path) -> String {
     )
 }
 
-/// The scope of the journal fingerprint.
-fn scope_label(options: &MutationRunOptions, base_ref: Option<&str>) -> String {
+/// The operator names of the journal fingerprint, sorted and without
+/// duplicates, so the order of `--operators` does not change it.
+fn operator_names(operators: &[fallow_engine::mutation::Operator]) -> Vec<String> {
+    let mut names: Vec<String> = operators
+        .iter()
+        .map(|operator| operator.as_str().to_owned())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// A scope path of the journal fingerprint: relative to `root` when it is
+/// inside the root, without `.` parts, with `/` separators.
+fn scope_path(root: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative
+        .components()
+        .filter(|part| !matches!(part, std::path::Component::CurDir))
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The scope of the journal fingerprint. The paths of a `paths` scope are
+/// normalized, sorted and without duplicates, so `./src/a` and `src/a` give
+/// one fingerprint.
+fn scope_label(options: &MutationRunOptions, base_ref: Option<&str>, root: &Path) -> String {
     match &options.scope {
         MutationRunScope::All => "all".to_owned(),
-        MutationRunScope::Paths(paths) => format!(
-            "paths {}",
-            paths
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        MutationRunScope::Paths(paths) => {
+            let mut paths: Vec<String> = paths.iter().map(|path| scope_path(root, path)).collect();
+            paths.sort_unstable();
+            paths.dedup();
+            format!("paths {}", paths.join(","))
+        }
         MutationRunScope::Changed { .. } => base_ref.map_or_else(
             || "changed lines of a diff".to_owned(),
             |base| format!("changed against {base}"),
@@ -726,7 +745,7 @@ fn open_stores(
             .map(|hash| hash.to_string_lossy().into_owned())
             .unwrap_or_default(),
         runner_config: planned.runner_config.clone(),
-        scope: scope_label(options, planned.base_ref.as_deref()),
+        scope: scope_label(options, planned.base_ref.as_deref(), root),
         operators: planned.operators.clone(),
         allow_side_effects: options.allow_side_effects,
     };
@@ -1447,5 +1466,34 @@ mod tests {
         }
         let vitest = init_options(Runner::Vitest, dir.path(), &files);
         assert!(vitest.extra_test_files.is_empty());
+    }
+
+    #[test]
+    fn equal_scopes_and_operators_give_one_fingerprint() {
+        let root = Path::new("/project");
+        let paths = |paths: &[&str]| MutationRunOptions {
+            scope: MutationRunScope::Paths(paths.iter().map(PathBuf::from).collect()),
+            ..MutationRunOptions::default()
+        };
+        let label = scope_label(&paths(&["src/a", "lib"]), None, root);
+        for same in [
+            paths(&["./src/a", "lib"]),
+            paths(&["lib/", "src/a"]),
+            paths(&["/project/src/a", "lib", "./lib"]),
+        ] {
+            assert_eq!(scope_label(&same, None, root), label, "{:?}", same.scope);
+        }
+        assert_ne!(scope_label(&paths(&["src/b"]), None, root), label);
+
+        use fallow_engine::mutation::Operator;
+        let names = operator_names(&[
+            Operator::RelationalOperator,
+            Operator::ArithmeticOperator,
+            Operator::RelationalOperator,
+        ]);
+        assert_eq!(
+            names,
+            operator_names(&[Operator::ArithmeticOperator, Operator::RelationalOperator,])
+        );
     }
 }

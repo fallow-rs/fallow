@@ -187,3 +187,92 @@ fn a_failed_write_is_reported_and_never_stops_the_run() {
         opened.journal.write_error()
     );
 }
+
+#[test]
+fn a_last_line_cut_inside_a_multibyte_character_keeps_the_earlier_results() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = open(dir.path(), &header(), false).unwrap();
+    first.journal.append("m1", "k1", &killed("t1"));
+    drop(first);
+    let line = serde_json::to_string(&Line {
+        id: "m2".to_owned(),
+        key: "k2".to_owned(),
+        status: MutantStatus::Killed,
+        killed_by: Some("test/\u{eb}.test.ts::adds".to_owned()),
+        duration_ms: None,
+    })
+    .unwrap();
+    let cut = line.find('\u{eb}').unwrap() + 1;
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(Journal::path(dir.path()))
+        .unwrap();
+    file.write_all(&line.as_bytes()[..cut]).unwrap();
+    drop(file);
+
+    let resumed = open(dir.path(), &header(), true).unwrap();
+    assert!(resumed.note.is_none(), "{:?}", resumed.note);
+    assert_eq!(resumed.journal.resumed("m1", "k1"), Some(killed("t1")));
+    assert_eq!(lines(dir.path()).len(), 2, "the cut line is dropped");
+}
+
+#[test]
+fn a_journal_over_the_size_cap_is_not_read_and_not_erased() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = open(dir.path(), &header(), false).unwrap();
+    first.journal.append("m1", "k1", &killed("t1"));
+    drop(first);
+    let before = std::fs::read(Journal::path(dir.path())).unwrap();
+
+    let opened = Journal::open_capped(dir.path(), &header(), keys(dir.path()), true, 16).unwrap();
+    assert_eq!(
+        opened.note.as_deref(),
+        Some(
+            "the run started from the beginning, because the journal is larger than 16 bytes; the run moved it to journal.jsonl.unread"
+        )
+    );
+    assert_eq!(opened.journal.resumed("m1", "k1"), None);
+    assert_eq!(
+        std::fs::read(dir.path().join("journal.jsonl.unread")).unwrap(),
+        before,
+        "the unread journal is kept"
+    );
+    assert_eq!(lines(dir.path()).len(), 1, "the run starts its own journal");
+}
+
+#[test]
+fn a_stale_temporary_file_is_removed_and_a_failed_start_leaves_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let stale = dir.path().join("journal.jsonl.999999.tmp");
+    std::fs::write(&stale, "{").unwrap();
+    File::options()
+        .write(true)
+        .open(&stale)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(7200))
+        .unwrap();
+    let fresh = dir.path().join("journal.jsonl.999998.tmp");
+    std::fs::write(&fresh, "{").unwrap();
+    drop(open(dir.path(), &header(), false).unwrap());
+    assert!(!stale.exists(), "a temporary file of a dead run is removed");
+    assert!(
+        fresh.exists(),
+        "a recent temporary file can belong to a live run"
+    );
+
+    let blocked = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(Journal::path(blocked.path()).join("child")).unwrap();
+    let opened = open(blocked.path(), &header(), false).unwrap();
+    assert!(opened.journal.write_error().is_some());
+    let leftovers: Vec<String> = std::fs::read_dir(blocked.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|extension| extension == "tmp")
+        })
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}

@@ -1083,16 +1083,27 @@ outcome journal keeps them.
   config, the scope, the operators and `--allow-side-effects`. A header of
   other inputs exits `2` with `FALLOW_MUTATION_RESUME_MISMATCH`. The message
   names each input that differs, with both values.
+- The fingerprint sorts the operators and removes duplicates. It writes the
+  paths of a `paths` scope relative to the root, without `.` parts, sorted
+  and without duplicates. `./src/a` and `src/a` give one fingerprint.
 - `--max-mutants`, `--time-budget` and `--concurrency` are not in the
   fingerprint. A run that `--max-mutants` or the time budget stopped can
   continue with other limits. A resumed result takes a place in the
   `--max-mutants` limit, the same as a cached result.
 - A journal result whose key does not match the key of this run is
-  rejected, for example after a change to a covering test file. That mutant
-  runs again.
+  rejected, for example after a change to a covering test file. The result
+  is not reused from the journal. The mutant runs again, or its status comes
+  from the result cache.
 - With no journal, or a journal without a valid header, the run starts from
   the beginning. It does not exit. The `resume.note` field says why, and the
   human output prints it.
+- The run checks the journal size before it reads the file. A journal over
+  64 MiB, or a journal that does not read, is not read. The run moves it to
+  `journal.jsonl.unread`, so no earlier result is erased, and starts from
+  the beginning with a note. When the move fails, the file stays and the run
+  writes no journal.
+- The run parses each line as bytes. A last line that an interrupt cut, also
+  inside a multibyte character, is one bad line. The other lines stay.
 - A resumed result has `resumed: true` in `mutants[]`, not `cached: true`.
   It counts in the score and the coverage the same as a result of this run.
   The result cache stores it, because the interrupted run did not save its
@@ -1100,9 +1111,11 @@ outcome journal keeps them.
 - A run with no mutant that needs a test run reads no journal. Its
   `resume.note` says so.
 
-The report of a `--resume` run has a `resume` object: `journal` (the path,
-relative to the root when it is inside the root), `reused`, `rejected`, and
-`note` when the run did not read a journal. The object is absent without
+The report of a `--resume` run has a `resume` object: `journal`, `reused`,
+`rejected`, and `note` when the run did not read a journal. `journal` is
+relative to the root. When the cache directory is outside the root, it is
+absolute, because the report has no other cache path to follow. The file
+stays only when the run did not complete. The object is absent without
 `--resume`. The human output prints one `Resumed:` line.
 
 The lifecycle of the journal:
@@ -1111,12 +1124,20 @@ The lifecycle of the journal:
 - A `--resume` run keeps the valid lines of a matching journal and appends
   its new results. It drops a last line that an interrupt cut.
 - A run with `completion.status: complete` removes the journal after it
-  saves `last-report.json`. When the save fails, the journal stays.
+  saves `last-report.json`. When the save fails, the journal stays. A run
+  that started no test runner did not write or check the journal, so it
+  never removes it.
 - A `partial` run, for example after `--time-budget` or `--max-mutants`,
   keeps the journal, so a later `--resume` continues it. An interrupted run
   and a run that exits `2` also keep it.
 - A failed journal write adds a `journal-write-failed` error and keeps the
   run result.
+- A start writes the journal to `journal.jsonl.<pid>.tmp` and renames it. A
+  failed start removes its temporary file. A start also removes each
+  temporary journal file older than one hour, which a run that ended before
+  its rename leaves.
+- Two concurrent runs on one project write the same journal file, so the
+  journal of one run can replace the journal of the other.
 - The scheduler talks to the journal through the `OutcomeJournal` trait in
   `crates/api/src/mutation/scheduler`. The file lives in
   `crates/api/src/mutation/journal`. The CLI removes a finished journal
@@ -1340,8 +1361,8 @@ reads files only. It runs no test.
 - One `Cache:` line when a result came from the result cache. It names
   `--no-cache`.
 - One `Resumed:` line for a `--resume` run: the count of results from the
-  journal and the count of mutants that ran again because their inputs
-  changed. When the run read no journal, the line gives the reason and the
+  journal and the count of journal results that were not reused from the
+  journal because their inputs changed. When the run read no journal, the line gives the reason and the
   journal path.
 - The 10 best-ranked survivors grouped by file, files and mutants in rank
   order, and one `and N more survivors` line. Each survivor has the location,

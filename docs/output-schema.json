@@ -33774,7 +33774,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "A stable kebab-case code: `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `typecheck-failed`, `worktree-changed`\nor `worktree-check-failed`."
+          "description": "A stable kebab-case code: `cache-write-failed`,\n`journal-write-failed`, `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `typecheck-failed`, `worktree-changed`\nor `worktree-check-failed`."
         },
         "message": {
           "type": "string",
@@ -34718,7 +34718,7 @@
       "properties": {
         "journal": {
           "type": "string",
-          "description": "The path of the outcome journal, relative to the project root when it\nis inside the root."
+          "description": "The path of the outcome journal, relative to the project root. When\nthe cache directory is outside the root, the path is absolute: the\nreport has no other cache path, so no other rule applies. The file\nstays only when the run did not complete. A run with\n`completion.status: complete` removes it."
         },
         "reused": {
           "type": "integer",
@@ -34726,7 +34726,7 @@
         },
         "rejected": {
           "type": "integer",
-          "description": "The journal results whose key does not match this run, because an\ninput of the mutant changed. These mutants ran again."
+          "description": "The journal results whose key does not match this run, because an\ninput of the mutant changed. These results were not reused from the\njournal. The mutant ran again, or its status came from the result\ncache."
         },
         "note": {
           "type": [

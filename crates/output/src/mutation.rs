@@ -502,13 +502,18 @@ pub struct MutationCacheOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationResumeOutput {
-    /// The path of the outcome journal, relative to the project root when it
-    /// is inside the root.
+    /// The path of the outcome journal, relative to the project root. When
+    /// the cache directory is outside the root, the path is absolute: the
+    /// report has no other cache path, so no other rule applies. The file
+    /// stays only when the run did not complete. A run with
+    /// `completion.status: complete` removes it.
     pub journal: String,
     /// The mutants whose status came from the journal. They did not run.
     pub reused: usize,
     /// The journal results whose key does not match this run, because an
-    /// input of the mutant changed. These mutants ran again.
+    /// input of the mutant changed. These results were not reused from the
+    /// journal. The mutant ran again, or its status came from the result
+    /// cache.
     pub rejected: usize,
     /// Why the run did not read a journal and started from the beginning,
     /// for example because no journal exists. Absent when the run read the
@@ -657,7 +662,8 @@ pub struct MutationWorktreeCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationRunIssue {
-    /// A stable kebab-case code: `runtime-error`, `static-map-miss`,
+    /// A stable kebab-case code: `cache-write-failed`,
+    /// `journal-write-failed`, `runtime-error`, `static-map-miss`,
     /// `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
     /// or `worktree-check-failed`.
     pub code: String,

@@ -1404,6 +1404,64 @@ export default {
     }
 }
 
+/// Issue #3783: `--resume` with a journal of other inputs exits 2, names the
+/// input that differs, and keeps the journal. The header check runs after the
+/// runtime discovery, so the test needs `node`.
+#[test]
+#[expect(
+    clippy::print_stderr,
+    reason = "a skipped end-to-end test says why it did not run"
+)]
+fn resume_with_a_journal_of_other_inputs_exits_2_and_keeps_it() {
+    let has_node = std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !has_node {
+        eprintln!("skipped: the resume mismatch test needs `node` on PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"resume-mismatch","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/math.js"),
+        "export const inc = (x) => x + 1;\n",
+    )
+    .expect("math.js");
+    fs::write(
+        root.join("test/math.test.js"),
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { inc } from \"../src/math.js\";\ntest(\"inc\", () => { assert.equal(inc(1), 2); });\n",
+    )
+    .expect("math.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    let journal = root.join(".fallow/mutation/journal.jsonl");
+    fs::create_dir_all(journal.parent().expect("parent")).expect("dir");
+    let text = "{\"journal_format\":1,\"fallow_version\":\"0.0.1\",\"runner\":\"node-test\",\"runtime\":\"node 0.0.1\",\"run_dir\":\"0000\",\"runner_config\":null,\"scope\":\"all\",\"operators\":null,\"allow_side_effects\":false}\n{\"id\":\"m1\",\"key\":\"k1\",\"status\":\"killed\"}\n";
+    fs::write(&journal, text).expect("journal");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+
+    let (output, envelope) = json_mutation(root, &["--all", "--no-cache", "--resume"]);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(
+        envelope["code"], "FALLOW_MUTATION_RESUME_MISMATCH",
+        "{envelope}"
+    );
+    let message = envelope["message"].as_str().expect("message");
+    assert!(
+        message.contains("Fallow version (journal: 0.0.1, this run: "),
+        "{message}"
+    );
+    assert_eq!(fs::read_to_string(&journal).expect("kept"), text);
+}
+
 /// Issue #3783: a run that SIGINT stops keeps its finished results, and
 /// `--resume` continues it. The `node:test` runner needs only `node`.
 #[cfg(unix)]

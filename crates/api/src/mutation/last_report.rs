@@ -59,7 +59,10 @@ pub fn last_mutation_report_path(analysis: &AnalysisOptions) -> Result<PathBuf, 
 /// Removes the outcome journal of the project when `report` is complete,
 /// and returns true when it removed a journal. Call it after the report is
 /// saved: the saved report then holds each result. A partial or failed run
-/// keeps the journal, so `--resume` can continue it.
+/// keeps the journal, so `--resume` can continue it. A run that started no
+/// test runner (`runner` is absent) did not write or check the journal, so
+/// the journal can belong to an interrupted run of another scope, and it
+/// stays.
 ///
 /// # Errors
 ///
@@ -69,7 +72,9 @@ pub fn remove_finished_mutation_journal(
     analysis: &AnalysisOptions,
     report: &fallow_output::MutationReport,
 ) -> Result<bool, ProgrammaticError> {
-    if report.completion.status != fallow_output::MutationCompletionStatus::Complete {
+    if report.completion.status != fallow_output::MutationCompletionStatus::Complete
+        || report.runner.is_none()
+    {
         return Ok(false);
     }
     let path = super::journal::Journal::path(&cache_dir(analysis)?.join("mutation"));
