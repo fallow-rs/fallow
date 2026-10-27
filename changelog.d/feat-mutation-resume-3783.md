@@ -1,3 +1,0 @@
-### Added
-
-- **An interrupted `fallow mutation` run keeps its finished results, and `--resume` continues it.** Each run writes the killed and the retry-confirmed survived mutants to `.fallow/mutation/journal.jsonl` when each result is final, also with `--no-cache`. `fallow mutation --resume` reuses these results and runs only the other mutants. A journal of other inputs exits 2 with `FALLOW_MUTATION_RESUME_MISMATCH` and names each input that differs. A resumed mutant has `resumed: true`, and the report has a `resume` object. A complete run removes the journal, and a partial run keeps it. (Closes [#3783](https://github.com/fallow-rs/fallow/issues/3783))

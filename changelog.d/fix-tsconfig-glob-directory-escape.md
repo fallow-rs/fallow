@@ -1,3 +1,0 @@
-### Fixed
-
-- **A tsconfig in a directory whose name holds glob characters now applies to its files.** Fallow matched the `include` and `exclude` patterns of a tsconfig with the directory of that tsconfig as part of the glob. A directory such as `app/[id]`, `{a,b}`, `*` or `?` then changed the meaning of the pattern, so the pattern did not match the files in that directory. Fallow then could drop a referenced config, and its `paths` aliases did not apply. Fallow now treats the tsconfig directory as literal text. In the entry itself, Fallow reads only `*` and `?` as wildcards, the same as `tsc`, so an entry such as `app/[id]/**/*` matches the `[id]` directory.

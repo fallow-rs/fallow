@@ -1,6 +1,0 @@
-### Fixed
-
-- **`fallow security` no longer reports module-relative paths as path-traversal candidates.** A path that starts from `import.meta.url`, `import.meta.dirname`, `import.meta.filename`, `__dirname`, `__filename` or `process.cwd()` and adds only literal segments cannot carry caller input. Examples are `path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..")` and `fs.readFileSync(path.join(__dirname, "template.html"))`. A module-scope `const` that holds such a path is also trusted. The rule applies to every sink argument, so `res.sendFile(path.join(__dirname, "index.html"))` is also clear. `fileURLToPath(value)` and `new URL(value, import.meta.url)` stay candidates when `value` is not known.
-  (Closes [#3711](https://github.com/fallow-rs/fallow/issues/3711))
-- **`fallow security` now checks every `path.join` and `path.resolve` segment.** Before, the path-traversal matcher checked only the first argument, so `path.resolve(".", input)` and `path.join(".", input)` gave no candidate. The matcher now checks each argument and reports one candidate for each call. A `path.relative` containment guard on the result still clears the call.
-  (Closes [#3712](https://github.com/fallow-rs/fallow/issues/3712))

@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow dead-code` no longer reports a class member as unused when an array pattern or a held getter is its only read.** Without `--type-aware`, `unused-class-members` missed two destructure forms. The first is an array pattern around an object pattern, such as `const [{ m }] = [service]` or `for (const [{ m }] of [[service]])`. The second is a getter on an object literal that a variable holds, such as `const src = { get k() { return service } }` with a later `src.k.m` read or `{ k: { m } } = src` destructure. Each form now credits the member. An array element after a spread, or a getter with more than one statement, gives no credit. The extraction cache version is 386. (Closes [#3799](https://github.com/fallow-rs/fallow/issues/3799))

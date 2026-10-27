@@ -7,6 +7,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.37.0] - 2026-10-27
+
+### Added
+
+- **`fallow health --css` reads server-side template files as class references.** Before, a class that only a Shopify `.liquid` section applied was reported as an `unreferenced-css-class`. Fallow now reads files with the extensions `liquid`, `njk`, `hbs`, `handlebars`, `twig`, and `blade.php`, and any class-like word in them counts as used. Templates are more lenient than Markdown: the whole text of a template counts, so a common word such as `hidden` or `title` in a template also credits that class, while a Markdown file counts only when it has dynamic class syntax. A class prefix before a `{{` echo, as in `grid--{{ columns }}`, also counts. `{{` is a shared interpolation marker, so it also applies to `.vue`, `.html`, `.md` and `.astro` sources with dynamic class syntax, and these can report fewer classes too. The new top-level `markupExtensions` key adds other template extensions, for example `["tpl", "erb"]`. A value that ends in a script, stylesheet, data or asset extension, such as `module.css` or `d.ts`, is a config error. The walk honors `.gitignore`, `ignorePatterns` and `--max-file-size`. These files do not join source discovery, so they never become unused files. Thanks [@james2doyle](https://github.com/james2doyle) for the report. (Closes [#3917](https://github.com/fallow-rs/fallow/issues/3917))
+
+- **The npm package now ships `rule-pack-schema.json`.** A rule pack can point `$schema` at `./node_modules/fallow/rule-pack-schema.json` and get a schema that matches the installed Fallow version. The package also exports the file as `fallow/rule-pack-schema.json`. Thanks [@hckhanh](https://github.com/hckhanh) for the report and [@tahodev](https://github.com/tahodev) for the change. (Closes [#3851](https://github.com/fallow-rs/fallow/issues/3851))
+
+- **An interrupted `fallow mutation` run keeps its finished results, and `--resume` continues it.** Each run writes the killed and the retry-confirmed survived mutants to `.fallow/mutation/journal.jsonl` when each result is final, also with `--no-cache`. `fallow mutation --resume` reuses these results and runs only the other mutants. A journal of other inputs exits 2 with `FALLOW_MUTATION_RESUME_MISMATCH` and names each input that differs. A resumed mutant has `resumed: true`, and the report has a `resume` object. A complete run removes the journal, and a partial run keeps it. (Closes [#3783](https://github.com/fallow-rs/fallow/issues/3783))
+
+### Changed
+
+- **A bare machine run that exits 0 on a failing gate now says so on stderr.** Bare `fallow` in `--format json`, `sarif`, `codeclimate`, the GitHub formats and the comment and review formats exits 0 on findings, while `fallow dead-code --format json` exits 1 on the same findings. Before, nothing showed why. Now such a run prints one stderr line, also under `--quiet`, that names each failing findings gate and the flag that enforces it: `[W] Exit code 0: gate error-severity-findings (2 at or above error) failed, but bare fallow does not enforce it in --format json. To exit 1 on it, pass --fail-on-issues.` The exit code and stdout do not change. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3826](https://github.com/fallow-rs/fallow/issues/3826))
+
+- **The exit-code contract no longer says that exit 0 means a clean run.** `fallow schema` (`exit_codes`), the fallow skill, `AGENTS.md` and the npm README said that 0 means no error-severity findings. For bare `fallow` in a machine format, that was false. They now say that 0 means no enforced gate failed, that 1 means findings and not a tool failure, and that a bare machine run gates on findings only with `--fail-on-issues`. To see a failing gate that did not set the exit code, read `gate_outcomes`.
+
+- **`fallow mutation` gives no mutant for a pure condition whose only effect is a logging call.** An `if` statement such as `if (count > 0) { console.info("Items", count); }` gave mutants for its test that could only change which message was logged. The collector already skips each `console.*` and `debug(...)` call, and it now also skips such an `if` statement. The test must be pure, and each branch must hold only logging calls with pure arguments. An `else if` chain must meet the same conditions. The callee must be the global `console` or `debug`: a file that declares or imports one of these names keeps the conditions that call it. A condition with a call, an assignment or another statement in a branch keeps its mutants. (Closes [#3719](https://github.com/fallow-rs/fallow/issues/3719))
+
+### Fixed
+
+- **`thin-wrapper` and `duplicate-prop-shape` set to `error` now fail the gates.** These rules count in issue totals, the dead-code and audit gates, and CI reports when their severity is `error`. Warnings stay advisory, also with `--fail-on-issues`. Per-file overrides and saved baselines use the component that owns each finding. Thanks [@luciocabrera](https://github.com/luciocabrera) for the report. (Closes [#3867](https://github.com/fallow-rs/fallow/issues/3867))
+
+- **A CommonJS `postcss.config.cjs` no longer reports its `module.exports` keys as unused exports.** Since 3.35.0, Fallow credited only the `default` export of a PostCSS config. A tool that loads a CommonJS file reads `module.exports` as its default export. When a plugin credits only `default` for a CommonJS module, Fallow now credits every key of `module.exports`. This applies to the CommonJS config files of all plugins that read the default export. User `ignoreExports` rules do not change. Thanks [@waldoluisribeiro](https://github.com/waldoluisribeiro) for the report. (Closes [#3876](https://github.com/fallow-rs/fallow/issues/3876))
+
+- **`fallow security` resolves a string enum member in the same module.** It now reads the member like a `const` string. A template literal such as `` `<meta name="${MetaName.BUILD_NUMBER}">` `` that goes to an HTML sink is no longer reported as non-literal HTML. Enums and constants that you import from another module stay unresolved, because sink extraction reads one module at a time. The extraction cache version changes, so the first run after the update parses all files again. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3854](https://github.com/fallow-rs/fallow/issues/3854))
+
+- **Component export queries no longer stop type-aware refinement for the whole run.** Vue, Astro, Svelte and MDX query files receive an `unsupported-syntax` abstention before the semantic backend opens them. Supported TypeScript and JavaScript queries continue to resolve in the same batch. (Closes [#3763](https://github.com/fallow-rs/fallow/issues/3763))
+
+- **`fallow dead-code` follows `child_process.fork` targets built from the module directory.** A file that `fork(path.join(path.dirname(fileURLToPath(import.meta.url)), "child.ts"))` starts is no longer an unused file. Fallow also reads `path.resolve`, `__dirname`, `import.meta.dirname` and a constant that holds the module directory. A target with a computed segment stays unresolved. Thanks [@VariableVince](https://github.com/VariableVince) for the report. (Closes [#3919](https://github.com/fallow-rs/fallow/issues/3919))
+
+- **Config values in a same-file constant are now read.** A config can keep a
+  part of its value in a top-level constant, for example
+  `const UNIT = { test: { setupFiles: [...] } }` with `projects: [UNIT]`, or
+  `setupFiles: SETUP` and `test: TEST`. Fallow read only inline values, so it
+  reported the setup files of such a Vitest project as unused files. The config
+  parser now uses the value of the constant in each property value and array
+  element that names it. This applies to all plugins that read config files. A
+  constant that the file declares more than one time or writes to stays
+  unresolved. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Closes [#3852](https://github.com/fallow-rs/fallow/issues/3852))
+
+- **`fallow dead-code` no longer reports a class member as unused when an array pattern or a held getter is its only read.** Without `--type-aware`, `unused-class-members` missed two destructure forms. The first is an array pattern around an object pattern, such as `const [{ m }] = [service]` or `for (const [{ m }] of [[service]])`. The second is a getter on an object literal that a variable holds, such as `const src = { get k() { return service } }` with a later `src.k.m` read or `{ k: { m } } = src` destructure. Each form now credits the member. An array element after a spread, or a getter with more than one statement, gives no credit. The extraction cache version is 386. (Closes [#3799](https://github.com/fallow-rs/fallow/issues/3799))
+
+- **Package scripts and CI steps that run a local shell helper now credit the commands of that helper.** For `bash scripts/build.sh` or `./scripts/release.sh`, Fallow reads the helper without running it. A binary that the helper runs makes its package used, and a file that the helper runs with `tsx` or `node` becomes an entry. The helper path resolves in the package directory or in the `working-directory` of the CI step, and it must stay inside the project. Fallow follows nested helpers and stops at a cycle. It follows a `cd` to a literal directory or to the helper directory (`cd "$(dirname "$0")/.."`). After another `cd`, the remaining commands of the helper credit packages but do not add entries. Thanks [@VariableVince](https://github.com/VariableVince) for the report in [#3918](https://github.com/fallow-rs/fallow/issues/3918). (Closes [#3886](https://github.com/fallow-rs/fallow/issues/3886))
+
+- **`fallow dead-code` now credits a store member that a helper reads through a store alias declared in a function body.** `unused-store-member` resolved `type X = ReturnType<typeof useXStore>` only at the top level of a module or through an import. An alias in a function body or a block now credits the store member for a parameter in the same scope. An inner type of the same name for another type still shadows the alias. A local non-store type alias also shadows a module-level store alias of the same name, so a read through the local type credits no store member. A parameter type resolves in the scope outside the function body, the same as in TypeScript. The extraction cache version is 386. (Closes [#3550](https://github.com/fallow-rs/fallow/issues/3550))
+
+- **Deeply nested defaults in an object pattern no longer make extraction hang.** In a declaration such as `const { k: { k: { m } = s } = s } = s`, each default walked its left pattern again against the fallback. The work doubled at each level of nesting, so a short file could stop the analysis. A step budget now bounds the walk of one declaration.
+
+- **`fallow dead-code` now credits Expo config plugins that come from a local array binding.** An app config can hold its `plugins` list in a top-level `const` or `let`, such as `const plugins = [...]; export default { plugins }`. Fallow now reads that list, its spreads of array literals or other stable bindings, and entries or tuples that a binding holds. A `push`, `unshift` or `splice` call on the list adds its arguments, also inside a top-level block or `if` statement. An `expo` object with a type assertion, such as `expo: { ... } satisfies ExpoConfig`, is read too. Fallow credits nothing from a binding that the config reassigns, from a name that the config declares more than once, or from a dynamic value. (Closes [#3883](https://github.com/fallow-rs/fallow/issues/3883))
+
+- **`--production --type-aware` no longer credits an export that only a test file uses.** A type-aware reference from a file outside the analysis scope, such as a test file that production mode excludes, no longer removes a dead-code finding. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3869](https://github.com/fallow-rs/fallow/issues/3869))
+
+- **Audit cleanup preserves unrelated Git worktree registrations.** Removing legacy
+  Fallow snapshots keeps user worktrees registered when their directories are
+  temporarily unavailable.
+  (Closes [#3884](https://github.com/fallow-rs/fallow/issues/3884))
+
+- **Astro extraction avoids repeated scans of malformed script and style tags.** Quoted attributes retain their original source offsets and Unicode tag matching while incomplete tags no longer cause quadratic region scanning.
+
+- **CODEOWNERS lookups avoid excessive memory use and slow matching with long patterns.** Pattern batches bound regex fallback costs while preserving last-match precedence and GitLab section behavior.
+
+- **Vue and Angular template extraction avoids repeated scans of incomplete tags.** Recovery from an incomplete template tag or component interpolation no longer scans the same suffix again. Recovered references and source offsets stay the same.
+
+- **MDX extraction avoids repeated parser runs on unfinished imports and exports.** A multiline import or export that does not end no longer makes the parser try again for each line, and blank continuation lines are skipped.
+
+- **Type-aware refinement on the `tsrs` backend no longer fails on public APIs with many non-generic interfaces.** The semantic sidecar asked the checker for the type arguments of every type in the public API walk. On `tsrs`, each call on a type that is not a type reference panicked and wrote the panic to stderr. With enough such interfaces, stderr went past its 16384-byte limit and Fallow dropped the type-aware result. The sidecar now asks for type arguments only on type references, so `tsrs` gives the same result as `typescript-go`. Thanks to [@Smrtnyk](https://github.com/Smrtnyk) for the report and the reproduction. (Closes [#3872](https://github.com/fallow-rs/fallow/issues/3872))
+
+- **Programmatic and MCP audits no longer show their base snapshot in `git worktree list`.**
+  The API, the MCP `audit` tool, and the decision surface now remove the Git
+  registration of the base snapshot before the base analysis starts, as
+  `fallow audit` does. They also remove the snapshots that a stopped process
+  left behind. A snapshot stays when its owner process can still run, when
+  Fallow cannot inspect that process, or when the snapshot is younger than one
+  minute.
+  (Closes [#3885](https://github.com/fallow-rs/fallow/issues/3885))
+
+- **`fallow dead-code` no longer reports the default export of a local Oxlint `jsPlugins` file.** Oxlint loads the default export of each local plugin file. With `includeEntryExports`, fallow reported this export as unused. Fallow now credits the default export, as it does for the Oxlint config file. Other exports of the plugin file stay reportable. Thanks to @Smrtnyk for the report.
+  (Closes [#3871](https://github.com/fallow-rs/fallow/issues/3871))
+
+- **`fallow dead-code` no longer reports `tsrs` and `fallow-type-aware` as unused devDependencies.** Fallow loads these type-aware backend packages at run time, so no script or import names them. The tooling catalogue now credits both packages by name. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3873](https://github.com/fallow-rs/fallow/issues/3873))
+
+- **`fallow dead-code` credits the packages in tsconfig `contentMappers`.** TypeScript 7.1 loads each `contentMappers[].package` to map files such as `.vue` or `.astro` into the program. Fallow did not read this field, so it reported the mapper package as an unused dependency. The TypeScript plugin now credits the package name. Relative and absolute paths credit no dependency. Thanks to @Smrtnyk for the report.
+  (Closes [#3870](https://github.com/fallow-rs/fallow/issues/3870))
+
+- **`fallow security` follows per-path overrides for its dead-code note.** A sink in a file where an override sets `unused-files` or `unused-exports` to `off` no longer shows the "also reported as unused-file" or "unused-export" note, and no longer gets the delete or remove action. Thanks to [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Closes [#3853](https://github.com/fallow-rs/fallow/issues/3853))
+
+- **`fallow security` no longer reports module-relative paths as path-traversal candidates.** A path that starts from `import.meta.url`, `import.meta.dirname`, `import.meta.filename`, `__dirname`, `__filename` or `process.cwd()` and adds only literal segments cannot carry caller input. Examples are `path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..")` and `fs.readFileSync(path.join(__dirname, "template.html"))`. A module-scope `const` that holds such a path is also trusted. The rule applies to every sink argument, so `res.sendFile(path.join(__dirname, "index.html"))` is also clear. `fileURLToPath(value)` and `new URL(value, import.meta.url)` stay candidates when `value` is not known.
+  (Closes [#3711](https://github.com/fallow-rs/fallow/issues/3711))
+- **`fallow security` now checks every `path.join` and `path.resolve` segment.** Before, the path-traversal matcher checked only the first argument, so `path.resolve(".", input)` and `path.join(".", input)` gave no candidate. The matcher now checks each argument and reports one candidate for each call. A `path.relative` containment guard on the result still clears the call.
+  (Closes [#3712](https://github.com/fallow-rs/fallow/issues/3712))
+
+- **`fallow health --css` credits classes that plain `.js` and `.ts` DOM code applies.** Before, a class was reported as `unreferenced-css-class` when only a `.js`, `.ts`, `.mjs` or `.cjs` file applied it. Fallow now reads the values of `el.className = ...`, `el.classList.add / remove / toggle / replace / contains(...)`, `el.setAttribute('class', ...)` and `class:` or `className:` object properties. A template value such as `` `panel-${kind}` `` credits its `panel-` prefix. Other strings in these files still do not credit a class. A `.js` file that holds JSX is now scanned the same as a `.jsx` file. Thanks to [@osazemeu](https://github.com/osazemeu) for the report and the clear reproduction.
+  (Closes [#3865](https://github.com/fallow-rs/fallow/issues/3865))
+
+- **`fallow mutation` now runs Vitest projects in a `happy-dom` or `jsdom` environment when the cache is outside the project.** A client test environment loads the setup file of the mutation runtime through Vite. Vite refused that file when `FALLOW_CACHE_DIR` was outside the project, so the project failed its baseline with `Cannot find module '/@fs/.../vitest-setup.mjs'`. The Vitest adapter now adds the companion directory to `server.fs.allow` of the root server and of each inline project.
+  (Closes [#3793](https://github.com/fallow-rs/fallow/issues/3793))
+
+- **`fallow dead-code` credits a member access on the declared return type of an instance method.** A call such as `manager.current()?.onDown?.()`, where `current(): Tool | undefined`, now credits `Tool.onDown`. The implementer `SelectTool.onDown` is no longer reported as an unused class member. A class return type, such as `manager.widget().paint()` with `widget(): Widget`, now credits `Widget.paint`. Static, private, and method-generic return types give no credit. Thanks to @Smrtnyk for the report.
+  (Closes [#3868](https://github.com/fallow-rs/fallow/issues/3868))
+
+- **`fallow dead-code` no longer reports an aliased asset import as an unlisted dependency when the alias is in a referenced tsconfig.** A solution-style root `tsconfig.json` can reference a config whose `include` starts with `./`, for example `"./app/javascript/**/*"`. Fallow did not match that pattern to the source files, so it did not apply the `paths` of that config. An import such as `@circle-assets/images/logo.png` then gave the unlisted dependency `@circle-assets/images`. Fallow now removes `./` and `..` segments from `include` and `exclude` patterns before it matches them. Thanks to @agneym for the report and the public reproduction.
+  (Closes [#3946](https://github.com/fallow-rs/fallow/issues/3946))
+
+- **A tsconfig in a directory whose name holds glob characters now applies to its files.** Fallow matched the `include` and `exclude` patterns of a tsconfig with the directory of that tsconfig as part of the glob. A directory such as `app/[id]`, `{a,b}`, `*` or `?` then changed the meaning of the pattern, so the pattern did not match the files in that directory. Fallow then could drop a referenced config, and its `paths` aliases did not apply. Fallow now treats the tsconfig directory as literal text. In the entry itself, Fallow reads only `*` and `?` as wildcards, the same as `tsc`, so an entry such as `app/[id]/**/*` matches the `[id]` directory.
+
+### Security
+
+- **The Windows binaries now carry an Authenticode signature from Fallow B.V.** Windows 11 Smart App Control blocked `fallow.exe` from the npm package, because the file had no Authenticode signature and no reputation (Code Integrity event 3077). The release now signs every Fallow Windows file before packaging: the CLI, LSP, MCP, multicall and similar-code executables and the Node addon. The signed files ship in the GitHub release archives, the npm packages and the VS Code extension. The Ed25519 signatures do not change. Thanks [@Rednas83](https://github.com/Rednas83) for the report. (Closes [#3807](https://github.com/fallow-rs/fallow/issues/3807))
+
+- **Git commands in an audit base snapshot no longer read a repository from the base commit.**
+  The `.git` file of a base snapshot pointed at a relative path. A base commit
+  could supply a directory at that path, or a directory shaped as a bare
+  repository, and Git then read its config. That config can run commands, for
+  example through `core.fsmonitor`. The `.git` file now names an absolute path
+  that cannot exist, and each Git command that Fallow runs inside a snapshot
+  gets a `GIT_DIR` that does not exist. Every Git command that Fallow starts
+  also sets `safe.bareRepository=explicit`, so Git does not use a directory
+  shaped as a bare repository that it finds on its own.
+
+- **`fallow hooks install` validates the detected default branch name.**
+  Without `--branch`, the command reads the remote default branch name from
+  `origin/HEAD` and writes it into the generated pre-commit hook. A crafted
+  name could put shell code into the hook. The command now applies the same
+  ref validator that `--branch` uses. When the name fails, the command prints
+  a warning and uses `main` as the fallback. The existing-hook and lefthook
+  hints and the install summary get the same validated name.
+
 ## [3.36.0] - 2026-10-24
 
 ### Added
@@ -16106,7 +16235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.36.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.37.0...HEAD
+[3.37.0]: https://github.com/fallow-rs/fallow/compare/v3.36.0...v3.37.0
 [3.36.0]: https://github.com/fallow-rs/fallow/compare/v3.35.0...v3.36.0
 [3.35.0]: https://github.com/fallow-rs/fallow/compare/v3.34.1...v3.35.0
 [3.34.1]: https://github.com/fallow-rs/fallow/compare/v3.34.0...v3.34.1

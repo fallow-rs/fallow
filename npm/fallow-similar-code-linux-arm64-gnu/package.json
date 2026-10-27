@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-similar-code-linux-arm64-gnu",
-  "version": "3.36.0",
+  "version": "3.37.0",
   "description": "Fallow similar-code sidecar binary for Linux ARM64 (glibc)",
   "license": "MIT",
   "repository": {
