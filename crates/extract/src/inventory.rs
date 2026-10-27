@@ -35,7 +35,9 @@
 //!    opt-in `name_callback_arguments` (which `@fallow-cli/beacon` enables).
 //!    Only parentheses may be between the call and the function: an array
 //!    element, an object property or a `??` operand inside an argument takes
-//!    no callee name.
+//!    no callee name. An optional call on a callee that is not a member access
+//!    (`foo?.(cb)`) gives no callee name, because the instrumenter wraps that
+//!    callee in its optional-chain helper. `a.b?.(cb)` still gives "b".
 //!
 //! 4. `(anonymous_N)` with the current counter value; counter then increments.
 //!    Only genuinely unnamed functions reach this: an immediately-invoked
@@ -501,8 +503,16 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
     /// `name_callback_arguments`. The name is keyed on the start of the
     /// argument function, so a chained call (`a.b().c(cb)`) never gives `b`
     /// to the callback of `c`.
+    ///
+    /// An optional call on a callee that is not a member access (`foo?.(cb)`)
+    /// gives no name. The instrumenter wraps that callee in its optional-chain
+    /// helper (`enter_call_expression`), so its `callee_name` then sees a call.
+    /// A member callee (`a.b?.(cb)`, `a?.b?.(cb)`) stays native to keep `this`,
+    /// so it keeps its property name.
     fn visit_call_expression(&mut self, call: &CallExpression<'ast>) {
-        self.name_callback_arguments(&call.callee, &call.arguments);
+        if !(call.optional && call.callee.get_member_expr().is_none()) {
+            self.name_callback_arguments(&call.callee, &call.arguments);
+        }
         walk::walk_call_expression(self, call);
     }
 
@@ -899,6 +909,37 @@ mod tests {
     fn parenthesized_callee_unwraps_to_the_inner_name() {
         assert_eq!(walk("(foo)(() => run());")[0].name, "foo");
         assert_eq!(walk("(a.b)(() => run());")[0].name, "b");
+    }
+
+    #[test]
+    fn optional_call_on_a_non_member_callee_gives_no_callee_name() {
+        // The instrumenter wraps a non-member callee of an optional call in its
+        // optional-chain helper, so the callback sees a call as its callee.
+        assert_eq!(walk("foo?.(() => 1);")[0].name, "(anonymous_0)");
+        assert_eq!(walk("(foo)?.(() => 1);")[0].name, "(anonymous_0)");
+        assert_eq!(walk("(foo as any)?.(() => 1);")[0].name, "(anonymous_0)");
+        assert_eq!(walk("foo!?.(() => 1);")[0].name, "(anonymous_0)");
+        assert_eq!(walk("a?.b?.c?.(() => 1);")[0].name, "c");
+    }
+
+    #[test]
+    fn optional_call_on_a_member_callee_keeps_the_callee_name() {
+        // A receiver-bound optional call stays native in the instrumenter, so
+        // the callee keeps its property name.
+        assert_eq!(walk("a.b?.(() => 1);")[0].name, "b");
+        assert_eq!(walk("a?.b?.(() => 1);")[0].name, "b");
+        assert_eq!(walk("a['k']?.(() => 1);")[0].name, "k");
+        assert_eq!(walk("(a.b)?.(() => 1);")[0].name, "b");
+        assert_eq!(walk("a?.b(() => 1);")[0].name, "b");
+        assert_eq!(walk("a?.b?.c(() => 1);")[0].name, "c");
+    }
+
+    #[test]
+    fn optional_call_without_callee_name_still_names_a_nested_call_argument() {
+        // Only the direct arguments of the optional call lose the callee name.
+        let entries = walk("foo?.(() => 1, bar(() => 2));");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["(anonymous_0)", "bar"]);
     }
 
     #[test]
