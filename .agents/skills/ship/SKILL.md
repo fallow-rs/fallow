@@ -14,7 +14,10 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    conflicts, when the branch changes `CHANGELOG.md`, when the branch and
    `main` both change a generated file, or when the merge loses a version
    bump of the branch. Otherwise it prints the merge command for the
-   current head, and no new CI run is necessary. After a rebase, the
+   current head, and no new CI run is necessary. The checks of the pull
+   request then ran against an older `main`. A change on `main` that
+   breaks the branch without a text conflict shows only in steps 6 and 7.
+   After a rebase, the
    script compares the result with a merge and checks each version
    constant. A failed manual `rebase --continue` leaves commits on a
    detached HEAD. For a stacked branch after a squash merge of its parent,
@@ -39,7 +42,10 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    own push that you reviewed, run the command again with the new head.
    When all required checks already passed, the same command merges at
    once. `--admin` does not skip a required check, because the branch
-   protection of `main` applies to administrators too.
+   protection of `main` applies to administrators too. A pull request that
+   lands on `main` after the `--if-needed` run can make the same version
+   bump. Git merges two equal edits without a conflict, so step 7 checks
+   the version constants of the merge.
 6. Monitor the merged commit until required CI completes. Use
    `node scripts/ship-wait-checks.mjs --commit <full sha> --follow-main`.
    Do not give `--min-checks`: path filters decide which workflows a push
@@ -63,7 +69,11 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    merge, so do not report it as yours. Exit code 1 means that at least
    one failure is new.
 7. Inspect the merged tree for conflict markers and generated drift. Then
-   run `git diff <reviewed head> <merge commit>`. A pull request that merged
+   run `git diff <reviewed head> <merge commit>`. Then run
+   `node scripts/check-version-bumps.mjs --base <merge commit>^ --head <reviewed head>`.
+   A failure means that `main` made the same version bump before the merge.
+   Set the constant above the value of `main` in a follow-up pull request.
+   A pull request that merged
    after your last rebase shows there, also when it did not conflict. Read
    each hunk in a file that your pull request changed. Such a merge can make
    your code, a comment or a doc wrong without a text conflict. Fix that in
@@ -83,7 +93,8 @@ Use these scripts for each pull request, one at a time:
 
 1. Rebase the branch when necessary:
    `node scripts/ship-rebase.mjs --pr <number> --if-needed --push`. When
-   the script reports "No rebase needed", go to step 3. Otherwise the
+   the script reports "No rebase needed", do step 2 for the current head
+   and then step 3. Otherwise the
    script resolves the conflicts that have one mechanical answer and
    stops on any other conflict:
    - `CHANGELOG.md`: it keeps both sides.

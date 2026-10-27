@@ -10,6 +10,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { branchVersionBumps } from "./check-version-bumps.mjs";
 import { runCliMain } from "./cli-main.mjs";
 import { contractSurfacePaths } from "./contract-surfaces.mjs";
 import {
@@ -600,6 +601,9 @@ const checkResult = (cwd, log, options, rebased, state) => {
   });
 };
 
+// `git merge-tree` exits with 1 when the merge has conflicts.
+const MERGE_TREE_CONFLICT_EXIT = 1;
+
 /** Paths that `from..to` changes. */
 const changedPaths = (cwd, from, to) =>
   new Set(
@@ -612,15 +616,20 @@ const changedPaths = (cwd, from, to) =>
  * The reasons why a squash merge of the old branch tip into the base is not
  * safe without a rebase. An empty list means that the merge has no
  * conflict, keeps each version bump of the branch, and needs no
- * mechanical resolution that the rebase does.
+ * mechanical resolution that the rebase does. The bumps of the branch come
+ * from its own commits, because a merge of the base into the branch moves
+ * the merge base past an equal bump.
  */
 const rebaseReasons = (cwd, { oldBase, oldTip, baseTip }) => {
   const merge = run("git", ["merge-tree", "--write-tree", "--no-messages", baseTip, oldTip], {
     cwd,
     allowFailure: true,
   });
+  if (merge.status === MERGE_TREE_CONFLICT_EXIT) {
+    return ["The merge into the base has a conflict."];
+  }
   if (merge.status !== 0) {
-    return [`The merge into the base has a conflict (git merge-tree exit ${merge.status}).`];
+    throw new Error(`git merge-tree failed (exit ${merge.status})\n${merge.stderr.trim()}`);
   }
   const mergeTree = merge.stdout.trim().split("\n")[0];
   const reasons = [];
@@ -636,7 +645,10 @@ const rebaseReasons = (cwd, { oldBase, oldTip, baseTip }) => {
     );
   }
   reasons.push(
-    ...checkVersions(versionChanges(cwd, oldBase, oldTip), versionChanges(cwd, baseTip, mergeTree)),
+    ...checkVersions(
+      branchVersionBumps(cwd, baseTip, oldTip),
+      versionChanges(cwd, baseTip, mergeTree),
+    ),
   );
   return reasons;
 };

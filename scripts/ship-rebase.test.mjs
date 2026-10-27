@@ -1465,3 +1465,25 @@ test("--if-needed rebases a branch that conflicts or changes CHANGELOG.md", (t) 
   assert.match(entryResult.output, /The branch changes CHANGELOG\.md\./u);
   newTipOf(entryResult);
 });
+
+test("--if-needed finds an equal cache bump that a merge of main into the branch hides", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "src/lib.rs": cacheSource(2),
+        "src/other.txt": "other\n",
+      }),
+  });
+  repo.git("switch", "--quiet", "feat");
+  repo.git("merge", "--quiet", "--no-edit", "origin/main");
+  repo.git("push", "--quiet", "origin", "feat");
+  repo.git("switch", "--quiet", "main");
+
+  const result = shipRebase(repo, "--if-needed");
+
+  assert.match(result.output, /Rebase needed for feat:/u);
+  assert.match(result.output, /GRAPH_CACHE_VERSION 1 -> 2/u);
+  assert.doesNotMatch(result.output, /No rebase needed/u);
+});
