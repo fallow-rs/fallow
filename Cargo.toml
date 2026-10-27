@@ -275,6 +275,13 @@ strip = "symbols"
 opt-level = 3
 panic = "abort"                         # Smaller binary, no unwind tables needed
 
+# `cargo bench` and `cargo codspeed build` use this profile. It inherits
+# `release`, but fat LTO of the fallow-benchmarks crate graph needs more
+# memory than the ubuntu-24.04 CodSpeed runner has (exit code 143).
+# Thin LTO keeps the build inside that limit.
+[profile.bench]
+lto = "thin"
+
 # Profile-with-debug: release-equivalent codegen + debuginfo retained.
 # Use for samply / Instruments / perf without enabling LTO+strip in the
 # regular release profile.

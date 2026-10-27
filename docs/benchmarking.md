@@ -21,6 +21,12 @@ Simulation leaves syscall time out of the value. A benchmark that CodSpeed
 marks "dominated by syscalls" does not show file-system cost, so do not use it
 to judge an I/O change.
 
+`cargo codspeed build` and `cargo bench` use `[profile.bench]` in the root
+`Cargo.toml`. It inherits `release` but uses thin LTO, because fat LTO of the
+`fallow-benchmarks` crate graph runs the CodSpeed runner out of memory. Do not
+compare instruction counts across a change to this profile: the codegen
+changes, so CodSpeed records a one-time baseline shift.
+
 The optional TypeScript semantic companion is measured separately with
 CodSpeed walltime. Simulation cannot measure the interpreted Node.js process or
 its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the
