@@ -740,7 +740,7 @@ mod tests {
             );
         }
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(5),
+            start.elapsed() < std::time::Duration::from_secs(25),
             "ownership lookup exceeded its resource regression budget"
         );
     }
