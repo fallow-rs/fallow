@@ -2938,7 +2938,7 @@ fn get_nested_object_keys(obj: &ObjectExpression, path: &[&str]) -> Option<Vec<S
 }
 
 /// Navigate a nested property path and return the raw expression at the end.
-pub(crate) fn get_nested_expression<'a>(
+fn get_nested_expression<'a>(
     obj: &'a ObjectExpression<'a>,
     path: &[&str],
 ) -> Option<&'a Expression<'a>> {

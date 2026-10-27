@@ -5,7 +5,10 @@
 
 use std::path::Path;
 
-use oxc_ast::ast::{ArrayExpressionElement, Expression, Program};
+use oxc_ast::ast::{
+    Argument, ArrayExpression, ArrayExpressionElement, Expression, ObjectExpression, Program,
+    Statement,
+};
 use rustc_hash::FxHashSet;
 
 use super::{Plugin, PluginResult, config_parser};
@@ -95,23 +98,40 @@ pub(super) fn add_config_plugins(
 /// string or the first string of a `[name, options]` tuple.
 ///
 /// The list, a spread argument, an entry, or a tuple head can be a top-level
-/// `const` or `let` binding that the program never writes to. A spread of an
-/// array literal adds its entries, and a conditional spread adds the entries of
-/// each branch. Any other expression adds no entry, so a dynamic value never
-/// counts as proof of a missing plugin.
+/// `const` or `let` binding that the program never assigns to. A `push`,
+/// `unshift` or `splice` call on a bound list at the top level adds its
+/// arguments. A spread of an array literal adds its entries, and a conditional
+/// spread adds the entries of each branch. Any other expression adds no entry,
+/// so a dynamic value never counts as proof of a missing plugin.
 fn config_plugin_names(source: &str, config_path: &Path, plugins_path: &[&str]) -> Vec<String> {
     config_parser::extract_from_source(source, config_path, |program| {
         let config = config_parser::find_config_object(program)?;
-        let plugins = config_parser::get_nested_expression(config, plugins_path)?;
+        let plugins = nested_value(config, plugins_path)?;
         let mut entries = StaticPluginEntries {
             program,
             followed: FxHashSet::default(),
             names: Vec::new(),
         };
-        entries.collect_array(plugins);
+        entries.collect_spread(plugins);
         Some(entries.names)
     })
     .unwrap_or_default()
+}
+
+/// The value at a property path. Each value can carry a type assertion, such
+/// as `expo: { ... } satisfies ExpoConfig`.
+fn nested_value<'a>(object: &'a ObjectExpression<'a>, path: &[&str]) -> Option<&'a Expression<'a>> {
+    let (key, rest) = path.split_first()?;
+    let value = config_parser::find_property(object, key)?
+        .value
+        .get_inner_expression();
+    if rest.is_empty() {
+        return Some(value);
+    }
+    match value {
+        Expression::ObjectExpression(nested) => nested_value(nested, rest),
+        _ => None,
+    }
 }
 
 /// Collects the static entry names of a plugin list and follows stable local
@@ -138,10 +158,10 @@ impl<'a> StaticPluginEntries<'a> {
         Some(expr)
     }
 
-    fn collect_array(&mut self, expr: &'a Expression<'a>) {
-        let Some(Expression::ArrayExpression(array)) = self.resolve(expr) else {
-            return;
-        };
+    /// Collect the entries of an array. When the array is the value of
+    /// `binding`, the entries that `push`, `unshift` or `splice` calls on the
+    /// binding add count too.
+    fn collect_array(&mut self, array: &'a ArrayExpression<'a>, binding: Option<&'a str>) {
         for element in &array.elements {
             if let ArrayExpressionElement::SpreadElement(spread) = element {
                 self.collect_spread(&spread.argument);
@@ -149,16 +169,37 @@ impl<'a> StaticPluginEntries<'a> {
                 self.collect_entry(entry);
             }
         }
+        let Some(binding) = binding else {
+            return;
+        };
+        let mut added = Vec::new();
+        collect_added_entries(&self.program.body, binding, &mut added);
+        for argument in added {
+            if let Argument::SpreadElement(spread) = argument {
+                self.collect_spread(&spread.argument);
+            } else if let Some(entry) = argument.as_expression() {
+                self.collect_entry(entry);
+            }
+        }
     }
 
+    /// Collect the entries of a list or a spread argument: an array, or a
+    /// condition with array branches.
     fn collect_spread(&mut self, expr: &'a Expression<'a>) {
+        let binding = match expr.get_inner_expression() {
+            Expression::Identifier(id) => Some(id.name.as_str()),
+            _ => None,
+        };
         match self.resolve(expr) {
-            Some(array @ Expression::ArrayExpression(_)) => self.collect_array(array),
+            Some(Expression::ArrayExpression(array)) => self.collect_array(array, binding),
             Some(Expression::ConditionalExpression(conditional)) => {
                 self.collect_spread(&conditional.consequent);
                 self.collect_spread(&conditional.alternate);
             }
-            Some(Expression::LogicalExpression(logical)) => self.collect_spread(&logical.right),
+            Some(Expression::LogicalExpression(logical)) => {
+                self.collect_spread(&logical.left);
+                self.collect_spread(&logical.right);
+            }
             _ => {}
         }
     }
@@ -178,6 +219,48 @@ impl<'a> StaticPluginEntries<'a> {
             && !self.names.contains(&name)
         {
             self.names.push(name);
+        }
+    }
+}
+
+/// Collect the arguments that `binding.push(...)`, `binding.unshift(...)` and
+/// `binding.splice(start, count, ...)` calls add to the array of `binding`.
+/// The calls can be top-level statements or sit in a top-level block or `if`
+/// statement, such as `if (isDev) plugins.push("expo-dev-client")`.
+fn collect_added_entries<'a>(
+    statements: &'a [Statement<'a>],
+    binding: &str,
+    added: &mut Vec<&'a Argument<'a>>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::ExpressionStatement(statement) => {
+                let Expression::CallExpression(call) = statement.expression.get_inner_expression()
+                else {
+                    continue;
+                };
+                let Expression::StaticMemberExpression(member) = &call.callee else {
+                    continue;
+                };
+                if !matches!(member.object.get_inner_expression(), Expression::Identifier(id) if id.name == binding)
+                {
+                    continue;
+                }
+                let skip = match member.property.name.as_str() {
+                    "push" | "unshift" => 0,
+                    "splice" => 2,
+                    _ => continue,
+                };
+                added.extend(call.arguments.iter().skip(skip));
+            }
+            Statement::BlockStatement(block) => collect_added_entries(&block.body, binding, added),
+            Statement::IfStatement(statement) => {
+                collect_added_entries(std::slice::from_ref(&statement.consequent), binding, added);
+                if let Some(alternate) = &statement.alternate {
+                    collect_added_entries(std::slice::from_ref(alternate), binding, added);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -203,7 +286,7 @@ mod tests {
 
     fn credited(source: &str) -> Vec<String> {
         let result = ExpoPlugin.resolve_config(
-            Path::new("/project/app.config.js"),
+            Path::new("/project/app.config.ts"),
             source,
             Path::new("/project"),
         );
@@ -231,7 +314,7 @@ mod tests {
     fn credits_plugins_from_a_binding_under_expo() {
         let source = r#"
             const plugins = ["plugin-a"];
-            export default { expo: { name: "app", plugins: plugins } };
+            export default { expo: { name: "app", plugins: plugins } satisfies ExpoConfig };
         "#;
         assert_eq!(credited(source), ["plugin-a"]);
     }
@@ -270,5 +353,76 @@ mod tests {
             export default { plugins };
         "#;
         assert_eq!(credited(source), ["plugin-a"]);
+    }
+
+    #[test]
+    fn credits_plugins_that_mutating_calls_add() {
+        let source = r#"
+            const plugins = ["plugin-a"];
+            plugins.push("plugin-b", ["plugin-c", { enabled: true }]);
+            plugins!.unshift("plugin-d");
+            plugins.splice(1, 0, "plugin-e");
+            if (isDev) {
+                plugins.push("plugin-f");
+            } else plugins.push(...["plugin-g"]);
+            other.push("not-a-plugin");
+            export default { plugins };
+        "#;
+        assert_eq!(
+            credited(source),
+            [
+                "plugin-a", "plugin-b", "plugin-c", "plugin-d", "plugin-e", "plugin-f", "plugin-g"
+            ]
+        );
+    }
+
+    #[test]
+    fn credits_plugins_from_a_module_exports_config() {
+        let source = r#"
+            const plugins = ["plugin-a"];
+            module.exports = { expo: { plugins } };
+        "#;
+        assert_eq!(credited(source), ["plugin-a"]);
+    }
+
+    #[test]
+    fn credits_plugins_from_a_config_function() {
+        let source = r#"
+            const plugins = ["plugin-a"];
+            export default ({ config }) => ({ ...config, plugins });
+        "#;
+        assert_eq!(credited(source), ["plugin-a"]);
+    }
+
+    #[test]
+    fn stops_on_mutual_spreads() {
+        let source = r#"
+            const first = [...second, "plugin-a"];
+            const second = [...first, "plugin-b"];
+            export default { plugins: first };
+        "#;
+        assert_eq!(credited(source), ["plugin-a", "plugin-b"]);
+    }
+
+    #[test]
+    fn credits_both_sides_of_a_logical_spread() {
+        let source = r#"
+            const extra = ["plugin-a"];
+            export default { plugins: [...(extra || ["plugin-b"])] };
+        "#;
+        assert_eq!(credited(source), ["plugin-a", "plugin-b"]);
+    }
+
+    #[test]
+    fn skips_a_name_that_a_function_binds_again() {
+        let source = r#"
+            const plugins = ["plugin-a"];
+            function local() {
+                const plugins = ["plugin-b"];
+                return plugins;
+            }
+            export default { plugins };
+        "#;
+        assert!(credited(source).is_empty());
     }
 }
