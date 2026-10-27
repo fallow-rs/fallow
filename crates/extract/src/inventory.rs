@@ -430,16 +430,18 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
     /// Name an anonymous default export "default", matching the instrumenter's
     /// `name_anonymous_default_export`. A named one keeps its own identifier.
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'ast>) {
+        let name = "default".to_owned();
         match &decl.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(func) => {
-                self.inferred_names
-                    .insert(func.span.start, "default".to_owned());
+                self.inferred_names.insert(func.span.start, name);
             }
-            ExportDefaultDeclarationKind::ArrowFunctionExpression(arrow) => {
-                self.inferred_names
-                    .insert(arrow.span.start, "default".to_owned());
+            kind => {
+                // `export default (() => 1)` also gives "default": the value
+                // can have parentheses around it.
+                if let Some(value) = kind.as_expression() {
+                    self.infer_name_for_value(value, Some(name));
+                }
             }
-            _ => {}
         }
         walk::walk_export_default_declaration(self, decl);
     }
@@ -896,6 +898,17 @@ mod tests {
         let entries = walk("export default () => 1;");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "default");
+    }
+
+    #[test]
+    fn parenthesized_anonymous_default_export_is_named_default() {
+        assert_eq!(names("export default (() => 1);"), ["default"]);
+        assert_eq!(names("export default (function () {});"), ["default"]);
+        assert_eq!(
+            names("export default (function () { return () => 1; });"),
+            ["default", "(anonymous_1)"]
+        );
+        assert_eq!(names("export default (function own() {});"), ["own"]);
     }
 
     #[test]
