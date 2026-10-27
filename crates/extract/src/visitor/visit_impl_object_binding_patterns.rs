@@ -6,16 +6,34 @@
 //! budget is far above the size of a pattern that a person writes, so a wide
 //! pattern keeps all of its credits.
 
-use oxc_ast::ast::{BindingPattern, Expression, ObjectPattern, ObjectPropertyKind};
-use rustc_hash::FxHashSet;
+use oxc_ast::ast::{
+    BindingPattern, Expression, ObjectExpression, ObjectPattern, ObjectPropertyKind,
+};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::super::ModuleInfoExtractor;
 use super::{DirectObjectBindingScope, direct_object_binding_expression_path};
 use crate::js_text::JsText;
 
 /// Upper bound on the work of one declaration: pattern nodes, fallback
-/// properties, and recorded targets.
+/// property lookups, and the nested properties of object fallbacks.
 const MAX_OBJECT_PATTERN_STEPS: usize = 1 << 16;
+
+/// Properties of an object literal, nested object literals included, so that
+/// recording targets from a nested fallback costs its real size.
+fn nested_property_count(object: &ObjectExpression<'_>) -> usize {
+    object
+        .properties
+        .iter()
+        .map(|property| match property {
+            ObjectPropertyKind::ObjectProperty(property) => match &property.value {
+                Expression::ObjectExpression(nested) => 1 + nested_property_count(nested),
+                _ => 1,
+            },
+            ObjectPropertyKind::SpreadProperty(_) => 1,
+        })
+        .sum()
+}
 
 /// The state of one walk: the remaining steps and the (pattern, fallback)
 /// pairs that the walk has already visited, keyed by AST node address.
@@ -139,7 +157,7 @@ impl ModuleInfoExtractor {
                     }
                 }
                 Expression::ObjectExpression(object) => {
-                    if !walk.take(object.properties.len()) {
+                    if !walk.take(nested_property_count(object)) {
                         return;
                     }
                     self.record_direct_object_binding_targets_at_path(
@@ -160,25 +178,24 @@ impl ModuleInfoExtractor {
             },
             BindingPattern::ObjectPattern(pattern) => match fallback {
                 Expression::ObjectExpression(object) => {
-                    // Each pattern property scans the fallback properties.
-                    let lookups = pattern
-                        .properties
-                        .len()
-                        .saturating_mul(object.properties.len());
-                    if !walk.take(lookups) {
+                    if !walk.take(pattern.properties.len() + object.properties.len()) {
                         return;
                     }
+                    // The last property with a name wins, as in the object literal.
+                    let mut values = FxHashMap::default();
+                    for candidate in &object.properties {
+                        if let ObjectPropertyKind::ObjectProperty(candidate) = candidate
+                            && let Some(name) = candidate.key.static_name()
+                        {
+                            values.insert(name, &candidate.value);
+                        }
+                    }
                     for property in &pattern.properties {
-                        let Some(property_name) = property.key.static_name() else {
-                            continue;
-                        };
-                        let Some(value) = object.properties.iter().rev().find_map(|candidate| {
-                            let ObjectPropertyKind::ObjectProperty(candidate) = candidate else {
-                                return None;
-                            };
-                            (candidate.key.static_name().as_ref() == Some(&property_name))
-                                .then_some(&candidate.value)
-                        }) else {
+                        let Some(value) = property
+                            .key
+                            .static_name()
+                            .and_then(|name| values.get(&name).copied())
+                        else {
                             continue;
                         };
                         self.record_direct_object_binding_fallback(&property.value, value, walk);
