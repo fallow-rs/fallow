@@ -31,6 +31,7 @@ mod specifier;
 mod static_imports;
 #[cfg(test)]
 mod tests;
+mod tsconfig_scope;
 mod types;
 mod upgrades;
 mod work;

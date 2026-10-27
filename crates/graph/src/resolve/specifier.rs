@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use globset::{Glob, GlobSetBuilder};
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
@@ -28,6 +27,7 @@ use super::path_info::{
     normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
+use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
@@ -564,38 +564,6 @@ fn tsconfig_applies_to_file(
         .get("exclude")
         .and_then(Value::as_array)
         .is_some_and(|exclude| glob_values_match(tsconfig_dir, exclude, from_file))
-}
-
-fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
-    let mut builder = GlobSetBuilder::new();
-    let mut has_patterns = false;
-    for value in values.iter().filter_map(Value::as_str) {
-        let mut pattern = resolve_tsconfig_relative_path(base_dir, value);
-        if !has_glob_meta(value) && pattern.is_dir() {
-            pattern = pattern.join("**/*");
-        }
-        let Some(pattern) = pattern.to_str() else {
-            continue;
-        };
-        let Ok(glob) = Glob::new(pattern) else {
-            continue;
-        };
-        builder.add(glob);
-        has_patterns = true;
-    }
-    has_patterns && builder.build().is_ok_and(|set| set.is_match(path))
-}
-
-fn has_glob_meta(value: &str) -> bool {
-    value
-        .bytes()
-        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']' | b'{'))
-}
-
-/// Join a tsconfig `files`, `include` or `exclude` entry to its directory
-/// without `./` and `..`, as the globs match path text (issue #3946).
-fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
-    normalize_path_lexically(&base_dir.join(path))
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
@@ -2205,7 +2173,7 @@ mod tests {
 
     use super::super::package_credit::package_usage_name_for_resolved_package;
     use super::{
-        SpecifierNormalization, extension_alias_matches, glob_values_match, has_glob_meta,
+        SpecifierNormalization, extension_alias_matches, glob_values_match,
         is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
         is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
         is_safe_static_dir_relative_path, is_style_file, is_tsconfig_error,
@@ -2784,33 +2752,6 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // ---- has_glob_meta (lines 370-374) ----
-
-    #[test]
-    fn has_glob_meta_detects_star_wildcard() {
-        assert!(has_glob_meta("src/**/*.ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_detects_question_mark() {
-        assert!(has_glob_meta("src/?.ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_detects_bracket_group() {
-        assert!(has_glob_meta("src/[abc].ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_detects_brace_group() {
-        assert!(has_glob_meta("src/{a,b}.ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_plain_path_returns_false() {
-        assert!(!has_glob_meta("src/components"));
-    }
-
     // ---- path_alias_specificity (lines 734-738) ----
 
     #[test]
@@ -3182,13 +3123,6 @@ mod tests {
     #[test]
     fn is_bare_style_subpath_less_extension_matches() {
         assert!(is_bare_style_subpath("antd/lib/style/index.less"));
-    }
-
-    // ---- has_glob_meta: closing brace or bracket alone ----
-
-    #[test]
-    fn has_glob_meta_closing_bracket_detected() {
-        assert!(has_glob_meta("src/[a-z]"));
     }
 
     // ---- path_alias_specificity: wildcard-only pattern ----
