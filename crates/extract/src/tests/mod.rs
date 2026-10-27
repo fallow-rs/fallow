@@ -10,6 +10,7 @@ mod mdx;
 mod nesting;
 mod regex_compile;
 mod sfc;
+mod store_aliases;
 
 use std::path::Path;
 
