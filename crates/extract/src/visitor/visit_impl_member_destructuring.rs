@@ -9,6 +9,7 @@
 use oxc_ast::ast::*;
 
 use std::borrow::Cow;
+use std::cell::Cell;
 
 use super::super::{BindingTarget, ModuleInfoExtractor};
 use super::{static_member_object_name, unwrap_static_expr};
@@ -27,7 +28,8 @@ impl<'a> ModuleInfoExtractor {
         // can be resolved through `binding_target_names`; record the access at
         // the destructuring site instead. This is the object-pattern parity
         // of the existing `instance.member` path (see #2560).
-        let depth = DefaultDepth::default();
+        let steps = DestructureSteps::default();
+        let depth = DefaultDepth::new(&steps);
         match &declarator.id {
             BindingPattern::ObjectPattern(pattern) => {
                 self.record_object_destructure(DestructureObject::Binding(pattern), init, depth);
@@ -45,8 +47,11 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: &BindingPattern<'a>,
         source: &Expression<'a>,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
+        if !depth.take() {
+            return;
+        }
         match pattern {
             BindingPattern::ObjectPattern(pattern) => {
                 self.record_object_destructure(DestructureObject::Binding(pattern), source, depth);
@@ -72,14 +77,20 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: &ArrayPattern<'a>,
         source: &Expression<'a>,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
+        if !depth.take() {
+            return;
+        }
         let values = match unwrap_static_expr(source) {
             Expression::ArrayExpression(array) => &array.elements[..],
             _ => &[],
         };
         let mut after_spread = false;
         for (index, element) in pattern.elements.iter().enumerate() {
+            if !depth.take() {
+                return;
+            }
             let value = values.get(index);
             after_spread |= matches!(value, Some(ArrayExpressionElement::SpreadElement(_)));
             let Some(element) = element else {
@@ -110,7 +121,7 @@ impl<'a> ModuleInfoExtractor {
             self.record_object_destructure(
                 DestructureObject::Assignment(target),
                 &expr.right,
-                DefaultDepth::default(),
+                DefaultDepth::new(&DestructureSteps::default()),
             );
         }
     }
@@ -123,8 +134,11 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         source: &Expression<'a>,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
+        if !depth.take() {
+            return;
+        }
         let source = unwrap_static_expr(source);
         if let Expression::ObjectExpression(object) = source {
             self.record_literal_destructure(pattern, object, depth);
@@ -150,7 +164,7 @@ impl<'a> ModuleInfoExtractor {
         pattern: DestructureObject<'_, 'a>,
         path: &str,
         source: Option<&IdentifierReference<'_>>,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
         let entries = pattern.entries();
         if let Some(BindingTarget::Class(class_name)) = self.resolve_bound_object_name(path) {
@@ -187,9 +201,12 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         entries: &[DestructureEntry<'_, 'a>],
         path: Option<&str>,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
         for entry in entries {
+            if !depth.take() {
+                return;
+            }
             let Some(nested) = entry.nested else {
                 continue;
             };
@@ -212,14 +229,20 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         object: &ObjectExpression<'a>,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
         for property in &object.properties {
+            if !depth.take() {
+                return;
+            }
             if let ObjectPropertyKind::SpreadProperty(spread) = property {
                 self.record_object_destructure(pattern, &spread.argument, depth);
             }
         }
         for entry in pattern.entries() {
+            if !depth.take() {
+                return;
+            }
             let Some(nested) = entry.nested else {
                 continue;
             };
@@ -245,9 +268,15 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         path: &str,
-        depth: DefaultDepth,
+        depth: DefaultDepth<'_>,
     ) {
+        if !depth.take() {
+            return;
+        }
         for entry in pattern.entries() {
+            if !depth.take() {
+                return;
+            }
             if let (Some(nested), Some(default)) = (entry.nested, entry.default)
                 && let Some(depth) = depth.into_default()
             {
@@ -288,7 +317,7 @@ impl<'a> ModuleInfoExtractor {
                 self.record_object_destructure(
                     DestructureObject::Binding(pattern),
                     initializer,
-                    DefaultDepth::default(),
+                    DefaultDepth::new(&DestructureSteps::default()),
                 );
             }
         }
@@ -323,7 +352,8 @@ impl<'a> ModuleInfoExtractor {
             }
             _ => return,
         };
-        let depth = DefaultDepth::default();
+        let steps = DestructureSteps::default();
+        let depth = DefaultDepth::new(&steps);
         let iterable = unwrap_static_expr(&stmt.right);
         let Expression::ArrayExpression(array) = iterable else {
             self.record_iterable_element_destructure(pattern, iterable);
@@ -348,7 +378,8 @@ impl<'a> ModuleInfoExtractor {
         let Expression::ArrayExpression(array) = unwrap_static_expr(iterable) else {
             return;
         };
-        let depth = DefaultDepth::default();
+        let steps = DestructureSteps::default();
+        let depth = DefaultDepth::new(&steps);
         for element in &array.elements {
             if let Some(element) = element.as_expression() {
                 self.record_array_destructure(pattern, element, depth);
@@ -384,7 +415,7 @@ impl<'a> ModuleInfoExtractor {
             DestructureObject::Binding(pattern),
             path,
             None,
-            DefaultDepth::default(),
+            DefaultDepth::new(&DestructureSteps::default()),
         );
     }
 
@@ -485,20 +516,56 @@ impl<'a> ModuleInfoExtractor {
 /// limit.
 const MAX_DESTRUCTURE_DEFAULT_DEPTH: usize = 8;
 
-/// The nested pattern level of the current destructure walk.
-#[derive(Clone, Copy, Default)]
-struct DefaultDepth(usize);
+/// The most steps that one destructure statement takes. A step is one
+/// pattern node or one sibling entry. The depth limit bounds the walks of one
+/// sub-pattern, but a wide source or a source with many spreads still walks
+/// the pattern many times. This cap bounds that total.
+const MAX_DESTRUCTURE_STEPS: usize = 1 << 16;
 
-impl DefaultDepth {
+/// The steps that one destructure statement has left.
+struct DestructureSteps(Cell<usize>);
+
+impl Default for DestructureSteps {
+    fn default() -> Self {
+        Self(Cell::new(MAX_DESTRUCTURE_STEPS))
+    }
+}
+
+/// The nested pattern level of the current destructure walk, and the steps
+/// that its destructure statement has left.
+#[derive(Clone, Copy)]
+struct DefaultDepth<'s> {
+    level: usize,
+    steps: &'s DestructureSteps,
+}
+
+impl<'s> DefaultDepth<'s> {
+    const fn new(steps: &'s DestructureSteps) -> Self {
+        Self { level: 0, steps }
+    }
+
     /// The level of a nested pattern one level further down.
     const fn nested(self) -> Self {
-        Self(self.0.saturating_add(1))
+        Self {
+            level: self.level.saturating_add(1),
+            steps: self.steps,
+        }
     }
 
     /// The level for a walk of a default one level further down, or `None`
     /// below the deepest level that reads a default.
     fn into_default(self) -> Option<Self> {
-        (self.0 < MAX_DESTRUCTURE_DEFAULT_DEPTH).then(|| self.nested())
+        (self.level < MAX_DESTRUCTURE_DEFAULT_DEPTH).then(|| self.nested())
+    }
+
+    /// Use one step. Returns `false` when the statement has no step left.
+    fn take(self) -> bool {
+        let left = self.steps.0.get();
+        if left == 0 {
+            return false;
+        }
+        self.steps.0.set(left - 1);
+        true
     }
 }
 

@@ -219,3 +219,41 @@ fn wide_array_destructure_credits_the_last_element() {
     assert!(reads_service_member(&info, "viaWideArray"));
     assert!(reads_service_member(&info, "viaWideNested"));
 }
+
+/// Nesting levels of the spread source.
+const SPREAD_DEPTH: usize = 20;
+
+#[test]
+fn nested_spread_sources_cost_bounded_work() {
+    let mut pattern = String::from("{ m }");
+    let mut source = String::from("s");
+    for _ in 0..SPREAD_DEPTH {
+        pattern = format!("{{ k: {pattern} }}");
+        source = format!("{{ ...a, ...b, k: {source} }}");
+    }
+    assert_extracts_in_time(format!(
+        "declare const s: any, a: any, b: any;\nconst {pattern} = {source};\n"
+    ));
+}
+
+/// Elements and pattern properties of the wide-by-wide destructure.
+const WIDE_BY_WIDE: usize = 2_000;
+
+#[test]
+fn wide_pattern_over_wide_source_records_bounded_entries() {
+    let keys = (0..WIDE_BY_WIDE)
+        .map(|index| format!("m{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let elements = "service, ".repeat(WIDE_BY_WIDE);
+    let source = format!(
+        "export class Service {{}}\nconst service = new Service();\n\
+         for (const {{ {keys} }} of [{elements}]) {{}}\n"
+    );
+    let info = parse("src/index.ts", &source);
+    assert!(
+        info.member_accesses.len() < WIDE_BY_WIDE * WIDE_BY_WIDE / 4,
+        "one destructure recorded {} member accesses",
+        info.member_accesses.len()
+    );
+}
