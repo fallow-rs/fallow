@@ -23,8 +23,10 @@
 //!    instrumenter's `get ` / `set ` label), an `ObjectProperty` key
 //!    (shorthand methods, accessors, and function-valued data properties), a
 //!    `VariableDeclarator` binding, a plain `=` assignment target
-//!    (`o.foo = () => {}` -> "foo", `x = () => {}` -> "x"), or an anonymous
-//!    `export default` (-> "default").
+//!    (`o.foo = () => {}` -> "foo", `x = () => {}` -> "x"), the binding of a
+//!    default value (`function f(cb = () => {})` -> "cb",
+//!    `const { a = () => {} } = o` -> "a"), or an anonymous `export default`
+//!    (-> "default").
 //!    A binding, key or assignment name is given only to a function or arrow
 //!    value, through parentheses; a class value takes none.
 //! 3. The callee of the call / `new` expression that the function is a direct
@@ -425,6 +427,54 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
             self.infer_name_for_value(&expr.right, assignment_target_name(&expr.left));
         }
         walk::walk_assignment_expression(self, expr);
+    }
+
+    /// Name a function-valued parameter default after the parameter binding
+    /// (`function f(cb = () => 1)` -> "cb"), matching the instrumenter's
+    /// `instrument_parameter_default`.
+    fn visit_formal_parameter(&mut self, param: &FormalParameter<'ast>) {
+        if let Some(init) = &param.initializer {
+            let name = param
+                .pattern
+                .get_binding_identifier()
+                .map(|id| id.name.to_string());
+            self.infer_name_for_value(init, name);
+        }
+        walk::walk_formal_parameter(self, param);
+    }
+
+    /// Name a function-valued default in a binding pattern after its binding
+    /// (`const { a = () => 1 } = o` -> "a", `{ k: v = () => 1 }` -> "v"),
+    /// matching the instrumenter's `instrument_destructuring_default`.
+    fn visit_assignment_pattern(&mut self, pattern: &AssignmentPattern<'ast>) {
+        let name = pattern
+            .left
+            .get_binding_identifier()
+            .map(|id| id.name.to_string());
+        self.infer_name_for_value(&pattern.right, name);
+        walk::walk_assignment_pattern(self, pattern);
+    }
+
+    /// Name a function-valued default in an assignment target after an
+    /// identifier target (`[a = () => 1] = []` -> "a"), matching the
+    /// instrumenter's `simple_target_name`. A member target gives no name.
+    fn visit_assignment_target_with_default(&mut self, target: &AssignmentTargetWithDefault<'ast>) {
+        if let AssignmentTarget::AssignmentTargetIdentifier(id) = &target.binding {
+            self.infer_name_for_value(&target.init, Some(id.name.to_string()));
+        }
+        walk::walk_assignment_target_with_default(self, target);
+    }
+
+    /// Name a function-valued shorthand default in an assignment target
+    /// (`({ a = () => 1 } = o)` -> "a").
+    fn visit_assignment_target_property_identifier(
+        &mut self,
+        target: &AssignmentTargetPropertyIdentifier<'ast>,
+    ) {
+        if let Some(init) = &target.init {
+            self.infer_name_for_value(init, Some(target.binding.name.to_string()));
+        }
+        walk::walk_assignment_target_property_identifier(self, target);
     }
 
     /// Name an anonymous default export "default", matching the instrumenter's
@@ -1189,6 +1239,36 @@ mod tests {
             ["(anonymous_0)"]
         );
         assert_eq!(names("push({ k: a ?? (() => 1) });"), ["(anonymous_0)"]);
+    }
+
+    #[test]
+    fn function_default_value_takes_the_binding_name() {
+        // The instrumenter names a function-valued default after the binding
+        // that it is the default of. A renamed property takes the binding
+        // name (`v`), not the key (`k`).
+        assert_eq!(names("function f(cb = () => 1) {}"), ["f", "cb"]);
+        assert_eq!(names("function h(cb = (() => 1)) {}"), ["h", "cb"]);
+        assert_eq!(names("function h(cb = function own() {}) {}"), ["h", "own"]);
+        assert_eq!(names("const fn = (cb = () => 1) => cb;"), ["fn", "cb"]);
+        assert_eq!(names("class P { m(cb = () => 1) {} }"), ["m", "cb"]);
+        assert_eq!(
+            names("function Button({ onClick = () => {} }) {}"),
+            ["Button", "onClick"]
+        );
+        assert_eq!(names("function g({ k: v = () => 1 }) {}"), ["g", "v"]);
+        assert_eq!(names("const { a = () => 1 } = o;"), ["a"]);
+        assert_eq!(names("const { k: v = () => 1 } = o;"), ["v"]);
+        assert_eq!(names("const [b = () => 1] = o;"), ["b"]);
+        assert_eq!(names("[a = () => 1] = [];"), ["a"]);
+        assert_eq!(names("({ a = () => 1 } = o);"), ["a"]);
+        assert_eq!(names("({ k: v = () => 1 } = o);"), ["v"]);
+    }
+
+    #[test]
+    fn default_value_of_a_member_target_stays_anonymous() {
+        // Only an identifier target gives its name to a default value.
+        assert_eq!(names("({ k: o.v = () => 1 } = x);"), ["(anonymous_0)"]);
+        assert_eq!(names("[o.v = () => 1] = x;"), ["(anonymous_0)"]);
     }
 
     #[test]
