@@ -11,10 +11,13 @@ const BUILT_IN_MARKUP_EXTENSIONS: &[&str] = &[
     "astro", "html", "htm", "jsx", "md", "mdx", "svelte", "tsx", "vue",
 ];
 
-/// Script and stylesheet extensions. Their text as class references would
-/// credit every class that a stylesheet defines, so they are a config error.
+/// Script, stylesheet, data and asset extensions. Their text as class
+/// references would credit every class that a stylesheet defines, or every
+/// word of a data file, so a value that ends in one of them is a config error.
+/// The check reads the last segment, so `module.css` and `d.ts` fail too.
 const REJECTED_MARKUP_EXTENSIONS: &[&str] = &[
-    "cjs", "css", "cts", "gjs", "gts", "js", "json", "less", "mjs", "mts", "sass", "scss", "ts",
+    "cjs", "css", "cts", "gjs", "gts", "js", "json", "less", "map", "mjs", "mts", "sass", "scss",
+    "svg", "ts", "xml",
 ];
 
 fn normalize(value: &str) -> String {
@@ -44,19 +47,24 @@ fn markup_extension_errors(values: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|value| {
             let extension = normalize(value);
-            let plain = !extension.is_empty()
-                && !extension.ends_with('.')
-                && extension
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+            let plain = extension.split('.').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+            });
             if !plain {
                 return Some(format!(
                     "markupExtensions entry {value:?} is not a file extension: use only letters, digits, '.', '-', and '_', for example \"liquid\""
                 ));
             }
-            REJECTED_MARKUP_EXTENSIONS.contains(&extension.as_str()).then(|| {
+            let last = extension.rsplit('.').next().unwrap_or_default();
+            let compound = extension.contains('.');
+            let rejected = REJECTED_MARKUP_EXTENSIONS.contains(&last)
+                || (compound && BUILT_IN_MARKUP_EXTENSIONS.contains(&last));
+            rejected.then(|| {
                 format!(
-                    "markupExtensions entry {value:?} is a script or stylesheet extension: list only template extensions, for example \"liquid\""
+                    "markupExtensions entry {value:?} ends in a script, stylesheet, data or markup extension that fallow already reads: list only template extensions, for example \"liquid\""
                 )
             })
         })
@@ -87,18 +95,26 @@ pub fn resolve_markup_extensions(values: &[String]) -> Vec<String> {
 /// `welcome.blade.php` gives `blade.php` even when `php` is also configured.
 #[must_use]
 pub fn template_markup_extension<'a>(file_name: &str, configured: &'a [String]) -> Option<&'a str> {
-    let lower = file_name.to_ascii_lowercase();
     DEFAULT_MARKUP_EXTENSIONS
         .iter()
         .map(|extension| -> &'a str { extension })
         .chain(configured.iter().map(String::as_str))
-        .filter(|extension| {
-            lower
-                .strip_suffix(extension)
-                .and_then(|rest| rest.strip_suffix('.'))
-                .is_some_and(|stem| !stem.is_empty())
-        })
+        .filter(|extension| has_extension(file_name, extension))
         .max_by_key(|extension| extension.len())
+}
+
+/// True when `file_name` ends in `.` plus `extension`, ignoring ASCII case,
+/// and has a non-empty stem.
+fn has_extension(file_name: &str, extension: &str) -> bool {
+    let name = file_name.as_bytes();
+    let Some(dot) = name.len().checked_sub(extension.len() + 1) else {
+        return false;
+    };
+    dot > 0
+        && name.get(dot) == Some(&b'.')
+        && name
+            .get(dot + 1..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(extension.as_bytes()))
 }
 
 #[cfg(test)]
@@ -112,15 +128,48 @@ mod tests {
     #[test]
     fn errors_name_invalid_and_rejected_values() {
         let errors = markup_extension_errors(&strings(&[
-            "liquid", ".tpl", "erb", "", ".", "a/b", "*", "css", ".TS", "blade.",
+            "liquid",
+            ".tpl",
+            "erb",
+            "blade.php",
+            "",
+            ".",
+            "a/b",
+            "*",
+            "css",
+            ".TS",
+            "blade.",
+            "a..b",
         ]));
-        assert_eq!(errors.len(), 7, "{errors:#?}");
+        assert_eq!(errors.len(), 8, "{errors:#?}");
         assert!(
             errors
                 .iter()
                 .all(|error| error.contains("markupExtensions"))
         );
         assert!(errors.iter().any(|error| error.contains("\"css\"")));
+    }
+
+    #[test]
+    fn errors_read_the_last_segment_of_a_compound_value() {
+        for value in [
+            "module.css",
+            "min.css",
+            "d.ts",
+            "min.js",
+            "icons.svg",
+            "feed.xml",
+            "js.map",
+            "page.html",
+            "component.vue",
+        ] {
+            assert_eq!(
+                markup_extension_errors(&strings(&[value])).len(),
+                1,
+                "{value} must be rejected"
+            );
+        }
+        assert!(markup_extension_errors(&strings(&["html", "vue", "html.erb"])).is_empty());
     }
 
     #[test]

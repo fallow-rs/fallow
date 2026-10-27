@@ -1108,59 +1108,72 @@ fn collect_css_reference_surface_file(
     }
 }
 
+/// Walks the project for Markdown and template files. The walk uses the
+/// ignore-file rules of source discovery (`.gitignore`, `.ignore`, the global
+/// gitignore), skips `ignorePatterns`, `health.ignore` and the build and
+/// dependency directories, reads only regular files, and skips a file over
+/// the `--max-file-size` limit.
+#[expect(
+    clippy::filetype_is_file,
+    reason = "only regular files are read: a FIFO or a device file can block the read"
+)]
 fn collect_markdown_reference_surface_files(
     surface: &mut CssReferenceSurfaceBuilder,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) {
-    collect_markdown_reference_surface_dir(surface, &config.root, config, ignore_set);
-}
-
-fn collect_markdown_reference_surface_dir(
-    surface: &mut CssReferenceSurfaceBuilder,
-    dir: &std::path::Path,
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
+    let root = config.root.clone();
+    let mut builder = fallow_config::source_walk_builder(&config.root);
+    builder.filter_entry(move |entry| {
+        let relative = entry
+            .path()
+            .strip_prefix(&root)
+            .unwrap_or_else(|_| entry.path());
+        !is_skipped_markdown_reference_path(relative)
+    });
+    for entry in builder.build().flatten() {
+        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+            continue;
+        }
         let path = entry.path();
-        let relative = path.strip_prefix(&config.root).unwrap_or(&path);
-        if ignore_set.is_match(relative)
-            || config.ignore_patterns.is_match(relative)
-            || is_skipped_markdown_reference_path(relative)
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) || config.ignore_patterns.is_match(relative) {
+            continue;
+        }
+        if let Some(limit) = config.max_file_size_bytes
+            && entry
+                .metadata()
+                .is_ok_and(|metadata| metadata.len() > limit)
         {
             continue;
         }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            collect_markdown_reference_surface_dir(surface, &path, config, ignore_set);
-            continue;
-        }
         let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(extension, Some("md" | "mdx")) {
-            collect_template_reference_surface_file(surface, &path, config);
-            continue;
+        if matches!(extension, Some("md" | "mdx")) {
+            collect_markdown_reference_surface_file(surface, path);
+        } else {
+            collect_template_reference_surface_file(surface, path, config);
         }
-        let Ok(source) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        surface.source_corpus.push_str(&source);
-        surface.source_corpus.push('\n');
-        let scan = crate::css::scan_markup_class_tokens(&source);
-        for token in scan.static_tokens {
-            surface.static_tokens.insert(token.value);
-        }
-        collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
-        if scan.has_dynamic {
-            collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
-            surface.dynamic_corpus.push_str(&source);
-            surface.dynamic_corpus.push('\n');
-        }
+    }
+}
+
+fn collect_markdown_reference_surface_file(
+    surface: &mut CssReferenceSurfaceBuilder,
+    path: &std::path::Path,
+) {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    surface.source_corpus.push_str(&source);
+    surface.source_corpus.push('\n');
+    let scan = crate::css::scan_markup_class_tokens(&source);
+    for token in scan.static_tokens {
+        surface.static_tokens.insert(token.value);
+    }
+    collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
+    if scan.has_dynamic {
+        collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
+        surface.dynamic_corpus.push_str(&source);
+        surface.dynamic_corpus.push('\n');
     }
 }
 
@@ -1209,6 +1222,10 @@ fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
                     | "coverage"
                     | ".turbo"
                     | ".cache"
+                    | ".output"
+                    | "out"
+                    | ".venv"
+                    | "storage"
             )
         )
     })
@@ -1373,6 +1390,8 @@ mod tests {
                 "<div class=\"vendor-menu\"></div>",
             ),
             ("notes/ignored.tpl", "<div class=\"custom-tpl\"></div>"),
+            (".ignore", "drafts/\n"),
+            ("drafts/menu.liquid", "<div class=\"draft-menu\"></div>"),
         ]);
 
         assert!(surface.references("banner__content--top"));
@@ -1381,6 +1400,7 @@ mod tests {
         assert!(surface.references("card-wrapper--open"));
         assert!(!surface.references("vendor-menu"));
         assert!(!surface.references("custom-tpl"));
+        assert!(!surface.references("draft-menu"));
         assert!(!surface.references("banner__media"));
         assert_eq!(surface.template_extensions(), ["blade.php", "liquid"]);
     }
