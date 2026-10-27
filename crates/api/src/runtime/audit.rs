@@ -1701,4 +1701,84 @@ mod tests {
             Some("merge-base with origin/main")
         );
     }
+
+    fn registered_worktree_count(root: &Path) -> usize {
+        let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(root)
+            .output()
+            .expect("git worktree list");
+        assert!(output.status.success(), "git worktree list failed");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count()
+    }
+
+    /// #3885: the base snapshot of the programmatic audit, which MCP also
+    /// uses, is not registered with Git while the base analysis reads it.
+    #[test]
+    fn programmatic_base_snapshot_is_unregistered_during_base_analysis() {
+        use crate::audit_run::AuditBackend as _;
+
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"base-snapshot","main":"index.ts"}"#,
+        )
+        .expect("write manifest");
+        std::fs::write(root.join("index.ts"), "export const used = 1;\n").expect("write entry");
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        let options = AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                ..AnalysisOptions::default()
+            },
+            ..AuditOptions::default()
+        };
+        let analysis = analysis_options_for_audit(&options, "HEAD");
+        let resolved = audit_section_context(&analysis).expect("context resolves");
+        let config = load_programmatic_audit_config(&resolved).expect("config loads");
+        let backend = ProgrammaticAuditBackend {
+            options: &options,
+            analysis: &analysis,
+            resolved: &resolved,
+            config: &config,
+        };
+
+        let checkout = backend
+            .create_base_checkout("HEAD", None)
+            .unwrap_or_else(|_| panic!("base checkout is created"));
+        assert_eq!(
+            registered_worktree_count(root),
+            1,
+            "only the main worktree may be registered while the base analysis runs"
+        );
+        let base = backend
+            .run_base(checkout.path(), None)
+            .unwrap_or_else(|_| panic!("base analysis runs on the unregistered snapshot"));
+        assert!(base.subanalyses.dead_code.is_some());
+        assert_eq!(registered_worktree_count(root), 1);
+
+        let path = checkout.path().to_path_buf();
+        drop(checkout);
+        assert!(!path.exists(), "the base snapshot is removed on drop");
+        assert_eq!(registered_worktree_count(root), 1);
+    }
 }

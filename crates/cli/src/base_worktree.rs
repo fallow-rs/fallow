@@ -6,6 +6,12 @@ use std::time::{Duration, SystemTime};
 
 use fallow_engine::changed_files::clear_ambient_git_env;
 pub use fallow_engine::repo_refs::materialize_base_dependency_context;
+#[cfg(test)]
+use fallow_engine::repo_refs::parse_worktree_gitdir;
+use fallow_engine::repo_refs::{
+    UNREGISTERED_GITDIR_STUB, deregister_base_worktree, trusted_base_worktree_admin_dir,
+    write_unregistered_gitdir_stub,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -345,18 +351,6 @@ const REUSABLE_SHA_SUFFIX: &str = ".sha";
 
 /// Sidecar filename suffix of the reuse-lock file.
 const REUSABLE_LOCK_SUFFIX: &str = ".lock";
-
-/// Invalid gitdir pointer written into `<cache>/.git` after deregistering a
-/// transient audit worktree (issue #1815).
-///
-/// The `.git` file is REPLACED, never deleted: both discovery walkers use the
-/// `ignore` crate with `require_git` on, whose gitignore handling is gated on
-/// `<root>/.git` existing. Deleting the gitfile would silently stop the base
-/// pass from honoring `.gitignore`, inflating base findings and skewing
-/// audit's introduced-vs-inherited split. The stub keeps gitignore parity
-/// while pointing at a nonexistent gitdir, so any stray `git` command inside
-/// the snapshot fails loudly instead of operating on the host repo.
-const UNREGISTERED_GITDIR_STUB: &str = "gitdir: fallow-audit-unregistered\n";
 
 /// Sidecar path for the "last used" timestamp of a reusable cache entry.
 ///
@@ -1788,7 +1782,7 @@ fn path_entry_exists(path: &Path) -> bool {
 fn remove_reusable_cache_entry_locked(repo_root: &Path, path: &Path) -> std::io::Result<bool> {
     let existed = reusable_cache_entry_exists(path);
     ensure_cache_entry_is_owned(path)?;
-    if trusted_worktree_admin_dir(repo_root, path).is_some() {
+    if trusted_base_worktree_admin_dir(repo_root, path).is_some() {
         unregister_worktree_checked(repo_root, path)?;
     }
     remove_dir_if_exists(path)?;
@@ -1867,14 +1861,8 @@ fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
 }
 
 /// Deregister a freshly-added audit worktree from git while KEEPING its
-/// directory on disk (issue #1815).
-///
-/// Targets the single admin dir this worktree owns via its `.git` gitfile
-/// pointer, rather than a global `git worktree prune`, so a user's unrelated
-/// prunable worktrees are never collaterally deregistered and git's
-/// name-collision admin suffixing (`<name>1`) is handled for free. The `.git`
-/// gitfile is REPLACED with an invalid stub (see [`UNREGISTERED_GITDIR_STUB`]),
-/// never deleted.
+/// directory on disk (issue #1815). The engine owns this lifecycle step, so
+/// the programmatic base snapshot uses the same code (issue #3885).
 pub fn unregister_worktree(repo_root: &Path, path: &Path) -> std::io::Result<()> {
     unregister_worktree_checked(repo_root, path)
 }
@@ -1896,29 +1884,7 @@ fn unregister_legacy_worktree_checked(repo_root: &Path, path: &Path) -> std::io:
 }
 
 fn unregister_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let gitfile = path.join(".git");
-    let metadata = std::fs::symlink_metadata(&gitfile)?;
-    if !metadata_is_regular_file(&metadata) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "refusing to deregister through a non-file audit worktree .git entry",
-        ));
-    }
-    let contents = std::fs::read_to_string(&gitfile)?;
-    if contents == UNREGISTERED_GITDIR_STUB {
-        return Ok(());
-    }
-    let Some(admin_dir) = trusted_worktree_admin_dir(repo_root, path) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "refusing to deregister an unverified audit worktree admin entry",
-        ));
-    };
-    remove_dir_if_exists(&admin_dir)?;
-    write_git_stub_safely(&gitfile)
+    deregister_base_worktree(repo_root, path)
 }
 
 /// Ensure a cache hit's `.git` stub stays valid. Recreates the stub if the
@@ -1928,73 +1894,12 @@ fn unregister_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result
 fn repair_unregistered_git_stub(path: &Path) -> bool {
     let gitfile = path.join(".git");
     let Ok(metadata) = std::fs::symlink_metadata(&gitfile) else {
-        return write_git_stub_safely(&gitfile).is_ok();
+        return write_unregistered_gitdir_stub(&gitfile).is_ok();
     };
     if !metadata_is_regular_file(&metadata) {
         return false;
     }
     std::fs::read_to_string(&gitfile).is_ok_and(|contents| contents == UNREGISTERED_GITDIR_STUB)
-}
-
-fn write_git_stub_safely(gitfile: &Path) -> std::io::Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).truncate(true);
-    match std::fs::symlink_metadata(gitfile) {
-        Ok(metadata) if metadata_is_regular_file(&metadata) => {}
-        Ok(_) => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "refusing to replace non-file audit worktree .git entry",
-            ));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            options.create_new(true);
-        }
-        Err(error) => return Err(error),
-    }
-    let mut file = options.open(gitfile)?;
-    file.write_all(UNREGISTERED_GITDIR_STUB.as_bytes())?;
-    file.sync_all()
-}
-
-fn trusted_worktree_admin_dir(repo_root: &Path, path: &Path) -> Option<PathBuf> {
-    let gitfile = path.join(".git");
-    let metadata = std::fs::symlink_metadata(&gitfile).ok()?;
-    if !metadata_is_regular_file(&metadata) {
-        return None;
-    }
-    let contents = std::fs::read_to_string(&gitfile).ok()?;
-    let admin_dir = parse_worktree_gitdir(&contents)?;
-    if !is_fallow_admin_dir(&admin_dir) {
-        return None;
-    }
-    let common_dir = fallow_engine::changed_files::resolve_git_common_dir(repo_root).ok()?;
-    let worktrees_dir = dunce::canonicalize(common_dir.join("worktrees")).ok()?;
-    let admin_parent = dunce::canonicalize(admin_dir.parent()?).ok()?;
-    if admin_parent != worktrees_dir {
-        return None;
-    }
-    let backlink = std::fs::read_to_string(admin_dir.join("gitdir")).ok()?;
-    let expected_gitfile = dunce::canonicalize(&gitfile).ok()?;
-    let actual_gitfile = dunce::canonicalize(Path::new(backlink.trim())).ok()?;
-    (actual_gitfile == expected_gitfile).then_some(admin_dir)
-}
-
-/// Parse the `gitdir: <path>` pointer from a linked-worktree `.git` gitfile.
-fn parse_worktree_gitdir(contents: &str) -> Option<PathBuf> {
-    contents
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("gitdir:"))
-        .map(|rest| PathBuf::from(rest.trim()))
-}
-
-/// True when an admin dir basename is one fallow itself created, used as a
-/// safety belt before removing it.
-fn is_fallow_admin_dir(admin_dir: &Path) -> bool {
-    admin_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("fallow-audit-base-"))
 }
 
 pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
