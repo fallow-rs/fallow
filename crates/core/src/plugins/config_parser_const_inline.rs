@@ -64,7 +64,7 @@ fn constant_values<'a>(
     if candidates.is_empty() {
         return FxHashMap::default();
     }
-    let stable = stable_bindings(program, candidates.iter().map(|(name, _)| *name));
+    let stable = stable_bindings(program, candidates.iter().map(|(name, _)| *name), false);
     candidates
         .into_iter()
         .filter(|(name, _)| stable.contains(name))
@@ -142,9 +142,14 @@ impl<'a> VisitMut<'a> for Inliner<'a, '_> {
 }
 
 /// Whether one top-level `const` or `let` is the only binding of `name` in the
-/// program, and no expression writes to it or to one of its members.
-pub(super) fn holds_one_stable_object(program: &Program<'_>, name: &str) -> bool {
-    !stable_bindings(program, [name]).is_empty()
+/// program, and no expression writes to it or to one of its members. A
+/// mutating method call counts as a write unless `allow_mutating_calls` is set.
+pub(super) fn holds_one_stable_object(
+    program: &Program<'_>,
+    name: &str,
+    allow_mutating_calls: bool,
+) -> bool {
+    !stable_bindings(program, [name], allow_mutating_calls).is_empty()
 }
 
 /// The subset of `names` that [`holds_one_stable_object`] accepts, from one
@@ -152,6 +157,7 @@ pub(super) fn holds_one_stable_object(program: &Program<'_>, name: &str) -> bool
 fn stable_bindings<'n>(
     program: &Program<'_>,
     names: impl IntoIterator<Item = &'n str>,
+    allow_mutating_calls: bool,
 ) -> FxHashSet<&'n str> {
     let mut usage = NameUsage::new(
         names
@@ -165,7 +171,11 @@ fn stable_bindings<'n>(
     usage
         .counts
         .into_iter()
-        .filter(|(_, count)| count.bindings == 1 && count.writes == 0)
+        .filter(|(_, count)| {
+            count.bindings == 1
+                && count.writes == 0
+                && (allow_mutating_calls || count.mutating_calls == 0)
+        })
         .map(|(name, _)| name)
         .collect()
 }
@@ -184,11 +194,13 @@ fn declares_top_level_const_or_let(program: &Program<'_>, name: &str) -> bool {
 }
 
 /// What one program does with one name: the number of bindings that declare it,
-/// and the number of expressions that write to it or to one of its members.
+/// the number of expressions that write to it or to one of its members, and the
+/// number of calls such as `name.push(...)` that change it.
 #[derive(Default)]
 struct NameCount {
     bindings: usize,
     writes: usize,
+    mutating_calls: usize,
 }
 
 /// The [`NameCount`] of each name in a set, from one walk of a program.
@@ -236,6 +248,15 @@ impl<'a> Visit<'a> for NameUsage<'_> {
         self.write_depth -= 1;
     }
 
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Some(name) = mutated_receiver(&call.callee)
+            && let Some(count) = self.counts.get_mut(name)
+        {
+            count.mutating_calls += 1;
+        }
+        walk::walk_call_expression(self, call);
+    }
+
     fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
         if expression.operator != UnaryOperator::Delete {
             walk::walk_unary_expression(self, expression);
@@ -244,6 +265,38 @@ impl<'a> Visit<'a> for NameUsage<'_> {
         self.write_depth += 1;
         walk::walk_unary_expression(self, expression);
         self.write_depth -= 1;
+    }
+}
+
+/// Methods that change the array, map or set they are called on.
+const MUTATING_METHODS: &[&str] = &[
+    "push",
+    "unshift",
+    "splice",
+    "pop",
+    "shift",
+    "sort",
+    "reverse",
+    "fill",
+    "copyWithin",
+    "set",
+    "add",
+    "delete",
+    "clear",
+];
+
+/// The receiver name of a call such as `name.push(...)` or `name!.push(...)`
+/// whose method changes the receiver.
+fn mutated_receiver<'e>(callee: &'e Expression<'_>) -> Option<&'e str> {
+    let Expression::StaticMemberExpression(member) = callee.without_parentheses() else {
+        return None;
+    };
+    if !MUTATING_METHODS.contains(&member.property.name.as_str()) {
+        return None;
+    }
+    match member.object.without_parentheses().get_inner_expression() {
+        Expression::Identifier(identifier) => Some(identifier.name.as_str()),
+        _ => None,
     }
 }
 
@@ -297,5 +350,24 @@ mod tests {
         );
         assert!(extract_config_string_or_array(source, js_path(), &["b"]).is_empty());
         assert!(extract_config_string_or_array(source, js_path(), &["c"]).is_empty());
+    }
+
+    #[test]
+    fn constant_that_a_method_call_mutates_does_not_resolve() {
+        let source = r#"
+            const PUSHED = ["./a.ts"];
+            PUSHED.push("./b.ts");
+            const ASSERTED = ["./c.ts"];
+            ASSERTED!.splice(0, 1);
+            const READ = ["./d.ts"];
+            READ.map((file) => file);
+            export default { a: PUSHED, b: ASSERTED, c: READ };
+        "#;
+        assert!(extract_config_string_or_array(source, ts_path(), &["a"]).is_empty());
+        assert!(extract_config_string_or_array(source, ts_path(), &["b"]).is_empty());
+        assert_eq!(
+            extract_config_string_or_array(source, ts_path(), &["c"]),
+            vec!["./d.ts"]
+        );
     }
 }

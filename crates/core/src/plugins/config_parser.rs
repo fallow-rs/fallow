@@ -1705,18 +1705,18 @@ fn top_level_variable_declarations<'a>(
 /// of `name` in the program and that no expression writes to.
 ///
 /// `new ModuleFederationPlugin(mfConfig)` is the common shape for plugin options
-/// that a config declares above the plugin list. A reader that accepts the
-/// inline object only reads nothing there.
+/// that a config declares above the plugin list, where an inline-only reader fails.
 ///
 /// The name resolves only when the program holds one binding of that name. A
 /// second binding, a parameter of the same name, or a write to the binding means
 /// the expression can name another value than the top-level one, so the
-/// resolver declines instead of reading the wrong value.
+/// resolver declines. A caller that reads `push`-style calls itself can allow them.
 pub(crate) fn find_stable_binding_init<'a>(
     program: &'a Program<'a>,
     name: &str,
+    allow_mutating_calls: bool,
 ) -> Option<&'a Expression<'a>> {
-    if !holds_one_stable_object(program, name) {
+    if !holds_one_stable_object(program, name, allow_mutating_calls) {
         return None;
     }
     find_variable_init_expression(program, name)

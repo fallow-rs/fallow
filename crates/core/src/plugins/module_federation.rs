@@ -905,7 +905,7 @@ fn resolve_options_name(
     depth: usize,
     options: &mut ResolvedOptions,
 ) -> bool {
-    if let Some(init) = config_parser::find_stable_binding_init(program, name) {
+    if let Some(init) = config_parser::find_stable_binding_init(program, name, false) {
         return resolve_options_init(program, path, init, depth + 1, options);
     }
     let Some((specifier, imported_name)) =

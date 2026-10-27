@@ -152,7 +152,7 @@ impl<'a> StaticPluginEntries<'a> {
             if !self.followed.insert(id.name.as_str()) {
                 return None;
             }
-            expr = config_parser::find_stable_binding_init(self.program, &id.name)?
+            expr = config_parser::find_stable_binding_init(self.program, &id.name, true)?
                 .get_inner_expression();
         }
         Some(expr)
