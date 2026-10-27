@@ -19922,6 +19922,10 @@ runner?: (MutationRunnerOutput | null)
  * started.
  */
 cache?: (MutationCacheOutput | null)
+/**
+ * The resume facts. Absent without `--resume`.
+ */
+resume?: (MutationResumeOutput | null)
 summary: MutationSummary
 /**
  * Each mutant, ranked mutants first.
@@ -20057,6 +20061,31 @@ stored: number
 not_keyed: string[]
 }
 /**
+ * The resume facts of a `--resume` run.
+ */
+export interface MutationResumeOutput {
+/**
+ * The path of the outcome journal, relative to the project root when it
+ * is inside the root.
+ */
+journal: string
+/**
+ * The mutants whose status came from the journal. They did not run.
+ */
+reused: number
+/**
+ * The journal results whose key does not match this run, because an
+ * input of the mutant changed. These mutants ran again.
+ */
+rejected: number
+/**
+ * Why the run did not read a journal and started from the beginning,
+ * for example because no journal exists. Absent when the run read the
+ * journal.
+ */
+note?: (string | null)
+}
+/**
  * The totals of a run.
  */
 export interface MutationSummary {
@@ -20181,6 +20210,11 @@ attempts?: MutantAttempt[]
  * The mutant did not run in this run. `--no-cache` runs each mutant.
  */
 cached?: boolean
+/**
+ * True when the status comes from the journal of an interrupted run
+ * (`--resume`). The mutant did not run in this run.
+ */
+resumed?: boolean
 /**
  * The TypeScript diagnostic codes of the new errors of a
  * `compile_error` mutant, sorted, at most 8.

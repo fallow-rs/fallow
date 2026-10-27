@@ -26,8 +26,10 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`,
   `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
-  `--min-score`, `--operators`, `--verdicts` and `--typecheck`. The global
-  `--no-cache` flag also turns off the result cache (see "Result cache").
+  `--min-score`, `--operators`, `--verdicts`, `--typecheck` and `--resume`.
+  The global `--no-cache` flag also turns off the result cache (see "Result
+  cache"). `--resume` continues an interrupted or partial run (see "Outcome
+  journal and resume").
 - Only `--format human` and `--format json` are valid. Version 1 has no SARIF,
   CodeClimate, LSP, gate, GitHub Action or GitLab surface.
 - Each run saves its full JSON report to
@@ -364,7 +366,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`). |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run in which no mutant has a test result has no score. It exits
@@ -1049,6 +1051,78 @@ report repeats it in `cache.not_keyed`.
   `crates/api/src/mutation/scheduler`. The key and the file live in
   `crates/api/src/mutation/result_cache`.
 
+## Outcome journal and resume
+
+The result cache saves the results only after the last retry. An interrupted
+run, for example by Ctrl-C or a machine crash, then loses each result. The
+outcome journal keeps them.
+
+- Each run writes `<cache dir>/mutation/journal.jsonl`. The first line is a
+  header with the fingerprint of the run. Each next line is one final result
+  with its mutant id and the key of the result cache (see "Result cache").
+- A result is final when the mutant is `killed`, or when it is `survived`
+  and a retry confirmed it without a dropped covering test. The run writes
+  the line of a kill after the first run of the mutant, and the line of a
+  survivor after its retry. The run writes one line with one write call and
+  flushes it to disk.
+- A `timeout`, `flaky`, `runtime_error`, `no_coverage` or `pending` result
+  is never in the journal. A survivor without a retry is not in it. These
+  mutants run again in a resumed run.
+- The journal is not a report. The saved report and the `-o` file stay the
+  report of a run.
+- The run writes the journal with and without `--no-cache`. `--no-cache`
+  turns off only the result cache.
+
+`fallow mutation --resume` continues a run:
+
+- The run reads the journal before the mutant runs. The dry run always
+  runs, because it gives the covering tests.
+- The header must match the run. The fingerprint has the journal format,
+  the Fallow version, the runner, the runtime name and version, the run
+  directory hash (each planned path and its instrumented text), the runner
+  config, the scope, the operators and `--allow-side-effects`. A header of
+  other inputs exits `2` with `FALLOW_MUTATION_RESUME_MISMATCH`. The message
+  names each input that differs, with both values.
+- `--max-mutants`, `--time-budget` and `--concurrency` are not in the
+  fingerprint. A run that `--max-mutants` or the time budget stopped can
+  continue with other limits. A resumed result takes a place in the
+  `--max-mutants` limit, the same as a cached result.
+- A journal result whose key does not match the key of this run is
+  rejected, for example after a change to a covering test file. That mutant
+  runs again.
+- With no journal, or a journal without a valid header, the run starts from
+  the beginning. It does not exit. The `resume.note` field says why, and the
+  human output prints it.
+- A resumed result has `resumed: true` in `mutants[]`, not `cached: true`.
+  It counts in the score and the coverage the same as a result of this run.
+  The result cache stores it, because the interrupted run did not save its
+  cache.
+- A run with no mutant that needs a test run reads no journal. Its
+  `resume.note` says so.
+
+The report of a `--resume` run has a `resume` object: `journal` (the path,
+relative to the root when it is inside the root), `reused`, `rejected`, and
+`note` when the run did not read a journal. The object is absent without
+`--resume`. The human output prints one `Resumed:` line.
+
+The lifecycle of the journal:
+
+- A run without `--resume` replaces the journal when its runner starts.
+- A `--resume` run keeps the valid lines of a matching journal and appends
+  its new results. It drops a last line that an interrupt cut.
+- A run with `completion.status: complete` removes the journal after it
+  saves `last-report.json`. When the save fails, the journal stays.
+- A `partial` run, for example after `--time-budget` or `--max-mutants`,
+  keeps the journal, so a later `--resume` continues it. An interrupted run
+  and a run that exits `2` also keep it.
+- A failed journal write adds a `journal-write-failed` error and keeps the
+  run result.
+- The scheduler talks to the journal through the `OutcomeJournal` trait in
+  `crates/api/src/mutation/scheduler`. The file lives in
+  `crates/api/src/mutation/journal`. The CLI removes a finished journal
+  through `fallow_api::mutation::remove_finished_mutation_journal`. MCP does
+  not run mutants, so it has no resume option.
+
 ## Run directory
 
 The run writes the instrumented files, `paths.json` and the runtime hooks to
@@ -1265,6 +1339,10 @@ reads files only. It runs no test.
   that the survivors keep the status `survived`.
 - One `Cache:` line when a result came from the result cache. It names
   `--no-cache`.
+- One `Resumed:` line for a `--resume` run: the count of results from the
+  journal and the count of mutants that ran again because their inputs
+  changed. When the run read no journal, the line gives the reason and the
+  journal path.
 - The 10 best-ranked survivors grouped by file, files and mutants in rank
   order, and one `and N more survivors` line. Each survivor has the location,
   the operator, the original and mutated code, and one line with the count of
@@ -1340,7 +1418,7 @@ reads files only. It runs no test.
 | Mutant sites and instrumentation | `crates/mutation` |
 | Component script blocks | `crates/mutation/src/blocks.rs`, `crates/engine/src/mutation/layout.rs` |
 | Selection, test map, prune and rank | `crates/engine/src/mutation` |
-| Runner protocol, companion, scheduler, report, verdict join, survivor type check | `crates/api/src/mutation` |
+| Runner protocol, companion, scheduler, report, verdict join, survivor type check, outcome journal | `crates/api/src/mutation` |
 | Type check request and response | `crates/api/src/type_aware/mutant_typecheck.rs` |
 | Type check in the companion | `tools/type-aware-sidecar/src/mutant-typecheck.mjs` |
 | Envelopes | `crates/output/src/mutation.rs` |

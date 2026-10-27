@@ -325,12 +325,12 @@ pub use mutation::{
     MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
     MutationInspectStatus, MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile,
     MutationPlanMutant, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
-    MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
-    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
-    MutationStatusCounts, MutationSummary, MutationTimings, MutationTypecheckOutput,
-    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict, MutationVerdictInput,
-    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
-    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    MutationResumeOutput, MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput,
+    MutationSchemaVersion, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
+    MutationStaleReason, MutationStatusCounts, MutationSummary, MutationTimings,
+    MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict,
+    MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
+    MutationWorktreeCheck, serialize_mutation_inspect_json_output, serialize_mutation_json_output,
     serialize_mutation_plan_json_output,
 };
 pub use next_steps::{

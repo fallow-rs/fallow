@@ -15,8 +15,8 @@ use fallow_engine::mutation::{
 use fallow_engine::session::AnalysisSession;
 use fallow_output::{
     MutationCacheOutput, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
-    MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind,
-    MutationScopeOutput, MutationTimings, MutationWorktreeCheck,
+    MutationResumeOutput, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
+    MutationScopeKind, MutationScopeOutput, MutationTimings, MutationWorktreeCheck,
 };
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
@@ -24,9 +24,10 @@ use rustc_hash::FxHashSet;
 use crate::ProgrammaticError;
 use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 use crate::mutation::companion::{COMPANION_FILES, install};
-use crate::mutation::discovery::discover_runtime;
+use crate::mutation::discovery::{JsRuntime, discover_runtime};
+use crate::mutation::journal::{JOURNAL_FORMAT, Journal, JournalHeader, JournalMismatch};
 use crate::mutation::last_report::ignore_cache_dir;
-use crate::mutation::manifest::{RunnerRange, manifest};
+use crate::mutation::manifest::{Manifest, RunnerRange, manifest};
 use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::report::{
@@ -37,8 +38,8 @@ use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
 use crate::mutation::scheduler::{
-    ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome, SchedulePlan,
-    ScheduledMutant, run_schedule_with_progress,
+    OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
+    SchedulePlan, ScheduledMutant, run_schedule_with_progress,
 };
 use crate::mutation::transport::ProcessSpawner;
 use crate::mutation::typecheck::typecheck_survivors;
@@ -212,6 +213,8 @@ struct Planned {
     base_ref: Option<String>,
     /// The selected runner config file, relative to the project root.
     runner_config: Option<String>,
+    /// The names of the selected operators. `None` uses each operator.
+    operators: Option<Vec<String>>,
 }
 
 /// The selected runner config: the caller option, else the
@@ -291,6 +294,12 @@ fn plan_for(
         Some(operators) => Some(operators.clone()),
         None => config_operators(&session)?,
     };
+    let operator_names = operators.as_ref().map(|operators| {
+        operators
+            .iter()
+            .map(|operator| operator.as_str().to_owned())
+            .collect()
+    });
     let request = MutationPlanRequest {
         scope,
         operators,
@@ -320,6 +329,7 @@ fn plan_for(
         plan,
         base_ref,
         runner_config,
+        operators: operator_names,
     })
 }
 
@@ -615,7 +625,170 @@ struct Execution {
     outcome: Option<ScheduleOutcome>,
     runner: Option<MutationRunnerOutput>,
     cache: Option<MutationCacheOutput>,
+    resume: Option<MutationResumeOutput>,
     setup_ms: u64,
+}
+
+/// The journal path as the report shows it: relative to the root, with `/`
+/// separators, when the journal is inside the root.
+fn shown_path(root: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(root).map(Path::to_path_buf).or_else(|_| {
+        canonical_path(path)
+            .strip_prefix(canonical_path(root))
+            .map(Path::to_path_buf)
+    });
+    relative.map_or_else(
+        |_| path.display().to_string(),
+        |relative| {
+            relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        },
+    )
+}
+
+/// The scope of the journal fingerprint.
+fn scope_label(options: &MutationRunOptions, base_ref: Option<&str>) -> String {
+    match &options.scope {
+        MutationRunScope::All => "all".to_owned(),
+        MutationRunScope::Paths(paths) => format!(
+            "paths {}",
+            paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        MutationRunScope::Changed { .. } => base_ref.map_or_else(
+            || "changed lines of a diff".to_owned(),
+            |base| format!("changed against {base}"),
+        ),
+    }
+}
+
+fn resume_mismatch(mismatch: &JournalMismatch, journal: &str) -> ProgrammaticError {
+    mutation_error(
+        "FALLOW_MUTATION_RESUME_MISMATCH",
+        format!(
+            "the journal {journal} belongs to a run with other inputs: {}",
+            mismatch.differences.join("; ")
+        ),
+    )
+    .with_help("run without --resume to start a new run; that run replaces the journal")
+    .with_context("mutation.resume")
+}
+
+/// The resume facts of a `--resume` run in which no mutant needs a test run.
+/// Such a run reads no journal.
+fn unread_journal(options: &MutationRunOptions, planned: &Planned) -> Option<MutationResumeOutput> {
+    options.resume.then(|| MutationResumeOutput {
+        journal: shown_path(
+            planned.resolved.root(),
+            &Journal::path(&planned.cache_dir.join("mutation")),
+        ),
+        reused: 0,
+        rejected: 0,
+        note: Some("the run read no journal, because no mutant needs a test run".to_owned()),
+    })
+}
+
+/// The result cache (`None` with `--no-cache`) and the outcome journal of a
+/// run. The journal uses the key of the result cache.
+fn open_stores(
+    options: &MutationRunOptions,
+    planned: &Planned,
+    mutation_cache: &Path,
+    runtime: &str,
+    run_dir: &Path,
+) -> ProgrammaticResult<(Option<Arc<ResultCache>>, RunJournal)> {
+    let root = planned.resolved.root();
+    let name = planned.runner.name();
+    let files = key_files(&planned.plan, planned.runner_config.as_deref());
+    let result_cache = open_result_cache(
+        planned.resolved.no_cache,
+        mutation_cache,
+        root,
+        name,
+        files.clone(),
+    );
+    let keys = result_cache
+        .clone()
+        .unwrap_or_else(|| Arc::new(ResultCache::keys_only(mutation_cache, root, name, files)));
+    let header = JournalHeader {
+        journal_format: JOURNAL_FORMAT,
+        fallow_version: env!("CARGO_PKG_VERSION").to_owned(),
+        runner: name.to_owned(),
+        runtime: runtime.to_owned(),
+        run_dir: run_dir
+            .file_name()
+            .map(|hash| hash.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        runner_config: planned.runner_config.clone(),
+        scope: scope_label(options, planned.base_ref.as_deref()),
+        operators: planned.operators.clone(),
+        allow_side_effects: options.allow_side_effects,
+    };
+    let run_journal = start_journal(options, planned, mutation_cache, &header, keys)?;
+    Ok((result_cache, run_journal))
+}
+
+/// The outcome journal of a started run.
+struct RunJournal {
+    journal: Arc<Journal>,
+    /// The journal path of the report.
+    shown: String,
+    /// Why a `--resume` run started from the beginning.
+    note: Option<String>,
+}
+
+/// Starts the outcome journal of a run. The journal is written with and
+/// without `--no-cache`. `keys` gives the result cache key of each mutant.
+fn start_journal(
+    options: &MutationRunOptions,
+    planned: &Planned,
+    mutation_cache: &Path,
+    header: &JournalHeader,
+    keys: Arc<ResultCache>,
+) -> ProgrammaticResult<RunJournal> {
+    let shown = shown_path(planned.resolved.root(), &Journal::path(mutation_cache));
+    let opened = Journal::open(mutation_cache, header, keys, options.resume)
+        .map_err(|mismatch| resume_mismatch(&mismatch, &shown))?;
+    Ok(RunJournal {
+        journal: Arc::new(opened.journal),
+        shown,
+        note: opened.note,
+    })
+}
+
+/// The resume facts of a `--resume` run, and the issue of a journal that
+/// was not written.
+fn settle_journal(
+    options: &MutationRunOptions,
+    run_journal: RunJournal,
+    outcome: &mut ScheduleOutcome,
+) -> Option<MutationResumeOutput> {
+    if let Some(message) = run_journal.journal.write_error() {
+        outcome.issues.push(ScheduleIssue {
+            code: "journal-write-failed",
+            message: format!(
+                "the outcome journal was not written, so an interrupted run cannot resume each result: {message}"
+            ),
+            mutant_id: None,
+            stderr_tail: None,
+        });
+    }
+    options.resume.then(|| MutationResumeOutput {
+        journal: run_journal.shown,
+        reused: outcome
+            .results
+            .values()
+            .filter(|result| result.resumed)
+            .count(),
+        rejected: run_journal.journal.rejected(),
+        note: run_journal.note,
+    })
 }
 
 /// The result cache of a run. `None` with `--no-cache`.
@@ -682,6 +855,31 @@ fn init_options(runner: Runner, root: &Path, static_test_files: &[String]) -> In
     }
 }
 
+/// The runner facts of the report. `None` when no companion started.
+fn runner_output(
+    outcome: &ScheduleOutcome,
+    name: &str,
+    manifest: &Manifest,
+    runtime: &JsRuntime,
+) -> Option<MutationRunnerOutput> {
+    outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
+        name: name.to_owned(),
+        version: ready.runner_version.clone(),
+        protocol_version: manifest.wire_protocol_version,
+        runtime: MutationRuntimeOutput {
+            name: runtime.kind.name().to_owned(),
+            version: runtime.version.clone(),
+        },
+        concurrency: outcome.workers,
+        notes: ready
+            .notes
+            .iter()
+            .filter(|note| manifest.ready_notes.contains(note))
+            .cloned()
+            .collect(),
+    })
+}
+
 /// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
@@ -700,6 +898,7 @@ fn execute(
             outcome: None,
             runner: None,
             cache: None,
+            resume: unread_journal(options, planned),
             setup_ms: 0,
         });
     }
@@ -734,10 +933,15 @@ fn execute(
         })
         .collect();
     let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
-    let resolved = &planned.resolved;
-    let root = resolved.root().to_path_buf();
-    let files = key_files(plan, planned.runner_config.as_deref());
-    let result_cache = open_result_cache(resolved.no_cache, &mutation_cache, &root, name, files);
+    let root = planned.resolved.root().to_path_buf();
+    let runtime_label = format!("{} {}", runtime.kind.name(), runtime.version);
+    let (result_cache, run_journal) = open_stores(
+        options,
+        planned,
+        &mutation_cache,
+        &runtime_label,
+        &run_dir.dir,
+    )?;
     let config = ScheduleConfig {
         init: InitRequest {
             root: root.to_string_lossy().into_owned(),
@@ -754,6 +958,7 @@ fn execute(
         cache: result_cache
             .clone()
             .map(|cache| cache as Arc<dyn ResultLookup>),
+        journal: Some(Arc::clone(&run_journal.journal) as Arc<dyn OutcomeJournal>),
     };
     let spawner = ProcessSpawner {
         runtime: runtime.path.clone(),
@@ -765,30 +970,17 @@ fn execute(
     let setup_ms = millis(setup_started.elapsed());
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
-    let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
-        name: name.to_owned(),
-        version: ready.runner_version.clone(),
-        protocol_version: manifest.wire_protocol_version,
-        runtime: MutationRuntimeOutput {
-            name: runtime.kind.name().to_owned(),
-            version: runtime.version.clone(),
-        },
-        concurrency: outcome.workers,
-        notes: ready
-            .notes
-            .iter()
-            .filter(|note| manifest.ready_notes.contains(note))
-            .cloned()
-            .collect(),
-    });
+    let runner = runner_output(&outcome, name, manifest, &runtime);
     let cache = match (&result_cache, outcome.ready.is_some()) {
         (Some(result_cache), true) => Some(store_results(result_cache, &mut outcome)),
         _ => None,
     };
+    let resume = settle_journal(options, run_journal, &mut outcome);
     Ok(Execution {
         outcome: Some(outcome),
         runner,
         cache,
+        resume,
         setup_ms,
     })
 }
@@ -823,6 +1015,31 @@ fn run_issues(
         });
     }
     errors
+}
+
+/// The wall time of each phase. A run that started no companion has only
+/// the plan and the type check times.
+fn run_timings(
+    outcome: Option<&ScheduleOutcome>,
+    setup_ms: u64,
+    plan_ms: u64,
+    typecheck_ms: u64,
+) -> MutationTimings {
+    outcome.map_or_else(
+        || MutationTimings {
+            plan_ms,
+            typecheck_ms,
+            ..MutationTimings::default()
+        },
+        |outcome| MutationTimings {
+            plan_ms,
+            setup_ms: setup_ms + millis(outcome.timings.setup),
+            dry_run_ms: millis(outcome.timings.dry_run),
+            mutants_ms: millis(outcome.timings.mutants),
+            retry_ms: millis(outcome.timings.retry),
+            typecheck_ms,
+        },
+    )
 }
 
 /// Refuses a run with the survivor type check before the tests start when no
@@ -920,21 +1137,7 @@ pub fn run_mutation_with_progress(
     });
     let mut errors = run_issues(outcome, &changed_paths, check_error);
     errors.extend(typecheck.issue);
-    let timings = outcome.map_or_else(
-        || MutationTimings {
-            plan_ms,
-            typecheck_ms,
-            ..MutationTimings::default()
-        },
-        |outcome| MutationTimings {
-            plan_ms,
-            setup_ms: execution.setup_ms + millis(outcome.timings.setup),
-            dry_run_ms: millis(outcome.timings.dry_run),
-            mutants_ms: millis(outcome.timings.mutants),
-            retry_ms: millis(outcome.timings.retry),
-            typecheck_ms,
-        },
-    );
+    let timings = run_timings(outcome, execution.setup_ms, plan_ms, typecheck_ms);
     Ok(MutationReport {
         schema_version: MutationSchemaVersion::V1,
         version: tool_version(),
@@ -943,6 +1146,7 @@ pub fn run_mutation_with_progress(
         scope: scope_output(options, planned.base_ref.clone()),
         runner: execution.runner,
         cache: execution.cache,
+        resume: execution.resume,
         summary: summary(&results),
         functions: function_results(plan, &results),
         mutants: results,

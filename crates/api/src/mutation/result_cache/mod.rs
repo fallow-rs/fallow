@@ -293,8 +293,8 @@ impl ResultCache {
     /// file that does not parse gives an empty cache.
     #[must_use]
     pub fn open(mutation_cache: &Path, root: &Path, runner: &str, files: KeyFiles) -> Self {
-        let file = mutation_cache.join(RESULT_CACHE_FILE);
-        let state = std::fs::read(&file)
+        let cache = Self::keys_only(mutation_cache, root, runner, files);
+        let state = std::fs::read(&cache.file)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<CacheFile>(&bytes).ok())
             .filter(|state| state.format_version == FORMAT_VERSION)
@@ -303,6 +303,18 @@ impl ResultCache {
                 state
             })
             .unwrap_or_default();
+        Self {
+            state: Mutex::new(state),
+            ..cache
+        }
+    }
+
+    /// A cache that only computes keys: it reads no entry of the cache
+    /// file. The outcome journal of a `--no-cache` run uses it, so the
+    /// journal key is the same key as the result cache key.
+    #[must_use]
+    pub fn keys_only(mutation_cache: &Path, root: &Path, runner: &str, files: KeyFiles) -> Self {
+        let file = mutation_cache.join(RESULT_CACHE_FILE);
         let mut hasher = Sha256::new();
         feed(&mut hasher, &FORMAT_VERSION.to_string());
         feed(&mut hasher, env!("CARGO_PKG_VERSION"));
@@ -321,7 +333,7 @@ impl ResultCache {
             files,
             hashes: Mutex::new(FxHashMap::default()),
             test_digests: Mutex::new(FxHashMap::default()),
-            state: Mutex::new(state),
+            state: Mutex::new(CacheFile::default()),
             max_entries: MAX_ENTRIES,
         }
     }

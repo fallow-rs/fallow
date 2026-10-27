@@ -1403,3 +1403,139 @@ export default {
         );
     }
 }
+
+/// Issue #3783: a run that SIGINT stops keeps its finished results, and
+/// `--resume` continues it. The `node:test` runner needs only `node`.
+#[cfg(unix)]
+mod interrupt {
+    use std::fs;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    use super::{commit_all, git, json_mutation, mutation};
+    use crate::common::{fallow_bin, scrub_analysis_env};
+
+    const SOURCE: &str = "export const inc = (x) => x + 1;\nexport const dec = (x) => x - 1;\nexport const dbl = (x) => x * 2;\nexport const half = (x) => x / 2;\nexport const pos = (x) => x > 0;\nexport const neg = (x) => x < 0;\n";
+
+    /// Each test waits, so the run lasts long enough for an interrupt.
+    const TESTS: &str = "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { inc, dec, dbl, half, pos, neg } from \"../src/math.js\";\nconst pause = () => new Promise((resolve) => setTimeout(resolve, 300));\ntest(\"inc\", async () => { await pause(); assert.equal(inc(1), 2); });\ntest(\"dec\", async () => { await pause(); assert.equal(dec(1), 0); });\ntest(\"dbl\", async () => { await pause(); assert.equal(dbl(3), 6); });\ntest(\"half\", async () => { await pause(); assert.equal(half(8), 4); });\ntest(\"pos\", async () => { await pause(); assert.equal(pos(1), true); assert.equal(pos(0), false); });\ntest(\"neg\", async () => { await pause(); assert.equal(neg(-1), true); assert.equal(neg(0), false); });\n";
+
+    #[expect(
+        clippy::print_stderr,
+        reason = "a skipped end-to-end test says why it did not run"
+    )]
+    fn has_node() -> bool {
+        let found = Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if !found {
+            eprintln!("skipped: the interrupt test needs `node` on PATH");
+        }
+        found
+    }
+
+    fn slow_project() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"resume-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+        )
+        .expect("package.json");
+        fs::create_dir_all(root.join("src")).expect("src");
+        fs::create_dir_all(root.join("test")).expect("test");
+        fs::write(root.join("src/math.js"), SOURCE).expect("math.js");
+        fs::write(root.join("test/math.test.js"), TESTS).expect("math.test.js");
+        fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+        git(root, &["init", "-q"]);
+        commit_all(root, "init");
+        dir
+    }
+
+    fn journal_results(journal: &Path) -> usize {
+        fs::read_to_string(journal).map_or(0, |text| {
+            text.lines()
+                .skip(1)
+                .filter(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
+                .count()
+        })
+    }
+
+    #[test]
+    fn an_interrupted_run_keeps_its_results_and_resume_continues_it() {
+        if !has_node() {
+            return;
+        }
+        let project = slow_project();
+        let root = project.path();
+        let journal = root.join(".fallow/mutation/journal.jsonl");
+
+        let mut command = Command::new(fallow_bin());
+        scrub_analysis_env(&mut command);
+        command
+            .args(["mutation", "--root"])
+            .arg(root)
+            .args([
+                "--all",
+                "--no-cache",
+                "--concurrency",
+                "1",
+                "--format",
+                "json",
+                "--quiet",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("spawn fallow mutation");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while journal_results(&journal) < 2 {
+            assert!(
+                child.try_wait().expect("poll").is_none(),
+                "the run ended before it journaled two results"
+            );
+            assert!(Instant::now() < deadline, "no journal results in time");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let interrupted = Command::new("kill")
+            .args(["-INT", &child.id().to_string()])
+            .status()
+            .expect("kill");
+        assert!(interrupted.success());
+        let status = child.wait().expect("wait");
+        assert_eq!(status.code(), Some(130), "{status:?}");
+        let kept = journal_results(&journal);
+        assert!(kept >= 2, "the interrupted run keeps its results: {kept}");
+
+        let (output, report) = json_mutation(root, &["--all", "--no-cache", "--resume"]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        assert_eq!(report["completion"]["status"], "complete", "{report}");
+        assert_eq!(report["resume"]["reused"], kept, "{report}");
+        assert_eq!(report["resume"]["rejected"], 0, "{report}");
+        let mutants = report["mutants"].as_array().expect("mutants");
+        let resumed = mutants
+            .iter()
+            .filter(|mutant| mutant["resumed"] == true)
+            .count();
+        assert_eq!(resumed, kept, "{report}");
+        assert!(
+            mutants.iter().all(|mutant| mutant.get("cached").is_none()),
+            "{report}"
+        );
+        assert!(
+            !journal.exists(),
+            "a complete run removes the journal after it saves the report"
+        );
+
+        let missing = mutation(root, &["--all", "--no-cache", "--resume", "--quiet"]);
+        assert_eq!(missing.code, 0, "{}", missing.stderr);
+        assert!(
+            missing.stdout.contains(
+                "Resumed: the run started from the beginning, because no journal exists (.fallow/mutation/journal.jsonl)."
+            ),
+            "{}",
+            missing.stdout
+        );
+    }
+}

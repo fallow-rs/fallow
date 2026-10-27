@@ -252,6 +252,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         retried: false,
         attempts: Vec::new(),
         cached: false,
+        resumed: false,
         type_error_codes: Vec::new(),
     }
 }
@@ -272,6 +273,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         },
         runner: None,
         cache: None,
+        resume: None,
         summary: MutationSummary::from_results(&mutants),
         functions: Vec::<MutationFunctionResult>::new(),
         mutants,

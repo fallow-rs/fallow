@@ -112,6 +112,11 @@ pub struct MutationArgs {
     /// `compile_error` and leaves the score.
     #[arg(long)]
     pub typecheck: bool,
+    /// Continue an interrupted or partial run: reuse the killed and confirmed
+    /// survived mutants in its journal and run only the others. A journal of
+    /// other inputs exits 2.
+    #[arg(long)]
+    pub resume: bool,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -309,6 +314,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             .into_iter()
             .collect(),
         typecheck: input.args.typecheck || input.config.typecheck == Some(true),
+        resume: input.args.resume,
     })
 }
 
@@ -492,22 +498,36 @@ fn run_with_progress(
     report
 }
 
+/// Refuses a run flag together with `--plan`.
+fn refuse_run_flags_in_plan(args: &MutationArgs) -> Result<(), ProgrammaticError> {
+    let refused = if args.verdicts.is_some() {
+        Some((
+            "--verdicts joins the results of a run; a plan has no results",
+            "mutation.verdicts",
+        ))
+    } else if args.typecheck {
+        Some((
+            "--typecheck checks the survivors of a run; a plan has no survivors",
+            "mutation.typecheck",
+        ))
+    } else if args.resume {
+        Some((
+            "--resume continues a run; a plan runs no mutant",
+            "mutation.resume",
+        ))
+    } else {
+        None
+    };
+    refused.map_or(Ok(()), |(message, context)| {
+        Err(input_error(message, context))
+    })
+}
+
 fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError> {
     let options = run_options(input)?;
     let min_score = min_score(input)?;
     if input.args.plan {
-        if input.args.verdicts.is_some() {
-            return Err(input_error(
-                "--verdicts joins the results of a run; a plan has no results",
-                "mutation.verdicts",
-            ));
-        }
-        if input.args.typecheck {
-            return Err(input_error(
-                "--typecheck checks the survivors of a run; a plan has no survivors",
-                "mutation.typecheck",
-            ));
-        }
+        refuse_run_flags_in_plan(&input.args)?;
         let plan = plan_mutation(&options)?;
         return Ok(emit_plan(plan, input));
     }
@@ -543,6 +563,9 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     })?;
     let saved_path = save_report(&options.analysis, &value);
     let saved = saved_path.is_some();
+    if saved {
+        remove_journal(&options.analysis, &report);
+    }
     let json = matches!(input.output, OutputFormat::Json);
     // The JSON contract of exit code 2 is the error envelope on stdout. The
     // envelope replaces the report on stdout only when the report is in a
@@ -609,6 +632,18 @@ fn save_report(analysis: &AnalysisOptions, value: &serde_json::Value) -> Option<
             );
             None
         }
+    }
+}
+
+/// Removes the outcome journal after a complete run whose report is saved.
+/// A failed removal is a warning: a later run without `--resume` replaces
+/// the journal.
+fn remove_journal(analysis: &AnalysisOptions, report: &MutationReport) {
+    if let Err(error) = fallow_api::mutation::remove_finished_mutation_journal(analysis, report) {
+        eprintln!(
+            "fallow: warning: the mutation journal of the complete run was not removed: {}",
+            error.message
+        );
     }
 }
 

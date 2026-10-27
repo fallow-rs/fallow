@@ -1290,6 +1290,16 @@
           ]
         },
         {
+          "name": "--resume",
+          "type": "bool",
+          "required": false,
+          "description": "Continue an interrupted or partial run: reuse the killed and confirmed survived mutants in its journal and run only the others. A journal of other inputs exits 2",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "paths",
           "type": "string",
           "required": false,

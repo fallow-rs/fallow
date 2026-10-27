@@ -7,6 +7,7 @@
 
 pub(crate) mod companion;
 pub(crate) mod discovery;
+pub(crate) mod journal;
 pub(crate) mod last_report;
 pub(crate) mod manifest;
 pub(crate) mod node_args;
@@ -29,7 +30,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub use fallow_engine::mutation::Operator;
-pub use last_report::{last_mutation_report_path, save_last_mutation_report};
+pub use last_report::{
+    last_mutation_report_path, remove_finished_mutation_journal, save_last_mutation_report,
+};
 pub use report::baseline_blocked_run_error;
 pub use scheduler::control::split_control_run_failure;
 pub use verdicts::{MAX_VERDICT_INPUT_BYTES, apply_mutation_verdicts, validate_mutation_verdicts};
@@ -150,4 +153,10 @@ pub struct MutationRunOptions {
     /// becomes `compile_error` and leaves the score. The run fails before
     /// the tests start when no trusted companion exists.
     pub typecheck: bool,
+    /// Reuse the final results in the outcome journal of an interrupted
+    /// earlier run, and run only the other mutants. A journal of other
+    /// inputs stops the run with `FALLOW_MUTATION_RESUME_MISMATCH`. With no
+    /// journal, the run starts from the beginning and the report says so.
+    /// Without this option, the run starts a new journal.
+    pub resume: bool,
 }

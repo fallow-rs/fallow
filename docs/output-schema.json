@@ -32695,6 +32695,17 @@
           ],
           "description": "The result cache. Absent with `--no-cache`, and when no companion\nstarted."
         },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationResumeOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The resume facts. Absent without `--resume`."
+        },
         "summary": {
           "description": "The totals.",
           "$ref": "#/definitions/MutationSummary"
@@ -33557,6 +33568,10 @@
         "cached": {
           "type": "boolean",
           "description": "True when the status comes from the result cache of an earlier run.\nThe mutant did not run in this run. `--no-cache` runs each mutant."
+        },
+        "resumed": {
+          "type": "boolean",
+          "description": "True when the status comes from the journal of an interrupted run\n(`--resume`). The mutant did not run in this run."
         },
         "type_error_codes": {
           "type": "array",
@@ -34697,6 +34712,36 @@
         }
       ],
       "description": "How `fallow health` counts cyclomatic complexity for its gates.\n\nThe policy changes the cyclomatic value that the `maxCyclomatic` gate reads\nand the cyclomatic value in every CRAP score. It does not change the health\nscore, the complexity density, or the hotspot ranking: those keep the\nstandard count so that grades stay comparable across projects."
+    },
+    "MutationResumeOutput": {
+      "type": "object",
+      "properties": {
+        "journal": {
+          "type": "string",
+          "description": "The path of the outcome journal, relative to the project root when it\nis inside the root."
+        },
+        "reused": {
+          "type": "integer",
+          "description": "The mutants whose status came from the journal. They did not run."
+        },
+        "rejected": {
+          "type": "integer",
+          "description": "The journal results whose key does not match this run, because an\ninput of the mutant changed. These mutants ran again."
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the run did not read a journal and started from the beginning,\nfor example because no journal exists. Absent when the run read the\njournal."
+        }
+      },
+      "required": [
+        "journal",
+        "reused",
+        "rejected"
+      ],
+      "description": "The resume facts of a `--resume` run."
     }
   }
 }

@@ -56,6 +56,33 @@ pub fn last_mutation_report_path(analysis: &AnalysisOptions) -> Result<PathBuf, 
     Ok(cache_dir(analysis)?.join("mutation").join(LAST_REPORT_FILE))
 }
 
+/// Removes the outcome journal of the project when `report` is complete,
+/// and returns true when it removed a journal. Call it after the report is
+/// saved: the saved report then holds each result. A partial or failed run
+/// keeps the journal, so `--resume` can continue it.
+///
+/// # Errors
+///
+/// Returns an error when the config does not resolve or the journal cannot
+/// be removed.
+pub fn remove_finished_mutation_journal(
+    analysis: &AnalysisOptions,
+    report: &fallow_output::MutationReport,
+) -> Result<bool, ProgrammaticError> {
+    if report.completion.status != fallow_output::MutationCompletionStatus::Complete {
+        return Ok(false);
+    }
+    let path = super::journal::Journal::path(&cache_dir(analysis)?.join("mutation"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(cache_error(format!(
+            "failed to remove {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
 /// Saves the JSON `report` of a run as the last report of the project, and
 /// returns its path. The write goes to a temporary file first, so a reader
 /// never sees half a report.
