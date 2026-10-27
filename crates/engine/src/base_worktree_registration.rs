@@ -354,6 +354,7 @@ mod tests {
 
     /// Write a directory that Git accepts as a repository, whose config runs
     /// `marker` as the fsmonitor hook.
+    #[cfg(unix)]
     fn write_crafted_gitdir(dir: &Path, marker: &Path) {
         fs::create_dir_all(dir.join("objects")).expect("create objects");
         fs::create_dir_all(dir.join("refs")).expect("create refs");
@@ -370,6 +371,7 @@ mod tests {
         .expect("write config");
     }
 
+    #[cfg(unix)]
     fn raw_git_status(cwd: &Path, confine: bool) -> bool {
         let mut command = Command::new("git");
         crate::changed_files::clear_ambient_git_env(&mut command);

@@ -368,6 +368,7 @@ mod tests {
     /// A process id that `kill(pid, 0)` reports as `ESRCH`.
     const DEAD_PID: u32 = 99_999_998;
 
+    #[cfg(unix)]
     fn snapshot_dir(root: &Path, pid: u32, age: Duration) -> PathBuf {
         let path = root.join(format!("fallow-audit-base-{pid}-1-0"));
         fs::create_dir_all(&path).expect("create snapshot dir");

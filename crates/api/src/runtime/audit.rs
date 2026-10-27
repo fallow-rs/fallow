@@ -1782,6 +1782,7 @@ mod tests {
         assert_eq!(registered_worktree_count(root), 1);
     }
 
+    #[cfg(unix)]
     fn commit_all(root: &Path, message: &str) {
         git(root, &["add", "-f", "."]);
         git(
