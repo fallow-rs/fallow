@@ -710,7 +710,9 @@ checkout. The required checks do not require an up-to-date branch, so a
 green run can become stale when the base branch moves. A rebase that is not
 `scripts/ship-rebase.mjs` can drop an equal bump from the commit, and then
 the step cannot see the bump. `scripts/ship-rebase.mjs` compares the values
-before and after each rebase of the serial merge flow. Both scripts use
+before and after each rebase of the serial merge flow. With `--if-needed`,
+it also compares the values of a squash merge without a rebase, and it
+rebases when that merge loses a bump. Both scripts use
 `scripts/version-constants.mjs`.
 
 ## Evidence standard
