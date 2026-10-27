@@ -3027,17 +3027,16 @@ mod tests {
         );
     }
 
-    // ---- glob_values_match: invalid glob is skipped (line 362) ----
+    // ---- glob_values_match: a stray bracket is literal text ----
 
     #[test]
-    fn glob_values_match_invalid_glob_pattern_is_skipped() {
+    fn glob_values_match_stray_bracket_is_literal_text() {
         let base = Path::new("/project");
+        let values = [serde_json::json!("[invalid/*")];
         let source = Path::new("/project/src/index.ts");
-        let result = glob_values_match(base, &[serde_json::json!("[invalid")], source);
-        assert!(
-            !result,
-            "an invalid glob pattern must not accidentally match"
-        );
+        assert!(!glob_values_match(base, &values, source));
+        let literal = Path::new("/project/[invalid/index.ts");
+        assert!(glob_values_match(base, &values, literal));
     }
 
     // ---- glob_values_match: no patterns at all returns false ----
