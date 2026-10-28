@@ -234,13 +234,13 @@ fn collect_flag_value_file_refs(
         {
             continue;
         }
-        // Only a program that loads its file arguments, such as a bundler,
-        // loads a file that a flag value names. For another program the
-        // value is data (issue #3967).
+        // A script runtime gives its flag values to no file, except the
+        // modules that its loading flags name. `extract_script_file_refs`
+        // reads those (issue #3967).
         let binary = invoked
             .as_ref()
             .map_or(tokens[0], |invoked| tokens[invoked.index]);
-        if !crate::scripts::takes_file_arguments(binary) {
+        if crate::scripts::is_script_runtime(binary) {
             continue;
         }
         for token in tokens {
@@ -249,6 +249,7 @@ fn collect_flag_value_file_refs(
             }
             if let Some((_key, value)) = token.split_once('=')
                 && looks_like_script_file(value)
+                && !crate::scripts::is_glob(value)
             {
                 refs.extend(match &invoked {
                     Some(invoked) => invoked.file_refs(value),
@@ -618,6 +619,26 @@ mod tests {
             CommandRefContext::NONE,
         );
         assert_eq!(refs, vec!["dist/out.js"]);
+    }
+
+    #[test]
+    fn dockerfile_runtime_loader_values_after_equals_stay_refs() {
+        let mut refs = extract_dockerfile_file_refs(
+            "RUN node --import=./app/instrument.mjs app/server.js\n\
+             CMD [\"node\", \"--require=./app/setup.js\", \"app/worker.js\"]\n",
+            CommandRefContext::NONE,
+        );
+        refs.sort();
+        refs.dedup();
+        assert_eq!(
+            refs,
+            vec![
+                "./app/instrument.mjs",
+                "./app/setup.js",
+                "app/server.js",
+                "app/worker.js"
+            ]
+        );
     }
 
     #[test]

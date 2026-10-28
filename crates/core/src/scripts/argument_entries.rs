@@ -1,17 +1,23 @@
 //! The file arguments of a script command that become entry points
 //! (issue #3967).
 //!
-//! A file argument is an entry point only when the program runs or loads the
-//! file:
+//! The program of a command decides which of its file arguments are entry
+//! points:
 //!
 //! - A script runtime (`node`, `tsx`, `bun`, `deno run`, a shell) runs one
-//!   script: its first positional argument. The arguments after the script
-//!   are data for the script. The values of the runtime flags that load a
-//!   module (`--import`, `--loader`) stay entry points.
+//!   script: its first positional argument that looks like a script file.
+//!   The arguments after the script are data for the script. A relative
+//!   module path of a runtime flag that loads code (`-r ./setup.js`,
+//!   `--import=./register.js`) stays an entry point. When the script is the
+//!   binary of a known file runner (`node node_modules/jest/bin/jest.js`),
+//!   the rules of that runner apply.
 //! - A known file runner (a test runner, a bundler, a compiler) runs or
 //!   loads every file that it gets. All its file arguments stay entry points.
-//! - Every other program gets data from its arguments, for example a list of
-//!   files to read or to watch. Its arguments name no entry point.
+//! - Another program can run a known program (`time node x.js`,
+//!   `infisical run -- node x.js`). The rules of the first known program in
+//!   its arguments then apply. Without a known program, the literal file
+//!   arguments and option values stay entry points, but a glob never
+//!   expands: `watchee -f './src/**/*'` gives no entry point.
 //!
 //! The built-in test runners of the runtimes (`node --test`, `bun test`,
 //! `deno test`) and `borp` keep all their file arguments. The formatters and
@@ -32,25 +38,33 @@ struct ScriptRuntime {
     subcommands: &'static [&'static str],
     /// Flags whose value is the next token and names no module.
     value_flags: &'static [&'static str],
-    /// Flags whose value is the next token and names a module that the
-    /// runtime loads. A relative path value (`./setup.js`) is an entry
+    /// Flags whose value names a module that the runtime loads, as the next
+    /// token or after `=`. A relative path value (`./setup.js`) is an entry
     /// point. A bare value (`tsx`, `ts-node/esm`) names a package.
     loading_flags: &'static [&'static str],
 }
 
-/// The flags of Node and of the runtimes that give their flags to Node,
-/// whose value names no module.
+/// The flags of Node, of the runtimes that give their flags to Node, and of
+/// the TypeScript runtimes, whose value names no module.
 const NODE_VALUE_FLAGS: &[&str] = &[
     "-C",
+    "-O",
+    "-P",
+    "--compiler-options",
     "--conditions",
     "--disable-warning",
     "--env-file",
     "--env-file-if-exists",
+    "--exclude",
     "--experimental-config-file",
+    "--ignore",
+    "--include",
     "--input-type",
     "--inspect-port",
+    "--project",
     "--title",
     "--tsconfig",
+    "--unhandled-rejections",
     "--watch-path",
 ];
 
@@ -70,6 +84,14 @@ const RELATIVE_PATH_PREFIXES: &[&str] = &["./", "../", "/"];
 /// as its value, and the next positional argument is read as the script.
 const NODE_INLINE_CODE_FLAGS: &[&str] = &["-e", "--eval", "-p", "--print"];
 
+/// The extensions of a file that a script runtime runs.
+const SCRIPT_EXTENSIONS: &[&str] = &[
+    ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".sh", ".bash",
+];
+
+/// The characters that make an argument a glob.
+const GLOB_CHARS: &[char] = &['*', '?', '{'];
+
 /// Every [`ScriptRuntime`].
 const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
     ScriptRuntime {
@@ -81,7 +103,10 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
             "esno",
             "esr",
             "jiti",
+            "node-ts",
             "sucrase-node",
+            "swc-node",
+            "tsimp",
             "electron",
             "zx",
         ],
@@ -104,7 +129,13 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
     ScriptRuntime {
         names: &["bun"],
         subcommands: &["run"],
-        value_flags: &["--cwd", "-c", "--config", "--env-file"],
+        value_flags: &[
+            "--cwd",
+            "-c",
+            "--config",
+            "--env-file",
+            "--tsconfig-override",
+        ],
         loading_flags: &["-r", "--preload"],
     },
     ScriptRuntime {
@@ -119,6 +150,8 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
             "--location",
             "--seed",
             "--env-file",
+            "-L",
+            "--log-level",
         ],
         loading_flags: &[],
     },
@@ -140,6 +173,8 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
             "--signal",
             "-r",
             "--require",
+            "--config",
+            "--project",
         ],
         loading_flags: &[],
     },
@@ -158,10 +193,14 @@ const FILE_RUNNERS: &[&str] = &[
     // Test runners.
     "ava",
     "brittle",
+    "codecept",
     "cucumber-js",
     "cypress",
+    "detox",
+    "electron-mocha",
     "jasmine",
     "jest",
+    "jest-electron",
     "karma",
     "lab",
     "mocha",
@@ -172,9 +211,12 @@ const FILE_RUNNERS: &[&str] = &[
     "tap",
     "tape",
     "testcafe",
+    "ts-mocha",
     "uvu",
     "vitest",
     "wdio",
+    "web-test-runner",
+    "wtr",
     "zora",
     // Load test runners.
     "artillery",
@@ -214,21 +256,31 @@ const FILE_RUNNERS: &[&str] = &[
     "alchemy",
 ];
 
-/// Subcommands of a script runtime that bundle or compile every file
-/// argument: `deno compile`, `deno bundle`. Their file arguments stay entry
-/// points.
-const RUNTIME_BUILD_SUBCOMMANDS: &[(&str, &str)] = &[("deno", "compile"), ("deno", "bundle")];
+/// Subcommands of a script runtime that bundle, compile, serve, or measure
+/// every file argument: `bun build`, `deno compile`, `deno bundle`,
+/// `deno serve`, `deno bench`. Their file arguments stay entry points.
+const RUNTIME_RUNNER_SUBCOMMANDS: &[(&str, &str)] = &[
+    ("bun", "build"),
+    ("deno", "bench"),
+    ("deno", "bundle"),
+    ("deno", "compile"),
+    ("deno", "serve"),
+];
 
 /// Which arguments of a command name entry points.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ArgumentEntries<'a> {
     /// Every file argument: the program runs or loads each one.
     All,
+    /// Every literal file argument and option value, but no glob: the
+    /// program is not known.
+    Literal,
     /// Only these arguments: the script of a runtime and the modules that
     /// its flags load.
     Listed(Vec<&'a str>),
-    /// No argument: the arguments are data for the program.
-    None,
+    /// Only these files: the modules that the flags of a formatter or linter
+    /// load.
+    Loaded(Vec<String>),
 }
 
 /// Return which arguments of `binary` name entry points. `args` are the
@@ -239,52 +291,84 @@ pub fn argument_entries<'a>(binary: &str, args: &[&'a str]) -> ArgumentEntries<'
     if takes_file_arguments(name) || node_test::runs_tests(name, args) {
         return ArgumentEntries::All;
     }
-    match SCRIPT_RUNTIMES
-        .iter()
-        .find(|runtime| runtime.names.contains(&name))
-    {
-        Some(runtime) => runtime_entry_args(name, runtime, args),
-        None => ArgumentEntries::None,
+    if is_file_target_tool(name) {
+        return ArgumentEntries::Loaded(file_target_tool_loaded_files(name, args));
+    }
+    if let Some(runtime) = script_runtime(name) {
+        return runtime_entry_args(name, runtime, args);
+    }
+    // A program that fallow does not know can run a known program.
+    match args.iter().position(|token| is_known_program(token)) {
+        Some(idx) => argument_entries(args[idx], &args[idx + 1..]),
+        None => ArgumentEntries::Literal,
     }
 }
 
 /// Return `true` when `binary` runs or loads every file argument that it
 /// gets: a test runner, a bundler, or a compiler.
 #[must_use]
-pub fn takes_file_arguments(binary: &str) -> bool {
+pub(super) fn takes_file_arguments(binary: &str) -> bool {
     let name = tool_name(binary);
     borp::is_borp(name) || FILE_RUNNERS.contains(&name)
+}
+
+/// Return `true` when `binary` is a script runtime such as `node` or `tsx`.
+#[must_use]
+pub fn is_script_runtime(binary: &str) -> bool {
+    script_runtime(tool_name(binary)).is_some()
+}
+
+/// Return `true` when `token` is a glob, which fallow never expands from the
+/// arguments of a program that it does not know.
+#[must_use]
+pub fn is_glob(token: &str) -> bool {
+    token.contains(GLOB_CHARS)
+}
+
+fn script_runtime(name: &str) -> Option<&'static ScriptRuntime> {
+    SCRIPT_RUNTIMES
+        .iter()
+        .find(|runtime| runtime.names.contains(&name))
+}
+
+/// Whether `token` names a program that has its own rules.
+fn is_known_program(token: &str) -> bool {
+    let name = tool_name(token);
+    takes_file_arguments(name) || is_file_target_tool(name) || script_runtime(name).is_some()
 }
 
 /// Return the file arguments of `binary` that become entry points.
 ///
 /// `args` are the tokens after the binary. `file_args` are the file-like
-/// arguments that the caller found. A formatter or linter gives only the
-/// modules that its flags load. When `binary` is itself a file that a
+/// arguments that the caller found. When `binary` is itself a file that a
 /// command wrapper runs (`varlock run -- ./worker.js`), that file stays an
 /// entry point.
 pub(super) fn entry_file_args(binary: &str, args: &[&str], file_args: Vec<String>) -> Vec<String> {
-    if is_file_target_tool(binary) {
-        return file_target_tool_loaded_files(binary, args);
-    }
     let executable = file_args.first().filter(|file| file.as_str() == binary);
     let mut entries: Vec<String> = executable.cloned().into_iter().collect();
     match argument_entries(binary, args) {
         ArgumentEntries::All => return file_args,
+        ArgumentEntries::Literal => {
+            return file_args
+                .into_iter()
+                .filter(|file| !is_glob(file))
+                .collect();
+        }
         ArgumentEntries::Listed(listed) => entries.extend(
             listed
                 .into_iter()
                 .filter(|token| looks_like_file_path(token))
                 .map(str::to_string),
         ),
-        ArgumentEntries::None => {}
+        ArgumentEntries::Loaded(loaded) => entries.extend(loaded),
     }
     entries
 }
 
 /// Return the script that `runtime` runs and the modules that its flags
 /// load. The script is the first positional argument after an optional
-/// subcommand. Each argument after the script goes to the script.
+/// subcommand that looks like a script file. Each argument after the script
+/// goes to the script.
 fn runtime_entry_args<'a>(
     name: &str,
     runtime: &ScriptRuntime,
@@ -292,35 +376,85 @@ fn runtime_entry_args<'a>(
 ) -> ArgumentEntries<'a> {
     let mut entries = Vec::new();
     let mut idx = 0;
-    let mut seen_subcommand = false;
+    let mut seen_positional = false;
     while let Some(&token) = args.get(idx) {
-        if runtime.loading_flags.contains(&token) {
-            entries.extend(
-                args.get(idx + 1)
-                    .copied()
-                    .filter(|value| RELATIVE_PATH_PREFIXES.iter().any(|p| value.starts_with(p))),
-            );
-            idx += 2;
+        if let Some((width, value)) = loading_flag(runtime, token, args.get(idx + 1).copied()) {
+            entries.extend(value);
+            idx += width;
             continue;
         }
         if let Some(width) = flag_width(runtime, token) {
             idx += width;
             continue;
         }
-        if !seen_subcommand {
-            if RUNTIME_BUILD_SUBCOMMANDS.contains(&(name, token)) {
+        if !seen_positional {
+            seen_positional = true;
+            if RUNTIME_RUNNER_SUBCOMMANDS.contains(&(name, token)) {
                 return ArgumentEntries::All;
             }
             if runtime.subcommands.contains(&token) {
-                seen_subcommand = true;
                 idx += 1;
                 continue;
             }
         }
-        entries.push(token);
-        break;
+        if is_script_candidate(token) {
+            // `node node_modules/jest/bin/jest.js a.test.js` runs jest.
+            if runs_file_runner(token) {
+                return ArgumentEntries::All;
+            }
+            entries.push(token);
+            break;
+        }
+        idx += 1;
     }
     ArgumentEntries::Listed(entries)
+}
+
+/// Return `Some` when `token` is a loading flag of `runtime`: the number of
+/// tokens that the flag takes, and the module value when it is a relative
+/// path. `next` is the token after `token`.
+fn loading_flag<'a>(
+    runtime: &ScriptRuntime,
+    token: &'a str,
+    next: Option<&'a str>,
+) -> Option<(usize, Option<&'a str>)> {
+    let (width, value) = if runtime.loading_flags.contains(&token) {
+        (2, next)
+    } else {
+        let (flag, value) = token.split_once('=')?;
+        if !runtime.loading_flags.contains(&flag) {
+            return None;
+        }
+        (1, Some(value))
+    };
+    let value = value.filter(|value| RELATIVE_PATH_PREFIXES.iter().any(|p| value.starts_with(p)));
+    Some((width, value))
+}
+
+/// Whether a positional argument of a runtime can be the script that it
+/// runs: a file with a script extension, or an extensionless path.
+fn is_script_candidate(token: &str) -> bool {
+    if is_glob(token) {
+        return false;
+    }
+    if SCRIPT_EXTENSIONS.iter().any(|ext| token.ends_with(ext)) {
+        return true;
+    }
+    token
+        .rsplit_once('/')
+        .is_some_and(|(_, file)| !file.is_empty() && !file.contains('.'))
+}
+
+/// Whether the script `path` is the binary of a known file runner inside
+/// `node_modules`: `node_modules/.bin/mocha` or
+/// `node_modules/jest/bin/jest.js`.
+fn runs_file_runner(path: &str) -> bool {
+    if !path.contains("node_modules/") {
+        return false;
+    }
+    let file = tool_name(path);
+    let stem = file.split('.').next().unwrap_or(file);
+    takes_file_arguments(stem)
 }
 
 /// The number of tokens that the flag `token` takes, with its value, or
@@ -424,14 +558,149 @@ mod tests {
     }
 
     #[test]
-    fn unknown_program_makes_no_entry_from_its_arguments() {
+    fn unknown_program_expands_no_glob() {
         for script in [
             "watchee -f './src/**/*' -c 'echo hi'",
-            "some-tool src/a.js src/lib/b.js",
-            "some-tool --input src/lib/b.js",
             "pnpm watchee -f './src/**/*' -c 'echo hi'",
+            "some-tool 'src/*.js' src/lib/{a,b}.js",
         ] {
             assert_eq!(entries(script), Vec::<String>::new(), "{script}");
+        }
+    }
+
+    #[test]
+    fn unknown_program_keeps_literal_files_and_option_values() {
+        for (script, expected) in [
+            (
+                "jscodeshift -t codemods/transform.js src/a.js",
+                &["codemods/transform.js", "src/a.js"][..],
+            ),
+            (
+                "knex migrate:latest --knexfile app/knexfile.js",
+                &["app/knexfile.js"],
+            ),
+            (
+                "typeorm migration:run -d app/config/typeorm.ts",
+                &["app/config/typeorm.ts"],
+            ),
+            (
+                "gulp build --gulpfile tools/gulpfile.js",
+                &["tools/gulpfile.js"],
+            ),
+            ("truffle exec app/script.js", &["app/script.js"]),
+            ("hardhat run tools/deploy.ts", &["tools/deploy.ts"]),
+        ] {
+            assert_eq!(entries(script), expected, "{script}");
+        }
+    }
+
+    #[test]
+    fn unknown_wrapper_applies_the_rules_of_the_program_that_it_runs() {
+        for script in [
+            "time node app/x.js data/a.js",
+            "env-cmd -f .env node app/x.js data/a.js",
+            "infisical run -- node app/x.js data/a.js",
+            "op run --env-file .env -- node app/x.js data/a.js",
+            "xvfb-run node app/x.js data/a.js",
+            "nice -n 10 node app/x.js data/a.js",
+            "percy exec -- node app/x.js data/a.js",
+            "clinic doctor -- node app/x.js data/a.js",
+        ] {
+            assert_eq!(entries(script), vec!["app/x.js".to_string()], "{script}");
+        }
+        assert_eq!(
+            entries("percy exec -- cypress run --spec app/a.cy.js"),
+            vec!["app/a.cy.js".to_string()]
+        );
+    }
+
+    #[test]
+    fn runtime_flag_values_do_not_hide_the_script() {
+        for script in [
+            "ts-node -P tsconfig.app.json app/x.ts data/a.ts",
+            "ts-node --project tsconfig.app.json app/x.ts data/a.ts",
+            "ts-node -O '{\"module\":\"commonjs\"}' app/x.ts data/a.ts",
+            "ts-node --compiler-options '{}' app/x.ts data/a.ts",
+            "ts-node-dev --project tsconfig.app.json app/x.ts data/a.ts",
+            "nodemon --config nodemon.app.json app/x.ts data/a.ts",
+            "tsx watch --include src/lib --exclude src/gen --ignore src/tmp app/x.ts data/a.ts",
+            "deno run -L info app/x.ts data/a.ts",
+            "deno run --log-level debug app/x.ts data/a.ts",
+            "node --unhandled-rejections strict app/x.ts data/a.ts",
+            "ts-node --unknown-flag tsconfig.json app/x.ts data/a.ts",
+        ] {
+            assert_eq!(entries(script), vec!["app/x.ts".to_string()], "{script}");
+        }
+        assert_eq!(
+            super::argument_entries(
+                "bun",
+                &["--tsconfig-override", "tsconfig.app.json", "app/x.ts"]
+            ),
+            super::ArgumentEntries::Listed(vec!["app/x.ts"])
+        );
+    }
+
+    #[test]
+    fn loading_flag_value_after_equals_stays_an_entry() {
+        assert_eq!(
+            entries("node --import=./app/instrument.mjs app/server.js data.js"),
+            vec![
+                "./app/instrument.mjs".to_string(),
+                "app/server.js".to_string()
+            ]
+        );
+        assert_eq!(
+            entries("node --require=./app/setup.js --import=tsx app/worker.js"),
+            vec!["./app/setup.js".to_string(), "app/worker.js".to_string()]
+        );
+    }
+
+    #[test]
+    fn runtime_runner_subcommands_keep_every_file() {
+        for (args, name) in [
+            (&["build", "./x.ts", "--outdir", "dist"][..], "bun"),
+            (&["build", "--compile", "./x.ts"], "bun"),
+            (&["serve", "x.ts"], "deno"),
+            (&["bench", "x.ts"], "deno"),
+        ] {
+            assert_eq!(
+                super::argument_entries(name, args),
+                super::ArgumentEntries::All,
+                "{name} {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_running_a_runner_binary_applies_the_runner_rules() {
+        assert_eq!(
+            entries("node --experimental-vm-modules node_modules/jest/bin/jest.js app/a.test.js"),
+            vec![
+                "node_modules/jest/bin/jest.js".to_string(),
+                "app/a.test.js".to_string()
+            ]
+        );
+        assert_eq!(
+            entries("node ./node_modules/.bin/mocha app/one.spec.js"),
+            vec![
+                "./node_modules/.bin/mocha".to_string(),
+                "app/one.spec.js".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn new_runners_keep_every_file() {
+        for runner in [
+            "ts-mocha",
+            "web-test-runner",
+            "wtr",
+            "electron-mocha",
+            "jest-electron",
+            "codecept",
+            "detox",
+        ] {
+            assert!(super::takes_file_arguments(runner), "{runner}");
         }
     }
 
@@ -453,7 +722,11 @@ mod tests {
                 .flat_map(|cmd| cmd.file_args)
                 .collect()
         };
-        assert!(forwarded("npm run codegen -- src/input.ts").is_empty());
+        assert_eq!(
+            forwarded("npm run codegen -- src/input.ts"),
+            vec!["src/input.ts"]
+        );
+        assert!(forwarded("npm run codegen -- 'src/**/*.ts'").is_empty());
         assert_eq!(
             forwarded("npm run gen src/input.ts"),
             vec!["scripts/gen.ts"]
@@ -464,7 +737,7 @@ mod tests {
     #[test]
     fn wrapped_executable_file_stays_an_entry() {
         assert_eq!(
-            entries("varlock run -- ./scripts/worker.js src/a.js"),
+            entries("varlock run -- ./scripts/worker.js"),
             vec!["./scripts/worker.js".to_string()]
         );
     }

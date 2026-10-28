@@ -487,18 +487,24 @@ points (issue #3967). `crates/core/src/scripts/argument_entries.rs` holds
 the rules:
 
 - A script runtime (`node`, `tsx`, `bun`, `deno run`, `nodemon`, a shell)
-  runs one script, its first positional argument. The arguments after the
-  script are data for the script. A relative path value of a runtime flag
-  that loads a module (`-r`, `--import`, `--loader`, `bun --preload`) stays
-  an entry point.
-- A known file runner (a test runner, a bundler, a compiler) runs or loads
-  every file argument, so each one stays an entry point.
-- Every other program, for example a watcher or a code generator that
-  fallow does not know, gets data from its arguments. Its arguments and
-  flag values name no entry point. A Dockerfile flag value names an entry
-  point only for a known file runner.
+  runs one script: its first positional argument that looks like a script
+  file. The arguments after the script are data for the script. A relative
+  path value of a runtime flag that loads a module (`-r`, `--import`,
+  `--loader`, `bun --preload`), also in the `--flag=value` form, stays an
+  entry point. When the script is the binary of a known file runner
+  (`node node_modules/jest/bin/jest.js`), the rules of that runner apply.
+- A known file runner (a test runner, a bundler, a compiler, and runtime
+  subcommands such as `bun build` and `deno serve`) runs or loads every
+  file argument, so each one stays an entry point.
+- A program that fallow does not know can run a known program
+  (`time node x.js`, `infisical run -- node x.js`). The rules of the first
+  known program in its arguments then apply. Without a known program, the
+  literal file arguments and option values stay entry points, but a glob
+  never expands from them. `watchee -f './src/**/*'` gives no entry point,
+  and `jscodeshift -t codemods/transform.js` keeps its transform.
 - A call of a script with an unknown body keeps every file argument,
   because the body can run any program.
+- `sh -c "<command>"` reads the quoted command with the same rules.
 
 Formatters and linters (`file_target_tools.rs`) and the built-in test
 runners (`node --test`, `bun test`, `deno test`, `borp`) keep their own

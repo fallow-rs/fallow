@@ -10,7 +10,7 @@
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
 mod argument_entries;
-pub use argument_entries::{ArgumentEntries, argument_entries, takes_file_arguments};
+pub use argument_entries::{ArgumentEntries, argument_entries, is_glob, is_script_runtime};
 mod borp;
 pub mod ci;
 #[cfg(test)]
