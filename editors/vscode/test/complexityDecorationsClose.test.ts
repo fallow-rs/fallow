@@ -23,6 +23,7 @@ vi.mock("vscode", () => {
 });
 
 import { ComplexityDecorationController } from "../src/complexityDecorations.js";
+import type { HealthFinding } from "../src/types.js";
 
 const makeDocument = (uri: string): { uri: { toString: () => string; scheme: string } } => ({
   uri: { toString: () => uri, scheme: "file" },
@@ -66,5 +67,19 @@ describe("ComplexityDecorationController staleDocuments eviction", () => {
 
     controller.handleDocumentClose(doc);
     expect(controller.isStale(doc)).toBe(false);
+  });
+});
+
+describe("ComplexityDecorationController findingsForDocument", () => {
+  it("keeps function findings and leaves out file-length findings", () => {
+    const controller = makeController();
+    const base = { path: "src/big.ts", col: 0, cognitive: 0, param_count: 0, severity: "high" };
+    const fn = { ...base, name: "parse", line: 12, cyclomatic: 30, line_count: 40, exceeded: "cyclomatic" };
+    const file = { ...base, name: "<file>", line: 1, cyclomatic: 0, line_count: 1240, exceeded: "file_lines" };
+    controller.setFindings([fn, file] as unknown as HealthFinding[]);
+
+    expect(controller.findingsForDocument("/project/src/big.ts").map((f) => f.name)).toEqual([
+      "parse",
+    ]);
   });
 });

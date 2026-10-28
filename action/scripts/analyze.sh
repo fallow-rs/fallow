@@ -277,6 +277,7 @@ build_command_args() {
       [ -n "${INPUT_MAX_CYCLOMATIC:-}" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
       [ -n "${INPUT_MAX_COGNITIVE:-}" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
       [ -n "${INPUT_MAX_CRAP:-}" ] && ARGS+=(--max-crap "$INPUT_MAX_CRAP")
+      [ -n "${INPUT_MAX_FILE_LINES:-}" ] && ARGS+=(--max-file-lines "$INPUT_MAX_FILE_LINES")
       [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
       [ -n "${INPUT_PRODUCTION_COVERAGE:-}" ] && ARGS+=(--runtime-coverage "$INPUT_PRODUCTION_COVERAGE")
       [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
@@ -546,6 +547,7 @@ fi
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
                "max-cyclomatic:${INPUT_MAX_CYCLOMATIC:-}" "max-cognitive:${INPUT_MAX_COGNITIVE:-}" \
+               "max-file-lines:${INPUT_MAX_FILE_LINES:-}" \
                "top:${INPUT_TOP:-}" "min-commits:${INPUT_MIN_COMMITS:-}" "threads:${INPUT_THREADS:-}" \
                "min-invocations-hot:${INPUT_MIN_INVOCATIONS_HOT:-}" "min-observation-volume:${INPUT_MIN_OBSERVATION_VOLUME:-}"; do
   name="${name_val%%:*}"; val="${name_val#*:}"

@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { isFileLengthFinding } from "./health-utils.js";
 import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { ComplexityContribution, ComplexityContributionKind, HealthFinding } from "./types.js";
 import { resolveFilePath } from "./treeView-utils.js";
@@ -372,7 +373,9 @@ export class ComplexityDecorationController {
 
   /** Findings whose function lives in the given document (for lens + hover). */
   findingsForDocument(documentPath: string): readonly HealthFinding[] {
-    return this.findings.filter((f) => sameFile(f.path, documentPath, this.workspaceRoot()));
+    return this.findings.filter(
+      (f) => !isFileLengthFinding(f) && sameFile(f.path, documentPath, this.workspaceRoot()),
+    );
   }
 
   /**

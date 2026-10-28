@@ -261,6 +261,10 @@ pub struct CombinedParams {
     /// Maximum CRAP score threshold.
     pub max_crap: Option<f64>,
 
+    /// Maximum physical lines per file (default 0, off). A longer file is
+    /// reported as a complexity finding with `exceeded: "file_lines"`.
+    pub max_file_lines: Option<u32>,
+
     /// Istanbul or raw V8 coverage file or directory used by the health section.
     /// When omitted, `FALLOW_COVERAGE` and then `health.coverage` apply.
     pub coverage: Option<String>,

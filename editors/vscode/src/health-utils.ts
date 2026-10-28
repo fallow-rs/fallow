@@ -209,6 +209,13 @@ export const severityThemeColor = (severity: FindingSeverity | string): string |
 };
 
 /**
+ * Whether a complexity finding reports a whole file that is longer than
+ * `health.maxFileLines`, not one function.
+ */
+export const isFileLengthFinding = (finding: { readonly exceeded?: string }): boolean =>
+  finding.exceeded === "file_lines";
+
+/**
  * Compact offense summary for a complexity finding's row description, e.g.
  * `parseArgs · 24 cyc · 18 cog · CRAP 31`. The row label is the file:line (for
  * consistency with the other file-led Health sections), so this dimmed detail
@@ -221,7 +228,15 @@ export const formatComplexityOffense = (finding: {
   readonly cyclomatic: number;
   readonly cognitive: number;
   readonly crap?: number | null;
+  readonly exceeded?: string;
+  readonly line_count?: number;
+  readonly max_file_lines?: number | null;
 }): string => {
+  if (isFileLengthFinding(finding)) {
+    const limit =
+      typeof finding.max_file_lines === "number" ? ` · limit ${finding.max_file_lines}` : "";
+    return `${finding.line_count ?? 0} lines${limit}`;
+  }
   const crapSegment = typeof finding.crap === "number" ? ` · CRAP ${finding.crap.toFixed(0)}` : "";
   return `${finding.name} · ${finding.cyclomatic} cyc · ${finding.cognitive} cog${crapSegment}`;
 };

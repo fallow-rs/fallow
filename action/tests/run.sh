@@ -1049,6 +1049,21 @@ ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "analyze: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "analyze: forwards coverage-root to default combined command"
 
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="json" INPUT_MAX_FILE_LINES="800" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+assert_contains "$ARGS" "--max-file-lines 800" "analyze: forwards max-file-lines to health"
+
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="json" INPUT_MAX_FILE_LINES="lots" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" "max-file-lines must be a positive integer" "analyze: rejects a non-numeric max-file-lines"
+
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output" "$ANALYZE_TMP/github-env"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   GITHUB_ENV="$ANALYZE_TMP/github-env" INPUT_ROOT="." INPUT_COMMAND="dead-code" \

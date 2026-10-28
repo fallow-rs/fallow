@@ -5,7 +5,7 @@ vi.mock("vscode", async () => {
   return createTreeViewVscodeMock("/workspace");
 });
 
-import { HealthTreeProvider } from "../src/healthTreeView.js";
+import { complexityTargetOf, HealthTreeProvider } from "../src/healthTreeView.js";
 import { OPEN_FILE_COMMAND, type OpenFileCommandArgs } from "../src/openFileCommand.js";
 import type { HealthOutput } from "../src/types.js";
 import type { TestTreeItem } from "./vscodeTreeMock.js";
@@ -208,5 +208,42 @@ describe("HealthTreeProvider type coupling", () => {
         col: 4,
       }),
     ]);
+  });
+});
+
+describe("HealthTreeProvider file-length findings", () => {
+  it("shows the file and its line count, without a function breakdown", () => {
+    const provider = new HealthTreeProvider();
+    provider.update({
+      findings: [
+        {
+          path: "src/big.ts",
+          name: "<file>",
+          line: 1,
+          col: 0,
+          cyclomatic: 0,
+          cognitive: 0,
+          line_count: 1240,
+          param_count: 0,
+          exceeded: "file_lines",
+          severity: "high",
+          max_file_lines: 800,
+          actions: [],
+        },
+      ],
+      summary: {},
+    } as unknown as HealthOutput);
+
+    const sections = provider.getChildren() as TestTreeItem[];
+    const complexity = sections.find((section) => String(section.label).startsWith("Complexity"));
+    const [row] = provider.getChildren(complexity as never) as TestTreeItem[];
+    expect(row?.label).toBe("src/big.ts");
+    expect(String(row?.tooltip)).toContain("1240 lines, limit 800");
+    expect(String(row?.tooltip)).not.toContain("cyclomatic");
+
+    const [detail] = provider.getChildren(row as never) as TestTreeItem[];
+    expect(detail?.label).toBe("1240 lines · limit 800");
+    expect(complexityTargetOf(detail as never)).toBeUndefined();
+    expect(complexityTargetOf(row as never)).toBeUndefined();
   });
 });
