@@ -1,0 +1,13 @@
+{
+  "name": "stale-suppression-production-only-members",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "pinia": "^3.0.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "vitest": "3.2.0"
+  }
+}

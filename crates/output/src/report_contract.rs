@@ -221,10 +221,25 @@ pub fn coverage_setup_meta() -> Value {
             "dockerfile_snippet": "Environment snippet for file-system capture in containerized Node runtimes, or null when not applicable.",
             "commands": "Package-manager commands needed to install the runtime beacon and sidecar packages.",
             "next_steps": "Ordered setup workflow after applying the emitted snippets.",
-            "warnings": "Actionable setup caveats discovered while building the recipe."
+            "warnings": "Actionable setup caveats discovered while building the recipe.",
+            "cloud": "Fallow Cloud plan, present only with --cloud. With --cloud the snippets send coverage over HTTP with the deployed commit SHA and the production origin.",
+            "cloud.project_id": "Fallow Cloud project id (owner/repo) from --project-id, $GITHUB_REPOSITORY, $CI_PROJECT_PATH or the git remote, or null when none was detected.",
+            "cloud.git_sha": "Commit SHA that --wait checks: --git-sha, else git rev-parse HEAD, or null outside a git repository.",
+            "cloud.endpoint": "Fallow Cloud API base URL.",
+            "cloud.api_key_env": "Environment variable that holds the full API key in CI and on the server. The plan never holds a key value.",
+            "cloud.browser_key_env": "Build-time variable that holds the ingest-only browser key, or null when no member runs in the browser.",
+            "cloud.commit_sha_env": "Runtime variables the server snippets read the deployed commit SHA from, in order.",
+            "cloud.ci.steps": "GitHub Actions steps for the job that builds and deploys: a full-history checkout, the inventory and source map uploads, and the deployment registration, all for $GITHUB_SHA.",
+            "cloud.ci.workflows_detected": "Existing workflow files that look like a deploy workflow, relative to the project root.",
+            "cloud.source_maps": "Whether the CI steps upload source maps, the build directory of each bundled member (dirs), and why.",
+            "cloud.activation_url": "Activation endpoint that reports each setup step for one SHA, or null without a project id.",
+            "cloud.wait_command": "Command that waits until Fallow Cloud reports every setup step as done.",
+            "cloud.wait": "Result of --wait: outcome complete, timeout or error, and the last activation body from the cloud, unchanged. New step ids and states can appear in it."
         },
         "enums": {
             "framework_detected": ["nextjs", "nestjs", "nuxt", "sveltekit", "astro", "remix", "vite", "plain_node", "unknown"],
+            "cloud.ci.provider": ["github_actions"],
+            "cloud.wait.outcome": ["complete", "timeout", "error"],
             "runtime_targets": ["node", "browser"],
             "package_manager": ["npm", "pnpm", "yarn", "bun", null]
         },

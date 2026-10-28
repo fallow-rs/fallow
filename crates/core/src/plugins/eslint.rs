@@ -390,7 +390,7 @@ const MAX_NODE_MODULES_WALK_DEPTH: usize = 8;
 ///
 /// Mirrors Node.js module resolution and handles monorepos where dependencies are
 /// hoisted to the monorepo root rather than installed per-workspace.
-fn find_package_dir(start: &Path, pkg_name: &str) -> Option<PathBuf> {
+pub(super) fn find_package_dir(start: &Path, pkg_name: &str) -> Option<PathBuf> {
     for dir in start.ancestors().take(MAX_NODE_MODULES_WALK_DEPTH) {
         let candidate = dir.join("node_modules").join(pkg_name);
         if candidate.join("package.json").exists() {

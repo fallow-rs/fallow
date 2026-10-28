@@ -93,12 +93,14 @@ fn exact_framework_contract_only_replaces_its_matching_plugin_rule() {
         members: vec!["render".to_string(), "localHook".to_string()],
     });
 
-    assert!(super::framework_contract_covers_rule(&contract, &matching));
-    assert!(!super::framework_contract_covers_rule(
+    assert!(super::class_member_rules::framework_contract_covers_rule(
+        &contract, &matching
+    ));
+    assert!(!super::class_member_rules::framework_contract_covers_rule(
         &contract,
         &local_name_only
     ));
-    assert!(!super::framework_contract_covers_rule(
+    assert!(!super::class_member_rules::framework_contract_covers_rule(
         &contract,
         &extra_member
     ));

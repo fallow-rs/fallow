@@ -1369,6 +1369,14 @@ export type CoverageSetupPackageManager = ("npm" | "pnpm" | "yarn" | "bun")
  */
 export type CoverageSetupRuntimeTarget = ("node" | "browser")
 /**
+ * CI provider of a Fallow Cloud setup plan.
+ */
+export type CoverageSetupCiProvider = "github_actions"
+/**
+ * Outcome of `fallow coverage setup --cloud --wait`.
+ */
+export type CoverageSetupWaitOutcome = ("complete" | "timeout" | "error")
+/**
  * Schema-version discriminator for [`CoverageAnalyzeOutput`].
  */
 export type CoverageAnalyzeSchemaVersion = ("1" | "2")
@@ -13711,6 +13719,10 @@ next_steps: string[]
  */
 warnings: string[]
 /**
+ * Fallow Cloud plan, present only for `fallow coverage setup --cloud`.
+ */
+cloud?: (CoverageSetupCloud | null)
+/**
  * `_meta` block with docs and field definitions, when requested.
  */
 _meta?: {
@@ -13784,6 +13796,112 @@ path: string
  * The snippet source text.
  */
 content: string
+}
+/**
+ * Fallow Cloud plan of `fallow coverage setup --cloud`.
+ *
+ * The beacon, the inventory, the source maps and the deployment registration
+ * must all carry the same commit SHA. The plan names only the environment
+ * variable names of keys, never a key value.
+ */
+export interface CoverageSetupCloud {
+/**
+ * Fallow Cloud project id (`owner/repo`), or null when it was not detected.
+ */
+project_id?: (string | null)
+/**
+ * Commit SHA that `--wait` checks: `--git-sha`, else `HEAD` of the
+ * working tree, or null outside a git repository.
+ */
+git_sha?: (string | null)
+/**
+ * Fallow Cloud API base URL.
+ */
+endpoint: string
+/**
+ * Environment variable that holds the full API key in CI and on the server.
+ */
+api_key_env: string
+/**
+ * Environment variable that holds the ingest-only browser key, when a
+ * member runs in the browser.
+ */
+browser_key_env?: (string | null)
+/**
+ * Environment variables the server snippets read the deployed commit SHA
+ * from, in order.
+ */
+commit_sha_env: string[]
+ci: CoverageSetupCi
+source_maps: CoverageSetupSourceMaps
+/**
+ * Activation endpoint that reports each setup step, or null without a
+ * project id.
+ */
+activation_url?: (string | null)
+/**
+ * Command that waits until the cloud reports every step as done.
+ */
+wait_command: string
+/**
+ * Result of `--wait`, present only when the command waited.
+ */
+wait?: (CoverageSetupWait | null)
+}
+/**
+ * CI steps of a Fallow Cloud setup plan.
+ */
+export interface CoverageSetupCi {
+provider: CoverageSetupCiProvider
+/**
+ * Existing workflow files that look like a deploy workflow, relative to
+ * the project root.
+ */
+workflows_detected: string[]
+/**
+ * Workflow steps to add to the job that builds and deploys.
+ */
+steps: string
+/**
+ * Where the steps go and what they need.
+ */
+instructions: string
+}
+/**
+ * Source map guidance of a Fallow Cloud setup plan.
+ */
+export interface CoverageSetupSourceMaps {
+/**
+ * Whether the CI steps upload source maps.
+ */
+needed: boolean
+/**
+ * Build output directories the maps are uploaded from, one per bundled
+ * workspace member, relative to the project root. Empty when no upload
+ * is needed.
+ */
+dirs: string[]
+/**
+ * Why the upload is or is not needed.
+ */
+reason: string
+}
+/**
+ * Result of `fallow coverage setup --cloud --wait`.
+ */
+export interface CoverageSetupWait {
+outcome: CoverageSetupWaitOutcome
+/**
+ * The last activation response body (`data`) from the cloud, unchanged,
+ * or null when no read succeeded. New step ids and states can appear.
+ */
+activation?: {
+[k: string]: unknown
+}
+/**
+ * Error text when the outcome is `error`.
+ */
+message?: (string | null)
 }
 /**
  * Envelope emitted by `fallow coverage analyze --format json`.

@@ -147,7 +147,9 @@ fn resolve_command_output(cli: &Cli, selected: OutputFormat) -> OutputFormat {
             | Command::Config { path: false }
             | Command::Coverage {
                 subcommand:
-                    CoverageCli::Setup { json: true, .. }
+                    CoverageCli::Setup {
+                        args: crate::coverage::CoverageSetupCli { json: true, .. },
+                    }
                     | CoverageCli::ReviewPacket { .. }
                     | CoverageCli::DeploymentChanges { .. },
             },
@@ -172,8 +174,8 @@ fn command_payload_is_json(cli: &Cli, selected: OutputFormat) -> bool {
         ) => true,
         Some(Command::Config { path }) => !path,
         Some(Command::Coverage {
-            subcommand: CoverageCli::Setup { json, .. },
-        }) => *json,
+            subcommand: CoverageCli::Setup { args },
+        }) => args.json,
         Some(
             Command::Coverage {
                 subcommand:

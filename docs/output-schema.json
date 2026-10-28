@@ -402,6 +402,17 @@
           },
           "description": "Non-fatal problems encountered during detection."
         },
+        "cloud": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSetupCloud"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fallow Cloud plan, present only for `fallow coverage setup --cloud`."
+        },
         "_meta": {
           "description": "`_meta` block with docs and field definitions, when requested."
         }
@@ -34780,6 +34791,196 @@
         "rejected"
       ],
       "description": "The resume facts of a `--resume` run."
+    },
+    "CoverageSetupCi": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "description": "CI provider the steps are written for.",
+          "$ref": "#/definitions/CoverageSetupCiProvider"
+        },
+        "workflows_detected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Existing workflow files that look like a deploy workflow, relative to\nthe project root."
+        },
+        "steps": {
+          "type": "string",
+          "description": "Workflow steps to add to the job that builds and deploys."
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Where the steps go and what they need."
+        }
+      },
+      "required": [
+        "provider",
+        "workflows_detected",
+        "steps",
+        "instructions"
+      ],
+      "description": "CI steps of a Fallow Cloud setup plan."
+    },
+    "CoverageSetupCloud": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fallow Cloud project id (`owner/repo`), or null when it was not detected."
+        },
+        "git_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Commit SHA that `--wait` checks: `--git-sha`, else `HEAD` of the\nworking tree, or null outside a git repository."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Fallow Cloud API base URL."
+        },
+        "api_key_env": {
+          "type": "string",
+          "description": "Environment variable that holds the full API key in CI and on the server."
+        },
+        "browser_key_env": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Environment variable that holds the ingest-only browser key, when a\nmember runs in the browser."
+        },
+        "commit_sha_env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Environment variables the server snippets read the deployed commit SHA\nfrom, in order."
+        },
+        "ci": {
+          "description": "CI steps that upload the inventory and source maps and register the\ndeployment.",
+          "$ref": "#/definitions/CoverageSetupCi"
+        },
+        "source_maps": {
+          "description": "Whether the production build needs a source map upload.",
+          "$ref": "#/definitions/CoverageSetupSourceMaps"
+        },
+        "activation_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Activation endpoint that reports each setup step, or null without a\nproject id."
+        },
+        "wait_command": {
+          "type": "string",
+          "description": "Command that waits until the cloud reports every step as done."
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSetupWait"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Result of `--wait`, present only when the command waited."
+        }
+      },
+      "required": [
+        "endpoint",
+        "api_key_env",
+        "commit_sha_env",
+        "ci",
+        "source_maps",
+        "wait_command"
+      ],
+      "description": "Fallow Cloud plan of `fallow coverage setup --cloud`.\n\nThe beacon, the inventory, the source maps and the deployment registration\nmust all carry the same commit SHA. The plan names only the environment\nvariable names of keys, never a key value."
+    },
+    "CoverageSetupSourceMaps": {
+      "type": "object",
+      "properties": {
+        "needed": {
+          "type": "boolean",
+          "description": "Whether the CI steps upload source maps."
+        },
+        "dirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Build output directories the maps are uploaded from, one per bundled\nworkspace member, relative to the project root. Empty when no upload\nis needed."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the upload is or is not needed."
+        }
+      },
+      "required": [
+        "needed",
+        "dirs",
+        "reason"
+      ],
+      "description": "Source map guidance of a Fallow Cloud setup plan."
+    },
+    "CoverageSetupWait": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "description": "How the wait ended.",
+          "$ref": "#/definitions/CoverageSetupWaitOutcome"
+        },
+        "activation": {
+          "description": "The last activation response body (`data`) from the cloud, unchanged,\nor null when no read succeeded. New step ids and states can appear."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Error text when the outcome is `error`."
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "description": "Result of `fallow coverage setup --cloud --wait`."
+    },
+    "CoverageSetupCiProvider": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "github_actions",
+          "description": "GitHub Actions workflow steps."
+        }
+      ],
+      "description": "CI provider of a Fallow Cloud setup plan."
+    },
+    "CoverageSetupWaitOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "The cloud reported every step as done."
+        },
+        {
+          "type": "string",
+          "const": "timeout",
+          "description": "The wait timed out before every step was done."
+        },
+        {
+          "type": "string",
+          "const": "error",
+          "description": "The activation endpoint could not be read."
+        }
+      ],
+      "description": "Outcome of `fallow coverage setup --cloud --wait`."
     }
   }
 }

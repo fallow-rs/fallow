@@ -37,6 +37,49 @@ fn is_path_specifier(find: &str) -> bool {
     find.starts_with("./") || find.starts_with("../") || find.starts_with('/')
 }
 
+/// Credit every export of an alias replacement file when the resolver never
+/// routes an import to it. The import of the original target is then the only
+/// consumer, so no import names the exports of the replacement file.
+///
+/// The resolver applies a plugin alias only as a fallback, which misses two
+/// cases:
+/// - A relative or absolute key, such as `./clock.js`, resolves to the
+///   original file (issue #3963).
+/// - A bare key for an installed package, such as `pkg` with `node_modules/pkg`
+///   present, resolves to the real package.
+///
+/// A bare key for a missing package and a path-alias key (`~/lib`, `@lib`)
+/// reach the replacement file through the resolver, so their exports keep
+/// precise tracking. A scope-only key such as `@lib` counts as a bare key, but
+/// no installed package has that name.
+pub(super) fn credit_unrouted_replacement(
+    result: &mut PluginResult,
+    find: &str,
+    normalized: &str,
+    config_path: &Path,
+) {
+    if !alias_target_is_source_file(normalized) {
+        return;
+    }
+    let unrouted = is_path_specifier(find)
+        || (is_bare_package_specifier(find) && is_installed_package(find, config_path));
+    if unrouted {
+        result.push_entry_export_credit(normalized.to_owned(), ["*"]);
+    }
+}
+
+/// True when the package of `specifier` is installed in a `node_modules`
+/// directory at or above the config directory. A package that only a nested
+/// workspace package installs is not found, so its replacement keeps the
+/// current behavior.
+fn is_installed_package(specifier: &str, config_path: &Path) -> bool {
+    let Some(config_dir) = config_path.parent() else {
+        return false;
+    };
+    let pkg_name = crate::resolve::extract_package_name(specifier);
+    super::eslint::find_package_dir(config_dir, &pkg_name).is_some()
+}
+
 /// Apply one alias entry to the plugin result.
 ///
 /// Path aliases feed `path_aliases`, source-file targets seed setup files, and
@@ -71,14 +114,8 @@ pub(super) fn process_test_alias(
     result
         .path_aliases
         .push((find.to_owned(), normalized.clone()));
+    credit_unrouted_replacement(result, find, &normalized, config_path);
     if alias_target_is_source_file(&normalized) {
-        if is_path_specifier(find) {
-            // The resolver resolves a relative or absolute import to the
-            // original file and never applies the alias. The import of the
-            // original file is then the only consumer, so credit every export
-            // of the replacement file (issue #3963).
-            result.push_entry_export_credit(normalized.clone(), ["*"]);
-        }
         result.setup_files.push(root.join(&normalized));
     }
     if find_is_pkg {
@@ -201,6 +238,70 @@ mod tests {
             result.entry_export_credits.is_empty(),
             "the resolver routes these imports through the alias: {:?}",
             result.entry_export_credits
+        );
+    }
+
+    #[test]
+    fn installed_bare_key_credits_every_replacement_export() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/@scope/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "@scope/pkg" }"#)
+            .expect("write manifest");
+        let config_path = root.join("vitest.config.ts");
+
+        let mut result = PluginResult::default();
+        process_test_alias(
+            &mut result,
+            "@scope/pkg",
+            "./mocks/pkg.ts",
+            false,
+            &config_path,
+            root,
+        );
+        for find in ["@lib", "~/lib", "missing-pkg"] {
+            process_test_alias(
+                &mut result,
+                find,
+                "./src/lib/index.ts",
+                false,
+                &config_path,
+                root,
+            );
+        }
+        assert_eq!(
+            result.entry_export_credits,
+            vec![crate::plugins::UsedExportRule::new("mocks/pkg.ts", ["*"])],
+            "only the installed package key credits the replacement exports"
+        );
+    }
+
+    #[test]
+    fn hoisted_bare_key_credits_replacement_of_nested_config() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg" }"#).expect("write manifest");
+        let config_path = root.join("packages/app/vitest.config.ts");
+
+        let mut result = PluginResult::default();
+        process_test_alias(
+            &mut result,
+            "pkg",
+            "./mocks/pkg.ts",
+            false,
+            &config_path,
+            root,
+        );
+        assert_eq!(
+            result.entry_export_credits,
+            vec![crate::plugins::UsedExportRule::new(
+                "packages/app/mocks/pkg.ts",
+                ["*"]
+            )],
+            "a package hoisted above the config directory is installed"
         );
     }
 

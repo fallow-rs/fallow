@@ -822,6 +822,10 @@ pub(super) struct UnusedMemberScanInput<'a> {
     /// decorated members, and `@property` (the public attribute API), stay
     /// skipped.
     pub(super) lit_active: bool,
+    /// Whether to warn about `usedClassMembers` and `ignoreDecorators` entries
+    /// that match nothing. A second scan of the same run sets it to `false`,
+    /// so each warning appears once.
+    pub(super) report_unmatched_patterns: bool,
 }
 
 struct PreparedMemberScan<'a> {
@@ -878,8 +882,10 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         unused_store_members.extend(store_members);
     }
 
-    allowlist.warn_unmatched_patterns();
-    ignore_decorators.warn_unmatched();
+    if input.report_unmatched_patterns {
+        allowlist.warn_unmatched_patterns();
+        ignore_decorators.warn_unmatched();
+    }
 
     UnusedMemberResults {
         enum_members: unused_enum_members,
