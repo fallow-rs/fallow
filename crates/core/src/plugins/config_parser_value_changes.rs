@@ -28,9 +28,12 @@ type Chain = Vec<Option<String>>;
 /// changes every value that it reaches.
 const MAX_CHAIN: usize = 32;
 
-/// The maximum number of (name, change) pairs that one analysis follows.
-/// Above it, every name of the program counts as changed.
-const MAX_CHANGES: usize = 100_000;
+/// The maximum number of steps that one analysis takes: each change that it
+/// records and each alias that it follows counts as one step.
+const MAX_STEPS: usize = 200_000;
+
+/// The maximum number of aliases that one analysis collects.
+const MAX_EDGES: usize = 20_000;
 
 /// One change of a value, with the key chain under the changed name.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -115,6 +118,11 @@ impl Edge {
 /// The names that the program changes, directly, through an alias or through
 /// a call to a local function. A name of the program that no change reaches
 /// is not in the set.
+///
+/// When the program has more than [`MAX_EDGES`] aliases, or the analysis
+/// needs more than [`MAX_STEPS`] steps, the result is empty: no change
+/// through an alias counts, and the caller reads the literal values. A missed
+/// change can only hide an unused file.
 pub(super) fn changed_names(program: &Program<'_>) -> FxHashSet<String> {
     let mut functions = FunctionFinder::default();
     functions.visit_program(program);
@@ -129,13 +137,17 @@ pub(super) fn changed_names(program: &Program<'_>) -> FxHashSet<String> {
         next_function: None,
         edges: Vec::new(),
         changes: Vec::new(),
+        overflow: false,
     };
     collector.visit_program(program);
-    propagate(&collector.edges, collector.changes).unwrap_or_else(|| all_names(program))
+    if collector.overflow {
+        return FxHashSet::default();
+    }
+    propagate(&collector.edges, collector.changes).unwrap_or_default()
 }
 
 /// Follow each change along the aliases to the roots. Returns `None` when the
-/// analysis stops at [`MAX_CHANGES`].
+/// analysis stops at [`MAX_STEPS`].
 fn propagate(edges: &[Edge], changes: Vec<(String, Change)>) -> Option<FxHashSet<String>> {
     let mut edges_by_name: FxHashMap<&str, Vec<&Edge>> = FxHashMap::default();
     for edge in edges {
@@ -144,40 +156,28 @@ fn propagate(edges: &[Edge], changes: Vec<(String, Change)>) -> Option<FxHashSet
             .or_default()
             .push(edge);
     }
-    let mut seen: FxHashSet<(String, Change)> = FxHashSet::default();
+    let mut steps = changes.len();
+    if steps > MAX_STEPS {
+        return None;
+    }
+    let mut seen: FxHashSet<(String, Change)> = changes.iter().cloned().collect();
     let mut pending = changes;
-    while let Some(item) = pending.pop() {
-        if !seen.insert(item.clone()) {
-            continue;
-        }
-        if seen.len() > MAX_CHANGES {
-            return None;
-        }
-        let (name, change) = item;
+    while let Some((name, change)) = pending.pop() {
         for edge in edges_by_name.get(name.as_str()).into_iter().flatten() {
-            if let Some(next) = edge.translate(&change) {
-                pending.push((edge.root.clone(), next));
+            steps += 1;
+            if steps > MAX_STEPS {
+                return None;
+            }
+            let Some(next) = edge.translate(&change) else {
+                continue;
+            };
+            let next = (edge.root.clone(), next);
+            if seen.insert(next.clone()) {
+                pending.push(next);
             }
         }
     }
     Some(seen.into_iter().map(|(name, _)| name).collect())
-}
-
-/// Every identifier that the program names, for the overflow case.
-fn all_names(program: &Program<'_>) -> FxHashSet<String> {
-    #[derive(Default)]
-    struct Names(FxHashSet<String>);
-    impl<'a> Visit<'a> for Names {
-        fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-            self.0.insert(identifier.name.to_string());
-        }
-        fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
-            self.0.insert(identifier.name.to_string());
-        }
-    }
-    let mut names = Names::default();
-    names.visit_program(program);
-    names.0
 }
 
 /// The functions of the program that a name binds, with the argument index
@@ -255,9 +255,19 @@ struct Collector<'l> {
     next_function: Option<String>,
     edges: Vec<Edge>,
     changes: Vec<(String, Change)>,
+    /// Set when the program has more than [`MAX_EDGES`] aliases.
+    overflow: bool,
 }
 
 impl Collector<'_> {
+    fn push_edge(&mut self, edge: Edge) {
+        if self.edges.len() >= MAX_EDGES {
+            self.overflow = true;
+            return;
+        }
+        self.edges.push(edge);
+    }
+
     /// The name that `name` stands for in the current function.
     fn resolve(&self, name: &str) -> String {
         self.scopes
@@ -347,7 +357,7 @@ impl Collector<'_> {
             other => {
                 if let Some((root, keys)) = member_chain(other) {
                     let root = self.resolve(root);
-                    self.edges.push(Edge {
+                    self.push_edge(Edge {
                         name: name.to_owned(),
                         root,
                         prefix: prefix.clone(),
@@ -439,7 +449,7 @@ impl Collector<'_> {
                 } else {
                     Vec::new()
                 };
-                self.edges.push(Edge {
+                self.push_edge(Edge {
                     name: stand_in.clone(),
                     root: argument,
                     prefix,

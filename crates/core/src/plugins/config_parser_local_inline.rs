@@ -453,6 +453,37 @@ mod tests {
         );
     }
 
+    /// A config whose array `h.k` holds `OPTS` `copies` times, with one
+    /// change of `OPTS` through `h` for each of `writes` keys.
+    fn many_alias_edges(copies: usize, writes: usize) -> String {
+        let elements = vec!["OPTS"; copies].join(", ");
+        let changes = (0..writes)
+            .map(|i| format!("h.k[0].files.f{i} = 1;\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        format!(
+            "const OPTS = {{ files: [\"./a.ts\"] }};\nconst h = {{ k: [{elements}] }};\n{changes}export default {{ x: OPTS }};\n"
+        )
+    }
+
+    #[test]
+    fn too_many_alias_edges_or_steps_end_fast_and_read_the_literal_value() {
+        let limit = std::time::Duration::from_secs(5);
+        // More aliases than the edge limit.
+        // More steps than the step limit: each write follows each alias.
+        for source in [many_alias_edges(25_000, 1), many_alias_edges(10_000, 30)] {
+            let start = std::time::Instant::now();
+            assert_eq!(
+                extract_config_string_or_array(&source, js(), &["x", "files"]),
+                vec!["./a.ts"]
+            );
+            assert!(start.elapsed() < limit, "took {:?}", start.elapsed());
+        }
+        // Below both limits, the change counts.
+        let source = many_alias_edges(10_000, 5);
+        assert!(extract_config_string_or_array(&source, js(), &["x", "files"]).is_empty());
+    }
+
     #[test]
     fn many_aliases_still_find_a_change_through_the_last_one() {
         let aliases = (0..=4096)
