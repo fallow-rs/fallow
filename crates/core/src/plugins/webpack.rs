@@ -1111,6 +1111,103 @@ mod tests {
     }
 
     #[test]
+    fn entry_constant_in_a_config_that_changes_other_keys_still_resolves() {
+        let cases = [
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, plugins: [] };
+               if (process.env.ANALYZE) { config.devtool = "source-map"; }
+               module.exports = config;"#,
+            r#"const webpack = require("webpack");
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, plugins: [] };
+               if (process.env.NODE_ENV === "production") { config.plugins.push(new webpack.ProgressPlugin()); }
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry: entry, output: { path: "dist" } };
+               config.output.filename = "[name].js";
+               delete config.mode;
+               module.exports = config;"#,
+        ];
+        for source in cases {
+            assert!(credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn entry_constant_that_a_holder_changes_through_its_key_does_not_resolve() {
+        let cases = [
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               config.entry.admin = "./src/other.ts";
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               config[key].admin = "./src/other.ts";
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               configure(config);
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const list = [entry];
+               list[0].admin = "./src/other.ts";
+               module.exports = { entry };"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { ...{ entry } };
+               config.devtool = "source-map";
+               module.exports = { entry };"#,
+        ];
+        for source in cases {
+            assert!(!credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn local_function_whose_parameter_shares_a_name_still_reads_its_argument() {
+        // The parameter `config` of `htmlPages` is not the top-level `config`.
+        let source = r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+            function htmlPages(config) { return Object.keys(config).map(() => null); }
+            const config = { mode: "production", entry, plugins: htmlPages(entry) };
+            if (process.env.ANALYZE) { config.devtool = "source-map"; }
+            module.exports = config;"#;
+        assert!(credits_admin_entry(source));
+    }
+
+    #[test]
+    fn local_function_that_changes_its_parameter_through_a_call_counts_as_a_change() {
+        let cases = [
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               function outer(x) { inner(x); }
+               function inner(y) { y.admin = "./src/other.ts"; }
+               outer(entry);
+               module.exports = { entry };"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const walk = function (e, n) { if (n > 0) return walk(e, n - 1); e.admin = "./src/other.ts"; };
+               walk(entry, 2);
+               module.exports = { entry };"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               function configure(e) { const alias = e; alias.admin = "./src/other.ts"; }
+               configure(entry);
+               module.exports = { entry };"#,
+        ];
+        for source in cases {
+            assert!(!credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn local_binding_that_shadows_a_top_level_function_counts_as_a_change() {
+        let source = r#"function setEntry(e) { return Object.keys(e); }
+            module.exports = () => {
+              const { setEntry } = require("./helpers.js");
+              const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+              setEntry(entry);
+              return { entry };
+            };"#;
+        assert!(!credits_admin_entry(source));
+    }
+
+    #[test]
     fn entry_constant_that_a_local_function_only_reads_still_resolves() {
         let source = r#"const entries = { main: "./src/main.ts", admin: "./src/admin.ts" };
             function htmlPages(e) { return Object.keys(e).map(() => null); }

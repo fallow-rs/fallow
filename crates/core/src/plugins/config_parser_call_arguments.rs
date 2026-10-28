@@ -14,7 +14,7 @@ use oxc_syntax::scope::ScopeFlags;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::super::{MAX_CONFIG_WRAPPER_DEPTH, find_variable_init, is_module_exports_target};
-use super::{changes_first_argument, member_root};
+use super::{Scope, changes_first_argument, member_root, scope_counts};
 
 /// Functions that only read their arguments.
 const READ_ONLY_FUNCTIONS: &[&str] = &[
@@ -65,10 +65,14 @@ pub(super) struct CallArguments {
     modules: FxHashSet<String>,
     /// The spans of the exported config calls.
     exported_calls: FxHashSet<(u32, u32)>,
-    /// The parameter names of each top-level function of the file. A call to
-    /// such a function makes each parameter an alias of each argument, so a
-    /// change through a parameter changes the argument.
+    /// The parameter names of each top-level function of the file whose name
+    /// the program binds once.
     local_functions: FxHashMap<String, Vec<String>>,
+    /// The local functions whose body can change an argument: it writes to a
+    /// parameter, calls a mutating method on it, or passes it to a call that
+    /// counts. A call to another local function changes its arguments only
+    /// when that function is in this set.
+    changing_functions: FxHashSet<String>,
 }
 
 impl CallArguments {
@@ -78,10 +82,81 @@ impl CallArguments {
             modules: FxHashSet::default(),
             exported_calls: FxHashSet::default(),
             local_functions: FxHashMap::default(),
+            changing_functions: FxHashSet::default(),
         };
         calls.collect_imports(program);
+        calls.keep_unshadowed_functions(program);
         collect_exported_calls(program, &mut calls.exported_calls);
+        calls.find_changing_functions(program);
         calls
+    }
+
+    /// Fill `changing_functions`. A function that passes a parameter to a
+    /// changing function changes it too, so the search repeats until no
+    /// function is added.
+    fn find_changing_functions(&mut self, program: &Program<'_>) {
+        let bodies = local_function_bodies(program, &self.local_functions);
+        if bodies.len() > MAX_LOCAL_FUNCTIONS {
+            self.changing_functions = self.local_functions.keys().cloned().collect();
+            return;
+        }
+        loop {
+            let added: Vec<String> = bodies
+                .iter()
+                .filter(|(name, _)| !self.changing_functions.contains(*name))
+                .filter(|(name, scope)| {
+                    let params = &self.local_functions[*name];
+                    scope_counts(*scope, params.iter().map(String::as_str), self)
+                        .values()
+                        .any(|count| {
+                            count.writes > count.rebinds
+                                || count.mutating_calls > 0
+                                || count.call_arguments > 0
+                        })
+                })
+                .map(|(name, _)| (*name).to_owned())
+                .collect();
+            if added.is_empty() {
+                return;
+            }
+            self.changing_functions.extend(added);
+        }
+    }
+
+    /// Keep only the top-level functions whose name the program binds once.
+    /// A second binding of the name, such as a local `const configure` in a
+    /// callback, can make a call name a different function.
+    fn keep_unshadowed_functions(&mut self, program: &Program<'_>) {
+        struct Bindings<'f> {
+            counts: FxHashMap<&'f str, usize>,
+        }
+        impl<'a> Visit<'a> for Bindings<'_> {
+            fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
+                if let Some(count) = self.counts.get_mut(identifier.name.as_str()) {
+                    *count += 1;
+                }
+            }
+        }
+        if self.local_functions.is_empty() {
+            return;
+        }
+        let mut bindings = Bindings {
+            counts: self
+                .local_functions
+                .keys()
+                .map(|name| (name.as_str(), 0))
+                .collect(),
+        };
+        bindings.visit_program(program);
+        let shadowed: Vec<String> = bindings
+            .counts
+            .into_iter()
+            .filter(|(_, count)| *count != 1)
+            .map(|(name, _)| name.to_owned())
+            .collect();
+        for name in shadowed {
+            self.local_functions.remove(&name);
+        }
     }
 
     /// The root names that a call or a `new` expression passes to a function
@@ -98,36 +173,53 @@ impl CallArguments {
         span: Span,
         arguments: &'e [Argument<'_>],
     ) -> Vec<&'e str> {
-        let callee = callee.without_parentheses();
-        if self.exported_calls.contains(&(span.start, span.end))
-            || self.local_function_parameters(callee).is_some()
-            || self.reads_arguments_only(callee)
-            || matches!(callee, Expression::StaticMemberExpression(member) if changes_first_argument(member))
-        {
+        if !self.counts(callee, span) {
             return Vec::new();
         }
-        let mut roots = Vec::new();
+        Self::direct_arguments(arguments)
+            .into_iter()
+            .filter_map(member_root)
+            .collect()
+    }
+
+    /// Whether a call or a `new` expression can change its direct arguments.
+    pub(super) fn counts(&self, callee: &Expression<'_>, span: Span) -> bool {
+        let callee = callee.without_parentheses();
+        !(self.exported_calls.contains(&(span.start, span.end))
+            || self.is_reading_local_function(callee)
+            || self.reads_arguments_only(callee)
+            || matches!(callee, Expression::StaticMemberExpression(member) if changes_first_argument(member)))
+    }
+
+    /// The direct argument values: each argument, the argument of a spread,
+    /// and each branch of `a || b`, `a ?? b` or `cond ? a : b`.
+    pub(super) fn direct_arguments<'e, 'a>(
+        arguments: &'e [Argument<'a>],
+    ) -> Vec<&'e Expression<'a>> {
+        let mut values = Vec::new();
         for argument in arguments {
             match argument {
-                Argument::SpreadElement(spread) => push_direct_roots(&spread.argument, &mut roots),
+                Argument::SpreadElement(spread) => {
+                    push_direct_values(&spread.argument, &mut values);
+                }
                 argument => {
                     if let Some(expr) = argument.as_expression() {
-                        push_direct_roots(expr, &mut roots);
+                        push_direct_values(expr, &mut values);
                     }
                 }
             }
         }
-        roots
+        values
     }
 
-    /// The parameter names of the top-level function that `callee` names.
-    pub(super) fn local_function_parameters(&self, callee: &Expression<'_>) -> Option<&[String]> {
+    /// Whether `callee` names a local function that does not change its
+    /// arguments.
+    fn is_reading_local_function(&self, callee: &Expression<'_>) -> bool {
         let Expression::Identifier(id) = callee.without_parentheses() else {
-            return None;
+            return false;
         };
-        self.local_functions
-            .get(id.name.as_str())
-            .map(Vec::as_slice)
+        self.local_functions.contains_key(id.name.as_str())
+            && !self.changing_functions.contains(id.name.as_str())
     }
 
     fn reads_arguments_only(&self, callee: &Expression<'_>) -> bool {
@@ -251,6 +343,59 @@ impl CallArguments {
     }
 }
 
+/// The maximum number of local functions that [`CallArguments`] analyzes.
+/// Above it, every local function counts as a function that changes its
+/// arguments.
+const MAX_LOCAL_FUNCTIONS: usize = 64;
+
+/// The body of each local function in `functions`, by name.
+fn local_function_bodies<'p, 'a>(
+    program: &'p Program<'a>,
+    functions: &FxHashMap<String, Vec<String>>,
+) -> Vec<(&'p str, Scope<'p, 'a>)> {
+    let mut bodies = Vec::new();
+    for statement in &program.body {
+        match statement {
+            Statement::FunctionDeclaration(func) => {
+                if let (Some(id), Some(body)) = (&func.id, &func.body)
+                    && functions.contains_key(id.name.as_str())
+                {
+                    bodies.push((id.name.as_str(), Scope::Body(body)));
+                }
+            }
+            Statement::VariableDeclaration(decl) => {
+                for declarator in &decl.declarations {
+                    let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                        continue;
+                    };
+                    if !functions.contains_key(id.name.as_str()) {
+                        continue;
+                    }
+                    let scope = match declarator
+                        .init
+                        .as_ref()
+                        .map(Expression::get_inner_expression)
+                    {
+                        Some(Expression::ArrowFunctionExpression(arrow)) => match &arrow.body {
+                            ArrowFunctionBody::FunctionBody(body) => Some(Scope::Body(body)),
+                            body => body.as_expression().map(Scope::Expression),
+                        },
+                        Some(Expression::FunctionExpression(func)) => {
+                            func.body.as_deref().map(Scope::Body)
+                        }
+                        _ => None,
+                    };
+                    if let Some(scope) = scope {
+                        bodies.push((id.name.as_str(), scope));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    bodies
+}
+
 /// The names that the parameters of a function bind.
 fn parameter_names(params: &FormalParameters<'_>) -> Vec<String> {
     params
@@ -282,17 +427,17 @@ fn required_source<'e>(init: &'e Expression<'_>) -> Option<&'e str> {
 
 /// The root names of a direct argument: an identifier, a member chain, or
 /// each branch of `a || b`, `a ?? b` or `cond ? a : b`.
-fn push_direct_roots<'e>(expr: &'e Expression<'_>, roots: &mut Vec<&'e str>) {
+fn push_direct_values<'e, 'a>(expr: &'e Expression<'a>, values: &mut Vec<&'e Expression<'a>>) {
     match expr.without_parentheses().get_inner_expression() {
         Expression::LogicalExpression(logical) => {
-            push_direct_roots(&logical.left, roots);
-            push_direct_roots(&logical.right, roots);
+            push_direct_values(&logical.left, values);
+            push_direct_values(&logical.right, values);
         }
         Expression::ConditionalExpression(conditional) => {
-            push_direct_roots(&conditional.consequent, roots);
-            push_direct_roots(&conditional.alternate, roots);
+            push_direct_values(&conditional.consequent, values);
+            push_direct_values(&conditional.alternate, values);
         }
-        other => roots.extend(member_root(other)),
+        other => values.push(other),
     }
 }
 

@@ -17,6 +17,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 mod call_arguments;
 use super::top_level_variable_declarations;
 use call_arguments::CallArguments;
+#[path = "config_parser_keyed_alias.rs"]
+mod keyed_alias;
 
 /// The maximum number of constants that one inlined value can pass through,
 /// as in `const A = {...}; const B = [A]; export default { x: B }`.
@@ -441,18 +443,49 @@ fn binding_counts<'n>(
     names: impl IntoIterator<Item = &'n str>,
     require_top_level: bool,
 ) -> FxHashMap<&'n str, NameCount> {
+    let names: Vec<&'n str> = names
+        .into_iter()
+        .filter(|name| !require_top_level || declares_top_level_const_or_let(program, name))
+        .collect();
+    if names.is_empty() {
+        return FxHashMap::default();
+    }
     let calls = CallArguments::of(program);
-    let mut usage = NameUsage::new(
-        names
-            .into_iter()
-            .filter(|name| !require_top_level || declares_top_level_const_or_let(program, name)),
-        &calls,
-    );
+    scope_counts(Scope::Program(program), names, &calls)
+}
+
+/// The code that a name analysis walks: the whole program, or the body of a
+/// function of the program.
+#[derive(Clone, Copy)]
+enum Scope<'s, 'a> {
+    Program(&'s Program<'a>),
+    Body(&'s FunctionBody<'a>),
+    Expression(&'s Expression<'a>),
+}
+
+impl<'a> Scope<'_, 'a> {
+    fn walk(self, visitor: &mut impl Visit<'a>) {
+        match self {
+            Scope::Program(program) => visitor.visit_program(program),
+            Scope::Body(body) => visitor.visit_function_body(body),
+            Scope::Expression(expr) => visitor.visit_expression(expr),
+        }
+    }
+}
+
+/// The [`NameCount`] of each name in `scope`, with the changes and calls
+/// through aliases added to the root names.
+fn scope_counts<'n>(
+    scope: Scope<'_, '_>,
+    names: impl IntoIterator<Item = &'n str>,
+    calls: &CallArguments,
+) -> FxHashMap<&'n str, NameCount> {
+    let mut usage = NameUsage::new(names, calls);
     if usage.counts.is_empty() {
         return FxHashMap::default();
     }
-    usage.visit_program(program);
-    let aliased = changed_alias_names(program, &calls);
+    scope.walk(&mut usage);
+    let aliased = changed_alias_names(scope, calls);
     for name in aliased.changed {
         usage.count_mutation(&name);
     }
@@ -496,12 +529,11 @@ struct AliasedNames {
 /// or through an alias of the alias, changes the root name. A call argument
 /// that names the alias passes the root name to that call. An alias that is
 /// only read changes nothing.
-fn changed_alias_names(program: &Program<'_>, calls: &CallArguments) -> AliasedNames {
+fn changed_alias_names(scope: Scope<'_, '_>, calls: &CallArguments) -> AliasedNames {
     let mut collector = AliasCollector {
         aliases: Vec::new(),
-        calls,
     };
-    collector.visit_program(program);
+    scope.walk(&mut collector);
     if collector.aliases.is_empty() {
         return AliasedNames::default();
     }
@@ -517,10 +549,24 @@ fn changed_alias_names(program: &Program<'_>, calls: &CallArguments) -> AliasedN
         };
     }
     let mut usage = NameUsage::new(
-        collector.aliases.iter().map(|alias| alias.name.as_str()),
+        collector
+            .aliases
+            .iter()
+            .filter(|alias| alias.path.is_empty())
+            .map(|alias| alias.name.as_str()),
         calls,
     );
-    usage.visit_program(program);
+    scope.walk(&mut usage);
+    let keyed = keyed_alias::KeyedUses::of(
+        scope,
+        collector
+            .aliases
+            .iter()
+            .filter(|alias| !alias.path.is_empty())
+            .map(|alias| alias.name.as_str())
+            .collect(),
+        calls,
+    );
     let mut roots: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
     for alias in &collector.aliases {
         roots
@@ -528,22 +574,40 @@ fn changed_alias_names(program: &Program<'_>, calls: &CallArguments) -> AliasedN
             .or_default()
             .push(alias.root.as_str());
     }
-    let aliases_where = |accept: fn(&NameCount) -> bool| -> Vec<String> {
-        let start = collector
-            .aliases
-            .iter()
-            .map(|alias| alias.name.as_str())
-            .filter(|name| usage.counts.get(name).is_some_and(accept));
-        roots_of(&roots, start)
-    };
+    // A change through an alias changes the root that the alias holds. A
+    // keyed alias changes its root only through its key path. A change of
+    // that root then changes each root that the root holds.
+    let mut changed = Vec::new();
+    let mut passed = Vec::new();
+    for alias in &collector.aliases {
+        let (is_changed, is_passed) = if alias.path.is_empty() {
+            usage
+                .counts
+                .get(alias.name.as_str())
+                .map_or((false, false), |count| {
+                    (
+                        count.writes > count.rebinds || count.mutating_calls > 0,
+                        count.call_arguments > 0,
+                    )
+                })
+        } else {
+            keyed.changes(&alias.name, &alias.path)
+        };
+        if is_changed {
+            changed.push(alias.root.as_str());
+        }
+        if is_passed {
+            passed.push(alias.root.as_str());
+        }
+    }
     AliasedNames {
-        changed: aliases_where(|count| count.writes > count.rebinds || count.mutating_calls > 0),
-        passed_to_calls: aliases_where(|count| count.call_arguments > 0),
+        changed: roots_of(&roots, changed.into_iter()),
+        passed_to_calls: roots_of(&roots, passed.into_iter()),
     }
 }
 
-/// The start names and every root that they reach through `roots`. An alias of
-/// a changed alias changes its root as well. Each name enters the worklist at
+/// The start names and every root that they reach through `roots`. A root
+/// of a changed name changes as well. Each name enters the worklist at
 /// most once.
 fn roots_of<'r>(
     roots: &FxHashMap<&'r str, Vec<&'r str>>,
@@ -562,48 +626,35 @@ fn roots_of<'r>(
 }
 
 /// A name that holds the value of another name or of one of its members.
+/// An object literal holds a name under a key path, as `config` holds `entry`
+/// under `["entry"]` in `const config = { entry }`. The path is empty for an
+/// alias that holds the whole value, such as `const r = common.resolve`, and
+/// for an array element or a spread, which hold the name under every key.
 struct Alias {
     name: String,
     root: String,
+    path: Vec<String>,
 }
 
-struct AliasCollector<'c> {
+struct AliasCollector {
     aliases: Vec<Alias>,
-    calls: &'c CallArguments,
 }
 
-impl AliasCollector<'_> {
+impl AliasCollector {
     fn push(&mut self, name: &str, value: &Expression<'_>) {
-        for root in alias_roots(value) {
+        let mut roots = Vec::new();
+        push_keyed_roots(value, &mut Vec::new(), &mut roots);
+        for (root, path) in roots {
             self.aliases.push(Alias {
                 name: name.to_owned(),
                 root: root.to_owned(),
+                path,
             });
         }
     }
 }
 
-impl<'a> Visit<'a> for AliasCollector<'_> {
-    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        // A call to a function of the file binds each parameter to an
-        // argument, as in `const configure = (cfg) => {...}; configure(web)`.
-        if let Some(params) = self.calls.local_function_parameters(&call.callee) {
-            for argument in &call.arguments {
-                let value = match argument {
-                    Argument::SpreadElement(spread) => &spread.argument,
-                    argument => match argument.as_expression() {
-                        Some(expr) => expr,
-                        None => continue,
-                    },
-                };
-                for param in params {
-                    self.push(param, value);
-                }
-            }
-        }
-        walk::walk_call_expression(self, call);
-    }
-
+impl<'a> Visit<'a> for AliasCollector {
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
         if let Some(init) = &declarator.init {
             for identifier in declarator.id.get_binding_identifiers() {
@@ -667,12 +718,6 @@ fn target_names(target: &AssignmentTarget<'_>) -> Vec<String> {
 /// roots of each branch of `a || b`, `a ?? b` or `cond ? a : b`, and the roots
 /// of each element, property value and spread of an array or object literal,
 /// such as `[common]` or `{ c: common }`.
-fn alias_roots<'e>(value: &'e Expression<'_>) -> Vec<&'e str> {
-    let mut roots = Vec::new();
-    push_alias_roots(value, &mut roots);
-    roots
-}
-
 fn push_alias_roots<'e>(value: &'e Expression<'_>, roots: &mut Vec<&'e str>) {
     match value.without_parentheses().get_inner_expression() {
         Expression::LogicalExpression(logical) => {
@@ -710,6 +755,71 @@ fn push_alias_roots<'e>(value: &'e Expression<'_>, roots: &mut Vec<&'e str>) {
             }
         }
         other => roots.extend(member_root(other)),
+    }
+}
+
+/// The roots of [`push_alias_roots`], each with the key path of the object
+/// literals that hold it. A computed key, an array element and a spread hold
+/// the name under every key, so the path stops there.
+fn push_keyed_roots<'e>(
+    value: &'e Expression<'_>,
+    path: &mut Vec<String>,
+    roots: &mut Vec<(&'e str, Vec<String>)>,
+) {
+    match value.without_parentheses().get_inner_expression() {
+        Expression::LogicalExpression(logical) => {
+            push_keyed_roots(&logical.left, path, roots);
+            push_keyed_roots(&logical.right, path, roots);
+        }
+        Expression::ConditionalExpression(conditional) => {
+            push_keyed_roots(&conditional.consequent, path, roots);
+            push_keyed_roots(&conditional.alternate, path, roots);
+        }
+        Expression::ObjectExpression(object) => {
+            for property in &object.properties {
+                let ObjectPropertyKind::ObjectProperty(property) = property else {
+                    continue;
+                };
+                let Some(key) = static_key_of(property) else {
+                    continue;
+                };
+                path.push(key.to_owned());
+                push_keyed_roots(&property.value, path, roots);
+                path.pop();
+            }
+            let mut unkeyed = Vec::new();
+            for property in &object.properties {
+                match property {
+                    ObjectPropertyKind::SpreadProperty(spread) => {
+                        push_alias_roots(&spread.argument, &mut unkeyed);
+                    }
+                    ObjectPropertyKind::ObjectProperty(property) => {
+                        if static_key_of(property).is_none() {
+                            push_alias_roots(&property.value, &mut unkeyed);
+                        }
+                    }
+                }
+            }
+            roots.extend(unkeyed.into_iter().map(|root| (root, path.clone())));
+        }
+        other => {
+            let mut plain = Vec::new();
+            push_alias_roots(other, &mut plain);
+            roots.extend(plain.into_iter().map(|root| (root, path.clone())));
+        }
+    }
+}
+
+/// The key of a property that is not computed, such as `entry` in `{ entry }`
+/// or in `{ "entry": value }`.
+fn static_key_of<'p>(property: &'p ObjectProperty<'_>) -> Option<&'p str> {
+    if property.computed {
+        return None;
+    }
+    match &property.key {
+        PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
+        PropertyKey::StringLiteral(literal) => literal.value.as_str(),
+        _ => None,
     }
 }
 
@@ -862,20 +972,22 @@ const MUTATING_METHODS: &[&str] = &[
 /// `Object.assign(name.resolve, ...)` or `Reflect.set(name, ...)`. A change to a
 /// member changes the value of the root name too.
 fn mutated_receiver<'e>(call: &'e CallExpression<'_>) -> Option<&'e str> {
+    mutated_target(call).and_then(member_root)
+}
+
+/// The value that a call changes: the receiver of a mutating method, or the
+/// first argument of a mutator such as `Object.assign`.
+fn mutated_target<'e, 'a>(call: &'e CallExpression<'a>) -> Option<&'e Expression<'a>> {
     let Expression::StaticMemberExpression(member) = call.callee.without_parentheses() else {
         return None;
     };
     if changes_first_argument(member) {
-        return call
-            .arguments
-            .first()
-            .and_then(Argument::as_expression)
-            .and_then(member_root);
+        return call.arguments.first().and_then(Argument::as_expression);
     }
     if !MUTATING_METHODS.contains(&member.property.name.as_str()) {
         return None;
     }
-    member_root(&member.object)
+    Some(&member.object)
 }
 
 /// Static methods that change the object in their first argument.
