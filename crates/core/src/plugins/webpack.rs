@@ -313,6 +313,12 @@ fn config_directory_package(config_path: &Path, root: &Path) -> Option<PathBuf> 
 }
 
 /// Register the `resolve.alias` entries of a config as path aliases.
+///
+/// Webpack applies an alias before it resolves an import, but fallow applies it
+/// only as a fallback. A replacement file that the fallback never reaches is
+/// made an entry point, because nothing else in the graph imports it. A
+/// trailing `$` marks an exact-match key, such as `react$`, and names the same
+/// package.
 fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path, root: &Path) {
     for (find, replacement) in
         config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
@@ -320,6 +326,15 @@ fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path
         if let Some(normalized) =
             config_parser::normalize_filesystem_config_path(&replacement, config_path, root)
         {
+            let key = find.strip_suffix('$').unwrap_or(&find);
+            if super::alias_replacement::credit_unrouted_replacement(
+                result,
+                key,
+                &normalized,
+                config_path,
+            ) {
+                result.push_entry_pattern(globset::escape(&normalized));
+            }
             result.path_aliases.push((find, normalized));
         }
     }
@@ -815,6 +830,44 @@ mod tests {
                 ("@components".to_string(), "src/components".to_string()),
                 ("@utils".to_string(), "src/utils".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_seeds_replacements_of_unrouted_alias_keys() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg" }"#).expect("write manifest");
+        let source = r#"
+            const path = require("path");
+            module.exports = {
+                resolve: {
+                    alias: {
+                        "./src/clock.js": path.resolve(__dirname, "mocks/clock.js"),
+                        pkg: path.resolve(__dirname, "mocks/pkg.js"),
+                        pkg$: path.resolve(__dirname, "mocks/[exact].js"),
+                        missing: path.resolve(__dirname, "mocks/missing.js"),
+                        "@lib": path.resolve(__dirname, "src/lib/index.js"),
+                        "@": path.resolve(__dirname, "src"),
+                    },
+                },
+            };
+        "#;
+        let result = WebpackPlugin.resolve_config(&root.join("webpack.config.js"), source, root);
+
+        assert_eq!(
+            result.entry_export_credits,
+            vec![
+                crate::plugins::UsedExportRule::new("mocks/clock.js", ["*"]),
+                crate::plugins::UsedExportRule::new("mocks/pkg.js", ["*"]),
+                crate::plugins::UsedExportRule::new("mocks/[[]exact[]].js", ["*"]),
+            ]
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["mocks/clock.js", "mocks/pkg.js", "mocks/[[]exact[]].js"]
         );
     }
 

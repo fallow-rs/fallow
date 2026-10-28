@@ -279,7 +279,7 @@ define_plugin!(
             if let Some(normalized) =
                 config_parser::normalize_config_path(&replacement, config_path, root)
             {
-                super::test_alias::credit_unrouted_replacement(
+                super::alias_replacement::credit_unrouted_replacement(
                     &mut result,
                     &find,
                     &normalized,

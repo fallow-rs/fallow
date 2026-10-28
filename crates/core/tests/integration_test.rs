@@ -710,5 +710,7 @@ mod vite_root_entries;
 mod vitest_include_scope;
 #[path = "integration_test/vitest_script_config_arg.rs"]
 mod vitest_script_config_arg;
+#[path = "integration_test/webpack_alias_replacement.rs"]
+mod webpack_alias_replacement;
 #[path = "integration_test/webpack_inline_loaders.rs"]
 mod webpack_inline_loaders;
