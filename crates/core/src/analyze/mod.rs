@@ -3,6 +3,7 @@ mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
 mod bundle_externalization;
+mod class_member_rules;
 mod component_health;
 mod deprecated_exports;
 mod duplicate_prop_shape;
@@ -91,6 +92,7 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use class_member_rules::ClassMemberRules;
 use component_health::{populate_duplicate_prop_shape_findings, populate_thin_wrapper_findings};
 use dynamic_segment_name_conflict::find_dynamic_segment_name_conflicts;
 use invalid_client_exports::find_invalid_client_exports;
@@ -758,6 +760,7 @@ pub(crate) fn find_dead_code_full(
     config.ignore_findings.reset_usage();
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
+    let class_member_rules = ClassMemberRules::new(config, plugin_result);
 
     let mut results = run_setup_and_detect(&SetupAndDetectInput {
         graph,
@@ -771,6 +774,7 @@ pub(crate) fn find_dead_code_full(
         pkg: run_context.pkg.as_ref(),
         public_api_entry_points: &run_context.public_api_entry_points,
         declared_deps: &run_context.declared_deps,
+        class_member_rules: &class_member_rules,
         collect_usages,
     });
 
@@ -784,6 +788,7 @@ pub(crate) fn find_dead_code_full(
         public_api_entry_points: &run_context.public_api_entry_points,
         suppressions: &run_context.suppressions,
         line_offsets_by_file: &run_context.line_offsets_by_file,
+        class_member_rules: &class_member_rules,
         collect_usages,
         results: &mut results,
     });
@@ -820,12 +825,13 @@ struct SetupAndDetectInput<'a, 'm> {
     pkg: Option<&'a PackageJson>,
     public_api_entry_points: &'a FxHashSet<FileId>,
     declared_deps: &'a FxHashSet<String>,
+    class_member_rules: &'a ClassMemberRules,
     collect_usages: bool,
 }
 
 /// Build the plugin result augmented with Iconify, inline loader and default
-/// JSX runtime packages, derive plugin-backed slices and the user
-/// class-member set, then run the parallel dead-code detectors.
+/// JSX runtime packages, derive plugin-backed slices, then run the parallel
+/// dead-code detectors.
 /// Extracted from `find_dead_code_full` to keep that orchestrator's body as
 /// setup -> detect -> populate.
 fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults {
@@ -860,23 +866,6 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         Some(&augmented_plugin_result)
     };
 
-    let mut user_class_members = input.config.used_class_members.clone();
-    let mut semantic_framework_candidates = Vec::new();
-    if let Some(plugin_result) = plugin_result {
-        for rule in &plugin_result.used_class_members {
-            if input.config.type_aware.enabled
-                && plugin_result
-                    .framework_class_member_contracts
-                    .iter()
-                    .any(|contract| framework_contract_covers_rule(contract, rule))
-            {
-                semantic_framework_candidates.push(rule.clone());
-            } else {
-                user_class_members.push(rule.clone());
-            }
-        }
-    }
-
     let (virtual_prefixes, generated_patterns, generated_type_prefixes) =
         derive_plugin_string_slices(plugin_result);
 
@@ -890,8 +879,8 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         line_offsets_by_file: input.line_offsets_by_file,
         plugin_result,
         pkg: input.pkg,
-        user_class_members: &user_class_members,
-        semantic_framework_candidates: &semantic_framework_candidates,
+        user_class_members: &input.class_member_rules.user,
+        semantic_framework_candidates: &input.class_member_rules.semantic_framework_candidates,
         public_api_entry_points: input.public_api_entry_points,
         virtual_prefixes: &virtual_prefixes,
         generated_patterns: &generated_patterns,
@@ -924,37 +913,6 @@ fn collect_federation_runtime_remotes(
         .collect();
     fallow_config::record_workspace_diagnostics(&input.config.root, diagnostics);
     remotes.rules
-}
-
-fn framework_contract_covers_rule(
-    contract: &fallow_types::semantic::SemanticFrameworkContract,
-    rule: &fallow_config::UsedClassMemberRule,
-) -> bool {
-    use fallow_types::semantic::SemanticFrameworkRelation;
-
-    let fallow_config::UsedClassMemberRule::Scoped(rule) = rule else {
-        return false;
-    };
-    let heritage_matches =
-        match contract.relation {
-            SemanticFrameworkRelation::Extends => {
-                rule.implements.is_none()
-                    && rule.extends.as_ref().is_some_and(|name| {
-                        contract.heritage_names.iter().any(|known| known == name)
-                    })
-            }
-            SemanticFrameworkRelation::Implements => {
-                rule.extends.is_none()
-                    && rule.implements.as_ref().is_some_and(|name| {
-                        contract.heritage_names.iter().any(|known| known == name)
-                    })
-            }
-        };
-    heritage_matches
-        && rule
-            .members
-            .iter()
-            .all(|member| contract.members.contains(member))
 }
 
 /// Derive the borrowed plugin string slices (virtual module prefixes, generated
@@ -1005,6 +963,7 @@ struct PostDetectionInput<'a, 'm> {
     public_api_entry_points: &'a FxHashSet<FileId>,
     suppressions: &'a SuppressionContext<'m>,
     line_offsets_by_file: &'a LineOffsetsMap<'m>,
+    class_member_rules: &'a ClassMemberRules,
     /// Whether the editor/LSP usages path is active; gates in-process-only
     /// intel (`react_component_intel`) off the bare `fallow` / `audit` hot path.
     collect_usages: bool,
@@ -2504,9 +2463,8 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
         semantic_framework_candidates: input.semantic_framework_candidates,
         ignore_decorators: &input.config.ignore_decorators,
         public_api_entry_points: input.public_api_entry_points,
-        lit_active: input.declared_deps.contains("lit")
-            || input.declared_deps.contains("lit-element")
-            || input.declared_deps.contains("@lit/reactive-element"),
+        lit_active: lit_is_declared(input.declared_deps),
+        report_unmatched_patterns: true,
     });
     populate_unused_enum_member_findings(&mut results, input.config, member_results.enum_members);
     populate_unused_class_member_findings(&mut results, input.config, member_results.class_members);
@@ -2516,6 +2474,12 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
         member_results.store_members,
     );
     results
+}
+
+fn lit_is_declared(declared_deps: &FxHashSet<String>) -> bool {
+    declared_deps.contains("lit")
+        || declared_deps.contains("lit-element")
+        || declared_deps.contains("@lit/reactive-element")
 }
 
 fn member_rules_are_disabled(config: &ResolvedConfig, store_members_active: bool) -> bool {
@@ -2883,12 +2847,14 @@ mod tests {
             members: vec!["render".to_string(), "localHook".to_string()],
         });
 
-        assert!(super::framework_contract_covers_rule(&contract, &matching));
-        assert!(!super::framework_contract_covers_rule(
+        assert!(super::class_member_rules::framework_contract_covers_rule(
+            &contract, &matching
+        ));
+        assert!(!super::class_member_rules::framework_contract_covers_rule(
             &contract,
             &local_name_only
         ));
-        assert!(!super::framework_contract_covers_rule(
+        assert!(!super::class_member_rules::framework_contract_covers_rule(
             &contract,
             &extra_member
         ));
