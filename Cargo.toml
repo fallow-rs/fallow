@@ -115,8 +115,8 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 # LSP
 ls-types = "0.0.6"
 tower-lsp-server = "0.23"
-# `io-util` matches the feature that rmcp (fallow-mcp) enables; see the serde note.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "process", "signal", "time"] }
+# `io-util` and `net` match the features that rmcp (fallow-mcp) enables; see the serde note.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "net", "process", "signal", "time"] }
 tokio-util = { version = "0.7", default-features = false }
 
 # File watching
