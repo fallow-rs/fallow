@@ -119,7 +119,7 @@ Use these reads when the project sends production coverage to Fallow Cloud. The 
 
 - `hit_count`: the production call count. Rank hot functions by it, not by `prod_hit_count`, which counts tagged traffic only.
 - `tracking_state`: `called`, `never_called`, or `untracked` in the current deployment.
-- `covered_by_test`: `true` or `null`. `null` means no test evidence, not "no test". A hot function with `covered_by_test: null` is a high-risk edit.
+- `covered_by_test`: `true`, `false`, or `null`. `true` means a test or CI run called the function. `false` means a test or CI run tracked the function and never called it. `null` means no test evidence, not "no test". A hot function with `covered_by_test: false` or `null` is a high-risk edit.
 - `blast_radius.caller_count` and `blast_radius.caller_sites`: callers when the data exists; `null` is unknown, not zero.
 
 An entry in `not_found` has no cloud data. Absence is not evidence that the code is cold.
