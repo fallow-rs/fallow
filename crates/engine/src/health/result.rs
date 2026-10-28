@@ -298,7 +298,7 @@ fn append_tailwind_arbitrary_value_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-token-drift".to_string(),
             sub_kind: "tailwind-arbitrary-value".to_string(),
             path: candidate.path.clone(),
@@ -331,7 +331,7 @@ fn append_cva_variant_token_drift_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-token-drift".to_string(),
             sub_kind: "cva-variant-token-drift".to_string(),
             path: candidate.path.clone(),
@@ -370,7 +370,7 @@ fn append_raw_style_value_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-token-drift".to_string(),
             sub_kind: "raw-style-value".to_string(),
             path: candidate.path.clone(),
@@ -421,7 +421,7 @@ fn append_near_duplicate_theme_token_findings(
             )
         };
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-token-drift".to_string(),
             sub_kind: "near-duplicate-theme-token".to_string(),
             path: candidate.path.clone(),
@@ -457,7 +457,7 @@ fn append_near_duplicate_css_in_js_token_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-token-drift".to_string(),
             sub_kind: "near-duplicate-css-in-js-token".to_string(),
             path: candidate.path.clone(),
@@ -505,7 +505,7 @@ fn append_duplicate_declaration_block_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-duplicate-block".to_string(),
             sub_kind: "duplicate-declaration-block".to_string(),
             path: first.path.clone(),
@@ -544,7 +544,7 @@ fn append_cva_duplicate_variant_block_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-duplicate-block".to_string(),
             sub_kind: "cva-duplicate-variant-block".to_string(),
             path: first.path.clone(),
@@ -611,7 +611,10 @@ fn append_selector_complexity_finding(
         )
     };
     findings.push(fallow_output::StylingFinding {
-        introduced: None,
+        internal: fallow_output::StylingFindingInternal {
+            rule_selector: Some(rule.selector.clone()).filter(|selector| !selector.is_empty()),
+            introduced: None,
+        },
         code: "css-selector-complexity".to_string(),
         sub_kind: sub_kind.to_string(),
         path: file.path.clone(),
@@ -654,7 +657,7 @@ fn append_scoped_unused_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: "scoped-unused-class".to_string(),
             path: candidate.path.clone(),
@@ -711,7 +714,7 @@ fn append_unused_theme_token_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: "unused-theme-token".to_string(),
             path: candidate.path.clone(),
@@ -744,7 +747,7 @@ fn append_unreferenced_css_class_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: "unreferenced-css-class".to_string(),
             path: candidate.path.clone(),
@@ -777,7 +780,7 @@ fn append_unreferenced_keyframe_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: "unreferenced-keyframes".to_string(),
             path: candidate.path.clone(),
@@ -810,7 +813,7 @@ fn append_unused_font_face_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: "unused-font-face".to_string(),
             path: candidate.path.clone(),
@@ -843,7 +846,7 @@ fn append_unused_at_rule_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: match candidate.kind {
                 fallow_output::UnusedAtRuleKind::PropertyRegistration => {
@@ -896,7 +899,7 @@ fn append_unresolved_class_reference_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-broken-reference".to_string(),
             sub_kind: "unresolved-class-reference".to_string(),
             path: candidate.path.clone(),
@@ -929,7 +932,7 @@ fn append_undefined_keyframe_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-broken-reference".to_string(),
             sub_kind: "undefined-keyframes".to_string(),
             path: candidate.path.clone(),
@@ -977,7 +980,7 @@ fn append_dead_style_export_findings(
             continue;
         };
         findings.push(fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-dead-surface".to_string(),
             sub_kind: surface.sub_kind.to_string(),
             path,

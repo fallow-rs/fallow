@@ -1471,6 +1471,120 @@ fn audit_css_new_equal_value_rule_above_marks_the_new_rule_introduced() {
     );
 }
 
+/// Issue #3956: a rule with a new selector replaces a removed rule with the
+/// same specificity. The new rule is introduced, and the new-only gate fails.
+#[test]
+fn audit_css_replaced_selector_with_equal_value_is_introduced() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-css-replaced-selector"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rules":{"css-selector-complexity":"error"}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("src/index.ts"), "import './styles.css';\n").unwrap();
+    let plain = ".a { color: blue; }\n.b { color: blue; }\n.c { color: blue; }\n";
+    fs::write(
+        root.join("src/styles.css"),
+        format!("{plain}#app .legacy .title {{ color: red; }}\n"),
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/styles.css"),
+        format!("/* one */\n/* two */\n{plain}#nav .menu .item {{ color: green; }}\n"),
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 1,
+        "a new complex selector should fail the new-only gate. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["attribution"]["styling_introduced"], 1);
+    assert_eq!(json["attribution"]["styling_inherited"], 0);
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["line"] == 6 && finding["introduced"] == true),
+        "{findings:#?}"
+    );
+}
+
+/// Issue #3956: an edit inside an existing rule keeps the selector, so the
+/// finding of the rule stays inherited.
+#[test]
+fn audit_css_edit_inside_rule_keeps_finding_inherited() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-css-edit-rule"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rules":{"css-selector-complexity":"error"}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("src/index.ts"), "import './styles.css';\n").unwrap();
+    fs::write(
+        root.join("src/styles.css"),
+        "#app .legacy .title { color: red; }\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/styles.css"),
+        "/* added */\n#app .legacy .title { color: green; } /* edited */\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "an edited rule should not fail the new-only gate. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["attribution"]["styling_introduced"], 0);
+    assert_eq!(json["attribution"]["styling_inherited"], 1);
+}
+
 /// Issue #3956 reproduction: a comment line above an unchanged `:where()`
 /// rule keeps its default-severity styling finding inherited.
 #[test]

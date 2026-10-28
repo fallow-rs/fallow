@@ -14,18 +14,30 @@ pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHash
 }
 
 /// Identity key for one styling finding:
-/// `styling:<code>:<sub kind>:<path>:<value>`.
+/// `styling:<code>:<sub kind>:<path>:<value>`, plus `:<selector hash>` when
+/// the finding has the selector of its rule.
 ///
 /// Line numbers are excluded, so a finding survives unrelated edits above it
-/// (issue #3956). Use [`styling_ledger_keys`] to tell repeated findings apart.
+/// (issue #3956). A selector-complexity value is only a metric, such as
+/// `specificity 1-2-0`. The selector hash keeps a new rule with an equal
+/// metric apart from a removed rule. The key holds a hash, not the selector,
+/// because a selector can contain the `:` and `|` key separators. Use
+/// [`styling_ledger_keys`] to tell repeated findings apart.
 pub fn styling_finding_key(finding: &fallow_output::StylingFinding, root: &Path) -> String {
-    format!(
-        "styling:{}:{}:{}:{}",
-        finding.code,
-        finding.sub_kind,
-        relative_key_path(Path::new(&finding.path), root),
-        finding.value
-    )
+    let path = relative_key_path(Path::new(&finding.path), root);
+    let base = format!(
+        "styling:{}:{}:{path}:{}",
+        finding.code, finding.sub_kind, finding.value
+    );
+    match finding.internal.rule_selector.as_deref() {
+        Some(selector) if !selector.is_empty() => {
+            format!(
+                "{base}:{:016x}",
+                xxhash_rust::xxh3::xxh3_64(selector.as_bytes())
+            )
+        }
+        _ => base,
+    }
 }
 
 /// Attribution keys of styling findings, in the order of `findings`.
@@ -92,7 +104,10 @@ pub(super) fn annotate_styling_json(
     let keys = styling_ledger_keys(findings, root);
     for ((item, key), finding) in items.iter_mut().zip(&keys).zip(findings) {
         if let serde_json::Value::Object(map) = item {
-            let introduced = finding.introduced.unwrap_or_else(|| !base.contains(key));
+            let introduced = finding
+                .internal
+                .introduced
+                .unwrap_or_else(|| !base.contains(key));
             map.insert("introduced".to_string(), serde_json::json!(introduced));
         }
     }
@@ -102,11 +117,11 @@ pub(super) fn annotate_styling_json(
 mod tests {
     use std::path::PathBuf;
 
-    use super::{styling_ledger_keys, styling_ledger_keys_with_diff};
+    use super::{styling_finding_key, styling_ledger_keys, styling_ledger_keys_with_diff};
 
     fn styling_finding(path: &str, line: u32, value: &str) -> fallow_output::StylingFinding {
         fallow_output::StylingFinding {
-            introduced: None,
+            internal: fallow_output::StylingFindingInternal::default(),
             code: "css-selector-complexity".to_string(),
             sub_kind: "high-specificity".to_string(),
             path: path.to_string(),
@@ -174,5 +189,25 @@ mod tests {
 
         assert_eq!(head_keys[1], base_keys[0]);
         assert_eq!(head_keys[0], format!("{}#2", base_keys[0]));
+    }
+
+    /// Issue #3956: the rule selector separates findings with an equal
+    /// metric value, and the line does not change the key.
+    #[test]
+    fn styling_finding_key_uses_the_rule_selector() {
+        let root = PathBuf::from("/project");
+        let with_selector = |line: u32, selector: &str| {
+            let mut finding = styling_finding("src/a.css", line, "specificity 1-2-0");
+            finding.internal.rule_selector = Some(selector.to_string());
+            finding
+        };
+
+        let legacy = styling_finding_key(&with_selector(4, "#app .legacy .title"), &root);
+        let moved = styling_finding_key(&with_selector(9, "#app .legacy .title"), &root);
+        let nav = styling_finding_key(&with_selector(6, "#nav .menu .item"), &root);
+
+        assert_eq!(legacy, moved);
+        assert_ne!(legacy, nav);
+        assert!(!legacy.contains("#app"), "{legacy}");
     }
 }

@@ -39,9 +39,10 @@ use crate::error::emit_error;
 /// Version 16 added the dead-code collections that the base could not prove.
 /// Version 17 adds thin-wrapper and duplicate-prop-shape attribution keys, so
 /// inherited component findings are not mistaken for new findings.
-/// Version 18 removes the line from styling keys and adds an occurrence
-/// suffix on repeated keys (#3956). A version-17 snapshot holds styling keys
-/// with lines, so a line shift would mark inherited findings as introduced.
+/// Version 18 removes the line from styling keys, adds a hash of the rule
+/// selector to selector-complexity keys, and adds an occurrence suffix on
+/// repeated keys (#3956). A version-17 snapshot holds styling keys with
+/// lines, so a line shift would mark inherited findings as introduced.
 pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 18;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds

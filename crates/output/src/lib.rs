@@ -235,10 +235,10 @@ pub use health_css::{
     CssCandidateActionType, CssDuplicateBlock, CssFileAnalytics, CssNotationConsistency,
     CssNotationCount, CvaDuplicateVariantBlock, CvaVariantTokenDrift, NearDuplicateThemeToken,
     NearestStylingToken, RawStyleValue, ScopedUnusedClasses, StylingAgentDisposition,
-    StylingFinding, StylingFindingConfidence, StylingFindingSeverity, TOKEN_CONSUMER_SAMPLE_CAP,
-    TailwindArbitraryValue, TokenConsumerLocation, TokenConsumers, UndefinedKeyframes,
-    UnreferencedCssClass, UnreferencedKeyframes, UnresolvedClassReference, UnusedAtRule,
-    UnusedAtRuleKind, UnusedFontFace, UnusedThemeToken,
+    StylingFinding, StylingFindingConfidence, StylingFindingInternal, StylingFindingSeverity,
+    TOKEN_CONSUMER_SAMPLE_CAP, TailwindArbitraryValue, TokenConsumerLocation, TokenConsumers,
+    UndefinedKeyframes, UnreferencedCssClass, UnreferencedKeyframes, UnresolvedClassReference,
+    UnusedAtRule, UnusedAtRuleKind, UnusedFontFace, UnusedThemeToken,
 };
 pub use health_diagnostics::{
     FrameworkHealthDetector, FrameworkHealthDetectorStatus, FrameworkHealthDiagnostics,

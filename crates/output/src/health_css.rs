@@ -629,10 +629,20 @@ pub struct StylingFinding {
     pub fix_hint: Option<String>,
     /// Suggested next steps (verify / suppress; never an auto-fix).
     pub actions: Vec<CssCandidateAction>,
-    /// Audit-mode result of the comparison with the base snapshot. The audit
-    /// sets it, and the audit JSON writes it as `introduced`. It is not part
-    /// of the serialized finding.
+    /// In-process audit data. It is not part of the serialized finding.
     #[serde(skip)]
+    pub internal: StylingFindingInternal,
+}
+
+/// In-process data of a styling finding that the serialized finding does not
+/// carry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StylingFindingInternal {
+    /// Selector list of the rule that owns the finding, when the finding
+    /// family has one. The audit key uses it to tell equal values apart.
+    pub rule_selector: Option<String>,
+    /// Audit-mode result of the comparison with the base snapshot. The audit
+    /// sets it, and the audit JSON writes it as `introduced`.
     pub introduced: Option<bool>,
 }
 

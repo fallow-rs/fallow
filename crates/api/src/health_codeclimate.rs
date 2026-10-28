@@ -436,7 +436,7 @@ mod tests {
     fn health_codeclimate_includes_styling_findings() {
         let report = HealthReport {
             styling_findings: vec![StylingFinding {
-                introduced: None,
+                internal: fallow_output::StylingFindingInternal::default(),
                 code: "css-selector-complexity".to_string(),
                 sub_kind: "high-specificity".to_string(),
                 path: "src/styles.css".to_string(),

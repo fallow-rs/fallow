@@ -457,7 +457,7 @@ fn annotate_health_report(report: &mut HealthReport, comparison: &AuditCompariso
         .iter_mut()
         .zip(comparison.styling.introduced())
     {
-        finding.introduced = Some(introduced);
+        finding.internal.introduced = Some(introduced);
     }
 }
 

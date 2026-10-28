@@ -3365,7 +3365,7 @@ mod health_markdown_tests {
     fn broken_reference_report(value: &str) -> HealthReport {
         HealthReport {
             styling_findings: vec![StylingFinding {
-                introduced: None,
+                internal: fallow_output::StylingFindingInternal::default(),
                 code: "css-broken-reference".to_string(),
                 sub_kind: "unresolved-class-reference".to_string(),
                 path: "src/app.css".to_string(),

@@ -848,7 +848,7 @@ fn styling_finding_audit_context(
     // The audit run sets the typed flag for each styling finding when it has
     // a base snapshot.
     let base_state = result.base_snapshot.as_ref().map(|_| {
-        if finding.introduced == Some(false) {
+        if finding.internal.introduced == Some(false) {
             format!(
                 "inherited styling debt from {}",
                 short_base_ref(&result.base_ref)
