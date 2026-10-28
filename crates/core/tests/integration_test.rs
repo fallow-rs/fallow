@@ -664,6 +664,8 @@ mod issue_3817_workspace_dist_src_exports;
 mod issue_3868_method_return_type_member;
 #[path = "integration_test/issue_3960_this_method_return_type_member.rs"]
 mod issue_3960_this_method_return_type_member;
+#[path = "integration_test/issue_3967_script_argument_entries.rs"]
+mod issue_3967_script_argument_entries;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

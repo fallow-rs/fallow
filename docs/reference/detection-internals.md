@@ -482,6 +482,28 @@ definition whose type does not accept a boolean, such as `-w`, `--prefix`,
 (`--input=src/a.ts`) go through the same resolution, so `ignoreCommandEntries`
 applies to the command of the script body.
 
+The program of a command decides which of its file arguments are entry
+points (issue #3967). `crates/core/src/scripts/argument_entries.rs` holds
+the rules:
+
+- A script runtime (`node`, `tsx`, `bun`, `deno run`, `nodemon`, a shell)
+  runs one script, its first positional argument. The arguments after the
+  script are data for the script. A relative path value of a runtime flag
+  that loads a module (`-r`, `--import`, `--loader`, `bun --preload`) stays
+  an entry point.
+- A known file runner (a test runner, a bundler, a compiler) runs or loads
+  every file argument, so each one stays an entry point.
+- Every other program, for example a watcher or a code generator that
+  fallow does not know, gets data from its arguments. Its arguments and
+  flag values name no entry point. A Dockerfile flag value names an entry
+  point only for a known file runner.
+- A call of a script with an unknown body keeps every file argument,
+  because the body can run any program.
+
+Formatters and linters (`file_target_tools.rs`) and the built-in test
+runners (`node --test`, `bun test`, `deno test`, `borp`) keep their own
+rules.
+
 A package-manager command can run in other workspace packages. The parser
 records where the command runs as a `RunLocation` in
 `crates/core/src/scripts/mod.rs`:

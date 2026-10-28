@@ -152,7 +152,7 @@ fn command_file_arguments_are_entries_without_the_option() {
 
 #[test]
 fn ignore_command_entries_drops_the_listed_command_everywhere() {
-    let config = ignore_command_entries_config(&["my-codegen"]);
+    let config = ignore_command_entries_config(&["tsup"]);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
@@ -180,7 +180,7 @@ fn ignore_command_entries_drops_the_listed_command_everywhere() {
     }
     let unused_dev = unused_dev_dependency_names(&results);
     assert!(
-        !unused_dev.iter().any(|name| name == "my-codegen"),
+        !unused_dev.iter().any(|name| name == "tsup"),
         "an ignored command still counts as a used dependency. Got: {unused_dev:?}"
     );
 }

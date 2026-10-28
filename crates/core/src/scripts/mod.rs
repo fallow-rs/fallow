@@ -9,6 +9,8 @@
 //! runners (`npx`, `pnpm exec`, `yarn dlx`), and Node.js runners (`node`, `tsx`,
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
+mod argument_entries;
+pub use argument_entries::{ArgumentEntries, argument_entries, takes_file_arguments};
 mod borp;
 pub mod ci;
 #[cfg(test)]
@@ -2720,9 +2722,7 @@ fn binary_path_args(binary: &str, tokens: &[&str], idx: usize) -> (Vec<String>, 
     let args = &tokens[idx + 1..];
     let (mut file_args, mut config_args) =
         extract_args_for_binary(tokens, idx + 1, NODE_RUNNERS.contains(&binary));
-    if is_file_target_tool(binary) {
-        file_args = file_target_tool_loaded_files(binary, args);
-    }
+    file_args = argument_entries::entry_file_args(binary, args, file_args);
     if is_task_runner(binary) {
         file_args.clear();
         config_args.clear();
@@ -2785,9 +2785,7 @@ fn wrapped_command_args<'a>(
         return WrappedCommandArgs::without_args(child);
     }
     let (mut file_args, mut config_args) = extract_args_for_binary(tokens, command_start, false);
-    if is_file_target_tool(child) {
-        file_args = file_target_tool_loaded_files(child, &tokens[child_idx + 1..]);
-    }
+    file_args = argument_entries::entry_file_args(child, &tokens[child_idx + 1..], file_args);
     if is_task_runner(child) {
         file_args.clear();
         config_args.clear();
@@ -3396,7 +3394,7 @@ mod tests {
     fn parse_script_with_catalog_resolves_a_call_of_a_linter_script() {
         let scripts: HashMap<String, String> = HashMap::from([
             ("lint".to_string(), "eslint".to_string()),
-            ("gen".to_string(), "my-codegen".to_string()),
+            ("gen".to_string(), "mocha".to_string()),
         ]);
         let catalog = ScriptCatalog::from_scripts(&scripts);
         for script in [
@@ -3414,8 +3412,8 @@ mod tests {
         let commands = parse_script_with_catalog("npm run gen -- src/gen-input.ts", &catalog);
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].file_args, vec!["src/gen-input.ts"]);
-        assert_eq!(commands[0].file_args_command, "my-codegen");
-        let ignored = vec!["my-codegen".to_string()];
+        assert_eq!(commands[0].file_args_command, "mocha");
+        let ignored = vec!["mocha".to_string()];
         assert!(
             commands[0]
                 .entry_files(IgnoredCommandEntries::new(&ignored))
@@ -4342,7 +4340,7 @@ mod tests {
     fn npm_run_forwards_positional_arguments_without_double_dash() {
         let result = analyze_ci_command(
             "npm run gen src/input.ts",
-            &[("gen", "node scripts/gen.ts")],
+            &[("gen", "mocha scripts/gen.ts")],
             &[],
         );
         assert!(

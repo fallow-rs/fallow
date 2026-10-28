@@ -14,7 +14,7 @@
     "lint:workspaces-run": "yarn workspaces run lint src/dead-workspaces-run.ts",
     "lint:npm-workspace": "npm -w web run lint -- src/dead-npm-workspace.ts",
     "lint:turbo": "turbo run lint -- src/dead-turbo.ts",
-    "gen": "node scripts/gen.ts",
+    "gen": "mocha scripts/gen.ts",
     "gen:tag": "npm run gen --tag cfg/tagged.ts src/gen-input.ts",
     "gen:web": "pnpm -C packages/web exec tsx scripts/gen.ts",
     "gen:web-node": "yarn workspace web node scripts/node-run.ts",
@@ -23,7 +23,7 @@
     "gen:each": "pnpm --filter './packages/*' exec tsx scripts/each.ts",
     "gen:yarn-node": "yarn node scripts/yarn-node.ts",
     "lint:web-script": "npm run -w web lint -- src/dead-web-lint.ts",
-    "prettier": "node tools/check.js",
+    "prettier": "mocha tools/check.js",
     "gen:all": "pnpm -r exec tsx scripts/all.ts",
     "gen:all-script": "yarn workspaces run codegen scripts/all-codegen.ts",
     "gen:dir": "pnpm -C packages/web run codegen scripts/dir-codegen.ts",
@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "eslint": "9.39.1",
+    "mocha": "10.0.0",
     "tsx": "4.20.6",
     "turbo": "2.5.8"
   }

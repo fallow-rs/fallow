@@ -234,6 +234,15 @@ fn collect_flag_value_file_refs(
         {
             continue;
         }
+        // Only a program that loads its file arguments, such as a bundler,
+        // loads a file that a flag value names. For another program the
+        // value is data (issue #3967).
+        let binary = invoked
+            .as_ref()
+            .map_or(tokens[0], |invoked| tokens[invoked.index]);
+        if !crate::scripts::takes_file_arguments(binary) {
+            continue;
+        }
         for token in tokens {
             if !token.starts_with('-') {
                 continue;
@@ -614,7 +623,7 @@ mod tests {
     #[test]
     fn flag_value_file_refs_alias() {
         let refs = extract_flag_value_file_refs(
-            "node --alias:helper=./src/helper.ts app.js",
+            "esbuild --alias:helper=./src/helper.ts app.js",
             CommandRefContext::NONE,
         );
         assert_eq!(refs, vec!["./src/helper.ts"]);

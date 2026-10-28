@@ -1,6 +1,6 @@
 use crate::scripts::{
-    DeclaredScriptCall, IgnoredCommandEntries, MAX_SCRIPT_EXPANSIONS, MAX_SCRIPT_INDIRECTION_DEPTH,
-    MAX_SUBSTITUTION_DEPTH, ScriptCatalog,
+    ArgumentEntries, DeclaredScriptCall, IgnoredCommandEntries, MAX_SCRIPT_EXPANSIONS,
+    MAX_SCRIPT_INDIRECTION_DEPTH, MAX_SUBSTITUTION_DEPTH, ScriptCatalog,
 };
 
 /// Extract file path references from a package.json script value.
@@ -97,6 +97,7 @@ fn collect_script_file_refs(
         if tokens.is_empty() {
             continue;
         }
+        let mut unknown_body = false;
         match crate::scripts::declared_script_call(&tokens, context.scripts) {
             Some(DeclaredScriptCall::NoFileRefs) => continue,
             Some(DeclaredScriptCall::Command(command)) => {
@@ -136,7 +137,8 @@ fn collect_script_file_refs(
                 }
                 continue;
             }
-            Some(DeclaredScriptCall::UnknownBody) | None => {}
+            Some(DeclaredScriptCall::UnknownBody) => unknown_body = true,
+            None => {}
         }
         // A call of a script with an unknown body, such as
         // `npm run gen -- scripts/a.ts` with no `gen` body, has no binary;
@@ -173,25 +175,44 @@ fn collect_script_file_refs(
             continue;
         }
 
-        refs.extend(script_file_args(cmd, &tokens, start).flat_map(resolve));
+        refs.extend(script_file_args(cmd, &tokens, start, unknown_body).flat_map(resolve));
     }
 }
 
 /// The arguments of the command `cmd` at `start` that name script files. A
 /// runner such as `node` takes any file path, another command a script file.
+///
+/// A runtime such as `node` runs only its script, so the arguments after the
+/// script name no file. A program that fallow does not know gets data from
+/// its arguments, so only the command itself can be a script file
+/// (issue #3967). A call of a script with an unknown body
+/// (`unknown_body`) can run any program, so every argument can name a file.
 fn script_file_args<'a>(
     cmd: &str,
     tokens: &'a [&'a str],
     start: usize,
+    unknown_body: bool,
 ) -> impl Iterator<Item = &'a str> {
     const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
-    let (args, is_ref): (&[&str], fn(&str) -> bool) = if RUNNERS.contains(&cmd) {
-        (&tokens[start + 1..], looks_like_file_path)
+    // A package manager that stays the command runs a script that the
+    // catalog does not declare. A flag in the command position
+    // (`bun --smol --preload ./a.js b.js`) means that the program is not
+    // known. Every argument can then name a file.
+    const PACKAGE_MANAGERS: &[&str] = &["npm", "pnpm", "yarn"];
+    let entries = if unknown_body || PACKAGE_MANAGERS.contains(&cmd) || cmd.starts_with('-') {
+        ArgumentEntries::All
     } else {
-        (&tokens[start..], looks_like_script_file)
+        crate::scripts::argument_entries(cmd, &tokens[start + 1..])
     };
-    args.iter()
-        .copied()
+    let (args, is_ref): (Vec<&str>, fn(&str) -> bool) = match entries {
+        ArgumentEntries::All if RUNNERS.contains(&cmd) => {
+            (tokens[start + 1..].to_vec(), looks_like_file_path)
+        }
+        ArgumentEntries::All => (tokens[start..].to_vec(), looks_like_script_file),
+        ArgumentEntries::Listed(listed) => (listed, looks_like_file_path),
+        ArgumentEntries::None => (vec![tokens[start]], looks_like_script_file),
+    };
+    args.into_iter()
         .filter(move |token| !token.starts_with('-') && is_ref(token))
 }
 
@@ -262,12 +283,33 @@ mod tests {
 
     #[test]
     fn script_call_resolves_to_the_body_with_forwarded_arguments() {
-        let scripts = catalog(&[("gen", "my-codegen"), ("run-tool", "node scripts/tool.ts")]);
+        let scripts = catalog(&[
+            ("gen", "mocha"),
+            ("codegen", "my-codegen"),
+            ("run-tool", "node scripts/tool.ts"),
+        ]);
         assert_eq!(
             extract_script_file_refs("npm run gen -- src/gen-input.ts", with_scripts(&scripts)),
             vec!["src/gen-input.ts"]
         );
-        let ignored = vec!["my-codegen".to_string()];
+        // A program that fallow does not know gets data from its arguments,
+        // and `node` gives the arguments after its script to that script
+        // (issue #3967).
+        assert!(
+            extract_script_file_refs(
+                "npm run codegen -- src/gen-input.ts",
+                with_scripts(&scripts)
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            extract_script_file_refs(
+                "npm run run-tool -- src/gen-input.ts",
+                with_scripts(&scripts)
+            ),
+            vec!["scripts/tool.ts"]
+        );
+        let ignored = vec!["mocha".to_string()];
         assert!(
             extract_script_file_refs(
                 "npm run gen -- src/gen-input.ts",
@@ -295,6 +337,31 @@ mod tests {
             refs("npm run gen -- src/gen-input.ts"),
             vec!["src/gen-input.ts"]
         );
+    }
+
+    #[test]
+    fn script_arguments_after_the_runtime_script_are_data() {
+        assert_eq!(refs("node tool.js src/**/*.js"), vec!["tool.js"]);
+        assert_eq!(refs("node tool.js --input src/lib/b.js"), vec!["tool.js"]);
+        assert_eq!(
+            refs("node api-docs/build-openapi.js --definition a.json src/*.js src/**/*.js"),
+            vec!["api-docs/build-openapi.js"]
+        );
+        assert!(refs("watchee -f './src/**/*' -c 'echo hi'").is_empty());
+        assert!(refs("pnpm watchee -f ./src/a.js -c 'echo hi'").is_empty());
+        assert_eq!(
+            refs("mocha test/a.spec.js test/b.spec.js"),
+            vec!["test/a.spec.js", "test/b.spec.js"]
+        );
+    }
+
+    #[test]
+    fn bun_preload_after_runtime_flags_stays_a_ref() {
+        let refs = refs(
+            "CA=./c.pem bun --bun --smol --preload ./test/preload.js \
+             ./node_modules/jest-cli/bin/jest.js --logHeapUsage",
+        );
+        assert!(refs.contains(&"./test/preload.js".to_string()), "{refs:?}");
     }
 
     #[test]
@@ -374,7 +441,7 @@ mod tests {
         reason = "ScriptCatalog takes the serde-deserialized std HashMap"
     )]
     fn a_declared_script_named_after_a_linter_keeps_its_target_refs() {
-        let scripts = catalog(&[("eslint", "node tools/check.js")]);
+        let scripts = catalog(&[("eslint", "mocha tools/check.js")]);
         assert_eq!(
             extract_script_file_refs(
                 "varlock run -- yarn eslint src/a.ts",

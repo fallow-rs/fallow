@@ -1,0 +1,16 @@
+{
+  "name": "issue-3967-script-argument-entries",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tool.js src/**/*.js",
+    "input": "node tool.js --input src/lib/flag.js",
+    "docs": "sh api-docs/build-docs.sh",
+    "test": "mocha checks/run.js"
+  },
+  "devDependencies": {
+    "mocha": "10.0.0",
+    "watchee": "1.0.0"
+  }
+}
