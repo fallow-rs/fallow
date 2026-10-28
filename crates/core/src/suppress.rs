@@ -123,8 +123,7 @@ impl<'a> SuppressionContext<'a> {
         }
     }
 
-    /// Build an empty suppression context (for testing).
-    #[cfg(test)]
+    /// Build an empty suppression context, which suppresses nothing.
     pub(crate) fn empty() -> Self {
         Self {
             by_file: FxHashMap::default(),
