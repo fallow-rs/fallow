@@ -700,7 +700,7 @@ mod tests {
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const list = [web]; for (const c of list) c.entry = "./src/new.ts"; return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const configure = (cfg) => { cfg.entry = "./src/new.ts"; }; configure(web); return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; _.merge(web, { entry: "./src/new.ts" }); return [web]; };"#,
-            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; addPlugins([web]); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const list = [web]; addPlugins(list); return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const all = { web }; configure(all); return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; globalThis.Object.assign(web, { entry: "./src/new.ts" }); return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const { assign } = Object; assign(web, { entry: "./src/new.ts" }); return [web]; };"#,
@@ -728,15 +728,39 @@ mod tests {
 
     #[test]
     fn top_level_constant_that_a_call_can_change_does_not_resolve() {
-        let source = r#"
-            const OPTS = { files: ["./a.ts"] };
-            configure(OPTS);
-            export default { x: OPTS };
-        "#;
-        assert!(
-            extract_config_string_or_array(source, Path::new("vitest.config.ts"), &["x", "files"])
-                .is_empty()
-        );
+        // Only a direct argument counts, and `new` counts like a call.
+        let cases = [
+            r#"const OPTS = { files: ["./a.ts"] }; configure(OPTS); export default { x: OPTS };"#,
+            r#"const OPTS = { files: ["./a.ts"] }; new Mutator(OPTS); export default { x: OPTS };"#,
+            r#"const { merge } = require("lodash"); const OPTS = { files: ["./a.ts"] }; merge(OPTS, {}); export default { x: OPTS };"#,
+        ];
+        for source in cases {
+            assert!(
+                extract_config_string_or_array(
+                    source,
+                    Path::new("vitest.config.ts"),
+                    &["x", "files"]
+                )
+                .is_empty(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn constant_in_a_literal_argument_or_an_exported_call_still_resolves() {
+        let path = Path::new("vitest.config.ts");
+        let cases = [
+            r#"import { defineVitestConfig } from "@nuxt/test-utils/config"; const setupFiles = ["./test/setup.ts"]; export default defineVitestConfig({ test: { setupFiles } });"#,
+            r#"import { defineConfig } from "vitest/config"; import checker from "vite-plugin-checker"; const setupFiles = ["./test/setup.ts"]; export default defineConfig({ plugins: [checker({ files: setupFiles })], test: { setupFiles } });"#,
+        ];
+        for source in cases {
+            assert_eq!(
+                extract_config_string_or_array(source, path, &["test", "setupFiles"]),
+                vec!["./test/setup.ts"],
+                "{source}"
+            );
+        }
     }
 
     #[test]

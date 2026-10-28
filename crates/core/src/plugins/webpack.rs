@@ -1039,6 +1039,85 @@ mod tests {
         }
     }
 
+    fn credits_admin_entry(source: &str) -> bool {
+        WebpackPlugin
+            .resolve_config(
+                std::path::Path::new("/project/webpack.config.js"),
+                source,
+                std::path::Path::new("/project"),
+            )
+            .entry_patterns
+            .iter()
+            .any(|rule| rule.pattern == "src/admin.ts")
+    }
+
+    #[test]
+    fn entry_constant_that_a_read_only_or_exported_call_gets_still_resolves() {
+        let cases = [
+            // A `webpack-merge` call only reads its arguments.
+            r#"const { merge } = require("webpack-merge"); const common = require("./webpack.common.js");
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               module.exports = merge(common, { mode: "production", entry });"#,
+            r#"import { merge } from "webpack-merge"; import common from "./webpack.common.js";
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               export default merge(common, { entry });"#,
+            // A named import of the `path` module only reads its arguments.
+            r#"const { resolve } = require("path"); const HtmlWebpackPlugin = require("html-webpack-plugin");
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               module.exports = { entry, plugins: [new HtmlWebpackPlugin({ template: resolve(__dirname, entry.main) })] };"#,
+            r#"import { join } from "node:path";
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               export default { entry, output: { path: join(__dirname, entry.main) } };"#,
+            // The exported config call gives the config to webpack.
+            r#"const SpeedMeasurePlugin = require("speed-measure-webpack-plugin"); const smp = new SpeedMeasurePlugin();
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               module.exports = smp.wrap({ entry });"#,
+            r#"module.exports = (env) => {
+                 const config = { entry: { main: "./src/main.ts", admin: "./src/admin.ts" } };
+                 if (env.analyze) return withAnalyzer(config);
+                 return config;
+               };"#,
+            // The local pass: the returned `merge` call.
+            r#"const { merge } = require("webpack-merge"); const common = require("./webpack.common.js");
+               module.exports = (env) => {
+                 const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+                 return merge(common, { mode: env.production ? "production" : "development", entry });
+               };"#,
+        ];
+        for source in cases {
+            assert!(credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn entry_constant_that_lodash_merge_or_a_local_function_changes_does_not_resolve() {
+        let cases = [
+            r#"const { merge } = require("lodash");
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               merge(entry, { admin: "./src/other.ts" });
+               module.exports = { entry };"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               function configure(e) { e.admin = "./src/other.ts"; }
+               configure(entry);
+               module.exports = { entry };"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const configure = (e) => addPages(e);
+               configure(entry);
+               module.exports = { entry };"#,
+        ];
+        for source in cases {
+            assert!(!credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn entry_constant_that_a_local_function_only_reads_still_resolves() {
+        let source = r#"const entries = { main: "./src/main.ts", admin: "./src/admin.ts" };
+            function htmlPages(e) { return Object.keys(e).map(() => null); }
+            module.exports = { entry: entries, plugins: htmlPages(entries) };"#;
+        assert!(credits_admin_entry(source));
+    }
+
     fn federation_exposes_of(source: &str) -> Vec<String> {
         let result = WebpackPlugin.resolve_config(
             std::path::Path::new("/project/webpack.config.js"),

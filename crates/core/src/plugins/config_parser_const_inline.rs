@@ -13,7 +13,10 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, VisitMut, walk, walk_mut};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+#[path = "config_parser_call_arguments.rs"]
+mod call_arguments;
 use super::top_level_variable_declarations;
+use call_arguments::CallArguments;
 
 /// The maximum number of constants that one inlined value can pass through,
 /// as in `const A = {...}; const B = [A]; export default { x: B }`.
@@ -438,16 +441,18 @@ fn binding_counts<'n>(
     names: impl IntoIterator<Item = &'n str>,
     require_top_level: bool,
 ) -> FxHashMap<&'n str, NameCount> {
+    let calls = CallArguments::of(program);
     let mut usage = NameUsage::new(
         names
             .into_iter()
             .filter(|name| !require_top_level || declares_top_level_const_or_let(program, name)),
+        &calls,
     );
     if usage.counts.is_empty() {
         return FxHashMap::default();
     }
     usage.visit_program(program);
-    let aliased = changed_alias_names(program);
+    let aliased = changed_alias_names(program, &calls);
     for name in aliased.changed {
         usage.count_mutation(&name);
     }
@@ -491,8 +496,11 @@ struct AliasedNames {
 /// or through an alias of the alias, changes the root name. A call argument
 /// that names the alias passes the root name to that call. An alias that is
 /// only read changes nothing.
-fn changed_alias_names(program: &Program<'_>) -> AliasedNames {
-    let mut collector = AliasCollector::default();
+fn changed_alias_names(program: &Program<'_>, calls: &CallArguments) -> AliasedNames {
+    let mut collector = AliasCollector {
+        aliases: Vec::new(),
+        calls,
+    };
     collector.visit_program(program);
     if collector.aliases.is_empty() {
         return AliasedNames::default();
@@ -508,7 +516,10 @@ fn changed_alias_names(program: &Program<'_>) -> AliasedNames {
             passed_to_calls: Vec::new(),
         };
     }
-    let mut usage = NameUsage::new(collector.aliases.iter().map(|alias| alias.name.as_str()));
+    let mut usage = NameUsage::new(
+        collector.aliases.iter().map(|alias| alias.name.as_str()),
+        calls,
+    );
     usage.visit_program(program);
     let mut roots: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
     for alias in &collector.aliases {
@@ -556,12 +567,12 @@ struct Alias {
     root: String,
 }
 
-#[derive(Default)]
-struct AliasCollector {
+struct AliasCollector<'c> {
     aliases: Vec<Alias>,
+    calls: &'c CallArguments,
 }
 
-impl AliasCollector {
+impl AliasCollector<'_> {
     fn push(&mut self, name: &str, value: &Expression<'_>) {
         for root in alias_roots(value) {
             self.aliases.push(Alias {
@@ -572,7 +583,27 @@ impl AliasCollector {
     }
 }
 
-impl<'a> Visit<'a> for AliasCollector {
+impl<'a> Visit<'a> for AliasCollector<'_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // A call to a function of the file binds each parameter to an
+        // argument, as in `const configure = (cfg) => {...}; configure(web)`.
+        if let Some(params) = self.calls.local_function_parameters(&call.callee) {
+            for argument in &call.arguments {
+                let value = match argument {
+                    Argument::SpreadElement(spread) => &spread.argument,
+                    argument => match argument.as_expression() {
+                        Some(expr) => expr,
+                        None => continue,
+                    },
+                };
+                for param in params {
+                    self.push(param, value);
+                }
+            }
+        }
+        walk::walk_call_expression(self, call);
+    }
+
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
         if let Some(init) = &declarator.init {
             for identifier in declarator.id.get_binding_identifiers() {
@@ -705,24 +736,26 @@ impl NameCount {
 }
 
 /// The [`NameCount`] of each name in a set, from one walk of a program.
-struct NameUsage<'n> {
+struct NameUsage<'n, 'c> {
     counts: FxHashMap<&'n str, NameCount>,
     write_depth: usize,
+    calls: &'c CallArguments,
 }
 
-impl<'n> NameUsage<'n> {
-    fn new(names: impl IntoIterator<Item = &'n str>) -> Self {
+impl<'n, 'c> NameUsage<'n, 'c> {
+    fn new(names: impl IntoIterator<Item = &'n str>, calls: &'c CallArguments) -> Self {
         Self {
             counts: names
                 .into_iter()
                 .map(|name| (name, NameCount::default()))
                 .collect(),
             write_depth: 0,
+            calls,
         }
     }
 }
 
-impl NameUsage<'_> {
+impl NameUsage<'_, '_> {
     fn count_mutation(&mut self, name: &str) {
         if let Some(count) = self.counts.get_mut(name) {
             count.mutating_calls += 1;
@@ -736,7 +769,7 @@ impl NameUsage<'_> {
     }
 }
 
-impl<'a> Visit<'a> for NameUsage<'_> {
+impl<'a> Visit<'a> for NameUsage<'_, '_> {
     fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
         if let Some(count) = self.counts.get_mut(identifier.name.as_str()) {
             count.bindings += 1;
@@ -776,10 +809,23 @@ impl<'a> Visit<'a> for NameUsage<'_> {
         if let Some(name) = mutated_receiver(call) {
             self.count_mutation(name);
         }
-        for name in changeable_arguments(call) {
+        for name in self
+            .calls
+            .changeable(&call.callee, call.span, &call.arguments)
+        {
             self.count_call_argument(name);
         }
         walk::walk_call_expression(self, call);
+    }
+
+    fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
+        let names =
+            self.calls
+                .changeable(&expression.callee, expression.span, &expression.arguments);
+        for name in names {
+            self.count_call_argument(name);
+        }
+        walk::walk_new_expression(self, expression);
     }
 
     fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
@@ -844,7 +890,7 @@ const FIRST_ARGUMENT_MUTATORS: &[(&str, &str)] = &[
     ("Reflect", "setPrototypeOf"),
 ];
 
-fn changes_first_argument(member: &StaticMemberExpression<'_>) -> bool {
+pub(super) fn changes_first_argument(member: &StaticMemberExpression<'_>) -> bool {
     let Some(owner) = global_name(&member.object) else {
         return false;
     };
@@ -870,83 +916,10 @@ fn global_name<'e>(expr: &'e Expression<'_>) -> Option<&'e str> {
     }
 }
 
-/// Functions that only read their arguments.
-const READ_ONLY_FUNCTIONS: &[&str] = &[
-    "require",
-    "defineConfig",
-    "defineProject",
-    "defineWorkspace",
-    "mergeConfig",
-    "String",
-    "Number",
-    "Boolean",
-    "fileURLToPath",
-];
-
-/// Methods of a global object that only read their arguments. An empty
-/// method name stands for each method of that object.
-const READ_ONLY_METHODS: &[(&str, &str)] = &[
-    ("path", ""),
-    ("console", ""),
-    ("JSON", "stringify"),
-    ("require", "resolve"),
-    ("Object", "keys"),
-    ("Object", "values"),
-    ("Object", "entries"),
-    ("Object", "hasOwn"),
-    ("Object", "getOwnPropertyNames"),
-    ("Array", "isArray"),
-];
-
-/// The root names that a call passes to a function that can change them.
-///
-/// A config can change a value in a helper, as in `addPlugins(config)` or
-/// `_.merge(config, extra)`. A callee that only reads its arguments, such as
-/// `path.resolve` or `defineConfig`, changes nothing. The first argument of a
-/// mutator such as `Object.assign` is a change that [`mutated_receiver`]
-/// counts, and its other arguments are only read.
-fn changeable_arguments<'e>(call: &'e CallExpression<'_>) -> Vec<&'e str> {
-    let callee = call.callee.without_parentheses();
-    if reads_arguments_only(callee) {
-        return Vec::new();
-    }
-    if matches!(callee, Expression::StaticMemberExpression(member) if changes_first_argument(member))
-    {
-        return Vec::new();
-    }
-    let mut roots = Vec::new();
-    for argument in &call.arguments {
-        match argument {
-            Argument::SpreadElement(spread) => push_alias_roots(&spread.argument, &mut roots),
-            argument => {
-                if let Some(expr) = argument.as_expression() {
-                    push_alias_roots(expr, &mut roots);
-                }
-            }
-        }
-    }
-    roots
-}
-
-fn reads_arguments_only(callee: &Expression<'_>) -> bool {
-    match callee {
-        Expression::Identifier(id) => READ_ONLY_FUNCTIONS.contains(&id.name.as_str()),
-        Expression::StaticMemberExpression(member) => {
-            let Expression::Identifier(owner) = member.object.without_parentheses() else {
-                return false;
-            };
-            READ_ONLY_METHODS.iter().any(|(name, method)| {
-                owner.name == *name && (method.is_empty() || member.property.name == *method)
-            })
-        }
-        _ => false,
-    }
-}
-
 /// The root name of an identifier or of a member chain such as
 /// `name.resolve.alias`. A binding or an assignment that holds such a value
 /// is an alias, and a write through the alias changes the root name.
-fn member_root<'e>(expr: &'e Expression<'_>) -> Option<&'e str> {
+pub(super) fn member_root<'e>(expr: &'e Expression<'_>) -> Option<&'e str> {
     let mut current = expr.without_parentheses().get_inner_expression();
     loop {
         current = match current {
