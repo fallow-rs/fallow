@@ -1206,9 +1206,7 @@ pub(crate) fn extract_from_source<T: Send>(
     fallow_extract::parse_bounded(source, || {
         let allocator = oxc_allocator::Allocator::default();
         let mut parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-        const_inline::inline_value_constants(&allocator, &mut parsed.program, source.len());
-        local_inline::inline_callback_locals(&allocator, &mut parsed.program, source.len());
-        extractor(&parsed.program)
+        const_inline::with_inlined_program(&allocator, &mut parsed.program, source.len(), extractor)
     })
     .flatten()
 }

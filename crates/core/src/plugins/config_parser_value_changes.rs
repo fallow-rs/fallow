@@ -24,18 +24,15 @@ use super::mutated_target;
 /// stands for a computed key, which can be any key.
 type Chain = Vec<Option<String>>;
 
-/// The maximum number of chain keys that one change keeps. A longer chain
-/// keeps its first keys, so a recursive function such as
-/// `function mark(o) { o.seen = true; mark(o.next); }` ends with a bounded set
-/// of changes.
-const MAX_CHAIN: usize = 32;
-
 /// The maximum number of steps that one analysis takes: each change that it
 /// records and each alias that it follows counts as one step.
 const MAX_STEPS: usize = 200_000;
 
 /// The maximum number of aliases that one analysis collects.
 const MAX_EDGES: usize = 20_000;
+
+/// A change of the value that a name holds.
+type NamedChange = (String, Change);
 
 /// One change of a value, with the key chain under the changed name.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -44,6 +41,22 @@ enum Change {
     Write(Chain),
     /// A mutating call on the value at the chain, such as `x.a.push(1)`.
     Mutation(Chain),
+}
+
+impl Change {
+    /// The same change with the first `keep` keys of its chain.
+    fn cut(self, keep: usize) -> Self {
+        match self {
+            Change::Write(mut chain) => {
+                chain.truncate(keep);
+                Change::Write(chain)
+            }
+            Change::Mutation(mut chain) => {
+                chain.truncate(keep);
+                Change::Mutation(chain)
+            }
+        }
+    }
 }
 
 /// One step of the way that an object or array literal holds a value.
@@ -74,8 +87,9 @@ struct Edge {
 }
 
 impl Edge {
-    /// The change of `root` that a change of `name` makes, if any.
-    fn translate(&self, change: &Change) -> Option<Change> {
+    /// The change of `root` that a change of `name` makes, if any. The
+    /// result keeps the first `keep` keys of its chain.
+    fn translate(&self, change: &Change, keep: usize) -> Option<Change> {
         let (chain, is_write) = match change {
             Change::Write(chain) => (chain, true),
             Change::Mutation(chain) => (chain, false),
@@ -113,13 +127,7 @@ impl Edge {
         if rest.len() < needed {
             return None;
         }
-        let chain: Chain = self
-            .part
-            .iter()
-            .chain(rest)
-            .take(MAX_CHAIN)
-            .cloned()
-            .collect();
+        let chain: Chain = self.part.iter().chain(rest).take(keep).cloned().collect();
         Some(if is_write {
             Change::Write(chain)
         } else {
@@ -137,6 +145,16 @@ impl Edge {
 /// through an alias counts, and the caller reads the literal values. A missed
 /// change can only hide an unused file.
 pub(super) fn changed_names(program: &Program<'_>) -> FxHashSet<String> {
+    let Some((edges, changes)) = collect(program) else {
+        return FxHashSet::default();
+    };
+    let keep = chain_keep(&edges);
+    propagate(&edges, changes, keep).unwrap_or_default()
+}
+
+/// The aliases and the direct changes of the program. Returns `None` when
+/// the program has more than [`MAX_EDGES`] aliases.
+fn collect(program: &Program<'_>) -> Option<(Vec<Edge>, Vec<NamedChange>)> {
     let mut functions = FunctionFinder::default();
     functions.visit_program(program);
     let local: FxHashMap<String, Option<usize>> = functions
@@ -153,15 +171,40 @@ pub(super) fn changed_names(program: &Program<'_>) -> FxHashSet<String> {
         overflow: false,
     };
     collector.visit_program(program);
-    if collector.overflow {
-        return FxHashSet::default();
-    }
-    propagate(&collector.edges, collector.changes).unwrap_or_default()
+    (!collector.overflow).then_some((collector.edges, collector.changes))
 }
 
-/// Follow each change along the aliases to the roots. Returns `None` when the
-/// analysis stops at [`MAX_STEPS`].
-fn propagate(edges: &[Edge], changes: Vec<(String, Change)>) -> Option<FxHashSet<String>> {
+/// [`changed_names`] without the chain cut, for the test that shows that the
+/// cut does not change the result.
+#[cfg(test)]
+fn changed_names_uncut(program: &Program<'_>) -> Option<FxHashSet<String>> {
+    let (edges, changes) = collect(program)?;
+    propagate(&edges, changes, usize::MAX)
+}
+
+/// The number of chain keys that the analysis keeps. An edge reads the first
+/// `prefix.len() + holds.len()` keys of its prefixed chain, and it needs at
+/// most two more keys after them. So two chains with the same first
+/// [`chain_keep`] keys give the same result on each edge, and each later
+/// chain keeps that property. The cut makes the result exact, and it bounds
+/// the number of chains that a recursive function such as
+/// `function mark(o) { o.seen = true; mark(o.next); }` can make.
+fn chain_keep(edges: &[Edge]) -> usize {
+    edges
+        .iter()
+        .map(|edge| edge.prefix.len() + edge.holds.len())
+        .max()
+        .unwrap_or(0)
+        + 2
+}
+
+/// Follow each change along the aliases to the roots, with each chain cut to
+/// `keep` keys. Returns `None` when the analysis stops at [`MAX_STEPS`].
+fn propagate(
+    edges: &[Edge],
+    changes: Vec<(String, Change)>,
+    keep: usize,
+) -> Option<FxHashSet<String>> {
     let mut edges_by_name: FxHashMap<&str, Vec<&Edge>> = FxHashMap::default();
     for edge in edges {
         edges_by_name
@@ -173,6 +216,10 @@ fn propagate(edges: &[Edge], changes: Vec<(String, Change)>) -> Option<FxHashSet
     if steps > MAX_STEPS {
         return None;
     }
+    let changes: Vec<(String, Change)> = changes
+        .into_iter()
+        .map(|(name, change)| (name, change.cut(keep)))
+        .collect();
     let mut seen: FxHashSet<(String, Change)> = changes.iter().cloned().collect();
     let mut pending = changes;
     while let Some((name, change)) = pending.pop() {
@@ -181,7 +228,7 @@ fn propagate(edges: &[Edge], changes: Vec<(String, Change)>) -> Option<FxHashSet
             if steps > MAX_STEPS {
                 return None;
             }
-            let Some(next) = edge.translate(&change) else {
+            let Some(next) = edge.translate(&change, keep) else {
                 continue;
             };
             let next = (edge.root.clone(), next);
@@ -767,4 +814,40 @@ fn member_key(member: &MemberExpression<'_>) -> Option<String> {
     member
         .static_property_name()
         .and_then(|name| name.as_str().map(str::to_owned))
+}
+
+#[cfg(test)]
+mod tests {
+    use oxc_allocator::Allocator;
+    use oxc_parser::Parser;
+    use oxc_span::SourceType;
+
+    use super::{changed_names, changed_names_uncut};
+
+    /// Configs from the alias tests, each without recursion, so the analysis
+    /// without the chain cut ends too.
+    const SOURCES: &[&str] = &[
+        "const entry = {}; const config = { mode: 1, entry, plugins: [] }; const plugins = config.plugins; plugins.push(1);",
+        "const entry = {}; const config = { mode: 1, entry, plugins: [] }; const { plugins } = config; plugins.push(1);",
+        "const entry = {}; const config = { entry }; const c2 = config; c2.devtool = 1; c2.entry.admin = 2;",
+        "const entry = {}; const config = { entry, plugins: [] }; function add(cfg) { cfg.plugins.push(1); } add(config);",
+        "const entry = {}; const config = { entry }; function set(cfg) { cfg.entry.admin = 1; } set(config);",
+        "const entry = {}; const holder = { a: { entry, list: [] } }; holder.a.list.push(1); holder.a.entry.x = 1;",
+        "const common = { entry: {} }; const prod = { ...common, plugins: [] }; prod.plugins.push(1); prod.entry.a = 1;",
+        "const entry = {}; const config = { entry }; Object.assign(config.entry, {}); config?.entry?.push?.(1);",
+        "const entry = {}; const config = { entry }; const { entry: e } = config; e.admin = 1; config['entry'].x = 2;",
+        "const entry = {}; const list = [entry]; for (const c of list) c.x = 1; list[0].y = 2;",
+        "const entry = {}; let mode; ({ mode = entry.mode, a: entry.b } = {});",
+        "const a = {}; const b = { k: { l: { m: a } } }; const c = { n: b }; c.n.k.l.m.x = 1; c.n.k.other = 1;",
+    ];
+
+    #[test]
+    fn chain_cut_gives_the_same_changed_names() {
+        for source in SOURCES {
+            let allocator = Allocator::default();
+            let parsed = Parser::new(&allocator, source, SourceType::cjs()).parse();
+            let uncut = changed_names_uncut(&parsed.program).expect("no limit applies");
+            assert_eq!(changed_names(&parsed.program), uncut, "{source}");
+        }
+    }
 }

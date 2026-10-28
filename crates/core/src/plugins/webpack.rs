@@ -1322,6 +1322,63 @@ mod tests {
     }
 
     #[test]
+    fn recursive_helpers_over_more_than_one_key_end_fast() {
+        let shared: String = (0..20)
+            .map(|i| format!("const S{i} = {{ singleton: true }};\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        let shared_keys = (0..20)
+            .map(|i| format!("p{i}: S{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let cases = [
+            // fixture b6: the ejected webpack or craco rules helper.
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = {
+                 mode: "production",
+                 entry,
+                 module: { rules: [{ oneOf: [{ test: /\.css$/, use: ["style-loader", "css-loader"] }] }] },
+               };
+               function excludeNodeModules(rules) {
+                 for (const rule of rules) {
+                   if (rule.oneOf) excludeNodeModules(rule.oneOf);
+                   if (rule.rules) excludeNodeModules(rule.rules);
+                   rule.exclude = /node_modules/;
+                 }
+               }
+               excludeNodeModules(config.module.rules);
+               module.exports = config;"#
+                .to_string(),
+            // fixture b1: a recursion over three keys.
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, tree: {} };
+               function mark(o) { o.seen = true; if (o.l) mark(o.l); if (o.r) mark(o.r); if (o.m) mark(o.m); }
+               mark(config.tree);
+               module.exports = config;"#
+                .to_string(),
+            // fixture b5: the same recursion, with many stable lookups.
+            format!(
+                "const entry = {{ main: \"./src/main.ts\", admin: \"./src/admin.ts\" }};\n\
+                 const config = {{ mode: \"production\", entry, tree: {{}} }};\n\
+                 function mark(o) {{ o.seen = true; if (o.l) mark(o.l); if (o.r) mark(o.r); if (o.m) mark(o.m); }}\n\
+                 mark(config.tree);\n{shared}\
+                 const {{ ModuleFederationPlugin }} = require('webpack').container;\n\
+                 config.plugins = [new ModuleFederationPlugin({{ name: 'a', exposes: {{ './A': './src/main.ts' }}, shared: {{ {shared_keys} }} }})];\n\
+                 module.exports = config;\n"
+            ),
+        ];
+        for source in cases {
+            let start = std::time::Instant::now();
+            assert!(credits_admin_entry(&source), "{source}");
+            let elapsed = start.elapsed();
+            assert!(
+                elapsed < std::time::Duration::from_millis(500),
+                "took {elapsed:?}: {source}"
+            );
+        }
+    }
+
+    #[test]
     fn local_binding_that_shadows_a_top_level_function_does_not_use_its_body() {
         // The top-level `setEntry` changes its parameter, but the call names
         // the local binding from `require`, which fallow cannot see.

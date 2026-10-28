@@ -7,6 +7,9 @@
 //! identifier in a property value or an array element with a copy of the
 //! constant's literal value, so that every walker reads it without change.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use oxc_allocator::{Allocator, CloneIn};
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
@@ -432,10 +435,67 @@ fn binding_counts<'n>(
         return FxHashMap::default();
     }
     usage.visit_program(program);
-    for name in value_changes::changed_names(program) {
-        usage.count_mutation(&name);
+    for name in changed_names(program).iter() {
+        usage.count_mutation(name);
     }
     usage.counts
+}
+
+/// The identity of one parsed program: its address, its source text and its
+/// number of statements.
+type ProgramKey = (usize, usize, usize, usize);
+
+thread_local! {
+    /// The changed names of the last program that [`changed_names`] read.
+    /// [`with_inlined_program`] clears it each time the program changes.
+    static CHANGED_NAMES: RefCell<Option<(ProgramKey, Rc<FxHashSet<String>>)>> =
+        const { RefCell::new(None) };
+}
+
+fn program_key(program: &Program<'_>) -> ProgramKey {
+    (
+        std::ptr::from_ref(program) as usize,
+        program.source_text.as_ptr() as usize,
+        program.source_text.len(),
+        program.body.len(),
+    )
+}
+
+/// The names that the program changes through an alias or a local call,
+/// computed once for each state of the program. A config parse asks for each
+/// stable binding, so one analysis serves all of them.
+fn changed_names(program: &Program<'_>) -> Rc<FxHashSet<String>> {
+    let key = program_key(program);
+    if let Some(names) = CHANGED_NAMES.with_borrow(|cached| {
+        cached
+            .as_ref()
+            .filter(|(cached_key, _)| *cached_key == key)
+            .map(|(_, names)| Rc::clone(names))
+    }) {
+        return names;
+    }
+    let names = Rc::new(value_changes::changed_names(program));
+    CHANGED_NAMES.set(Some((key, Rc::clone(&names))));
+    names
+}
+
+/// Run both inline passes on `program`, then `read` it. The cache of
+/// [`changed_names`] is cleared before and after each step, because each
+/// inline pass changes the program.
+pub(super) fn with_inlined_program<'a, R>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+    source_len: usize,
+    read: impl FnOnce(&Program<'a>) -> R,
+) -> R {
+    CHANGED_NAMES.set(None);
+    inline_value_constants(allocator, program, source_len);
+    CHANGED_NAMES.set(None);
+    super::local_inline::inline_callback_locals(allocator, program, source_len);
+    CHANGED_NAMES.set(None);
+    let result = read(program);
+    CHANGED_NAMES.set(None);
+    result
 }
 
 /// Whether a top-level `const` or `let` statement declares `name`. A `var` is
