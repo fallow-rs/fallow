@@ -1090,15 +1090,35 @@ mod tests {
     }
 
     #[test]
-    fn entry_constant_that_lodash_merge_or_a_local_function_changes_does_not_resolve() {
+    fn entry_constant_that_a_local_function_changes_does_not_resolve() {
         let cases = [
-            r#"const { merge } = require("lodash");
-               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
-               merge(entry, { admin: "./src/other.ts" });
-               module.exports = { entry };"#,
             r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
                function configure(e) { e.admin = "./src/other.ts"; }
                configure(entry);
+               module.exports = { entry };"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               function retarget(cfg) { cfg.entry.admin = "./src/other.ts"; }
+               retarget(config);
+               module.exports = config;"#,
+        ];
+        for source in cases {
+            assert!(!credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn entry_constant_that_an_imported_or_unknown_call_gets_still_resolves() {
+        let cases = [
+            // An imported helper (fixture u9).
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const addAnalyzer = require("./analyzer.js");
+               const config = { mode: "production", entry, plugins: [] };
+               if (process.env.ANALYZE) addAnalyzer(config);
+               module.exports = config;"#,
+            r#"const { merge } = require("lodash");
+               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               merge(entry, { admin: "./src/other.ts" });
                module.exports = { entry };"#,
             r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
                const configure = (e) => addPages(e);
@@ -1106,7 +1126,46 @@ mod tests {
                module.exports = { entry };"#,
         ];
         for source in cases {
-            assert!(!credits_admin_entry(source), "{source}");
+            assert!(credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn entry_constant_that_an_alias_or_a_local_function_changes_under_another_key_still_resolves() {
+        let cases = [
+            // fixture u4
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, plugins: [] };
+               const plugins = config.plugins;
+               if (process.env.X) plugins.push(1);
+               module.exports = config;"#,
+            // fixture u5
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, plugins: [] };
+               const { plugins } = config;
+               if (process.env.X) plugins.push(1);
+               module.exports = config;"#,
+            // fixture u6
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               const c2 = config;
+               c2.devtool = "source-map";
+               module.exports = config;"#,
+            // fixture u8
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, plugins: [] };
+               function addAnalyzer(cfg) { cfg.plugins.push(1); }
+               if (process.env.ANALYZE) addAnalyzer(config);
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const holder = { a: { entry, list: [] } };
+               holder.a.list.push(1);
+               holder.a.mode = "x";
+               holder.b = 1;
+               module.exports = { entry };"#,
+        ];
+        for source in cases {
+            assert!(credits_admin_entry(source), "{source}");
         }
     }
 
@@ -1146,15 +1205,29 @@ mod tests {
                module.exports = config;"#,
             r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
                const config = { mode: "production", entry };
-               configure(config);
+               Object.assign(config.entry, { admin: "./src/other.ts" });
                module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               const c2 = config;
+               c2.entry.admin = "./src/other.ts";
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               const { entry: e } = config;
+               e.admin = "./src/other.ts";
+               module.exports = config;"#,
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const holder = { a: { entry } };
+               holder.a.entry.admin = "./src/other.ts";
+               module.exports = { entry };"#,
             r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
                const list = [entry];
                list[0].admin = "./src/other.ts";
                module.exports = { entry };"#,
             r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
                const config = { ...{ entry } };
-               config.devtool = "source-map";
+               config.entry.admin = "./src/other.ts";
                module.exports = { entry };"#,
         ];
         for source in cases {
@@ -1196,15 +1269,17 @@ mod tests {
     }
 
     #[test]
-    fn local_binding_that_shadows_a_top_level_function_counts_as_a_change() {
-        let source = r#"function setEntry(e) { return Object.keys(e); }
+    fn local_binding_that_shadows_a_top_level_function_does_not_use_its_body() {
+        // The top-level `setEntry` changes its parameter, but the call names
+        // the local binding from `require`, which fallow cannot see.
+        let source = r#"function setEntry(e) { e.admin = "./src/other.ts"; }
             module.exports = () => {
               const { setEntry } = require("./helpers.js");
               const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
               setEntry(entry);
               return { entry };
             };"#;
-        assert!(!credits_admin_entry(source));
+        assert!(credits_admin_entry(source));
     }
 
     #[test]

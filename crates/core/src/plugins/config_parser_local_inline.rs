@@ -454,15 +454,22 @@ mod tests {
     }
 
     #[test]
-    fn too_many_aliases_block_the_root() {
+    fn many_aliases_still_find_a_change_through_the_last_one() {
         let aliases = (0..=4096)
             .map(|i| format!("const a{i} = OPTS.files;"))
             .collect::<Vec<_>>()
             .join("\n");
-        let source = format!(
+        let read = format!(
             "const OPTS = {{ files: [\"./a.ts\"] }};\n{aliases}\nexport default {{ x: OPTS }};\n"
         );
-        assert!(extract_config_string_or_array(&source, js(), &["x", "files"]).is_empty());
+        assert_eq!(
+            extract_config_string_or_array(&read, js(), &["x", "files"]),
+            vec!["./a.ts"]
+        );
+        let changed = format!(
+            "const OPTS = {{ files: [\"./a.ts\"] }};\n{aliases}\na4096.push(\"./b.ts\");\nexport default {{ x: OPTS }};\n"
+        );
+        assert!(extract_config_string_or_array(&changed, js(), &["x", "files"]).is_empty());
     }
 
     fn linkedom() -> Vec<(String, PathBuf)> {
@@ -699,11 +706,8 @@ mod tests {
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; for (const c of [web]) c.entry = "./src/new.ts"; return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const list = [web]; for (const c of list) c.entry = "./src/new.ts"; return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const configure = (cfg) => { cfg.entry = "./src/new.ts"; }; configure(web); return [web]; };"#,
-            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; _.merge(web, { entry: "./src/new.ts" }); return [web]; };"#,
-            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const list = [web]; addPlugins(list); return [web]; };"#,
-            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const all = { web }; configure(all); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const all = { web }; const configure = (holder) => { holder.web.entry = "./src/new.ts"; }; configure(all); return [web]; };"#,
             r#"module.exports = () => { const web = { entry: "./src/old.ts" }; globalThis.Object.assign(web, { entry: "./src/new.ts" }); return [web]; };"#,
-            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const { assign } = Object; assign(web, { entry: "./src/new.ts" }); return [web]; };"#,
         ];
         for source in entry_cases {
             let entries: Vec<_> =
@@ -718,8 +722,7 @@ mod tests {
             r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const list = [common]; list[0].resolve.alias.a = "./b.ts"; return common; };"#,
             r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const holder = { c: common }; holder.c.resolve.alias.a = "./b.ts"; return common; };"#,
             r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const web = { ...common }; web.resolve.alias.a = "./b.ts"; return common; };"#,
-            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const r = common.resolve; configure(r); return common; };"#,
-            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; configure(common.resolve); return common; };"#,
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const r = common.resolve; const configure = (resolve) => { resolve.alias.a = "./b.ts"; }; configure(r); return common; };"#,
         ];
         for source in alias_cases {
             assert!(aliases(source).is_empty(), "{source}");
@@ -727,24 +730,36 @@ mod tests {
     }
 
     #[test]
-    fn top_level_constant_that_a_call_can_change_does_not_resolve() {
-        // Only a direct argument counts, and `new` counts like a call.
+    fn top_level_constant_that_an_imported_or_unknown_call_gets_still_resolves() {
+        // Fallow counts only a change that the file shows. A call to a
+        // function that the file does not define can change nothing that
+        // fallow sees.
         let cases = [
             r#"const OPTS = { files: ["./a.ts"] }; configure(OPTS); export default { x: OPTS };"#,
             r#"const OPTS = { files: ["./a.ts"] }; new Mutator(OPTS); export default { x: OPTS };"#,
             r#"const { merge } = require("lodash"); const OPTS = { files: ["./a.ts"] }; merge(OPTS, {}); export default { x: OPTS };"#,
+            r#"const { assign } = Object; const OPTS = { files: ["./a.ts"] }; assign(OPTS, {}); export default { x: OPTS };"#,
         ];
         for source in cases {
-            assert!(
+            assert_eq!(
                 extract_config_string_or_array(
                     source,
                     Path::new("vitest.config.ts"),
                     &["x", "files"]
-                )
-                .is_empty(),
+                ),
+                vec!["./a.ts"],
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn top_level_constant_that_a_local_function_changes_does_not_resolve() {
+        let source = r#"const OPTS = { files: ["./a.ts"] }; function configure(o) { o.files.push("./b.ts"); } configure(OPTS); export default { x: OPTS };"#;
+        assert!(
+            extract_config_string_or_array(source, Path::new("vitest.config.ts"), &["x", "files"])
+                .is_empty()
+        );
     }
 
     #[test]

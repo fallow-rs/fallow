@@ -13,12 +13,9 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, VisitMut, walk, walk_mut};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-#[path = "config_parser_call_arguments.rs"]
-mod call_arguments;
 use super::top_level_variable_declarations;
-use call_arguments::CallArguments;
-#[path = "config_parser_keyed_alias.rs"]
-mod keyed_alias;
+#[path = "config_parser_value_changes.rs"]
+mod value_changes;
 
 /// The maximum number of constants that one inlined value can pass through,
 /// as in `const A = {...}; const B = [A]; export default { x: B }`.
@@ -404,93 +401,39 @@ pub(super) fn stable_bindings<'n>(
         .collect()
 }
 
-/// The subset of the named literal values that no code can change. This is
-/// stricter than [`stable_bindings`]: a value that the program passes to a
-/// call, as in `configure(config)`, counts as changed, unless the callee only
-/// reads its arguments or the value is a string. A called function can change
-/// an object or an array that it gets.
+/// The subset of the named literal values that [`stable_bindings`] accepts
+/// with no mutating calls.
 pub(super) fn stable_values<'n, 'e, 'a: 'e>(
     program: &Program<'_>,
     candidates: impl IntoIterator<Item = (&'n str, &'e Expression<'a>)>,
     require_top_level: bool,
 ) -> FxHashSet<&'n str> {
-    let mut immutable = FxHashSet::default();
-    let names: Vec<&'n str> = candidates
-        .into_iter()
-        .map(|(name, value)| {
-            if matches!(
-                value.get_inner_expression(),
-                Expression::StringLiteral(_) | Expression::TemplateLiteral(_)
-            ) {
-                immutable.insert(name);
-            }
-            name
-        })
-        .collect();
-    binding_counts(program, names, require_top_level)
-        .into_iter()
-        .filter(|(name, count)| {
-            count.is_stable(false) && (count.call_arguments == 0 || immutable.contains(name))
-        })
-        .map(|(name, _)| name)
-        .collect()
+    stable_bindings(
+        program,
+        candidates.into_iter().map(|(name, _)| name),
+        false,
+        require_top_level,
+    )
 }
 
-/// The [`NameCount`] of each name, with the changes and calls through aliases
-/// added to the root names.
+/// The [`NameCount`] of each name, with the changes through aliases and
+/// through calls to local functions added as mutating calls.
 fn binding_counts<'n>(
     program: &Program<'_>,
     names: impl IntoIterator<Item = &'n str>,
     require_top_level: bool,
 ) -> FxHashMap<&'n str, NameCount> {
-    let names: Vec<&'n str> = names
-        .into_iter()
-        .filter(|name| !require_top_level || declares_top_level_const_or_let(program, name))
-        .collect();
-    if names.is_empty() {
-        return FxHashMap::default();
-    }
-    let calls = CallArguments::of(program);
-    scope_counts(Scope::Program(program), names, &calls)
-}
-
-/// The code that a name analysis walks: the whole program, or the body of a
-/// function of the program.
-#[derive(Clone, Copy)]
-enum Scope<'s, 'a> {
-    Program(&'s Program<'a>),
-    Body(&'s FunctionBody<'a>),
-    Expression(&'s Expression<'a>),
-}
-
-impl<'a> Scope<'_, 'a> {
-    fn walk(self, visitor: &mut impl Visit<'a>) {
-        match self {
-            Scope::Program(program) => visitor.visit_program(program),
-            Scope::Body(body) => visitor.visit_function_body(body),
-            Scope::Expression(expr) => visitor.visit_expression(expr),
-        }
-    }
-}
-
-/// The [`NameCount`] of each name in `scope`, with the changes and calls
-/// through aliases added to the root names.
-fn scope_counts<'n>(
-    scope: Scope<'_, '_>,
-    names: impl IntoIterator<Item = &'n str>,
-    calls: &CallArguments,
-) -> FxHashMap<&'n str, NameCount> {
-    let mut usage = NameUsage::new(names, calls);
+    let mut usage = NameUsage::new(
+        names
+            .into_iter()
+            .filter(|name| !require_top_level || declares_top_level_const_or_let(program, name)),
+    );
     if usage.counts.is_empty() {
         return FxHashMap::default();
     }
-    scope.walk(&mut usage);
-    let aliased = changed_alias_names(scope, calls);
-    for name in aliased.changed {
+    usage.visit_program(program);
+    for name in value_changes::changed_names(program) {
         usage.count_mutation(&name);
-    }
-    for name in aliased.passed_to_calls {
-        usage.count_call_argument(&name);
     }
     usage.counts
 }
@@ -508,378 +451,52 @@ fn declares_top_level_const_or_let(program: &Program<'_>, name: &str) -> bool {
     })
 }
 
-/// The maximum number of aliases that [`changed_alias_names`] follows. Above
-/// it, every name in an alias counts as changed, so no value is inlined past
-/// an alias that was not checked.
-const MAX_ALIASES: usize = 4096;
-
-/// The root names that the program changes or passes to a call through an
-/// alias.
-#[derive(Default)]
-struct AliasedNames {
-    changed: Vec<String>,
-    passed_to_calls: Vec<String>,
-}
-
-/// The names that the program changes through an alias. An alias is a
-/// binding, an assignment or a loop binding that holds a name or a member
-/// chain of it, such as `const r = common.resolve`, `const { resolve } =
-/// common`, `({ resolve: r } = common)`, `const list = [common]` or
-/// `for (const c of [common])`. A write or a mutating call through the alias,
-/// or through an alias of the alias, changes the root name. A call argument
-/// that names the alias passes the root name to that call. An alias that is
-/// only read changes nothing.
-fn changed_alias_names(scope: Scope<'_, '_>, calls: &CallArguments) -> AliasedNames {
-    let mut collector = AliasCollector {
-        aliases: Vec::new(),
-    };
-    scope.walk(&mut collector);
-    if collector.aliases.is_empty() {
-        return AliasedNames::default();
-    }
-    if collector.aliases.len() > MAX_ALIASES {
-        // Too many aliases to follow: every name in them counts as changed.
-        return AliasedNames {
-            changed: collector
-                .aliases
-                .into_iter()
-                .flat_map(|alias| [alias.name, alias.root])
-                .collect(),
-            passed_to_calls: Vec::new(),
-        };
-    }
-    let mut usage = NameUsage::new(
-        collector
-            .aliases
-            .iter()
-            .filter(|alias| alias.path.is_empty())
-            .map(|alias| alias.name.as_str()),
-        calls,
-    );
-    scope.walk(&mut usage);
-    let keyed = keyed_alias::KeyedUses::of(
-        scope,
-        collector
-            .aliases
-            .iter()
-            .filter(|alias| !alias.path.is_empty())
-            .map(|alias| alias.name.as_str())
-            .collect(),
-        calls,
-    );
-    let mut roots: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
-    for alias in &collector.aliases {
-        roots
-            .entry(alias.name.as_str())
-            .or_default()
-            .push(alias.root.as_str());
-    }
-    // A change through an alias changes the root that the alias holds. A
-    // keyed alias changes its root only through its key path. A change of
-    // that root then changes each root that the root holds.
-    let mut changed = Vec::new();
-    let mut passed = Vec::new();
-    for alias in &collector.aliases {
-        let (is_changed, is_passed) = if alias.path.is_empty() {
-            usage
-                .counts
-                .get(alias.name.as_str())
-                .map_or((false, false), |count| {
-                    (
-                        count.writes > count.rebinds || count.mutating_calls > 0,
-                        count.call_arguments > 0,
-                    )
-                })
-        } else {
-            keyed.changes(&alias.name, &alias.path)
-        };
-        if is_changed {
-            changed.push(alias.root.as_str());
-        }
-        if is_passed {
-            passed.push(alias.root.as_str());
-        }
-    }
-    AliasedNames {
-        changed: roots_of(&roots, changed.into_iter()),
-        passed_to_calls: roots_of(&roots, passed.into_iter()),
-    }
-}
-
-/// The start names and every root that they reach through `roots`. A root
-/// of a changed name changes as well. Each name enters the worklist at
-/// most once.
-fn roots_of<'r>(
-    roots: &FxHashMap<&'r str, Vec<&'r str>>,
-    start: impl Iterator<Item = &'r str>,
-) -> Vec<String> {
-    let mut pending: Vec<&str> = start.collect();
-    let mut reached: FxHashSet<&str> = pending.iter().copied().collect();
-    while let Some(name) = pending.pop() {
-        for &root in roots.get(name).into_iter().flatten() {
-            if reached.insert(root) {
-                pending.push(root);
-            }
-        }
-    }
-    reached.into_iter().map(str::to_owned).collect()
-}
-
-/// A name that holds the value of another name or of one of its members.
-/// An object literal holds a name under a key path, as `config` holds `entry`
-/// under `["entry"]` in `const config = { entry }`. The path is empty for an
-/// alias that holds the whole value, such as `const r = common.resolve`, and
-/// for an array element or a spread, which hold the name under every key.
-struct Alias {
-    name: String,
-    root: String,
-    path: Vec<String>,
-}
-
-struct AliasCollector {
-    aliases: Vec<Alias>,
-}
-
-impl AliasCollector {
-    fn push(&mut self, name: &str, value: &Expression<'_>) {
-        let mut roots = Vec::new();
-        push_keyed_roots(value, &mut Vec::new(), &mut roots);
-        for (root, path) in roots {
-            self.aliases.push(Alias {
-                name: name.to_owned(),
-                root: root.to_owned(),
-                path,
-            });
-        }
-    }
-}
-
-impl<'a> Visit<'a> for AliasCollector {
-    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
-        if let Some(init) = &declarator.init {
-            for identifier in declarator.id.get_binding_identifiers() {
-                self.push(identifier.name.as_str(), init);
-            }
-        }
-        walk::walk_variable_declarator(self, declarator);
-    }
-
-    fn visit_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
-        if let AssignmentTarget::AssignmentTargetIdentifier(target) = &assign.left {
-            self.push(target.name.as_str(), &assign.right);
-        } else if assign.left.as_assignment_target_pattern().is_some() {
-            // `({ resolve: r } = common)` binds `r` to a member of `common`.
-            for name in target_names(&assign.left) {
-                self.push(&name, &assign.right);
-            }
-        }
-        walk::walk_assignment_expression(self, assign);
-    }
-
-    fn visit_for_of_statement(&mut self, statement: &ForOfStatement<'a>) {
-        // `for (const c of [common])` binds `c` to each element.
-        match &statement.left {
-            ForStatementLeft::VariableDeclaration(decl) => {
-                for declarator in &decl.declarations {
-                    for identifier in declarator.id.get_binding_identifiers() {
-                        self.push(identifier.name.as_str(), &statement.right);
-                    }
-                }
-            }
-            left => {
-                if let Some(target) = left.as_assignment_target() {
-                    for name in target_names(target) {
-                        self.push(&name, &statement.right);
-                    }
-                }
-            }
-        }
-        walk::walk_for_of_statement(self, statement);
-    }
-}
-
-/// The identifier names in an assignment target, such as `r` and `a` in
-/// `{ resolve: r, a }`. A name in a default value or a computed key counts
-/// too, which can only add an alias.
-fn target_names(target: &AssignmentTarget<'_>) -> Vec<String> {
-    #[derive(Default)]
-    struct Names(Vec<String>);
-    impl<'a> Visit<'a> for Names {
-        fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-            self.0.push(identifier.name.to_string());
-        }
-    }
-    let mut names = Names::default();
-    names.visit_assignment_target(target);
-    names.0
-}
-
-/// The root names that a value can hold: the root of a member chain, the
-/// roots of each branch of `a || b`, `a ?? b` or `cond ? a : b`, and the roots
-/// of each element, property value and spread of an array or object literal,
-/// such as `[common]` or `{ c: common }`.
-fn push_alias_roots<'e>(value: &'e Expression<'_>, roots: &mut Vec<&'e str>) {
-    match value.without_parentheses().get_inner_expression() {
-        Expression::LogicalExpression(logical) => {
-            push_alias_roots(&logical.left, roots);
-            push_alias_roots(&logical.right, roots);
-        }
-        Expression::ConditionalExpression(conditional) => {
-            push_alias_roots(&conditional.consequent, roots);
-            push_alias_roots(&conditional.alternate, roots);
-        }
-        Expression::ArrayExpression(array) => {
-            for element in &array.elements {
-                match element {
-                    ArrayExpressionElement::SpreadElement(spread) => {
-                        push_alias_roots(&spread.argument, roots);
-                    }
-                    element => {
-                        if let Some(expr) = element.as_expression() {
-                            push_alias_roots(expr, roots);
-                        }
-                    }
-                }
-            }
-        }
-        Expression::ObjectExpression(object) => {
-            for property in &object.properties {
-                match property {
-                    ObjectPropertyKind::ObjectProperty(property) => {
-                        push_alias_roots(&property.value, roots);
-                    }
-                    ObjectPropertyKind::SpreadProperty(spread) => {
-                        push_alias_roots(&spread.argument, roots);
-                    }
-                }
-            }
-        }
-        other => roots.extend(member_root(other)),
-    }
-}
-
-/// The roots of [`push_alias_roots`], each with the key path of the object
-/// literals that hold it. A computed key, an array element and a spread hold
-/// the name under every key, so the path stops there.
-fn push_keyed_roots<'e>(
-    value: &'e Expression<'_>,
-    path: &mut Vec<String>,
-    roots: &mut Vec<(&'e str, Vec<String>)>,
-) {
-    match value.without_parentheses().get_inner_expression() {
-        Expression::LogicalExpression(logical) => {
-            push_keyed_roots(&logical.left, path, roots);
-            push_keyed_roots(&logical.right, path, roots);
-        }
-        Expression::ConditionalExpression(conditional) => {
-            push_keyed_roots(&conditional.consequent, path, roots);
-            push_keyed_roots(&conditional.alternate, path, roots);
-        }
-        Expression::ObjectExpression(object) => {
-            for property in &object.properties {
-                let ObjectPropertyKind::ObjectProperty(property) = property else {
-                    continue;
-                };
-                let Some(key) = static_key_of(property) else {
-                    continue;
-                };
-                path.push(key.to_owned());
-                push_keyed_roots(&property.value, path, roots);
-                path.pop();
-            }
-            let mut unkeyed = Vec::new();
-            for property in &object.properties {
-                match property {
-                    ObjectPropertyKind::SpreadProperty(spread) => {
-                        push_alias_roots(&spread.argument, &mut unkeyed);
-                    }
-                    ObjectPropertyKind::ObjectProperty(property) => {
-                        if static_key_of(property).is_none() {
-                            push_alias_roots(&property.value, &mut unkeyed);
-                        }
-                    }
-                }
-            }
-            roots.extend(unkeyed.into_iter().map(|root| (root, path.clone())));
-        }
-        other => {
-            let mut plain = Vec::new();
-            push_alias_roots(other, &mut plain);
-            roots.extend(plain.into_iter().map(|root| (root, path.clone())));
-        }
-    }
-}
-
-/// The key of a property that is not computed, such as `entry` in `{ entry }`
-/// or in `{ "entry": value }`.
-fn static_key_of<'p>(property: &'p ObjectProperty<'_>) -> Option<&'p str> {
-    if property.computed {
-        return None;
-    }
-    match &property.key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
-        PropertyKey::StringLiteral(literal) => literal.value.as_str(),
-        _ => None,
-    }
-}
-
 /// What one program does with one name: the number of bindings that declare it,
 /// the number of expressions that write to it or to one of its members, the
-/// number of those writes that assign a new value to the name itself, the
-/// number of calls such as `name.push(...)` that change it, and the number of
-/// call arguments that pass it to a function that can change it.
+/// number of those writes that assign a new value to the name itself, and the
+/// number of calls such as `name.push(...)` that change it.
 #[derive(Default)]
 struct NameCount {
     bindings: usize,
     writes: usize,
     rebinds: usize,
     mutating_calls: usize,
-    call_arguments: usize,
 }
 
 impl NameCount {
     /// One binding, no writes, and no mutating calls unless they are allowed.
-    /// A call argument does not count here: see [`stable_values`].
     fn is_stable(&self, allow_mutating_calls: bool) -> bool {
         self.bindings == 1 && self.writes == 0 && (allow_mutating_calls || self.mutating_calls == 0)
     }
 }
 
 /// The [`NameCount`] of each name in a set, from one walk of a program.
-struct NameUsage<'n, 'c> {
+struct NameUsage<'n> {
     counts: FxHashMap<&'n str, NameCount>,
     write_depth: usize,
-    calls: &'c CallArguments,
 }
 
-impl<'n, 'c> NameUsage<'n, 'c> {
-    fn new(names: impl IntoIterator<Item = &'n str>, calls: &'c CallArguments) -> Self {
+impl<'n> NameUsage<'n> {
+    fn new(names: impl IntoIterator<Item = &'n str>) -> Self {
         Self {
             counts: names
                 .into_iter()
                 .map(|name| (name, NameCount::default()))
                 .collect(),
             write_depth: 0,
-            calls,
         }
     }
 }
 
-impl NameUsage<'_, '_> {
+impl NameUsage<'_> {
     fn count_mutation(&mut self, name: &str) {
         if let Some(count) = self.counts.get_mut(name) {
             count.mutating_calls += 1;
         }
     }
-
-    fn count_call_argument(&mut self, name: &str) {
-        if let Some(count) = self.counts.get_mut(name) {
-            count.call_arguments += 1;
-        }
-    }
 }
 
-impl<'a> Visit<'a> for NameUsage<'_, '_> {
+impl<'a> Visit<'a> for NameUsage<'_> {
     fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
         if let Some(count) = self.counts.get_mut(identifier.name.as_str()) {
             count.bindings += 1;
@@ -919,23 +536,7 @@ impl<'a> Visit<'a> for NameUsage<'_, '_> {
         if let Some(name) = mutated_receiver(call) {
             self.count_mutation(name);
         }
-        for name in self
-            .calls
-            .changeable(&call.callee, call.span, &call.arguments)
-        {
-            self.count_call_argument(name);
-        }
         walk::walk_call_expression(self, call);
-    }
-
-    fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
-        let names =
-            self.calls
-                .changeable(&expression.callee, expression.span, &expression.arguments);
-        for name in names {
-            self.count_call_argument(name);
-        }
-        walk::walk_new_expression(self, expression);
     }
 
     fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
@@ -1002,7 +603,7 @@ const FIRST_ARGUMENT_MUTATORS: &[(&str, &str)] = &[
     ("Reflect", "setPrototypeOf"),
 ];
 
-pub(super) fn changes_first_argument(member: &StaticMemberExpression<'_>) -> bool {
+fn changes_first_argument(member: &StaticMemberExpression<'_>) -> bool {
     let Some(owner) = global_name(&member.object) else {
         return false;
     };
@@ -1031,7 +632,7 @@ fn global_name<'e>(expr: &'e Expression<'_>) -> Option<&'e str> {
 /// The root name of an identifier or of a member chain such as
 /// `name.resolve.alias`. A binding or an assignment that holds such a value
 /// is an alias, and a write through the alias changes the root name.
-pub(super) fn member_root<'e>(expr: &'e Expression<'_>) -> Option<&'e str> {
+fn member_root<'e>(expr: &'e Expression<'_>) -> Option<&'e str> {
     let mut current = expr.without_parentheses().get_inner_expression();
     loop {
         current = match current {
