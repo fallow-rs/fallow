@@ -22,6 +22,8 @@ pub(crate) use multi_config::{
     extract_each_config_entries, extract_each_config_path_aliases,
     extract_each_config_require_strings, extract_each_config_shallow_strings, find_config_objects,
 };
+#[path = "config_parser_alias_entry.rs"]
+mod alias_entry;
 #[path = "config_parser_vite_plugin_call.rs"]
 mod vite_plugin_call;
 pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;
@@ -2246,11 +2248,7 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
                 let Expression::ObjectExpression(obj) = element.as_expression()? else {
                     return None;
                 };
-                let find = find_property(obj, "find")
-                    .and_then(|prop| expression_to_string(&prop.value))?;
-                let (replacement, is_bare) = find_property(obj, "replacement")
-                    .and_then(|prop| alias_replacement_kinded(&prop.value, PathScope::Bare))?;
-                Some((find, replacement, is_bare))
+                alias_entry::object_alias_pair(obj, PathScope::Bare)
             })
             .collect(),
         _ => Vec::new(),
@@ -2286,7 +2284,7 @@ fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(
             .iter()
             .find_map(ArrayExpressionElement::as_expression)
             .and_then(|element| alias_replacement_kinded(element, scope)),
-        _ => path_string_in(expr, scope).map(|value| (value, false)),
+        _ => alias_entry::path_value(expr, scope).map(|value| (value, false)),
     }
 }
 
@@ -2410,14 +2408,10 @@ fn resolve_array_alias_pairs_kinded(
             }
             _ => {
                 if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
-                    && let Some(find) = find_property(obj, "find")
-                        .and_then(|prop| expression_to_string(&prop.value))
-                    && let Some((replacement, is_bare)) = find_property(obj, "replacement")
-                        .and_then(|prop| {
-                            alias_replacement_kinded(&prop.value, PathScope::Program(program))
-                        })
+                    && let Some(pair) =
+                        alias_entry::object_alias_pair(obj, PathScope::Program(program))
                 {
-                    pairs.push((find, replacement, is_bare));
+                    pairs.push(pair);
                 }
             }
         }
