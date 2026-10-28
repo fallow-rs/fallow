@@ -18198,7 +18198,7 @@
         "important_count",
         "nesting_depth"
       ],
-      "description": "Structural CSS metrics for a single style rule, computed from the parsed CSS\nsyntax tree. A rule is recorded only when it crosses a structural floor (an\nid selector, a complex selector, a `!important` declaration, or deep\nnesting), so the vector stays bounded on normal stylesheets.\n\nNot persisted in the extraction cache: `fallow health` computes these\non demand from the CSS source, so there is no `bitcode` derive."
+      "description": "Structural CSS metrics for one style rule of the parsed CSS. Only a rule\nover a structural floor (an id selector, a complex selector, `!important`,\nor deep nesting) is recorded, so the vector stays bounded. Not cached:\n`fallow health` computes these from the CSS source (no `bitcode` derive)."
     },
     "CssAnalyticsSummary": {
       "type": "object",

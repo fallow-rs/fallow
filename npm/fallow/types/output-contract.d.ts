@@ -11085,13 +11085,10 @@ defined_font_faces: string[]
 referenced_font_families: string[]
 }
 /**
- * Structural CSS metrics for a single style rule, computed from the parsed CSS
- * syntax tree. A rule is recorded only when it crosses a structural floor (an
- * id selector, a complex selector, a `!important` declaration, or deep
- * nesting), so the vector stays bounded on normal stylesheets.
- *
- * Not persisted in the extraction cache: `fallow health` computes these
- * on demand from the CSS source, so there is no `bitcode` derive.
+ * Structural CSS metrics for one style rule of the parsed CSS. Only a rule
+ * over a structural floor (an id selector, a complex selector, `!important`,
+ * or deep nesting) is recorded, so the vector stays bounded. Not cached:
+ * `fallow health` computes these from the CSS source (no `bitcode` derive).
  */
 export interface CssRuleMetric {
 /**
