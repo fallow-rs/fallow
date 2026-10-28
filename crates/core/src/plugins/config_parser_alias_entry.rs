@@ -1,14 +1,20 @@
 //! Read one `{ find, replacement }` alias entry.
 //!
 //! Vite and Rollup accept a string or a regular expression as `find`. The
-//! resolver keeps aliases as `(prefix, replacement)` pairs, so only two regex
-//! shapes map to it without a change of meaning:
+//! resolver keeps aliases as `(prefix, replacement)` pairs, so only three regex
+//! shapes map to it:
 //! - An anchored literal, such as `/^node:module$/`. The key is the literal.
 //! - An anchored prefix with one trailing capture, such as `/^@\/(.*)$/`, when
 //!   the replacement ends with `/$1`. The key is the prefix and the replacement
 //!   loses the `/$1` suffix.
+//! - An anchored prefix that ends with a slash, such as `/^@\//`, when the
+//!   replacement ends with a slash. The key keeps the slash.
 //!
 //! Every other regex gives no alias, which keeps the old behavior.
+//!
+//! Limit: the resolver matches every key as a prefix. Thus an exact key such as
+//! `lodash` from `/^lodash$/` also matches `lodash/fp`, which Vite does not
+//! alias. A capture key also matches `<prefix>` without a rest.
 
 use oxc_ast::ast::{Expression, ObjectExpression, RegExpFlags, RegExpLiteral, TemplateLiteral};
 
@@ -29,6 +35,9 @@ enum RegexAliasKey {
     Exact(String),
     /// The regex matches `<prefix>/<rest>` and captures `<rest>` as `$1`.
     Prefix(String),
+    /// The regex matches a leading `<prefix>/` and does not capture the rest.
+    /// The key keeps the trailing slash.
+    SlashPrefix(String),
 }
 
 /// Build the `(find, replacement, is_bare)` tuple of one alias array entry.
@@ -97,9 +106,23 @@ fn regex_alias_pair(regex: &RegExpLiteral<'_>, replacement: &str) -> Option<(Str
     {
         return None;
     }
-    let (key, replacement) = match parse_regex_alias_key(regex.regex.pattern.text.as_str())? {
+    let key = parse_regex_alias_key(regex.regex.pattern.text.as_str())?;
+    alias_pair_for_key(key, replacement)
+}
+
+/// Pair a parsed regex key with its replacement.
+///
+/// A slash prefix key needs a replacement that ends with a slash. Vite replaces
+/// only the matched text, so `#/b` with `/^#\//` and `/src/lib` gives
+/// `/src/libb`, which the prefix model can not express.
+fn alias_pair_for_key(key: RegexAliasKey, replacement: &str) -> Option<(String, String)> {
+    let (key, replacement) = match key {
         RegexAliasKey::Exact(key) => (key, replacement),
         RegexAliasKey::Prefix(key) => (key, replacement.strip_suffix(CAPTURE_SUFFIX)?),
+        RegexAliasKey::SlashPrefix(key) => {
+            replacement.strip_suffix('/')?;
+            (key, replacement)
+        }
     };
     if replacement.contains('$') {
         return None;
@@ -118,8 +141,15 @@ fn parse_regex_alias_key(pattern: &str) -> Option<RegexAliasKey> {
         let prefix = prefix.strip_suffix('/')?;
         return (!prefix.is_empty()).then(|| RegexAliasKey::Prefix(prefix.to_owned()));
     }
-    let literal = unescape_literal(body.strip_suffix('$')?)?;
-    (!literal.is_empty()).then_some(RegexAliasKey::Exact(literal))
+    if let Some(exact) = body.strip_suffix('$') {
+        let literal = unescape_literal(exact)?;
+        return (!literal.is_empty()).then_some(RegexAliasKey::Exact(literal));
+    }
+    let literal = unescape_literal(body)?;
+    let has_name = literal
+        .strip_suffix('/')
+        .is_some_and(|name| !name.is_empty());
+    has_name.then_some(RegexAliasKey::SlashPrefix(literal))
 }
 
 /// Read a regex fragment as literal text. Returns `None` when the fragment has
@@ -181,6 +211,30 @@ mod tests {
     }
 
     #[test]
+    fn anchored_slash_prefix_maps_to_a_slash_prefix_key() {
+        for (pattern, key) in [(r"^@\/", "@/"), (r"^#\/", "#/"), ("^~lib/", "~lib/")] {
+            assert_eq!(
+                parse_regex_alias_key(pattern),
+                Some(RegexAliasKey::SlashPrefix(key.to_owned())),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn slash_prefix_needs_a_replacement_that_ends_with_a_slash() {
+        let pair = |pattern: &str, replacement: &str| {
+            let key = parse_regex_alias_key(pattern)?;
+            alias_pair_for_key(key, replacement)
+        };
+        assert_eq!(
+            pair(r"^#\/", "/src/lib/"),
+            Some(("#/".to_owned(), "/src/lib/".to_owned()))
+        );
+        assert_eq!(pair(r"^#\/", "/src/lib"), None);
+    }
+
+    #[test]
     fn other_regex_shapes_give_no_key() {
         for pattern in [
             "node:module",
@@ -193,6 +247,8 @@ mod tests {
             r"^@\/(.*)\.js$",
             r"^\d+$",
             "^$",
+            r"^\/",
+            r"^@\/.*",
         ] {
             assert_eq!(parse_regex_alias_key(pattern), None, "{pattern}");
         }

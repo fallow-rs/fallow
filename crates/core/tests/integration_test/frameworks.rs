@@ -1049,6 +1049,10 @@ fn vite_alias_with_regex_find_resolves() {
         !unresolved.contains(&"@/format"),
         "regex capture alias must resolve: {unresolved:?}"
     );
+    assert!(
+        !unresolved.contains(&"~/pad"),
+        "regex slash prefix alias must resolve: {unresolved:?}"
+    );
 
     let unused_file_paths: Vec<String> = results
         .unused_files
@@ -1056,7 +1060,12 @@ fn vite_alias_with_regex_find_resolves() {
         .filter_map(|f| f.file.path.strip_prefix(&root).ok())
         .map(|path| path.to_string_lossy().replace('\\', "/"))
         .collect();
-    for file in ["src/node-module-shim.ts", "src/logger.ts", "src/format.ts"] {
+    for file in [
+        "src/node-module-shim.ts",
+        "src/logger.ts",
+        "src/format.ts",
+        "src/lib/pad.ts",
+    ] {
         assert!(
             !unused_file_paths.contains(&file.to_string()),
             "{file} must be reachable through the regex alias: {unused_file_paths:?}"

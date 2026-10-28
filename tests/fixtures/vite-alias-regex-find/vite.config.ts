@@ -9,6 +9,7 @@ export default defineConfig({
       { find: /^node:module$/, replacement: p("./src/node-module-shim.ts") },
       { find: /^virtual-logger$/, replacement: p("./src/logger.ts") },
       { find: /^@\/(.*)$/, replacement: p("./src/$1") },
+      { find: /^~\//, replacement: "/src/lib/" },
     ],
   },
 });

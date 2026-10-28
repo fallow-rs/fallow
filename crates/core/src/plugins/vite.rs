@@ -642,6 +642,8 @@ mod tests {
                     alias: [
                         { find: /^node:module$/, replacement: p('./src/shim.ts') },
                         { find: /^@\/(.*)$/, replacement: p('./src/$1') },
+                        { find: /^#\//, replacement: '/src/lib/' },
+                        { find: /^%\//, replacement: '/src/lib' },
                         { find: /^~lib\/(.+)$/u, replacement: '/lib/$1' },
                         { find: /\.svg$/, replacement: './src/svg.ts' },
                         { find: /^Pkg$/i, replacement: './src/pkg.ts' },
@@ -667,6 +669,7 @@ mod tests {
             vec![
                 ("node:module".to_string(), "src/shim.ts".to_string()),
                 ("@".to_string(), "src".to_string()),
+                ("#/".to_string(), "src/lib".to_string()),
                 ("~lib".to_string(), "lib".to_string()),
                 ("regex".to_string(), "dir".to_string()),
             ]
