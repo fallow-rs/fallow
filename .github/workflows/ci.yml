@@ -194,6 +194,7 @@ jobs:
               - 'crates/cli/src/base_worktree.rs'
               - 'crates/cli/src/ci_template.rs'
               - 'crates/cli/src/coverage/mod.rs'
+              - 'crates/cli/src/coverage/mod_tests.rs'
               - 'crates/cli/src/coverage/upload_source_maps.rs'
               - 'crates/cli/src/health/coverage.rs'
               - 'crates/cli/src/report/sink.rs'

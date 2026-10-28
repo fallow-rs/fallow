@@ -2462,17 +2462,8 @@ pub enum CiTemplateCli {
 pub enum CoverageCli {
     /// Resumable first-run setup: license + sidecar + recipe + analysis.
     Setup {
-        /// Accept all prompts automatically.
-        #[arg(short = 'y', long)]
-        yes: bool,
-
-        /// Print instructions instead of prompting.
-        #[arg(long)]
-        non_interactive: bool,
-
-        /// Emit deterministic setup instructions as JSON. Implies --non-interactive.
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: crate::coverage::CoverageSetupCli,
     },
     /// Analyze runtime coverage from a local artifact or explicit cloud source.
     ///

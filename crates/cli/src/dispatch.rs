@@ -1992,11 +1992,7 @@ fn map_coverage_subcommand(
     base: Option<&str>,
 ) -> coverage::CoverageSubcommand {
     match sub {
-        CoverageCli::Setup {
-            yes,
-            non_interactive,
-            json,
-        } => map_coverage_setup(*yes, *non_interactive, *json, explain),
+        CoverageCli::Setup { args } => args.to_subcommand(explain),
         CoverageCli::Analyze { .. } => map_coverage_analyze(sub),
         CoverageCli::UploadInventory { .. } => map_coverage_upload_inventory(sub),
         CoverageCli::UploadSourceMaps { .. } => map_coverage_upload_source_maps(sub),
@@ -2040,20 +2036,6 @@ fn map_coverage_subcommand(
             cursor: cursor.clone(),
         }),
     }
-}
-
-fn map_coverage_setup(
-    yes: bool,
-    non_interactive: bool,
-    json: bool,
-    explain: bool,
-) -> coverage::CoverageSubcommand {
-    coverage::CoverageSubcommand::Setup(coverage::SetupArgs {
-        yes,
-        non_interactive: non_interactive || json,
-        json,
-        explain,
-    })
 }
 
 fn map_coverage_analyze(sub: &CoverageCli) -> coverage::CoverageSubcommand {

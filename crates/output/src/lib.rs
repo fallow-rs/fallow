@@ -169,11 +169,12 @@ pub use codeclimate::{
     codeclimate_issues_to_value,
 };
 pub use coverage_envelopes::{
-    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
-    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
-    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet,
-    build_coverage_analyze_output, serialize_coverage_analyze_json_output,
-    serialize_coverage_setup_json_output,
+    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupCi, CoverageSetupCiProvider,
+    CoverageSetupCloud, CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember,
+    CoverageSetupOutput, CoverageSetupPackageManager, CoverageSetupRuntimeTarget,
+    CoverageSetupSchemaVersion, CoverageSetupSnippet, CoverageSetupSourceMaps, CoverageSetupWait,
+    CoverageSetupWaitOutcome, build_coverage_analyze_output,
+    serialize_coverage_analyze_json_output, serialize_coverage_setup_json_output,
 };
 pub use dead_code_sarif::build_dead_code_sarif;
 pub use diff::{
