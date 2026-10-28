@@ -297,11 +297,34 @@ pub fn argument_entries<'a>(binary: &str, args: &[&'a str]) -> ArgumentEntries<'
     if let Some(runtime) = script_runtime(name) {
         return runtime_entry_args(name, runtime, args);
     }
+    // An executable script file runs itself. Its arguments are data.
+    if is_executable_script(binary) {
+        return ArgumentEntries::Listed(Vec::new());
+    }
     // A program that fallow does not know can run a known program.
-    match args.iter().position(|token| is_known_program(token)) {
+    match wrapped_program(args) {
         Some(idx) => argument_entries(args[idx], &args[idx + 1..]),
         None => ArgumentEntries::Literal,
     }
+}
+
+/// Return the index of the known program that an unknown program runs
+/// (`time node x.js`, `infisical run -- node x.js`). The program is a bare
+/// name or a binary under `node_modules/`. It is not the value of the flag
+/// before it, and no literal file argument comes before it.
+fn wrapped_program(args: &[&str]) -> Option<usize> {
+    let mut after_flag = false;
+    for (idx, &token) in args.iter().enumerate() {
+        let program_form = !token.contains('/') || token.contains("node_modules/");
+        if !after_flag && program_form && is_known_program(token) {
+            return Some(idx);
+        }
+        if !token.starts_with('-') && looks_like_file_path(token) {
+            return None;
+        }
+        after_flag = token.starts_with('-') && token != "--" && !token.contains('=');
+    }
+    None
 }
 
 /// Return `true` when `binary` runs or loads every file argument that it
@@ -329,6 +352,12 @@ fn script_runtime(name: &str) -> Option<&'static ScriptRuntime> {
     SCRIPT_RUNTIMES
         .iter()
         .find(|runtime| runtime.names.contains(&name))
+}
+
+/// Whether `binary` is a script file that runs itself, such as
+/// `./scripts/build.js`, and not the binary of a known program.
+fn is_executable_script(binary: &str) -> bool {
+    is_script_candidate(binary) && !is_known_program(binary)
 }
 
 /// Whether `token` names a program that has its own rules.
@@ -591,6 +620,53 @@ mod tests {
             ("hardhat run tools/deploy.ts", &["tools/deploy.ts"]),
         ] {
             assert_eq!(entries(script), expected, "{script}");
+        }
+    }
+
+    #[test]
+    fn known_program_name_in_a_value_or_path_is_not_a_wrapped_program() {
+        let mut failures = Vec::new();
+        for (script, expected) in [
+            ("my-cli app/a.js --engine node", &["app/a.js"][..]),
+            ("foo --watch app/a.js --exec node", &["app/a.js"]),
+            ("tsdx build --entry app/a.ts --target node", &["app/a.ts"]),
+            ("gen --out app/a.ts --runtime bun", &["app/a.ts"]),
+            (
+                "serverless invoke local -f fn -p app/event.js --runtime node",
+                &["app/event.js"],
+            ),
+            ("cp app/worker.js dist/node", &["app/worker.js"]),
+            (
+                "foo --target node app/x.js app/y.js",
+                &["app/x.js", "app/y.js"],
+            ),
+            ("foo -e node app/a.js app/b.js", &["app/a.js", "app/b.js"]),
+            ("tool app/node app/a.js app/b.js", &["app/a.js", "app/b.js"]),
+            (
+                "run scripts/deno app/a.ts app/b.ts",
+                &["app/a.ts", "app/b.ts"],
+            ),
+        ] {
+            let found = entries(script);
+            if !expected.iter().all(|file| found.iter().any(|f| f == file)) {
+                failures.push(format!("{script}: {found:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn bun_script_arguments_are_data() {
+        for script in [
+            "bun --smol app/tool.js app/data.js",
+            "bun --bun app/tool.js app/data.js",
+            "bun run app/tool.js app/data.js",
+        ] {
+            let found = entries(script);
+            assert!(
+                !found.iter().any(|file| file == "app/data.js"),
+                "{script}: {found:?}"
+            );
         }
     }
 

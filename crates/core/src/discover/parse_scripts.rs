@@ -192,7 +192,13 @@ fn shell_command_body<'a>(
     start: usize,
     segment: &'a str,
 ) -> Option<&'a str> {
-    if !SHELLS.contains(&cmd) || tokens.get(start + 1) != Some(&"-c") {
+    if !SHELLS.contains(&cmd) {
+        return None;
+    }
+    // Shell flags such as `-e` or `-eu` can come before `-c`.
+    let flags = tokens.get(start + 1..)?;
+    let c_idx = flags.iter().position(|token| *token == "-c")?;
+    if !flags[..c_idx].iter().all(|token| token.starts_with('-')) {
         return None;
     }
     let (_, body) = segment.split_once(" -c ")?;
@@ -233,7 +239,15 @@ fn script_file_args(cmd: &str, tokens: &[&str], start: usize, unknown_body: bool
                 .collect(),
             looks_like_script_file,
         ),
-        ArgumentEntries::Listed(listed) => (listed, looks_like_file_path),
+        // An executable script file (`bun --smol app/tool.js`) is the
+        // command itself, so it stays a reference.
+        ArgumentEntries::Listed(listed) => (
+            std::iter::once(tokens[start])
+                .filter(|cmd| looks_like_script_file(cmd))
+                .chain(listed)
+                .collect(),
+            looks_like_file_path,
+        ),
         ArgumentEntries::Loaded(loaded) => return loaded,
     };
     args.into_iter()
@@ -388,10 +402,53 @@ mod tests {
         assert_eq!(refs("sh -c \"watchee app/data.js\""), vec!["app/data.js"]);
         assert_eq!(refs("sh -c 'node app/x.js data/a.js'"), vec!["app/x.js"]);
         assert!(refs("sh -c \"watchee -f 'src/**/*'\"").is_empty());
+    }
+
+    #[test]
+    fn wrapped_program_needs_a_bare_name_before_any_literal_file() {
+        assert_eq!(
+            refs("foo --target node app/x.js app/y.js"),
+            vec!["app/x.js", "app/y.js"]
+        );
+        assert_eq!(refs("my-cli app/a.js --engine node"), vec!["app/a.js"]);
+        assert_eq!(
+            refs("run scripts/deno app/a.ts app/b.ts"),
+            vec!["app/a.ts", "app/b.ts"]
+        );
         assert_eq!(
             refs("mocha test/a.spec.js test/b.spec.js"),
             vec!["test/a.spec.js", "test/b.spec.js"]
         );
+    }
+
+    #[test]
+    fn shell_flags_before_c_keep_the_quoted_command() {
+        assert_eq!(
+            refs("bash -e -c \"node app/a.js data/b.js\""),
+            vec!["app/a.js"]
+        );
+        assert_eq!(
+            refs("bash -eu -c \"watchee app/data.js\""),
+            vec!["app/data.js"]
+        );
+    }
+
+    #[test]
+    fn bun_script_arguments_are_data() {
+        let failures: Vec<String> = [
+            "bun --smol app/tool.js app/data.js",
+            "bun --bun app/tool.js app/data.js",
+            "bun run app/tool.js app/data.js",
+        ]
+        .into_iter()
+        .map(|script| (script, refs(script)))
+        .filter(|(_, found)| {
+            found.contains(&"app/data.js".to_string())
+                || !found.contains(&"app/tool.js".to_string())
+        })
+        .map(|(script, found)| format!("{script}: {found:?}"))
+        .collect();
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 
     #[test]

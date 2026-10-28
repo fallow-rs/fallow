@@ -498,7 +498,12 @@ the rules:
   file argument, so each one stays an entry point.
 - A program that fallow does not know can run a known program
   (`time node x.js`, `infisical run -- node x.js`). The rules of the first
-  known program in its arguments then apply. Without a known program, the
+  known program in its arguments then apply. That program must be a bare
+  name or a binary under `node_modules/`, must not be the value of the flag
+  before it, and must come before any literal file argument. So
+  `my-cli app/a.js --engine node` keeps `app/a.js`. An executable script
+  file (`bun --smol app/tool.js`) runs itself, and its arguments are data.
+  Without a known program, the
   literal file arguments and option values stay entry points, but a glob
   never expands from them. `watchee -f './src/**/*'` gives no entry point,
   and `jscodeshift -t codemods/transform.js` keeps its transform.
