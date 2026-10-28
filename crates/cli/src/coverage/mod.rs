@@ -10,7 +10,8 @@
 //!   unlocking the `untracked` filter on the dashboard by pairing runtime
 //!   coverage data with the AST view of "every function that exists".
 //! - `upload-source-maps`: push build source maps so bundled runtime coverage
-//!   can resolve back to original source files.
+//!   can resolve back to original source files. Each map also carries the
+//!   line starts of its generated script (`x_fallow_line_starts`).
 //! - `review-packet`: read the production facts of changed files or functions
 //!   from Fallow Cloud in one small request.
 //! - `deployment-changes`: read how production behavior changed between two
@@ -45,6 +46,7 @@ mod analyze;
 mod cloud_client;
 mod cloud_reads;
 mod cloud_transport;
+mod generated_line_starts;
 mod setup_cli;
 mod setup_cloud;
 mod source_map_sources;
