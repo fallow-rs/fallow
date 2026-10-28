@@ -42,6 +42,7 @@ const fn exceeded_priority(exceeded: ExceededThreshold) -> u8 {
         ExceededThreshold::Crap => 3,
         ExceededThreshold::Both => 2,
         ExceededThreshold::Cyclomatic | ExceededThreshold::Cognitive => 1,
+        ExceededThreshold::FileLines => 0,
     }
 }
 

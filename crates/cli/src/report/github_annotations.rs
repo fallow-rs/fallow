@@ -1363,6 +1363,13 @@ fn complexity_annotation(finding: &Value, ctx: &ComplexityThresholds) -> (String
         })
         .unwrap_or_default();
     match s(finding, "exceeded") {
+        "file_lines" => (
+            "Long file".to_owned(),
+            format!(
+                "File has {lines} lines (threshold: {}).\n\nConsider moving cohesive groups of exports into their own modules.",
+                num(finding, "max_file_lines"),
+            ),
+        ),
         "crap" | "cyclomatic_crap" | "cognitive_crap" | "all" => (
             format!("High CRAP score ({severity})"),
             format!(

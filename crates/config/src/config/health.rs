@@ -29,6 +29,14 @@ const fn default_max_unit_size() -> u32 {
     60
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if passes a reference"
+)]
+const fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
 /// Default for `suggest_inline_suppression`: emit `suppress-line` actions
 /// alongside health findings unless a baseline is active or the team has
 /// opted out via config.
@@ -296,6 +304,18 @@ pub struct HealthConfig {
     #[serde(default = "default_max_unit_size")]
     pub max_unit_size: u32,
 
+    /// Maximum file length in physical lines before the file is reported as a
+    /// complexity finding with `exceeded: "file_lines"` (default: `0`, off).
+    /// Every line counts, also blank lines and comment lines. A final newline
+    /// does not add a line. Set a limit such as `500` to enable the check, and
+    /// raise it per file via `thresholdOverrides[].maxFileLines`. The
+    /// `complexity-file-lines` rule decides if a finding fails the run. In
+    /// `fallow audit`, a long file that did not grow stays inherited. Older
+    /// fallow versions reject this key as unknown, so pair it with
+    /// `minimumVersion`.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub max_file_lines: u32,
+
     /// Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage
     /// (a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate
     /// per-function CRAP scores. Relative paths resolve against the project root. The CLI
@@ -358,6 +378,7 @@ impl Default for HealthConfig {
             max_crap: default_max_crap(),
             crap_refactor_band: default_crap_refactor_band(),
             max_unit_size: default_max_unit_size(),
+            max_file_lines: 0,
             coverage: None,
             coverage_root: None,
             ignore: vec![],
@@ -400,6 +421,11 @@ pub struct HealthThresholdOverride {
     /// suite).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_unit_size: Option<u32>,
+    /// Local file-length ceiling in physical lines. `0` turns the file-length
+    /// check off for the matching files. The ceiling applies to whole files,
+    /// so an entry that sets it must leave `functions` empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_lines: Option<u32>,
     /// Human-readable rationale for the exception.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -413,10 +439,22 @@ impl HealthThresholdOverride {
             || self.max_cognitive.is_some()
             || self.max_crap.is_some()
             || self.max_unit_size.is_some()
+            || self.max_file_lines.is_some()
     }
 }
 
 impl HealthConfig {
+    /// Whether the file-length check can report a finding: the global
+    /// `maxFileLines` is above `0`, or an override sets a `maxFileLines`.
+    #[must_use]
+    pub fn file_lines_check_enabled(&self) -> bool {
+        self.max_file_lines > 0
+            || self
+                .threshold_overrides
+                .iter()
+                .any(|entry| entry.max_file_lines.is_some_and(|max| max > 0))
+    }
+
     /// Validate semantic constraints that serde cannot express.
     #[must_use]
     pub fn threshold_override_errors(&self) -> Vec<String> {
@@ -429,7 +467,12 @@ impl HealthConfig {
             }
             if !override_entry.has_any_threshold() {
                 errors.push(format!(
-                    "health.thresholdOverrides[{index}] must set at least one of maxCyclomatic, maxCognitive, maxCrap, or maxUnitSize"
+                    "health.thresholdOverrides[{index}] must set at least one of maxCyclomatic, maxCognitive, maxCrap, maxUnitSize, or maxFileLines"
+                ));
+            }
+            if override_entry.max_file_lines.is_some() && !override_entry.functions.is_empty() {
+                errors.push(format!(
+                    "health.thresholdOverrides[{index}].maxFileLines applies to whole files; move it to an entry without functions"
                 ));
             }
         }
@@ -611,6 +654,7 @@ maxCognitive = 25
             max_crap: 75.0,
             crap_refactor_band: 4,
             max_unit_size: 120,
+            max_file_lines: 500,
             ignore: vec!["test/**".to_string()],
             threshold_overrides: vec![HealthThresholdOverride {
                 files: vec!["src/auth.ts".to_string()],
@@ -619,6 +663,7 @@ maxCognitive = 25
                 max_cognitive: None,
                 max_crap: Some(45.0),
                 max_unit_size: None,
+                max_file_lines: None,
                 reason: Some("framework assembly".to_string()),
             }],
             coverage: None,
@@ -642,6 +687,7 @@ maxCognitive = 25
         assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);
         assert_eq!(restored.crap_refactor_band, 4);
         assert_eq!(restored.max_unit_size, 120);
+        assert_eq!(restored.max_file_lines, 500);
         assert_eq!(restored.ignore, vec!["test/**"]);
         assert_eq!(restored.threshold_overrides.len(), 1);
         assert_eq!(restored.threshold_overrides[0].max_cyclomatic, Some(30));
@@ -691,7 +737,7 @@ maxCognitive = 25
         assert_eq!(
             config.threshold_override_errors(),
             vec![
-                "health.thresholdOverrides[0] must set at least one of maxCyclomatic, maxCognitive, maxCrap, or maxUnitSize"
+                "health.thresholdOverrides[0] must set at least one of maxCyclomatic, maxCognitive, maxCrap, maxUnitSize, or maxFileLines"
             ]
         );
     }
@@ -710,6 +756,28 @@ maxCognitive = 25
         assert!(override_entry.max_cyclomatic.is_none());
         assert!(override_entry.has_any_threshold());
         assert!(config.threshold_override_errors().is_empty());
+    }
+
+    #[test]
+    fn health_config_threshold_override_max_file_lines() {
+        let json = r#"{
+            "maxFileLines": 500,
+            "thresholdOverrides": [
+                {"files": ["src/generated/**"], "maxFileLines": 0},
+                {"files": ["src/a.ts"], "functions": ["f"], "maxFileLines": 900}
+            ]
+        }"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_file_lines, 500);
+        assert_eq!(config.threshold_overrides[0].max_file_lines, Some(0));
+        assert!(config.threshold_overrides[0].has_any_threshold());
+        assert_eq!(
+            config.threshold_override_errors(),
+            vec![
+                "health.thresholdOverrides[1].maxFileLines applies to whole files; move it to an entry without functions"
+            ]
+        );
+        assert_eq!(HealthConfig::default().max_file_lines, 0);
     }
 
     #[test]

@@ -177,6 +177,7 @@ jobs:
               - 'crates/engine/src/write_guard.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/engine/src/health/scoring.rs'
+              - 'crates/engine/src/health/scoring_tests.rs'
               - 'crates/engine/src/health/coverage_v8/**'
               - 'crates/engine/src/trace_error.rs'
               - 'crates/cli/src/signal/**'

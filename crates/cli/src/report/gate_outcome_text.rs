@@ -378,8 +378,8 @@ fn exit_hint(name: &str) -> Option<&'static str> {
     match name {
         "health-findings" => Some(
             "To report complexity findings without a failure, set the rules \
-             complexity-cyclomatic, complexity-cognitive and complexity-crap to \"warn\", \
-             or run `fallow health --report-only`.",
+             complexity-cyclomatic, complexity-cognitive, complexity-crap and \
+             complexity-file-lines to \"warn\", or run `fallow health --report-only`.",
         ),
         "error-severity-findings" => {
             Some("To report a finding type without a failure, set its rule to \"warn\".")

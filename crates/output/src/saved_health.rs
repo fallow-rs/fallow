@@ -65,6 +65,8 @@ struct SavedHealthFinding {
     effective_thresholds: Option<crate::HealthEffectiveThresholds>,
     #[serde(default)]
     threshold_source: Option<crate::ThresholdSource>,
+    #[serde(default)]
+    max_file_lines: Option<u32>,
     /// Absent in envelopes from an older fallow. An unknown value reads as
     /// absent, so the renderers keep the band-based level.
     #[serde(
@@ -88,6 +90,8 @@ struct SavedHealthSummary {
     max_crap_threshold: f64,
     #[serde(default = "default_max_unit_size")]
     max_unit_size_threshold: u32,
+    #[serde(default)]
+    max_file_lines_threshold: Option<u32>,
 }
 
 const fn default_max_cyclomatic() -> u16 {
@@ -271,6 +275,7 @@ impl From<SavedHealthFinding> for HealthFinding {
                 contributions: Vec::new(),
                 effective_thresholds: saved.effective_thresholds,
                 threshold_source: saved.threshold_source,
+                max_file_lines: saved.max_file_lines,
             },
             Vec::new(),
             saved.introduced,
@@ -289,6 +294,7 @@ impl From<SavedHealthSummary> for HealthSummary {
             max_cognitive_threshold: saved.max_cognitive_threshold,
             max_crap_threshold: saved.max_crap_threshold,
             max_unit_size_threshold: saved.max_unit_size_threshold,
+            max_file_lines_threshold: saved.max_file_lines_threshold,
             ..Self::default()
         }
     }

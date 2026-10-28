@@ -543,6 +543,10 @@ fn apply_health_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
             m.filter_flag = Some("--complexity");
             m.suppress = Some(("complexity", false));
         }
+        "long-file" => {
+            m.filter_flag = Some("--complexity");
+            m.suppress = Some(("complexity", true));
+        }
         "refactoring-target" => {
             m.filter_flag = Some("--targets");
         }

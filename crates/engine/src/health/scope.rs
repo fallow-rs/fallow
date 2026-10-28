@@ -19,6 +19,10 @@ pub(super) fn prepare_health_scope<'a, R>(
         .max_cognitive
         .unwrap_or(config.health.max_cognitive);
     let max_crap = opts.thresholds.max_crap.unwrap_or(config.health.max_crap);
+    let max_file_lines = opts
+        .thresholds
+        .max_file_lines
+        .unwrap_or(config.health.max_file_lines);
     let ignore_set = build_ignore_set(&config.health.ignore);
     let HealthScopeInputs {
         changed_files,
@@ -32,6 +36,7 @@ pub(super) fn prepare_health_scope<'a, R>(
         max_cyclomatic,
         max_cognitive,
         max_crap,
+        max_file_lines,
         enforce_crap: max_crap > 0.0,
         ignore_set,
         changed_files,

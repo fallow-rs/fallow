@@ -400,9 +400,10 @@ pub struct ComplexityViolation {
     /// File path relative to the project root.
     #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
-    /// Function name, or a synthesized name for anonymous functions.
+    /// Function name, or a synthesized name for anonymous functions. A
+    /// file-length finding has the name `<file>`.
     pub name: String,
-    /// 1-based line the function starts on.
+    /// 1-based line the function starts on. A file-length finding has `1`.
     pub line: u32,
     /// 1-based column the function starts on.
     pub col: u32,
@@ -417,7 +418,8 @@ pub struct ComplexityViolation {
     pub standard_cyclomatic: Option<u16>,
     /// Cognitive complexity of the function.
     pub cognitive: u16,
-    /// Lines of code in the function body.
+    /// Lines of code in the function body. On a file-length finding, the
+    /// physical line count of the file.
     pub line_count: u32,
     /// Number of declared parameters.
     pub param_count: u8,
@@ -501,6 +503,11 @@ pub struct ComplexityViolation {
     /// Source of the effective thresholds. Omitted when thresholds are global.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_source: Option<ThresholdSource>,
+    /// File-length ceiling in physical lines that the file exceeded. Present
+    /// only on a file-level finding (`exceeded: "file_lines"`), where
+    /// `line_count` holds the physical line count of the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_lines: Option<u32>,
 }
 
 /// An empty cyclomatic finding in the moderate band. Builders and tests start
@@ -534,6 +541,7 @@ impl Default for ComplexityViolation {
             contributions: Vec::new(),
             effective_thresholds: None,
             threshold_source: None,
+            max_file_lines: None,
         }
     }
 }
@@ -571,6 +579,9 @@ impl ComplexityViolation {
 /// code are reported as oversized. Mirrors the config crate's default so
 /// renderers can fill an effective-thresholds fallback without a config handle.
 pub const DEFAULT_MAX_UNIT_SIZE: u32 = 60;
+
+/// The `name` of a file-level file-length finding (`exceeded: "file_lines"`).
+pub const FILE_LINES_FINDING_NAME: &str = "<file>";
 
 /// Resolved thresholds used to evaluate a health finding.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -612,6 +623,9 @@ pub struct HealthConfiguredThresholds {
     /// Unit-size ceiling set by the override, when it sets one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_unit_size: Option<u32>,
+    /// File-length ceiling set by the override, when it sets one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_lines: Option<u32>,
 }
 
 /// Source for a finding's effective thresholds.
@@ -792,6 +806,10 @@ pub enum ExceededThreshold {
     CognitiveCrap,
     /// Cyclomatic, cognitive, and CRAP all exceeded.
     All,
+    /// The file has more physical lines than `health.maxFileLines`. The
+    /// finding describes the whole file: `name` is `<file>`, `line_count` is
+    /// the line count of the file, and `max_file_lines` is the ceiling.
+    FileLines,
 }
 
 impl ExceededThreshold {
@@ -832,6 +850,12 @@ impl ExceededThreshold {
             self,
             Self::Cognitive | Self::Both | Self::CognitiveCrap | Self::All
         )
+    }
+
+    /// True when the finding is a file-level file-length finding.
+    #[must_use]
+    pub const fn is_file_lines(self) -> bool {
+        matches!(self, Self::FileLines)
     }
 
     /// True when the CRAP threshold contributed to the finding.
@@ -944,7 +968,9 @@ pub struct HealthSummary {
     /// reports the disjoint authored-function, module, and template populations
     /// behind those aggregates.
     pub functions_analyzed: usize,
-    /// Functions exceeding at least one complexity or CRAP threshold.
+    /// Complexity findings before `--top`: functions exceeding at least one
+    /// complexity or CRAP threshold, plus file-length findings
+    /// (`exceeded: "file_lines"`).
     pub functions_above_threshold: usize,
     /// Global cyclomatic-complexity ceiling for this run.
     pub max_cyclomatic_threshold: u16,
@@ -962,6 +988,11 @@ pub struct HealthSummary {
     /// configured threshold. Per-file `thresholdOverrides` are not reflected
     /// here; this is the global default.
     pub max_unit_size_threshold: u32,
+    /// Global file-length ceiling (`health.maxFileLines` or
+    /// `--max-file-lines`) in physical lines. Absent when the file-length
+    /// check is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_lines_threshold: Option<u32>,
     /// Files with a computed maintainability score; absent when file scoring
     /// did not run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1015,6 +1046,7 @@ impl Default for HealthSummary {
             max_cognitive_threshold: 15,
             max_crap_threshold: 30.0,
             max_unit_size_threshold: DEFAULT_MAX_UNIT_SIZE,
+            max_file_lines_threshold: None,
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,

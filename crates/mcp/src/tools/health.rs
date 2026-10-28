@@ -169,6 +169,10 @@ impl HealthArgsBuilder<'_> {
             self.args
                 .extend(["--max-crap".to_string(), format!("{max_crap}")]);
         }
+        if let Some(max_file_lines) = self.params.max_file_lines {
+            self.args
+                .extend(["--max-file-lines".to_string(), max_file_lines.to_string()]);
+        }
         if let Some(top) = self.params.top {
             self.args.extend(["--top".to_string(), top.to_string()]);
         }
@@ -366,6 +370,7 @@ fn health_options_from_params(
         max_cyclomatic: params.max_cyclomatic,
         max_cognitive: params.max_cognitive,
         max_crap: params.max_crap,
+        max_file_lines: params.max_file_lines,
         top: params.top,
         sort: complexity_sort_from_param(params.sort.as_deref())?,
         complexity_breakdown: params.complexity_breakdown.unwrap_or(false),

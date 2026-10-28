@@ -105,6 +105,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
             cache_dir: Some(&config.cache_dir),
             changed_files,
             inherited_base_refs: &resolved_base.inherited_refs,
+            compare_line_counts: config.health.file_lines_check_enabled(),
         },
     )?
     else {

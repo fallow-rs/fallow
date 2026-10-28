@@ -43,7 +43,9 @@ use crate::error::emit_error;
 /// selector to selector-complexity keys, and adds an occurrence suffix on
 /// repeated keys (#3956). A version-17 snapshot holds styling keys with
 /// lines, so a line shift would mark inherited findings as introduced.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 18;
+/// Version 19 adds the file-length flag of each complexity entry
+/// (`health.maxFileLines`). A version-18 row has no way to hold it.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 19;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -112,6 +114,9 @@ pub(super) struct CachedComplexityFinding {
     pub(super) crap: Option<f64>,
     pub(super) line_count: u32,
     pub(super) exceeded: [bool; 3],
+    /// The entry is a file-length finding (`exceeded: "file_lines"`). Then
+    /// every flag in `exceeded` is false.
+    pub(super) file_lines: bool,
     /// 0 for moderate, 1 for high, 2 for critical.
     pub(super) severity: u8,
     pub(super) crap_estimated: bool,
@@ -240,6 +245,7 @@ fn sorted_complexity(baseline: &ComplexityBaseline) -> Vec<CachedComplexityFindi
                     metrics.exceeded.includes_cognitive(),
                     metrics.exceeded.includes_crap(),
                 ],
+                file_lines: metrics.exceeded.is_file_lines(),
                 severity: match metrics.severity {
                     FindingSeverity::Moderate => 0,
                     FindingSeverity::High => 1,
@@ -260,9 +266,16 @@ fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> Option<Complexi
     let mut baseline = ComplexityBaseline::default();
     for row in rows {
         let [cyclomatic, cognitive, crap] = row.exceeded;
-        if !(cyclomatic || cognitive || crap) {
+        let exceeded = if row.file_lines {
+            if cyclomatic || cognitive || crap {
+                return None;
+            }
+            ExceededThreshold::FileLines
+        } else if cyclomatic || cognitive || crap {
+            ExceededThreshold::from_bools(cyclomatic, cognitive, crap)
+        } else {
             return None;
-        }
+        };
         let severity = match row.severity {
             0 => FindingSeverity::Moderate,
             1 => FindingSeverity::High,
@@ -278,7 +291,7 @@ fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> Option<Complexi
                 cognitive: row.cognitive,
                 crap: row.crap,
                 line_count: row.line_count,
-                exceeded: ExceededThreshold::from_bools(cyclomatic, cognitive, crap),
+                exceeded,
                 severity,
                 crap_estimated: row.crap_estimated,
             });
@@ -739,6 +752,7 @@ mod tests {
             crap: None,
             line_count: 40,
             exceeded,
+            file_lines: false,
             severity,
             crap_estimated: false,
         }
@@ -752,6 +766,24 @@ mod tests {
     #[test]
     fn complexity_row_with_unknown_severity_is_a_cache_miss() {
         assert!(complexity_from_cached(vec![cached_row([true, false, false], 3)]).is_none());
+    }
+
+    #[test]
+    fn file_lines_row_round_trips_and_rejects_extra_flags() {
+        let row = CachedComplexityFinding {
+            file_lines: true,
+            ..cached_row([false, false, false], 0)
+        };
+        let baseline = complexity_from_cached(vec![row]).expect("a file-length row decodes");
+        assert_eq!(
+            baseline["complexity:src/a.ts:f"][0].exceeded,
+            ExceededThreshold::FileLines
+        );
+        let mixed = CachedComplexityFinding {
+            file_lines: true,
+            ..cached_row([true, false, false], 0)
+        };
+        assert!(complexity_from_cached(vec![mixed]).is_none());
     }
 
     #[test]

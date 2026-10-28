@@ -670,14 +670,16 @@ fn a_docs_only_change_reuses_the_head_run_as_the_base() {
     fs::write(repo.join("README.md"), "changed\n").expect("edit docs");
     let changed: FxHashSet<PathBuf> = std::iter::once(repo.join("README.md")).collect();
 
-    assert!(can_reuse_current_as_base(&repo, None, "HEAD", &changed));
+    assert!(can_reuse_current_as_base(
+        &repo, None, "HEAD", &changed, false
+    ));
 
     fs::write(repo.join("package.json"), "{}\n").expect("add manifest");
     let changed: FxHashSet<PathBuf> = [repo.join("README.md"), repo.join("package.json")]
         .into_iter()
         .collect();
     assert!(
-        !can_reuse_current_as_base(&repo, None, "HEAD", &changed),
+        !can_reuse_current_as_base(&repo, None, "HEAD", &changed, false),
         "a manifest change can change findings"
     );
 }
@@ -906,7 +908,7 @@ fn a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot() {
     fs::write(repo.join("src/util.ts"), format!("{util}\n\n")).expect("edit util");
     let changed: FxHashSet<PathBuf> = std::iter::once(repo.join("src/util.ts")).collect();
     assert!(
-        can_reuse_current_as_base(&repo, None, "HEAD", &changed),
+        can_reuse_current_as_base(&repo, None, "HEAD", &changed, false),
         "the whitespace-only edit must reach the reuse path"
     );
     let backend = CountingBackend {
@@ -924,6 +926,7 @@ fn a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot() {
             cache_dir: None,
             changed_files: changed,
             inherited_base_refs: &[],
+            compare_line_counts: false,
         },
     )
     .expect("the stub backend does not fail")

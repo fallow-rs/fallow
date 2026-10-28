@@ -233,6 +233,9 @@ pub struct AuditRunInput<'a> {
     /// Commits whose findings are inherited in addition to the base, see
     /// [`fallow_engine::repo_refs::merged_default_branch_refs`].
     pub inherited_base_refs: &'a [String],
+    /// The file-length check (`health.maxFileLines`) is on, so a change that
+    /// keeps the tokens but changes the line count still needs a real base.
+    pub compare_line_counts: bool,
 }
 
 /// The base snapshot that attribution compares with.
@@ -328,6 +331,19 @@ pub struct AuditRun<A> {
     pub outcome: AuditOutcome,
 }
 
+/// Whether the `new-only` gate needs a base pass, because a changed file can
+/// change a finding (see [`can_reuse_current_as_base`]).
+fn needs_real_base(input: &AuditRunInput<'_>) -> bool {
+    matches!(input.gate, AuditGate::NewOnly)
+        && !can_reuse_current_as_base(
+            input.root,
+            input.cache_dir,
+            input.base_ref,
+            &input.changed_files,
+            input.compare_line_counts,
+        )
+}
+
 /// Run one audit. Returns `None` when the run has no changed files.
 ///
 /// # Errors
@@ -338,22 +354,21 @@ pub fn run<B: AuditBackend>(
     backend: &B,
     input: AuditRunInput<'_>,
 ) -> Result<Option<AuditRun<B::Analyses>>, B::Error> {
+    if input.changed_files.is_empty() {
+        return Ok(None);
+    }
+    backend.prepare();
+    let needs_real_base = needs_real_base(&input);
     let AuditRunInput {
         root,
         gate,
         worsened,
         base_ref,
-        cache_dir,
+        cache_dir: _,
         changed_files,
         inherited_base_refs,
+        compare_line_counts: _,
     } = input;
-    if changed_files.is_empty() {
-        return Ok(None);
-    }
-    backend.prepare();
-
-    let needs_real_base = matches!(gate, AuditGate::NewOnly)
-        && !can_reuse_current_as_base(root, cache_dir, base_ref, &changed_files);
     // The diff-risk pass also needs the renames under `--gate all`, so a moved
     // test file does not read as removed tests.
     let renames = if needs_real_base || !matches!(gate, AuditGate::NewOnly) {

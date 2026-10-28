@@ -605,6 +605,7 @@ Angular templates contribute synthetic `<template>` complexity findings whenever
 | `--max-cyclomatic` | `string` | - | Fail if any function exceeds this cyclomatic complexity |
 | `--max-cognitive` | `string` | - | Fail if any function exceeds this cognitive complexity |
 | `--max-crap` | `string` | - | Fail if any function has CRAP score >= threshold. CRAP combines complexity with coverage (`CC^2 * (1 - cov/100)^3 + CC`). Pair with `--coverage` for accurate per-function CRAP; without coverage data fallow estimates coverage from the module graph. |
+| `--max-file-lines` | `string` | - | Maximum physical lines per file (overrides config `health.maxFileLines`, default 0 = off). A longer file is reported as a complexity finding with `exceeded: "file_lines"` |
 | `--top` | `string` | - | Only show the top N most complex functions (and file scores/hotspots/targets) |
 | `--sort` | `severity\|cyclomatic\|cognitive\|lines` | `cyclomatic` | Sort order for complexity findings |
 | `--complexity` | `bool` | `false` | Show only function complexity findings. When no section flags are set, all sections are shown by default. |

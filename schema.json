@@ -179,7 +179,7 @@
       "$ref": "#/$defs/MutationConfig"
     },
     "health": {
-      "description": "Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling). The four `max*` thresholds govern findings only and never move `health_score`: its penalties use fixed calibration so grades stay comparable across projects, and `ignore` is the lever that removes files from the score.",
+      "description": "Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `maxFileLines` (max physical lines per file before a file-level finding, 0 means off), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`maxFileLines`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling). The `max*` thresholds govern findings only and never move `health_score`: its penalties use fixed calibration so grades stay comparable across projects, and `ignore` is the lever that removes files from the score.",
       "$ref": "#/$defs/HealthConfig",
       "default": {
         "maxCyclomatic": 20,
@@ -253,6 +253,7 @@
         "complexity-cyclomatic": "error",
         "complexity-cognitive": "error",
         "complexity-crap": "error",
+        "complexity-file-lines": "error",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1309,6 +1310,12 @@
           "minimum": 0,
           "default": 60
         },
+        "maxFileLines": {
+          "description": "Maximum file length in physical lines before the file is reported as a\ncomplexity finding with `exceeded: \"file_lines\"` (default: `0`, off).\nEvery line counts, also blank lines and comment lines. A final newline\ndoes not add a line. Set a limit such as `500` to enable the check, and\nraise it per file via `thresholdOverrides[].maxFileLines`. The\n`complexity-file-lines` rule decides if a finding fails the run. In\n`fallow audit`, a long file that did not grow stays inherited. Older\nfallow versions reject this key as unknown, so pair it with\n`minimumVersion`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
         "coverage": {
           "description": "Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage\n(a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate\nper-function CRAP scores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,\n`fallow viz`, and the MCP `audit` / `check_health` tools.",
           "type": [
@@ -1436,6 +1443,15 @@
         },
         "maxUnitSize": {
           "description": "Local unit-size ceiling: maximum function length in lines of code before\nit is reported as an oversized \"large function\". Leave `functions` empty\nto relax the bar for every function in the matching files (which covers\nboth the `describe()` wrapper and the individual `it()` blocks in a test\nsuite).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "maxFileLines": {
+          "description": "Local file-length ceiling in physical lines. `0` turns the file-length\ncheck off for the matching files. The ceiling applies to whole files,\nso an entry that sets it must leave `functions` empty.",
           "type": [
             "integer",
             "null"
@@ -1758,6 +1774,11 @@
         },
         "complexity-crap": {
           "description": "A function above the CRAP ceiling (`health.maxCrap` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists; this rule decides if it fails the run. Defaults to `error`.\n`off` hides the findings only. `health.maxCrap: 0` also turns off the\nthreshold-relative file-score signals.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "complexity-file-lines": {
+          "description": "A file above the file-length ceiling (`health.maxFileLines` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists, and it is off by default; this rule decides if it fails the\nrun. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
@@ -2765,6 +2786,17 @@
         },
         "complexity-crap": {
           "description": "Optional override for [`RulesConfig::complexity_crap`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complexity-file-lines": {
+          "description": "Optional override for [`RulesConfig::complexity_file_lines`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

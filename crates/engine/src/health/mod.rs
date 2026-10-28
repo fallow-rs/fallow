@@ -34,6 +34,7 @@ mod cyclomatic_policy;
 mod derived_sections;
 pub(crate) mod diagnostics;
 mod execute;
+mod file_lines;
 mod file_scores;
 mod filters;
 mod finding_sort;
@@ -286,6 +287,9 @@ pub struct HealthThresholdOverrides {
     /// Maximum CRAP score threshold. Functions meeting or exceeding this score
     /// are reported as complexity findings.
     pub max_crap: Option<f64>,
+    /// Overrides the configured file-length ceiling (`health.maxFileLines`)
+    /// in physical lines. `0` turns the check off.
+    pub max_file_lines: Option<u32>,
 }
 
 /// Command-neutral Istanbul coverage inputs for health CRAP scoring.

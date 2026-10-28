@@ -132,6 +132,8 @@ pub(super) struct HealthScope<'a, R> {
     pub(super) max_cyclomatic: u16,
     pub(super) max_cognitive: u16,
     pub(super) max_crap: f64,
+    /// Global file-length ceiling in physical lines. `0` means off.
+    pub(super) max_file_lines: u32,
     pub(super) enforce_crap: bool,
     pub(super) ignore_set: globset::GlobSet,
     pub(super) changed_files: Option<FxHashSet<PathBuf>>,

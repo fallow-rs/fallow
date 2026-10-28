@@ -13,6 +13,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// the same token stream (whitespace and comment changes). The audit then
 /// reuses the head keys as the base keys, which attributes every finding as
 /// inherited, without a base worktree.
+///
+/// With `compare_line_counts`, a JS/TS source must also keep its line count.
+/// The file-length check (`health.maxFileLines`) counts blank and comment
+/// lines, so a comment-only change can make a file-length finding introduced
+/// or worsened.
 #[must_use]
 #[expect(
     clippy::implicit_hasher,
@@ -23,6 +28,7 @@ pub fn can_reuse_current_as_base(
     cache_dir: Option<&Path>,
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
+    compare_line_counts: bool,
 ) -> bool {
     let Ok(git_root) = fallow_engine::changed_files::resolve_git_toplevel(root) else {
         return false;
@@ -64,6 +70,9 @@ pub fn can_reuse_current_as_base(
         };
         if current == base {
             continue;
+        }
+        if compare_line_counts && current.lines().count() != base.lines().count() {
+            return false;
         }
         if !js_ts_tokens_equivalent(path, &current, &base) {
             return false;

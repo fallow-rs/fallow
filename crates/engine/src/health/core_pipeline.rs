@@ -42,6 +42,7 @@ struct HealthAnalysisPreludeInput<'a, R> {
 struct HealthScopedFindingsInput<'a, R> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
+    files: &'a [fallow_types::discover::DiscoveredFile],
     modules: &'a [crate::source::ModuleInfo],
     scope: &'a HealthScope<'a, R>,
     score_output: Option<&'a scoring::FileScoreOutput>,
@@ -93,7 +94,8 @@ pub(super) fn prepare_health_core_sections<R>(
             unit_size: config.health.max_unit_size,
         },
     )
-    .with_cyclomatic_policy(config.health.cyclomatic_policy);
+    .with_cyclomatic_policy(config.health.cyclomatic_policy)
+    .with_max_file_lines(scope.max_file_lines);
 
     let HealthAnalysisPrelude {
         analysis_data,
@@ -114,6 +116,7 @@ pub(super) fn prepare_health_core_sections<R>(
     let findings_data = prepare_health_scoped_findings(&HealthScopedFindingsInput {
         opts,
         config,
+        files,
         modules,
         scope,
         score_output: analysis_data.score_output.as_ref(),
@@ -203,6 +206,7 @@ fn prepare_health_scoped_findings<R>(
     prepare_health_findings(HealthFindingsInput {
         opts: input.opts,
         config: input.config,
+        files: input.files,
         modules: input.modules,
         file_paths: &input.scope.file_paths,
         ignore_set: &input.scope.ignore_set,

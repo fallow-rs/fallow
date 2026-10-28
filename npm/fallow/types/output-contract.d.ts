@@ -889,7 +889,7 @@ export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "su
 /**
  * Which complexity threshold was exceeded.
  */
-export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all")
+export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all" | "file_lines")
 /**
  * Severity tier indicating how far a function exceeds complexity thresholds.
  *
@@ -937,7 +937,7 @@ export type ThresholdSource = "override"
  * BOTH `increase-coverage` AND `refactor-function`, plus the trailing
  * `suppress-line`.
  */
-export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line")
+export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line" | "split-file")
 /**
  * Audit-mode class of a complexity finding against the base snapshot.
  */
@@ -8027,11 +8027,12 @@ export interface HealthFinding {
  */
 path: string
 /**
- * Function name, or a synthesized name for anonymous functions.
+ * Function name, or a synthesized name for anonymous functions. A
+ * file-length finding has the name `<file>`.
  */
 name: string
 /**
- * 1-based line the function starts on.
+ * 1-based line the function starts on. A file-length finding has `1`.
  */
 line: number
 /**
@@ -8055,7 +8056,8 @@ standard_cyclomatic?: (number | null)
  */
 cognitive: number
 /**
- * Lines of code in the function body.
+ * Lines of code in the function body. On a file-length finding, the
+ * physical line count of the file.
  */
 line_count: number
 /**
@@ -8151,6 +8153,12 @@ effective_thresholds?: (HealthEffectiveThresholds | null)
  * Source of the effective thresholds. Omitted when thresholds are global.
  */
 threshold_source?: (ThresholdSource | null)
+/**
+ * File-length ceiling in physical lines that the file exceeded. Present
+ * only on a file-level finding (`exceeded: "file_lines"`), where
+ * `line_count` holds the physical line count of the file.
+ */
+max_file_lines?: (number | null)
 /**
  * Machine-actionable fix and suppress hints.
  */
@@ -8497,7 +8505,9 @@ files_analyzed: number
  */
 functions_analyzed: number
 /**
- * Functions exceeding at least one complexity or CRAP threshold.
+ * Complexity findings before `--top`: functions exceeding at least one
+ * complexity or CRAP threshold, plus file-length findings
+ * (`exceeded: "file_lines"`).
  */
 functions_above_threshold: number
 /**
@@ -8525,6 +8535,12 @@ max_crap_threshold: number
  * here; this is the global default.
  */
 max_unit_size_threshold: number
+/**
+ * Global file-length ceiling (`health.maxFileLines` or
+ * `--max-file-lines`) in physical lines. Absent when the file-length
+ * check is off.
+ */
+max_file_lines_threshold?: (number | null)
 /**
  * Files with a computed maintainability score; absent when file scoring
  * did not run.
@@ -8654,6 +8670,10 @@ max_crap?: (number | null)
  * Unit-size ceiling set by the override, when it sets one.
  */
 max_unit_size?: (number | null)
+/**
+ * File-length ceiling set by the override, when it sets one.
+ */
+max_file_lines?: (number | null)
 }
 /**
  * Current complexity metrics for a matched threshold override entry.

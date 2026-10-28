@@ -3367,7 +3367,7 @@
         },
         "functions_above_threshold": {
           "type": "integer",
-          "description": "Functions exceeding at least one complexity or CRAP threshold."
+          "description": "Complexity findings before `--top`: functions exceeding at least one\ncomplexity or CRAP threshold, plus file-length findings\n(`exceeded: \"file_lines\"`)."
         },
         "max_cyclomatic_threshold": {
           "type": "integer",
@@ -3395,6 +3395,13 @@
         "max_unit_size_threshold": {
           "type": "integer",
           "description": "Effective global unit-size ceiling (`health.maxUnitSize`, maximum\nfunction length in lines) for this run. Sits alongside the other three\n`max_*_threshold` siblings so a consumer reading the summary sees every\nconfigured threshold. Per-file `thresholdOverrides` are not reflected\nhere; this is the global default."
+        },
+        "max_file_lines_threshold": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Global file-length ceiling (`health.maxFileLines` or\n`--max-file-lines`) in physical lines. Absent when the file-length\ncheck is off."
         },
         "files_scored": {
           "type": [
@@ -3518,11 +3525,11 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, or a synthesized name for anonymous functions."
+          "description": "Function name, or a synthesized name for anonymous functions. A\nfile-length finding has the name `<file>`."
         },
         "line": {
           "type": "integer",
-          "description": "1-based line the function starts on."
+          "description": "1-based line the function starts on. A file-length finding has `1`."
         },
         "col": {
           "type": "integer",
@@ -3545,7 +3552,7 @@
         },
         "line_count": {
           "type": "integer",
-          "description": "Lines of code in the function body."
+          "description": "Lines of code in the function body. On a file-length finding, the\nphysical line count of the file."
         },
         "param_count": {
           "type": "integer",
@@ -3686,6 +3693,13 @@
             }
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
+        },
+        "max_file_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "File-length ceiling in physical lines that the file exceeded. Present\nonly on a file-level finding (`exceeded: \"file_lines\"`), where\n`line_count` holds the physical line count of the file."
         },
         "actions": {
           "type": "array",
@@ -8037,6 +8051,11 @@
           "type": "string",
           "const": "all",
           "description": "Cyclomatic, cognitive, and CRAP all exceeded."
+        },
+        {
+          "type": "string",
+          "const": "file_lines",
+          "description": "The file has more physical lines than `health.maxFileLines`. The\nfinding describes the whole file: `name` is `<file>`, `line_count` is\nthe line count of the file, and `max_file_lines` is the ceiling."
         }
       ],
       "description": "Which complexity threshold was exceeded."
@@ -9114,12 +9133,17 @@
         {
           "type": "string",
           "const": "suppress-file",
-          "description": "Suppress with an HTML comment at the top of the template. Used for\nsynthetic Angular `<template>` findings on `.html` files where a\nline suppression cannot be expressed."
+          "description": "Suppress for the whole file. Used for synthetic Angular `<template>`\nfindings on `.html` files where a line suppression cannot be\nexpressed (an HTML comment at the top of the template), and for\nfile-length findings (`// fallow-ignore-file complexity` at the top of\nthe file)."
         },
         {
           "type": "string",
           "const": "suppress-line",
           "description": "Suppress with a next-line comment above the reported line: the\ninline `// fallow-ignore-next-line complexity` form above a function\nor Angular decorator, or the markup\n`<!-- fallow-ignore-next-line complexity -->` form for synthetic\n`<template>` findings in `.svelte`, `.vue`, and `.astro` files."
+        },
+        {
+          "type": "string",
+          "const": "split-file",
+          "description": "Split a file that exceeds `health.maxFileLines` into smaller modules.\nEmitted only on a file-length finding (`exceeded: \"file_lines\"`)."
         }
       ],
       "description": "Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types\nemitted by `build_health_finding_actions`. A single finding's `actions`\narray may carry multiple entries of different types: a finding that\nexceeded both cyclomatic and CRAP at `coverage_tier: partial` will get\nBOTH `increase-coverage` AND `refactor-function`, plus the trailing\n`suppress-line`."
@@ -12198,11 +12222,11 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, or a synthesized name for anonymous functions."
+          "description": "Function name, or a synthesized name for anonymous functions. A\nfile-length finding has the name `<file>`."
         },
         "line": {
           "type": "integer",
-          "description": "1-based line the function starts on."
+          "description": "1-based line the function starts on. A file-length finding has `1`."
         },
         "col": {
           "type": "integer",
@@ -12225,7 +12249,7 @@
         },
         "line_count": {
           "type": "integer",
-          "description": "Lines of code in the function body."
+          "description": "Lines of code in the function body. On a file-length finding, the\nphysical line count of the file."
         },
         "param_count": {
           "type": "integer",
@@ -12366,6 +12390,13 @@
             }
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
+        },
+        "max_file_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "File-length ceiling in physical lines that the file exceeded. Present\nonly on a file-level finding (`exceeded: \"file_lines\"`), where\n`line_count` holds the physical line count of the file."
         }
       },
       "required": [
@@ -16776,6 +16807,13 @@
             "null"
           ],
           "description": "Unit-size ceiling set by the override, when it sets one."
+        },
+        "max_file_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "File-length ceiling set by the override, when it sets one."
         }
       },
       "description": "Threshold values configured by a single override entry."
