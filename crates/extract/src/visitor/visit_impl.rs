@@ -3757,8 +3757,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
-        let previous_span = self.class_method_function_span.replace(method.value.span);
-        let previous_depth = std::mem::replace(&mut self.independent_this_depth, 0);
+        let (previous_span, previous_depth) = self.enter_method_definition(method);
         walk::walk_method_definition(self, method);
         self.independent_this_depth = previous_depth;
         self.class_method_function_span = previous_span;

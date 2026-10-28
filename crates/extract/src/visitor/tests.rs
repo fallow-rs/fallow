@@ -9913,6 +9913,43 @@ fn method_declared_return_type_records_call_instance_binding() {
 }
 
 #[test]
+fn this_member_return_type_credits_member_access() {
+    // Issue #3960: `this.current()?.onDown?.()` inside the class resolves
+    // through the declared return type of `current()`, also when the method is
+    // private, `#`-private, or a getter. Static and method-generic returns
+    // give no credit.
+    let info = parse(
+        r"
+        import type { Tool } from './tool';
+        import { Widget } from './widget';
+
+        export class Editor {
+            press(): void {
+                this.current()?.onDown?.();
+                this.#pen()?.stroke();
+                this.active?.onUp?.();
+                this.pick<Widget>().generic();
+            }
+            private current(): Tool | undefined { return undefined; }
+            #pen(): Widget | undefined { return undefined; }
+            private get active(): Tool | undefined { return undefined; }
+            pick<Widget>(): Widget { return undefined as Widget; }
+        }
+        ",
+    );
+
+    let has = |object: &str, member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+    assert!(has("Tool", "onDown"), "{:?}", info.member_accesses);
+    assert!(has("Widget", "stroke"), "{:?}", info.member_accesses);
+    assert!(has("Tool", "onUp"), "{:?}", info.member_accesses);
+    assert!(!has("Widget", "generic"), "{:?}", info.member_accesses);
+}
+
+#[test]
 fn non_angular_inject_property_does_not_record_instance_binding() {
     let info = parse(
         r"
