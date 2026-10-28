@@ -15,10 +15,13 @@
 use oxc_allocator::{Allocator, CloneIn};
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::const_inline::{Inliner, constant_values, literal_value, stable_bindings};
-use super::{MAX_CONFIG_BRANCH_DEPTH, MAX_CONFIG_WRAPPER_DEPTH, is_module_exports_target};
+use super::const_inline::{Inliner, constant_values, literal_value, stable_values};
+use super::{
+    MAX_CONFIG_BRANCH_DEPTH, MAX_CONFIG_WRAPPER_DEPTH, extract_object_from_expression,
+    is_module_exports_target,
+};
 
 /// The budget of the local pass, as a multiple of the source size. A config
 /// that spreads one shared local into two configs copies that local twice.
@@ -29,20 +32,23 @@ const LOCAL_BUDGET_FACTOR: usize = 2;
 ///
 /// A local qualifies when a `const` or `let` statement at the callback body's
 /// own level declares it with an object, array or string literal, and it is
-/// the only binding of its name in the program, with no writes and no mutating
-/// calls. The stable top-level constants are available too. The copied AST
+/// the only binding of its name in the program, with no writes, no mutating
+/// calls and no call that can change it. The stable top-level constants are
+/// available too. The copied AST
 /// nodes stay at or below `LOCAL_BUDGET_FACTOR` times `source_len`.
 pub(super) fn inline_callback_locals<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
     source_len: usize,
 ) {
-    let mut values = callback_locals(allocator, program);
-    if values.is_empty() {
+    let Some(mut values) = callback_locals(allocator, program) else {
         return;
-    }
+    };
     for (name, value) in constant_values(allocator, program) {
         values.entry(name).or_insert(value);
+    }
+    if values.is_empty() {
+        return;
     }
     let mut inliner = Inliner::new(
         allocator,
@@ -50,19 +56,22 @@ pub(super) fn inline_callback_locals<'a>(
         source_len.saturating_mul(LOCAL_BUDGET_FACTOR),
     );
     for callback in config_callbacks(program) {
-        for value in callback.returned_values() {
-            inliner.inline_value(value);
-        }
+        callback.inline_returns(&mut inliner, &values);
     }
 }
 
 /// A copy of the literal value of each stable local of the config callbacks.
+/// Returns `None` when the program exports no config callback.
 fn callback_locals<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
-) -> FxHashMap<String, Expression<'a>> {
+) -> Option<FxHashMap<String, Expression<'a>>> {
+    let callbacks = config_callbacks(program);
+    if callbacks.is_empty() {
+        return None;
+    }
     let mut candidates: Vec<(String, Expression<'a>)> = Vec::new();
-    for callback in config_callbacks(program) {
+    for callback in callbacks {
         let Callback::Body(body) = callback else {
             continue;
         };
@@ -87,19 +96,24 @@ fn callback_locals<'a>(
         }
     }
     if candidates.is_empty() {
-        return FxHashMap::default();
+        return Some(FxHashMap::default());
     }
-    let stable = stable_bindings(
+    let stable: FxHashSet<String> = stable_values(
         program,
-        candidates.iter().map(|(name, _)| name.as_str()),
+        candidates
+            .iter()
+            .map(|(name, value)| (name.as_str(), value)),
         false,
-        false,
-    );
-    let stable: Vec<String> = stable.into_iter().map(str::to_string).collect();
-    candidates
-        .into_iter()
-        .filter(|(name, _)| stable.contains(name))
-        .collect()
+    )
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    Some(
+        candidates
+            .into_iter()
+            .filter(|(name, _)| stable.contains(name))
+            .collect(),
+    )
 }
 
 /// The body of a config callback: a function body, or the expression body of
@@ -109,45 +123,63 @@ enum Callback<'p, 'a> {
     Expression(&'p mut Expression<'a>),
 }
 
-impl<'p, 'a> Callback<'p, 'a> {
-    /// The values that `find_config_object` can read as the returned config:
-    /// the expression body of an arrow, or the argument of each `return` at the
-    /// body's own level or in the bounded branch search. Returns of nested
-    /// functions belong to those functions and stay out.
+impl<'a> Callback<'_, 'a> {
+    /// Inline the values that `find_config_object` and the multi-config reader
+    /// can read as the returned config: the expression body of an arrow, or the
+    /// argument of each `return` at the body's own level or in the bounded
+    /// branch search. Returns of nested functions belong to those functions and
+    /// stay out.
     ///
     /// `find_config_object` prefers an object that a top-level `return` gives
     /// over a branch return. A top-level `return base;` gave no object before
-    /// this pass, so the search used the first branch return. To keep that
-    /// result, a returned identifier at the top level stays when a branch
-    /// return exists.
-    fn returned_values(self) -> Vec<&'p mut Expression<'a>> {
-        let expr = match self {
-            Callback::Body(body) => {
-                let mut returns = Vec::new();
-                collect_returns(
-                    &mut body.statements,
-                    MAX_CONFIG_BRANCH_DEPTH,
-                    true,
-                    &mut returns,
-                );
-                let has_branch_return = returns.iter().any(|ret| !ret.top_level);
-                return returns
-                    .into_iter()
-                    .filter(|ret| {
-                        !(has_branch_return
-                            && ret.top_level
-                            && matches!(
-                                ret.value.get_inner_expression(),
-                                Expression::Identifier(_)
-                            ))
-                    })
-                    .map(|ret| ret.value)
-                    .collect();
+    /// this pass, so the search used the first branch return that gives an
+    /// object. To keep that result, a returned identifier at the top level
+    /// stays when a branch return gives an object after inlining. A returned
+    /// array stays out of this rule: `find_config_object` never reads it, and
+    /// the multi-config reader reads only top-level returns.
+    fn inline_returns(
+        self,
+        inliner: &mut Inliner<'a, '_>,
+        values: &FxHashMap<String, Expression<'a>>,
+    ) {
+        let body = match self {
+            Callback::Body(body) => body,
+            Callback::Expression(expr) => {
+                inliner.inline_value(expr);
+                return;
             }
-            Callback::Expression(expr) => expr,
         };
-        vec![expr]
+        let mut returns = Vec::new();
+        collect_returns(
+            &mut body.statements,
+            MAX_CONFIG_BRANCH_DEPTH,
+            true,
+            &mut returns,
+        );
+        let (top_level, branches): (Vec<_>, Vec<_>) =
+            returns.into_iter().partition(|ret| ret.top_level);
+        let mut branch_gives_object = false;
+        for ret in branches {
+            inliner.inline_value(ret.value);
+            branch_gives_object |= extract_object_from_expression(ret.value).is_some();
+        }
+        for ret in top_level {
+            if branch_gives_object && names_a_non_array(ret.value, values) {
+                continue;
+            }
+            inliner.inline_value(ret.value);
+        }
     }
+}
+
+/// Whether `expr` is an identifier whose known value is not an array literal.
+fn names_a_non_array(expr: &Expression<'_>, values: &FxHashMap<String, Expression<'_>>) -> bool {
+    let Expression::Identifier(id) = expr.get_inner_expression() else {
+        return false;
+    };
+    !values
+        .get(id.name.as_str())
+        .is_some_and(|value| matches!(value.get_inner_expression(), Expression::ArrayExpression(_)))
 }
 
 /// The config callbacks that the program exports, in the shapes that
@@ -155,6 +187,8 @@ impl<'p, 'a> Callback<'p, 'a> {
 /// argument of an exported call such as `defineConfig(fn)`.
 fn config_callbacks<'p, 'a>(program: &'p mut Program<'a>) -> Vec<Callback<'p, 'a>> {
     let mut callbacks = Vec::new();
+    let mut exported_names = Vec::new();
+    let mut declarations = Vec::new();
     for statement in &mut program.body {
         match statement {
             Statement::ExportDefaultDeclaration(decl) => match &mut decl.declaration {
@@ -163,7 +197,7 @@ fn config_callbacks<'p, 'a>(program: &'p mut Program<'a>) -> Vec<Callback<'p, 'a
                 }
                 kind => {
                     if let Some(expr) = kind.as_expression_mut() {
-                        collect_callbacks(expr, MAX_CONFIG_WRAPPER_DEPTH, &mut callbacks);
+                        collect_exported(expr, &mut callbacks, &mut exported_names);
                     }
                 }
             },
@@ -171,13 +205,48 @@ fn config_callbacks<'p, 'a>(program: &'p mut Program<'a>) -> Vec<Callback<'p, 'a
                 if let Expression::AssignmentExpression(assign) = &mut stmt.expression
                     && is_module_exports_target(&assign.left)
                 {
-                    collect_callbacks(&mut assign.right, MAX_CONFIG_WRAPPER_DEPTH, &mut callbacks);
+                    collect_exported(&mut assign.right, &mut callbacks, &mut exported_names);
+                }
+            }
+            Statement::VariableDeclaration(decl) => declarations.push(&mut **decl),
+            Statement::ExportDeclaration(export) => {
+                if let Declaration::VariableDeclaration(decl) = &mut export.declaration {
+                    declarations.push(&mut **decl);
                 }
             }
             _ => {}
         }
     }
+    // `module.exports = config` reads the callback of one top-level binding,
+    // as `find_config_object` does.
+    for decl in declarations {
+        for declarator in &mut decl.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            if !exported_names.iter().any(|name| name == id.name.as_str()) {
+                continue;
+            }
+            if let Some(init) = &mut declarator.init {
+                collect_callbacks(init, MAX_CONFIG_WRAPPER_DEPTH, &mut callbacks);
+            }
+        }
+    }
     callbacks
+}
+
+/// Collect the callbacks of an exported expression, and the name of an
+/// exported identifier such as `config` in `module.exports = config`.
+fn collect_exported<'p, 'a>(
+    expr: &'p mut Expression<'a>,
+    callbacks: &mut Vec<Callback<'p, 'a>>,
+    exported_names: &mut Vec<String>,
+) {
+    if let Expression::Identifier(id) = expr.get_inner_expression() {
+        exported_names.push(id.name.to_string());
+        return;
+    }
+    collect_callbacks(expr, MAX_CONFIG_WRAPPER_DEPTH, callbacks);
 }
 
 fn collect_callbacks<'p, 'a>(
@@ -364,6 +433,27 @@ mod tests {
     }
 
     #[test]
+    fn many_callback_locals_stay_linear() {
+        // The stable filter must not compare each local with each other one.
+        let count = 60_000;
+        let locals = (0..count)
+            .map(|i| format!("const l{i} = \"x\";"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let source = format!("module.exports = () => {{\n{locals}return {{ entry: l0 }};\n}};\n");
+        let start = std::time::Instant::now();
+        assert_eq!(
+            extract_config_string(&source, js(), &["entry"]),
+            Some("x".to_string())
+        );
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "{count} locals took {elapsed:?}"
+        );
+    }
+
+    #[test]
     fn too_many_aliases_block_the_root() {
         let aliases = (0..=4096)
             .map(|i| format!("const a{i} = OPTS.files;"))
@@ -501,6 +591,171 @@ mod tests {
             extract_config_string_or_array(source, path, &["resolve", "conditions"]),
             vec!["x"]
         );
+    }
+
+    #[test]
+    fn branch_return_without_an_object_keeps_the_top_level_returned_local() {
+        let vite = r#"
+            export default defineConfig(({ command }) => {
+                const config = { test: { setupFiles: ["./src/setup.ts"] } };
+                if (command === "serve") {
+                    return mergeConfig(config, devOverrides);
+                }
+                return config;
+            });
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(
+                vite,
+                Path::new("vite.config.ts"),
+                &["test", "setupFiles"]
+            ),
+            vec!["./src/setup.ts"]
+        );
+        let webpack = r#"
+            module.exports = (env) => {
+                const config = { entry: "./src/main.ts" };
+                if (!env) return null;
+                return config;
+            };
+        "#;
+        assert_eq!(
+            extract_config_string(webpack, js(), &["entry"]),
+            Some("./src/main.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn branch_return_of_an_array_keeps_the_top_level_returned_array() {
+        let source = r#"
+            module.exports = (env) => {
+                const a = { entry: "./src/a.ts" };
+                const b = { entry: "./src/b.ts" };
+                const all = [a, b];
+                if (env.only) return [a];
+                return all;
+            };
+        "#;
+        let entries: Vec<_> =
+            super::super::extract_each_config_entries(source, js(), &["entry"], "context")
+                .into_iter()
+                .flat_map(|(entries, _)| entries)
+                .collect();
+        assert_eq!(entries, vec!["./src/a.ts", "./src/b.ts"]);
+    }
+
+    #[test]
+    fn branch_return_of_an_object_still_wins_over_a_returned_array_local() {
+        // A top-level array never gives an object to `find_config_object`, so
+        // the inlined array keeps the multi-config reader working.
+        let source = r#"
+            module.exports = (env) => {
+                const a = { entry: "./src/a.ts" };
+                const all = [a];
+                if (env.single) return { entry: "./src/single.ts" };
+                return all;
+            };
+        "#;
+        assert_eq!(
+            extract_config_string(source, js(), &["entry"]),
+            Some("./src/single.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn config_function_exported_through_a_binding_resolves_locals() {
+        let cases = [
+            r#"const config = (env) => { const common = { resolve: { alias: { linkedom: "./src/shims/linkedom.ts" } } }; return { ...common, entry: "./src/main.ts" }; }; module.exports = config;"#,
+            r#"const config = function (env) { const common = { resolve: { alias: { linkedom: "./src/shims/linkedom.ts" } } }; return { ...common, entry: "./src/main.ts" }; }; export default config;"#,
+        ];
+        for source in cases {
+            assert_eq!(aliases(source), linkedom(), "{source}");
+            assert_eq!(
+                extract_config_string(source, js(), &["entry"]),
+                Some("./src/main.ts".to_string()),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn returned_top_level_constant_resolves_without_a_callback_local() {
+        let cases = [
+            r#"const base = { entry: "./src/main.ts" }; module.exports = () => { return base; };"#,
+            r#"const base = { entry: "./src/main.ts" }; module.exports = () => base;"#,
+        ];
+        for source in cases {
+            assert_eq!(
+                extract_config_string(source, js(), &["entry"]),
+                Some("./src/main.ts".to_string()),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn local_that_a_hidden_alias_or_a_call_can_change_does_not_resolve() {
+        let entry_cases = [
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; for (const c of [web]) c.entry = "./src/new.ts"; return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const list = [web]; for (const c of list) c.entry = "./src/new.ts"; return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const configure = (cfg) => { cfg.entry = "./src/new.ts"; }; configure(web); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; _.merge(web, { entry: "./src/new.ts" }); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; addPlugins([web]); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const all = { web }; configure(all); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; globalThis.Object.assign(web, { entry: "./src/new.ts" }); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/old.ts" }; const { assign } = Object; assign(web, { entry: "./src/new.ts" }); return [web]; };"#,
+        ];
+        for source in entry_cases {
+            let entries: Vec<_> =
+                super::super::extract_each_config_entries(source, js(), &["entry"], "context")
+                    .into_iter()
+                    .flat_map(|(entries, _)| entries)
+                    .collect();
+            assert!(entries.is_empty(), "{source}: {entries:?}");
+        }
+        let alias_cases = [
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; let r; ({ resolve: r } = common); r.alias.a = "./b.ts"; return common; };"#,
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const list = [common]; list[0].resolve.alias.a = "./b.ts"; return common; };"#,
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const holder = { c: common }; holder.c.resolve.alias.a = "./b.ts"; return common; };"#,
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const web = { ...common }; web.resolve.alias.a = "./b.ts"; return common; };"#,
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; const r = common.resolve; configure(r); return common; };"#,
+            r#"module.exports = () => { const common = { resolve: { alias: { a: "./a.ts" } } }; configure(common.resolve); return common; };"#,
+        ];
+        for source in alias_cases {
+            assert!(aliases(source).is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn top_level_constant_that_a_call_can_change_does_not_resolve() {
+        let source = r#"
+            const OPTS = { files: ["./a.ts"] };
+            configure(OPTS);
+            export default { x: OPTS };
+        "#;
+        assert!(
+            extract_config_string_or_array(source, Path::new("vitest.config.ts"), &["x", "files"])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn local_that_a_read_only_call_gets_still_resolves() {
+        let cases = [
+            r#"module.exports = () => { const web = { entry: "./src/main.ts" }; console.log(web); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/main.ts" }; const out = path.resolve(__dirname, web.entry); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/main.ts" }; const keys = Object.keys(web); return [web]; };"#,
+            r#"module.exports = () => { const web = { entry: "./src/main.ts" }; const merged = Object.assign({}, web); return [web]; };"#,
+            r#"module.exports = () => { const ENTRY = "./src/main.ts"; check(ENTRY); const web = { entry: ENTRY }; return [web]; };"#,
+        ];
+        for source in cases {
+            let entries: Vec<_> =
+                super::super::extract_each_config_entries(source, js(), &["entry"], "context")
+                    .into_iter()
+                    .flat_map(|(entries, _)| entries)
+                    .collect();
+            assert_eq!(entries, vec!["./src/main.ts"], "{source}");
+        }
     }
 
     #[test]

@@ -20,7 +20,9 @@ use super::{
 };
 
 /// The maximum number of configs read from one exported array, in source order.
-const MAX_MULTI_CONFIGS: usize = 16;
+/// A build can export one config per locale or per target. The work for each
+/// config is linear in its size, and the inline budget bounds the copies.
+const MAX_MULTI_CONFIGS: usize = 64;
 
 /// The config objects of a program: the one object that `find_config_object`
 /// finds, or else each object element of an exported config array. Elements
@@ -29,16 +31,23 @@ pub fn find_config_objects<'a>(program: &'a Program<'a>) -> Vec<&'a ObjectExpres
     if let Some(object) = find_config_object(program) {
         return vec![object];
     }
-    find_default_export_array(program)
-        .map(|array| {
-            array
-                .elements
-                .iter()
-                .filter_map(|element| element.as_expression().and_then(object_expression))
-                .take(MAX_MULTI_CONFIGS)
-                .collect()
-        })
-        .unwrap_or_default()
+    let Some(array) = find_default_export_array(program) else {
+        return Vec::new();
+    };
+    let mut objects: Vec<_> = array
+        .elements
+        .iter()
+        .filter_map(|element| element.as_expression().and_then(object_expression))
+        .collect();
+    if objects.len() > MAX_MULTI_CONFIGS {
+        tracing::debug!(
+            configs = objects.len(),
+            read = MAX_MULTI_CONFIGS,
+            "config array is longer than the limit, later configs are not read"
+        );
+        objects.truncate(MAX_MULTI_CONFIGS);
+    }
+    objects
 }
 
 /// Run `read` on each config object of the source and collect the results in
@@ -261,8 +270,12 @@ mod tests {
 
     #[test]
     fn exported_array_count_is_bounded() {
+        // A build that emits one config per locale or per target can export
+        // more than 16 configs.
         let elements = vec!["{ entry: 'a' }"; 40].join(", ");
-        assert_eq!(count(&format!("module.exports = [{elements}];")), 16);
+        assert_eq!(count(&format!("module.exports = [{elements}];")), 40);
+        let elements = vec!["{ entry: 'a' }"; 100].join(", ");
+        assert_eq!(count(&format!("module.exports = [{elements}];")), 64);
     }
 
     #[test]

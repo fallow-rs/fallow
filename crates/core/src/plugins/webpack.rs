@@ -278,9 +278,14 @@ pub(super) struct ConfigFile<'a> {
 /// Webpack and rspack name the base directory `context`, and rsbuild names it
 /// `root`. A relative entry resolves against it, not against the config file.
 /// In a multi-config export, each config resolves its entries against its own
-/// base directory. Returns the project-relative base directory of the first
-/// config, so the Module Federation reader can resolve `exposes` targets the
-/// same way.
+/// base directory.
+///
+/// Returns the project-relative base directory that all configs share, so the
+/// Module Federation reader can resolve `exposes` targets the same way. The
+/// Federation reader reads the plugin calls of the whole file and does not
+/// know which config holds a call. When the configs declare different base
+/// directories, this returns `None`, and the reader resolves `exposes`
+/// against the config directory.
 pub(super) fn apply_entries(
     result: &mut PluginResult,
     source: &str,
@@ -289,11 +294,9 @@ pub(super) fn apply_entries(
     base_key: &str,
 ) -> Option<PathBuf> {
     let ConfigFile { path, root } = config;
-    let mut first_base = None;
-    for (index, (entries, raw_base)) in
+    let mut bases = Vec::new();
+    for (entries, raw_base) in
         config_parser::extract_each_config_entries(source, path, entry_key, base_key)
-            .into_iter()
-            .enumerate()
     {
         let base = raw_base
             .and_then(|raw| config_parser::normalize_filesystem_config_path_buf(&raw, path, root));
@@ -302,11 +305,19 @@ pub(super) fn apply_entries(
                 .map(|base| normalize_context_entry(&entry, base, path, root))
                 .unwrap_or(entry)
         });
-        if index == 0 {
-            first_base = base;
-        }
+        bases.push(base);
     }
-    first_base
+    shared_base(bases)
+}
+
+/// The one base directory of all configs, or `None` when the configs declare
+/// different base directories.
+fn shared_base(bases: Vec<Option<PathBuf>>) -> Option<PathBuf> {
+    let mut bases = bases.into_iter();
+    let first = bases.next()??;
+    bases
+        .all(|base| base.as_ref() == Some(&first))
+        .then_some(first)
 }
 
 /// The project-relative package directory of a config that sits in a config
@@ -964,6 +975,111 @@ mod tests {
         );
 
         assert_eq!(result.entry_patterns, vec!["app/src/B.tsx"]);
+    }
+
+    /// A config whose inlined values nest much deeper than the source does.
+    /// Two top-level constants name each other at the leaf, so the first pass
+    /// stacks their copies. Two callback locals do the same and also name the
+    /// constants, so the second pass stacks copies of values that already
+    /// hold copies of the first pass.
+    fn deep_inline_source(open: &str, close: &str, depth: usize) -> String {
+        let deep = |leaf: &str| format!("{}{leaf}{}", open.repeat(depth), close.repeat(depth));
+        format!(
+            "const A = {a};\nconst B = {b};\nmodule.exports = () => {{\n\
+             const l1 = {l1};\nconst l2 = {l2};\n\
+             return {{ entry: \"./src/a.ts\", resolve: {{ alias: l1 }}, plugins: [l1, l2],\n\
+             externals: l2, module: {{ rules: [l1] }}, other: [l1, l2, A, B] }};\n}};\n",
+            a = deep("B"),
+            b = deep("A"),
+            l1 = deep("[l2, A]"),
+            l2 = deep("[l1, B]"),
+        )
+    }
+
+    /// The shape of [`deep_inline_source`] with one constant and one local
+    /// that each name themselves, which gives the deepest AST per source byte.
+    fn self_inline_source(open: &str, close: &str, depth: usize) -> String {
+        let deep = |leaf: &str| format!("{}{leaf}{}", open.repeat(depth), close.repeat(depth));
+        format!(
+            "const A = {a};\nmodule.exports = () => {{\nconst l = {l};\n\
+             return {{ entry: \"./src/a.ts\", resolve: {{ alias: l }}, plugins: [l],\n\
+             externals: l, module: {{ rules: [l] }}, other: [l, A] }};\n}};\n",
+            a = deep("A"),
+            l = deep("[l, A]"),
+        )
+    }
+
+    #[test]
+    fn deep_inlined_values_stay_within_the_parse_stack() {
+        // Each parse runs on a stack that `parse_bounded` sizes from the source
+        // length and the source bracket depth. The inline passes can make the
+        // AST deeper than the source. This test fails with a stack overflow
+        // when the walks over the inlined AST need more stack than that.
+        // A probe measured about 1.1 AST levels per source byte for the
+        // self-naming array shape, against about 0.12 levels per byte for the
+        // source alone.
+        for (open, close) in [("[", "]"), ("{a:", "}"), ("{a:[", "]}")] {
+            for source in [
+                deep_inline_source(open, close, 480),
+                self_inline_source(open, close, 480),
+            ] {
+                let result = WebpackPlugin.resolve_config(
+                    std::path::Path::new("/project/webpack.config.js"),
+                    &source,
+                    std::path::Path::new("/project"),
+                );
+                assert!(
+                    result
+                        .entry_patterns
+                        .iter()
+                        .any(|rule| rule.pattern == "src/a.ts"),
+                    "{source}"
+                );
+            }
+        }
+    }
+
+    fn federation_exposes_of(source: &str) -> Vec<String> {
+        let result = WebpackPlugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        result
+            .entry_patterns
+            .into_iter()
+            .map(|rule| rule.pattern)
+            .filter(|pattern| pattern.contains("x.ts"))
+            .collect()
+    }
+
+    #[test]
+    fn multi_config_with_different_contexts_roots_exposes_at_the_config_directory() {
+        // The plugin call sits in the second config, which sets no `context`.
+        // The `context` of the first config must not move the exposed file.
+        let source = r#"
+            const path = require("path");
+            const { ModuleFederationPlugin } = require("webpack").container;
+            module.exports = [
+                { context: path.resolve(__dirname, "client"), entry: "./main.ts" },
+                { entry: "./src/server.ts",
+                  plugins: [new ModuleFederationPlugin({ name: "app", exposes: { "./X": "./src/x.ts" } })] },
+            ];
+        "#;
+        assert_eq!(federation_exposes_of(source), vec!["src/x.ts"]);
+    }
+
+    #[test]
+    fn multi_config_with_one_shared_context_roots_exposes_at_that_context() {
+        let source = r#"
+            const path = require("path");
+            module.exports = [
+                { context: path.resolve(__dirname, "app"), entry: "./main.ts" },
+                { context: path.resolve(__dirname, "app"), entry: "./server.ts",
+                  plugins: [new ModuleFederationPlugin({ name: "app", exposes: { "./X": "./src/x.ts" } })] },
+            ];
+        "#;
+        assert_eq!(federation_exposes_of(source), vec!["app/src/x.ts"]);
     }
 
     #[test]
