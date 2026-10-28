@@ -24,6 +24,9 @@ use fallow_types::extract::{
 };
 use oxc_semantic::ScopeFlags;
 
+mod sources;
+use sources::{is_flag_source, is_local_source};
+
 /// Built-in SDK function patterns: (function_name, name_arg_index, provider_label).
 const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
     ("useFlag", 0, "LaunchDarkly"),
@@ -75,25 +78,19 @@ const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
 ];
 
 /// Built-in SDK names that other libraries also use, such as a form
-/// library `getValue`. A call to one of these names is a certain flag site
-/// only when the file imports a flag SDK or a flag module.
-const GENERIC_SDK_NAMES: &[&str] = &["getValue", "isEnabled", "useFeature"];
-
-/// Case-insensitive parts of an import source that show a flag SDK or a
-/// flag module, such as `@unleash/proxy-client-react` or `./featureFlags`.
-const FLAG_SOURCE_MARKERS: &[&str] = &[
-    "flag",
-    "feature",
-    "toggle",
-    "launchdarkly",
-    "statsig",
-    "unleash",
-    "growthbook",
-    "splitio",
-    "posthog",
-    "configcat",
-    "optimizely",
-    "@eppo/",
+/// library `getValue`, a product `getVariant` or a switch `isOn`. A call to
+/// one of these names is a certain flag site only when the file imports a
+/// flag SDK or a flag module.
+const GENERIC_SDK_NAMES: &[&str] = &[
+    "getValue",
+    "isEnabled",
+    "useFeature",
+    "isOn",
+    "isOff",
+    "useConfig",
+    "variation",
+    "getVariant",
+    "hasFeature",
 ];
 
 const VERCEL_FLAGS_PROVIDER: &str = "Vercel Flags";
@@ -236,6 +233,9 @@ struct FlagVisitor<'a> {
     has_flag_import: bool,
     /// Reads of a generic SDK name that no flag import confirms.
     unconfirmed_reads: Vec<FlagRef>,
+    /// Names that the file declares at module level or imports from a
+    /// module of the project that is not a flag module.
+    local_names: FxHashSet<String>,
 }
 
 impl<'a> FlagVisitor<'a> {
@@ -272,6 +272,7 @@ impl<'a> FlagVisitor<'a> {
             in_const_declaration: false,
             has_flag_import: false,
             unconfirmed_reads: Vec::new(),
+            local_names: FxHashSet::default(),
         }
     }
 
@@ -354,6 +355,9 @@ impl<'a> FlagVisitor<'a> {
         let Some((name_arg_idx, provider)) = pattern else {
             return;
         };
+        if self.calls_local_generic_function(call, func_name) {
+            return;
+        }
         let sdk_name = (!provider.is_empty()).then(|| provider.to_string());
         let reads_before = self.read_count();
 
@@ -374,6 +378,16 @@ impl<'a> FlagVisitor<'a> {
         {
             self.unconfirmed_reads.push(flag_ref);
         }
+    }
+
+    /// Whether `call` calls a generic SDK name that the file itself declares
+    /// or imports from a module of the project, in a file without a flag
+    /// import. Such a call goes to project code, not to a flag SDK.
+    fn calls_local_generic_function(&self, call: &CallExpression<'_>, name: &str) -> bool {
+        matches!(&call.callee, Expression::Identifier(_))
+            && !self.has_flag_import
+            && self.is_generic_sdk_name(name)
+            && self.local_names.contains(name)
     }
 
     /// Whether `name` is a generic built-in SDK name that the user did not
@@ -520,6 +534,7 @@ impl<'a> FlagVisitor<'a> {
                 Statement::ImportDeclaration(decl) => {
                     self.collect_vercel_flags_import(decl);
                     self.collect_named_imports(decl);
+                    self.collect_local_imports(decl);
                     if imports_values(decl) && is_flag_source(&decl.source.value.text()) {
                         self.has_flag_import = true;
                     }
@@ -532,6 +547,58 @@ impl<'a> FlagVisitor<'a> {
                 }
                 _ => {}
             }
+            self.collect_local_declarations(stmt);
+        }
+    }
+
+    /// Note the names that an import from a module of the project brings
+    /// in, when that module is not a flag module.
+    fn collect_local_imports(&mut self, decl: &ImportDeclaration<'_>) {
+        let source = decl.source.value.text();
+        if !is_local_source(&source) || is_flag_source(&source) {
+            return;
+        }
+        for spec in decl.specifiers.iter().flatten() {
+            self.local_names.insert(spec.local().name.to_string());
+        }
+    }
+
+    /// Note the function, class and variable names that a module-level
+    /// statement declares, also behind `export` or `export default`.
+    fn collect_local_declarations(&mut self, stmt: &Statement<'_>) {
+        let declaration = match stmt {
+            Statement::ExportDeclaration(export) => Some(&export.declaration),
+            Statement::ExportDefaultDeclaration(export) => {
+                match &export.declaration {
+                    ExportDefaultDeclarationKind::FunctionDeclaration(func) => {
+                        self.note_local_name(func.id.as_ref());
+                    }
+                    ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                        self.note_local_name(class.id.as_ref());
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            _ => stmt.as_declaration(),
+        };
+        match declaration {
+            Some(Declaration::FunctionDeclaration(func)) => self.note_local_name(func.id.as_ref()),
+            Some(Declaration::ClassDeclaration(class)) => self.note_local_name(class.id.as_ref()),
+            Some(Declaration::VariableDeclaration(decl)) => {
+                for declarator in &decl.declarations {
+                    if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                        self.local_names.insert(id.name.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn note_local_name(&mut self, id: Option<&BindingIdentifier<'_>>) {
+        if let Some(id) = id {
+            self.local_names.insert(id.name.to_string());
         }
     }
 
@@ -1021,14 +1088,6 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 }
 
-/// Whether an import source names a flag SDK or a flag module.
-fn is_flag_source(source: &str) -> bool {
-    let source = source.to_ascii_lowercase();
-    FLAG_SOURCE_MARKERS
-        .iter()
-        .any(|marker| source.contains(marker))
-}
-
 /// Whether an import declaration brings in a value at runtime. A
 /// declaration of only inline type specifiers, as in
 /// `import { type Flags } from './flags'`, is erased like `import type`.
@@ -1452,6 +1511,8 @@ pub(crate) fn extract_flags(
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
+
+    mod confidence;
     use oxc_allocator::Allocator;
     use oxc_parser::Parser;
     use oxc_span::SourceType;
@@ -1767,153 +1828,6 @@ mod tests {
             &line_offsets,
             &FlagPatterns::default(),
         )
-    }
-
-    fn extract_with_sdk_patterns(source: &str, names: &[&str]) -> Vec<FlagUse> {
-        let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        let patterns = FlagPatterns {
-            sdk_patterns: names
-                .iter()
-                .map(|name| ((*name).to_string(), 0, "InHouse".to_string()))
-                .collect(),
-            ..FlagPatterns::default()
-        };
-        extract_flags(&parser_return.program, &line_offsets, &patterns).flag_uses
-    }
-
-    fn unconfirmed(flags: &[FlagUse]) -> Vec<bool> {
-        flags
-            .iter()
-            .map(|flag| flag.facts.unconfirmed_sdk())
-            .collect()
-    }
-
-    #[test]
-    fn generic_sdk_names_without_an_sdk_import_are_unconfirmed() {
-        let flags = extract_from_source(
-            "client.isEnabled('a');\n\
-             getValue('b');\n\
-             useFeature('c');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![true, true, true]);
-    }
-
-    #[test]
-    fn specific_sdk_names_without_an_import_stay_confirmed() {
-        let flags = extract_from_source(
-            "useFlag('a');\n\
-             checkGate('b');\n\
-             getFeatureValue('c');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![false, false, false]);
-    }
-
-    #[test]
-    fn a_vendor_sdk_import_confirms_generic_sdk_names() {
-        let flags = extract_from_source(
-            "import { useUnleashClient } from '@unleash/proxy-client-react';\n\
-             const client = useUnleashClient();\n\
-             client.isEnabled('a');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![false]);
-    }
-
-    #[test]
-    fn a_flag_module_import_confirms_generic_sdk_names() {
-        for source in [
-            "import { getValue } from './featureFlags';\ngetValue('a');",
-            "import flags from '@/lib/flags';\nflags.getValue('a');",
-            "import { useFeature } from '../toggles/client';\nuseFeature('a');",
-        ] {
-            let flags = extract_from_source(source);
-            assert_eq!(unconfirmed(&flags), vec![false], "{source}");
-        }
-    }
-
-    #[test]
-    fn a_top_level_require_of_an_sdk_confirms_generic_sdk_names() {
-        let flags = extract_from_source(
-            "const { initialize } = require('unleash-client');\n\
-             const client = initialize({});\n\
-             client.isEnabled('a');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![false]);
-    }
-
-    #[test]
-    fn an_unrelated_import_does_not_confirm_generic_sdk_names() {
-        let flags = extract_from_source(
-            "import { form } from './form';\n\
-             import type { Flags } from './flags';\n\
-             form.getValue('email');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![true]);
-    }
-
-    #[test]
-    fn an_import_equals_require_of_an_sdk_confirms_generic_sdk_names() {
-        let flags = extract_from_source(
-            "import unleash = require('unleash-client');\n\
-             const client = unleash.initialize({});\n\
-             client.isEnabled('a');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![false]);
-    }
-
-    #[test]
-    fn an_import_of_only_inline_types_does_not_confirm_generic_sdk_names() {
-        let flags = extract_from_source(
-            "import { type Flags, type Keys } from './flags';\n\
-             form.getValue('email');",
-        );
-        assert_eq!(unconfirmed(&flags), vec![true]);
-    }
-
-    #[test]
-    fn a_side_effect_or_mixed_import_of_a_flag_module_confirms_generic_sdk_names() {
-        for source in [
-            "import './flags';\ngetValue('a');",
-            "import { type Flags, getValue } from './flags';\ngetValue('a');",
-        ] {
-            let flags = extract_from_source(source);
-            assert_eq!(unconfirmed(&flags), vec![false], "{source}");
-        }
-    }
-
-    #[test]
-    fn guarded_and_bound_generic_sites_stay_unconfirmed() {
-        let flags = extract_from_source(
-            "if (client.isEnabled('a')) { run(); }\n\
-             function view() {\n\
-               const on = getValue('b');\n\
-               if (on) { run(); }\n\
-             }",
-        );
-        assert_eq!(flags.len(), 2);
-        assert!(flags.iter().all(|flag| flag.guard_span_start.is_some()));
-        assert_eq!(unconfirmed(&flags), vec![true, true]);
-    }
-
-    #[test]
-    fn a_generic_name_in_sdk_patterns_is_confirmed() {
-        let flags = extract_with_sdk_patterns("client.isEnabled('a');", &["isEnabled"]);
-        assert_eq!(unconfirmed(&flags), vec![false]);
-    }
-
-    #[test]
-    fn generic_registry_reads_without_an_sdk_import_are_unconfirmed() {
-        let facts = extract_facts(
-            "import { FLAGS } from './keys';\n\
-             const LOCAL = { A: 'a' } as const;\n\
-             isEnabled(LOCAL.A);\n\
-             isEnabled(FLAGS.B);",
-        );
-        assert_eq!(unconfirmed(&facts.flag_uses), vec![true]);
-        let reads = &facts.registry_facts.expect("registry facts").reads;
-        assert_eq!(reads.len(), 1);
-        assert!(reads[0].flag_use.facts.unconfirmed_sdk());
     }
 
     fn guard_text<'s>(source: &'s str, flag: &FlagUse) -> &'s str {

@@ -63,7 +63,7 @@ error by suppressing a downstream detector.
   `crates/engine/src/health/`.
 - Security candidates: `crates/core/src/analyze/security/` with matcher data
   owned by `crates/security/`.
-- Feature flags: extraction facts in `crates/extract/src/flags.rs`, project
+- Feature flags: extraction facts in `crates/extract/src/flags/mod.rs`, project
   analysis in `crates/engine/src/flags.rs`, and extraction helpers exposed by
   `crates/engine/src/feature_flags.rs`. A read such as `useFlag(FLAGS.X)`
   resolves in the extractor when `FLAGS` is a module-level `as const` object
