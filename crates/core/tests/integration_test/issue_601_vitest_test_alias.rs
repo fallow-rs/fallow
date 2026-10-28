@@ -482,3 +482,78 @@ fn vitest_workspace_array_file_aliases_resolve() {
         "workspace-array alias-resolved module must not be unlisted, found: {unlisted:?}"
     );
 }
+
+/// Issue #3963: a `resolve.alias` entry swaps a relative import for a stub
+/// file. The resolver resolves `./clock.js` to the original file, so the stub
+/// has no graph consumer. With `includeEntryExports`, the exports of the stub
+/// must stay credited. Exports of the original file stay reportable.
+#[test]
+fn relative_alias_replacement_exports_are_used_with_include_entry_exports() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "repro",
+            "private": true,
+            "type": "module",
+            "main": "src/index.ts",
+            "scripts": { "test": "vitest" },
+            "devDependencies": { "vitest": "4.0.0" }
+        }"#,
+    );
+    write(
+        &root.join("node_modules/vitest/package.json"),
+        r#"{ "name": "vitest", "version": "4.0.0", "bin": { "vitest": "vitest.mjs" } }"#,
+    );
+    write(
+        &root.join("vitest.config.ts"),
+        r#"
+            export default {
+                resolve: {
+                    alias: [{ find: "./clock.js", replacement: new URL("./test/stubs/clock.ts", import.meta.url).pathname }],
+                },
+            };
+        "#,
+    );
+    write(
+        &root.join("src/clock.ts"),
+        "export function now(): number { return Date.now(); }\nexport function unusedClock(): number { return 1; }\n",
+    );
+    write(
+        &root.join("src/index.ts"),
+        "import { now } from \"./clock.js\";\n\nexport function stamp(): number {\n    return now();\n}\n",
+    );
+    write(
+        &root.join("test/stubs/clock.ts"),
+        "export function now(): number { return 0; }\n",
+    );
+    write(
+        &root.join("test/index.spec.ts"),
+        "import { stamp } from \"../src/index.js\";\n\nif (stamp() !== 0) {\n    throw new Error(\"stamp\");\n}\n",
+    );
+
+    let mut config = create_config(root.to_path_buf());
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            let path = e.export.path.strip_prefix(root).unwrap_or(&e.export.path);
+            format!(
+                "{}:{}",
+                path.to_string_lossy().replace('\\', "/"),
+                e.export.export_name
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        unused,
+        vec!["src/clock.ts:unusedClock".to_string()],
+        "only the unused export of the original file stays reportable"
+    );
+}

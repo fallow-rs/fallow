@@ -30,6 +30,13 @@ fn alias_target_is_source_file(normalized: &str) -> bool {
         .is_some_and(|ext| ALIAS_SOURCE_EXTENSIONS.contains(&ext))
 }
 
+/// True when an alias key is a relative or absolute file specifier, such as
+/// `./clock.js`. An import with such a specifier resolves to a file on disk, so
+/// the path-alias fallback of the resolver never routes it to the replacement.
+fn is_path_specifier(find: &str) -> bool {
+    find.starts_with("./") || find.starts_with("../") || find.starts_with('/')
+}
+
 /// Apply one alias entry to the plugin result.
 ///
 /// Path aliases feed `path_aliases`, source-file targets seed setup files, and
@@ -65,6 +72,13 @@ pub(super) fn process_test_alias(
         .path_aliases
         .push((find.to_owned(), normalized.clone()));
     if alias_target_is_source_file(&normalized) {
+        if is_path_specifier(find) {
+            // The resolver resolves a relative or absolute import to the
+            // original file and never applies the alias. The import of the
+            // original file is then the only consumer, so credit every export
+            // of the replacement file (issue #3963).
+            result.push_entry_export_credit(normalized.clone(), ["*"]);
+        }
         result.setup_files.push(root.join(&normalized));
     }
     if find_is_pkg {
@@ -146,6 +160,48 @@ mod tests {
     }
     fn root() -> std::path::PathBuf {
         std::path::PathBuf::from("/project")
+    }
+
+    #[test]
+    fn path_specifier_key_credits_every_replacement_export() {
+        for find in ["./clock.js", "../src/clock", "/abs/clock.js"] {
+            let mut result = PluginResult::default();
+            process_test_alias(
+                &mut result,
+                find,
+                "./test/stubs/clock.ts",
+                false,
+                &cfg(),
+                &root(),
+            );
+            assert_eq!(
+                result.entry_export_credits,
+                vec![crate::plugins::UsedExportRule::new(
+                    "test/stubs/clock.ts",
+                    ["*"]
+                )],
+                "key `{find}` must credit the replacement exports"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_or_directory_alias_adds_no_entry_export_credit() {
+        let mut result = PluginResult::default();
+        process_test_alias(
+            &mut result,
+            "vscode",
+            "./mock/vscode.ts",
+            false,
+            &cfg(),
+            &root(),
+        );
+        process_test_alias(&mut result, "@", "src", false, &cfg(), &root());
+        assert!(
+            result.entry_export_credits.is_empty(),
+            "the resolver routes these imports through the alias: {:?}",
+            result.entry_export_credits
+        );
     }
 
     #[test]
