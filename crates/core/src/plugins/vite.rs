@@ -279,6 +279,12 @@ define_plugin!(
             if let Some(normalized) =
                 config_parser::normalize_config_path(&replacement, config_path, root)
             {
+                super::test_alias::credit_unrouted_replacement(
+                    &mut result,
+                    &find,
+                    &normalized,
+                    config_path,
+                );
                 result.path_aliases.push((find, normalized));
             }
         }
@@ -558,6 +564,36 @@ mod tests {
         assert_eq!(
             result.path_aliases,
             vec![("@".to_string(), "src".to_string())]
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_replacement_exports_of_unrouted_alias_keys() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg" }"#).expect("write manifest");
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: {
+                        "./clock.js": "/src/stubs/clock.ts",
+                        pkg: "/src/stubs/pkg.ts",
+                        "@lib": "/src/lib/index.ts",
+                        "@": "/src"
+                    }
+                }
+            };
+        "#;
+        let result = VitePlugin.resolve_config(&root.join("vite.config.prod.ts"), source, root);
+
+        assert_eq!(
+            result.entry_export_credits,
+            vec![
+                crate::plugins::UsedExportRule::new("src/stubs/clock.ts", ["*"]),
+                crate::plugins::UsedExportRule::new("src/stubs/pkg.ts", ["*"]),
+            ]
         );
     }
 
