@@ -25,7 +25,9 @@ use super::mutated_target;
 type Chain = Vec<Option<String>>;
 
 /// The maximum number of chain keys that one change keeps. A longer chain
-/// changes every value that it reaches.
+/// keeps its first keys, so a recursive function such as
+/// `function mark(o) { o.seen = true; mark(o.next); }` ends with a bounded set
+/// of changes.
 const MAX_CHAIN: usize = 32;
 
 /// The maximum number of steps that one analysis takes: each change that it
@@ -42,9 +44,6 @@ enum Change {
     Write(Chain),
     /// A mutating call on the value at the chain, such as `x.a.push(1)`.
     Mutation(Chain),
-    /// A change that this module cannot place, such as a destructuring
-    /// assignment target.
-    All,
 }
 
 /// One step of the way that an object or array literal holds a value.
@@ -55,8 +54,11 @@ enum Hold {
     /// An array element or a computed key, which can be any key.
     Any,
     /// A spread, as in `{ ...common }`. The copy has the same keys, but a
-    /// write to a key of the copy does not change the spread value.
-    Spread,
+    /// write to a key of the copy does not change the spread value. The list
+    /// holds the static keys that the same literal sets after the spread, as
+    /// `plugins` in `{ ...common, plugins: [] }`: the copy does not share the
+    /// value of such a key with the spread value.
+    Spread(Vec<String>),
 }
 
 /// A name that holds the value of `root`, or a part of it. A change of `name`
@@ -75,7 +77,6 @@ impl Edge {
     /// The change of `root` that a change of `name` makes, if any.
     fn translate(&self, change: &Change) -> Option<Change> {
         let (chain, is_write) = match change {
-            Change::All => return Some(Change::All),
             Change::Write(chain) => (chain, true),
             Change::Mutation(chain) => (chain, false),
         };
@@ -95,7 +96,16 @@ impl Edge {
                     full.get(index)?;
                     index += 1;
                 }
-                Hold::Spread => shallow = 1,
+                Hold::Spread(overridden) => {
+                    let first = full.get(index)?;
+                    if first
+                        .as_ref()
+                        .is_some_and(|key| overridden.iter().any(|own| own == key))
+                    {
+                        return None;
+                    }
+                    shallow = 1;
+                }
             }
         }
         let rest = &full[index..];
@@ -103,10 +113,13 @@ impl Edge {
         if rest.len() < needed {
             return None;
         }
-        let chain: Chain = self.part.iter().chain(rest).cloned().collect();
-        if chain.len() > MAX_CHAIN {
-            return Some(Change::All);
-        }
+        let chain: Chain = self
+            .part
+            .iter()
+            .chain(rest)
+            .take(MAX_CHAIN)
+            .cloned()
+            .collect();
         Some(if is_write {
             Change::Write(chain)
         } else {
@@ -329,7 +342,7 @@ impl Collector<'_> {
                 holds.pop();
             }
             Expression::ObjectExpression(object) => {
-                for property in &object.properties {
+                for (position, property) in object.properties.iter().enumerate() {
                     match property {
                         ObjectPropertyKind::ObjectProperty(property) => {
                             let hold = static_property_key(property)
@@ -344,7 +357,16 @@ impl Collector<'_> {
                                 Expression::ObjectExpression(_)
                             );
                             if !literal {
-                                holds.push(Hold::Spread);
+                                let overridden = object.properties[position + 1..]
+                                    .iter()
+                                    .filter_map(|later| match later {
+                                        ObjectPropertyKind::ObjectProperty(later) => {
+                                            static_property_key(later).map(str::to_owned)
+                                        }
+                                        ObjectPropertyKind::SpreadProperty(_) => None,
+                                    })
+                                    .collect();
+                                holds.push(Hold::Spread(overridden));
                             }
                             self.bind_held(name, prefix, &spread.argument, holds, suffix);
                             if !literal {
@@ -511,10 +533,16 @@ impl<'a> Visit<'a> for Collector<'_> {
         {
             self.record_member_write(member);
         } else if assign.left.as_assignment_target_pattern().is_some() {
-            // A destructuring assignment can bind or write any part.
-            for name in target_names(&assign.left) {
+            // A destructuring assignment binds each target name to a part of
+            // the value, and writes each member target.
+            let mut names = Vec::new();
+            let mut members = Vec::new();
+            pattern_targets(&assign.left, &mut names, &mut members);
+            for name in names {
                 self.bind(&name, &vec![None], &assign.right);
-                self.push_change(&name, Change::All);
+            }
+            for member in members {
+                self.record_member_write(member);
             }
         }
         walk::walk_assignment_expression(self, assign);
@@ -635,19 +663,71 @@ fn pattern_names(
 }
 
 /// The identifier names in an assignment target, such as `r` and `a` in
-/// `{ resolve: r, a }`. A name in a default value or a computed key counts
-/// too, which can only add a change.
+/// `{ resolve: r, a }`. A name in a default value or a computed key is only
+/// read, so it is not a target.
 fn target_names(target: &AssignmentTarget<'_>) -> Vec<String> {
-    #[derive(Default)]
-    struct Names(Vec<String>);
-    impl<'a> Visit<'a> for Names {
-        fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-            self.0.push(identifier.name.to_string());
+    let mut names = Vec::new();
+    pattern_targets(target, &mut names, &mut Vec::new());
+    names
+}
+
+/// The identifier targets and the member targets of an assignment target.
+fn pattern_targets<'e>(
+    target: &'e AssignmentTarget<'_>,
+    names: &mut Vec<String>,
+    members: &mut Vec<&'e MemberExpression<'e>>,
+) {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(id) => names.push(id.name.to_string()),
+        AssignmentTarget::ArrayAssignmentTarget(array) => {
+            for element in array.elements.iter().flatten() {
+                maybe_default_targets(element, names, members);
+            }
+            if let Some(rest) = &array.rest {
+                pattern_targets(&rest.target, names, members);
+            }
+        }
+        AssignmentTarget::ObjectAssignmentTarget(object) => {
+            for property in &object.properties {
+                match property {
+                    AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(shorthand) => {
+                        names.push(shorthand.binding.name.to_string());
+                    }
+                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(property) => {
+                        maybe_default_targets(&property.binding, names, members);
+                    }
+                }
+            }
+            if let Some(rest) = &object.rest {
+                pattern_targets(&rest.target, names, members);
+            }
+        }
+        other => {
+            if let Some(member) = other
+                .as_simple_assignment_target()
+                .and_then(SimpleAssignmentTarget::as_member_expression)
+            {
+                members.push(member);
+            }
         }
     }
-    let mut names = Names::default();
-    names.visit_assignment_target(target);
-    names.0
+}
+
+fn maybe_default_targets<'e>(
+    target: &'e AssignmentTargetMaybeDefault<'_>,
+    names: &mut Vec<String>,
+    members: &mut Vec<&'e MemberExpression<'e>>,
+) {
+    match target {
+        AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(with_default) => {
+            pattern_targets(&with_default.binding, names, members);
+        }
+        other => {
+            if let Some(target) = other.as_assignment_target() {
+                pattern_targets(target, names, members);
+            }
+        }
+    }
 }
 
 /// The key of a property that is not computed, such as `entry` in `{ entry }`

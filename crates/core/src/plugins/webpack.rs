@@ -1269,6 +1269,59 @@ mod tests {
     }
 
     #[test]
+    fn entry_that_a_spread_copy_recursion_or_destructuring_default_does_not_change_still_resolves()
+    {
+        let cases = [
+            // fixture s2: the copy sets its own `plugins`.
+            r#"const common = { entry: { main: "./src/main.ts", admin: "./src/admin.ts" } };
+               const prod = { ...common, mode: "production", plugins: [] };
+               if (process.env.ANALYZE) prod.plugins.push(1);
+               module.exports = prod;"#,
+            // fixture r1
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, optimization: { next: null } };
+               function mark(o) { o.seen = true; if (o.next) mark(o.next); }
+               mark(config.optimization);
+               module.exports = config;"#,
+            // fixture r2
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry, next: null };
+               function mark(o) { o.seen = true; if (o.next) mark(o.next); }
+               mark(config);
+               module.exports = config;"#,
+            // fixture d1: a default value is only read.
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               let mode;
+               ({ mode = config.mode } = {});
+               module.exports = config;"#,
+        ];
+        for source in cases {
+            assert!(credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn entry_that_a_spread_copy_or_a_destructuring_target_changes_does_not_resolve() {
+        let cases = [
+            // The copy shares `entry` with `common`.
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const common = { entry };
+               const prod = { ...common, plugins: [] };
+               prod.entry.admin = "./src/other.ts";
+               module.exports = { entry };"#,
+            // A member target of a destructuring assignment is a write.
+            r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+               const config = { mode: "production", entry };
+               ({ admin: config.entry.admin } = { admin: "./src/other.ts" });
+               module.exports = config;"#,
+        ];
+        for source in cases {
+            assert!(!credits_admin_entry(source), "{source}");
+        }
+    }
+
+    #[test]
     fn local_binding_that_shadows_a_top_level_function_does_not_use_its_body() {
         // The top-level `setEntry` changes its parameter, but the call names
         // the local binding from `require`, which fallow cannot see.
