@@ -25,7 +25,7 @@ use fallow_types::extract::{
 use oxc_semantic::ScopeFlags;
 
 mod sources;
-use sources::{is_flag_source, is_local_source};
+use sources::{is_flag_source, is_local_source, may_be_local_flag_source};
 
 /// Built-in SDK function patterns: (function_name, name_arg_index, provider_label).
 const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
@@ -552,10 +552,10 @@ impl<'a> FlagVisitor<'a> {
     }
 
     /// Note the names that an import from a module of the project brings
-    /// in, when that module is not a flag module.
+    /// in, when that module cannot be a flag module.
     fn collect_local_imports(&mut self, decl: &ImportDeclaration<'_>) {
         let source = decl.source.value.text();
-        if !is_local_source(&source) || is_flag_source(&source) {
+        if !is_local_source(&source) || may_be_local_flag_source(&source) {
             return;
         }
         for spec in decl.specifiers.iter().flatten() {

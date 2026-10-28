@@ -276,3 +276,34 @@ fn a_file_local_vendor_specific_name_still_reports() {
         extract_from_source("function useFlag(name: string) { return name; }\nuseFlag('a');");
     assert_eq!(unconfirmed(&flags), vec![false]);
 }
+
+#[test]
+fn a_generic_name_from_a_loosely_named_local_flag_module_reports() {
+    for module in [
+        "./flags.server",
+        "./flagUtils",
+        "./flag-keys",
+        "./getFlag",
+        "./flags.constants",
+        "@/lib/flag-helpers",
+    ] {
+        let source = format!("import {{ isEnabled }} from '{module}';\nisEnabled('a');");
+        let flags = extract_from_source(&source);
+        assert_eq!(unconfirmed(&flags), vec![false], "{module}");
+    }
+}
+
+#[test]
+fn a_generic_name_from_a_local_feature_module_reports_unconfirmed() {
+    for module in [
+        "./featureGate",
+        "@/lib/features",
+        "./experiments",
+        "./CountryFlag",
+        "./ThemeToggle",
+    ] {
+        let source = format!("import {{ isEnabled }} from '{module}';\nisEnabled('a');");
+        let flags = extract_from_source(&source);
+        assert_eq!(unconfirmed(&flags), vec![true], "{module}");
+    }
+}

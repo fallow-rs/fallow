@@ -39,6 +39,32 @@ const FLAG_CONTEXT_TOKENS: &[&str] = &[
     "node",
 ];
 
+/// Lowercase source tokens that name flags in a module of the project. A
+/// local module such as `./flags.server` or `./flagUtils` is a flag module.
+/// `toggle` is not one, because `./ThemeToggle` is a UI component.
+const LOCAL_FLAG_TOKENS: &[&str] = &[
+    "flag",
+    "flags",
+    "featureflag",
+    "featureflags",
+    "featuretoggle",
+    "featuretoggles",
+];
+
+/// Lowercase source tokens that can name a flag module of the project, such
+/// as `feature` in `./featureGate`. A generic SDK name from such a module is
+/// not a certain flag site, but it is also not a plain project function.
+const LOCAL_MAYBE_FLAG_TOKENS: &[&str] = &[
+    "feature",
+    "features",
+    "gate",
+    "gates",
+    "experiment",
+    "experiments",
+    "toggle",
+    "toggles",
+];
+
 /// File extensions that can end a path segment of an import source.
 const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "json", "vue", "svelte",
@@ -47,9 +73,34 @@ const SOURCE_EXTENSIONS: &[&str] = &[
 /// Whether an import source names a flag SDK or a flag module. One path
 /// segment must name a flag vendor or flags, so `@/lib/flags` and
 /// `@unleash/proxy-client-react` match, but `country-flag-icons` and
-/// `@/features/checkout/api` do not.
+/// `@/features/checkout/api` do not. For a module of the project, a
+/// segment such as `flags.server` or `flagUtils` that does not start with an
+/// uppercase letter also matches.
 pub(super) fn is_flag_source(source: &str) -> bool {
     source.split('/').any(is_flag_segment)
+        || (is_local_source(source) && source.split('/').any(is_local_flag_segment))
+}
+
+/// Whether an import source of the project can be a flag module: a segment
+/// has a flag word or a word such as `feature` or `gate`. A generic SDK name
+/// from such a module stays a flag site with `medium` confidence.
+pub(super) fn may_be_local_flag_source(source: &str) -> bool {
+    source.split('/').any(|segment| {
+        segment_tokens(segment).iter().any(|token| {
+            FLAG_TOKENS.contains(&token.as_str())
+                || LOCAL_MAYBE_FLAG_TOKENS.contains(&token.as_str())
+        })
+    })
+}
+
+/// Whether one path segment of a project import source names flags. A
+/// segment that starts with an uppercase letter, such as `CountryFlag`, is
+/// usually a UI component, so it does not match.
+fn is_local_flag_segment(segment: &str) -> bool {
+    !segment.starts_with(|c: char| c.is_ascii_uppercase())
+        && segment_tokens(segment)
+            .iter()
+            .any(|token| LOCAL_FLAG_TOKENS.contains(&token.as_str()))
 }
 
 /// Whether one path segment of an import source names a flag vendor or flags.
