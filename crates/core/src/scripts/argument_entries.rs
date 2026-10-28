@@ -42,6 +42,9 @@ struct ScriptRuntime {
     /// token or after `=`. A relative path value (`./setup.js`) is an entry
     /// point. A bare value (`tsx`, `ts-node/esm`) names a package.
     loading_flags: &'static [&'static str],
+    /// Flags that run code from the command line and take the code as
+    /// their value (`node -e`). A shell `-e` is a boolean flag.
+    inline_code_flags: &'static [&'static str],
 }
 
 /// The flags of Node, of the runtimes that give their flags to Node, and of
@@ -113,18 +116,21 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
         subcommands: &[],
         value_flags: NODE_VALUE_FLAGS,
         loading_flags: NODE_LOADING_FLAGS,
+        inline_code_flags: NODE_INLINE_CODE_FLAGS,
     },
     ScriptRuntime {
         names: &["tsx"],
         subcommands: &["watch"],
         value_flags: NODE_VALUE_FLAGS,
         loading_flags: NODE_LOADING_FLAGS,
+        inline_code_flags: NODE_INLINE_CODE_FLAGS,
     },
     ScriptRuntime {
         names: &["vite-node"],
         subcommands: &["watch"],
         value_flags: &["-r", "--root", "-c", "--config", "-m", "--mode"],
         loading_flags: &[],
+        inline_code_flags: &[],
     },
     ScriptRuntime {
         names: &["bun"],
@@ -137,6 +143,7 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
             "--tsconfig-override",
         ],
         loading_flags: &["-r", "--preload"],
+        inline_code_flags: NODE_INLINE_CODE_FLAGS,
     },
     ScriptRuntime {
         names: &["deno"],
@@ -154,6 +161,7 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
             "--log-level",
         ],
         loading_flags: &[],
+        inline_code_flags: &[],
     },
     ScriptRuntime {
         names: &["nodemon", "node-dev", "ts-node-dev", "tsnd"],
@@ -177,12 +185,14 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
             "--project",
         ],
         loading_flags: &[],
+        inline_code_flags: &[],
     },
     ScriptRuntime {
         names: &["sh", "bash", "zsh", "dash"],
         subcommands: &[],
         value_flags: &["-c", "-o", "+o"],
         loading_flags: &[],
+        inline_code_flags: &[],
     },
 ];
 
@@ -355,9 +365,12 @@ fn script_runtime(name: &str) -> Option<&'static ScriptRuntime> {
 }
 
 /// Whether `binary` is a script file that runs itself, such as
-/// `./scripts/build.js`, and not the binary of a known program.
+/// `./scripts/build.js`, and not the binary of a known program or of a
+/// package.
 fn is_executable_script(binary: &str) -> bool {
-    is_script_candidate(binary) && !is_known_program(binary)
+    // A binary under `node_modules/` is a package binary. Its tool name or
+    // the literal rule decides its arguments.
+    !binary.contains("node_modules/") && is_script_candidate(binary) && !is_known_program(binary)
 }
 
 /// Whether `token` names a program that has its own rules.
@@ -489,7 +502,7 @@ fn runs_file_runner(path: &str) -> bool {
 /// The number of tokens that the flag `token` takes, with its value, or
 /// `None` when `token` is not a flag.
 fn flag_width(runtime: &ScriptRuntime, token: &str) -> Option<usize> {
-    if runtime.value_flags.contains(&token) || NODE_INLINE_CODE_FLAGS.contains(&token) {
+    if runtime.value_flags.contains(&token) || runtime.inline_code_flags.contains(&token) {
         Some(2)
     } else if token.starts_with('-') || token.starts_with('+') {
         Some(1)
@@ -653,6 +666,41 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn package_binary_path_is_not_an_executable_script() {
+        let mut failures = Vec::new();
+        for (script, expected) in [
+            (
+                "./node_modules/.bin/jscodeshift -t codemods/transform.js src",
+                &["codemods/transform.js"][..],
+            ),
+            (
+                "node_modules/.bin/some-tool app/a.js app/b.js",
+                &["app/a.js", "app/b.js"],
+            ),
+        ] {
+            let found = entries(script);
+            if !expected.iter().all(|file| found.iter().any(|f| f == file)) {
+                failures.push(format!("{script}: {found:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn shell_e_flag_is_boolean() {
+        for script in [
+            "bash -e scripts/gen.sh out",
+            "sh -e scripts/gen.sh app/a.js",
+        ] {
+            assert_eq!(
+                entries(script),
+                vec!["scripts/gen.sh".to_string()],
+                "{script}"
+            );
+        }
     }
 
     #[test]

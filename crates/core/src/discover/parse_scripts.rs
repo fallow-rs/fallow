@@ -195,11 +195,15 @@ fn shell_command_body<'a>(
     if !SHELLS.contains(&cmd) {
         return None;
     }
-    // Shell flags such as `-e` or `-eu` can come before `-c`.
-    let flags = tokens.get(start + 1..)?;
-    let c_idx = flags.iter().position(|token| *token == "-c")?;
-    if !flags[..c_idx].iter().all(|token| token.starts_with('-')) {
-        return None;
+    // Shell flags such as `-e`, `-eu` or `-o pipefail` can come before `-c`.
+    let mut idx = start + 1;
+    loop {
+        match *tokens.get(idx)? {
+            "-c" => break,
+            "-o" | "+o" => idx += 2,
+            flag if flag.starts_with(['-', '+']) => idx += 1,
+            _ => return None,
+        }
     }
     let (_, body) = segment.split_once(" -c ")?;
     Some(body.trim().trim_matches(|ch| ch == '"' || ch == '\''))
@@ -419,6 +423,37 @@ mod tests {
             refs("mocha test/a.spec.js test/b.spec.js"),
             vec!["test/a.spec.js", "test/b.spec.js"]
         );
+    }
+
+    #[test]
+    fn package_binary_path_and_shell_e_flag_keep_their_files() {
+        let mut failures = Vec::new();
+        for (script, expected) in [
+            (
+                "./node_modules/.bin/jscodeshift -t codemods/transform.js src",
+                &["codemods/transform.js"][..],
+            ),
+            (
+                "node_modules/.bin/some-tool app/a.js app/b.js",
+                &["app/a.js", "app/b.js"],
+            ),
+            ("bash -e scripts/gen.sh out", &["scripts/gen.sh"]),
+            ("sh -e scripts/gen.sh app/a.js", &["scripts/gen.sh"]),
+            (
+                "bash -o pipefail -c \"node app/x.js data/a.js\"",
+                &["app/x.js"],
+            ),
+            (
+                "bash -o pipefail -c \"watchee app/data.js\"",
+                &["app/data.js"],
+            ),
+        ] {
+            let found = refs(script);
+            if found != expected {
+                failures.push(format!("{script}: {found:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 
     #[test]
