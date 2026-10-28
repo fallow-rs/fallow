@@ -575,6 +575,21 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_reads_sections_through_a_spread_of_a_local_constant() {
+        let source = r#"
+            const base = { main: { build: { lib: { entry: "src/main/app.ts" } } } };
+            const shared = { build: {} };
+            export default { ...base, preload: { ...shared } };
+        "#;
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert!(result.replace_entry_patterns);
+        assert_eq!(
+            entry_strings(&result),
+            vec!["src/main/app.ts".to_string(), PRELOAD_DEFAULT.to_string()]
+        );
+    }
+
+    #[test]
     fn resolve_config_without_node_sections_keeps_static_entries() {
         let source = r#"export default { renderer: { build: { rollupOptions: { input: "src/renderer/index.html" } } } };"#;
         let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));

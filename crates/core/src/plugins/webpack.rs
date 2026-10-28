@@ -119,7 +119,7 @@ define_plugin!(
         push_path_aliases(&mut result, source, config_path, root);
 
         let require_deps =
-            config_parser::extract_config_require_strings(source, config_path, "plugins");
+            config_parser::extract_each_config_require_strings(source, config_path, "plugins");
         for dep in &require_deps {
             result
                 .referenced_dependencies
@@ -127,7 +127,7 @@ define_plugin!(
         }
 
         let externals =
-            config_parser::extract_config_shallow_strings(source, config_path, "externals");
+            config_parser::extract_each_config_shallow_strings(source, config_path, "externals");
         for ext in &externals {
             result
                 .referenced_dependencies
@@ -140,7 +140,8 @@ define_plugin!(
     },
 );
 
-/// Extract loader package names from webpack `module.rules` config.
+/// Extract loader package names from webpack `module.rules` config, in each
+/// config of a multi-config export.
 ///
 /// Handles common patterns:
 /// - `{ loader: 'ts-loader' }`
@@ -148,31 +149,32 @@ define_plugin!(
 /// - `{ use: [{ loader: 'css-loader', options: {} }] }`
 /// - `{ oneOf: [...rules] }`
 pub(super) fn parse_webpack_loaders(source: &str, path: &Path, result: &mut PluginResult) {
-    use oxc_ast::ast::Expression;
+    let loaders = config_parser::extract_from_source(source, path, |program| {
+        let mut loaders = PluginResult::default();
+        for obj in config_parser::find_config_objects(program) {
+            if let Some(rules) = module_rules(obj) {
+                walk_rules(rules, &mut loaders);
+            }
+        }
+        Some(loaders.referenced_dependencies)
+    })
+    .unwrap_or_default();
+    result.referenced_dependencies.extend(loaders);
+}
 
-    use oxc_span::SourceType;
-
-    let source_type = SourceType::from_path(path).unwrap_or_default();
-    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
-        let Some(obj) = config_parser::find_config_object(&parsed.program) else {
-            return;
-        };
-
-        let Some(module_prop) = find_obj_prop(obj, "module") else {
-            return;
-        };
-        let Expression::ObjectExpression(module_obj) = &module_prop.value else {
-            return;
-        };
-        let Some(rules_prop) = find_obj_prop(module_obj, "rules") else {
-            return;
-        };
-        let Expression::ArrayExpression(rules_arr) = &rules_prop.value else {
-            return;
-        };
-
-        walk_rules(rules_arr, result);
-    });
+/// The `module.rules` array of one config object.
+fn module_rules<'a>(
+    obj: &'a oxc_ast::ast::ObjectExpression<'a>,
+) -> Option<&'a oxc_ast::ast::ArrayExpression<'a>> {
+    let module_prop = find_obj_prop(obj, "module")?;
+    let Expression::ObjectExpression(module_obj) = &module_prop.value else {
+        return None;
+    };
+    let rules_prop = find_obj_prop(module_obj, "rules")?;
+    let Expression::ArrayExpression(rules_arr) = &rules_prop.value else {
+        return None;
+    };
+    Some(rules_arr)
 }
 
 fn find_obj_prop<'a>(
@@ -275,8 +277,10 @@ pub(super) struct ConfigFile<'a> {
 ///
 /// Webpack and rspack name the base directory `context`, and rsbuild names it
 /// `root`. A relative entry resolves against it, not against the config file.
-/// Returns the project-relative base directory, so the Module Federation reader
-/// can resolve `exposes` targets the same way.
+/// In a multi-config export, each config resolves its entries against its own
+/// base directory. Returns the project-relative base directory of the first
+/// config, so the Module Federation reader can resolve `exposes` targets the
+/// same way.
 pub(super) fn apply_entries(
     result: &mut PluginResult,
     source: &str,
@@ -285,15 +289,24 @@ pub(super) fn apply_entries(
     base_key: &str,
 ) -> Option<PathBuf> {
     let ConfigFile { path, root } = config;
-    let entries = config_parser::extract_config_string_or_array(source, path, entry_key);
-    let base = config_parser::extract_config_path(source, path, &[base_key])
-        .and_then(|raw| config_parser::normalize_filesystem_config_path_buf(&raw, path, root));
-    result.extend_entry_patterns_or_dependencies(entries, |entry| {
-        base.as_ref()
-            .map(|base| normalize_context_entry(&entry, base, path, root))
-            .unwrap_or(entry)
-    });
-    base
+    let mut first_base = None;
+    for (index, (entries, raw_base)) in
+        config_parser::extract_each_config_entries(source, path, entry_key, base_key)
+            .into_iter()
+            .enumerate()
+    {
+        let base = raw_base
+            .and_then(|raw| config_parser::normalize_filesystem_config_path_buf(&raw, path, root));
+        result.extend_entry_patterns_or_dependencies(entries, |entry| {
+            base.as_ref()
+                .map(|base| normalize_context_entry(&entry, base, path, root))
+                .unwrap_or(entry)
+        });
+        if index == 0 {
+            first_base = base;
+        }
+    }
+    first_base
 }
 
 /// The project-relative package directory of a config that sits in a config
@@ -312,7 +325,7 @@ fn config_directory_package(config_path: &Path, root: &Path) -> Option<PathBuf> 
     directory.parent().map(Path::to_path_buf)
 }
 
-/// Register the `resolve.alias` entries of a config as path aliases.
+/// Register the `resolve.alias` entries of each config as path aliases.
 ///
 /// Webpack applies an alias before it resolves an import, but fallow applies it
 /// only as a fallback. A replacement file that the fallback never reaches is
@@ -321,7 +334,7 @@ fn config_directory_package(config_path: &Path, root: &Path) -> Option<PathBuf> 
 /// package.
 fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path, root: &Path) {
     for (find, replacement) in
-        config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
+        config_parser::extract_each_config_path_aliases(source, config_path, &["resolve", "alias"])
     {
         if let Some(normalized) =
             config_parser::normalize_filesystem_config_path(&replacement, config_path, root)
@@ -393,15 +406,18 @@ fn is_directory_config_name(config_path: &Path) -> bool {
 }
 
 /// Whether a module exports a webpack configuration: an object with at least
-/// one webpack config key (also from a function that returns one), an array of
-/// configurations, or a `webpack-merge` call such as `merge(common, { ... })`.
+/// one webpack config key (also from a function that returns one or an array
+/// of them), an array of configurations, or a `webpack-merge` call such as
+/// `merge(common, { ... })`.
 fn exports_webpack_config(source: &str, path: &Path) -> bool {
     config_parser::extract_from_source(source, path, |program| {
-        let declares_key = config_parser::find_config_object(program).is_some_and(|object| {
-            CONFIG_KEYS
-                .iter()
-                .any(|key| config_parser::property_expr(object, key).is_some())
-        });
+        let declares_key = config_parser::find_config_objects(program)
+            .into_iter()
+            .any(|object| {
+                CONFIG_KEYS
+                    .iter()
+                    .any(|key| config_parser::property_expr(object, key).is_some())
+            });
         if declares_key {
             return Some(true);
         }
@@ -1052,5 +1068,170 @@ mod tests {
         );
         assert_eq!(result.always_used_files, vec!["config/webpack.client.js"]);
         assert_eq!(result.entry_patterns, vec!["src/client.ts"]);
+    }
+
+    /// The shape of a browser extension build: a function with local configs
+    /// that spread a shared local, and a returned array of two configs. The
+    /// source is about as large as the real config that this shape comes from.
+    const FUNCTION_MULTI_CONFIG: &str = r#"
+        const path = require("path");
+        const webpack = require("webpack");
+        const TerserPlugin = require("terser-webpack-plugin");
+
+        module.exports = (env, argv) => {
+            const mode = argv.mode || "development";
+            const plugins = [
+                new webpack.IgnorePlugin({
+                    checkResource(resource) {
+                        return /wordlists/.test(resource);
+                    },
+                }),
+                new webpack.ProvidePlugin({ process: "process/browser" }),
+                new webpack.DefinePlugin({ "process.env.NODE_ENV": JSON.stringify(mode) }),
+            ];
+            const common = {
+                mode,
+                devtool: mode === "development" ? "inline-source-map" : false,
+                module: {
+                    rules: [{ test: /\.tsx?$/, use: "ts-loader", exclude: /node_modules/ }],
+                },
+                performance: {
+                    hints: mode === "production" ? "warning" : false,
+                    maxAssetSize: 2000000,
+                    maxEntrypointSize: 2000000,
+                },
+                optimization: {
+                    minimize: mode === "production",
+                    usedExports: true,
+                    minimizer: [
+                        new TerserPlugin({
+                            terserOptions: {
+                                compress: { drop_console: mode === "production", unused: true },
+                                format: { comments: false },
+                            },
+                            extractComments: false,
+                        }),
+                    ],
+                },
+                resolve: {
+                    alias: { linkedom: path.resolve(__dirname, "src/shims/linkedom.ts") },
+                    extensions: [".tsx", ".ts", ".js"],
+                    fallback: { process: false, canvas: false },
+                },
+                plugins,
+                output: { filename: "js/[name].js", path: path.resolve(__dirname, "dist") },
+            };
+            const bgConfig = {
+                ...common,
+                entry: { background: path.resolve(__dirname, "./src/worker/background.ts") },
+                target: "webworker",
+                resolve: {
+                    ...common.resolve,
+                    fallback: {
+                        ...common.resolve.fallback,
+                        fs: false,
+                        net: false,
+                        tls: false,
+                        path: false,
+                        stream: false,
+                        crypto: false,
+                    },
+                },
+            };
+            const webConfig = {
+                ...common,
+                entry: {
+                    page_0: path.resolve(__dirname, "./src/pages/page_0.ts"),
+                    page_1: path.resolve(__dirname, "./src/pages/page_1.ts"),
+                    page_2: path.resolve(__dirname, "./src/pages/page_2.ts"),
+                    page_3: path.resolve(__dirname, "./src/pages/page_3.ts"),
+                    page_4: path.resolve(__dirname, "./src/pages/page_4.ts"),
+                    page_5: path.resolve(__dirname, "./src/pages/page_5.ts"),
+                    page_6: path.resolve(__dirname, "./src/pages/page_6.ts"),
+                    page_7: path.resolve(__dirname, "./src/pages/page_7.ts"),
+                    page_8: path.resolve(__dirname, "./src/pages/page_8.ts"),
+                    page_9: path.resolve(__dirname, "./src/pages/page_9.ts"),
+                    page_10: path.resolve(__dirname, "./src/pages/page_10.ts"),
+                    page_11: path.resolve(__dirname, "./src/pages/page_11.ts"),
+                    page_12: path.resolve(__dirname, "./src/pages/page_12.ts"),
+                    page_13: path.resolve(__dirname, "./src/pages/page_13.ts"),
+                    page_14: path.resolve(__dirname, "./src/pages/page_14.ts"),
+                    page_15: path.resolve(__dirname, "./src/pages/page_15.ts"),
+                    page_16: path.resolve(__dirname, "./src/pages/page_16.ts"),
+                    page_17: path.resolve(__dirname, "./src/pages/page_17.ts"),
+                    page_18: path.resolve(__dirname, "./src/pages/page_18.ts"),
+                },
+                target: "web",
+            };
+            return [bgConfig, webConfig];
+        };
+    "#;
+
+    #[test]
+    fn resolve_config_reads_each_config_of_a_function_multi_config() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/linkedom");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "linkedom" }"#)
+            .expect("write manifest");
+        let result = WebpackPlugin.resolve_config(
+            &root.join("webpack.config.js"),
+            FUNCTION_MULTI_CONFIG,
+            root,
+        );
+
+        let mut expected = vec!["src/worker/background.ts".to_string()];
+        expected.extend((0..19).map(|i| format!("src/pages/page_{i}.ts")));
+        expected.push("src/shims/linkedom.ts".to_string());
+        assert_eq!(result.entry_patterns, expected);
+        assert_eq!(
+            result.path_aliases,
+            vec![("linkedom".to_string(), "src/shims/linkedom.ts".to_string())]
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"ts-loader".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_resolves_each_config_against_its_own_context() {
+        let source = r#"
+            const path = require("path");
+            module.exports = [
+                { context: path.resolve(__dirname, "client"), entry: "./main.ts" },
+                { context: path.resolve(__dirname, "server"), entry: "./main.ts" },
+                { entry: "./src/tool.ts" },
+            ];
+        "#;
+        let result = WebpackPlugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["client/main.ts", "server/main.ts", "src/tool.ts"]
+        );
+    }
+
+    #[test]
+    fn config_directory_file_that_returns_an_array_of_configs_is_a_config() {
+        let source = r#"
+            module.exports = (env) => {
+                const shared = { mode: "production" };
+                return [{ ...shared, target: "web" }, { ...shared, target: "node" }];
+            };
+        "#;
+        assert!(exports_webpack_config(
+            source,
+            std::path::Path::new("config/webpack.targets.js")
+        ));
+        assert!(!exports_webpack_config(
+            "module.exports = () => [{ src: \"a\" }];",
+            std::path::Path::new("config/webpack.paths.js")
+        ));
     }
 }
