@@ -11,7 +11,6 @@ use oxc_allocator::{Allocator, CloneIn};
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, VisitMut, walk, walk_mut};
-use oxc_span::GetSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::top_level_variable_declarations;
@@ -27,8 +26,9 @@ pub(super) const MAX_INLINE_NESTING: usize = 4;
 /// A constant qualifies when one top-level `const` or `let` is the only
 /// binding of its name, no expression writes to it, and its value is an
 /// object, array or string literal.
-/// The copied source bytes stay at or below `source_len`, so the AST grows at
-/// most to two times the size of the parsed source.
+/// The copied AST nodes stay at or below `source_len`, and each node of the
+/// parsed source spans at least one byte, so the AST grows at most to two
+/// times its parsed size.
 pub(super) fn inline_value_constants<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
@@ -92,12 +92,17 @@ pub(super) fn literal_value<'e, 'a>(init: &'e Expression<'a>) -> Option<&'e Expr
 }
 
 /// Copies literal values into the positions that name them. Each copy charges
-/// its source size to `budget`, and a copy inside a copy adds one to `nesting`.
+/// its number of AST nodes to `budget`, and a copy inside a copy adds one to
+/// `nesting`. A value can hold copies from an earlier pass, so its source span
+/// can be much smaller than the copy.
 pub(super) struct Inliner<'a, 'v> {
     allocator: &'a Allocator,
     values: &'v FxHashMap<String, Expression<'a>>,
     nesting: usize,
     budget: usize,
+    /// The node count of each value or object that was copied, by address.
+    /// The values do not change during a pass, so each count is computed once.
+    node_counts: FxHashMap<usize, usize>,
 }
 
 impl<'a, 'v> Inliner<'a, 'v> {
@@ -111,7 +116,34 @@ impl<'a, 'v> Inliner<'a, 'v> {
             values,
             nesting: 0,
             budget,
+            node_counts: FxHashMap::default(),
         }
+    }
+
+    /// Charge the node count of a value to the budget. Returns `None` when
+    /// the budget is too small.
+    fn charge_value(&mut self, value: &Expression<'a>) -> Option<()> {
+        let key = std::ptr::from_ref(value) as usize;
+        let count = *self.node_counts.entry(key).or_insert_with(|| {
+            let mut counter = NodeCounter::default();
+            counter.visit_expression(value);
+            counter.count
+        });
+        self.budget = self.budget.checked_sub(count)?;
+        Some(())
+    }
+
+    /// Charge the node count of an object literal to the budget. Returns
+    /// `None` when the budget is too small.
+    fn charge_object(&mut self, object: &ObjectExpression<'a>) -> Option<()> {
+        let key = std::ptr::from_ref(object) as usize;
+        let count = *self.node_counts.entry(key).or_insert_with(|| {
+            let mut counter = NodeCounter::default();
+            counter.visit_object_expression(object);
+            counter.count
+        });
+        self.budget = self.budget.checked_sub(count)?;
+        Some(())
     }
 
     /// Replace `expr` with a copy of the value it names, then inline inside it.
@@ -137,20 +169,19 @@ impl<'a, 'v> Inliner<'a, 'v> {
             return None;
         };
         let value = self.values.get(id.name.as_str())?;
-        let size = value.span().size() as usize;
-        self.budget = self.budget.checked_sub(size)?;
+        self.charge_value(value)?;
         Some(value.clone_in(self.allocator))
     }
 
     /// The object literal that a spread argument names: a constant, or a static
-    /// member chain such as `common.resolve` whose root is a constant. The size
-    /// of the object is charged to the budget.
+    /// member chain such as `common.resolve` whose root is a constant. The node
+    /// count of the object is charged to the budget.
     fn spread_source(&mut self, argument: &Expression<'a>) -> Option<&'v ObjectExpression<'a>> {
         if self.nesting >= MAX_INLINE_NESTING {
             return None;
         }
         let object = static_object(self.values, argument, MAX_INLINE_NESTING)?;
-        self.budget = self.budget.checked_sub(object.span.size() as usize)?;
+        self.charge_object(object)?;
         Some(object)
     }
 
@@ -187,6 +218,18 @@ impl<'a, 'v> Inliner<'a, 'v> {
         }
         drop_overridden_properties(obj, &mut copied);
         Some(copied)
+    }
+}
+
+/// Counts the AST nodes of a value.
+#[derive(Default)]
+struct NodeCounter {
+    count: usize,
+}
+
+impl<'a> Visit<'a> for NodeCounter {
+    fn enter_node(&mut self, _kind: oxc_ast::AstKind<'a>) {
+        self.count += 1;
     }
 }
 
@@ -391,6 +434,11 @@ fn declares_top_level_const_or_let(program: &Program<'_>, name: &str) -> bool {
     })
 }
 
+/// The maximum number of aliases that [`changed_alias_names`] follows. Above
+/// it, every name in an alias counts as changed, so no value is inlined past
+/// an alias that was not checked.
+const MAX_ALIASES: usize = 4096;
+
 /// The names that the program changes through an alias. An alias is a
 /// binding or an identifier assignment that holds a name or a member chain of
 /// it, such as `const r = common.resolve` or `const { resolve } = common`. A
@@ -402,9 +450,24 @@ fn changed_alias_names(program: &Program<'_>) -> Vec<String> {
     if collector.aliases.is_empty() {
         return Vec::new();
     }
+    if collector.aliases.len() > MAX_ALIASES {
+        // Too many aliases to follow: every name in them counts as changed.
+        return collector
+            .aliases
+            .into_iter()
+            .flat_map(|alias| [alias.name, alias.root])
+            .collect();
+    }
     let mut usage = NameUsage::new(collector.aliases.iter().map(|alias| alias.name.as_str()));
     usage.visit_program(program);
-    let mut changed: FxHashSet<&str> = collector
+    let mut roots: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
+    for alias in &collector.aliases {
+        roots
+            .entry(alias.name.as_str())
+            .or_default()
+            .push(alias.root.as_str());
+    }
+    let mut pending: Vec<&str> = collector
         .aliases
         .iter()
         .filter(|alias| {
@@ -415,17 +478,14 @@ fn changed_alias_names(program: &Program<'_>) -> Vec<String> {
         })
         .map(|alias| alias.name.as_str())
         .collect();
-    // An alias of a changed alias changes its root as well. The loop ends,
-    // because each round adds at least one name from a finite set.
-    loop {
-        let before = changed.len();
-        for alias in &collector.aliases {
-            if changed.contains(alias.name.as_str()) {
-                changed.insert(alias.root.as_str());
+    // An alias of a changed alias changes its root as well. Each name enters
+    // the worklist at most once.
+    let mut changed: FxHashSet<&str> = pending.iter().copied().collect();
+    while let Some(name) = pending.pop() {
+        for &root in roots.get(name).into_iter().flatten() {
+            if changed.insert(root) {
+                pending.push(root);
             }
-        }
-        if changed.len() == before {
-            break;
         }
     }
     changed.into_iter().map(str::to_owned).collect()

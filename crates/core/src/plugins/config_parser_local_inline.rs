@@ -30,8 +30,8 @@ const LOCAL_BUDGET_FACTOR: usize = 2;
 /// A local qualifies when a `const` or `let` statement at the callback body's
 /// own level declares it with an object, array or string literal, and it is
 /// the only binding of its name in the program, with no writes and no mutating
-/// calls. The stable top-level constants are available too. The copied source
-/// bytes stay at or below `LOCAL_BUDGET_FACTOR` times `source_len`.
+/// calls. The stable top-level constants are available too. The copied AST
+/// nodes stay at or below `LOCAL_BUDGET_FACTOR` times `source_len`.
 pub(super) fn inline_callback_locals<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
@@ -313,6 +313,66 @@ mod tests {
 
     fn aliases(source: &str) -> Vec<(String, PathBuf)> {
         extract_config_path_aliases(source, js(), &["resolve", "alias"])
+    }
+
+    #[derive(Default)]
+    struct NodeCount(usize);
+
+    impl<'a> oxc_ast_visit::Visit<'a> for NodeCount {
+        fn enter_node(&mut self, _kind: oxc_ast::AstKind<'a>) {
+            self.0 += 1;
+        }
+    }
+
+    /// The number of AST nodes after both inline passes.
+    fn inlined_node_count(source: &str) -> usize {
+        super::super::extract_from_source(source, js(), |program| {
+            let mut count = NodeCount::default();
+            oxc_ast_visit::Visit::visit_program(&mut count, program);
+            Some(count.0)
+        })
+        .expect("source parses")
+    }
+
+    #[test]
+    fn copies_of_expanded_constants_stay_within_the_budget() {
+        // The top-level pass expands `C` to 64 copies of `A`, but the source
+        // of `C` stays short. Each pass charges a copy by its node count, so
+        // the AST stays within the node budget of both passes.
+        let props: Vec<String> = (0..50).map(|i| format!("p{i}: {i}")).collect();
+        let eight = |name: &str| {
+            (0..8)
+                .map(|i| format!("k{i}: {name}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let many_c = vec!["C"; 64].join(", ");
+        let source = format!(
+            "const A = {{ {props} }};\nconst B = {{ {b} }};\nconst C = {{ {c} }};\n\
+             module.exports = () => ({{ entry: [{many_c}] }});\n/* {pad} */\n",
+            props = props.join(", "),
+            b = eight("A"),
+            c = eight("B"),
+            pad = "x".repeat(30_000),
+        );
+        let nodes = inlined_node_count(&source);
+        assert!(
+            nodes <= 4 * source.len(),
+            "{nodes} nodes for a source of {} bytes",
+            source.len()
+        );
+    }
+
+    #[test]
+    fn too_many_aliases_block_the_root() {
+        let aliases = (0..=4096)
+            .map(|i| format!("const a{i} = OPTS.files;"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let source = format!(
+            "const OPTS = {{ files: [\"./a.ts\"] }};\n{aliases}\nexport default {{ x: OPTS }};\n"
+        );
+        assert!(extract_config_string_or_array(&source, js(), &["x", "files"]).is_empty());
     }
 
     fn linkedom() -> Vec<(String, PathBuf)> {
