@@ -1379,6 +1379,21 @@ mod tests {
     }
 
     #[test]
+    fn change_through_two_holders_past_the_chain_cut_reads_the_old_value() {
+        // A known limit of the chain cut in `config_parser_value_changes.rs`:
+        // the write goes through `holder` (keys `a.b.c`) and then `x` (keys
+        // `d.e.f`). The cut keeps five keys, so `x` does not find `f` and
+        // fallow reads the old value of `entry`. This can hide an unused file
+        // (`src/admin.ts` is credited), which `main` does as well.
+        let source = r#"const entry = { main: "./src/main.ts", admin: "./src/admin.ts" };
+            const x = { d: { e: { f: entry } } };
+            const holder = { a: { b: { c: x } } };
+            holder.a.b.c.d.e.f.admin = "./src/other.ts";
+            module.exports = { entry };"#;
+        assert!(credits_admin_entry(source));
+    }
+
+    #[test]
     fn local_binding_that_shadows_a_top_level_function_does_not_use_its_body() {
         // The top-level `setEntry` changes its parameter, but the call names
         // the local binding from `require`, which fallow cannot see.

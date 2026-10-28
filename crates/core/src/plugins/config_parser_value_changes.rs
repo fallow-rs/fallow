@@ -182,13 +182,19 @@ fn changed_names_uncut(program: &Program<'_>) -> Option<FxHashSet<String>> {
     propagate(&edges, changes, usize::MAX)
 }
 
-/// The number of chain keys that the analysis keeps. An edge reads the first
-/// `prefix.len() + holds.len()` keys of its prefixed chain, and it needs at
-/// most two more keys after them. So two chains with the same first
-/// [`chain_keep`] keys give the same result on each edge, and each later
-/// chain keeps that property. The cut makes the result exact, and it bounds
-/// the number of chains that a recursive function such as
+/// The number of chain keys that the analysis keeps: the longest
+/// `prefix.len() + holds.len()` of any edge, plus 2. One edge reads only
+/// those keys of its prefixed chain and needs at most two more, so the cut
+/// does not change the result of one edge. The cut bounds the number of
+/// chains that a recursive function such as
 /// `function mark(o) { o.seen = true; mark(o.next); }` can make.
+///
+/// A chain through more than one holder can lose a change. In
+/// `holder.a.b.c.d.e.f.admin = x`, where `holder` holds `x` under `a.b.c` and
+/// `x` holds `entry` under `d.e.f`, the cut keeps `[a, b, c, d, e]`, so the
+/// second holder does not find `f` and `entry` does not change. Such a lost
+/// change only makes fallow read the old value, which can hide an unused file
+/// but never reports a used file as unused.
 fn chain_keep(edges: &[Edge]) -> usize {
     edges
         .iter()
