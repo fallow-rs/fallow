@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field. A `--lean` document is not a root branch: it validates against `LeanOutput`.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -9833,7 +9833,12 @@
               },
               "required": [
                 "kind"
-              ]
+              ],
+              "not": {
+                "required": [
+                  "profile"
+                ]
+              }
             }
           ]
         },
@@ -9873,7 +9878,12 @@
               },
               "required": [
                 "kind"
-              ]
+              ],
+              "not": {
+                "required": [
+                  "profile"
+                ]
+              }
             }
           ]
         },
@@ -10027,7 +10037,12 @@
               },
               "required": [
                 "kind"
-              ]
+              ],
+              "not": {
+                "required": [
+                  "profile"
+                ]
+              }
             }
           ]
         },
@@ -10067,7 +10082,12 @@
               },
               "required": [
                 "kind"
-              ]
+              ],
+              "not": {
+                "required": [
+                  "profile"
+                ]
+              }
             }
           ]
         },
@@ -32729,6 +32749,10 @@
           "description": "Whether the result is conclusive.",
           "$ref": "#/definitions/MutationCompletion"
         },
+        "kill_matrix": {
+          "description": "The observed kill matrix and candidate review signals.",
+          "$ref": "#/definitions/MutationKillMatrix"
+        },
         "scope": {
           "description": "The mutated code.",
           "$ref": "#/definitions/MutationScopeOutput"
@@ -32866,6 +32890,7 @@
         "version",
         "elapsed_ms",
         "completion",
+        "kill_matrix",
         "scope",
         "summary",
         "mutants",
@@ -33113,6 +33138,17 @@
             "null"
           ],
           "description": "The test that killed the mutant in the run of the report."
+        },
+        "killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
+        },
+        "kill_matrix_complete": {
+          "type": "boolean",
+          "description": "True only for exact requested membership with terminal pass or fail results."
         }
       },
       "required": [
@@ -33126,7 +33162,9 @@
         "span",
         "operator",
         "covering_tests",
-        "static_test_files"
+        "static_test_files",
+        "killing_tests",
+        "kill_matrix_complete"
       ],
       "description": "The envelope of `fallow mutation inspect`. It runs no user code."
     },
@@ -33156,8 +33194,8 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "1",
-          "description": "Initial independent contract."
+          "const": "2",
+          "description": "Adds complete kill matrix evidence."
         }
       ],
       "description": "Version singleton for a mutation report."
@@ -33176,8 +33214,8 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "1",
-          "description": "Initial independent contract."
+          "const": "2",
+          "description": "Adds complete kill matrix evidence."
         }
       ],
       "description": "Version singleton for a mutation inspect packet."
@@ -33583,7 +33621,18 @@
             "string",
             "null"
           ],
-          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field.\n\nThe retry of a survivor also runs the other tests of its test files,\nso this test can be absent from `covering_tests`."
+          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A normal run stops at\nthe first failing test. A kill matrix run retains each failing test\nin `killing_tests`. Tests run in measured fastest-first order, so a\nsecond run on the same code can name another first killer. No\nfingerprint or baseline comparison uses this field.\n\nThe retry of a survivor also runs the other tests of its test files,\nso this test can be absent from `covering_tests`."
+        },
+        "killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
+        },
+        "kill_matrix_complete": {
+          "type": "boolean",
+          "description": "True only for exact requested membership with terminal pass or fail results."
         },
         "covering_tests": {
           "type": "array",
@@ -33648,7 +33697,9 @@
         "column",
         "span",
         "operator",
-        "status"
+        "status",
+        "killing_tests",
+        "kill_matrix_complete"
       ],
       "description": "One mutant of a run."
     },
@@ -34555,6 +34606,17 @@
           ],
           "description": "The test that killed the mutant in this run."
         },
+        "killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
+        },
+        "kill_matrix_complete": {
+          "type": "boolean",
+          "description": "True only for exact requested membership with terminal pass or fail results."
+        },
         "failure_kind": {
           "anyOf": [
             {
@@ -34575,7 +34637,9 @@
         }
       },
       "required": [
-        "status"
+        "status",
+        "killing_tests",
+        "kill_matrix_complete"
       ],
       "description": "One run of a retried mutant."
     },
@@ -34992,6 +35056,272 @@
         }
       ],
       "description": "Outcome of `fallow coverage setup --cloud --wait`."
+    },
+    "MutationKillMatrix": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Whether the matrix supports candidate analysis.",
+          "$ref": "#/definitions/MutationKillMatrixStatus"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Why evidence is unavailable or incomplete, sorted."
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationTestKillRow"
+          },
+          "description": "Each eligible test with observed coverage, sorted by test id."
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tests with nonempty kills and no unique kills, sorted by test id."
+        },
+        "coverage_without_kills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tests with coverage and no observed kills, sorted by test id."
+        }
+      },
+      "required": [
+        "status",
+        "reasons",
+        "tests",
+        "candidates",
+        "coverage_without_kills"
+      ],
+      "description": "Redundancy signals over the observed mutants. Candidates need review.\nRemoving candidates together can remove all tests for a mutant."
+    },
+    "MutationKillMatrixStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Each eligible test has a terminal result for each covered mutant."
+        },
+        {
+          "type": "string",
+          "const": "incomplete",
+          "description": "At least one result is missing or inconclusive."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "The run did not request a kill matrix."
+        }
+      ],
+      "description": "The quality of observed test-to-mutant evidence."
+    },
+    "MutationTestKillRow": {
+      "type": "object",
+      "properties": {
+        "test_id": {
+          "type": "string",
+          "description": "The runner test id."
+        },
+        "file": {
+          "type": "string",
+          "description": "The root-relative test file."
+        },
+        "kills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The observed killed mutant ids, sorted."
+        },
+        "unique_kills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The mutant ids that no other eligible test kills, sorted."
+        },
+        "subsuming_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The tests whose kill sets contain this full kill set, sorted."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Conservative evidence notes, sorted."
+        }
+      },
+      "required": [
+        "test_id",
+        "file",
+        "kills",
+        "unique_kills",
+        "subsuming_tests",
+        "notes"
+      ],
+      "description": "The observed mutant kills of one eligible test."
+    },
+    "LeanOutput": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Kind of the full envelope that this document trims.",
+          "$ref": "#/definitions/LeanOutputKind"
+        },
+        "profile": {
+          "description": "Always `lean`. A full document has no `profile` field.",
+          "$ref": "#/definitions/LeanProfile"
+        },
+        "schema_version": {
+          "type": "integer",
+          "description": "Schema version of the full envelope of the same `kind`."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LeanDiagnosticGroup"
+          },
+          "description": "Workspace diagnostics, one entry per `kind`."
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LeanMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The `_meta` object of the full envelope plus `actions`."
+        }
+      },
+      "required": [
+        "kind",
+        "profile",
+        "schema_version"
+      ],
+      "title": "fallow --format json --lean",
+      "description": "Root of a `--format json --lean` document.\n\nThe body is the envelope of the same `kind`, with these changes:\n\n- Arrays that are empty are left out: at the root, in each `groups[]`\n  entry, and in each combined section (`check`, `dupes`, `health`).\n- Dead-code `summary` counts that are zero are left out (the dead-code\n  root and the combined `check` section).\n- `workspace_diagnostics` holds one entry per `kind`: the first\n  diagnostic of the kind plus `count` when the kind has more than one.\n- The health tables `hotspots`, `file_scores` and `large_functions` keep\n  their first rows (10 by default, the `--top` value when given, all rows\n  with `--full-tables`). `<table>_omitted` counts the rows left out. With\n  `fallow health --top`, the analysis cuts the tables first, so a table\n  that `--top` cut has no `<table>_omitted` count.\n- Repeated action text is in `_meta.actions`. An action without a text\n  field reads it from `_meta.actions[<type>].<field>`.\n\n`schema_version` is the version of the full envelope of the same `kind`."
+    },
+    "LeanOutputKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "dead-code",
+          "description": "`fallow dead-code --format json --lean`."
+        },
+        {
+          "type": "string",
+          "const": "dead-code-grouped",
+          "description": "`fallow dead-code --group-by ... --format json --lean`."
+        },
+        {
+          "type": "string",
+          "const": "health",
+          "description": "`fallow health --format json --lean`."
+        },
+        {
+          "type": "string",
+          "const": "combined",
+          "description": "Bare `fallow --format json --lean`."
+        }
+      ],
+      "description": "Envelope kinds that have a lean profile."
+    },
+    "LeanProfile": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "lean",
+          "description": "The `--lean` profile."
+        }
+      ],
+      "description": "Marker of a lean document."
+    },
+    "LeanDiagnosticGroup": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Diagnostic kind."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path of the first diagnostic of the kind."
+        },
+        "message": {
+          "type": "string",
+          "description": "Message of the first diagnostic of the kind."
+        },
+        "degrades_analysis": {
+          "type": "boolean",
+          "description": "`true` when any diagnostic of the kind degrades the analysis."
+        },
+        "count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of diagnostics of the kind, when more than 1. An absent count\nmeans 1. Run without `--lean` for each diagnostic."
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "message"
+      ],
+      "description": "One workspace diagnostic kind in a lean document. The entry also carries\nthe kind-specific fields of the first diagnostic of the kind."
+    },
+    "LeanMeta": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/LeanSharedActionText"
+          },
+          "description": "Shared action text, keyed by action `type`. An action without\n`description`, `note` or `comment` reads the value here."
+        }
+      },
+      "description": "The `_meta` keys that the lean profile adds. The keys of the full envelope\n`_meta` stay."
+    },
+    "LeanSharedActionText": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Shared `description`."
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Shared `note`."
+        },
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Shared `comment`."
+        }
+      },
+      "description": "The most common text of one action type. Actions with other text keep\ntheir own field."
     },
     "InspectCloudEvidence": {
       "type": "object",

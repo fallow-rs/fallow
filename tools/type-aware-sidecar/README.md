@@ -42,10 +42,12 @@ npm test
 ./fallow-type-aware.mjs < request.json
 ```
 
-The implementation pins `typescript@7.0.2` because `typescript/unstable/sync`
+The package depends on `typescript@7.0.2` because `typescript/unstable/sync`
 is an explicitly unstable API. That backend detail is contained behind
-Fallow's stable, exact-version protocol. Package version, protocol version, and
-TypeScript backend version are validated independently. See
+Fallow's stable, exact-version protocol. Package version and protocol version
+must match Fallow exactly. The backend version must be in the supported range
+of the protocol manifest, so a TypeScript 7 release that a package manager
+override selects, or a newer tsrs, still works. See
 [`docs/type-aware-analysis.md`](../../docs/type-aware-analysis.md)
 for the Fallow integration contract, safety policy, and current limitations.
 

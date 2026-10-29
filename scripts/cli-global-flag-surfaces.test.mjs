@@ -21,12 +21,27 @@ const SCHEMA_EXCLUDED_FLAGS = new Set(["--help", "--version"]);
 
 const ARG_FIELD = /#\[arg\(([\s\S]*?)\)\]\s*(?:#\[[\s\S]*?\]\s*)*(?:pub\s+)?([a-z0-9_]+)\s*:/g;
 
+const FLATTEN_FIELD =
+  /#\[command\(flatten\)\]\s*pub\s+[a-z0-9_]+\s*:\s*crate::([a-z0-9_]+)::([A-Za-z0-9_]+)\s*,/g;
+
+/** Body of `pub struct <name>` in `source`, from the declaration to its closing brace. */
+const structBody = (source, name, file) => {
+  const start = source.indexOf(`\npub struct ${name} {`);
+  assert.notEqual(start, -1, `${file} should declare \`struct ${name}\``);
+  return source.slice(start, source.indexOf("\n}\n", start));
+};
+
 /** Long flag names declared on the root `Cli` struct, in declaration order. */
 const declaredGlobalFlags = () => {
   const source = readFileSync(CLI_SOURCE, "utf8");
-  const start = source.indexOf("\npub struct Cli {");
-  assert.notEqual(start, -1, "crates/cli/src/cli_args.rs should declare `struct Cli`");
-  const body = source.slice(start, source.indexOf("\n}\n", start));
+  // A flattened field adds the flags of its struct at the same place.
+  const body = structBody(source, "Cli", "crates/cli/src/cli_args.rs").replace(
+    FLATTEN_FIELD,
+    (_, module, name) => {
+      const file = `crates/cli/src/${module}.rs`;
+      return structBody(readFileSync(join(REPO_ROOT, file), "utf8"), name, file);
+    },
+  );
   const names = [];
   for (const [, attributes, field] of body.matchAll(ARG_FIELD)) {
     const explicit = attributes.match(/\blong\s*=\s*"([^"]+)"/);

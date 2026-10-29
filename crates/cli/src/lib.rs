@@ -464,10 +464,8 @@ fn run_command() -> ExitCode {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
-    if cli.pretty && !fmt.payload_is_json {
-        eprintln!(
-            "Error: --pretty requires JSON output. Use --format json --pretty, or remove --pretty."
-        );
+    if let Some(message) = cli_format::json_presentation_error(&cli, &fmt) {
+        eprintln!("Error: {message}");
         return ExitCode::from(2);
     }
 

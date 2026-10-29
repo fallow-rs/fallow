@@ -6,3 +6,6 @@ Mutation testing (no test ran)
 Scope: changed code against origin/main
 Score n/a  killed 0  survived 0  timeout 0  complete
 No mutation data: the changed code has no mutant. `fallow mutation --plan --all` lists the mutants of each file and runs no code.
+
+Test kill evidence: unavailable
+  kill-matrix-disabled: this run did not collect all killing tests. Use --kill-matrix.

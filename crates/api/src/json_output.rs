@@ -297,7 +297,11 @@ pub fn serialize_grouped_check_json(
                 results,
             }
         })
-        .collect();
+        .collect::<Vec<CheckGroupedEntry>>();
+    let mut meta = input.meta;
+    if let Some(meta) = meta.as_mut() {
+        fallow_output::retain_reported_rules(meta, entries.iter().map(|entry| &entry.results));
+    }
 
     let envelope = CheckGroupedOutput {
         package_baselines: input.package_baselines,
@@ -313,7 +317,7 @@ pub fn serialize_grouped_check_json(
         baseline_staleness: input.baseline_staleness,
         finding_id_query: input.finding_id_query,
         gate_outcomes: input.gate_outcomes,
-        meta: input.meta,
+        meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     };

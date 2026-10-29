@@ -89,6 +89,32 @@ The `--compare` flag writes the review summary to stderr only. The JSON evidence
 on stdout does not change. Do not redirect stdout to the file that `--compare`
 reads: the shell empties that file before the generator reads it.
 
+## Companion Candle baseline
+
+`evidence/jina-v2-code-f32-candle.json` records the similarities of the
+`fallow-similar-code` companion. The companion runs the F32 model with Candle
+on the CPU. The release build checks three signed companion binaries against
+this file, each on its own platform: Linux x64 (the plain CPU build), macOS
+arm64, and macOS x64 (the Accelerate builds). The other Linux and Windows
+binaries use the same plain CPU build as Linux x64. Run the check locally:
+
+```bash
+npm run --silent conformance:semantic-clones:candle -- --pretty
+```
+
+Each similarity must stay within the absolute tolerance in the file, and no
+case can cross the candidate threshold. The macOS companion links Apple
+Accelerate for the matrix operations. The current baseline comes from that
+build. The Accelerate build and the plain CPU build differ by 0.000001 at
+most on this corpus, so the tolerance covers both builds.
+
+A change to the companion numeric path needs a new
+`embedding_semantics_version`. Write a new baseline with
+`--write-baseline <path>` after the version change.
+The installed model manifest records the version, so run
+`fallow-similar-code setup --local` first. This step verifies the local model
+files again and downloads nothing.
+
 ## Provenance
 
 The source fixtures are unmodified excerpts from

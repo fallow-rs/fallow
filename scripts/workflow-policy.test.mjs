@@ -737,7 +737,20 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(similarCodeConformance, /needs: \[build, sign\]/);
   assert.match(similarCodeConformance, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(similarCodeConformance, /id-token: write|contents: write/);
-  assert.match(similarCodeConformance, /fallow-similar-code-linux-x64-gnu/);
+  // The macOS binaries link Apple Accelerate, a separate numeric path from the
+  // Linux binary, so each one runs the conformance check on its own platform.
+  const conformanceLegs = Array.from(
+    similarCodeConformance.matchAll(/^\s+- npm_dir: (\S+)\n\s+os: (\S+)$/gmu),
+    (match) => `${match[1]}@${match[2]}`,
+  );
+  assert.deepEqual(conformanceLegs.toSorted(), [
+    "darwin-arm64@macos-latest",
+    "darwin-x64@macos-15-intel",
+    "linux-x64-gnu@ubuntu-26.04",
+  ]);
+  assert.match(similarCodeConformance, /runs-on: \$\{\{ matrix\.os \}\}/u);
+  assert.match(similarCodeConformance, /name: fallow-similar-code-\$\{\{ matrix\.npm_dir \}\}/u);
+  assert.doesNotMatch(similarCodeConformance, /stat --format/u);
   assert.match(similarCodeConformance, /verify-binary\.mjs/);
   assert.match(similarCodeConformance, /release_binary_max_bytes/);
   // The dependency audit lives in release validation, which `validate` calls.
@@ -1347,6 +1360,35 @@ test("CI runs the mutation runner tests at the declared runtime floors", () => {
   );
   assert.match(job, /persist-credentials: false/u);
   assert.match(indentedBlock(workflow, "ci-ok", 2), /mutation-runner-floor/u);
+});
+
+test("CI runs clippy on the similar-code sidecar workspace", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const job = indentedBlock(workflow, "similar-code-sidecar", 2);
+  const paths = listedPaths(indentedBlock(workflow, "similar-code-sidecar", 12));
+
+  // The sidecar is a separate Cargo workspace, so the workspace clippy run
+  // in check-lint does not lint it.
+  assert.match(
+    job,
+    /run: cargo clippy --locked --manifest-path tools\/similar-code-sidecar\/Cargo\.toml --target-dir target --all-targets -- -D warnings/u,
+  );
+  assert.match(job, /uses: \.\/\.github\/actions\/setup-rust\n\s+with:\n\s+components: clippy/u);
+  assert.match(job, /needs\.changes\.outputs\.similar-code-sidecar == 'true'/u);
+  assert.match(job, /persist-credentials: false/u);
+  // build.rs reads the protocol file, so a change there must lint too.
+  for (const path of [
+    "tools/similar-code-sidecar/**",
+    "crates/api/similar-code-protocol.json",
+    "rust-toolchain.toml",
+  ]) {
+    assert.ok(paths.includes(path), `the similar-code-sidecar filter must list ${path}`);
+  }
+  assert.match(
+    indentedBlock(workflow, "outputs", 4),
+    /similar-code-sidecar: \$\{\{ steps\.filter\.outputs\.similar-code-sidecar \}\}/u,
+  );
+  assert.match(indentedBlock(workflow, "ci-ok", 2), /needs: \[[^\n]*\bsimilar-code-sidecar\b/u);
 });
 
 test("the check job runs the end-to-end mutation tests instead of a skip", () => {

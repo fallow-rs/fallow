@@ -230,6 +230,8 @@ mod tests {
             },
             status,
             prune_reason: None,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             covering_tests: match status {
                 MutantStatus::NoCoverage | MutantStatus::Pending | MutantStatus::Pruned => {
@@ -258,10 +260,11 @@ mod tests {
             }
         }
         MutationReport {
-            schema_version: MutationSchemaVersion::V1,
+            schema_version: MutationSchemaVersion::V2,
             version: ToolVersion("0.0.0".to_owned()),
             elapsed_ms: ElapsedMs(0),
             completion: MutationCompletion::from_reasons(Vec::new()),
+            kill_matrix: fallow_output::MutationKillMatrix::default(),
             scope: MutationScopeOutput {
                 kind: MutationScopeKind::All,
                 base_ref: None,
@@ -299,6 +302,16 @@ mod tests {
             verdicts: None,
             typecheck: None,
         }
+    }
+
+    #[test]
+    fn normal_report_explains_unavailable_kill_matrix() {
+        let value = serde_json::to_value(report(Vec::new())).expect("report");
+        assert_eq!(value["kill_matrix"]["status"], "unavailable");
+        assert_eq!(
+            value["kill_matrix"]["reasons"],
+            serde_json::json!(["kill-matrix-disabled"])
+        );
     }
 
     fn document(keys: &[&str]) -> Vec<u8> {

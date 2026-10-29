@@ -24,7 +24,7 @@ read-only next steps. It never writes a test and never proposes a code change.
   because the plan cannot narrow to a workspace yet. Pass the workspace
   directory as a path.
 - The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
-  `--setup-timeout` (default `2m`), `--runner-config`,
+  `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck` and `--resume`.
   The global `--no-cache` flag also turns off the result cache (see "Result
@@ -467,6 +467,47 @@ shows as `pending`.
 - A `partial` completion does not change the exit code. The run exits `0`,
   or `1` when the score is under `--min-score`, or `2` when baseline
   failures leave each mutant without a test result (see Exit codes).
+
+## Redundant test candidates
+
+`--kill-matrix` records which tests kill each mutant. It runs all covering tests with bail disabled, which can increase execution time.
+
+```bash
+fallow mutation --all --kill-matrix --format json --quiet
+```
+
+The report separates matrix evidence from mutation completion. Normal mode reports unavailable evidence with the reason `kill-matrix-disabled`.
+Incomplete matrix evidence produces no redundant test candidates. Check its status and reasons before you review tests.
+
+`kills` and `unique_kills` are arrays of mutant IDs.
+A unique kill belongs to one test only. Individual subsumers kill every mutant that the candidate kills.
+A candidate can also have collective coverage: other tests together kill all its mutants without one individual subsumer.
+
+Review each candidate separately. Equal kill sets can make both tests candidates, so removing both can remove the remaining protection.
+The evidence describes observed mutants only. A candidate does not prove that you can safely remove the test.
+
+The report lists tests with runtime coverage and no observed kills separately. Zero kills do not prove that a test has no assertions.
+Survivors and timeouts do not count as kills. Baseline-failing tests do not qualify as candidates or subsumers.
+
+Sole-file notes describe observed runtime coverage of instrumented files. Public-export notes use static test-file reach, which does not prove per-test export coverage.
+
+The `mutation` and `mutation-inspect` JSON envelopes use schema version `"2"`. The `mutation-plan` envelope and verdict document keep schema version `"1"`.
+
+The `kill_matrix` object has these fields:
+
+| Field | Meaning |
+|---|---|
+| `status` | `complete`, `incomplete`, or `unavailable`, separate from mutation completion. |
+| `reasons` | Evidence limitations, such as `kill-matrix-disabled`, `incomplete-mutant-results`, `baseline-failure`, `partial-mutation-run`, or `missing-test-file-metadata`. |
+| `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. |
+| `candidates` | Test IDs whose observed kill sets other tests cover. |
+| `coverage_without_kills` | Test IDs with runtime coverage and no observed kills. |
+
+Each mutant and attempt records `killing_tests` and `kill_matrix_complete`. The existing `killed_by` field keeps the first observed killer. Outside matrix mode, `killing_tests` is empty.
+
+The result cache and outcome journal distinguish matrix mode from normal mode. Normal-mode results cannot supply complete matrix evidence.
+
+Matrix mode does not add the other tests of the covering test files to the retry of a survivor. A survivor that normal mode kills in that retry can stay `survived` in matrix mode, so the two modes can give different scores.
 
 ## Retries
 
@@ -940,6 +981,14 @@ test run.
   child process reaches stays `no_coverage`. A child that is not Node (for
   example `bun`), or a child that gets an environment without
   `NODE_OPTIONS`, loads the original files.
+- A Node overlay also recognizes byte-identical copies of planned source
+  files, including renamed temporary files. It serves the instrumented
+  source only when the bytes identify one planned file. Original paths keep
+  their own attribution even when other planned files have identical bytes.
+  A copy that matches several planned files reports `overlay-incomplete`,
+  including when the test ignores its child's output or exit status. The
+  baseline then fails, or the mutant has a runtime error and the run is
+  incomplete. Edited or transformed copies cannot be attributed by bytes.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
 - Neither runtime can load a Vue, Svelte or Astro component file. The

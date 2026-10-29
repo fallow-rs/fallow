@@ -1,9 +1,10 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { run as runNodeTests } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { CompanionError } from "../protocol.mjs";
-import { CHILD_ENV, HITS_DIAGNOSTIC } from "../runtime/child.mjs";
+import { CHILD_ENV, HITS_DIAGNOSTIC, overlayErrorsPath } from "../runtime/child.mjs";
 import {
   childProcessAdapter,
   createWorkDir,
@@ -349,6 +350,8 @@ export const createAdapter = async (init) => {
   // first failure stops the test process. That also ends a test that keeps
   // a timer after its timeout.
   const runFile = async (file, options) => {
+    const errorsPath = overlayErrorsPath(workDir.overlayPath);
+    writeFileSync(errorsPath, "");
     const controller = new AbortController();
     const stopAtFailure = () => {
       if (options.bail === true) controller.abort();
@@ -366,7 +369,10 @@ export const createAdapter = async (init) => {
         execArgv,
         ...runOptions(options),
       });
-      return await readFileEvents(stream, file, stopAtFailure);
+      const result = await readFileEvents(stream, file, stopAtFailure);
+      const incomplete = readFileSync(errorsPath, "utf8").trim();
+      if (incomplete.length > 0) throw new CompanionError("overlay-incomplete", incomplete);
+      return result;
     } finally {
       delete process.env[CHILD_ENV.overlay];
       setActiveMutant(null);

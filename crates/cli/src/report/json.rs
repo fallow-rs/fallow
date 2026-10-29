@@ -1340,12 +1340,8 @@ mod tests {
             fallow_output::ARCHITECTURE_SCHEMA_VERSION
         );
         assert_eq!(output["_meta"]["docs"], fallow_output::ARCHITECTURE_DOCS);
-        assert!(output["_meta"]["rules"].get("unused-file").is_none());
-        assert!(
-            output["_meta"]["rules"]
-                .get("circular-dependency")
-                .is_some()
-        );
+        // Architecture tests cover the rules of a run with findings.
+        assert!(output["_meta"].get("rules").is_none());
     }
 
     #[test]
@@ -2438,7 +2434,7 @@ mod tests {
         .expect("should serialize");
 
         assert!(output["_meta"]["docs"].is_string());
-        assert!(output["_meta"]["rules"].is_object());
+        assert!(output["_meta"].get("rules").is_none());
     }
 
     #[test]

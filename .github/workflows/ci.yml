@@ -55,6 +55,7 @@ jobs:
       action-current: ${{ steps.filter.outputs.action-current }}
       viz: ${{ steps.filter.outputs.viz }}
       mutation-runner: ${{ steps.filter.outputs.mutation-runner }}
+      similar-code-sidecar: ${{ steps.filter.outputs.similar-code-sidecar }}
       # A failed or skipped selector step never publishes partial output.
       heavy-runner: ${{ steps.heavy-runner.outcome == 'success' && steps.heavy-runner.outputs.runner || 'ubuntu-26.04' }}
       miri-runner: ${{ steps.miri-runner.outcome == 'success' && steps.miri-runner.outputs.runner || 'ubuntu-26.04' }}
@@ -342,6 +343,16 @@ jobs:
             mutation-runner:
               - 'tools/mutation-runner/**'
               - 'crates/api/mutation-runner-protocol.json'
+              - '.github/workflows/ci.yml'
+              - 'scripts/workflow-policy.test.mjs'
+            # `similar-code-sidecar` gates the lint job of the similar-code
+            # companion. It is a separate Cargo workspace, so the workspace
+            # clippy run in `check-lint` does not cover it.
+            similar-code-sidecar:
+              - 'tools/similar-code-sidecar/**'
+              - 'crates/api/similar-code-protocol.json'
+              - 'rust-toolchain.toml'
+              - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
               - 'scripts/workflow-policy.test.mjs'
 
@@ -1497,6 +1508,32 @@ jobs:
       - name: Format
         run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
 
+  # The similar-code companion is a separate Cargo workspace with its own
+  # lockfile. Release builds compile it, but no other pull request job lints
+  # it, so a clippy failure there stays hidden until a release. The root
+  # target directory is the one that the rust cache saves. The job runs on
+  # Linux only, so code for macOS only is not linted here.
+  similar-code-sidecar:
+    name: Similar-code sidecar clippy
+    needs: changes
+    if: needs.changes.outputs.similar-code-sidecar == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          cache-key: similar-code-sidecar
+
+      - name: Clippy
+        run: cargo clippy --locked --manifest-path tools/similar-code-sidecar/Cargo.toml --target-dir target --all-targets -- -D warnings
+
   test-gitlab-ci:
     name: Test GitLab CI scripts
     needs: changes
@@ -1743,7 +1780,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor]
+    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor, similar-code-sidecar]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}

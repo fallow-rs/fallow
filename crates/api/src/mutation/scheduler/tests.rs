@@ -282,6 +282,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
             max_version_exclusive: "6.0.0".to_owned(),
         },
         concurrency,
+        kill_matrix: false,
         runner_timeout: Duration::from_secs(5),
         deadline: None,
         cache: None,
@@ -757,6 +758,8 @@ fn a_flaky_result_keeps_the_history_of_each_attempt() {
             MutantAttempt {
                 status: MutantStatus::Timeout,
                 duration_ms: watchdog_ms,
+                killing_tests: Vec::new(),
+                kill_matrix_complete: false,
                 killed_by: None,
                 failure_kind: Some(MutantFailureKind::Timeout),
                 detail: None,
@@ -764,6 +767,8 @@ fn a_flaky_result_keeps_the_history_of_each_attempt() {
             MutantAttempt {
                 status: MutantStatus::Survived,
                 duration_ms: Some(12),
+                killing_tests: Vec::new(),
+                kill_matrix_complete: false,
                 killed_by: None,
                 failure_kind: None,
                 detail: None,
@@ -776,6 +781,8 @@ fn a_flaky_result_keeps_the_history_of_each_attempt() {
             MutantAttempt {
                 status: MutantStatus::Survived,
                 duration_ms: Some(12),
+                killing_tests: Vec::new(),
+                kill_matrix_complete: false,
                 killed_by: None,
                 failure_kind: None,
                 detail: None,
@@ -783,6 +790,8 @@ fn a_flaky_result_keeps_the_history_of_each_attempt() {
             MutantAttempt {
                 status: MutantStatus::Killed,
                 duration_ms: Some(12),
+                killing_tests: Vec::new(),
+                kill_matrix_complete: false,
                 killed_by: Some(tid("t1")),
                 failure_kind: Some(MutantFailureKind::Assertion),
                 detail: None,
@@ -803,6 +812,8 @@ fn a_timeout_from_the_companion_keeps_its_failure_kind() {
         Some(&MutantAttempt {
             status: MutantStatus::Timeout,
             duration_ms: Some(12),
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             failure_kind: Some(MutantFailureKind::Timeout),
             detail: None,
@@ -1806,6 +1817,8 @@ impl ResultLookup for FakeCache {
     fn get(&self, mutant_id: &str, key: &str) -> Option<CachedResult> {
         (mutant_id == "m1" && key == "key-m1").then(|| CachedResult {
             status: MutantStatus::Killed,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: Some(tid("t1")),
             duration_ms: Some(3),
         })
@@ -2838,6 +2851,8 @@ impl ResultLookup for CachedNewKiller {
     fn get(&self, mutant_id: &str, _: &str) -> Option<CachedResult> {
         (mutant_id == "m1").then(|| CachedResult {
             status: MutantStatus::Killed,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: Some(tid("t2")),
             duration_ms: Some(3),
         })
@@ -2967,6 +2982,8 @@ fn each_final_result_reaches_the_journal_before_the_schedule_returns() {
                 "key-m1".to_owned(),
                 CachedResult {
                     status: MutantStatus::Killed,
+                    killing_tests: Vec::new(),
+                    kill_matrix_complete: false,
                     killed_by: Some(tid("t1")),
                     duration_ms: Some(12),
                 }
@@ -2976,6 +2993,8 @@ fn each_final_result_reaches_the_journal_before_the_schedule_returns() {
                 "key-m2".to_owned(),
                 CachedResult {
                     status: MutantStatus::Survived,
+                    killing_tests: Vec::new(),
+                    kill_matrix_complete: false,
                     killed_by: None,
                     duration_ms: Some(12),
                 }
@@ -3015,6 +3034,8 @@ fn a_flaky_or_timed_out_result_never_reaches_the_journal() {
 fn a_resumed_result_skips_the_run_and_a_changed_key_runs_again() {
     let killed = |test: &str| CachedResult {
         status: MutantStatus::Killed,
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
         killed_by: Some(tid(test)),
         duration_ms: Some(3),
     };
@@ -3064,3 +3085,6 @@ fn a_resumed_result_skips_the_run_and_a_changed_key_runs_again() {
         "the journal already holds the resumed result"
     );
 }
+
+#[path = "matrix_tests.rs"]
+mod matrix_tests;

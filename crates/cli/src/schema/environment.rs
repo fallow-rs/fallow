@@ -103,7 +103,7 @@ pub(super) const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_TYPE_AWARE_BACKEND",
-        "Experimental. Type-checker backend for the TypeScript semantic sidecar: typescript-go (default) or tsrs. The tsrs backend needs the exact pinned tsrs npm package where fallow-type-aware can resolve it. An unknown value makes the type-aware pass unavailable.",
+        "Experimental. Type-checker backend for the TypeScript semantic sidecar: typescript-go (default) or tsrs. The tsrs backend needs a tsrs npm package in the supported range of the type-aware protocol manifest, where fallow-type-aware can resolve it. An unknown value makes the type-aware pass unavailable.",
     ),
     (
         "FALLOW_TYPE_AWARE_BIN",

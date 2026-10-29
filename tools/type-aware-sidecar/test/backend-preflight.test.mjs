@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { assertTypescriptBackendResolvable } from "../src/backend-preflight.mjs";
+import { supportsVersion } from "../src/backend-selection.mjs";
 import { BACKENDS, BACKEND_VERSION } from "../src/generated-protocol.mjs";
 
 const sidecarRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -145,9 +146,69 @@ test("preflight rejects a selected backend at another version", () => {
         assertTypescriptBackendResolvable(path.join(root, "probe.mjs"), {
           FALLOW_TYPE_AWARE_BACKEND: "tsrs",
         }),
-      /resolved tsrs 0\.1\.0 .*the tsrs backend needs exactly /u,
+      /resolved tsrs 0\.1\.0 .*the tsrs backend supports >=0\.18\.0 <1\.0\.0/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const withFakeTsrs = (version, check) => {
+  const root = makeTree();
+  try {
+    const packageDir = path.join(root, "node_modules", "tsrs");
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(path.join(packageDir, "package.json"), JSON.stringify({ name: "tsrs", version }));
+    check(() =>
+      assertTypescriptBackendResolvable(path.join(root, "probe.mjs"), {
+        FALLOW_TYPE_AWARE_BACKEND: "tsrs",
+      }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("preflight accepts a newer tsrs inside the supported range", () => {
+  for (const version of ["0.18.0-ts7.1.0-dev.20260929", "0.20.1-ts7.1.0-beta", "0.99.0"]) {
+    withFakeTsrs(version, (preflight) => assert.doesNotThrow(preflight, version));
+  }
+});
+
+test("preflight rejects a tsrs outside the supported range", () => {
+  for (const version of ["0.17.0", "1.0.0-ts8.0.0"]) {
+    withFakeTsrs(version, (preflight) =>
+      assert.throws(preflight, /the tsrs backend supports >=0\.18\.0 <1\.0\.0/u, version),
+    );
+  }
+});
+
+test("preflight accepts a newer typescript 7 release", () => {
+  const root = makeTree();
+  try {
+    writeFakeTypescript(root, "7.1.0-beta");
+    assertTypescriptBackendResolvable(path.join(root, "probe.mjs"), DEFAULT_BACKEND_ENV);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("supported range compares major.minor.patch at its boundaries", () => {
+  const tsrs = BACKENDS.find((backend) => backend.family === "tsrs");
+  const typescript = BACKENDS[0];
+  for (const version of ["0.18.0", "0.20.1+build", "0.99.99"]) {
+    assert.ok(supportsVersion(tsrs, version), version);
+  }
+  for (const version of ["0.17.99", "1.0.0", "0.20", "0.20.1.2", "0.20.1foo", "garbage"]) {
+    assert.ok(!supportsVersion(tsrs, version), version);
+  }
+  for (const version of ["7.0.0", "7.1.0-dev.20261029.1", "7.99.99"]) {
+    assert.ok(supportsVersion(typescript, version), version);
+  }
+  for (const version of ["6.99.99", "8.0.0-beta"]) {
+    assert.ok(!supportsVersion(typescript, version), version);
+  }
+  for (const backend of BACKENDS) {
+    assert.ok(supportsVersion(backend, backend.version), backend.family);
   }
 });

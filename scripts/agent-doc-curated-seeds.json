@@ -1492,6 +1492,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--full-tables",
+      "column": "Description",
+      "seed": "With `--lean`, keep every row of the health tables (`hotspots`, `file_scores`, `large_functions`)"
+    },
+    {
+      "section": "flags:global",
       "row": "--group",
       "column": "Description",
       "seed": "Keep only the matching groups of a `--group-by` health run. Accepts exact group keys, glob patterns, and `!`-prefixed negations. Values can be comma-separated or repeated. Project-level sections are not filtered. Supported by `fallow health` only"
@@ -1513,6 +1519,12 @@
       "row": "--include-entry-exports",
       "column": "Description",
       "seed": "Report unused exports in entry files instead of auto-marking them as used"
+    },
+    {
+      "section": "flags:global",
+      "row": "--lean",
+      "column": "Description",
+      "seed": "Trim JSON for agent context: leave out empty arrays and zero dead-code summary counts, group workspace diagnostics, cap health tables, and move repeated action text to `_meta.actions`. Requires JSON output. Applies to dead-code, health and the combined report; other commands reject it. Run without `--lean` for the full diagnostic list and the complete tables"
     },
     {
       "section": "flags:global",

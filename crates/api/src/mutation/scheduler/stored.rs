@@ -16,6 +16,10 @@ use super::{
 pub struct CachedResult {
     pub status: MutantStatus,
     pub killed_by: Option<String>,
+    /// All observed failing tests, sorted. Timeouts do not count.
+    pub killing_tests: Vec<String>,
+    /// True only for exact requested membership with terminal pass or fail results.
+    pub kill_matrix_complete: bool,
     pub duration_ms: Option<u64>,
 }
 
@@ -75,12 +79,14 @@ fn stored_result(
         .journal
         .and_then(|journal| journal.resumed(&mutant.id, key))
         .map(|hit| (hit, StoredSource::Journal));
-    resumed.or_else(|| {
-        context
-            .cache
-            .and_then(|cache| cache.get(&mutant.id, key))
-            .map(|hit| (hit, StoredSource::Cache))
-    })
+    resumed
+        .or_else(|| {
+            context
+                .cache
+                .and_then(|cache| cache.get(&mutant.id, key))
+                .map(|hit| (hit, StoredSource::Cache))
+        })
+        .filter(|(hit, _)| !context.kill_matrix || hit.kill_matrix_complete)
 }
 
 /// The outcome of a result of an earlier run, with its covering `tests`.
@@ -93,6 +99,8 @@ fn stored_outcome(
     covering_tests.sort_unstable();
     MutantOutcome {
         status: hit.status,
+        killing_tests: hit.killing_tests,
+        kill_matrix_complete: hit.kill_matrix_complete,
         killed_by: hit.killed_by,
         covering_tests,
         static_mutant,
@@ -118,6 +126,13 @@ pub(super) fn job_key(
         (None, Some(journal)) => Some(journal.key(context.ready, mutant, tests, test_files)),
         (None, None) => None,
     }
+    .map(|key| {
+        if context.kill_matrix {
+            format!("matrix:{key}")
+        } else {
+            key
+        }
+    })
 }
 
 /// Records the result of an earlier run for `mutant`, and returns true when
@@ -146,6 +161,9 @@ pub(super) fn record_stored(
 /// Adds a final result of `job` to the journal of `config`. A job without a
 /// key has no journal.
 fn journal_result(config: &ScheduleConfig, job: &Job, result: &CachedResult) {
+    if config.kill_matrix && !result.kill_matrix_complete {
+        return;
+    }
     if let (Some(journal), Some(key)) = (&config.journal, &job.cache_key) {
         journal.append(&job.id, key, result);
     }
@@ -163,6 +181,8 @@ pub(super) fn journal_first_run(config: &ScheduleConfig, job: &Job, attempt: &At
         job,
         &CachedResult {
             status: MutantStatus::Killed,
+            killing_tests: attempt.killing_tests.clone(),
+            kill_matrix_complete: attempt.kill_matrix_complete,
             killed_by: attempt.killed_by.clone(),
             duration_ms: attempt.duration_ms,
         },
@@ -188,11 +208,15 @@ pub(super) fn journal_retry(
     let result = match retry_status(first, job, retry) {
         MutantStatus::Killed => CachedResult {
             status: MutantStatus::Killed,
+            killing_tests: retry.killing_tests.clone(),
+            kill_matrix_complete: retry.kill_matrix_complete,
             killed_by: retry.killed_by.clone(),
             duration_ms: retry.duration_ms,
         },
         MutantStatus::Survived if retry.dropped_tests.is_empty() => CachedResult {
             status: MutantStatus::Survived,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: retry.kill_matrix_complete,
             killed_by: None,
             duration_ms: first_ms,
         },

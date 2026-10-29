@@ -80,7 +80,7 @@ use fallow_output::{
 use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateOutput, CodeClimateSeverity,
+    CodeClimateOutput, CodeClimateSeverity, LEAN_PROFILE_KINDS, LeanOutput,
 };
 use fallow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -394,6 +394,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "CodeClimateIssue",
     "CodeClimateOutput",
     "CombinedOutput",
+    "LeanOutput",
     "ReviewBriefOutput",
     "ReviewBriefWireOutput",
     "ReviewBriefSchemaVersion",
@@ -1145,6 +1146,7 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     // Structured error envelope (`--format json` failure path, no `kind`).
     let _ = generator.subschema_for::<fallow_output::ErrorOutput>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
+    let _ = generator.subschema_for::<LeanOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();
     let _ = generator.subschema_for::<CodeClimateSeverity>();
@@ -1509,21 +1511,18 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
 }
 
 fn fallow_output_variant_schema(kind: &str, definitions: &[&str], description: &str) -> Value {
+    let mut discriminator = serde_json::json!({
+        "type": "object",
+        "properties": { "kind": { "type": "string", "const": kind } },
+        "required": ["kind"]
+    });
+    // A `--lean` document validates against `LeanOutput`, not the full envelope.
+    if LEAN_PROFILE_KINDS.contains(&kind) {
+        discriminator["not"] = serde_json::json!({ "required": ["profile"] });
+    }
     serde_json::json!({
         "description": description,
-        "allOf": [
-            fallow_output_payload_schema(definitions),
-            {
-                "type": "object",
-                "properties": {
-                    "kind": {
-                        "type": "string",
-                        "const": kind
-                    }
-                },
-                "required": ["kind"]
-            }
-        ]
+        "allOf": [fallow_output_payload_schema(definitions), discriminator]
     })
 }
 
@@ -1574,7 +1573,8 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
              discriminated by checking whether the document root is an array. \
              `ErrorOutput` is the `--format json` failure document, emitted on \
              stdout with a non-zero exit; it carries no `kind` and is \
-             discriminated by the `error: true` field.",
+             discriminated by the `error: true` field. A `--lean` document \
+             is not a root branch: it validates against `LeanOutput`.",
             fallow_output_kind_list()
         )),
     );

@@ -1372,4 +1372,215 @@ mod end_to_end {
             changed.mutants
         );
     }
+    fn matrix_project() -> (tempfile::TempDir, PathBuf) {
+        let project = tempfile::tempdir().expect("project");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        for (file, text) in [
+            (
+                "package.json",
+                r#"{"name":"matrix-fixture","type":"module","main":"src/math.ts","scripts":{"test":"node --test"}}"#,
+            ),
+            (
+                "src/math.ts",
+                "export function add(a: number, b: number) { return a + b; }\nexport function subtract(a: number, b: number) { return a - b; }\nexport function multiply(a: number, b: number) { return a * b; }\n",
+            ),
+            (
+                "test/math.test.ts",
+                "import assert from 'node:assert/strict';\nimport {test} from 'node:test';\nimport {add, subtract} from '../src/math.ts';\ntest('A', () => { assert.equal(add(3, 2), 5); });\ntest('B', () => { assert.equal(add(3, 2), 5); assert.equal(subtract(7, 2), 5); });\n",
+            ),
+            (
+                "src/only.ts",
+                "export function double(a: number) { return a + a; }\n",
+            ),
+            (
+                "test/multiply.test.ts",
+                "import assert from 'node:assert/strict';\nimport {test} from 'node:test';\nimport {multiply} from '../src/math.ts';\nimport {double} from '../src/only.ts';\ntest('C', () => { assert.equal(multiply(3, 2), 6); assert.equal(double(3), 6); });\n",
+            ),
+        ] {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("directory");
+            fs::write(target, text).expect("fixture");
+        }
+        commit_all(&root);
+        (project, root)
+    }
+
+    fn assert_matrix_evidence(report: &fallow_output::MutationReport) {
+        assert_eq!(report.kill_matrix.candidates, ["test/math.test.ts::A"]);
+        let rows = &report.kill_matrix.tests;
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.test_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "test/math.test.ts::A",
+                "test/math.test.ts::B",
+                "test/multiply.test.ts::C"
+            ]
+        );
+        assert_eq!(rows[0].subsuming_tests, ["test/math.test.ts::B"]);
+        assert_eq!(rows[0].unique_kills, Vec::<String>::new());
+        assert!(
+            rows[0]
+                .notes
+                .iter()
+                .any(|note| note == "static-test-file-only-export-reach"),
+            "static test-file evidence must reach the report: {:#?}",
+            rows[0]
+        );
+        assert!(
+            !rows[0]
+                .notes
+                .iter()
+                .any(|note| note == "observed-instrumented-file-only-test")
+        );
+        assert_eq!(
+            rows[1].unique_kills,
+            report
+                .mutants
+                .iter()
+                .filter(|mutant| mutant.location.function.as_deref() == Some("subtract"))
+                .map(|mutant| mutant.location.mutant_id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        assert!(!rows[1].unique_kills.is_empty());
+        assert!(!rows[2].unique_kills.is_empty());
+        assert!(
+            rows[2]
+                .notes
+                .iter()
+                .any(|note| note == "observed-instrumented-file-only-test"),
+            "C is the sole observed test for src/only.ts"
+        );
+        let add = report
+            .mutants
+            .iter()
+            .find(|mutant| mutant.location.function.as_deref() == Some("add"))
+            .expect("add mutant");
+        assert_eq!(
+            add.killing_tests,
+            ["test/math.test.ts::A", "test/math.test.ts::B"]
+        );
+    }
+
+    #[test]
+    fn matrix_retains_real_adapter_killers_candidates_cache_and_resume() {
+        use crate::mutation::{Operator, discovery::RuntimeKind};
+        use fallow_output::MutationKillMatrixStatus;
+        if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        let (_project, root) = matrix_project();
+        let mut config = options(&root, MutationRunScope::All);
+        config.operators = Some(vec![Operator::ArithmeticOperator]);
+        config.kill_matrix = true;
+        config.max_mutants = Some(1);
+        let partial = run_mutation(&config).expect("partial matrix");
+        assert_eq!(
+            partial.kill_matrix.status,
+            MutationKillMatrixStatus::Incomplete
+        );
+        assert!(partial.kill_matrix.candidates.is_empty());
+        let first = partial
+            .mutants
+            .iter()
+            .find(|result| result.status == MutantStatus::Killed)
+            .expect("journaled kill");
+        assert!(first.kill_matrix_complete);
+        let first_id = first.location.mutant_id.clone();
+        let first_killers = first.killing_tests.clone();
+        config.max_mutants = None;
+        config.resume = true;
+        config.analysis.no_cache = false;
+        let resumed = run_mutation(&config).expect("resume matrix");
+        let reused = resumed
+            .mutants
+            .iter()
+            .find(|result| result.location.mutant_id == first_id)
+            .expect("resumed mutant");
+        assert!(reused.resumed);
+        assert_eq!(reused.killing_tests, first_killers);
+        assert_eq!(
+            resumed.kill_matrix.status,
+            MutationKillMatrixStatus::Complete,
+            "{:#?}",
+            resumed.kill_matrix
+        );
+        assert_matrix_evidence(&resumed);
+        config.resume = false;
+        let cached = run_mutation(&config).expect("cached matrix");
+        assert_eq!(cached.kill_matrix, resumed.kill_matrix);
+        assert!(
+            cached
+                .mutants
+                .iter()
+                .all(|mutant| mutant.cached && mutant.kill_matrix_complete)
+        );
+        config.kill_matrix = false;
+        let normal = run_mutation(&config).expect("normal mode cannot reuse matrix cache");
+        assert!(normal.mutants.iter().all(|mutant| !mutant.cached));
+        assert_eq!(
+            normal.kill_matrix.status,
+            MutationKillMatrixStatus::Unavailable
+        );
+    }
+    #[test]
+    fn project_prefixed_ids_keep_file_provenance_and_export_notes() {
+        use crate::mutation::Operator;
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package);
+        for (file, text) in [
+            (
+                "src/math.ts",
+                "export function add(a: number, b: number) { return a + b; }\n",
+            ),
+            (
+                "test/math.test.ts",
+                "import {test, expect} from 'vitest';\nimport {add} from '../src/math.ts';\ntest('A', () => expect(add(3, 2)).toBe(5));\n",
+            ),
+            (
+                "vitest.config.mjs",
+                "export default { test: { projects: [{ test: { name: 'a', include: ['test/math.test.ts'] } }, { test: { name: 'b', include: ['test/math.test.ts'] } }] } };\n",
+            ),
+        ] {
+            fs::write(root.join(file), text).expect("fixture");
+        }
+        let mut config = options(&root, MutationRunScope::All);
+        config.allow_dirty = true;
+        config.kill_matrix = true;
+        config.operators = Some(vec![Operator::ArithmeticOperator]);
+        config.analysis.no_cache = false;
+        let report = run_mutation(&config).expect("multi-project matrix");
+        let rows = &report.kill_matrix.tests;
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.test_id.as_str())
+                .collect::<Vec<_>>(),
+            ["a::test/math.test.ts::A", "b::test/math.test.ts::A"]
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.file.as_str()).collect::<Vec<_>>(),
+            ["test/math.test.ts", "test/math.test.ts"],
+            "test ids are opaque; use the baseline file metadata"
+        );
+        assert_eq!(
+            report.kill_matrix.candidates,
+            ["a::test/math.test.ts::A", "b::test/math.test.ts::A"]
+        );
+        for row in rows {
+            assert!(
+                row.notes
+                    .iter()
+                    .any(|note| note == "static-test-file-only-export-reach"),
+                "{row:#?}"
+            );
+        }
+        let cached = run_mutation(&config).expect("cached multi-project matrix");
+        assert_eq!(cached.kill_matrix, report.kill_matrix);
+        assert!(cached.mutants.iter().all(|mutant| mutant.cached));
+    }
 }

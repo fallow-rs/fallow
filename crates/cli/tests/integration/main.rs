@@ -86,6 +86,7 @@ mod inspect_cloud_tests;
 mod inspect_tests;
 mod json_format_tests;
 mod json_style_aux_commands_tests;
+mod lean_json_tests;
 mod legacy_glob_warning_tests;
 mod license_refresh_tests;
 mod line_free_baseline_tests;

@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{
-    BACKEND_ENV, SESSION_ENVELOPE_TYPES, SIDECAR_PACKAGE as SIDECAR_BINARY, STATUS_OPERATION,
-    WIRE_PROTOCOL_VERSION as TYPE_AWARE_PROTOCOL_VERSION, selected_backend,
+    BACKEND_ENV, BackendSpec, SESSION_ENVELOPE_TYPES, SIDECAR_PACKAGE as SIDECAR_BINARY,
+    STATUS_OPERATION, WIRE_PROTOCOL_VERSION as TYPE_AWARE_PROTOCOL_VERSION, selected_backend,
 };
 #[cfg(windows)]
 use discovery::canonical_sidecar_path;
@@ -133,8 +133,9 @@ impl Drop for ActiveSidecarGuard {
 /// Semantic-companion availability report produced by [`status`].
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeAwareStatus {
-    /// True only when the companion was found and its protocol, package,
-    /// and backend versions all match this fallow build exactly.
+    /// True only when the companion was found, its protocol and package
+    /// versions match this fallow build exactly, and its backend version is in
+    /// the supported range of the selected backend.
     pub available: bool,
     /// How the companion binary was located: `installed-sibling`,
     /// `environment-override`, or a wrapper marker such as `npm-wrapper`;
@@ -170,6 +171,25 @@ struct StatusResponse {
     protocol_version: u32,
     backend_family: String,
     backend_version: String,
+}
+
+/// Names the mismatch that made a status response unusable. A backend outside
+/// its supported range needs another backend install, not another companion.
+fn status_mismatch_remediation(response: &StatusResponse, backend: BackendSpec) -> String {
+    if response.protocol_version == TYPE_AWARE_PROTOCOL_VERSION
+        && response.package_version == env!("CARGO_PKG_VERSION")
+        && response.backend_family == backend.family
+    {
+        return format!(
+            "The {} backend {} is outside the supported range {}. Install a supported version, for example {}@{}",
+            backend.family,
+            response.backend_version,
+            backend.range(),
+            backend.package,
+            backend.version
+        );
+    }
+    "Install the exact fallow-type-aware version that matches Fallow".to_string()
 }
 
 /// Marker set alongside `FALLOW_TYPE_AWARE_BIN` by fallow's own launchers
@@ -220,7 +240,7 @@ pub fn status(root: &Path) -> TypeAwareStatus {
             };
         }
     };
-    let (backend_family, backend_version) = match selected_backend() {
+    let backend = match selected_backend() {
         Ok(backend) => backend,
         Err(error) => {
             return TypeAwareStatus {
@@ -249,8 +269,8 @@ pub fn status(root: &Path) -> TypeAwareStatus {
         Ok(response)
             if response.protocol_version == TYPE_AWARE_PROTOCOL_VERSION
                 && response.package_version == env!("CARGO_PKG_VERSION")
-                && response.backend_family == backend_family
-                && response.backend_version == backend_version =>
+                && response.backend_family == backend.family
+                && backend.supports(&response.backend_version) =>
         {
             TypeAwareStatus {
                 available: true,
@@ -263,18 +283,19 @@ pub fn status(root: &Path) -> TypeAwareStatus {
                 remediation: None,
             }
         }
-        Ok(response) => TypeAwareStatus {
-            available: false,
-            discovery_source: Some(discovery_source),
-            companion_path: Some(sidecar),
-            package_version: Some(response.package_version),
-            protocol_version: response.protocol_version,
-            backend_family: Some(response.backend_family),
-            backend_version: Some(response.backend_version),
-            remediation: Some(
-                "Install the exact fallow-type-aware version that matches Fallow".to_string(),
-            ),
-        },
+        Ok(response) => {
+            let remediation = status_mismatch_remediation(&response, backend);
+            TypeAwareStatus {
+                available: false,
+                discovery_source: Some(discovery_source),
+                companion_path: Some(sidecar),
+                package_version: Some(response.package_version),
+                protocol_version: response.protocol_version,
+                backend_family: Some(response.backend_family),
+                backend_version: Some(response.backend_version),
+                remediation: Some(remediation),
+            }
+        }
         Err(error) => TypeAwareStatus {
             available: false,
             discovery_source: Some(discovery_source),
@@ -358,6 +379,30 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    #[test]
+    fn status_remediation_names_the_backend_range_for_an_unsupported_backend() {
+        let backend = selected_backend().expect("default backend");
+        let mut response = StatusResponse {
+            package_version: env!("CARGO_PKG_VERSION").to_string(),
+            protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
+            backend_family: backend.family.to_string(),
+            backend_version: "6.0.3".to_string(),
+        };
+        let remediation = status_mismatch_remediation(&response, backend);
+        assert!(remediation.contains("6.0.3"), "{remediation}");
+        assert!(remediation.contains(&backend.range()), "{remediation}");
+        assert!(
+            remediation.contains(&format!("{}@{}", backend.package, backend.version)),
+            "{remediation}"
+        );
+
+        response.package_version = "0.0.0".to_string();
+        assert!(
+            status_mismatch_remediation(&response, backend).contains("fallow-type-aware"),
+            "a companion mismatch keeps the companion hint"
+        );
     }
 
     #[test]

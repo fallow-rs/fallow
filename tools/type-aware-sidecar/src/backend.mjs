@@ -1,11 +1,21 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { selectBackend } from "./backend-selection.mjs";
+import { selectBackend, supportedRange, supportsVersion } from "./backend-selection.mjs";
 
-export const BACKEND = selectBackend();
+const SELECTED = selectBackend();
+const { version: resolvedVersion } = await import(SELECTED.package);
+if (!supportsVersion(SELECTED, resolvedVersion)) {
+  throw new Error(
+    `${SELECTED.package} backend version ${resolvedVersion} is outside the supported range ${supportedRange(SELECTED)}`,
+  );
+}
 
-const { version: resolvedVersion } = await import(BACKEND.package);
+/**
+ * The selected backend. `version` is the resolved package version, which can
+ * differ from the tested version in the protocol manifest.
+ */
+export const BACKEND = Object.freeze({ ...SELECTED, version: resolvedVersion });
 // TypeScript 7.1 serves the API at `typescript/sync`. TypeScript 7.0 and its
 // 7.1 dev builds serve it at `typescript/unstable/sync`.
 const importApi = async (subpath) => {
@@ -20,12 +30,6 @@ export const sync = await importApi("sync");
 export const ast = await importApi("ast/is");
 export const { SyntaxKind } = await importApi("ast");
 const { serverFS } = await importApi("fs");
-
-if (resolvedVersion !== BACKEND.version) {
-  throw new Error(
-    `${BACKEND.package} backend version ${resolvedVersion} does not match protocol ${BACKEND.version}`,
-  );
-}
 
 /**
  * The value a `readFile` callback returns to read the file from disk.

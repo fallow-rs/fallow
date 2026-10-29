@@ -54,8 +54,7 @@ pub struct EntryPointSummary {
     pub by_source: Vec<(String, usize)>,
 }
 
-/// Per-component render fan-in counts plus the precomputed concentration
-/// aggregates.
+/// Per-component render fan-in counts plus the precomputed concentration aggregates.
 ///
 /// DESCRIPTIVE blast-radius signal (NOT a rule, finding, or threshold): the
 /// component-graph analogue of module-level fan-in. Module fan-in counts
@@ -113,8 +112,7 @@ pub struct RenderFanInComponent {
     pub render_sites: u32,
     /// Distinct `(parent_file, parent_component)` keys that render this
     /// component. The HEADLINE blast-radius axis: the honest count of distinct
-    /// render LOCATIONS, the percentiled distribution analogue of "distinct
-    /// importers".
+    /// render LOCATIONS, the percentiled distribution analogue of "distinct importers".
     pub distinct_parents: u32,
 }
 
@@ -1210,6 +1208,8 @@ macro_rules! counted_result_field_sum {
         0 $(+ ($results).$field.len())+
     };
 }
+#[path = "results_key_findings.rs"]
+mod result_key_findings;
 
 /// Serialized `AnalysisResults` arrays that contribute to [`AnalysisResults::total_issues`].
 pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =

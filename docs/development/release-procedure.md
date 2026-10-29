@@ -484,8 +484,9 @@ invariants in this file.
     approve, then rerun the failed jobs of the same run. Monitor the run through
     `status=completed` and `conclusion=success`; a successful watch command
     alone is not sufficient evidence. Require `similar-code-conformance` to have
-    validated the exact Linux x64 sidecar artifact against the committed F32
-    Candle baseline before `release-verified`. Also require both `musl smoke`
+    validated the exact Linux x64, macOS arm64, and macOS x64 sidecar
+    artifacts against the committed F32 Candle baseline before
+    `release-verified`. Also require both `musl smoke`
     legs to pass before `release-verified` (see [musl smoke](#musl-smoke)),
     and require the `Publish VS Code Marketplace
     targets`, `Publish Open VSX targets`, `Verify public VS Code registry

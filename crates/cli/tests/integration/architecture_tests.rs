@@ -677,18 +677,16 @@ fn architecture_json_points_to_the_architecture_docs() {
         .keys()
         .map(String::as_str)
         .collect();
+    // `--explain` lists only the rules of the reported findings, and the
+    // fixture reports a boundary violation, a cycle and a policy violation.
     assert_eq!(
         rules,
         [
-            "boundary-call-violation",
-            "boundary-coverage",
             "boundary-violation",
             "circular-dependency",
-            "package-cycle",
             "policy-violation",
-            "re-export-cycle",
         ],
-        "_meta.rules lists only the architecture rules"
+        "_meta.rules lists only the architecture rules with findings"
     );
     let dead_code = run(
         "dead-code",

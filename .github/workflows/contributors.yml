@@ -1,0 +1,97 @@
+name: Contributors
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  GIT_CONFIG_COUNT: '2'
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: 'false'
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: '0'
+
+concurrency:
+  group: contributors
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate contributor credits
+    if: github.repository == 'fallow-rs/fallow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Install renderer
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test contributor credits
+        run: node --test scripts/update-contributors.test.mjs scripts/render-contributors.test.mjs scripts/contributors-publish.test.mjs
+      - name: Generate gallery and names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/update-contributors.mjs contributors-output
+      - name: Render standalone gallery
+        run: node scripts/render-contributors.mjs contributors-output
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: contributor-credits
+          path: |
+            contributors-output/contributors.png
+            contributors-output/CONTRIBUTORS.md
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish contributor credits
+    needs: generate
+    if: github.repository == 'fallow-rs/fallow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: contributor-credits
+          path: contributor-credits
+      - name: Update generated files on badges
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          for file in contributors.png CONTRIBUTORS.md; do
+            new_sha=$(git hash-object "contributor-credits/$file")
+            for attempt in 1 2 3 4 5; do
+              gh api "repos/$GH_REPO/git/trees/badges" > badges-tree.json
+              old_sha=$(jq -r --arg file "$file" '.tree[] | select(.path == $file) | .sha' badges-tree.json)
+              if [ "$new_sha" = "$old_sha" ]; then
+                break
+              fi
+              base64 < "contributor-credits/$file" | tr -d '\r\n' > content-base64.txt
+              jq -n --rawfile content content-base64.txt --arg sha "$old_sha" \
+                '{message: "chore: update contributor credits", branch: "badges", content: $content} +
+                (if $sha == "" then {} else {sha: $sha} end)' > update.json
+              if gh api --method PUT "repos/$GH_REPO/contents/$file" --input update.json --silent; then
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::could not update $file on badges"
+                exit 1
+              fi
+              sleep "$((attempt * 2))"
+            done
+          done

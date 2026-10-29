@@ -387,6 +387,34 @@ test("similar-code sidecar docs follow the canonical protocol versions", () => {
   );
 });
 
+test("similar-code sidecar links Accelerate only on macOS", () => {
+  const manifest = readFileSync("tools/similar-code-sidecar/Cargo.toml", "utf8");
+  const sections = new Map();
+  let current = null;
+  for (const line of manifest.split(/\r?\n/u)) {
+    const header = /^\[(.+)\]\s*$/u.exec(line);
+    if (header) {
+      current = header[1];
+      sections.set(current, []);
+    } else if (current !== null) {
+      sections.get(current).push(line);
+    }
+  }
+  const body = (name) => (sections.get(name) ?? []).join("\n");
+  const macos = body(`target.'cfg(target_os = "macos")'.dependencies`);
+
+  // Only candle-core gets the feature: that is the measured configuration.
+  assert.match(
+    macos,
+    /^candle = \{ package = "candle-core", version = "=0\.11\.0", features = \["accelerate"\] \}$/mu,
+  );
+  assert.doesNotMatch(macos, /candle-nn|candle-transformers/u);
+  for (const [name, lines] of sections) {
+    if (name === `target.'cfg(target_os = "macos")'.dependencies`) continue;
+    assert.doesNotMatch(lines.join("\n"), /accelerate/u, `[${name}] must not enable accelerate`);
+  }
+});
+
 test("NAPI declarations have one canonical public source", () => {
   const packageJson = readJson("crates/napi/package.json");
   const entry = readFileSync("crates/napi/index.d.ts", "utf8");
@@ -480,7 +508,10 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(defaultBackend.package, "typescript");
   assert.equal(sidecarPackage.dependencies.typescript, defaultBackend.version);
   for (const backend of optionalBackends) {
-    assert.equal(sidecarPackage.peerDependencies[backend.package], backend.version);
+    // npm excludes prerelease versions such as tsrs `0.20.1-ts7.1.0-beta` from
+    // every bounded range, so `*` is the one peer range that accepts any
+    // installed tsrs without a warning. The sidecar enforces the real range.
+    assert.equal(sidecarPackage.peerDependencies[backend.package], "*");
     assert.equal(sidecarPackage.peerDependenciesMeta[backend.package].optional, true);
     assert.equal(sidecarPackage.devDependencies[backend.package], backend.version);
     assert.equal(sidecarLock.packages[`node_modules/${backend.package}`].version, backend.version);

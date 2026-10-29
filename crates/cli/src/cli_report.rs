@@ -1068,6 +1068,21 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
             crate::error::requested_json_style(),
         ));
     }
+    // A lean document has capped tables and grouped diagnostics, so a report
+    // from it would show part of the run as the whole run.
+    if envelope.get("profile").and_then(serde_json::Value::as_str)
+        == Some(fallow_output::LEAN_PROFILE)
+    {
+        return Err(crate::emit_known_failure(
+            &format!(
+                "{} is a `--lean` document; save the run without `--lean` for `fallow report`",
+                from.display()
+            ),
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        ));
+    }
     Ok(envelope)
 }
 

@@ -188,9 +188,8 @@ pub struct Cli {
     )]
     pub format: Format,
 
-    /// Indent JSON output for manual inspection. Requires the final output format to be JSON.
-    #[arg(hide_short_help = true, long, global = true)]
-    pub pretty: bool,
+    #[command(flatten)]
+    pub json: crate::json_style::JsonPresentationArgs,
 
     /// Suppress progress output
     #[arg(short, long, global = true)]

@@ -26,6 +26,7 @@ export const MUTATION_RUNNER_PROTOCOL = deepFreeze({
     "runner-load-failed",
     "config-load-failed",
     "test-file-missing",
+    "overlay-incomplete",
     "internal",
   ],
   capabilities: [
