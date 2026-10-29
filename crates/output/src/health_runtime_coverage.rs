@@ -742,6 +742,14 @@ pub struct RuntimeCoverageReport {
 pub const OPTIMIZATION_TARGET_UNMATCHED_WARNING: &str = "optimization_target_unmatched";
 
 impl RuntimeCoverageReport {
+    /// Whether this report contains only positive execution evidence.
+    #[must_use]
+    pub fn has_positive_only_capture(&self) -> bool {
+        self.warnings
+            .iter()
+            .any(|warning| warning.code == "positive_only_capture")
+    }
+
     /// Set the `optimization_target_unmatched` warning from the hot paths that
     /// this report shows. Call it after the last filter that removes hot
     /// paths, so that the count agrees with the output.

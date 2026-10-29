@@ -2597,6 +2597,12 @@ pub enum CoverageCli {
         #[arg(long, value_name = "SHA")]
         git_sha: Option<String>,
 
+        /// Bind the upload to a Vercel deployment. Defaults to
+        /// $VERCEL_DEPLOYMENT_ID only when $VERCEL=1.
+        /// The cloud verifies the deployment against the supplied git SHA.
+        #[arg(long, value_name = "DEPLOYMENT_ID")]
+        vercel_deployment_id: Option<String>,
+
         /// Proceed even when the working tree has uncommitted changes.
         ///
         /// Warning: the inventory is generated from the working copy, so it
@@ -2611,18 +2617,9 @@ pub enum CoverageCli {
         #[arg(long, value_name = "GLOB", num_args = 0..)]
         exclude_paths: Vec<String>,
 
-        /// Prefix prepended to every emitted filePath so the static
-        /// inventory joins with the runtime beacon for your deployment.
-        /// Required for containerized deployments where the deployed
-        /// WORKDIR rebases paths at runtime. Default: none (paths emit
-        /// repo-relative, matching local runs and non-container CI).
-        ///
-        /// Common values: `/app` (typical Dockerfile), `/workspace`
-        /// (Buildpacks / Cloud Run), `/usr/src/app` (older Node images),
-        /// `/var/task` (Lambda), `/home/runner/work/<repo>/<repo>`
-        /// (GitHub Actions default checkout).
-        ///
-        /// Must start with `/` and use POSIX separators.
+        /// Prefix for inventory paths to match the runtime beacon, for example
+        /// `/app` for Docker or `/var/task` for Lambda. Defaults to repo-relative
+        /// paths. Must start with `/` and use POSIX separators.
         #[arg(long, value_name = "PREFIX")]
         path_prefix: Option<String>,
 
@@ -2646,16 +2643,9 @@ pub enum CoverageCli {
     },
     /// Upload JavaScript source maps to Fallow Cloud for bundled runtime coverage.
     ///
-    /// Scans a build output directory for `.map` files and uploads them under
-    /// the selected repo + git SHA. The production beacon reports bundled
-    /// paths; the cloud resolver uses these maps to remap runtime coverage back
-    /// to original source files.
-    ///
-    /// Each upload also carries the map's path relative to the repo root, so the
-    /// source-evidence viewer can resolve a monorepo sub-package map's relative
-    /// `sources[]` (e.g. `../../src/X`) to the package-prefixed source path
-    /// (e.g. `dashboard/src/X`). Run from the repo root so this prefix is
-    /// correct.
+    /// Uploads build `.map` files under the selected repo and git SHA so the
+    /// cloud can resolve bundled runtime paths to original sources. Run from
+    /// the repo root to preserve each map's repo-relative path and source base.
     UploadSourceMaps {
         /// Directory to scan recursively for source maps.
         #[arg(long, value_name = "PATH", default_value = "dist")]
@@ -2683,6 +2673,12 @@ pub enum CoverageCli {
         /// `git rev-parse HEAD`.
         #[arg(long, value_name = "SHA")]
         git_sha: Option<String>,
+
+        /// Bind the upload to a Vercel deployment. Defaults to
+        /// $VERCEL_DEPLOYMENT_ID only when $VERCEL=1.
+        /// The cloud verifies the deployment against the supplied git SHA.
+        #[arg(long, value_name = "DEPLOYMENT_ID")]
+        vercel_deployment_id: Option<String>,
 
         /// Override the Fallow Cloud base URL.
         #[arg(long, value_name = "URL")]

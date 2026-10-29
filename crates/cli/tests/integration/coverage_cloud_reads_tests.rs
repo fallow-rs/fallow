@@ -600,3 +600,95 @@ fn deployment_changes_without_api_key_names_deployment_changes_in_the_hint() {
     assert!(message.contains("fallow coverage deployment-changes --repo owner/repo"));
     assert!(!message.contains("coverage analyze"), "message: {message}");
 }
+
+#[test]
+fn partial_cloud_capture_preserves_calls_and_withholds_cold_claims() {
+    let ordinary = runtime_context_body("src/covered.ts", None);
+    let (endpoint, _, handle) = serve(vec![MockResponse::json(&ordinary)]);
+    let baseline = run_analyze(&endpoint, None);
+    handle.join().unwrap();
+    assert_eq!(baseline.code, 0);
+    assert_eq!(
+        first_finding_function(&baseline).as_deref(),
+        Some("covered")
+    );
+    let baseline_report = parse_json(&baseline)["runtime_coverage"].clone();
+    assert!(runtime_markdown(baseline_report).contains("- Coverage: 0.0%"));
+
+    for marker in ["capturePolicy", "capture_policy"] {
+        let mut body: serde_json::Value = serde_json::from_str(&ordinary).unwrap();
+        body["data"][marker] = "positive_only".into();
+        body["data"]["summary"]["functions_hit"] = 1.into();
+        body["data"]["summary"]["functions_tracked"] = 2.into();
+        body["data"]["summary"]["coverage_percent"] = 50.into();
+        let mut called = body["data"]["functions"][0].clone();
+        called["function_name"] = "indirectlyCovered".into();
+        called["line_number"] = 5.into();
+        called["start_line"] = 5.into();
+        called["end_line"] = 7.into();
+        called["hit_count"] = 100.into();
+        called["tracking_state"] = "called".into();
+        body["data"]["functions"]
+            .as_array_mut()
+            .unwrap()
+            .push(called);
+        let text = body.to_string();
+        let (endpoint, captured, handle) = serve(vec![MockResponse::json(&text)]);
+        let output = run_analyze(&endpoint, None);
+        handle.join().unwrap();
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let report = &parse_json(&output)["runtime_coverage"];
+        assert_eq!(report["actionable"], false);
+        assert_eq!(report["verdict"], "unknown");
+        assert_eq!(report["summary"]["coverage_percent"].as_f64(), Some(50.0));
+        assert!(
+            report["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning["code"] == "positive_only_capture")
+        );
+        let markdown = runtime_markdown(report.clone());
+        assert!(
+            markdown.contains("positive execution evidence"),
+            "{markdown}"
+        );
+        assert!(!markdown.contains("- Coverage:"), "{markdown}");
+        assert!(!markdown.contains("- Unhit:"), "{markdown}");
+        assert_eq!(report["findings"][0]["verdict"], "coverage_unavailable");
+        assert!(report["findings"][0]["invocations"].is_null());
+        assert_eq!(report["hot_paths"][0]["function"], "indirectlyCovered");
+        assert!(
+            captured.lock().unwrap()[0]
+                .to_ascii_lowercase()
+                .contains("x-fallow-accept-capture-policy: positive_only")
+        );
+        let (endpoint, _, handle) = serve(vec![MockResponse::json(&text)]);
+        let mut args = analyze_args(&endpoint);
+        *args.last_mut().unwrap() = "human".to_owned();
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let human = run(&refs, &fixture_path("coverage-gaps"), None);
+        handle.join().unwrap();
+        assert_eq!(human.code, 0, "{}", human.stderr);
+        assert!(
+            human.stdout.contains("positive execution evidence"),
+            "{}",
+            human.stdout
+        );
+        assert!(!human.stdout.contains("% covered"), "{}", human.stdout);
+        assert!(
+            !human.stdout.contains("cold-code-detected"),
+            "{}",
+            human.stdout
+        );
+    }
+}
+
+fn runtime_markdown(value: serde_json::Value) -> String {
+    let production = serde_json::from_value(value).unwrap();
+    let health = fallow_output::HealthReport {
+        runtime_coverage: Some(production),
+        ..fallow_output::HealthReport::default()
+    };
+    fallow_api::build_health_markdown(&health, &fixture_path("coverage-gaps"))
+}

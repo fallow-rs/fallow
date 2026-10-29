@@ -260,7 +260,8 @@ fn send_once(
                 .get(url)
                 .header("Authorization", &bearer)
                 .header("Accept", "application/json")
-                .header("Accept-Encoding", "gzip");
+                .header("Accept-Encoding", "gzip")
+                .header("X-Fallow-Accept-Capture-Policy", "positive_only");
             if let Some(source) = auth.agent_source.as_deref() {
                 request = request.header(AGENT_SOURCE_HEADER, source);
             }
@@ -271,7 +272,8 @@ fn send_once(
                 .post(url)
                 .header("Authorization", &bearer)
                 .header("Accept", "application/json")
-                .header("Accept-Encoding", "gzip");
+                .header("Accept-Encoding", "gzip")
+                .header("X-Fallow-Accept-Capture-Policy", "positive_only");
             if let Some(source) = auth.agent_source.as_deref() {
                 request = request.header(AGENT_SOURCE_HEADER, source);
             }

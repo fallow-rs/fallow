@@ -1,3 +1,6 @@
+#[path = "markdown_runtime_summary.rs"]
+mod runtime_summary;
+
 use std::borrow::Cow;
 use std::fmt::Write;
 use std::path::Path;
@@ -1923,42 +1926,9 @@ fn write_runtime_coverage_section(
     if !out.is_empty() && !out.ends_with("\n\n") {
         out.push('\n');
     }
-    write_runtime_coverage_summary(out, production);
+    runtime_summary::write_runtime_coverage_summary(out, production);
     write_runtime_coverage_findings(out, production, root);
     write_runtime_coverage_hot_paths(out, production, root);
-}
-
-/// Write the runtime-coverage summary header and capture-quality lines.
-fn write_runtime_coverage_summary(
-    out: &mut String,
-    production: &fallow_output::RuntimeCoverageReport,
-) {
-    let _ = writeln!(
-        out,
-        "## Runtime Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {:.1}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
-        production.verdict,
-        production.summary.functions_tracked,
-        production.summary.functions_hit,
-        production.summary.functions_unhit,
-        production.summary.functions_untracked,
-        production.summary.coverage_percent,
-        production.summary.trace_count,
-        production.summary.period_days,
-        production.summary.deployments_seen,
-    );
-    if let Some(watermark) = production.watermark {
-        let _ = writeln!(out, "- Watermark: {watermark}\n");
-    }
-    if let Some(ref quality) = production.summary.capture_quality
-        && quality.lazy_parse_warning
-    {
-        let window = format_window(quality.window_seconds);
-        let _ = writeln!(
-            out,
-            "- Capture quality: short window ({} from {} instance(s), {:.1}% of functions untracked); lazy-parsed scripts may not appear.\n",
-            window, quality.instances_observed, quality.untracked_ratio_percent,
-        );
-    }
 }
 
 /// Write the runtime-coverage per-finding table.

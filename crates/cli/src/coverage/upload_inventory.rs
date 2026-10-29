@@ -110,6 +110,8 @@ pub struct UploadInventoryArgs {
     pub project_id: Option<String>,
     /// Explicit git SHA. Overrides `git rev-parse HEAD`.
     pub git_sha: Option<String>,
+    /// Bind this upload to a Vercel deployment, verified by the cloud.
+    pub vercel_deployment_id: Option<String>,
     /// Proceed even when the working tree has uncommitted changes.
     /// The inventory is still generated from the working copy, so it may
     /// not match the uploaded git SHA.
@@ -143,6 +145,7 @@ impl fmt::Debug for UploadInventoryArgs {
             .field("api_endpoint", &self.api_endpoint)
             .field("project_id", &self.project_id)
             .field("git_sha", &self.git_sha)
+            .field("vercel_deployment_id", &self.vercel_deployment_id)
             .field("allow_dirty", &self.allow_dirty)
             .field("exclude_paths", &self.exclude_paths)
             .field("path_prefix", &self.path_prefix)
@@ -166,6 +169,9 @@ fn run_inner(
     root: &Path,
     allow_remote_extends: bool,
 ) -> Result<(), UploadError> {
+    let deployment_id =
+        super::vercel_upload::resolve_deployment_id(args.vercel_deployment_id.as_deref())
+            .map_err(UploadError::Validation)?;
     let prepared = prepare_inventory_upload(args, root, allow_remote_extends)?;
     let caller_edge_limits = prepared.caller_edges.limits();
     let payload = InventoryRequest {
@@ -201,6 +207,7 @@ fn run_inner(
         args.api_endpoint.as_deref(),
         &api_key,
         &payload,
+        deployment_id.as_deref(),
     )
 }
 
@@ -385,6 +392,9 @@ fn collect_churn(
     else {
         return BTreeMap::new();
     };
+    if result.shallow_clone {
+        return BTreeMap::new();
+    }
     churn_to_payload(&config.root, &result, path_prefix)
 }
 
@@ -906,6 +916,7 @@ fn upload(
     endpoint_override: Option<&str>,
     api_key: &str,
     payload: &InventoryRequest<'_>,
+    deployment_id: Option<&str>,
 ) -> Result<(), UploadError> {
     let url = upload_common::endpoint_url(endpoint_override, project_id, "inventory");
     println!(
@@ -916,13 +927,15 @@ fn upload(
 
     let agent = try_api_agent_with_timeout(UPLOAD_CONNECT_TIMEOUT_SECS, UPLOAD_TOTAL_TIMEOUT_SECS)
         .map_err(|err| UploadError::Network(err.to_string()))?;
-    let mut response = agent
+    let mut request = agent
         .post(&url)
-        .header("Authorization", &format!("Bearer {api_key}"))
-        .send_json(payload)
-        .map_err(|err| {
-            UploadError::Network(sanitize_network_error(&format!("network error: {err}")))
-        })?;
+        .header("Authorization", &format!("Bearer {api_key}"));
+    if let Some(id) = deployment_id {
+        request = request.header(super::vercel_upload::DEPLOYMENT_ID_HEADER, id);
+    }
+    let mut response = request.send_json(payload).map_err(|err| {
+        UploadError::Network(sanitize_network_error(&format!("network error: {err}")))
+    })?;
 
     let status = response.status().as_u16();
     if matches!(status, 200 | 201) {

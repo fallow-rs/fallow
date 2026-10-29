@@ -28,6 +28,15 @@ fn render_runtime_summary(
     lines: &mut Vec<String>,
     production: &fallow_output::RuntimeCoverageReport,
 ) {
+    if production.has_positive_only_capture() {
+        lines.push("Runtime coverage: partial capture".to_owned());
+        lines.push(format!(
+            "  {} functions with positive execution evidence, {} untracked",
+            thousands(production.summary.functions_hit),
+            thousands(production.summary.functions_untracked)
+        ));
+        return;
+    }
     let verdict = match production.verdict {
         fallow_output::RuntimeCoverageReportVerdict::Clean => "clean",
         fallow_output::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",

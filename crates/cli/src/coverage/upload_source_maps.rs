@@ -45,11 +45,19 @@ pub struct UploadSourceMapsArgs {
     pub exclude: Vec<String>,
     pub repo: Option<String>,
     pub git_sha: Option<String>,
+    /// Bind the upload to the Vercel deployment verified by the cloud.
+    pub vercel_deployment_id: Option<String>,
     pub endpoint: Option<String>,
     pub strip_path: bool,
     pub dry_run: bool,
     pub concurrency: usize,
     pub fail_fast: bool,
+}
+
+#[derive(Clone, Copy)]
+struct UploadAuth<'a> {
+    api_key: &'a str,
+    deployment_id: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -86,6 +94,9 @@ pub fn run(args: &UploadSourceMapsArgs, root: &Path) -> ExitCode {
 }
 
 fn run_inner(args: &UploadSourceMapsArgs, root: &Path) -> Result<(), UploadSourceMapsError> {
+    let deployment_id =
+        super::vercel_upload::resolve_deployment_id(args.vercel_deployment_id.as_deref())
+            .map_err(UploadSourceMapsError::Validation)?;
     let build_dir = resolve_build_dir(root, &args.dir);
     if !build_dir.is_dir() {
         return Err(UploadSourceMapsError::Validation(format!(
@@ -115,7 +126,11 @@ fn run_inner(args: &UploadSourceMapsArgs, root: &Path) -> Result<(), UploadSourc
     }
 
     let api_key = resolve_api_key()?;
-    upload_maps(args, root, &repo, &git_sha, &api_key, &maps)
+    let auth = UploadAuth {
+        api_key: &api_key,
+        deployment_id: deployment_id.as_deref(),
+    };
+    upload_maps(args, root, &repo, &git_sha, auth, &maps)
 }
 
 /// Warns, without failing, when maps point at sources that are not in the
@@ -762,7 +777,7 @@ fn upload_maps(
     repo_root: &Path,
     repo: &str,
     git_sha: &str,
-    api_key: &str,
+    auth: UploadAuth<'_>,
     maps: &[SourceMapCandidate],
 ) -> Result<(), UploadSourceMapsError> {
     let (mut outcomes, ready) = prepare_source_maps_for_upload(args, maps)?;
@@ -775,7 +790,7 @@ fn upload_maps(
 
     let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
         .map_err(|err| UploadSourceMapsError::Network(err.to_string()))?;
-    let mut uploaded = upload_ready_source_maps(args, repo, git_sha, api_key, &agent, &ready)?;
+    let mut uploaded = upload_ready_source_maps(args, repo, git_sha, auth, &agent, &ready)?;
     outcomes.append(&mut uploaded);
     finish_source_map_upload(outcomes)
 }
@@ -834,13 +849,13 @@ fn upload_ready_source_maps(
     args: &UploadSourceMapsArgs,
     repo: &str,
     git_sha: &str,
-    api_key: &str,
+    auth: UploadAuth<'_>,
     agent: &ureq::Agent,
     ready: &[PreparedSourceMap],
 ) -> Result<Vec<MapOutcome>, UploadSourceMapsError> {
     if args.fail_fast {
         return Ok(upload_ready_source_maps_fail_fast(
-            args, repo, git_sha, api_key, agent, ready,
+            args, repo, git_sha, auth, agent, ready,
         ));
     }
 
@@ -852,7 +867,7 @@ fn upload_ready_source_maps(
     Ok(pool.install(|| {
         ready
             .par_iter()
-            .map(|map| upload_one(agent, args.endpoint.as_deref(), repo, git_sha, api_key, map))
+            .map(|map| upload_one(agent, args.endpoint.as_deref(), repo, git_sha, auth, map))
             .collect()
     }))
 }
@@ -861,13 +876,13 @@ fn upload_ready_source_maps_fail_fast(
     args: &UploadSourceMapsArgs,
     repo: &str,
     git_sha: &str,
-    api_key: &str,
+    auth: UploadAuth<'_>,
     agent: &ureq::Agent,
     ready: &[PreparedSourceMap],
 ) -> Vec<MapOutcome> {
     let mut uploaded = Vec::new();
     for map in ready {
-        let outcome = upload_one(agent, args.endpoint.as_deref(), repo, git_sha, api_key, map);
+        let outcome = upload_one(agent, args.endpoint.as_deref(), repo, git_sha, auth, map);
         let failed = matches!(outcome, MapOutcome::Failed { .. });
         uploaded.push(outcome);
         if failed {
@@ -914,11 +929,11 @@ fn upload_one(
     endpoint_override: Option<&str>,
     repo: &str,
     git_sha: &str,
-    api_key: &str,
+    auth: UploadAuth<'_>,
     map: &PreparedSourceMap,
 ) -> MapOutcome {
     for attempt in 1..=MAX_ATTEMPTS {
-        match send_source_map(agent, endpoint_override, repo, git_sha, api_key, map) {
+        match send_source_map(agent, endpoint_override, repo, git_sha, auth, map) {
             Ok(response) => {
                 println!(
                     "  {} {} ({})",
@@ -996,7 +1011,7 @@ fn send_source_map(
     endpoint_override: Option<&str>,
     repo: &str,
     git_sha: &str,
-    api_key: &str,
+    auth: UploadAuth<'_>,
     map: &PreparedSourceMap,
 ) -> Result<SourceMapUploadEnvelope, UploadAttemptError> {
     let url = upload_common::endpoint_url(endpoint_override, repo, "source-maps");
@@ -1006,9 +1021,13 @@ fn send_source_map(
         map_path: map.candidate.map_path.as_deref(),
         source_map: &map.source_map,
     };
-    let mut response = agent
+    let mut request = agent
         .post(&url)
-        .header("Authorization", &format!("Bearer {api_key}"))
+        .header("Authorization", &format!("Bearer {}", auth.api_key));
+    if let Some(id) = auth.deployment_id {
+        request = request.header(super::vercel_upload::DEPLOYMENT_ID_HEADER, id);
+    }
+    let mut response = request
         .send_json(&payload)
         .map_err(|err| UploadAttemptError {
             message: sanitize_network_error(&format!("network error: {err}")),
@@ -1602,6 +1621,7 @@ mod tests {
             exclude: Vec::new(),
             repo: Some("acme/widgets".to_owned()),
             git_sha: Some("abcdef1".to_owned()),
+            vercel_deployment_id: None,
             endpoint: Some("http://localhost:3000".to_owned()),
             strip_path: true,
             dry_run: true,

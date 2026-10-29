@@ -49,6 +49,7 @@ mod config_pattern_parity_tests;
 mod config_string_package_names_tests;
 mod coverage_analyze_tests;
 mod coverage_cloud_reads_tests;
+mod coverage_upload_binding_tests;
 mod deep_nesting_tests;
 mod deprecated_export_tests;
 mod doctor_tests;

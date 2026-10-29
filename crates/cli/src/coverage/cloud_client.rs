@@ -92,6 +92,8 @@ impl CloudRuntimeContextResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeContext {
+    #[serde(default, rename = "capturePolicy", alias = "capture_policy")]
+    pub capture_policy: Option<CloudCapturePolicy>,
     #[serde(default)]
     pub repo: String,
     #[serde(default)]
@@ -117,6 +119,13 @@ pub struct CloudRuntimeContext {
     pub importance: Vec<CloudRuntimeImportanceEntry>,
     #[serde(default)]
     pub warnings: Vec<CloudRuntimeWarning>,
+}
+
+/// A managed runtime capture that supports positive execution evidence only.
+#[derive(Debug, Clone, Deserialize)]
+pub enum CloudCapturePolicy {
+    #[serde(rename = "positive_only")]
+    PositiveOnly,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -322,7 +331,11 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
     match cloud_transport::send(&auth, &url, &CloudBody::None, RUNTIME_CONTEXT_OPERATION)? {
         CloudOutcome::Success(response) => {
             serde_json::from_str::<CloudRuntimeContextResponse>(&response.body)
-                .map(CloudRuntimeContextResponse::into_context)
+                .map(|response| {
+                    let mut context = response.into_context();
+                    super::partial_capture::apply_capture_policy(&mut context);
+                    context
+                })
                 .map_err(|err| {
                     CloudError::Server(format!("malformed runtime-context response: {err}"))
                 })
