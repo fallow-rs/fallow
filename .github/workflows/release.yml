@@ -1333,7 +1333,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/fallow-similar-code-cache
-          key: similar-code-model-516f4baf13dec4ddddda8631e019b5737c8bc250-semantics-v1
+          key: similar-code-model-516f4baf13dec4ddddda8631e019b5737c8bc250-semantics-v2
 
       - name: Set up the exact production model
         run: |

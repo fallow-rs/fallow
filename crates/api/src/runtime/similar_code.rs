@@ -2280,7 +2280,7 @@ mod tests {
             .map(|candidate| candidate.candidate_id.clone())
             .collect::<Vec<_>>();
         let json = serde_json::to_value(&cold).unwrap();
-        assert_eq!(json["generation"]["embedding_semantics_version"], 1);
+        assert_eq!(json["generation"]["embedding_semantics_version"], 2);
         assert_eq!(json["generation"]["provider"]["source_left_machine"], false);
         assert_eq!(json["generation"]["scope"]["active"], true);
         assert_eq!(

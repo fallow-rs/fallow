@@ -1,0 +1,4 @@
+### Performance
+
+- **`fallow similar-code` computes vectors about 2.7x faster on macOS.** The macOS builds of `fallow-similar-code` (darwin-arm64 and darwin-x64) now link the Accelerate framework through the `accelerate` feature of `candle-core`. On an Apple M5, 200 real functions took 14.8 s instead of 40.7 s. Inference stays F32 on the CPU with a batch size of one. Linux and Windows builds do not change. The vectors change only in the last digits: over 19,900 function pairs, the largest change in cosine similarity was 0.000001. Embedding semantics go from v1 to v2, so every vector cache clears one time. After the update, run `fallow similar-code setup --local` one time. Setup reuses the model files that are already verified and downloads nothing.
+  (Closes [#3993](https://github.com/fallow-rs/fallow/issues/3993))

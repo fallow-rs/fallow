@@ -6,7 +6,7 @@
     "execution": "candle-f32-cpu",
     "source_left_machine": false,
     "wire_protocol_version": 2,
-    "embedding_semantics_version": 1
+    "embedding_semantics_version": 2
   },
   "model": {
     "id": "jinaai/jina-embeddings-v2-base-code",

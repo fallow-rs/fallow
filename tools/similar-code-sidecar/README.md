@@ -6,7 +6,7 @@ embed a JavaScript model runtime.
 
 The protocol and model provenance come from
 `crates/api/similar-code-protocol.json`. Wire protocol v2 and embedding
-semantics v1 pin
+semantics v2 pin
 `jinaai/jina-embeddings-v2-base-code` revision
 `516f4baf13dec4ddddda8631e019b5737c8bc250`, 768 dimensions, mean pooling,
 L2 normalization, and Apache-2.0 licensing.
@@ -31,7 +31,7 @@ An `embed-functions` request is one JSON line:
 {
   "operation": "embed-functions",
   "protocol_version": 2,
-  "embedding_semantics_version": 1,
+  "embedding_semantics_version": 2,
   "model_revision": "516f4baf13dec4ddddda8631e019b5737c8bc250",
   "dimensions": 768,
   "max_tokens": 1024,
@@ -44,6 +44,12 @@ error information when a source, function, batch, or time budget limits work.
 Functions longer than the pinned 1024-token model budget are truncated and
 marked in the vector and completion metadata. Pooling is attention-mask-aware.
 Batch size is deliberately fixed at one to bound peak memory.
+
+Inference runs in F32 on the CPU. On macOS, every build links the Accelerate
+framework through the `accelerate` feature of `candle-core`, set as a
+macOS-only dependency in `Cargo.toml`. Linux and Windows builds use the
+default Candle CPU path. A change to this build setup changes the vectors, so
+it needs a bump of `embedding_semantics_version`.
 
 ## Privacy and cache
 
