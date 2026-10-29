@@ -4,7 +4,8 @@
 )]
 
 use crate::common::{
-    fixture_path, run_fallow, run_fallow_combined, run_fallow_raw, run_fallow_raw_with_env,
+    fixture_path, parse_json, run_fallow, run_fallow_combined, run_fallow_raw,
+    run_fallow_raw_with_env,
 };
 
 fn normalize_volatile_fields(value: &mut serde_json::Value) {
@@ -613,25 +614,37 @@ fn structured_json_errors_use_the_selected_presentation_style() {
         pretty.stderr.is_empty(),
         "JSON errors should stay on stdout"
     );
+    for output in [&compact, &pretty] {
+        let error = parse_json(output);
+        assert_eq!(error["code"], "FALLOW_INVALID_ROOT");
+        assert_eq!(
+            error["help"],
+            "Pass --root with an existing, readable project directory."
+        );
+    }
 }
 
 #[test]
 fn clap_json_errors_honor_pretty_before_parsing_finishes() {
-    let output = run_fallow_raw(&[
-        "dead-code",
-        "--format",
-        "json",
-        "--pretty",
-        "--not-a-real-flag",
-    ]);
-
-    assert_eq!(output.code, 2, "invalid CLI syntax should exit 2");
-    assert!(
-        output.stdout.lines().count() > 1,
-        "--pretty should indent clap JSON errors"
-    );
-    serde_json::from_str::<serde_json::Value>(&output.stdout)
-        .expect("clap error should remain structured JSON");
+    for invalid in ["--not-a-real-flag", "--root"] {
+        for pretty in [false, true] {
+            let mut args = vec!["dead-code", "--format", "json"];
+            if pretty {
+                args.push("--pretty");
+            }
+            args.push(invalid);
+            let output = run_fallow_raw(&args);
+            assert_eq!(output.code, 2, "invalid CLI syntax should exit 2");
+            assert_eq!(output.stdout.lines().count() > 1, pretty);
+            assert!(output.stderr.is_empty(), "JSON errors stay on stdout");
+            let error = parse_json(&output);
+            assert_eq!(error["code"], "FALLOW_INVALID_CLI_ARGUMENTS");
+            assert_eq!(
+                error["help"],
+                "Run `fallow --help` or `fallow <command> --help` to check accepted arguments and required values."
+            );
+        }
+    }
 }
 
 #[test]

@@ -117,6 +117,7 @@ fn push_withheld_class_member_entry(
         "applied": false,
         "skipped": true,
         "skip_reason": SkipReason::LowConfidenceIncompleteAnalysis.as_wire_str(),
+        "help": SkipReason::LowConfidenceIncompleteAnalysis.help(),
         "reachability_caveats": tokens,
     }));
 }
