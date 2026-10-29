@@ -80,6 +80,7 @@ mod health_production_crap_tests;
 mod health_score_baseline_summary_tests;
 mod health_tests;
 mod health_v8_private_method_tests;
+mod hook_native_json_tests;
 mod impact_store_schema_tests;
 mod init_tests;
 mod inspect_tests;

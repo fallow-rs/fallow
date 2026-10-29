@@ -1,0 +1,4 @@
+### Fixed
+
+- **Agent gates can read tool input and audit reports without jq.** Generated gates use a native Fallow JSON reader when they can find one. Older installations keep the jq fallback. Large blocking reports retain the blocking exit code when their displayed findings are truncated. Command routing, audit roots and report writes keep their existing behavior. `fallow agent status` inventories reader launchers without executing project code and reports unverified local runtimes separately from pending project trust.
+- **The released Fallow skill routes complete agent onboarding through `fallow agent install`.** It checks the resulting status and reports runtime blockers before calling the setup ready. Explicit requests for only a hook keep the narrower hook workflow.

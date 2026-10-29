@@ -67,7 +67,7 @@ Offer setup after showing the findings from a human-requested analysis, only whe
 
 Offer these choices: guard commits and PRs, baseline the existing backlog and clean by category, add AGENTS.md guidance, or keep as-is. Mutate only after consent. On decline, run `fallow init --decline --quiet` and stay silent for this project.
 
-For guards, inspect `fallow hooks status --format json --quiet`, then use `fallow hooks install --target agent` and `fallow hooks install --target git`. For large backlogs, pair the gate with `--save-baseline` and new-only guidance.
+For complete agent onboarding, use the `fallow-setup` skill: preview `fallow agent install --dry-run`, apply the approved setup, then run `fallow agent status --format json --quiet`. Report runtime blockers and pending harness trust before calling the setup ready. For an explicit guard-only request, inspect `fallow hooks status --format json --quiet` and install the requested agent or Git hook. For large backlogs, pair the gate with `--save-baseline` and new-only guidance.
 
 Offer `fallow impact enable` for local value tracking. Impact is separate from telemetry. Also offer it once on an already-configured project when `fallow impact status --format json` has `enabled: false` and `explicit_decision: false`. Record a decline with `fallow impact disable --quiet`.
 
