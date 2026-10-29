@@ -1362,6 +1362,35 @@ test("CI runs the mutation runner tests at the declared runtime floors", () => {
   assert.match(indentedBlock(workflow, "ci-ok", 2), /mutation-runner-floor/u);
 });
 
+test("CI runs clippy on the similar-code sidecar workspace", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const job = indentedBlock(workflow, "similar-code-sidecar", 2);
+  const paths = listedPaths(indentedBlock(workflow, "similar-code-sidecar", 12));
+
+  // The sidecar is a separate Cargo workspace, so the workspace clippy run
+  // in check-lint does not lint it.
+  assert.match(
+    job,
+    /run: cargo clippy --locked --manifest-path tools\/similar-code-sidecar\/Cargo\.toml --target-dir target --all-targets -- -D warnings/u,
+  );
+  assert.match(job, /uses: \.\/\.github\/actions\/setup-rust\n\s+with:\n\s+components: clippy/u);
+  assert.match(job, /needs\.changes\.outputs\.similar-code-sidecar == 'true'/u);
+  assert.match(job, /persist-credentials: false/u);
+  // build.rs reads the protocol file, so a change there must lint too.
+  for (const path of [
+    "tools/similar-code-sidecar/**",
+    "crates/api/similar-code-protocol.json",
+    "rust-toolchain.toml",
+  ]) {
+    assert.ok(paths.includes(path), `the similar-code-sidecar filter must list ${path}`);
+  }
+  assert.match(
+    indentedBlock(workflow, "outputs", 4),
+    /similar-code-sidecar: \$\{\{ steps\.filter\.outputs\.similar-code-sidecar \}\}/u,
+  );
+  assert.match(indentedBlock(workflow, "ci-ok", 2), /needs: \[[^\n]*\bsimilar-code-sidecar\b/u);
+});
+
 test("the check job runs the end-to-end mutation tests instead of a skip", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const checkJob = indentedBlock(workflow, "check", 2);
