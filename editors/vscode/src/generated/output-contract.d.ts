@@ -1768,11 +1768,15 @@ export type SimilarCodeCacheClearSchemaVersion = "1"
 /**
  * Version singleton for a mutation report.
  */
-export type MutationSchemaVersion = "1"
+export type MutationSchemaVersion = "2"
 /**
  * Why a run is partial.
  */
 export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "test-files-not-discovered" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
+/**
+ * The quality of observed test-to-mutant evidence.
+ */
+export type MutationKillMatrixStatus = ("complete" | "incomplete" | "unavailable")
 /**
  * Which code a run mutates.
  */
@@ -1800,7 +1804,7 @@ export type MutationPlanDisposition = ("planned" | "pending" | "no_coverage" | "
 /**
  * Version singleton for a mutation inspect packet.
  */
-export type MutationInspectSchemaVersion = "1"
+export type MutationInspectSchemaVersion = "2"
 /**
  * Whether the saved report still describes the current file.
  */
@@ -20046,6 +20050,7 @@ schema_version: MutationSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 completion: MutationCompletion
+kill_matrix: MutationKillMatrix
 scope: MutationScopeOutput
 /**
  * The runner. Absent when no companion started, for example when no
@@ -20122,6 +20127,58 @@ status: MutationCompletionStatus
  * Why the run is partial, sorted. Empty for a complete run.
  */
 reasons: MutationIncompleteReason[]
+}
+/**
+ * Redundancy signals over the observed mutants. Candidates need review.
+ * Removing candidates together can remove all tests for a mutant.
+ */
+export interface MutationKillMatrix {
+status: MutationKillMatrixStatus
+/**
+ * Why evidence is unavailable or incomplete, sorted.
+ */
+reasons: string[]
+/**
+ * Each eligible test with observed coverage, sorted by test id.
+ */
+tests: MutationTestKillRow[]
+/**
+ * Tests with nonempty kills and no unique kills, sorted by test id.
+ */
+candidates: string[]
+/**
+ * Tests with coverage and no observed kills, sorted by test id.
+ */
+coverage_without_kills: string[]
+}
+/**
+ * The observed mutant kills of one eligible test.
+ */
+export interface MutationTestKillRow {
+/**
+ * The runner test id.
+ */
+test_id: string
+/**
+ * The root-relative test file.
+ */
+file: string
+/**
+ * The observed killed mutant ids, sorted.
+ */
+kills: string[]
+/**
+ * The mutant ids that no other eligible test kills, sorted.
+ */
+unique_kills: string[]
+/**
+ * The tests whose kill sets contain this full kill set, sorted.
+ */
+subsuming_tests: string[]
+/**
+ * Conservative evidence notes, sorted.
+ */
+notes: string[]
 }
 /**
  * The scope of a plan or a run.
@@ -20305,15 +20362,25 @@ prune_reason?: (string | null)
  * The test that killed the mutant in this run. Absent for a kill by an
  * error outside a test.
  *
- * This is evidence of one run, not a stable fact. A run stops at the
- * first failing test, and it runs the fastest covering test first, so a
- * second run on the same code can name another covering test. No
+ * This is evidence of one run, not a stable fact. A normal run stops at
+ * the first failing test. A kill matrix run retains each failing test
+ * in `killing_tests`. Tests run in measured fastest-first order, so a
+ * second run on the same code can name another first killer. No
  * fingerprint or baseline comparison uses this field.
  *
  * The retry of a survivor also runs the other tests of its test files,
  * so this test can be absent from `covering_tests`.
  */
 killed_by?: (string | null)
+/**
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
+ */
+killing_tests: string[]
+/**
+ * True only for exact requested membership with terminal pass or fail results.
+ */
+kill_matrix_complete: boolean
 /**
  * The tests that reached the mutant in the dry run, sorted by test id.
  */
@@ -20422,6 +20489,15 @@ duration_ms?: (number | null)
  * The test that killed the mutant in this run.
  */
 killed_by?: (string | null)
+/**
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
+ */
+killing_tests: string[]
+/**
+ * True only for exact requested membership with terminal pass or fail results.
+ */
+kill_matrix_complete: boolean
 /**
  * How the run detected the mutant. Absent for a run that did not detect
  * it, and absent when the runner did not state the kind.
@@ -20888,6 +20964,15 @@ static_test_files: string[]
  * The test that killed the mutant in the run of the report.
  */
 killed_by?: (string | null)
+/**
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
+ */
+killing_tests: string[]
+/**
+ * True only for exact requested membership with terminal pass or fail results.
+ */
+kill_matrix_complete: boolean
 }
 /**
  * The code of one mutant, from the current file.

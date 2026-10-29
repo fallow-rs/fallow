@@ -117,6 +117,10 @@ pub struct MutationArgs {
     /// other inputs exits 2.
     #[arg(long)]
     pub resume: bool,
+    /// Collect all killing tests and report redundant-test candidates for
+    /// individual review. Run every covering test without stopping at a failure.
+    #[arg(long)]
+    pub kill_matrix: bool,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -315,6 +319,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             .collect(),
         typecheck: input.args.typecheck || input.config.typecheck == Some(true),
         resume: input.args.resume,
+        kill_matrix: input.args.kill_matrix,
     })
 }
 
@@ -509,6 +514,11 @@ fn refuse_run_flags_in_plan(args: &MutationArgs) -> Result<(), ProgrammaticError
         Some((
             "--typecheck checks the survivors of a run; a plan has no survivors",
             "mutation.typecheck",
+        ))
+    } else if args.kill_matrix {
+        Some((
+            "--kill-matrix requires a run; a plan collects no test outcomes",
+            "mutation.killMatrix",
         ))
     } else if args.resume {
         Some((

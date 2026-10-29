@@ -96,6 +96,61 @@ fn durations_take_a_unit_and_reject_zero_and_garbage() {
 }
 
 #[test]
+fn mutation_kill_matrix_flag_reaches_the_run_options() {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: MutationArgs,
+    }
+
+    let command = Command::try_parse_from(["mutation", "--kill-matrix"])
+        .expect("--kill-matrix must select complete killing-test evidence");
+    let options = run_options(&input(
+        Path::new("/project"),
+        command.args,
+        MutationConfig::default(),
+    ))
+    .unwrap();
+    assert!(
+        options.kill_matrix,
+        "the API must receive the requested matrix mode"
+    );
+    let normal = run_options(&input(
+        Path::new("/project"),
+        MutationArgs::default(),
+        MutationConfig::default(),
+    ))
+    .unwrap();
+    assert!(
+        !normal.kill_matrix,
+        "normal runs keep first-killer behavior"
+    );
+}
+
+#[test]
+fn mutation_plan_rejects_a_kill_matrix_before_analysis() {
+    let args = MutationArgs {
+        plan: true,
+        kill_matrix: true,
+        ..MutationArgs::default()
+    };
+    let error = run_inner(&input(
+        Path::new("/project"),
+        args,
+        MutationConfig::default(),
+    ))
+    .expect_err("a plan cannot collect test outcomes");
+    assert_eq!(error.exit_code, 2);
+    assert!(
+        error.message.contains("--kill-matrix requires a run"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn flags_win_over_config_and_config_fills_the_gaps() {
     let root = Path::new("/project");
     let config = MutationConfig {
@@ -246,6 +301,8 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         } else {
             Vec::new()
         },
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
         static_mutant: false,
         duration_ms: Some(3),
         test_reach: None,
@@ -263,7 +320,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         counts.add(mutant.status);
     }
     MutationReport {
-        schema_version: MutationSchemaVersion::V1,
+        schema_version: MutationSchemaVersion::V2,
         version: ToolVersion("0.0.0".to_owned()),
         elapsed_ms: ElapsedMs(0),
         completion: MutationCompletion::from_reasons(reasons),
@@ -275,6 +332,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         cache: None,
         resume: None,
         summary: MutationSummary::from_results(&mutants),
+        kill_matrix: fallow_output::MutationKillMatrix::default(),
         functions: Vec::<MutationFunctionResult>::new(),
         mutants,
         no_test_files: false,
@@ -958,7 +1016,7 @@ fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
 #[test]
 fn inspect_marks_each_line_of_a_multi_line_mutant() {
     let packet = fallow_output::MutationInspectOutput {
-        schema_version: fallow_output::MutationInspectSchemaVersion::V1,
+        schema_version: fallow_output::MutationInspectSchemaVersion::V2,
         version: ToolVersion("0.0.0".to_owned()),
         status: fallow_output::MutationInspectStatus::Fresh,
         stale_reason: None,
@@ -975,6 +1033,8 @@ fn inspect_marks_each_line_of_a_multi_line_mutant() {
         covering_tests: Vec::new(),
         static_test_files: Vec::new(),
         killed_by: None,
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
     };
     let text = plain(&render_inspect(&packet));
     let diff: Vec<&str> = text.lines().skip(2).take(5).collect();
@@ -1131,7 +1191,7 @@ fn inspect_packet(
     stale_reason: Option<fallow_output::MutationStaleReason>,
 ) -> fallow_output::MutationInspectOutput {
     fallow_output::MutationInspectOutput {
-        schema_version: fallow_output::MutationInspectSchemaVersion::V1,
+        schema_version: fallow_output::MutationInspectSchemaVersion::V2,
         version: ToolVersion("0.0.0".to_owned()),
         status,
         stale_reason,
@@ -1143,6 +1203,8 @@ fn inspect_packet(
         covering_tests: Vec::new(),
         static_test_files: Vec::new(),
         killed_by: None,
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
     }
 }
 
@@ -1618,5 +1680,253 @@ fn the_runner_config_flag_resolves_inside_the_root() {
         error.message.starts_with("--runner-config: "),
         "{}",
         error.message
+    );
+}
+
+fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
+    use fallow_output::{MutationKillMatrix, MutationKillMatrixStatus, MutationTestKillRow};
+
+    MutationKillMatrix {
+        status: MutationKillMatrixStatus::Complete,
+        reasons: Vec::new(),
+        candidates: vec!["test/a.test.ts::adds".to_owned()],
+        coverage_without_kills: vec!["test/c.test.ts::loads".to_owned()],
+        tests: vec![
+            MutationTestKillRow {
+                test_id: "test/a.test.ts::adds".to_owned(),
+                file: "test/a.test.ts".to_owned(),
+                kills: vec!["m1".to_owned()],
+                unique_kills: Vec::new(),
+                subsuming_tests: vec!["test/b.test.ts::adds".to_owned()],
+                notes: vec!["static-test-file-only-export-reach".to_owned()],
+            },
+            MutationTestKillRow {
+                test_id: "test/b.test.ts::adds".to_owned(),
+                file: "test/b.test.ts".to_owned(),
+                kills: vec!["m1".to_owned(), "m2".to_owned()],
+                unique_kills: vec!["m2".to_owned()],
+                subsuming_tests: Vec::new(),
+                notes: Vec::new(),
+            },
+            MutationTestKillRow {
+                test_id: "test/c.test.ts::loads".to_owned(),
+                file: "test/c.test.ts".to_owned(),
+                kills: Vec::new(),
+                unique_kills: Vec::new(),
+                subsuming_tests: Vec::new(),
+                notes: vec!["observed-instrumented-file-only-test".to_owned()],
+            },
+        ],
+    }
+}
+
+#[test]
+fn mutation_kill_matrix_human_report_distinguishes_candidates_and_evidence_limits() {
+    use fallow_output::{MutationKillMatrix, MutationKillMatrixStatus};
+
+    let mut measured = report(
+        vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
+        Vec::new(),
+    );
+    measured.kill_matrix = kill_matrix_fixture();
+    let text = run_text(&measured, &OPTIONS);
+    for expected in [
+        "Test kill evidence: complete",
+        "Redundant-test candidates for review (1)",
+        "Review each candidate individually.",
+        "Removing candidates together can remove all tests for a mutant.",
+        "test/a.test.ts::adds\n    File: test/a.test.ts\n    Kills: m1\n    Unique kills: none\n    Individual subsumers: test/b.test.ts::adds",
+        "test/b.test.ts::adds\n    File: test/b.test.ts\n    Kills: m1, m2\n    Unique kills: m2\n    Individual subsumers: none",
+        "Observed coverage without observed kills (1)",
+        "test/c.test.ts::loads\n    File: test/c.test.ts\n    Kills: none",
+        "Only this test was observed covering at least one instrumented file.",
+        "Only this test file reaches a public export in the static import graph.",
+        "Per-test export coverage is unknown.",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?}: {text}");
+    }
+
+    measured.kill_matrix.status = MutationKillMatrixStatus::Incomplete;
+    measured.kill_matrix.reasons = vec![
+        "partial-mutation-run".to_owned(),
+        "baseline-failure".to_owned(),
+    ];
+    measured.kill_matrix.candidates.clear();
+    let partial = run_text(&measured, &OPTIONS);
+    for expected in [
+        "Test kill evidence: incomplete",
+        "Candidates are unavailable because the kill matrix is incomplete.",
+        "partial-mutation-run:",
+        "baseline-failure:",
+        "Kills: m1, m2",
+    ] {
+        assert!(
+            partial.contains(expected),
+            "missing {expected:?}: {partial}"
+        );
+    }
+    assert!(
+        !partial.contains("Redundant-test candidates for review"),
+        "{partial}"
+    );
+
+    measured.kill_matrix = MutationKillMatrix::default();
+    let normal = run_text(&measured, &OPTIONS);
+    assert!(
+        normal.contains("Test kill evidence: unavailable"),
+        "{normal}"
+    );
+    assert!(normal.contains("kill-matrix-disabled:"), "{normal}");
+    assert!(normal.contains("Use --kill-matrix."), "{normal}");
+}
+
+#[test]
+fn mutation_kill_matrix_human_report_explains_missing_test_file_metadata() {
+    use fallow_output::MutationKillMatrixStatus;
+
+    let mut measured = report(Vec::new(), Vec::new());
+    measured.kill_matrix = kill_matrix_fixture();
+    measured.kill_matrix.status = MutationKillMatrixStatus::Incomplete;
+    measured.kill_matrix.reasons = vec!["missing-test-file-metadata".to_owned()];
+    measured.kill_matrix.candidates.clear();
+    let text = run_text(&measured, &OPTIONS);
+    assert!(
+        text.contains(
+            "missing-test-file-metadata: the runner did not report the test file of some tests."
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn mutation_human_matrix_bounds_rows_and_ids_without_truncating_json() {
+    let mut measured = report(Vec::new(), Vec::new());
+    measured.kill_matrix = kill_matrix_fixture();
+    let templates = measured.kill_matrix.tests.clone();
+    measured.kill_matrix.tests.clear();
+    measured.kill_matrix.candidates.clear();
+    measured.kill_matrix.coverage_without_kills.clear();
+    let long_name = "long-test-name-".repeat(12);
+    for (group, template) in templates.into_iter().enumerate() {
+        for index in 0..11 {
+            let mut row = template.clone();
+            row.test_id = format!("test/group-{group}/{index:02}::{long_name}");
+            if !row.kills.is_empty() {
+                row.kills = (0..5).map(|id| format!("mutant-{id:02}")).collect();
+                row.unique_kills = (0..4).map(|id| format!("unique-{id:02}")).collect();
+                row.subsuming_tests = (0..5)
+                    .map(|id| format!("test/index.spec.ts::case-{id:02}::{long_name}"))
+                    .collect();
+            }
+            match group {
+                0 => measured.kill_matrix.candidates.push(row.test_id.clone()),
+                2 => measured
+                    .kill_matrix
+                    .coverage_without_kills
+                    .push(row.test_id.clone()),
+                _ => {}
+            }
+            measured.kill_matrix.tests.push(row);
+        }
+    }
+    let text = run_text(&measured, &OPTIONS);
+    assert!(
+        text.contains("Kills: mutant-00, mutant-01, mutant-02"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Unique kills: unique-00, unique-01, unique-02"),
+        "{text}"
+    );
+    assert!(
+        text.contains("      test/index.spec.ts::case-00::")
+            && text.contains("      test/index.spec.ts::case-01::"),
+        "{text}"
+    );
+    assert!(
+        text.contains("and 1 more test (see the saved JSON report)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("and 2 more mutants (see the saved JSON report)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("and 1 more mutant (see the saved JSON report)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("and 2 more tests (see the saved JSON report)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("See the saved JSON report for complete evidence."),
+        "{text}"
+    );
+    for group in 0..3 {
+        let prefix = format!("  test/group-{group}/00::");
+        let first = text
+            .lines()
+            .find(|line| line.starts_with(&prefix))
+            .expect("visible first row");
+        assert!(first.ends_with("..."), "{first}");
+        assert!(first.chars().count() <= 62, "{first}");
+        assert!(
+            !text.contains(&format!("test/group-{group}/10::")),
+            "{text}"
+        );
+    }
+    for line in text
+        .lines()
+        .filter(|line| line.contains("Individual subsumers:"))
+    {
+        assert!(line.chars().count() <= 100, "{line}");
+    }
+    assert!(!text.contains("mutant-04"), "{text}");
+    assert!(!text.contains("unique-03"), "{text}");
+    assert!(!text.contains("case-04"), "{text}");
+
+    let json = serialize_mutation_json_output(measured).unwrap();
+    let rows = json["kill_matrix"]["tests"].as_array().unwrap();
+    assert_eq!(rows.len(), 33);
+    assert_eq!(rows[10]["test_id"], format!("test/group-0/10::{long_name}"));
+    assert_eq!(rows[0]["kills"][4], "mutant-04");
+    assert_eq!(rows[0]["unique_kills"][3], "unique-03");
+    assert_eq!(
+        rows[0]["subsuming_tests"][4],
+        format!("test/index.spec.ts::case-04::{long_name}")
+    );
+}
+
+#[test]
+fn mutation_human_inspect_bounds_killers_without_truncating_json() {
+    let mut packet = inspect_packet(fallow_output::MutationInspectStatus::Fresh, None);
+    let long_name = "long-killing-test-name-".repeat(10);
+    packet.kill_matrix_complete = true;
+    packet.killing_tests = (0..11)
+        .map(|id| format!("test/killers/{id:02}::{long_name}"))
+        .collect();
+    let text = plain(&render_inspect(&packet));
+    assert!(text.contains("Killing tests (complete matrix)"), "{text}");
+    assert!(
+        text.contains("and 1 more test (see the saved JSON report)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("See the saved JSON report for complete evidence."),
+        "{text}"
+    );
+    let first = text
+        .lines()
+        .find(|line| line.starts_with("  test/killers/00::"))
+        .expect("first killer stays visible");
+    assert!(first.ends_with("..."), "{first}");
+    assert!(first.chars().count() <= 62, "{first}");
+    assert!(!text.contains("test/killers/10::"), "{text}");
+    let json = serialize_mutation_inspect_json_output(packet).unwrap();
+    assert_eq!(json["killing_tests"].as_array().unwrap().len(), 11);
+    assert_eq!(
+        json["killing_tests"][10],
+        format!("test/killers/10::{long_name}")
     );
 }

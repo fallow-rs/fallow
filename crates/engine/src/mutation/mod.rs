@@ -267,6 +267,10 @@ pub struct MutantTestReach {
     /// For `mocked-only`: the test files whose references a mock removed,
     /// sorted.
     pub tests: Vec<String>,
+    /// Static test-file reach for this exported declaration. Internal plan
+    /// evidence only. This is not per-test runtime export coverage.
+    #[serde(skip)]
+    pub export_test_files: Vec<String>,
     /// For `mocked-only`: the mocked modules on the reference paths, sorted.
     pub mocked_targets: Vec<String>,
 }

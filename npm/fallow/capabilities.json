@@ -1320,6 +1320,16 @@
           ]
         },
         {
+          "name": "--kill-matrix",
+          "type": "bool",
+          "required": false,
+          "description": "Collect all killing tests and report redundant-test candidates for individual review. Run every covering test without stopping at a failure",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "paths",
           "type": "string",
           "required": false,

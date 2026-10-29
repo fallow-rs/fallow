@@ -57,6 +57,10 @@ struct SavedMutant {
     covering_tests: Vec<String>,
     #[serde(default)]
     killed_by: Option<String>,
+    #[serde(default)]
+    killing_tests: Vec<String>,
+    #[serde(default)]
+    kill_matrix_complete: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -278,8 +282,10 @@ pub fn inspect(
     };
     let mut covering_tests = mutant.covering_tests.clone();
     covering_tests.sort();
+    let mut killing_tests = mutant.killing_tests.clone();
+    killing_tests.sort();
     Ok(MutationInspectOutput {
-        schema_version: MutationInspectSchemaVersion::V1,
+        schema_version: MutationInspectSchemaVersion::V2,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
         status,
         stale_reason,
@@ -293,6 +299,8 @@ pub fn inspect(
             .map(|file| file.static_test_files.clone())
             .unwrap_or_default(),
         killed_by: mutant.killed_by.clone(),
+        killing_tests,
+        kill_matrix_complete: mutant.kill_matrix_complete,
     })
 }
 
@@ -322,6 +330,7 @@ mod tests {
     fn report_json(id: &str, span: (u32, u32), sha: &str) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
             "kind": "mutation",
+            "schema_version": "1",
             "mutants": [{
                 "mutant_id": id, "file": "src/math.ts", "line": 2, "column": 10,
                 "span": [span.0, span.1], "operator": "arithmetic-operator",
@@ -372,6 +381,59 @@ mod tests {
         assert_eq!(
             packet.static_test_files,
             vec!["test/math.test.ts".to_owned()]
+        );
+    }
+
+    #[test]
+    fn saved_inspect_preserves_all_killers_and_defaults_legacy_evidence() {
+        let mutant = arithmetic_mutant(SOURCE);
+        let dir = project(SOURCE);
+        let bytes = report_json(
+            mutant.id.as_str(),
+            mutant.span,
+            &sha256_hex(SOURCE.as_bytes()),
+        );
+        let legacy = parse_saved_report(&bytes).unwrap();
+        let old = inspect(&legacy, mutant.id.as_str(), dir.path()).unwrap();
+        assert_eq!(old.status, MutationInspectStatus::Fresh);
+        assert_eq!(old.killing_tests, Vec::<String>::new());
+        assert!(!old.kill_matrix_complete);
+
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        value["schema_version"] = serde_json::json!("2");
+        value["mutants"][0]["status"] = serde_json::json!("killed");
+        value["mutants"][0]["killed_by"] = serde_json::json!("test/math.test.ts::b");
+        value["mutants"][0]["killing_tests"] =
+            serde_json::json!(["test/math.test.ts::b", "test/math.test.ts::a"]);
+        value["mutants"][0]["kill_matrix_complete"] = serde_json::json!(true);
+        let report = parse_saved_report(&serde_json::to_vec(&value).unwrap()).unwrap();
+        let mut packet = inspect(&report, mutant.id.as_str(), dir.path()).unwrap();
+        assert_eq!(
+            packet.killing_tests,
+            ["test/math.test.ts::a", "test/math.test.ts::b"]
+        );
+        assert!(packet.kill_matrix_complete);
+        assert_eq!(packet.killed_by.as_deref(), Some("test/math.test.ts::b"));
+        let text = crate::mutation_human::render_inspect(&packet);
+        assert!(text.contains("Killing tests (complete matrix)"), "{text}");
+        assert!(
+            text.contains("  test/math.test.ts::a\n  test/math.test.ts::b"),
+            "{text}"
+        );
+        packet.kill_matrix_complete = false;
+        let partial = crate::mutation_human::render_inspect(&packet);
+        assert!(
+            partial.contains("Observed killing tests (incomplete matrix)"),
+            "{partial}"
+        );
+        packet.kill_matrix_complete = true;
+        packet.killing_tests.clear();
+        packet.killed_by = None;
+        packet.report_status = Some(MutantStatus::Survived);
+        let survived = crate::mutation_human::render_inspect(&packet);
+        assert!(
+            survived.contains("No test killed this mutant."),
+            "{survived}"
         );
     }
 

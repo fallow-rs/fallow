@@ -619,6 +619,7 @@ fn attach_test_reach(
                 reach: ExportTestReach::NoneFile,
                 export_name: None,
                 tests: Vec::new(),
+                export_test_files: Vec::new(),
                 mocked_targets: Vec::new(),
             });
         }
@@ -654,6 +655,7 @@ fn attach_test_reach(
                     reach: export.reach,
                     export_name: Some(export.export_name.clone()),
                     tests: mocked_only_files(export.reach, &export.tests),
+                    export_test_files: export.tests.clone(),
                     mocked_targets: mocked_only_files(export.reach, &export.mocked_targets),
                 },
             );
@@ -671,6 +673,7 @@ fn file_test_reach(
         reach: ExportTestReach::NoneFile,
         export_name: None,
         tests: Vec::new(),
+        export_test_files: Vec::new(),
         mocked_targets: Vec::new(),
     };
     if graph.test_entry_points.is_empty() {

@@ -2186,6 +2186,40 @@ Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid
 
 ---
 
+## `mutation --kill-matrix`: Redundant test evidence
+
+```bash
+fallow mutation --all --kill-matrix --format json --quiet
+```
+
+This opt-in mode runs all covering tests with bail disabled. It can increase execution time.
+Read the matrix evidence status before you review candidates. Normal mode reports `kill-matrix-disabled` and no candidates.
+Incomplete evidence also produces no candidates.
+
+`kills` and `unique_kills` are arrays of mutant IDs.
+Individual subsumers cover a candidate's full kill set. Other tests can also cover that set collectively.
+Review each candidate separately, including equal kill sets. Removing equal candidates together can remove their shared protection.
+A candidate does not prove safe removal. Baseline-failing tests cannot become candidates or subsumers.
+
+Tests with runtime coverage and no observed kills appear separately. Zero kills do not prove that a test has no assertions.
+Sole-file notes use observed instrumented-file coverage. Public-export notes use static test-file reach, without per-test export coverage claims.
+
+The `mutation` and `mutation-inspect` JSON envelopes use schema version `"2"`. The `mutation-plan` envelope and verdict document keep schema version `"1"`.
+
+The `kill_matrix` object has these fields:
+
+| Field | Meaning |
+|---|---|
+| `status` | `complete`, `incomplete`, or `unavailable`, separate from mutation completion. |
+| `reasons` | Evidence limitations, such as `kill-matrix-disabled`, `incomplete-mutant-results`, `baseline-failure`, `partial-mutation-run`, or `missing-test-file-metadata`. |
+| `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. |
+| `candidates` | Test IDs whose observed kill sets other tests cover. |
+| `coverage_without_kills` | Test IDs with runtime coverage and no observed kills. |
+
+Each mutant and attempt records `killing_tests` and `kill_matrix_complete`. The existing `killed_by` field keeps the first observed killer. Outside matrix mode, `killing_tests` is empty.
+
+Matrix mode does not add the other tests of the covering test files to the retry of a survivor. A survivor that normal mode kills in that retry can stay `survived` in matrix mode, so the two modes can give different scores.
+
 ## `ci`: Provider-Aware Review Automation
 
 `fallow ci reconcile-review` reads a typed review envelope (`--format review-github` / `review-gitlab`), looks up existing fingerprints on the PR/MR, and resolves stale review threads when their finding is no longer present in the new envelope. Posts an idempotent "Resolved in `<sha>`" follow-up comment per stale finding (skipped if a marker for the same fingerprint at the current SHA already exists).

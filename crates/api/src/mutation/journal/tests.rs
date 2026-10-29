@@ -12,6 +12,7 @@ fn header() -> JournalHeader {
         scope: "all".to_owned(),
         operators: None,
         allow_side_effects: false,
+        kill_matrix: false,
     }
 }
 
@@ -31,6 +32,8 @@ fn open(dir: &Path, header: &JournalHeader, resume: bool) -> Result<Opened, Jour
 fn killed(test: &str) -> CachedResult {
     CachedResult {
         status: MutantStatus::Killed,
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
         killed_by: Some(test.to_owned()),
         duration_ms: Some(5),
     }
@@ -71,6 +74,8 @@ fn a_resume_reads_the_final_results_and_ignores_a_cut_last_line() {
         "k2",
         &CachedResult {
             status: MutantStatus::Survived,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             duration_ms: Some(9),
         },
@@ -80,6 +85,8 @@ fn a_resume_reads_the_final_results_and_ignores_a_cut_last_line() {
         "k3",
         &CachedResult {
             status: MutantStatus::Timeout,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             duration_ms: None,
         },
@@ -198,6 +205,8 @@ fn a_last_line_cut_inside_a_multibyte_character_keeps_the_earlier_results() {
         id: "m2".to_owned(),
         key: "k2".to_owned(),
         status: MutantStatus::Killed,
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
         killed_by: Some("test/\u{eb}.test.ts::adds".to_owned()),
         duration_ms: None,
     })
@@ -275,4 +284,24 @@ fn a_stale_temporary_file_is_removed_and_a_failed_start_leaves_none() {
         })
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn matrix_resume_preserves_all_killers_and_refuses_another_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut matrix_header = header();
+    matrix_header.kill_matrix = true;
+    let first = open(dir.path(), &matrix_header, false).unwrap();
+    let mut result = killed("t1");
+    result.killing_tests = vec!["t1".to_owned(), "t2".to_owned()];
+    result.kill_matrix_complete = true;
+    first.journal.append("m1", "matrix:k1", &result);
+    let resumed = open(dir.path(), &matrix_header, true).unwrap();
+    assert_eq!(resumed.journal.resumed("m1", "matrix:k1"), Some(result));
+    assert!(resumed.journal.resumed("m1", "k1").is_none());
+    let mismatch = open(dir.path(), &header(), true).err().expect("mismatch");
+    assert_eq!(
+        mismatch.differences,
+        ["kill matrix (journal: true, this run: false)"]
+    );
 }

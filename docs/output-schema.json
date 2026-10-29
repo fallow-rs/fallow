@@ -32738,6 +32738,10 @@
           "description": "Whether the result is conclusive.",
           "$ref": "#/definitions/MutationCompletion"
         },
+        "kill_matrix": {
+          "description": "The observed kill matrix and candidate review signals.",
+          "$ref": "#/definitions/MutationKillMatrix"
+        },
         "scope": {
           "description": "The mutated code.",
           "$ref": "#/definitions/MutationScopeOutput"
@@ -32875,6 +32879,7 @@
         "version",
         "elapsed_ms",
         "completion",
+        "kill_matrix",
         "scope",
         "summary",
         "mutants",
@@ -33122,6 +33127,17 @@
             "null"
           ],
           "description": "The test that killed the mutant in the run of the report."
+        },
+        "killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
+        },
+        "kill_matrix_complete": {
+          "type": "boolean",
+          "description": "True only for exact requested membership with terminal pass or fail results."
         }
       },
       "required": [
@@ -33135,7 +33151,9 @@
         "span",
         "operator",
         "covering_tests",
-        "static_test_files"
+        "static_test_files",
+        "killing_tests",
+        "kill_matrix_complete"
       ],
       "description": "The envelope of `fallow mutation inspect`. It runs no user code."
     },
@@ -33165,8 +33183,8 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "1",
-          "description": "Initial independent contract."
+          "const": "2",
+          "description": "Adds complete kill matrix evidence."
         }
       ],
       "description": "Version singleton for a mutation report."
@@ -33185,8 +33203,8 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "1",
-          "description": "Initial independent contract."
+          "const": "2",
+          "description": "Adds complete kill matrix evidence."
         }
       ],
       "description": "Version singleton for a mutation inspect packet."
@@ -33592,7 +33610,18 @@
             "string",
             "null"
           ],
-          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field.\n\nThe retry of a survivor also runs the other tests of its test files,\nso this test can be absent from `covering_tests`."
+          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A normal run stops at\nthe first failing test. A kill matrix run retains each failing test\nin `killing_tests`. Tests run in measured fastest-first order, so a\nsecond run on the same code can name another first killer. No\nfingerprint or baseline comparison uses this field.\n\nThe retry of a survivor also runs the other tests of its test files,\nso this test can be absent from `covering_tests`."
+        },
+        "killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
+        },
+        "kill_matrix_complete": {
+          "type": "boolean",
+          "description": "True only for exact requested membership with terminal pass or fail results."
         },
         "covering_tests": {
           "type": "array",
@@ -33657,7 +33686,9 @@
         "column",
         "span",
         "operator",
-        "status"
+        "status",
+        "killing_tests",
+        "kill_matrix_complete"
       ],
       "description": "One mutant of a run."
     },
@@ -34564,6 +34595,17 @@
           ],
           "description": "The test that killed the mutant in this run."
         },
+        "killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
+        },
+        "kill_matrix_complete": {
+          "type": "boolean",
+          "description": "True only for exact requested membership with terminal pass or fail results."
+        },
         "failure_kind": {
           "anyOf": [
             {
@@ -34584,7 +34626,9 @@
         }
       },
       "required": [
-        "status"
+        "status",
+        "killing_tests",
+        "kill_matrix_complete"
       ],
       "description": "One run of a retried mutant."
     },
@@ -35001,6 +35045,121 @@
         }
       ],
       "description": "Outcome of `fallow coverage setup --cloud --wait`."
+    },
+    "MutationKillMatrix": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Whether the matrix supports candidate analysis.",
+          "$ref": "#/definitions/MutationKillMatrixStatus"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Why evidence is unavailable or incomplete, sorted."
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationTestKillRow"
+          },
+          "description": "Each eligible test with observed coverage, sorted by test id."
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tests with nonempty kills and no unique kills, sorted by test id."
+        },
+        "coverage_without_kills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tests with coverage and no observed kills, sorted by test id."
+        }
+      },
+      "required": [
+        "status",
+        "reasons",
+        "tests",
+        "candidates",
+        "coverage_without_kills"
+      ],
+      "description": "Redundancy signals over the observed mutants. Candidates need review.\nRemoving candidates together can remove all tests for a mutant."
+    },
+    "MutationKillMatrixStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Each eligible test has a terminal result for each covered mutant."
+        },
+        {
+          "type": "string",
+          "const": "incomplete",
+          "description": "At least one result is missing or inconclusive."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "The run did not request a kill matrix."
+        }
+      ],
+      "description": "The quality of observed test-to-mutant evidence."
+    },
+    "MutationTestKillRow": {
+      "type": "object",
+      "properties": {
+        "test_id": {
+          "type": "string",
+          "description": "The runner test id."
+        },
+        "file": {
+          "type": "string",
+          "description": "The root-relative test file."
+        },
+        "kills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The observed killed mutant ids, sorted."
+        },
+        "unique_kills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The mutant ids that no other eligible test kills, sorted."
+        },
+        "subsuming_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The tests whose kill sets contain this full kill set, sorted."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Conservative evidence notes, sorted."
+        }
+      },
+      "required": [
+        "test_id",
+        "file",
+        "kills",
+        "unique_kills",
+        "subsuming_tests",
+        "notes"
+      ],
+      "description": "The observed mutant kills of one eligible test."
     },
     "LeanOutput": {
       "type": "object",
