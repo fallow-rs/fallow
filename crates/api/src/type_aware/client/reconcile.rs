@@ -1,6 +1,7 @@
 //! Atomic dead-code reconciliation for validated semantic responses.
 
 use super::*;
+use crate::type_aware::manifest::supports_guarded_fix;
 
 pub(super) fn apply_dead_code_response(
     root: &Path,
@@ -223,9 +224,8 @@ fn plan_response_results(
         let mut summary = query_summary(result);
         match target {
             QueryTarget::ClassMember(index) => {
-                // Guarded-fix evidence comes from the default backend only.
-                let fix_supported =
-                    query_supports_guarded_fix(query) && response.backend == BACKEND_FAMILY;
+                let fix_supported = query_supports_guarded_fix(query)
+                    && supports_guarded_fix(&response.backend, &response.backend_version);
                 let decision = retain_non_crediting_evidence(
                     decode_candidate_decision(
                         root,

@@ -151,8 +151,8 @@ fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
     let path = std::env::var_os("PATH").and_then(|value| sanitize_search_path(root, &value));
     command.env_clear();
     command.envs(values);
-    if let Ok((family, _)) = selected_backend() {
-        command.env(BACKEND_ENV, family);
+    if let Ok(backend) = selected_backend() {
+        command.env(BACKEND_ENV, backend.family);
     }
     if let Some(path) = path {
         command.env("PATH", path);

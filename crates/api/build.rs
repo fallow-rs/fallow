@@ -27,6 +27,8 @@ struct Backend {
     family: String,
     package: String,
     version: String,
+    minimum_version: String,
+    below_version: String,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +129,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err(invalid_manifest("backend package and version must not be empty").into());
     }
+    if backends
+        .iter()
+        .any(|b| !is_version_core(&b.minimum_version) || !is_version_core(&b.below_version))
+    {
+        return Err(invalid_manifest(
+            "backend minimum_version and below_version must be major.minor.patch",
+        )
+        .into());
+    }
+    if backends.iter().any(|b| {
+        let minimum = version_core(&b.minimum_version);
+        let below = version_core(&b.below_version);
+        minimum >= below || !(minimum..below).contains(&version_core(&b.version))
+    }) {
+        return Err(invalid_manifest(
+            "backend minimum_version must be below below_version, and version must be in that range",
+        )
+        .into());
+    }
     if manifest.sidecar.version_source != "workspace-package" {
         return Err(invalid_manifest("unsupported sidecar version source").into());
     }
@@ -142,7 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          pub(super) const SESSION_ENVELOPE_TYPES: &[&str] = &[{}];\n\
          pub(super) const BACKEND_FAMILY: &str = {};\n\
          pub(super) const BACKEND_VERSION: &str = {};\n\
-         pub(super) const BACKENDS: &[(&str, &str)] = &[{}];\n\
+         pub(super) const BACKENDS: &[BackendSpec] = &[{}];\n\
          pub(super) const SIDECAR_PACKAGE: &str = {};\n",
         manifest.wire_protocol_version,
         manifest.semantic_schema_version,
@@ -155,7 +176,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rust_string(&manifest.backend.version),
         backends
             .iter()
-            .map(|b| format!("({}, {})", rust_string(&b.family), rust_string(&b.version)))
+            .map(|b| format!(
+                "BackendSpec {{ family: {}, package: {}, version: {}, minimum_version: {}, below_version: {} }}",
+                rust_string(&b.family),
+                rust_string(&b.package),
+                rust_string(&b.version),
+                rust_string(&b.minimum_version),
+                rust_string(&b.below_version),
+            ))
             .collect::<Vec<_>>()
             .join(", "),
         rust_string(&manifest.sidecar.package),
@@ -259,4 +287,27 @@ fn generate_similar_code_protocol(
     );
     fs::write(output.join("similar_code_protocol.rs"), generated)?;
     Ok(())
+}
+
+fn is_version_core(version: &str) -> bool {
+    let parts: Vec<&str> = version.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// `major.minor.patch` of a version, with any prerelease or build tag cut off.
+/// An unparsable part becomes 0. The manifest check above validates the
+/// range ends, and `version` must still land inside them.
+fn version_core(version: &str) -> (u64, u64, u64) {
+    let end = version.find(['-', '+']).unwrap_or(version.len());
+    let mut parts = version[..end]
+        .split('.')
+        .map(|part| part.parse::<u64>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
 }

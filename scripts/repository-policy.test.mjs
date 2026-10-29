@@ -480,7 +480,10 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(defaultBackend.package, "typescript");
   assert.equal(sidecarPackage.dependencies.typescript, defaultBackend.version);
   for (const backend of optionalBackends) {
-    assert.equal(sidecarPackage.peerDependencies[backend.package], backend.version);
+    // npm excludes prerelease versions such as tsrs `0.20.1-ts7.1.0-beta` from
+    // every bounded range, so `*` is the one peer range that accepts any
+    // installed tsrs without a warning. The sidecar enforces the real range.
+    assert.equal(sidecarPackage.peerDependencies[backend.package], "*");
     assert.equal(sidecarPackage.peerDependenciesMeta[backend.package].optional, true);
     assert.equal(sidecarPackage.devDependencies[backend.package], backend.version);
     assert.equal(sidecarLock.packages[`node_modules/${backend.package}`].version, backend.version);

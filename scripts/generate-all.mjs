@@ -205,7 +205,12 @@ export const generateTypeAwareProtocol = (stagingRoot) => {
       (backend) =>
         typeof backend?.family !== "string" ||
         typeof backend.package !== "string" ||
-        typeof backend.version !== "string",
+        typeof backend.version !== "string" ||
+        !SEMVER_CORE.test(backend.minimum_version) ||
+        !SEMVER_CORE.test(backend.below_version) ||
+        compareVersionCores(backend.minimum_version, backend.below_version) >= 0 ||
+        compareVersionCores(backend.version, backend.minimum_version) < 0 ||
+        compareVersionCores(backend.version, backend.below_version) >= 0,
     ) ||
     new Set([manifest.backend, ...manifest.experimental_backends].map((backend) => backend.family))
       .size !==
@@ -232,13 +237,15 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({\n\
   backend: {\n\
     family: ${string(manifest.backend.family)},\n\
     version: ${string(manifest.backend.version)},\n\
+    minimum_version: ${string(manifest.backend.minimum_version)},\n\
+    below_version: ${string(manifest.backend.below_version)},\n\
     package: ${string(manifest.backend.package)},\n\
   },\n\
   experimental_backends: [\n\
 ${manifest.experimental_backends
   .map(
     (backend) =>
-      `    {\n      family: ${string(backend.family)},\n      package: ${string(backend.package)},\n      version: ${string(backend.version)},\n    },\n`,
+      `    {\n      family: ${string(backend.family)},\n      package: ${string(backend.package)},\n      version: ${string(backend.version)},\n      minimum_version: ${string(backend.minimum_version)},\n      below_version: ${string(backend.below_version)},\n    },\n`,
   )
   .join("")}\
   ],\n\
@@ -278,6 +285,15 @@ const MUTATION_RUNNER_LIST_KEYS = [
 ];
 const MUTATION_RUNNER_RUNTIME_KEYS = ["global_name", "active_function", "hit_function"];
 const SEMVER_CORE = /^\d+\.\d+\.\d+$/u;
+const versionCoreParts = (version) =>
+  version
+    .split(/[-+]/u, 1)[0]
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+const compareVersionCores = (left, right) => {
+  const [a, b] = [versionCoreParts(left), versionCoreParts(right)];
+  return [0, 1, 2].map((index) => (a[index] ?? 0) - (b[index] ?? 0)).find((d) => d !== 0) ?? 0;
+};
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/u;
 
 const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
