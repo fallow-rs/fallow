@@ -940,6 +940,14 @@ test run.
   child process reaches stays `no_coverage`. A child that is not Node (for
   example `bun`), or a child that gets an environment without
   `NODE_OPTIONS`, loads the original files.
+- A Node overlay also recognizes byte-identical copies of planned source
+  files, including renamed temporary files. It serves the instrumented
+  source only when the bytes identify one planned file. Original paths keep
+  their own attribution even when other planned files have identical bytes.
+  A copy that matches several planned files reports `overlay-incomplete`,
+  including when the test ignores its child's output or exit status. The
+  baseline then fails, or the mutant has a runtime error and the run is
+  incomplete. Edited or transformed copies cannot be attributed by bytes.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
 - Neither runtime can load a Vue, Svelte or Astro component file. The

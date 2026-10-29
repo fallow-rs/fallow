@@ -2,7 +2,13 @@
 import { afterEach, beforeEach } from "node:test";
 
 import { installChildHooks } from "./child-hooks.mjs";
-import { CHILD_ENV, HITS_DIAGNOSTIC, readOverlay, takeChildEnv } from "./child.mjs";
+import {
+  CHILD_ENV,
+  HITS_DIAGNOSTIC,
+  readOverlay,
+  recordOverlayError,
+  takeChildEnv,
+} from "./child.mjs";
 import { registerOverlayHook } from "./overlay-hook.mjs";
 
 const SUBPROCESS_PRELOAD = new URL("./node-subprocess-preload.mjs", import.meta.url);
@@ -26,7 +32,11 @@ const shareWithChildProcesses = (overlayPath, active) => {
 const start = (overlayPath) => {
   const active = takeChildEnv(CHILD_ENV.active);
   const loaded = new Set();
-  registerOverlayHook(readOverlay(overlayPath), (entry) => loaded.add(entry.source));
+  registerOverlayHook(
+    readOverlay(overlayPath),
+    (entry) => loaded.add(entry.source),
+    (message) => recordOverlayError(overlayPath, message),
+  );
   shareWithChildProcesses(overlayPath, active);
   // The diagnostic of a test follows its result event, with the same file,
   // line and column. The adapter joins the two.
