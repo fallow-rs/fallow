@@ -465,8 +465,7 @@ fn run_command() -> ExitCode {
         Err(code) => return code,
     };
     if let Some(message) = cli_format::json_presentation_error(&cli, &fmt) {
-        eprintln!("Error: {message}");
-        return ExitCode::from(2);
+        return error::emit_error_with_style(message, 2, fmt.output, fmt.json_style);
     }
 
     if let Some(code) = reject_global_baseline_flags(&cli, &fmt) {
