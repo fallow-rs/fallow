@@ -145,7 +145,13 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
     for anchor in root.ancestors() {
         let candidate = anchor.join("node_modules/.bin/fallow");
         if candidate.is_file() {
-            return candidate_state(&candidate);
+            return if anchor == root {
+                candidate_state(&candidate)
+            } else {
+                // An ancestor can supply JSON decoding without being a runner
+                // that the gate can find from this audit root.
+                NativeGateState::Unverified
+            };
         }
         if package_runner && anchor.join("package.json").is_file() {
             return NativeGateState::Unverified;
@@ -163,14 +169,25 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
 /// probe fails: the gate has further fallbacks and an unreadable binary is not
 /// evidence of drift.
 fn path_fallow_drift(root: &Path) -> Option<String> {
-    let candidate = mcp::find_on_path("fallow")?;
+    let candidate = std::path::absolute(mcp::find_on_path("fallow")?).ok()?;
     let resolved = dunce::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+    // Resolve directory aliases without losing ownership of a final symlink.
+    let entry = candidate
+        .parent()
+        .and_then(|parent| dunce::canonicalize(parent).ok())
+        .and_then(|parent| candidate.file_name().map(|name| parent.join(name)));
+    let owned_by = |owner: &Path| {
+        candidate.starts_with(owner)
+            || resolved.starts_with(owner)
+            || entry.as_ref().is_some_and(|path| path.starts_with(owner))
+    };
     let project = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let workspace_launcher = project.ancestors().any(|anchor| {
-        let modules = anchor.join("node_modules");
-        candidate.starts_with(&modules) || resolved.starts_with(&modules)
+    let project_launcher = project.ancestors().any(|anchor| {
+        let owns_project = anchor.parent().is_some()
+            && (anchor.join(".git").exists() || anchor.join("package.json").is_file());
+        (owns_project && owned_by(anchor)) || owned_by(&anchor.join("node_modules"))
     });
-    if candidate.starts_with(&project) || resolved.starts_with(&project) || workspace_launcher {
+    if owned_by(&project) || project_launcher {
         return None;
     }
     let current = std::env::current_exe()

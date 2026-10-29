@@ -15,8 +15,8 @@ fn write_executable(path: &Path, text: &str) {
 fn no_jq_tools(bin: &Path) {
     std::fs::create_dir_all(bin).unwrap();
     for tool in [
-        "bash", "git", "cat", "dirname", "pwd", "tr", "sort", "head", "sed", "grep", "mktemp",
-        "mkdir", "mv", "rm",
+        "bash", "git", "cat", "dirname", "basename", "pwd", "tr", "sort", "head", "sed", "grep",
+        "mktemp", "mkdir", "mv", "rm",
     ] {
         let result = Command::new("/bin/sh")
             .args(["-c", &format!("command -v {tool}")])
@@ -457,4 +457,162 @@ fn native_json_gate_keeps_blocking_when_findings_exceed_a_pipe_buffer() {
         serde_json::from_slice(&std::fs::read(root.join(".fallow/gate-report.json")).unwrap())
             .unwrap();
     assert_eq!(preserved, report);
+}
+
+#[test]
+fn native_json_status_does_not_certify_a_reader_outside_the_audit_root() {
+    let (_temp, root, _script, bin) = fixture();
+    let app = root.join("packages/app");
+    std::fs::create_dir_all(&app).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&app)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let installed = Command::new(crate::common::fallow_bin())
+        .args([
+            "hooks", "install", "--target", "agent", "--agent", "codex", "--root",
+        ])
+        .arg(&app)
+        .env("HOME", &root)
+        .output()
+        .unwrap();
+    assert!(
+        installed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+    let local = root.join("node_modules/.bin");
+    std::fs::create_dir_all(&local).unwrap();
+    symlink(crate::common::fallow_bin(), local.join("fallow")).unwrap();
+    std::fs::remove_file(bin.join("fallow")).unwrap();
+    let payload = serde_json::to_vec(
+        &serde_json::json!({"cwd": app, "tool_input": {"command": "git commit -m test"}}),
+    )
+    .unwrap();
+    let output = run_gate(
+        &app,
+        &app.join(".codex/hooks/fallow-gate.sh"),
+        &bin,
+        &payload,
+    );
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("fallow binary not found"));
+    let result = Command::new(crate::common::fallow_bin())
+        .args(["agent", "status", "--root"])
+        .arg(&app)
+        .args(["--format", "json"])
+        .env("HOME", &root)
+        .env("PATH", &bin)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let gate = status["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["path"] == ".codex/hooks/fallow-gate.sh")
+        .unwrap();
+    assert_eq!(gate["state"], "stale", "{status}");
+    assert!(
+        status["next_actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["id"] == "gate-reader-unverified"),
+        "{status}"
+    );
+}
+
+#[test]
+fn native_json_status_does_not_execute_ancestor_owned_tools() {
+    for owner in ["repository", "workspace"] {
+        for layout in [
+            "relative-owned-symlink",
+            "direct",
+            "owned-symlink",
+            "external-symlink",
+        ] {
+            let (temp, root, _script, bin) = fixture();
+            let workspace = if owner == "repository" {
+                root
+            } else {
+                temp.path().join("workspace")
+            };
+            let app = workspace.join("packages/app");
+            std::fs::create_dir_all(&app).unwrap();
+            if owner == "workspace" {
+                std::fs::write(
+                    workspace.join("package.json"),
+                    r#"{"private":true,"workspaces":["packages/*"]}"#,
+                )
+                .unwrap();
+            }
+            let installed = Command::new(crate::common::fallow_bin())
+                .args([
+                    "hooks", "install", "--target", "agent", "--agent", "codex", "--root",
+                ])
+                .arg(&app)
+                .env("HOME", &workspace)
+                .output()
+                .unwrap();
+            assert!(installed.status.success());
+            let tools = workspace.join("tools");
+            std::fs::create_dir_all(&tools).unwrap();
+            let sentinel = workspace.join("ancestor-tool-executed");
+            let launcher = tools.join("fallow");
+            let text = format!(
+                "#!/bin/sh\nprintf unsafe > '{}'\necho 'fallow 1.0.0'\n",
+                sentinel.display()
+            );
+            std::fs::remove_file(bin.join("fallow")).unwrap();
+            if matches!(layout, "owned-symlink" | "relative-owned-symlink") {
+                let external = temp.path().join("outside-fallow");
+                write_executable(&external, &text);
+                symlink(external, &launcher).unwrap();
+            } else {
+                write_executable(&launcher, &text);
+            }
+            let path = if layout == "relative-owned-symlink" {
+                std::fs::create_dir(temp.path().join("launch")).unwrap();
+                format!(
+                    "launch/../{}/tools:{}",
+                    workspace.strip_prefix(temp.path()).unwrap().display(),
+                    bin.display()
+                )
+            } else if layout == "external-symlink" {
+                symlink(&launcher, bin.join("fallow")).unwrap();
+                bin.display().to_string()
+            } else {
+                format!("{}:{}", tools.display(), bin.display())
+            };
+            let result = Command::new(crate::common::fallow_bin())
+                .args(["agent", "status", "--root"])
+                .arg(&app)
+                .args(["--format", "json"])
+                .current_dir(temp.path())
+                .env("HOME", &workspace)
+                .env("PATH", path)
+                .output()
+                .unwrap();
+            assert!(result.status.success());
+            assert!(
+                !sentinel.exists(),
+                "status executed {owner} code through {layout}"
+            );
+            let status: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert!(
+                status["next_actions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|action| action["id"] == "gate-reader-unverified"),
+                "{status}"
+            );
+        }
+    }
 }
