@@ -369,7 +369,8 @@ pub struct MutantResult {
     /// so this test can be absent from `covering_tests`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed_by: Option<String>,
-    /// All observed failing tests, sorted. Timeouts do not count.
+    /// All observed failing tests, sorted. Timeouts do not count. Empty
+    /// outside `--kill-matrix`; `killed_by` keeps the first killer.
     pub killing_tests: Vec<String>,
     /// True only for exact requested membership with terminal pass or fail results.
     pub kill_matrix_complete: bool,
@@ -425,7 +426,8 @@ pub struct MutantAttempt {
     /// The test that killed the mutant in this run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed_by: Option<String>,
-    /// All observed failing tests, sorted. Timeouts do not count.
+    /// All observed failing tests, sorted. Timeouts do not count. Empty
+    /// outside `--kill-matrix`; `killed_by` keeps the first killer.
     pub killing_tests: Vec<String>,
     /// True only for exact requested membership with terminal pass or fail results.
     pub kill_matrix_complete: bool,
@@ -1127,7 +1129,8 @@ pub struct MutationInspectOutput {
     pub static_test_files: Vec<String>,
     /// The test that killed the mutant in the run of the report.
     pub killed_by: Option<String>,
-    /// All observed failing tests, sorted. Timeouts do not count.
+    /// All observed failing tests, sorted. Timeouts do not count. Empty
+    /// outside `--kill-matrix`; `killed_by` keeps the first killer.
     pub killing_tests: Vec<String>,
     /// True only for exact requested membership with terminal pass or fail results.
     pub kill_matrix_complete: bool,

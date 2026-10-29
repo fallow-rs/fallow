@@ -33113,7 +33113,7 @@
           "items": {
             "type": "string"
           },
-          "description": "All observed failing tests, sorted. Timeouts do not count."
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
         },
         "kill_matrix_complete": {
           "type": "boolean",
@@ -33597,7 +33597,7 @@
           "items": {
             "type": "string"
           },
-          "description": "All observed failing tests, sorted. Timeouts do not count."
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
         },
         "kill_matrix_complete": {
           "type": "boolean",
@@ -34580,7 +34580,7 @@
           "items": {
             "type": "string"
           },
-          "description": "All observed failing tests, sorted. Timeouts do not count."
+          "description": "All observed failing tests, sorted. Timeouts do not count. Empty\noutside `--kill-matrix`; `killed_by` keeps the first killer."
         },
         "kill_matrix_complete": {
           "type": "boolean",

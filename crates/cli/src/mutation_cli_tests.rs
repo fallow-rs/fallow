@@ -1781,6 +1781,24 @@ fn mutation_kill_matrix_human_report_distinguishes_candidates_and_evidence_limit
 }
 
 #[test]
+fn mutation_kill_matrix_human_report_explains_missing_test_file_metadata() {
+    use fallow_output::MutationKillMatrixStatus;
+
+    let mut measured = report(Vec::new(), Vec::new());
+    measured.kill_matrix = kill_matrix_fixture();
+    measured.kill_matrix.status = MutationKillMatrixStatus::Incomplete;
+    measured.kill_matrix.reasons = vec!["missing-test-file-metadata".to_owned()];
+    measured.kill_matrix.candidates.clear();
+    let text = run_text(&measured, &OPTIONS);
+    assert!(
+        text.contains(
+            "missing-test-file-metadata: the runner did not report the test file of some tests."
+        ),
+        "{text}"
+    );
+}
+
+#[test]
 fn mutation_human_matrix_bounds_rows_and_ids_without_truncating_json() {
     let mut measured = report(Vec::new(), Vec::new());
     measured.kill_matrix = kill_matrix_fixture();

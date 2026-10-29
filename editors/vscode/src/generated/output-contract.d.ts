@@ -20373,7 +20373,8 @@ prune_reason?: (string | null)
  */
 killed_by?: (string | null)
 /**
- * All observed failing tests, sorted. Timeouts do not count.
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
  */
 killing_tests: string[]
 /**
@@ -20489,7 +20490,8 @@ duration_ms?: (number | null)
  */
 killed_by?: (string | null)
 /**
- * All observed failing tests, sorted. Timeouts do not count.
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
  */
 killing_tests: string[]
 /**
@@ -20963,7 +20965,8 @@ static_test_files: string[]
  */
 killed_by?: (string | null)
 /**
- * All observed failing tests, sorted. Timeouts do not count.
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
  */
 killing_tests: string[]
 /**

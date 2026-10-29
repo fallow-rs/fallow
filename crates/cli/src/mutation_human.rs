@@ -738,6 +738,7 @@ fn kill_matrix_reason(reason: &str) -> &str {
         "incomplete-mutant-results" => "some requested test outcomes are missing or inconclusive.",
         "baseline-failure" => "baseline failures excluded tests and left incomplete evidence.",
         "partial-mutation-run" => "the mutation run did not finish.",
+        "missing-test-file-metadata" => "the runner did not report the test file of some tests.",
         _ => "complete matrix evidence is unavailable.",
     }
 }
