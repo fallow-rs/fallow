@@ -1,0 +1,1 @@
+{ "name": "dir-plugin", "type": "module", "main": "lib/plugin.js" }

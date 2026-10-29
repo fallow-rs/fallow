@@ -5,14 +5,23 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 
 # Ship
 
-1. Confirm the branch and diff exactly match the reviewed scope. To put
-   the branch on the current base, run
-   `node scripts/ship-rebase.mjs --pr <number> --push`, also for one pull
-   request. Do not rebase by hand. The script compares the result with a
-   merge and checks each version constant. A failed manual
-   `rebase --continue` leaves commits on a detached HEAD. For a stacked
-   branch after a squash merge of its parent, add `--upstream` (see
-   "Serial merge of many pull requests").
+1. Confirm the branch and diff exactly match the reviewed scope. Then run
+   `node scripts/ship-rebase.mjs --pr <number> --if-needed --push`, also
+   for one pull request. Do not rebase by hand. The required checks of
+   `main` do not require an up-to-date branch, so a rebase is only
+   necessary when a squash merge is not safe as it is. With
+   `--if-needed`, the script rebases only when the merge into `main`
+   conflicts, when the branch changes `CHANGELOG.md`, when the branch and
+   `main` both change a generated file, or when the merge loses a version
+   bump of the branch. Otherwise it prints the merge command for the
+   current head, and no new CI run is necessary. The checks of the pull
+   request then ran against an older `main`. A change on `main` that
+   breaks the branch without a text conflict shows only in steps 6 and 7.
+   After a rebase, the
+   script compares the result with a merge and checks each version
+   constant. A failed manual `rebase --continue` leaves commits on a
+   detached HEAD. For a stacked branch after a squash merge of its parent,
+   add `--upstream` (see "Serial merge of many pull requests").
 2. Re-run the required checks from `docs/development/quality-gates.md`.
 3. Verify that public contracts and generated files are pushed. Merge each
    companion change into the default branch of its repository (for example
@@ -21,7 +30,22 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    run `node scripts/sync-skills-companion.mjs` and push the fallow-skills
    commit that it prepares.
 4. Create signed conventional commits only.
-5. Merge through the repository's current protected-main workflow.
+5. Merge with pinned auto-merge. Do not wait for the checks in the
+   foreground:
+
+   ```bash
+   gh pr merge <number> --auto --squash --match-head-commit <reviewed sha> --subject "<type>: <summary> (#<number>)"
+   ```
+
+   GitHub merges when the last required check passes. The pin stops the
+   merge when someone pushes a commit that you did not review. After each
+   own push that you reviewed, run the command again with the new head.
+   When all required checks already passed, the same command merges at
+   once. `--admin` does not skip a required check, because the branch
+   protection of `main` applies to administrators too. A pull request that
+   lands on `main` after the `--if-needed` run can make the same version
+   bump. Git merges two equal edits without a conflict, so step 7 checks
+   the version constants of the merge.
 6. Monitor the merged commit until required CI completes. Use
    `node scripts/ship-wait-checks.mjs --commit <full sha> --follow-main`.
    Do not give `--min-checks`: path filters decide which workflows a push
@@ -38,8 +62,18 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    failed job, confirm that the branch contains the current base
    (`git merge-base --is-ancestor origin/main HEAD`). A second identical
    failure is a defect, not a flake: diagnose it instead of a third retry.
+   The script compares each failed run with the same workflow on the
+   commits before the merged commit. A run that also failed there gets the
+   line `FAIL (also on main <sha>)`. When all failed runs failed before,
+   the script stops with exit code 4: the failure does not come from your
+   merge, so do not report it as yours. Exit code 1 means that at least
+   one failure is new.
 7. Inspect the merged tree for conflict markers and generated drift. Then
-   run `git diff <reviewed head> <merge commit>`. A pull request that merged
+   run `git diff <reviewed head> <merge commit>`. Then run
+   `node scripts/check-version-bumps.mjs --base <merge commit>^ --head <reviewed head>`.
+   A failure means that `main` made the same version bump before the merge.
+   Set the constant above the value of `main` in a follow-up pull request.
+   A pull request that merged
    after your last rebase shows there, also when it did not conflict. Read
    each hunk in a file that your pull request changed. Such a merge can make
    your code, a comment or a doc wrong without a text conflict. Fix that in
@@ -57,8 +91,11 @@ still edits `CHANGELOG.md`. Move its entries to a fragment
 (`changelog.d/README.md`), because the `Changelog fragments` CI step fails it.
 Use these scripts for each pull request, one at a time:
 
-1. Rebase the branch: `node scripts/ship-rebase.mjs --pr <number> --push`.
-   The script resolves the conflicts that have one mechanical answer and
+1. Rebase the branch when necessary:
+   `node scripts/ship-rebase.mjs --pr <number> --if-needed --push`. When
+   the script reports "No rebase needed", do step 2 for the current head
+   and then step 3. Otherwise the
+   script resolves the conflicts that have one mechanical answer and
    stops on any other conflict:
    - `CHANGELOG.md`: it keeps both sides.
    - A `*CACHE_VERSION` constant: it takes the value of `main`. After the
@@ -162,8 +199,10 @@ Use these scripts for each pull request, one at a time:
    `main`, merge `main` into the branch, push, and wait again. Exit code 1
    means that at least one failure is new on the pull request.
 
-3. Merge through the protected-main workflow. Then continue with the next
-   pull request.
+3. Merge with pinned auto-merge (step 5 of "Ship"). Wait until the merge
+   is on `main` before you run step 1 for the next pull request. The
+   `--if-needed` check reads `main` at the time of the run, so it cannot
+   see a merge that lands after it.
 
 For a companion pull request in fallow-rs/docs, run
 `node <fallow>/scripts/ship-docs-rebase.mjs --pr <number> --push` in a

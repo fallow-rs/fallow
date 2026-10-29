@@ -372,9 +372,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.59"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7a4d3ec6524d28a329fc53654bbadc9bdd7b0431f5d65f1a56ffb28a1ee5283"
+checksum = "6651c9ed80effdc7db0ff72512157f901af5e3549e341e24b1dd4887d836d838"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-api"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-benchmarks"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "codspeed-criterion-compat",
  "fallow-api",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "base64",
  "bitcode",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "deser-value",
  "deser-yaml",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "codspeed-criterion-compat",
  "dunce",
@@ -1281,6 +1281,7 @@ dependencies = [
  "globset",
  "ignore",
  "indicatif",
+ "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",
@@ -1313,7 +1314,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-engine"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "bitcode",
  "codspeed-criterion-compat",
@@ -1325,6 +1326,7 @@ dependencies = [
  "fallow-graph",
  "fallow-mutation",
  "fallow-output",
+ "fallow-process",
  "fallow-security",
  "fallow-types",
  "globset",
@@ -1350,12 +1352,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "windows-sys 0.61.2",
  "xxhash-rust",
 ]
 
 [[package]]
 name = "fallow-extract"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -1380,7 +1383,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "dashmap",
  "dunce",
@@ -1402,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-license"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1412,7 +1415,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "dunce",
  "fallow-api",
@@ -1435,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "fallow-api",
  "fallow-output",
@@ -1459,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-multicall"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "fallow-cli",
  "fallow-lsp",
@@ -1469,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mutation"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "insta",
  "oxc_allocator",
@@ -1485,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-node"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "fallow-api",
  "fallow-types",
@@ -1498,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-output"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1511,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-process"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "libc",
  "rustc-hash",
@@ -1522,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1535,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -1549,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-v8-coverage"
-version = "3.36.0"
+version = "3.37.0"
 dependencies = [
  "proptest",
  "serde",
@@ -1590,9 +1593,9 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.9"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "fixedbitset"
@@ -2282,9 +2285,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f622c574a29fb3034a0a90645afee194dfedc75fc124228801b6e77041075bd1"
+checksum = "1b320ad34c177093d21622edc9215bb608294c2333ff296672c0c8265a5ee60c"
 dependencies = [
  "ahash",
  "bytecount",
@@ -2310,18 +2313,18 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a968fffd387b2ab005bf00c1851f5d26e90df05b6f7ad609ed0d620033cca5e7"
+checksum = "1472f7be79026f79e01a9b172263311e829d7c210d57b39cb57037abc0ce0500"
 dependencies = [
  "regex-syntax",
 ]
 
 [[package]]
 name = "jsonschema-value"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39b7670345e5ce87371339d13705dbb9276b7e3e934bbe1efa2c6734a1f65a96"
+checksum = "e5a7550a7a84787e715ead0b47e01fa8c6bb7c3413630f91a8f2094c06c2078a"
 dependencies = [
  "ahash",
  "bytecount",
@@ -2361,9 +2364,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.190"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libloading"
@@ -3751,9 +3754,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "558f3855529c0a7e78a48e409fa653456e55f1b167eab4109c16a255b7727e3f"
+checksum = "473f4dcca28ead7ee0f8e5b5d0bbae2549f4fc4c958fb20af328961b6c174be3"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -3829,14 +3832,15 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5023804cbe0304cbe06197ac16e645a0a0d0ffa2953bf735c15c2fa0213350"
+checksum = "ceb42e9e47443cd83a834dea57b5816d35481417bae72ade5dc5615c59122e26"
 dependencies = [
  "base64",
  "chrono",
  "futures",
  "indexmap",
+ "libc",
  "pastey 0.2.1",
  "pin-project-lite",
  "rmcp-macros",
@@ -3852,9 +3856,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "3.5.1"
+version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1da498700030856ba63114bceefa30ba21f5e278cb975e5b9de3529fe842b40"
+checksum = "8b0748e054a5f5598b3213cf72099ae6b2745ba4d996c59ccf455150a7dbb839"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -4169,9 +4173,9 @@ dependencies = [
 
 [[package]]
 name = "shlex"
-version = "1.3.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "signal-hook"
@@ -4264,6 +4268,16 @@ name = "smawk"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
+
+[[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "spki"
@@ -4585,6 +4599,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]

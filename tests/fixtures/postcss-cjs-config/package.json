@@ -1,0 +1,10 @@
+{
+  "name": "postcss-cjs-config",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.0"
+  }
+}

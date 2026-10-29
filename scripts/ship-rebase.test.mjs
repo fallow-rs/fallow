@@ -1401,3 +1401,89 @@ test("--upstream must be an ancestor of the branch", (t) => {
   assert.equal(result.status, 2, result.output);
   assert.match(result.output, /--upstream origin\/main is not an ancestor of feat\./u);
 });
+
+test("--if-needed skips the rebase of a branch that merges without a conflict", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => r.commit("fix: main change", { "src/main.txt": "main\n" }),
+    onBranch: (r) =>
+      r.commit("fix: branch change", {
+        "src/branch.txt": "branch\n",
+        "src/lib.rs": cacheSource(2),
+      }),
+  });
+  const oldTip = repo.git("rev-parse", "origin/feat");
+
+  const result = shipRebase(repo, "--if-needed", "--push");
+
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /No rebase needed: feat merges into origin\/main/u);
+  assert.match(result.output, new RegExp(`--auto --squash --match-head-commit ${oldTip}`, "u"));
+  repo.git("fetch", "--quiet", "origin");
+  assert.equal(repo.git("rev-parse", "origin/feat"), oldTip);
+  assert.deepEqual(worktreePaths(repo), [repo.work]);
+});
+
+test("--if-needed rebases when the merge loses a cache bump of the branch", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "src/lib.rs": cacheSource(2),
+        "src/other.txt": "other\n",
+      }),
+  });
+
+  const result = shipRebase(repo, "--if-needed");
+
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /Rebase needed for feat:/u);
+  assert.match(result.output, /GRAPH_CACHE_VERSION 1 -> 2/u);
+  assert.equal(fileAt(repo, newTipOf(result), "src/lib.rs"), cacheSource(3).trimEnd());
+});
+
+test("--if-needed rebases a branch that conflicts or changes CHANGELOG.md", (t) => {
+  const conflict = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/value.txt": "base\n" },
+    onMain: (r) => r.commit("fix: main value", { "src/value.txt": "main\n" }),
+    onBranch: (r) => r.commit("fix: branch value", { "src/value.txt": "branch\n" }),
+  });
+  const conflictResult = shipRebase(conflict, "--if-needed");
+  assert.equal(conflictResult.status, 1, conflictResult.output);
+  assert.match(conflictResult.output, /The merge into the base has a conflict/u);
+  assert.match(conflictResult.output, /STOP: feat: Conflicts outside CHANGELOG\.md/u);
+
+  const entry = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/value.txt": "base\n" },
+    onMain: (r) => r.commit("fix: main change", { "src/main.txt": "main\n" }),
+    onBranch: (r) =>
+      r.commit("feat: branch entry", { "CHANGELOG.md": changelog("- Branch entry.") }),
+  });
+  const entryResult = shipRebase(entry, "--if-needed");
+  assert.equal(entryResult.status, 0, entryResult.output);
+  assert.match(entryResult.output, /The branch changes CHANGELOG\.md\./u);
+  newTipOf(entryResult);
+});
+
+test("--if-needed finds an equal cache bump that a merge of main into the branch hides", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "src/lib.rs": cacheSource(2),
+        "src/other.txt": "other\n",
+      }),
+  });
+  repo.git("switch", "--quiet", "feat");
+  repo.git("merge", "--quiet", "--no-edit", "origin/main");
+  repo.git("push", "--quiet", "origin", "feat");
+  repo.git("switch", "--quiet", "main");
+
+  const result = shipRebase(repo, "--if-needed");
+
+  assert.match(result.output, /Rebase needed for feat:/u);
+  assert.match(result.output, /GRAPH_CACHE_VERSION 1 -> 2/u);
+  assert.doesNotMatch(result.output, /No rebase needed/u);
+});

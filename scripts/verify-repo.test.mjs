@@ -221,13 +221,45 @@ test("preflight names every missing install and runs no gate", () => {
   assert.doesNotMatch(output, /oxfmt/u);
 });
 
-test("full mode also checks the NAPI install", () => {
+test("full mode also checks the NAPI and type-aware sidecar installs", () => {
   const fast = installsForMode("fast").map(({ dependency }) => dependency);
   const full = installsForMode("full").map(({ dependency }) => dependency);
-  assert.deepEqual(full, [...fast, "@napi-rs/cli"]);
+  assert.deepEqual(full, [...fast, "@napi-rs/cli", "tsrs"]);
   assert.deepEqual(
     findInstallProblems("full", () => {}),
     [],
+  );
+});
+
+test("full mode stops before the first gate when the sidecar install is missing", () => {
+  const executed = [];
+  let output = "";
+  const exitCode = runVerification("full", {
+    runCommand: (command) => {
+      executed.push(command);
+      return 0;
+    },
+    write: (message) => {
+      output += message;
+    },
+    assertInstall: ({ dependency, resolveFrom, installCommand }) => {
+      if (resolveFrom.endsWith(join("tools", "type-aware-sidecar", "package.json"))) {
+        throw new Error(`${dependency} missing; run \`${installCommand}\``);
+      }
+    },
+    hasRef: () => true,
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(executed, []);
+  assert.match(output, /tsrs missing; run `npm ci --prefix tools\/type-aware-sidecar`/u);
+});
+
+test("fast mode does not check the sidecar install", () => {
+  assert.ok(
+    installsForMode("fast").every(
+      ({ resolveFrom }) => !resolveFrom.startsWith("tools/type-aware-sidecar/"),
+    ),
   );
 });
 

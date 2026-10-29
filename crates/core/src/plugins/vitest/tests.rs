@@ -1892,3 +1892,53 @@ fn projects_that_are_not_an_array_literal_add_no_inline_entries() {
     );
     assert!(result.entry_patterns.is_empty());
 }
+
+#[test]
+fn project_object_in_a_const_credits_its_setup_files() {
+    let result = resolve(
+        r#"const UNIT = { test: { name: "unit", setupFiles: ["./test/setup.ts"] } };
+        export default { test: { projects: [UNIT] } };"#,
+    );
+    assert!(
+        result
+            .setup_files
+            .contains(&std::path::PathBuf::from("/project/test/setup.ts")),
+        "the setup file of a project in a const must be credited: {:?}",
+        result.setup_files
+    );
+}
+
+#[test]
+fn test_object_and_setup_file_in_consts_are_credited() {
+    let result = resolve(
+        r#"const SETUP = "./test/setup.ts";
+        const INCLUDE = ["spec/**/*.check.ts"];
+        const TEST = { include: INCLUDE, setupFiles: SETUP };
+        export default defineConfig({ test: TEST });"#,
+    );
+    assert!(
+        result
+            .setup_files
+            .contains(&std::path::PathBuf::from("/project/test/setup.ts")),
+        "a setup file in a const must be credited: {:?}",
+        result.setup_files
+    );
+    assert!(
+        super::super::entry_rules_match(&result, "spec/a.check.ts"),
+        "the include patterns in a const must apply"
+    );
+}
+
+#[test]
+fn const_that_the_file_writes_to_does_not_resolve() {
+    let result = resolve(
+        r#"let TEST = { setupFiles: ["./test/old.ts"] };
+        TEST = { setupFiles: ["./test/new.ts"] };
+        export default { test: TEST };"#,
+    );
+    assert!(
+        result.setup_files.is_empty(),
+        "a binding that the file writes to must not resolve: {:?}",
+        result.setup_files
+    );
+}

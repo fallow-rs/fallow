@@ -7,10 +7,23 @@ use std::path::{Path, PathBuf};
 use fallow_extract::{JsText, visitor::extract_import_from_callable};
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
-use oxc_ast_visit::{Visit, walk};
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
 
+#[path = "config_parser_const_inline.rs"]
+mod const_inline;
+use const_inline::holds_one_stable_object;
+#[path = "config_parser_local_inline.rs"]
+mod local_inline;
+#[path = "config_parser_multi_config.rs"]
+mod multi_config;
+use multi_config::find_default_export_array;
+pub(crate) use multi_config::{
+    extract_each_config_entries, extract_each_config_path_aliases,
+    extract_each_config_require_strings, extract_each_config_shallow_strings, find_config_objects,
+};
+#[path = "config_parser_alias_entry.rs"]
+mod alias_entry;
 #[path = "config_parser_vite_plugin_call.rs"]
 mod vite_plugin_call;
 pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;
@@ -1168,6 +1181,13 @@ pub(crate) fn parent_relative_config_path(
 /// parentheses to produce an AST compatible with `find_config_object`. The native
 /// JSON source type in Oxc produces a different AST structure that our helpers
 /// don't handle.
+///
+/// Before the extraction, a JavaScript or TypeScript program gets the literal
+/// value of each stable same-file constant in the property values and array
+/// elements that name it, so `projects: [UNIT]` reads like an inline object.
+/// An object spread of such a constant gets its properties. The values that an
+/// exported config callback returns also get the literal value of the stable
+/// locals of that callback, so `return { ...common, entry }` reads the same way.
 pub(crate) fn extract_from_source<T: Send>(
     source: &str,
     path: &Path,
@@ -1176,13 +1196,19 @@ pub(crate) fn extract_from_source<T: Send>(
     let is_json = path
         .extension()
         .is_some_and(|ext| ext == "json" || ext == "jsonc");
-    let walk = |parsed: &oxc_parser::ParserReturn<'_>| extractor(&parsed.program);
     if is_json {
         let wrapped = wrap_json_as_expression(source);
-        return fallow_extract::parse_bounded_or_default(&wrapped, SourceType::mjs(), walk);
+        return fallow_extract::parse_bounded_or_default(&wrapped, SourceType::mjs(), |parsed| {
+            extractor(&parsed.program)
+        });
     }
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    fallow_extract::parse_bounded_or_default(source, source_type, walk)
+    fallow_extract::parse_bounded(source, || {
+        let allocator = oxc_allocator::Allocator::default();
+        let mut parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+        const_inline::with_inlined_program(&allocator, &mut parsed.program, source.len(), extractor)
+    })
+    .flatten()
 }
 
 /// Wrap JSON or JSONC source in parentheses so Oxc parses it as one JavaScript
@@ -1692,101 +1718,21 @@ fn top_level_variable_declarations<'a>(
 /// of `name` in the program and that no expression writes to.
 ///
 /// `new ModuleFederationPlugin(mfConfig)` is the common shape for plugin options
-/// that a config declares above the plugin list. A reader that accepts the
-/// inline object only reads nothing there.
+/// that a config declares above the plugin list, where an inline-only reader fails.
 ///
 /// The name resolves only when the program holds one binding of that name. A
 /// second binding, a parameter of the same name, or a write to the binding means
 /// the expression can name another value than the top-level one, so the
-/// resolver declines instead of reading the wrong value.
+/// resolver declines. A caller that reads `push`-style calls itself can allow them.
 pub(crate) fn find_stable_binding_init<'a>(
     program: &'a Program<'a>,
     name: &str,
+    allow_mutating_calls: bool,
 ) -> Option<&'a Expression<'a>> {
-    if !holds_one_stable_object(program, name) {
+    if !holds_one_stable_object(program, name, allow_mutating_calls) {
         return None;
     }
     find_variable_init_expression(program, name)
-}
-
-/// Whether one top-level `const` or `let` is the only binding of `name` in the
-/// program, and no expression writes to it or to one of its members.
-fn holds_one_stable_object(program: &Program<'_>, name: &str) -> bool {
-    if !declares_top_level_const_or_let(program, name) {
-        return false;
-    }
-    let mut usage = NameUsage::new(name);
-    usage.visit_program(program);
-    usage.bindings == 1 && usage.writes == 0
-}
-
-/// Whether a top-level `const` or `let` statement declares `name`. A `var` is
-/// function scoped and hoisted, so a later statement can hold its value.
-fn declares_top_level_const_or_let(program: &Program<'_>, name: &str) -> bool {
-    top_level_variable_declarations(program).any(|decl| {
-        matches!(
-            decl.kind,
-            VariableDeclarationKind::Const | VariableDeclarationKind::Let
-        ) && decl.declarations.iter().any(|declarator| {
-            matches!(&declarator.id, BindingPattern::BindingIdentifier(id) if id.name == name)
-        })
-    })
-}
-
-/// What one program does with one name: the number of bindings that declare it,
-/// and the number of expressions that write to it or to one of its members.
-struct NameUsage<'n> {
-    name: &'n str,
-    bindings: usize,
-    writes: usize,
-    write_depth: usize,
-}
-
-impl<'n> NameUsage<'n> {
-    const fn new(name: &'n str) -> Self {
-        Self {
-            name,
-            bindings: 0,
-            writes: 0,
-            write_depth: 0,
-        }
-    }
-}
-
-impl<'a> Visit<'a> for NameUsage<'_> {
-    fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
-        if identifier.name == self.name {
-            self.bindings += 1;
-        }
-    }
-
-    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-        if self.write_depth > 0 && identifier.name == self.name {
-            self.writes += 1;
-        }
-    }
-
-    fn visit_assignment_target(&mut self, target: &AssignmentTarget<'a>) {
-        self.write_depth += 1;
-        walk::walk_assignment_target(self, target);
-        self.write_depth -= 1;
-    }
-
-    fn visit_update_expression(&mut self, expression: &UpdateExpression<'a>) {
-        self.write_depth += 1;
-        walk::walk_update_expression(self, expression);
-        self.write_depth -= 1;
-    }
-
-    fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
-        if expression.operator != UnaryOperator::Delete {
-            walk::walk_unary_expression(self, expression);
-            return;
-        }
-        self.write_depth += 1;
-        walk::walk_unary_expression(self, expression);
-        self.write_depth -= 1;
-    }
 }
 
 /// Resolve a config object that is passed as a NAMED CONST to a wrapper call:
@@ -2300,11 +2246,7 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
                 let Expression::ObjectExpression(obj) = element.as_expression()? else {
                     return None;
                 };
-                let find = find_property(obj, "find")
-                    .and_then(|prop| expression_to_string(&prop.value))?;
-                let (replacement, is_bare) = find_property(obj, "replacement")
-                    .and_then(|prop| alias_replacement_kinded(&prop.value, PathScope::Bare))?;
-                Some((find, replacement, is_bare))
+                alias_entry::object_alias_pair(obj, PathScope::Bare)
             })
             .collect(),
         _ => Vec::new(),
@@ -2340,7 +2282,7 @@ fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(
             .iter()
             .find_map(ArrayExpressionElement::as_expression)
             .and_then(|element| alias_replacement_kinded(element, scope)),
-        _ => path_string_in(expr, scope).map(|value| (value, false)),
+        _ => alias_entry::path_value(expr, scope).map(|value| (value, false)),
     }
 }
 
@@ -2464,14 +2406,10 @@ fn resolve_array_alias_pairs_kinded(
             }
             _ => {
                 if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
-                    && let Some(find) = find_property(obj, "find")
-                        .and_then(|prop| expression_to_string(&prop.value))
-                    && let Some((replacement, is_bare)) = find_property(obj, "replacement")
-                        .and_then(|prop| {
-                            alias_replacement_kinded(&prop.value, PathScope::Program(program))
-                        })
+                    && let Some(pair) =
+                        alias_entry::object_alias_pair(obj, PathScope::Program(program))
                 {
-                    pairs.push((find, replacement, is_bare));
+                    pairs.push(pair);
                 }
             }
         }
@@ -2662,85 +2600,6 @@ pub(crate) fn resolve_sibling_module(
         }
     }
     None
-}
-
-/// Find a default-exported array config, the `defineWorkspace([...])` /
-/// `vitest.workspace.{ts,js}` shape. Handles `export default [...]` and
-/// `export default defineWorkspace([...])` / `defineConfig([...])` (the array as
-/// the call's first argument), function configs with a static array return, and
-/// parenthesised / `as` wrappers.
-fn find_default_export_array<'a>(program: &'a Program<'a>) -> Option<&'a ArrayExpression<'a>> {
-    for stmt in &program.body {
-        if let Statement::ExportDefaultDeclaration(decl) = stmt {
-            if let ExportDefaultDeclarationKind::FunctionDeclaration(function) = &decl.declaration {
-                if function.generator {
-                    return None;
-                }
-                return function.body.as_ref().and_then(|body| returned_array(body));
-            }
-            return decl
-                .declaration
-                .as_expression()
-                .and_then(array_from_config_expression);
-        }
-    }
-    None
-}
-
-/// Read only returns belonging to this callback, never nested helper functions.
-fn returned_array<'a>(body: &'a FunctionBody<'a>) -> Option<&'a ArrayExpression<'a>> {
-    body.statements
-        .iter()
-        .find_map(|statement| match statement {
-            Statement::ReturnStatement(returned) => Some(returned),
-            _ => None,
-        })
-        .and_then(|returned| returned.argument.as_ref())
-        .and_then(array_from_expression)
-}
-
-/// A config provider invokes its callback once; returned callbacks are values.
-fn array_from_config_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpression<'a>> {
-    match expr {
-        Expression::ArrowFunctionExpression(arrow) => match &arrow.body {
-            ArrowFunctionBody::FunctionBody(body) => returned_array(body),
-            body => body.as_expression().and_then(array_from_expression),
-        },
-        Expression::FunctionExpression(function) => {
-            if function.generator {
-                return None;
-            }
-            function.body.as_ref().and_then(|body| returned_array(body))
-        }
-        Expression::ParenthesizedExpression(paren) => {
-            array_from_config_expression(&paren.expression)
-        }
-        Expression::TSAsExpression(ts_as) => array_from_config_expression(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => {
-            array_from_config_expression(&ts_sat.expression)
-        }
-        Expression::CallExpression(call) => call
-            .arguments
-            .first()
-            .and_then(Argument::as_expression)
-            .and_then(array_from_config_expression),
-        _ => array_from_expression(expr),
-    }
-}
-
-fn array_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpression<'a>> {
-    match expr {
-        Expression::ArrayExpression(arr) => Some(arr),
-        Expression::ParenthesizedExpression(paren) => array_from_expression(&paren.expression),
-        Expression::TSAsExpression(ts_as) => array_from_expression(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => array_from_expression(&ts_sat.expression),
-        Expression::CallExpression(call) => call
-            .arguments
-            .first()
-            .and_then(Argument::as_expression)
-            .and_then(array_from_expression),
-        _ => None,
-    }
 }
 
 pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {

@@ -26,6 +26,18 @@ use super::{
     extract_destructured_names, extract_import_expression,
 };
 
+/// What a module-scope binding holds when it names a path of the current
+/// module, such as `const __dirname = path.dirname(__filename)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ModulePathBinding {
+    /// The file path of the current module.
+    File,
+    /// The directory of the current module.
+    Directory,
+    /// A `__filename` or `__dirname` binding that holds another value.
+    Other,
+}
+
 impl ModuleInfoExtractor {
     pub(crate) fn record_string_enum_member_values(
         &mut self,
@@ -42,6 +54,13 @@ impl ModuleInfoExtractor {
                 }
                 TSEnumMemberName::ComputedTemplateString(_) => continue,
             };
+            if !enumd.declare {
+                self.record_static_enum_member_literal(
+                    enumd.id.name.as_str(),
+                    &member_name,
+                    value.value.text().into_owned(),
+                );
+            }
             self.semantic_facts
                 .push(SemanticFact::StringEnumMemberValue(
                     StringEnumMemberValueFact {

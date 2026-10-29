@@ -13,6 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[path = "ci_references.rs"]
 mod references;
 
+use super::shell_helpers::HelperBase;
 use super::{
     IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
 };
@@ -412,15 +413,17 @@ fn working_directory_catalog<'a>(
             Segment::Expression => None,
         })
         .collect();
-    if let Some(names) = names
+    let dir = names.map(|names| names.join("/"));
+    if let Some(dir) = &dir
         && let Some(package) = catalog
             .workspaces
             .as_deref()
-            .and_then(|workspaces| workspaces.find_dir(&names.join("/")))
+            .and_then(|workspaces| workspaces.find_dir(dir))
     {
         return Cow::Owned(catalog.package_catalog(package));
     }
     let mut foreign = catalog.clone();
+    foreign.helper_base = dir.map_or(HelperBase::Unknown, HelperBase::Directory);
     for body in foreign.bodies.values_mut() {
         body.local = false;
     }

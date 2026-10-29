@@ -2,7 +2,7 @@
 
 [package]
 name = "fallow-similar-code-sidecar"
-version = "3.36.0"
+version = "3.37.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -24,6 +24,12 @@ serde_json = "=1.0.151"
 sha2 = "=0.11.0"
 tokenizers = { version = "=0.22.2", default-features = false, features = ["fancy-regex"] }
 ureq = { version = "=3.4.0", default-features = false, features = ["rustls"] }
+
+# macOS builds run the matrix products through the Accelerate framework. The
+# vectors change only in the last digits, so a change here needs a bump of
+# embedding_semantics_version in crates/api/similar-code-protocol.json.
+[target.'cfg(target_os = "macos")'.dependencies]
+candle = { package = "candle-core", version = "=0.11.0", features = ["accelerate"] }
 
 [dev-dependencies]
 tempfile = "=3.27.0"

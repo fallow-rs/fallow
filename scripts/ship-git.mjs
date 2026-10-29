@@ -777,6 +777,15 @@ export const shipBranch = (
 };
 
 /**
+ * Fetch the branch and the base without a worktree. Returns the branch, the
+ * remote that holds it and the refs of `fetchBranch`.
+ */
+export const fetchShipRefs = (cwd, options) => {
+  const { branch, remote } = branchHead(cwd, options);
+  return { branch, remote, ...fetchBranch(cwd, { ...options, headRemote: remote, branch }) };
+};
+
+/**
  * The branch to rebase and the remote that holds it. The base comes from
  * `options.remote`. The branch and its push go to the remote that holds it,
  * which is a fork for some pull requests.
@@ -807,6 +816,7 @@ const parseShipOptions = (argv) => {
       "head-remote": { type: "string" },
       upstream: { type: "string" },
       push: { type: "boolean", default: false },
+      "if-needed": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
     strict: true,
@@ -829,6 +839,7 @@ const parseShipOptions = (argv) => {
     upstream: values.upstream ?? null,
     base: values.base ?? `${values.remote}/${DEFAULT_BASE_BRANCH}`,
     push: values.push,
+    ifNeeded: values["if-needed"],
   };
 };
 

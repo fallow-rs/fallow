@@ -234,7 +234,7 @@
       "section": "commands",
       "row": "health",
       "column": "Key Flags",
-      "seed": "`--max-cyclomatic`, `--max-cognitive`, `--max-crap`, `--top`, `--sort`, `--complexity`, `--complexity-breakdown`, `--file-scores`"
+      "seed": "`--max-cyclomatic`, `--max-cognitive`, `--max-crap`, `--max-file-lines`, `--top`, `--sort`, `--complexity`, `--complexity-breakdown`"
     },
     {
       "section": "commands",
@@ -1792,6 +1792,12 @@
     },
     {
       "section": "flags:health",
+      "row": "--max-file-lines",
+      "column": "Description",
+      "seed": "Maximum physical lines per file (overrides config `health.maxFileLines`, default 0 = off). A longer file is reported as a complexity finding with `exceeded: \"file_lines\"`"
+    },
+    {
+      "section": "flags:health",
       "row": "--min-commits",
       "column": "Description",
       "seed": "Minimum number of commits for a file to be included in hotspot ranking (default: 3)"
@@ -2257,6 +2263,12 @@
       "row": "invalid-client-export",
       "column": "Description",
       "seed": "\"use client\" file exports a server-only / route-config name; Requires the project to declare next"
+    },
+    {
+      "section": "issue-types",
+      "row": "long-file",
+      "column": "Description",
+      "seed": "File has more lines than the file-length threshold"
     },
     {
       "section": "issue-types",

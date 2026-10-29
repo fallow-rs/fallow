@@ -230,7 +230,10 @@ fn credits_setup_store_members_read_by_typed_helpers_and_setup_body() {
 fn credits_store_members_read_through_imported_and_later_declared_aliases() {
     // Issue #3357: `doubled` is read through a `ReturnType` alias that another
     // file declares and exports. `label` is read through a `ReturnType` alias
-    // that the same file declares after the helper. `deadFlag` is the control.
+    // that the same file declares after the helper. Issue #3550: `scopedTotal`
+    // is read through an alias that a function body declares, and an inner
+    // alias of the same name for another type must not credit `deadFlag`.
+    // `deadFlag` is the control.
     let root = fixture_path("pinia-store-return-type-alias");
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

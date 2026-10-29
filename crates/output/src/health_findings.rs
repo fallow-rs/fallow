@@ -143,6 +143,9 @@ pub fn build_health_finding_actions(
     violation: &ComplexityViolation,
     ctx: &HealthActionContext,
 ) -> Vec<HealthFindingAction> {
+    if violation.exceeded.is_file_lines() {
+        return build_file_lines_actions(violation, ctx);
+    }
     let name = violation.name.as_str();
     let exceeded = violation.exceeded;
     let includes_crap = exceeded.includes_crap();
@@ -201,6 +204,38 @@ pub fn build_health_finding_actions(
         actions.push(build_suppress_action(violation, is_template, is_component));
     }
 
+    actions
+}
+
+/// The actions of a file-length finding: split the file, and the file-level
+/// suppression. A next-line comment cannot suppress a whole file.
+fn build_file_lines_actions(
+    violation: &ComplexityViolation,
+    ctx: &HealthActionContext,
+) -> Vec<HealthFindingAction> {
+    let mut actions = vec![HealthFindingAction {
+        kind: HealthFindingActionType::SplitFile,
+        auto_fixable: false,
+        description: format!(
+            "Split the file into smaller modules ({} lines, threshold: {})",
+            violation.line_count,
+            violation.max_file_lines.unwrap_or_default()
+        ),
+        note: Some(
+            "Move cohesive groups of exports into their own modules. Removing unused code also shortens the file"
+                .to_string(),
+        ),
+        comment: None,
+        placement: None,
+        target_path: None,
+    }];
+    if !ctx.opts.omit_suppress_line {
+        actions.push(suppress_file_action(
+            "Suppress with a file-level comment at the top of the file (the comment also hides the function complexity findings of the file)",
+            "// fallow-ignore-file complexity",
+            "top-of-file",
+        ));
+    }
     actions
 }
 
@@ -1201,6 +1236,7 @@ mod crap_action_tests {
             contributions: Vec::new(),
             effective_thresholds: None,
             threshold_source: None,
+            max_file_lines: None,
         };
         let action = build_suppress_action(&violation, true, false);
         assert_eq!(

@@ -30,6 +30,16 @@ export class Service {
   viaGetter(): void {}
   viaSpread(): void {}
   viaSpreadLiteral(): void {}
+  viaForOfNestedArray(): void {}
+  viaArrayDecl(): void {}
+  viaArraySkip(): void {}
+  viaArrayDefault(): void {}
+  viaHeldGetter(): void {}
+  viaHeldGetterMember(): void {}
+  deadArrayIndex(): void {}
+  deadArraySpread(): void {}
+  deadGetterOther(): void {}
+  deadThisGetter(): void {}
   untypedOnly(): void {}
   signatureOnly(): void {}
   dead(): void {}

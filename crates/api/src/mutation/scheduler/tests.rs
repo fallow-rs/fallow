@@ -285,6 +285,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
         runner_timeout: Duration::from_secs(5),
         deadline: None,
         cache: None,
+        journal: None,
     }
 }
 
@@ -2865,4 +2866,201 @@ fn the_retry_extra_time_is_the_retry_time_minus_the_first_run_time() {
     assert_eq!(retry_extra_ms(10.0, 20.0), 0);
     assert_eq!(retry_extra_ms(500.5, 0.0), 501);
     assert_eq!(retry_extra_ms(f64::NAN, 20.0), 0);
+}
+
+/// A journal that gives the `resume` results of an earlier run, and records
+/// each appended result.
+#[derive(Debug, Default)]
+struct FakeJournal {
+    resume: FxHashMap<String, (String, CachedResult)>,
+    appended: Mutex<Vec<(String, String, CachedResult)>>,
+}
+
+impl FakeJournal {
+    fn ids(&self) -> Vec<String> {
+        self.appended
+            .lock()
+            .expect("appended")
+            .iter()
+            .map(|(id, _, _)| id.clone())
+            .collect()
+    }
+}
+
+impl OutcomeJournal for FakeJournal {
+    fn key(
+        &self,
+        _ready: &Ready,
+        mutant: &ScheduledMutant,
+        _tests: &[String],
+        _test_files: &[String],
+    ) -> String {
+        format!("key-{}", mutant.id)
+    }
+
+    fn resumed(&self, mutant_id: &str, key: &str) -> Option<CachedResult> {
+        self.resume
+            .get(mutant_id)
+            .filter(|(stored, _)| stored == key)
+            .map(|(_, result)| result.clone())
+    }
+
+    fn append(&self, mutant_id: &str, key: &str, result: &CachedResult) {
+        self.appended.lock().expect("appended").push((
+            mutant_id.to_owned(),
+            key.to_owned(),
+            result.clone(),
+        ));
+    }
+}
+
+/// The mutant id, the companion index and the journal ids at each run.
+type JournalView = (String, usize, Vec<String>);
+
+#[test]
+fn each_final_result_reaches_the_journal_before_the_schedule_returns() {
+    let journal = Arc::new(FakeJournal::default());
+    let seen: Arc<Mutex<Vec<JournalView>>> = Arc::new(Mutex::new(Vec::new()));
+    let (inside, log) = (Arc::clone(&journal), Arc::clone(&seen));
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        move |index, run| {
+            let id = run.mutant_id.clone().unwrap_or_default();
+            log.lock()
+                .expect("seen")
+                .push((id.clone(), index, inside.ids()));
+            match id.as_str() {
+                "m1" => Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+                _ => Ok(run_result(run, RunStatus::Survived, None)),
+            }
+        },
+    ));
+    let mut config = config(1);
+    config.journal = Some(Arc::clone(&journal) as Arc<dyn OutcomeJournal>);
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config).expect("run");
+
+    let seen = seen.lock().expect("seen").clone();
+    let first_m2 = seen
+        .iter()
+        .find(|(id, index, _)| id == "m2" && *index == 0)
+        .expect("the first run of m2");
+    assert_eq!(
+        first_m2.2,
+        vec!["m1".to_owned()],
+        "the kill of m1 is in the journal before the next mutant runs"
+    );
+    let retry_m2 = seen
+        .iter()
+        .find(|(id, index, _)| id == "m2" && *index > 0)
+        .expect("the retry of m2");
+    assert_eq!(
+        retry_m2.2,
+        vec!["m1".to_owned()],
+        "a survivor is not final before its retry"
+    );
+    let appended = journal.appended.lock().expect("appended").clone();
+    assert_eq!(
+        appended,
+        vec![
+            (
+                "m1".to_owned(),
+                "key-m1".to_owned(),
+                CachedResult {
+                    status: MutantStatus::Killed,
+                    killed_by: Some(tid("t1")),
+                    duration_ms: Some(12),
+                }
+            ),
+            (
+                "m2".to_owned(),
+                "key-m2".to_owned(),
+                CachedResult {
+                    status: MutantStatus::Survived,
+                    killed_by: None,
+                    duration_ms: Some(12),
+                }
+            ),
+        ],
+        "a no-coverage mutant is not a journal result"
+    );
+    assert_eq!(status(&outcome, "m3"), MutantStatus::NoCoverage);
+}
+
+#[test]
+fn a_flaky_or_timed_out_result_never_reaches_the_journal() {
+    // m1 times out in the first run and in the retry. In the second
+    // schedule, m1 times out first and survives the retry: flaky.
+    for (first_only, expected) in [(false, MutantStatus::Timeout), (true, MutantStatus::Flaky)] {
+        let journal = Arc::new(FakeJournal::default());
+        let spawner = FakeSpawner::new(script(
+            |_| standard_dry(),
+            move |index, run| {
+                if index == 0 || !first_only {
+                    Err(LinkFault::Timeout)
+                } else {
+                    Ok(run_result(run, RunStatus::Survived, None))
+                }
+            },
+        ));
+        let mut config = config(1);
+        config.journal = Some(Arc::clone(&journal) as Arc<dyn OutcomeJournal>);
+        let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
+
+        assert_eq!(status(&outcome, "m1"), expected);
+        assert!(journal.ids().is_empty(), "{:?}", journal.ids());
+    }
+}
+
+#[test]
+fn a_resumed_result_skips_the_run_and_a_changed_key_runs_again() {
+    let killed = |test: &str| CachedResult {
+        status: MutantStatus::Killed,
+        killed_by: Some(tid(test)),
+        duration_ms: Some(3),
+    };
+    let journal = Arc::new(FakeJournal {
+        resume: FxHashMap::from_iter([
+            ("m1".to_owned(), ("key-m1".to_owned(), killed("t1"))),
+            ("m2".to_owned(), ("an-old-key".to_owned(), killed("t2"))),
+        ]),
+        appended: Mutex::new(Vec::new()),
+    });
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+    ));
+    let mut config = config(1);
+    config.journal = Some(Arc::clone(&journal) as Arc<dyn OutcomeJournal>);
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config).expect("run");
+
+    let ran: Vec<String> = spawner
+        .runs()
+        .into_iter()
+        .filter_map(|(_, run)| run.mutant_id)
+        .collect();
+    assert_eq!(
+        ran,
+        vec!["m2".to_owned()],
+        "the resumed mutant does not run"
+    );
+    let m1 = &outcome.results["m1"];
+    assert!(m1.resumed);
+    assert!(!m1.cached, "a resumed result is not a cache hit");
+    assert_eq!(m1.status, MutantStatus::Killed);
+    assert_eq!(m1.killed_by, Some(tid("t1")));
+    assert_eq!(m1.covering_tests, vec![tid("t1")]);
+    assert!(!outcome.results["m2"].resumed);
+    assert_eq!(
+        outcome.cache_keys,
+        FxHashMap::from_iter([
+            ("m1".to_owned(), "key-m1".to_owned()),
+            ("m2".to_owned(), "key-m2".to_owned()),
+        ]),
+        "the result cache can store a resumed result"
+    );
+    assert_eq!(
+        journal.ids(),
+        vec!["m2".to_owned()],
+        "the journal already holds the resumed result"
+    );
 }

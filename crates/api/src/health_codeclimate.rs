@@ -92,6 +92,11 @@ impl HealthCodeClimateContext<'_> {
                     finding.name, thresholds.max_crap, finding.cyclomatic,
                 )
             }
+            ExceededThreshold::FileLines => format!(
+                "File has {} lines (threshold: {})",
+                finding.line_count,
+                finding.max_file_lines.unwrap_or_default()
+            ),
         }
     }
 
@@ -304,6 +309,7 @@ const fn complexity_check_name(finding: &ComplexityViolation) -> &'static str {
         | ExceededThreshold::CyclomaticCrap
         | ExceededThreshold::CognitiveCrap
         | ExceededThreshold::All => "fallow/high-crap-score",
+        ExceededThreshold::FileLines => "fallow/long-file",
     }
 }
 
@@ -416,6 +422,7 @@ mod tests {
                     contributions: Vec::new(),
                     effective_thresholds: None,
                     threshold_source: None,
+                    max_file_lines: None,
                 }
                 .into(),
             ],
@@ -436,6 +443,7 @@ mod tests {
     fn health_codeclimate_includes_styling_findings() {
         let report = HealthReport {
             styling_findings: vec![StylingFinding {
+                internal: fallow_output::StylingFindingInternal::default(),
                 code: "css-selector-complexity".to_string(),
                 sub_kind: "high-specificity".to_string(),
                 path: "src/styles.css".to_string(),
@@ -492,6 +500,7 @@ mod tests {
             contributions: Vec::new(),
             threshold_source: effective_thresholds
                 .map(|_| fallow_output::ThresholdSource::Override),
+            max_file_lines: None,
             effective_thresholds,
         }
     }

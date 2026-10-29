@@ -633,6 +633,7 @@ mod tests {
             rule_packs: vec![],
             rule_pack_sources: vec![],
             dynamically_loaded: vec![],
+            markup_extensions: vec![],
             overrides: vec![],
             workspace_changed_since: std::collections::BTreeMap::default(),
             workspace_patterns: Vec::new(),

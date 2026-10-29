@@ -54,6 +54,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
+        markup_extensions: vec![],
         overrides: vec![],
         regression: None,
         audit: fallow_config::AuditConfig::default(),

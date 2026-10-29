@@ -951,7 +951,7 @@ pub fn collect_workspace_packages(
             .replace('\\', "/");
         packages.add(&ws.name, &dir, ws_pkg.scripts.as_ref());
     }
-    std::sync::Arc::new(packages)
+    std::sync::Arc::new(packages.with_project_root(project_root))
 }
 
 /// The scripts of each package that a runtime script of another package
@@ -1780,7 +1780,6 @@ mod tests {
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
             audit: fallow_config::AuditConfig::default(),
@@ -1796,6 +1795,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
+            ..Default::default()
         }
         .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
 
@@ -1948,7 +1948,6 @@ mod tests {
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
             audit: fallow_config::AuditConfig::default(),
@@ -1964,6 +1963,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
+            ..Default::default()
         }
         .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
 

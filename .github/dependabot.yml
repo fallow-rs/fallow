@@ -72,6 +72,30 @@ updates:
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
+    directory: /.github/publishers/marketplace
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /.github/publishers/open-vsx
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /tools/mutation-runner
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
     directory: /npm/fallow
     schedule:
       interval: weekly

@@ -186,6 +186,9 @@ inputs:
   max-crap:
     description: 'Maximum CRAP score threshold (health and audit commands, default: 30.0). Functions meeting or exceeding this score are reported alongside complexity findings. Pair with coverage data for accurate per-function scoring.'
     required: false
+  max-file-lines:
+    description: 'Maximum physical lines per file (health command, default: 0, off). A longer file is reported as a complexity finding.'
+    required: false
   coverage:
     description: 'Path to Istanbul coverage-final.json data for accurate CRAP scoring (health, audit, and bare command).'
     required: false
@@ -490,6 +493,7 @@ runs:
         INPUT_MAX_CYCLOMATIC: ${{ inputs.max-cyclomatic }}
         INPUT_MAX_COGNITIVE: ${{ inputs.max-cognitive }}
         INPUT_MAX_CRAP: ${{ inputs.max-crap }}
+        INPUT_MAX_FILE_LINES: ${{ inputs.max-file-lines }}
         INPUT_COVERAGE: ${{ inputs.coverage }}
         INPUT_PRODUCTION_COVERAGE: ${{ inputs.runtime-coverage }}
         INPUT_COVERAGE_ROOT: ${{ inputs.coverage-root }}
@@ -560,7 +564,7 @@ runs:
         steps.analyze.outputs.sarif != '' &&
         steps.ghas-check.outputs.available == 'true' &&
         always()
-      uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+      uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
       with:
         sarif_file: ${{ steps.analyze.outputs.sarif }}
         category: fallow

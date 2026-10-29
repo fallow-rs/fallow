@@ -63,7 +63,7 @@ error by suppressing a downstream detector.
   `crates/engine/src/health/`.
 - Security candidates: `crates/core/src/analyze/security/` with matcher data
   owned by `crates/security/`.
-- Feature flags: extraction facts in `crates/extract/src/flags.rs`, project
+- Feature flags: extraction facts in `crates/extract/src/flags/mod.rs`, project
   analysis in `crates/engine/src/flags.rs`, and extraction helpers exposed by
   `crates/engine/src/feature_flags.rs`. A read such as `useFlag(FLAGS.X)`
   resolves in the extractor when `FLAGS` is a module-level `as const` object
@@ -481,6 +481,39 @@ definition whose type does not accept a boolean, such as `-w`, `--prefix`,
 `--tag`, `--otp`, and `--node-options`. Dockerfile flag values
 (`--input=src/a.ts`) go through the same resolution, so `ignoreCommandEntries`
 applies to the command of the script body.
+
+The program of a command decides which of its file arguments are entry
+points (issue #3967). `crates/core/src/scripts/argument_entries.rs` holds
+the rules:
+
+- A script runtime (`node`, `tsx`, `bun`, `deno run`, `nodemon`, a shell)
+  runs one script: its first positional argument that looks like a script
+  file. The arguments after the script are data for the script. A relative
+  path value of a runtime flag that loads a module (`-r`, `--import`,
+  `--loader`, `bun --preload`), also in the `--flag=value` form, stays an
+  entry point. When the script is the binary of a known file runner
+  (`node node_modules/jest/bin/jest.js`), the rules of that runner apply.
+- A known file runner (a test runner, a bundler, a compiler, and runtime
+  subcommands such as `bun build` and `deno serve`) runs or loads every
+  file argument, so each one stays an entry point.
+- A program that fallow does not know can run a known program
+  (`time node x.js`, `infisical run -- node x.js`). The rules of the first
+  known program in its arguments then apply. That program must be a bare
+  name or a binary under `node_modules/`, must not be the value of the flag
+  before it, and must come before any literal file argument. So
+  `my-cli app/a.js --engine node` keeps `app/a.js`. An executable script
+  file (`bun --smol app/tool.js`) runs itself, and its arguments are data.
+  Without a known program, the
+  literal file arguments and option values stay entry points, but a glob
+  never expands from them. `watchee -f './src/**/*'` gives no entry point,
+  and `jscodeshift -t codemods/transform.js` keeps its transform.
+- A call of a script with an unknown body keeps every file argument,
+  because the body can run any program.
+- `sh -c "<command>"` reads the quoted command with the same rules.
+
+Formatters and linters (`file_target_tools.rs`) and the built-in test
+runners (`node --test`, `bun test`, `deno test`, `borp`) keep their own
+rules.
 
 A package-manager command can run in other workspace packages. The parser
 records where the command runs as a `RunLocation` in

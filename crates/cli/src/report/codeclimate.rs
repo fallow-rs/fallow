@@ -3384,10 +3384,7 @@ mod tests {
             .map(|contract| contract.code)
             .collect();
 
-        assert_eq!(
-            BTreeSet::from(["duplicate-prop-shape", "thin-wrapper"]),
-            missing
-        );
+        assert_eq!(BTreeSet::<&str>::new(), missing);
 
         let check_names: BTreeSet<String> = fallow_output::issue_output_contracts()
             .flat_map(|contract| contract.codeclimate_check_names)
@@ -3395,5 +3392,7 @@ mod tests {
         assert!(check_names.contains("fallow/stale-suppression"));
         assert!(check_names.contains("fallow/missing-suppression-reason"));
         assert!(check_names.contains("fallow/prop-drilling"));
+        assert!(check_names.contains("fallow/thin-wrapper"));
+        assert!(check_names.contains("fallow/duplicate-prop-shape"));
     }
 }

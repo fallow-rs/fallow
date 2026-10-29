@@ -24,8 +24,8 @@ pub type ChurnSpawnHook = fn(&mut Command) -> std::io::Result<Output>;
 
 static SPAWN_HOOK: OnceLock<ChurnSpawnHook> = OnceLock::new();
 
-fn git_command() -> Command {
-    crate::git_env::git_command()
+fn git_command(cwd: &Path) -> Command {
+    crate::git_env::git_command(cwd)
 }
 
 /// Install a spawn-hook that wraps the `git log` subprocess. Idempotent;
@@ -563,7 +563,7 @@ fn validate_churn_event_timestamp(
 /// Check if the repository is a shallow clone.
 #[must_use]
 fn is_shallow_clone(root: &Path) -> bool {
-    let mut command = git_command();
+    let mut command = git_command(root);
     command
         .args(["rev-parse", "--is-shallow-repository"])
         .current_dir(root);
@@ -577,13 +577,9 @@ fn is_shallow_clone(root: &Path) -> bool {
 /// Check if the directory is inside a git repository.
 #[must_use]
 pub fn is_git_repo(root: &Path) -> bool {
-    let mut command = git_command();
-    command
-        .args(["rev-parse", "--git-dir"])
-        .current_dir(root)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command.status().is_ok_and(|s| s.success())
+    let mut command = git_command(root);
+    command.args(["rev-parse", "--git-dir"]).current_dir(root);
+    command.output().is_ok_and(|output| output.status.success())
 }
 
 /// Maximum size of a churn cache file (64 MB). The incremental cache stores
@@ -665,7 +661,7 @@ fn get_head_sha(root: &Path) -> Option<String> {
 
 /// Check whether `ancestor` is still reachable from `descendant`.
 fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
-    let mut command = git_command();
+    let mut command = git_command(root);
     command
         .args(["merge-base", "--is-ancestor", ancestor, descendant])
         .current_dir(root);
@@ -990,7 +986,7 @@ fn analyze_churn_events(
     revision_range: Option<&str>,
     clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
-    let mut command = git_command();
+    let mut command = git_command(root);
     command.arg("log");
     if let Some(range) = revision_range {
         command.arg(range);
@@ -1830,7 +1826,7 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str]) {
-        let status = super::git_command()
+        let status = super::git_command(root)
             .args(args)
             .current_dir(root)
             .status()

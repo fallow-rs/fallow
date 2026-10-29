@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-similar-code-darwin-arm64",
-  "version": "3.36.0",
+  "version": "3.37.0",
   "description": "Fallow similar-code sidecar binary for macOS ARM64 (Apple Silicon)",
   "license": "MIT",
   "repository": {

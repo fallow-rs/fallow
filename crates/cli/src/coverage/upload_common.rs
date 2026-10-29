@@ -1,10 +1,11 @@
 use std::fmt::Write as _;
 use std::path::Path;
-use std::process::{Command, ExitCode};
+#[cfg(test)]
+use std::process::Command;
+use std::process::ExitCode;
 
 use colored::Colorize as _;
 use fallow_config::{FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig};
-use fallow_engine::changed_files::clear_ambient_git_env;
 
 use crate::api::{
     NETWORK_EXIT_CODE, ParsedErrorEnvelope, actionable_error_hint, api_url, response_message_suffix,
@@ -192,12 +193,10 @@ pub(super) fn validate_project_id(id: &str) -> Result<&str, String> {
 }
 
 fn git_origin_project_id(root: &Path) -> Option<String> {
-    let mut command = Command::new("git");
-    command
+    let output = fallow_engine::changed_files::git_command_in(root)
         .args(["remote", "get-url", "origin"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -347,9 +346,8 @@ pub(super) fn resolve_git_sha(
 }
 
 pub(super) fn dirty_worktree(root: &Path) -> bool {
-    let mut command = Command::new("git");
-    command.args(["status", "--porcelain"]).current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = fallow_engine::changed_files::git_command_in(root);
+    command.args(["status", "--porcelain"]);
     let Ok(output) = command.output() else {
         return false;
     };

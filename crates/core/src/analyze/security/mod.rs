@@ -67,7 +67,10 @@ mod rank;
 mod tainted_sink;
 
 pub use hardcoded_secret::find_hardcoded_secret_candidates;
-pub use rank::{SecurityRankingInput, annotate_dead_code_cross_links, rank_security_findings};
+pub use rank::{
+    SecurityRankingInput, annotate_dead_code_cross_links, boundary_crossings_by_file,
+    rank_security_findings, reportable_dead_code_for_cross_links,
+};
 pub use tainted_sink::{CategoryFilter, TaintedSinkContext, find_tainted_sinks};
 
 /// Segment-aware callee pattern matcher, re-exported for the boundary

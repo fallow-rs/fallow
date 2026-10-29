@@ -196,9 +196,10 @@ fn inventory_rejects_invalid_deployment_bindings_without_exposing_bearer() {
 }
 
 #[test]
-fn source_map_upload_uses_the_same_deployment_binding() {
+fn source_map_upload_keeps_deployment_binding_and_generated_line_starts() {
     let root = project();
     std::fs::create_dir(root.path().join("dist")).unwrap();
+    std::fs::write(root.path().join("dist/app.js"), "main();\nmain();\n").unwrap();
     std::fs::write(root.path().join("dist/app.js.map"), r#"{"version":3,"file":"app.js","sources":["../src/index.ts"],"sourcesContent":["export const main = (): number => 2;"],"names":[],"mappings":"AAAA"}"#).unwrap();
     let mut command = Command::new(fallow_bin());
     command
@@ -224,4 +225,8 @@ fn source_map_upload_uses_the_same_deployment_binding() {
     assert_eq!(body["gitSha"], "abcdef123456");
     assert_eq!(body["fileName"], "app.js.map");
     assert_eq!(body["sourceMap"]["sources"][0], "../src/index.ts");
+    assert_eq!(
+        body["sourceMap"]["x_fallow_line_starts"],
+        serde_json::json!([0, 8, 16])
+    );
 }

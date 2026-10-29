@@ -685,6 +685,23 @@ mod tests {
     }
 
     #[test]
+    fn resolve_alias_reads_a_spread_of_a_local_constant() {
+        let result = resolve(
+            "rstest.config.ts",
+            "const shared = { '@app': './src' };\n\
+             export default defineConfig({ resolve: { alias: { ...shared, '@lib': './lib' } } });",
+        );
+        for alias in [("@app", "src"), ("@lib", "lib")] {
+            assert!(
+                result
+                    .path_aliases
+                    .contains(&(alias.0.to_owned(), alias.1.to_owned())),
+                "{alias:?}"
+            );
+        }
+    }
+
+    #[test]
     fn enabler_is_the_core_package() {
         assert_eq!(RstestPlugin.enablers(), ["@rstest/core"]);
         assert_eq!(

@@ -374,15 +374,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target
-          # cc forwards -Cprofile-generate to the C compiler. Apple clang writes
-          # an older raw profile format than the Rust profiler runtime, and the
-          # instrumented binary then crashes at exit. Remove after #3285.
-          case "$FALLOW_TARGET" in
-            *-apple-darwin)
-              export "CFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-generate"
-              export "CXXFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-generate"
-              ;;
-          esac
           printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw', '-Clto=off', '-Clinker-plugin-lto=no']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
           cargo build --release --locked --target "$FALLOW_TARGET" -p fallow-multicall --config target/pgo-generate.toml
 
@@ -621,14 +612,6 @@ jobs:
           printf "[target.%s]\nrustflags = ['-Cprofile-use=%s', '-Cllvm-args=-pgo-warn-missing-function']\n" "$FALLOW_TARGET" "$profile" > "$dir/pgo.toml"
           cat "$dir/pgo.toml"
           echo "PGO_PROFILE=$profile" >> "$GITHUB_ENV"
-          # cc also forwards -Cprofile-use, and Apple clang can reject a profile
-          # from the newer Rust llvm-profdata. Remove after #3285.
-          case "$FALLOW_TARGET" in
-            *-apple-darwin)
-              echo "CFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-use" >> "$GITHUB_ENV"
-              echo "CXXFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-use" >> "$GITHUB_ENV"
-              ;;
-          esac
           echo "PGO profile ${digest} applied to fallow-cli, fallow-lsp, fallow-mcp and fallow-multicall for ${FALLOW_TARGET}." >> "$GITHUB_STEP_SUMMARY"
 
       # One cargo invocation builds the four binaries. Cargo then resolves the
@@ -862,6 +845,227 @@ jobs:
           name: napi-${{ matrix.npm_dir }}
           path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
 
+  # Windows Smart App Control and SmartScreen trust an Authenticode signature,
+  # not the Ed25519 signature that `sign` adds. This job signs every Fallow
+  # Windows executable and NAPI addon before any packaging job reads them, and
+  # replaces the build artifacts with the signed copies under the same names.
+  # The signing app trusts only the `windows-signing` environment subject. The
+  # publisher jobs in `release` run third-party tools with `id-token: write`,
+  # so a shared subject would let that code request a Fallow B.V. signature.
+  # Third-party binaries are never signed here. `WINDOWS_SIGNING_MODE=off` (or
+  # unset) keeps the artifacts unchanged.
+  authenticode:
+    name: Authenticode (${{ matrix.npm_dir }})
+    if: ${{ !inputs.auth_check }}
+    needs: build
+    environment: windows-signing
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - npm_dir: win32-x64-msvc
+            target: x86_64-pc-windows-msvc
+          - npm_dir: win32-arm64-msvc
+            target: aarch64-pc-windows-msvc
+    steps:
+      - name: Select Windows signing mode
+        id: mode
+        shell: bash
+        env:
+          WINDOWS_SIGNING_MODE: ${{ vars.WINDOWS_SIGNING_MODE }}
+        run: |
+          case "${WINDOWS_SIGNING_MODE:-off}" in
+            authenticode)
+              echo "enabled=true" >> "$GITHUB_OUTPUT"
+              ;;
+            off)
+              echo "::warning::WINDOWS_SIGNING_MODE is off. Windows binaries ship without an Authenticode signature."
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::WINDOWS_SIGNING_MODE must be authenticode or off"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate Windows signing configuration
+        if: steps.mode.outputs.enabled == 'true'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ vars.WINDOWS_SIGNING_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.WINDOWS_SIGNING_TENANT_ID }}
+          SIGNING_ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+        run: |
+          azure_id_pattern='^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$'
+          name_pattern='^[A-Za-z0-9][A-Za-z0-9-]{1,98}[A-Za-z0-9]$'
+          if ! [[ "${AZURE_CLIENT_ID:-}" =~ $azure_id_pattern ]] || \
+              ! [[ "${AZURE_TENANT_ID:-}" =~ $azure_id_pattern ]] || \
+              ! [[ "${SIGNING_ENDPOINT:-}" =~ ^https://[a-z]+\.codesigning\.azure\.net/?$ ]] || \
+              ! [[ "${SIGNING_ACCOUNT:-}" =~ $name_pattern ]] || \
+              ! [[ "${SIGNING_PROFILE:-}" =~ $name_pattern ]] || \
+              [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || \
+              [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::Windows signing configuration is incomplete"
+            exit 1
+          fi
+
+      - name: Download unsigned binaries
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: unsigned-binaries-${{ matrix.npm_dir }}
+          path: payload
+
+      - name: Download NAPI addon
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: napi-${{ matrix.npm_dir }}
+          path: napi
+
+      - name: Download release archive
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: fallow-${{ matrix.target }}
+          path: archive
+
+      # The archive must hold the same bytes as the raw payload. Then the
+      # rebuilt archive below differs from the build output only by the
+      # signatures.
+      - name: Validate Windows payload inventory
+        if: steps.mode.outputs.enabled == 'true'
+        shell: bash
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          expected="$(printf '%s\n' fallow fallow-multicall fallow-lsp fallow-mcp fallow-similar-code \
+            | sed "s/\$/-${FALLOW_NPM_DIR}.exe/" | sort)"
+          entries() { find "$1" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort; }
+          if [ "$(entries payload)" != "$expected" ]; then
+            echo "::error::Unexpected Windows payload inventory"
+            exit 1
+          fi
+          if [ "$(entries napi)" != "fallow-node.${FALLOW_NPM_DIR}.node" ] || \
+              [ "$(entries archive)" != "fallow-${FALLOW_TARGET}.zip" ]; then
+            echo "::error::Unexpected NAPI addon or archive inventory"
+            exit 1
+          fi
+          mkdir unpacked
+          7z x -ounpacked "archive/fallow-${FALLOW_TARGET}.zip" >/dev/null
+          for name in fallow fallow-lsp fallow-mcp fallow-similar-code; do
+            if ! cmp -s "unpacked/${name}.exe" "payload/${name}-${FALLOW_NPM_DIR}.exe"; then
+              echo "::error::Archive entry ${name}.exe differs from the raw payload"
+              exit 1
+            fi
+          done
+          if [ "$(find unpacked -mindepth 1 | wc -l)" -ne 4 ]; then
+            echo "::error::Unexpected release archive entries"
+            exit 1
+          fi
+
+      - name: Authenticate Windows signing with Microsoft Entra
+        if: steps.mode.outputs.enabled == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.WINDOWS_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ vars.WINDOWS_SIGNING_TENANT_ID }}
+          allow-no-subscriptions: true
+          audience: api://AzureADTokenExchange
+
+      - name: Sign Windows binaries
+        if: steps.mode.outputs.enabled == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+          files: |
+            ${{ github.workspace }}\payload\fallow-${{ matrix.npm_dir }}.exe
+            ${{ github.workspace }}\payload\fallow-multicall-${{ matrix.npm_dir }}.exe
+            ${{ github.workspace }}\payload\fallow-lsp-${{ matrix.npm_dir }}.exe
+            ${{ github.workspace }}\payload\fallow-mcp-${{ matrix.npm_dir }}.exe
+            ${{ github.workspace }}\payload\fallow-similar-code-${{ matrix.npm_dir }}.exe
+            ${{ github.workspace }}\napi\fallow-node.${{ matrix.npm_dir }}.node
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          description: Fallow
+          description-url: https://fallow.tools
+          exclude-environment-credential: true
+
+      - name: Verify Authenticode signatures
+        if: steps.mode.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem payload, napi -File)
+          if ($files.Count -ne 6) { throw "Expected 6 signed files, found $($files.Count)" }
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "$($file.Name): signature status is $($signature.Status)"
+            }
+            if ($signature.SignerCertificate.Subject -notmatch '(^|, )O=Fallow B\.V\.(,|$)') {
+              throw "$($file.Name): unexpected signer $($signature.SignerCertificate.Subject)"
+            }
+            if ($null -eq $signature.TimeStamperCertificate) {
+              throw "$($file.Name): signature has no timestamp"
+            }
+            Write-Output "$($file.Name): $($signature.SignerCertificate.Subject)"
+          }
+
+      - name: Rebuild release archive with signed binaries
+        if: steps.mode.outputs.enabled == 'true'
+        shell: bash
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          rm -rf staged "archive/fallow-${FALLOW_TARGET}.zip"
+          mkdir staged
+          for name in fallow fallow-lsp fallow-mcp fallow-similar-code; do
+            cp "payload/${name}-${FALLOW_NPM_DIR}.exe" "staged/${name}.exe"
+          done
+          (cd staged && 7z a "../archive/fallow-${FALLOW_TARGET}.zip" \
+            fallow.exe fallow-lsp.exe fallow-mcp.exe fallow-similar-code.exe)
+
+      - name: Replace unsigned binary payload
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-binaries-${{ matrix.npm_dir }}
+          path: payload/*
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Replace NAPI addon
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: napi-${{ matrix.npm_dir }}
+          path: napi/fallow-node.${{ matrix.npm_dir }}.node
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Replace release archive
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fallow-${{ matrix.target }}
+          path: archive/fallow-${{ matrix.target }}.zip
+          if-no-files-found: error
+          overwrite: true
+
   # The build job checks the musl binaries only statically. This job executes
   # the exact unsigned-binaries-<platform> artifact on its own architecture in
   # Alpine, which has no glibc. Signing does not change the bytes, so these are
@@ -929,7 +1133,7 @@ jobs:
   sign:
     name: Sign (${{ matrix.npm_dir }})
     if: ${{ !inputs.auth_check }}
-    needs: build
+    needs: [build, authenticode]
     environment: release
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -1081,13 +1285,26 @@ jobs:
       contents: read
 
   similar-code-conformance:
-    name: Similar-code production conformance
+    name: Similar-code production conformance (${{ matrix.npm_dir }})
     if: ${{ !inputs.auth_check }}
     needs: [build, sign]
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      # Each leg runs one signed companion binary on its own platform. The
+      # macOS binaries link Apple Accelerate, so they use a different numeric
+      # path than the Linux binary. All legs compare against one baseline.
+      matrix:
+        include:
+          - npm_dir: linux-x64-gnu
+            os: ubuntu-26.04
+          - npm_dir: darwin-arm64
+            os: macos-latest
+          - npm_dir: darwin-x64
+            os: macos-15-intel
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1097,15 +1314,17 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Download exact Linux x64 similar-code provider
+      - name: Download exact similar-code provider
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: fallow-similar-code-linux-x64-gnu
+          name: fallow-similar-code-${{ matrix.npm_dir }}
           path: ${{ runner.temp }}/fallow-similar-code
 
       - name: Prepare exact provider and isolated model cache
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
         run: |
-          echo "SIDECAR_BIN=$RUNNER_TEMP/fallow-similar-code/fallow-similar-code-linux-x64-gnu" >> "$GITHUB_ENV"
+          echo "SIDECAR_BIN=$RUNNER_TEMP/fallow-similar-code/fallow-similar-code-${FALLOW_NPM_DIR}" >> "$GITHUB_ENV"
           echo "FALLOW_SIMILAR_CODE_CACHE_DIR=$RUNNER_TEMP/fallow-similar-code-cache" >> "$GITHUB_ENV"
 
       - name: Verify signed provider and release size ceiling
@@ -1115,7 +1334,7 @@ jobs:
           set -euo pipefail
           chmod +x "$SIDECAR_BIN"
           node .github/scripts/verify-binary.mjs "$SIDECAR_BIN" "${SIDECAR_BIN}.sig"
-          actual_bytes=$(stat --format=%s "$SIDECAR_BIN")
+          actual_bytes=$(wc -c < "$SIDECAR_BIN" | tr -d '[:space:]')
           maximum_bytes=$(jq -r '.release_binary_max_bytes' tools/similar-code-sidecar/audit-allowlist.json)
           if [ "$actual_bytes" -gt "$maximum_bytes" ]; then
             echo "::error::Similar-code provider is ${actual_bytes} bytes, above ${maximum_bytes}"
@@ -1129,26 +1348,28 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/fallow-similar-code-cache
-          key: similar-code-model-516f4baf13dec4ddddda8631e019b5737c8bc250-semantics-v1
+          key: similar-code-model-516f4baf13dec4ddddda8631e019b5737c8bc250-semantics-v2
 
       - name: Set up the exact production model
         run: |
           "$SIDECAR_BIN" setup --local --json
 
       - name: Compare production Candle output with the compact baseline
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
         run: |
           node scripts/semantic-clone-candle-conformance.mjs \
             --sidecar-bin "$SIDECAR_BIN" \
             --pretty > similar-code-candle-conformance.json
           jq -r '
-            ["## Similar-code production conformance", "", "| Case | Similarity | Selected |", "| --- | ---: | :---: |"],
+            ["## Similar-code production conformance (\(env.FALLOW_NPM_DIR))", "", "| Case | Similarity | Selected |", "| --- | ---: | :---: |"],
             (.cases[] | "| \(.id) | \(.similarity) | \(.selected) |")
           ' similar-code-candle-conformance.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload compact production conformance evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: similar-code-candle-conformance
+          name: similar-code-candle-conformance-${{ matrix.npm_dir }}
           path: similar-code-candle-conformance.json
           if-no-files-found: error
           retention-days: 30
@@ -1495,6 +1716,10 @@ jobs:
           # cp will fail loud here instead of silently shipping a stale
           # schema to npm consumers. Refs #440.
           diff schema.json npm/fallow/schema.json
+          # Same invariant for the rule-pack schema, bundled so rule packs
+          # can use a local, version-matched $schema. Refs #3851.
+          cp rule-pack-schema.json npm/fallow/rule-pack-schema.json
+          diff rule-pack-schema.json npm/fallow/rule-pack-schema.json
 
       - name: Bundle LICENSE into fallow package
         run: |

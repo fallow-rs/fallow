@@ -279,6 +279,12 @@ define_plugin!(
             if let Some(normalized) =
                 config_parser::normalize_config_path(&replacement, config_path, root)
             {
+                super::alias_replacement::credit_unrouted_replacement(
+                    &mut result,
+                    &find,
+                    &normalized,
+                    config_path,
+                );
                 result.path_aliases.push((find, normalized));
             }
         }
@@ -562,6 +568,36 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_credits_replacement_exports_of_unrouted_alias_keys() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg" }"#).expect("write manifest");
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: {
+                        "./clock.js": "/src/stubs/clock.ts",
+                        pkg: "/src/stubs/pkg.ts",
+                        "@lib": "/src/lib/index.ts",
+                        "@": "/src"
+                    }
+                }
+            };
+        "#;
+        let result = VitePlugin.resolve_config(&root.join("vite.config.prod.ts"), source, root);
+
+        assert_eq!(
+            result.entry_export_credits,
+            vec![
+                crate::plugins::UsedExportRule::new("src/stubs/clock.ts", ["*"]),
+                crate::plugins::UsedExportRule::new("src/stubs/pkg.ts", ["*"]),
+            ]
+        );
+    }
+
+    #[test]
     fn resolve_config_reads_alias_replacement_through_local_path_helper() {
         let source = r"
             import { defineConfig } from 'vite';
@@ -594,6 +630,83 @@ mod tests {
                 ("local-b".to_string(), "lib/b.ts".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn resolve_config_reads_alias_with_regex_find() {
+        let source = r"
+            import { fileURLToPath, URL } from 'node:url';
+            const p = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
+            export default {
+                resolve: {
+                    alias: [
+                        { find: /^node:module$/, replacement: p('./src/shim.ts') },
+                        { find: /^@\/(.*)$/, replacement: p('./src/$1') },
+                        { find: /^#\//, replacement: '/src/lib/' },
+                        { find: /^%\//, replacement: '/src/lib' },
+                        { find: /^~lib\/(.+)$/u, replacement: '/lib/$1' },
+                        { find: /\.svg$/, replacement: './src/svg.ts' },
+                        { find: /^Pkg$/i, replacement: './src/pkg.ts' },
+                        { find: /^@app\/(.*)$/, replacement: './src/app.ts' },
+                        { find: /^@x\/(.*)$/, replacement: './src/$1/index.ts' },
+                        {
+                            find: /^regex\/(.*)/,
+                            replacement: `${path.resolve(import.meta.dirname, 'dir')}/$1`,
+                        },
+                        { find: /^=replace\/(.*)/, replacement: `${dirname}/$1` },
+                    ]
+                }
+            };
+        ";
+        let result = VitePlugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![
+                ("node:module".to_string(), "src/shim.ts".to_string()),
+                ("@".to_string(), "src".to_string()),
+                ("#/".to_string(), "src/lib".to_string()),
+                ("~lib".to_string(), "lib".to_string()),
+                ("regex".to_string(), "dir".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_reads_regex_find_through_spread_and_test_projects() {
+        let source = r#"
+            const shared = [{ find: /^virtual-a$/, replacement: './src/a.ts' }];
+            export default {
+                resolve: { alias: [...shared] },
+                test: {
+                    projects: [
+                        {
+                            test: { name: "unit" },
+                            resolve: { alias: [{ find: /^virtual-b$/, replacement: './mock/b.ts' }] },
+                        },
+                    ],
+                },
+            };
+        "#;
+        let result = VitePlugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        for pair in [("virtual-a", "src/a.ts"), ("virtual-b", "mock/b.ts")] {
+            assert!(
+                result
+                    .path_aliases
+                    .contains(&(pair.0.to_string(), pair.1.to_string())),
+                "{pair:?} missing: {:?}",
+                result.path_aliases
+            );
+        }
     }
 
     #[test]

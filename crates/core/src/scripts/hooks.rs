@@ -157,36 +157,9 @@ fn collect_hook_script_commands(dir: &Path, commands: &mut Vec<String>) {
     paths.sort();
     for path in paths {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            commands.extend(shell_script_commands(&content));
+            commands.extend(super::shell_helpers::script_file_commands(&content));
         }
     }
-}
-
-/// Split a shell script into command lines: comments, the shebang and the
-/// `. "$(dirname -- "$0")/_/husky.sh"` sourcing line are skipped, and a line
-/// that ends with `\` continues on the next one.
-fn shell_script_commands(content: &str) -> Vec<String> {
-    let mut commands = Vec::new();
-    let mut pending = String::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if pending.is_empty()
-            && (trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(". "))
-        {
-            continue;
-        }
-        if let Some(continued) = trimmed.strip_suffix('\\') {
-            pending.push_str(continued);
-            pending.push(' ');
-            continue;
-        }
-        pending.push_str(trimmed);
-        commands.push(std::mem::take(&mut pending));
-    }
-    if !pending.trim().is_empty() {
-        commands.push(pending);
-    }
-    commands
 }
 
 fn read_json(path: &Path) -> Option<serde_json::Value> {

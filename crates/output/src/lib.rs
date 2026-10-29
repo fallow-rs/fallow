@@ -169,11 +169,12 @@ pub use codeclimate::{
     codeclimate_issues_to_value,
 };
 pub use coverage_envelopes::{
-    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
-    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
-    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet,
-    build_coverage_analyze_output, serialize_coverage_analyze_json_output,
-    serialize_coverage_setup_json_output,
+    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupCi, CoverageSetupCiProvider,
+    CoverageSetupCloud, CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember,
+    CoverageSetupOutput, CoverageSetupPackageManager, CoverageSetupRuntimeTarget,
+    CoverageSetupSchemaVersion, CoverageSetupSnippet, CoverageSetupSourceMaps, CoverageSetupWait,
+    CoverageSetupWaitOutcome, build_coverage_analyze_output,
+    serialize_coverage_analyze_json_output, serialize_coverage_setup_json_output,
 };
 pub use dead_code_sarif::build_dead_code_sarif;
 pub use diff::{
@@ -235,10 +236,10 @@ pub use health_css::{
     CssCandidateActionType, CssDuplicateBlock, CssFileAnalytics, CssNotationConsistency,
     CssNotationCount, CvaDuplicateVariantBlock, CvaVariantTokenDrift, NearDuplicateThemeToken,
     NearestStylingToken, RawStyleValue, ScopedUnusedClasses, StylingAgentDisposition,
-    StylingFinding, StylingFindingConfidence, StylingFindingSeverity, TOKEN_CONSUMER_SAMPLE_CAP,
-    TailwindArbitraryValue, TokenConsumerLocation, TokenConsumers, UndefinedKeyframes,
-    UnreferencedCssClass, UnreferencedKeyframes, UnresolvedClassReference, UnusedAtRule,
-    UnusedAtRuleKind, UnusedFontFace, UnusedThemeToken,
+    StylingFinding, StylingFindingConfidence, StylingFindingInternal, StylingFindingSeverity,
+    TOKEN_CONSUMER_SAMPLE_CAP, TailwindArbitraryValue, TokenConsumerLocation, TokenConsumers,
+    UndefinedKeyframes, UnreferencedCssClass, UnreferencedKeyframes, UnresolvedClassReference,
+    UnusedAtRule, UnusedAtRuleKind, UnusedFontFace, UnusedThemeToken,
 };
 pub use health_diagnostics::{
     FrameworkHealthDetector, FrameworkHealthDetectorStatus, FrameworkHealthDiagnostics,
@@ -271,14 +272,15 @@ pub use health_scores::{
     COGNITIVE_EXTRACTION_THRESHOLD, ClockProvenance, ClockSource, ComplexityViolation,
     ComponentRollup, ContributorEntry, ContributorIdentifierFormat, CoverageSource,
     CoverageSourceConsistency, CoverageTier, DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH,
-    DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, ExceededThreshold, FileHealthScore,
-    FindingSeverity, HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD,
-    HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore, HealthScorePenalties,
-    HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry, MI_DENSITY_MIN_LINES,
-    OwnershipMetrics, OwnershipState, ReactHookProfile, STYLING_HEALTH_FORMULA_VERSION,
-    StylingHealth, StylingHealthConfidence, StylingHealthPenalties, ThresholdOverrideDimension,
-    ThresholdOverrideMetrics, ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource,
-    compute_finding_severity, letter_grade, summarize_coverage_source_consistency,
+    DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, ExceededThreshold,
+    FILE_LINES_FINDING_NAME, FileHealthScore, FindingSeverity, HEALTH_SCORE_FORMULA_VERSION,
+    HOTSPOT_SCORE_THRESHOLD, HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore,
+    HealthScorePenalties, HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry,
+    MI_DENSITY_MIN_LINES, OwnershipMetrics, OwnershipState, ReactHookProfile,
+    STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence, StylingHealthPenalties,
+    ThresholdOverrideDimension, ThresholdOverrideMetrics, ThresholdOverrideState,
+    ThresholdOverrideStatus, ThresholdSource, compute_finding_severity, letter_grade,
+    summarize_coverage_source_consistency,
 };
 pub use health_targets::{
     CloneSiblingEvidence, CoChangePartnerEvidence, Confidence, ContributingFactor,
@@ -325,12 +327,12 @@ pub use mutation::{
     MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
     MutationInspectStatus, MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile,
     MutationPlanMutant, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
-    MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
-    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
-    MutationStatusCounts, MutationSummary, MutationTimings, MutationTypecheckOutput,
-    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict, MutationVerdictInput,
-    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
-    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    MutationResumeOutput, MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput,
+    MutationSchemaVersion, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
+    MutationStaleReason, MutationStatusCounts, MutationSummary, MutationTimings,
+    MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict,
+    MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
+    MutationWorktreeCheck, serialize_mutation_inspect_json_output, serialize_mutation_json_output,
     serialize_mutation_plan_json_output,
 };
 pub use next_steps::{

@@ -15,7 +15,7 @@ and parse-cache changes.
   including the synthetic `<module>` unit for module-scope branching.
 - `crates/extract/src/template_complexity/`: synthetic `<template>` complexity
   for Angular, Vue, Svelte, and Astro, over a shared JS-expression engine.
-- `crates/extract/src/sfc.rs`, `astro.rs`, `glimmer.rs`, `mdx.rs`, and
+- `crates/extract/src/sfc.rs`, `astro/mod.rs`, `glimmer.rs`, `mdx.rs`, and
   `graphql.rs`: component and embedded-language extraction.
 - `crates/extract/src/sfc_template/`: template-visible usage for supported
   component formats.

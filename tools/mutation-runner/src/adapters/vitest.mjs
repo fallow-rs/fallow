@@ -30,6 +30,8 @@ const RUNNER_NAME = "vitest";
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
 const OVERLAY_KEY = "fallowOverlay";
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
+/** The companion directory, with the runtime files that a test worker loads. */
+const COMPANION_DIR = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MESSAGE = /\b(?:Test|Hook) timed out in \d+ms/u;
 const OVERLAY_PLUGIN = "fallow-mutation-overlay";
 
@@ -87,6 +89,13 @@ const componentEntry = (overlay, id) => {
  * plugins of `createVitest` to the root project only. Vitest 5 does not give
  * them to an inline project with a `browser` block, also when browser mode
  * is off. Vite keeps one copy of a plugin that a project gets twice.
+ *
+ * The `config` hook also adds the companion directory to `server.fs.allow`
+ * of each server that has this plugin. A client test environment, such as
+ * `happy-dom` or `jsdom`, loads the setup file of the runtime through Vite.
+ * Vite refuses a file outside `server.fs.allow`, and the companion directory
+ * is outside the project when `FALLOW_CACHE_DIR` is outside it. Vitest adds
+ * its own default entries to the list, so the workspace root stays allowed.
  */
 const overlayPlugin = (overlay, loaded) => {
   const plugin = {
@@ -94,12 +103,14 @@ const overlayPlugin = (overlay, loaded) => {
     enforce: "pre",
     config(config) {
       const projects = config.test?.projects;
-      if (!Array.isArray(projects)) return;
-      config.test.projects = projects.map((project) =>
-        isPlainObject(project)
-          ? { ...project, plugins: [...(project.plugins ?? []), plugin] }
-          : project,
-      );
+      if (Array.isArray(projects)) {
+        config.test.projects = projects.map((project) =>
+          isPlainObject(project)
+            ? { ...project, plugins: [...(project.plugins ?? []), plugin] }
+            : project,
+        );
+      }
+      return { server: { fs: { allow: [COMPANION_DIR] } } };
     },
     load(id) {
       const entry = componentEntry(overlay, id);

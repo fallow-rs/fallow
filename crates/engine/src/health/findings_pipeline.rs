@@ -12,6 +12,7 @@ use super::baseline_io::{HealthBaselineSaveInput, load_health_baseline, save_hea
 use super::component_rollup::{
     ComponentTemplateUnitScope, append_component_rollup_findings, collect_component_template_units,
 };
+use super::file_lines::{FileLinesInput, append_file_lines_findings};
 use super::filters::filter_complexity_findings_by_diff;
 use super::findings::{
     CollectFindingsInput, CrapFindingMergeInput, collect_findings_with_resolver,
@@ -48,6 +49,7 @@ struct CollectedHealthFindings {
 pub(super) struct HealthFindingsInput<'a> {
     pub(super) opts: &'a HealthOptions<'a>,
     pub(super) config: &'a ResolvedConfig,
+    pub(super) files: &'a [fallow_types::discover::DiscoveredFile],
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) file_paths:
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
@@ -144,8 +146,22 @@ fn collect_health_findings(
         threshold_state_tracker,
         complexity_breakdown: input.opts.complexity_breakdown,
     };
-    let (findings, files_analyzed, total_functions) =
+    let (mut findings, files_analyzed, total_functions) =
         collect_findings_with_resolver(&mut collect_input);
+    append_file_lines_findings(
+        &FileLinesInput {
+            files: input.files,
+            modules: input.modules,
+            file_paths: input.file_paths,
+            config_root: &input.config.root,
+            ignore_set: input.ignore_set,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            threshold_resolver,
+        },
+        threshold_state_tracker,
+        &mut findings,
+    );
 
     CollectedHealthFindings {
         findings,
@@ -401,6 +417,9 @@ fn apply_complexity_rules(
     findings.retain_mut(|finding| {
         let exceeded = finding.exceeded;
         let severity_of = |rules: &fallow_config::RulesConfig| {
+            if exceeded.is_file_lines() {
+                return rules.complexity_file_lines;
+            }
             rules.complexity_severity(
                 exceeded.includes_cyclomatic(),
                 exceeded.includes_cognitive(),

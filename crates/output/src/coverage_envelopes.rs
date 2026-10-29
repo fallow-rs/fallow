@@ -35,9 +35,114 @@ pub struct CoverageSetupOutput {
     pub next_steps: Vec<String>,
     /// Non-fatal problems encountered during detection.
     pub warnings: Vec<String>,
+    /// Fallow Cloud plan, present only for `fallow coverage setup --cloud`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<CoverageSetupCloud>,
     /// `_meta` block with docs and field definitions, when requested.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
+}
+
+/// Fallow Cloud plan of `fallow coverage setup --cloud`.
+///
+/// The beacon, the inventory, the source maps and the deployment registration
+/// must all carry the same commit SHA. The plan names only the environment
+/// variable names of keys, never a key value.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupCloud {
+    /// Fallow Cloud project id (`owner/repo`), or null when it was not detected.
+    pub project_id: Option<String>,
+    /// Commit SHA that `--wait` checks: `--git-sha`, else `HEAD` of the
+    /// working tree, or null outside a git repository.
+    pub git_sha: Option<String>,
+    /// Fallow Cloud API base URL.
+    pub endpoint: String,
+    /// Environment variable that holds the full API key in CI and on the server.
+    pub api_key_env: String,
+    /// Environment variable that holds the ingest-only browser key, when a
+    /// member runs in the browser.
+    pub browser_key_env: Option<String>,
+    /// Environment variables the server snippets read the deployed commit SHA
+    /// from, in order.
+    pub commit_sha_env: Vec<String>,
+    /// CI steps that upload the inventory and source maps and register the
+    /// deployment.
+    pub ci: CoverageSetupCi,
+    /// Whether the production build needs a source map upload.
+    pub source_maps: CoverageSetupSourceMaps,
+    /// Activation endpoint that reports each setup step, or null without a
+    /// project id.
+    pub activation_url: Option<String>,
+    /// Command that waits until the cloud reports every step as done.
+    pub wait_command: String,
+    /// Result of `--wait`, present only when the command waited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<CoverageSetupWait>,
+}
+
+/// CI provider of a Fallow Cloud setup plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageSetupCiProvider {
+    /// GitHub Actions workflow steps.
+    GithubActions,
+}
+
+/// CI steps of a Fallow Cloud setup plan.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupCi {
+    /// CI provider the steps are written for.
+    pub provider: CoverageSetupCiProvider,
+    /// Existing workflow files that look like a deploy workflow, relative to
+    /// the project root.
+    pub workflows_detected: Vec<String>,
+    /// Workflow steps to add to the job that builds and deploys.
+    pub steps: String,
+    /// Where the steps go and what they need.
+    pub instructions: String,
+}
+
+/// Source map guidance of a Fallow Cloud setup plan.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupSourceMaps {
+    /// Whether the CI steps upload source maps.
+    pub needed: bool,
+    /// Build output directories the maps are uploaded from, one per bundled
+    /// workspace member, relative to the project root. Empty when no upload
+    /// is needed.
+    pub dirs: Vec<String>,
+    /// Why the upload is or is not needed.
+    pub reason: String,
+}
+
+/// Outcome of `fallow coverage setup --cloud --wait`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageSetupWaitOutcome {
+    /// The cloud reported every step as done.
+    Complete,
+    /// The wait timed out before every step was done.
+    Timeout,
+    /// The activation endpoint could not be read.
+    Error,
+}
+
+/// Result of `fallow coverage setup --cloud --wait`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupWait {
+    /// How the wait ended.
+    pub outcome: CoverageSetupWaitOutcome,
+    /// The last activation response body (`data`) from the cloud, unchanged,
+    /// or null when no read succeeded. New step ids and states can appear.
+    pub activation: Option<serde_json::Value>,
+    /// Error text when the outcome is `error`.
+    pub message: Option<String>,
 }
 
 /// Schema-version discriminator for [`CoverageSetupOutput`].
@@ -257,6 +362,7 @@ mod tests {
             dockerfile_snippet: None,
             next_steps: Vec::new(),
             warnings: Vec::new(),
+            cloud: None,
             meta: None,
         };
 

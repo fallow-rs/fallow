@@ -230,6 +230,7 @@ fn collect_complexity_finding(
         threshold_source: applied_thresholds
             .override_index
             .map(|_| fallow_output::ThresholdSource::Override),
+        max_file_lines: None,
     })
 }
 
@@ -667,6 +668,7 @@ fn new_crap_finding(args: NewCrapFindingInput<'_, '_>) -> ComplexityViolation {
             .applied_thresholds
             .override_index
             .map(|_| fallow_output::ThresholdSource::Override),
+        max_file_lines: None,
     }
 }
 

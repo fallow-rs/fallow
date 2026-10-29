@@ -28,8 +28,14 @@ pub fn health_signal_header_part(results: &AnalysisResults) -> String {
             results.prop_drilling_chains.len() - results.enforced_prop_drilling_count(),
             "prop drilling chain",
         ),
-        (results.thin_wrappers.len(), "thin wrapper"),
-        (results.duplicate_prop_shapes.len(), "duplicate prop shape"),
+        (
+            results.thin_wrappers.len() - results.enforced_thin_wrapper_count(),
+            "thin wrapper",
+        ),
+        (
+            results.duplicate_prop_shapes.len() - results.enforced_duplicate_prop_shape_count(),
+            "duplicate prop shape",
+        ),
     ];
     let count: usize = kinds.iter().map(|(n, _)| n).sum();
     if count == 0 {

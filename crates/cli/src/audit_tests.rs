@@ -320,7 +320,7 @@ fn audit_orphan_sweep_removes_dead_pid_worktree() {
     assert!(worktree_path.is_dir());
     assert!(worktree_is_registered_with_git(&repo, &worktree_path));
 
-    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path(), std::time::Duration::ZERO);
 
     assert!(
         !worktree_path.exists(),
@@ -360,7 +360,7 @@ fn audit_orphan_sweep_keeps_live_pid_worktree() {
         ],
     );
 
-    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path(), std::time::Duration::ZERO);
 
     assert!(
         worktree_path.is_dir(),
@@ -1924,7 +1924,7 @@ fn orphan_sweep_removes_unregistered_dead_pid_dir() {
     fs::create_dir_all(&dir).expect("orphan dir should be created");
     fs::write(dir.join(".git"), "gitdir: fallow-audit-unregistered\n").expect("stub should write");
 
-    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path(), std::time::Duration::ZERO);
 
     assert!(
         !dir.exists(),
@@ -2738,6 +2738,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -2829,6 +2830,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -2929,6 +2931,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3020,6 +3023,7 @@ fn audit_gate_all_skips_base_snapshot() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::All,
@@ -3131,6 +3135,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3243,6 +3248,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3354,6 +3360,7 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3536,6 +3543,7 @@ fn audit_new_only_still_gates_pasted_clone_as_introduced() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3662,6 +3670,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3769,6 +3778,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -3922,6 +3932,7 @@ export function App() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -4082,6 +4093,7 @@ export function App() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -4182,6 +4194,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -4277,6 +4290,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -4381,6 +4395,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
@@ -4509,6 +4524,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::All,
@@ -4688,6 +4704,7 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: None,
+        file_lines_check: false,
         coverage: None,
         coverage_root: None,
         gate: AuditGate::All,

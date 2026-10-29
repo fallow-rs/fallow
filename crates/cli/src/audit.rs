@@ -129,6 +129,8 @@ pub struct AuditOptions<'a> {
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
     pub max_crap: Option<f64>,
+    /// The file-length check (`health.maxFileLines`) is on in the config.
+    pub file_lines_check: bool,
     /// Istanbul or raw V8 coverage input for accurate CRAP scoring in the health sub-pass.
     pub coverage: Option<&'a std::path::Path>,
     /// Prefix to strip from Istanbul source paths before rebasing to `root`.
@@ -347,6 +349,7 @@ fn build_base_audit_options<'a>(
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         fail_on_stale_baseline: false,
         max_crap: opts.max_crap,
+        file_lines_check: opts.file_lines_check,
         coverage: base_coverage.coverage.as_deref(),
         coverage_root: base_coverage.coverage_root.as_deref(),
         gate: AuditGate::All,
@@ -1277,6 +1280,7 @@ pub fn execute_audit_with_type_aware(
             cache_dir: Some(opts.cache_dir),
             changed_files,
             inherited_base_refs: &inherited_refs,
+            compare_line_counts: opts.file_lines_check,
         },
     )?;
     let Some(run) = run else {
@@ -1452,66 +1456,9 @@ fn prepare_audit_brief_external_data(
     }
 }
 
-#[expect(
-    clippy::ref_option,
-    reason = "the hidden benchmark options mirror the production AuditOptions contract"
-)]
-fn audit_review_benchmark_options<'a>(
-    root: &'a Path,
-    config_path: &'a Option<PathBuf>,
-    cache_dir: &'a Path,
-    threads: usize,
-) -> AuditOptions<'a> {
-    AuditOptions {
-        root,
-        config_path,
-        cache_dir,
-        output: OutputFormat::Json,
-        json_style: crate::json_style::JsonStyle::Compact,
-        no_cache: true,
-        threads,
-        quiet: true,
-        allow_remote_extends: false,
-        changed_since: None,
-        production: false,
-        production_dead_code: Some(false),
-        production_health: Some(false),
-        production_dupes: Some(false),
-        workspace: None,
-        changed_workspaces: None,
-        explain: false,
-        explain_skipped: false,
-        performance: false,
-        group_by: None,
-        dead_code_baseline: None,
-        health_baseline: None,
-        dupes_baseline: None,
-        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
-        fail_on_stale_baseline: false,
-        max_crap: None,
-        coverage: None,
-        coverage_root: None,
-        gate: AuditGate::NewOnly,
-        worsened: fallow_config::AuditWorsened::Warn,
-        include_entry_exports: false,
-        show_cascade: false,
-        fail_on_parse_error: false,
-        analyses: AuditAnalysisSelection::ALL,
-        css: false,
-        css_deep: false,
-        runtime_coverage: None,
-        min_invocations_hot: 0,
-        brief: true,
-        max_decisions: 4,
-        walkthrough_guide: false,
-        walkthrough: false,
-        mark_viewed: &[],
-        show_cleared: false,
-        walkthrough_file: None,
-        show_deprioritized: false,
-        scope: None,
-    }
-}
+#[path = "audit_benchmark_options.rs"]
+mod benchmark_options;
+use benchmark_options::*;
 
 /// Build the analysis corpus and preload every external input used by the
 /// review-brief assembly benchmark. This is not a supported API.
@@ -2777,6 +2724,7 @@ fn build_audit_health_options<'a>(
             max_cyclomatic: None,
             max_cognitive: None,
             max_crap: opts.max_crap,
+            max_file_lines: None,
         },
         top: None,
         sort: fallow_engine::health::HealthSort::Cyclomatic,

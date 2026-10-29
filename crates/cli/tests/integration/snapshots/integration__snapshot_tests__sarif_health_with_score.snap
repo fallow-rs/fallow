@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
-assertion_line: 3150
 expression: redact_health_sarif_version(&json_str)
 ---
 {
@@ -64,6 +63,19 @@ expression: redact_health_sarif_version(&json_str)
               "helpUri": "https://fallow.tools/docs/explanations/health/#crap-score",
               "defaultConfiguration": {
                 "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/long-file",
+              "shortDescription": {
+                "text": "File has more lines than the file-length threshold"
+              },
+              "fullDescription": {
+                "text": "The file has more physical lines than `health.maxFileLines` (or `--max-file-lines`, or a `thresholdOverrides[].maxFileLines` entry for the file). Every line counts, also blank lines and comment lines; a final newline does not add a line. The threshold is off (`0`) by default. The finding is a complexity finding with `exceeded: \"file_lines\"`, the name `<file>`, the line count in `line_count`, and the ceiling in `max_file_lines`. The `complexity-file-lines` rule sets its gate severity. In `fallow audit`, a long file that did not grow by at least 5 lines stays inherited, and one that grew is worsened."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/health/#file-length",
+              "defaultConfiguration": {
+                "level": "note"
               }
             },
             {

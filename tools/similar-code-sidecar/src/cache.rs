@@ -116,7 +116,10 @@ pub fn inspect_cache(paths: &ModelPaths) -> CacheStatus {
     if manifest != expected_manifest() {
         return CacheStatus {
             ready: false,
-            problem: Some("the installed model manifest does not match this sidecar".to_string()),
+            problem: Some(
+                "the installed model manifest does not match this sidecar; run `fallow similar-code setup --local`"
+                    .to_string(),
+            ),
         };
     }
     for artifact in ARTIFACTS {
@@ -374,6 +377,32 @@ mod tests {
                 .problem
                 .expect("manifest error")
                 .contains("does not match this sidecar")
+        );
+    }
+
+    #[test]
+    fn manifest_from_an_earlier_embedding_semantics_version_names_the_setup_command() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = ModelPaths::from_cache_root(directory.path());
+        fs::create_dir_all(&paths.directory).expect("cache directory");
+        // An upgrade from the release before the semantics bump leaves this
+        // manifest on disk. The model files stay the same, so the problem must
+        // tell the user how to record the new version.
+        let mut earlier = expected_manifest();
+        earlier.embedding_semantics_version -= 1;
+        fs::write(
+            &paths.manifest,
+            serde_json::to_vec_pretty(&earlier).expect("earlier manifest"),
+        )
+        .expect("write earlier manifest");
+
+        let status = inspect_cache(&paths);
+        assert!(!status.ready);
+        assert!(
+            status
+                .problem
+                .expect("manifest error")
+                .contains("run `fallow similar-code setup --local`")
         );
     }
 

@@ -1026,4 +1026,32 @@ mod tests {
         assert_eq!(confidence("specific"), FlagConfidence::High);
         assert_eq!(confidence("confirmed"), FlagConfidence::High);
     }
+
+    #[test]
+    fn local_generic_functions_and_lookalike_imports_are_not_certain_flags() {
+        let flags = scan(&[
+            (
+                "src/product.ts",
+                "export const getVariant = (id: string) => id;\n",
+            ),
+            (
+                "src/shop.ts",
+                "import { getVariant } from './product';\n\
+                 export const a = getVariant('oak-30x40');\n",
+            ),
+            (
+                "src/local.ts",
+                "function isEnabled(name: string) { return name.length > 0; }\n\
+                 export const b = isEnabled('local');\n",
+            ),
+            (
+                "src/checkout.ts",
+                "import { flagFor } from 'country-flag-icons';\n\
+                 import { api } from '@/features/checkout/api';\n\
+                 export const c = api.isOn('lookalike');\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["lookalike"]);
+        assert_eq!(flags[0].confidence, FlagConfidence::Medium);
+    }
 }

@@ -188,6 +188,16 @@ ecosystem = "analysis"
 cli = true
 config = [".fallowrc.json", ".fallowrc.jsonc", "fallow.toml", ".fallow.toml"]
 
+# Fallow loads the type-aware backend at run time. No script or import names
+# these packages, so they are credited by name.
+[[exact]]
+name = "fallow-type-aware"
+ecosystem = "analysis"
+
+[[exact]]
+name = "tsrs"
+ecosystem = "analysis"
+
 [[exact]]
 name = "jest"
 ecosystem = "testing"

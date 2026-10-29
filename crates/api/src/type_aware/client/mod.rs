@@ -29,12 +29,12 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[cfg(test)]
-use super::manifest::BACKEND_VERSION;
 use super::manifest::{
-    ANALYSIS_OPERATION as OPERATION, BACKEND_FAMILY, QUERY_OPERATIONS, SEMANTIC_SCHEMA_VERSION,
+    ANALYSIS_OPERATION as OPERATION, QUERY_OPERATIONS, SEMANTIC_SCHEMA_VERSION,
     WIRE_PROTOCOL_VERSION as PROTOCOL_VERSION, selected_backend,
 };
+#[cfg(test)]
+use super::manifest::{BACKEND_FAMILY, BACKEND_VERSION};
 use super::transport::{TypeAwareError, TypeAwareOutcome};
 use empty::empty_semantic_outcome;
 use queries::{build_dead_code_queries, query_supports_guarded_fix};
@@ -676,7 +676,7 @@ fn refine_dead_code_results_with_transport(
         return Ok(None);
     }
     if queries.is_empty() {
-        let (backend_family, _) = selected_backend().map_err(TypeAwareError::from)?;
+        let backend_family = selected_backend().map_err(TypeAwareError::from)?.family;
         discard_unverified_semantic_candidates(results);
         return Ok(Some(empty_semantic_outcome(
             requested_capabilities,
@@ -1433,19 +1433,9 @@ fn validate_response(
             env!("CARGO_PKG_VERSION"),
         )));
     }
-    let (backend_family, backend_version) = selected_backend().map_err(TypeAwareError::from)?;
-    if response.backend != backend_family {
-        return Err(TypeAwareError::from(format!(
-            "unsupported type-aware backend {}; expected {backend_family}",
-            response.backend
-        )));
-    }
-    if response.backend_version != backend_version {
-        return Err(TypeAwareError::from(format!(
-            "unsupported type-aware backend version {}; expected {backend_version}",
-            response.backend_version
-        )));
-    }
+    selected_backend()
+        .and_then(|backend| backend.check_reported(&response.backend, &response.backend_version))
+        .map_err(TypeAwareError::from)?;
     let expected = request
         .queries
         .iter()

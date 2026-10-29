@@ -195,6 +195,31 @@ describe("severityThemeColor", () => {
 });
 
 describe("formatComplexityOffense", () => {
+  it("shows the line count and the limit for a file-length finding", () => {
+    expect(
+      formatComplexityOffense({
+        name: "<file>",
+        cyclomatic: 0,
+        cognitive: 0,
+        exceeded: "file_lines",
+        line_count: 1240,
+        max_file_lines: 800,
+      }),
+    ).toBe("1240 lines · limit 800");
+  });
+
+  it("shows only the line count when a file-length finding has no limit", () => {
+    expect(
+      formatComplexityOffense({
+        name: "<file>",
+        cyclomatic: 0,
+        cognitive: 0,
+        exceeded: "file_lines",
+        line_count: 1240,
+      }),
+    ).toBe("1240 lines");
+  });
+
   it("leads with the function and abbreviates the metrics", () => {
     expect(
       formatComplexityOffense({ name: "parseArgs", cyclomatic: 24, cognitive: 18, crap: 31 }),

@@ -1,7 +1,10 @@
 use crate::scripts::{
-    DeclaredScriptCall, IgnoredCommandEntries, MAX_SCRIPT_EXPANSIONS, MAX_SCRIPT_INDIRECTION_DEPTH,
-    MAX_SUBSTITUTION_DEPTH, ScriptCatalog,
+    ArgumentEntries, DeclaredScriptCall, IgnoredCommandEntries, MAX_SCRIPT_EXPANSIONS,
+    MAX_SCRIPT_INDIRECTION_DEPTH, MAX_SUBSTITUTION_DEPTH, ScriptCatalog,
 };
+
+/// Shells whose `-c` value is a command.
+const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash"];
 
 /// Extract file path references from a package.json script value.
 ///
@@ -97,6 +100,7 @@ fn collect_script_file_refs(
         if tokens.is_empty() {
             continue;
         }
+        let mut unknown_body = false;
         match crate::scripts::declared_script_call(&tokens, context.scripts) {
             Some(DeclaredScriptCall::NoFileRefs) => continue,
             Some(DeclaredScriptCall::Command(command)) => {
@@ -136,7 +140,8 @@ fn collect_script_file_refs(
                 }
                 continue;
             }
-            Some(DeclaredScriptCall::UnknownBody) | None => {}
+            Some(DeclaredScriptCall::UnknownBody) => unknown_body = true,
+            None => {}
         }
         // A call of a script with an unknown body, such as
         // `npm run gen -- scripts/a.ts` with no `gen` body, has no binary;
@@ -164,35 +169,95 @@ fn collect_script_file_refs(
         let Some((cmd, start)) = crate::scripts::vite_plus::scan_command(&tokens, start) else {
             continue;
         };
-        if crate::scripts::is_file_target_tool(cmd) {
-            refs.extend(
-                crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..])
-                    .iter()
-                    .flat_map(|path| resolve(path)),
-            );
+        if let Some(body) = shell_command_body(cmd, &tokens, start, segment)
+            && depth.substitutions < MAX_SUBSTITUTION_DEPTH
+        {
+            let inner = Depth {
+                substitutions: depth.substitutions + 1,
+                ..depth
+            };
+            collect_script_file_refs(body, context, inner, expansions, refs);
             continue;
         }
-
-        refs.extend(script_file_args(cmd, &tokens, start).flat_map(resolve));
+        let files = script_file_args(cmd, &tokens, start, unknown_body);
+        refs.extend(files.iter().flat_map(|path| resolve(path)));
     }
+}
+
+/// Return the quoted command of `sh -c "watchee app/a.js"`. The shell runs
+/// it, so it is read as a command of its own and the same rules apply.
+fn shell_command_body<'a>(
+    cmd: &str,
+    tokens: &[&str],
+    start: usize,
+    segment: &'a str,
+) -> Option<&'a str> {
+    if !SHELLS.contains(&cmd) {
+        return None;
+    }
+    // Shell flags such as `-e`, `-eu` or `-o pipefail` can come before `-c`.
+    let mut idx = start + 1;
+    loop {
+        match *tokens.get(idx)? {
+            "-c" => break,
+            "-o" | "+o" => idx += 2,
+            flag if flag.starts_with(['-', '+']) => idx += 1,
+            _ => return None,
+        }
+    }
+    let (_, body) = segment.split_once(" -c ")?;
+    Some(body.trim().trim_matches(|ch| ch == '"' || ch == '\''))
 }
 
 /// The arguments of the command `cmd` at `start` that name script files. A
 /// runner such as `node` takes any file path, another command a script file.
-fn script_file_args<'a>(
-    cmd: &str,
-    tokens: &'a [&'a str],
-    start: usize,
-) -> impl Iterator<Item = &'a str> {
+///
+/// The program of the command decides which arguments count (issue #3967):
+/// a runtime such as `node` gives only its script and the modules that its
+/// flags load, and a program that fallow does not know gives no glob. A
+/// call of a script with an unknown body (`unknown_body`) can run any
+/// program, so every argument can name a file.
+fn script_file_args(cmd: &str, tokens: &[&str], start: usize, unknown_body: bool) -> Vec<String> {
     const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
-    let (args, is_ref): (&[&str], fn(&str) -> bool) = if RUNNERS.contains(&cmd) {
-        (&tokens[start + 1..], looks_like_file_path)
+    // A package manager that stays the command runs a script that the
+    // catalog does not declare.
+    const PACKAGE_MANAGERS: &[&str] = &["npm", "pnpm", "yarn"];
+    if crate::scripts::is_file_target_tool(cmd) {
+        return crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..]);
+    }
+    let entries = if unknown_body || PACKAGE_MANAGERS.contains(&cmd) {
+        ArgumentEntries::All
     } else {
-        (&tokens[start..], looks_like_script_file)
+        crate::scripts::argument_entries(cmd, &tokens[start + 1..])
     };
-    args.iter()
-        .copied()
-        .filter(move |token| !token.starts_with('-') && is_ref(token))
+    let (args, is_ref): (Vec<&str>, fn(&str) -> bool) = match entries {
+        ArgumentEntries::All if RUNNERS.contains(&cmd) => {
+            (tokens[start + 1..].to_vec(), looks_like_file_path)
+        }
+        ArgumentEntries::All => (tokens[start..].to_vec(), looks_like_script_file),
+        ArgumentEntries::Literal => (
+            tokens[start..]
+                .iter()
+                .copied()
+                .filter(|token| !crate::scripts::is_glob(token))
+                .collect(),
+            looks_like_script_file,
+        ),
+        // An executable script file (`bun --smol app/tool.js`) is the
+        // command itself, so it stays a reference.
+        ArgumentEntries::Listed(listed) => (
+            std::iter::once(tokens[start])
+                .filter(|cmd| looks_like_script_file(cmd))
+                .chain(listed)
+                .collect(),
+            looks_like_file_path,
+        ),
+        ArgumentEntries::Loaded(loaded) => return loaded,
+    };
+    args.into_iter()
+        .filter(|token| !token.starts_with('-') && is_ref(token))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Check if a token looks like a file path argument (has a directory separator
@@ -262,12 +327,29 @@ mod tests {
 
     #[test]
     fn script_call_resolves_to_the_body_with_forwarded_arguments() {
-        let scripts = catalog(&[("gen", "my-codegen"), ("run-tool", "node scripts/tool.ts")]);
+        let scripts = catalog(&[
+            ("gen", "mocha"),
+            ("codegen", "my-codegen"),
+            ("run-tool", "node scripts/tool.ts"),
+        ]);
         assert_eq!(
             extract_script_file_refs("npm run gen -- src/gen-input.ts", with_scripts(&scripts)),
             vec!["src/gen-input.ts"]
         );
-        let ignored = vec!["my-codegen".to_string()];
+        // A program that fallow does not know expands no glob, and `node`
+        // gives the arguments after its script to that script (issue #3967).
+        assert!(
+            extract_script_file_refs("npm run codegen -- src/**/*.ts", with_scripts(&scripts))
+                .is_empty()
+        );
+        assert_eq!(
+            extract_script_file_refs(
+                "npm run run-tool -- src/gen-input.ts",
+                with_scripts(&scripts)
+            ),
+            vec!["scripts/tool.ts"]
+        );
+        let ignored = vec!["mocha".to_string()];
         assert!(
             extract_script_file_refs(
                 "npm run gen -- src/gen-input.ts",
@@ -295,6 +377,122 @@ mod tests {
             refs("npm run gen -- src/gen-input.ts"),
             vec!["src/gen-input.ts"]
         );
+    }
+
+    #[test]
+    fn script_arguments_after_the_runtime_script_are_data() {
+        assert_eq!(refs("node tool.js src/**/*.js"), vec!["tool.js"]);
+        assert_eq!(refs("node tool.js --input src/lib/b.js"), vec!["tool.js"]);
+        assert_eq!(
+            refs("node api-docs/build-openapi.js --definition a.json src/*.js src/**/*.js"),
+            vec!["api-docs/build-openapi.js"]
+        );
+        assert!(refs("watchee -f './src/**/*' -c 'echo hi'").is_empty());
+        assert!(refs("pnpm watchee -f ./src/**/*.js -c 'echo hi'").is_empty());
+        assert_eq!(
+            refs("jscodeshift -t codemods/transform.js"),
+            vec!["codemods/transform.js"]
+        );
+        assert_eq!(refs("time node app/x.js data/a.js"), vec!["app/x.js"]);
+        assert_eq!(
+            refs("node --import=./app/instrument.mjs app/server.js"),
+            vec!["./app/instrument.mjs", "app/server.js"]
+        );
+        assert_eq!(
+            refs("bun build ./app/x.ts --outdir dist"),
+            vec!["./app/x.ts"]
+        );
+        assert_eq!(refs("deno serve app/x.ts"), vec!["app/x.ts"]);
+        assert_eq!(refs("sh -c \"watchee app/data.js\""), vec!["app/data.js"]);
+        assert_eq!(refs("sh -c 'node app/x.js data/a.js'"), vec!["app/x.js"]);
+        assert!(refs("sh -c \"watchee -f 'src/**/*'\"").is_empty());
+    }
+
+    #[test]
+    fn wrapped_program_needs_a_bare_name_before_any_literal_file() {
+        assert_eq!(
+            refs("foo --target node app/x.js app/y.js"),
+            vec!["app/x.js", "app/y.js"]
+        );
+        assert_eq!(refs("my-cli app/a.js --engine node"), vec!["app/a.js"]);
+        assert_eq!(
+            refs("run scripts/deno app/a.ts app/b.ts"),
+            vec!["app/a.ts", "app/b.ts"]
+        );
+        assert_eq!(
+            refs("mocha test/a.spec.js test/b.spec.js"),
+            vec!["test/a.spec.js", "test/b.spec.js"]
+        );
+    }
+
+    #[test]
+    fn package_binary_path_and_shell_e_flag_keep_their_files() {
+        let mut failures = Vec::new();
+        for (script, expected) in [
+            (
+                "./node_modules/.bin/jscodeshift -t codemods/transform.js src",
+                &["codemods/transform.js"][..],
+            ),
+            (
+                "node_modules/.bin/some-tool app/a.js app/b.js",
+                &["app/a.js", "app/b.js"],
+            ),
+            ("bash -e scripts/gen.sh out", &["scripts/gen.sh"]),
+            ("sh -e scripts/gen.sh app/a.js", &["scripts/gen.sh"]),
+            (
+                "bash -o pipefail -c \"node app/x.js data/a.js\"",
+                &["app/x.js"],
+            ),
+            (
+                "bash -o pipefail -c \"watchee app/data.js\"",
+                &["app/data.js"],
+            ),
+        ] {
+            let found = refs(script);
+            if found != expected {
+                failures.push(format!("{script}: {found:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn shell_flags_before_c_keep_the_quoted_command() {
+        assert_eq!(
+            refs("bash -e -c \"node app/a.js data/b.js\""),
+            vec!["app/a.js"]
+        );
+        assert_eq!(
+            refs("bash -eu -c \"watchee app/data.js\""),
+            vec!["app/data.js"]
+        );
+    }
+
+    #[test]
+    fn bun_script_arguments_are_data() {
+        let failures: Vec<String> = [
+            "bun --smol app/tool.js app/data.js",
+            "bun --bun app/tool.js app/data.js",
+            "bun run app/tool.js app/data.js",
+        ]
+        .into_iter()
+        .map(|script| (script, refs(script)))
+        .filter(|(_, found)| {
+            found.contains(&"app/data.js".to_string())
+                || !found.contains(&"app/tool.js".to_string())
+        })
+        .map(|(script, found)| format!("{script}: {found:?}"))
+        .collect();
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn bun_preload_after_runtime_flags_stays_a_ref() {
+        let refs = refs(
+            "CA=./c.pem bun --bun --smol --preload ./test/preload.js \
+             ./node_modules/jest-cli/bin/jest.js --logHeapUsage",
+        );
+        assert!(refs.contains(&"./test/preload.js".to_string()), "{refs:?}");
     }
 
     #[test]
@@ -374,7 +572,7 @@ mod tests {
         reason = "ScriptCatalog takes the serde-deserialized std HashMap"
     )]
     fn a_declared_script_named_after_a_linter_keeps_its_target_refs() {
-        let scripts = catalog(&[("eslint", "node tools/check.js")]);
+        let scripts = catalog(&[("eslint", "mocha tools/check.js")]);
         assert_eq!(
             extract_script_file_refs(
                 "varlock run -- yarn eslint src/a.ts",

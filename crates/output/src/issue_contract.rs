@@ -117,8 +117,20 @@ pub fn check_meta() -> Meta {
                 range: Some("Non-negative integer".to_string()),
                 interpretation: Some("Each counted chain contributes to total_issues and CI error gates. The finding array can also contain advisory chains excluded from this counter.".to_string()),
             },
-        )]),
+        ),
+        ("summary.thin_wrappers".to_owned(), component_error_metric("Thin wrappers")),
+        ("summary.duplicate_prop_shapes".to_owned(), component_error_metric("Duplicate prop shapes")),
+        ]),
         ..Meta::default()
+    }
+}
+
+fn component_error_metric(name: &str) -> MetaMetric {
+    MetaMetric {
+        name: Some(format!("Enforced {name}")),
+        description: Some("Number of findings with saved effective_severity set to error. Warnings are excluded; the counter is omitted when zero.".to_owned()),
+        range: Some("Non-negative integer".to_owned()),
+        interpretation: Some("Each counted finding contributes to total_issues and CI error gates. The finding array can also contain advisory warnings.".to_owned()),
     }
 }
 
@@ -150,7 +162,9 @@ pub fn architecture_meta() -> Meta {
         .collect();
     meta.rules
         .retain(|code, _| architecture_codes.contains(&code.as_str()));
-    meta.metrics.remove("summary.prop_drilling_chains");
+    for key in fallow_types::results::ERROR_ONLY_RESULT_KEYS {
+        meta.metrics.remove(&format!("summary.{key}"));
+    }
     meta.docs = Some(ARCHITECTURE_DOCS.to_string());
     meta
 }
@@ -266,24 +280,30 @@ mod tests {
                     contract.code
                 );
             }
-            for check_name in contract.codeclimate_check_names {
+            for check_name in &contract.codeclimate_check_names {
                 assert!(
                     check_name.starts_with("fallow/"),
                     "result metadata code {} has unprefixed CodeClimate check name {check_name}",
                     contract.code
                 );
             }
+            assert!(
+                !contract.codeclimate_check_names.is_empty(),
+                "result metadata code {} has no CodeClimate check names",
+                contract.code
+            );
         }
     }
 
     #[test]
-    fn codeclimate_result_exclusions_are_explicit() {
-        let expected = BTreeSet::from(["duplicate-prop-shape", "thin-wrapper"]);
-        let from_contracts: BTreeSet<&str> = issue_output_contracts()
-            .filter(|contract| contract.codeclimate_check_names.is_empty())
-            .map(|contract| contract.code)
-            .collect();
-        assert_eq!(expected, from_contracts);
+    fn component_health_codeclimate_contracts_are_present() {
+        for code in ["duplicate-prop-shape", "thin-wrapper"] {
+            let contract = issue_output_contracts()
+                .find(|contract| contract.code == code)
+                .expect("component-health contract must be present");
+            let expected = format!("fallow/{code}");
+            assert_eq!(contract.codeclimate_check_names, vec![expected]);
+        }
     }
 
     #[test]

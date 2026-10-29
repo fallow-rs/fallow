@@ -1049,6 +1049,21 @@ ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "analyze: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "analyze: forwards coverage-root to default combined command"
 
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="json" INPUT_MAX_FILE_LINES="800" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+assert_contains "$ARGS" "--max-file-lines 800" "analyze: forwards max-file-lines to health"
+
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="json" INPUT_MAX_FILE_LINES="lots" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" "max-file-lines must be a positive integer" "analyze: rejects a non-numeric max-file-lines"
+
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output" "$ANALYZE_TMP/github-env"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   GITHUB_ENV="$ANALYZE_TMP/github-env" INPUT_ROOT="." INPUT_COMMAND="dead-code" \
@@ -3808,6 +3823,15 @@ assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$
 PROP_EMPTY=$(jq '.prop_drilling_chains[0].hops=[]' <<< "$PROP_CHECK")
 PROP_SCOPED=$(jq --argjson changed '["src/main.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_EMPTY")
 assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$PROP_SCOPED")" '[1,1]' "prop scope: empty-hop imported error stays counted without fabricated path"
+
+# Component health errors count after changed-file filtering; warnings remain advisory.
+COMPONENT_CHECK='{"total_issues":2,"thin_wrappers":[{"file":"src/Wrapper.tsx","effective_severity":"error"}],"duplicate_prop_shapes":[{"file":"src/Field.tsx","effective_severity":"error"},{"file":"src/Other.tsx","effective_severity":"warn"}]}'
+COMPONENT_SCOPED=$(jq --argjson changed '["src/Wrapper.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$COMPONENT_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.thin_wrappers|length),(.duplicate_prop_shapes|length)]' <<< "$COMPONENT_SCOPED")" '[1,1,0]' "component scope: wrapper errors retain their own anchor and total"
+COMPONENT_SCOPED=$(jq --argjson changed '["src/Field.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$COMPONENT_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.thin_wrappers|length),(.duplicate_prop_shapes|length)]' <<< "$COMPONENT_SCOPED")" '[1,0,1]' "component scope: duplicate shape errors retain their own anchor and total"
+COMPONENT_SCOPED=$(jq --argjson changed '["src/Other.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$COMPONENT_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.thin_wrappers|length),(.duplicate_prop_shapes|length)]' <<< "$COMPONENT_SCOPED")" '[0,0,1]' "component scope: shape warnings remain visible and advisory"
 
 # --- IssueKind summary drift guard ---
 #

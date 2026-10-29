@@ -1,11 +1,30 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
+
+#[cfg(test)]
+use fallow_engine::changed_files::clear_ambient_git_env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use fallow_engine::changed_files::clear_ambient_git_env;
+use fallow_engine::changed_files::git_command_in;
 pub use fallow_engine::repo_refs::materialize_base_dependency_context;
+#[cfg(test)]
+use fallow_engine::repo_refs::parse_worktree_gitdir;
+#[cfg(test)]
+pub use fallow_engine::repo_refs::{
+    audit_worktree_pid, is_fallow_audit_worktree_path, parse_worktree_list, process_is_alive,
+    sweep_orphan_audit_worktrees_in,
+};
+use fallow_engine::repo_refs::{
+    deregister_base_worktree, is_unregistered_gitdir_stub, trusted_base_worktree_admin_dir,
+    unregistered_gitdir_stub, write_unregistered_gitdir_stub,
+};
+pub use fallow_engine::repo_refs::{
+    is_reusable_audit_worktree_path, list_audit_worktrees, remove_audit_worktree,
+    sweep_orphan_audit_worktrees,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -155,7 +174,7 @@ impl BaseWorktree {
 
 /// Build a unique temp path for a non-reusable base worktree.
 ///
-/// The pid stays the FIRST `-`-separated segment so [`audit_worktree_pid`] and
+/// The pid stays the FIRST `-`-separated segment so [`audit_worktree_pid`](fallow_engine::repo_refs::audit_worktree_pid) and
 /// the orphan sweep keep working. A process-global monotonic counter is the
 /// final segment: the wall-clock nanos read is NOT monotonic and repeats across
 /// threads, so two `audit` runs in one process (e.g. parallel unit tests, or a
@@ -345,18 +364,6 @@ const REUSABLE_SHA_SUFFIX: &str = ".sha";
 
 /// Sidecar filename suffix of the reuse-lock file.
 const REUSABLE_LOCK_SUFFIX: &str = ".lock";
-
-/// Invalid gitdir pointer written into `<cache>/.git` after deregistering a
-/// transient audit worktree (issue #1815).
-///
-/// The `.git` file is REPLACED, never deleted: both discovery walkers use the
-/// `ignore` crate with `require_git` on, whose gitignore handling is gated on
-/// `<root>/.git` existing. Deleting the gitfile would silently stop the base
-/// pass from honoring `.gitignore`, inflating base findings and skewing
-/// audit's introduced-vs-inherited split. The stub keeps gitignore parity
-/// while pointing at a nonexistent gitdir, so any stray `git` command inside
-/// the snapshot fails loudly instead of operating on the host repo.
-const UNREGISTERED_GITDIR_STUB: &str = "gitdir: fallow-audit-unregistered\n";
 
 /// Sidecar path for the "last used" timestamp of a reusable cache entry.
 ///
@@ -933,10 +940,8 @@ pub fn sweep_reusable_caches_with_report(
     let mut report = SweepReport::default();
 
     // Legacy pass: deregister reusable caches left REGISTERED by pre-#1815
-    // fallow (the reporter's `git worktree list` backlog). This is what makes
-    // those entries vanish on the first post-upgrade audit; the `--expire=now`
-    // prune is retained ONLY here to also sweep any admin entry orphaned by a
-    // crash in the transient registration window.
+    // fallow (the reporter's `git worktree list` backlog). Each entry is
+    // deregistered individually so unavailable user worktrees stay registered.
     legacy_registered_pass(repo_root, mode, sizes, now, &mut report);
 
     // Primary pass: visit this requested root's cache plus legacy SHA-suffixed
@@ -1027,8 +1032,7 @@ fn entry_probe_metadata(path: &Path, now: SystemTime) -> (Option<u64>, Option<Pa
 /// are removed because the root-owned cache cannot reuse them. Under
 /// [`SweepMode::DryRun`] only the read-only halves run
 /// (`list_audit_worktrees`, `audit_worktree_is_registered`): registered
-/// entries are reported without locks, deregistration, removal, or the
-/// trailing `git worktree prune`.
+/// entries are reported without locks, deregistration, or removal.
 fn legacy_registered_pass(
     repo_root: &Path,
     mode: SweepMode,
@@ -1045,7 +1049,6 @@ fn legacy_registered_pass(
         .collect();
     let mut size_map = measure_entry_sizes(sizes, candidates.iter());
     let owned_path = reusable_audit_worktree_path(repo_root);
-    let mut deregistered = false;
     for path in candidates {
         let pass = if paths_equal(&path, &owned_path) {
             SweepPass::Owned
@@ -1087,7 +1090,7 @@ fn legacy_registered_pass(
                 let head = is_current_path
                     .then(|| legacy_reusable_sha(&path))
                     .flatten();
-                if unregister_worktree_checked(repo_root, &path).is_err() {
+                if unregister_legacy_worktree_checked(repo_root, &path).is_err() {
                     report.push(SweepEntry {
                         path,
                         pass,
@@ -1098,7 +1101,7 @@ fn legacy_registered_pass(
                     });
                     continue;
                 }
-                let disposition = if is_current_path {
+                if is_current_path {
                     if let Some(head) = head {
                         let _ = write_reusable_sha(&path, &head);
                     }
@@ -1112,9 +1115,7 @@ fn legacy_registered_pass(
                     SweepDisposition::RemoveFailed
                 } else {
                     SweepDisposition::ReclaimedLegacyRegistered
-                };
-                deregistered = true;
-                disposition
+                }
             }
         };
         report.push(SweepEntry {
@@ -1125,14 +1126,6 @@ fn legacy_registered_pass(
             owner_root,
             size_bytes,
         });
-    }
-    if deregistered {
-        let mut command = Command::new("git");
-        command
-            .args(["worktree", "prune", "--expire=now"])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let _ = command.output();
     }
 }
 
@@ -1802,7 +1795,7 @@ fn path_entry_exists(path: &Path) -> bool {
 fn remove_reusable_cache_entry_locked(repo_root: &Path, path: &Path) -> std::io::Result<bool> {
     let existed = reusable_cache_entry_exists(path);
     ensure_cache_entry_is_owned(path)?;
-    if trusted_worktree_admin_dir(repo_root, path).is_some() {
+    if trusted_base_worktree_admin_dir(repo_root, path).is_some() {
         unregister_worktree_checked(repo_root, path)?;
     }
     remove_dir_if_exists(path)?;
@@ -1881,124 +1874,55 @@ fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
 }
 
 /// Deregister a freshly-added audit worktree from git while KEEPING its
-/// directory on disk (issue #1815).
-///
-/// Targets the single admin dir this worktree owns via its `.git` gitfile
-/// pointer, rather than a global `git worktree prune`, so a user's unrelated
-/// prunable worktrees are never collaterally deregistered and git's
-/// name-collision admin suffixing (`<name>1`) is handled for free. The `.git`
-/// gitfile is REPLACED with an invalid stub (see [`UNREGISTERED_GITDIR_STUB`]),
-/// never deleted.
+/// directory on disk (issue #1815). The engine owns this lifecycle step, so
+/// the programmatic base snapshot uses the same code (issue #3885).
 pub fn unregister_worktree(repo_root: &Path, path: &Path) -> std::io::Result<()> {
     unregister_worktree_checked(repo_root, path)
 }
 
+fn unregister_legacy_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
+    if path.try_exists()? {
+        return unregister_worktree_checked(repo_root, path);
+    }
+    // Without a checkout gitfile, Git's own registry identifies the owned entry.
+    remove_audit_worktree(repo_root, path);
+    if list_audit_worktrees(repo_root)
+        .is_some_and(|paths| !paths.iter().any(|entry| paths_equal(entry, path)))
+    {
+        return Ok(());
+    }
+    Err(std::io::Error::other(
+        "could not deregister missing legacy audit worktree",
+    ))
+}
+
 fn unregister_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let gitfile = path.join(".git");
-    let metadata = std::fs::symlink_metadata(&gitfile)?;
-    if !metadata_is_regular_file(&metadata) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "refusing to deregister through a non-file audit worktree .git entry",
-        ));
-    }
-    let contents = std::fs::read_to_string(&gitfile)?;
-    if contents == UNREGISTERED_GITDIR_STUB {
-        return Ok(());
-    }
-    let Some(admin_dir) = trusted_worktree_admin_dir(repo_root, path) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "refusing to deregister an unverified audit worktree admin entry",
-        ));
-    };
-    remove_dir_if_exists(&admin_dir)?;
-    write_git_stub_safely(&gitfile)
+    deregister_base_worktree(repo_root, path)
 }
 
 /// Ensure a cache hit's `.git` stub stays valid. Recreates the stub if the
-/// gitfile is gone (so gitignore parity holds), and deregisters in place if a
-/// live pointer to a fallow admin dir is found (a mixed-version re-registration
-/// or a torn transient window).
+/// gitfile is gone (so gitignore parity holds), and replaces a legacy relative
+/// stub, whose gitdir the untrusted base commit can supply.
 fn repair_unregistered_git_stub(path: &Path) -> bool {
     let gitfile = path.join(".git");
     let Ok(metadata) = std::fs::symlink_metadata(&gitfile) else {
-        return write_git_stub_safely(&gitfile).is_ok();
+        return write_unregistered_gitdir_stub(&gitfile).is_ok();
     };
     if !metadata_is_regular_file(&metadata) {
         return false;
     }
-    std::fs::read_to_string(&gitfile).is_ok_and(|contents| contents == UNREGISTERED_GITDIR_STUB)
-}
-
-fn write_git_stub_safely(gitfile: &Path) -> std::io::Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).truncate(true);
-    match std::fs::symlink_metadata(gitfile) {
-        Ok(metadata) if metadata_is_regular_file(&metadata) => {}
-        Ok(_) => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "refusing to replace non-file audit worktree .git entry",
-            ));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            options.create_new(true);
-        }
-        Err(error) => return Err(error),
+    let Ok(contents) = std::fs::read_to_string(&gitfile) else {
+        return false;
+    };
+    if !is_unregistered_gitdir_stub(path, &contents) {
+        return false;
     }
-    let mut file = options.open(gitfile)?;
-    file.write_all(UNREGISTERED_GITDIR_STUB.as_bytes())?;
-    file.sync_all()
-}
-
-fn trusted_worktree_admin_dir(repo_root: &Path, path: &Path) -> Option<PathBuf> {
-    let gitfile = path.join(".git");
-    let metadata = std::fs::symlink_metadata(&gitfile).ok()?;
-    if !metadata_is_regular_file(&metadata) {
-        return None;
-    }
-    let contents = std::fs::read_to_string(&gitfile).ok()?;
-    let admin_dir = parse_worktree_gitdir(&contents)?;
-    if !is_fallow_admin_dir(&admin_dir) {
-        return None;
-    }
-    let common_dir = fallow_engine::changed_files::resolve_git_common_dir(repo_root).ok()?;
-    let worktrees_dir = dunce::canonicalize(common_dir.join("worktrees")).ok()?;
-    let admin_parent = dunce::canonicalize(admin_dir.parent()?).ok()?;
-    if admin_parent != worktrees_dir {
-        return None;
-    }
-    let backlink = std::fs::read_to_string(admin_dir.join("gitdir")).ok()?;
-    let expected_gitfile = dunce::canonicalize(&gitfile).ok()?;
-    let actual_gitfile = dunce::canonicalize(Path::new(backlink.trim())).ok()?;
-    (actual_gitfile == expected_gitfile).then_some(admin_dir)
-}
-
-/// Parse the `gitdir: <path>` pointer from a linked-worktree `.git` gitfile.
-fn parse_worktree_gitdir(contents: &str) -> Option<PathBuf> {
-    contents
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("gitdir:"))
-        .map(|rest| PathBuf::from(rest.trim()))
-}
-
-/// True when an admin dir basename is one fallow itself created, used as a
-/// safety belt before removing it.
-fn is_fallow_admin_dir(admin_dir: &Path) -> bool {
-    admin_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("fallow-audit-base-"))
+    contents == unregistered_gitdir_stub(path) || write_unregistered_gitdir_stub(&gitfile).is_ok()
 }
 
 pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(["rev-parse", rev]).current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = git_command_in(root);
+    command.args(["rev-parse", rev]);
     let output = command.output().ok()?;
     if !output.status.success() {
         return None;
@@ -2007,11 +1931,8 @@ pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
 }
 
 pub fn git_toplevel(root: &Path) -> Option<PathBuf> {
-    let mut command = Command::new("git");
-    command
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
+    let mut command = git_command_in(root);
+    command.args(["rev-parse", "--show-toplevel"]);
     let output = command.output().ok()?;
     if !output.status.success() {
         return None;
@@ -2037,268 +1958,6 @@ pub fn paths_equal(left: &Path, right: &Path) -> bool {
     }
 }
 
-pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {
-    let mut command = Command::new("git");
-    command
-        .args([
-            "worktree",
-            "remove",
-            "--force",
-            path.to_string_lossy().as_ref(),
-        ])
-        .current_dir(repo_root);
-    clear_ambient_git_env(&mut command);
-    match crate::signal::scoped_child::output(&mut command) {
-        Ok(output) => {
-            if !output.status.success() && path.exists() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                tracing::warn!(
-                    path = %path.display(),
-                    stderr = %stderr.trim(),
-                    "git worktree remove failed; the directory remains and may leak",
-                );
-            }
-        }
-        Err(err) => {
-            tracing::warn!(
-                path = %path.display(),
-                error = %err,
-                "git worktree remove subprocess failed to spawn",
-            );
-        }
-    }
-}
-
-pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
-    sweep_orphan_audit_worktrees_in(repo_root, &std::env::temp_dir());
-}
-
-/// `temp_root` is the directory scanned for unregistered dead-pid worktree
-/// directories. Production always passes `std::env::temp_dir()`; tests pass a
-/// private root because a fabricated dead-pid fixture in the SHARED temp dir
-/// is legitimate prey for any concurrent sweep (a parallel test or a spawned
-/// fallow binary), which races the fixture's own assertions.
-pub fn sweep_orphan_audit_worktrees_in(repo_root: &Path, temp_root: &Path) {
-    // Legacy pass: deregister dead-pid non-reusable worktrees left REGISTERED
-    // by pre-#1815 fallow (or by a crash in the transient registration
-    // window). The `--expire=now` prune, retained only here, also sweeps any
-    // now-dangling admin entry.
-    if deregister_legacy_orphan_worktrees(repo_root) {
-        let mut command = Command::new("git");
-        command
-            .args(["worktree", "prune", "--expire=now"])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let _ = command.output();
-    }
-
-    // Primary pass: remove unregistered dead-pid worktree DIRECTORIES via a
-    // temp-dir prefix scan. A dead PID means the owning process is gone
-    // regardless of repo, so this scan is global (not repo-scoped).
-    for path in scan_non_reusable_orphan_paths(temp_root) {
-        let _ = std::fs::remove_dir_all(&path);
-    }
-}
-
-/// Deregister dead-pid non-reusable worktrees left REGISTERED by pre-#1815
-/// fallow or by a crash mid-registration. Returns `true` when any were removed.
-fn deregister_legacy_orphan_worktrees(repo_root: &Path) -> bool {
-    let Some(worktrees) = list_audit_worktrees(repo_root) else {
-        return false;
-    };
-    let mut removed_any = false;
-    for path in worktrees {
-        if !is_fallow_audit_worktree_path(&path)
-            || is_reusable_audit_worktree_path(&path)
-            || audit_worktree_process_is_alive(&path)
-        {
-            continue;
-        }
-        remove_audit_worktree(repo_root, &path);
-        let _ = std::fs::remove_dir_all(&path);
-        removed_any = true;
-    }
-    removed_any
-}
-
-/// Enumerate unregistered non-reusable worktree DIRECTORY paths owned by a
-/// dead PID. Reusable caches yield no parseable PID and are skipped.
-fn scan_non_reusable_orphan_paths(temp: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(temp) else {
-        return Vec::new();
-    };
-    let mut paths = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let Some(pid) = audit_worktree_pid(name) else {
-            continue;
-        };
-        if process_is_alive(pid) || !entry.path().is_dir() {
-            continue;
-        }
-        paths.push(temp.join(name));
-    }
-    paths
-}
-
-pub fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
-    let mut command = Command::new("git");
-    command
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(repo_root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(parse_worktree_list(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
-}
-
-pub fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
-    output
-        .lines()
-        .filter_map(|line| line.strip_prefix("worktree "))
-        .map(PathBuf::from)
-        .filter(|path| is_fallow_audit_worktree_path(path))
-        .collect()
-}
-
-pub fn is_fallow_audit_worktree_path(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    name.starts_with("fallow-audit-base-") && path_is_inside_temp_dir(path)
-}
-
-pub fn is_reusable_audit_worktree_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("fallow-audit-base-cache-"))
-}
-
-fn path_is_inside_temp_dir(path: &Path) -> bool {
-    let temp = std::env::temp_dir();
-    let simple_path = dunce::simplified(path);
-    let simple_temp = dunce::simplified(&temp);
-    if simple_path.starts_with(simple_temp) {
-        return true;
-    }
-    let Ok(canonical_temp) = std::fs::canonicalize(&temp) else {
-        return false;
-    };
-    let simple_canonical_temp = dunce::simplified(&canonical_temp);
-    simple_path.starts_with(simple_canonical_temp)
-        || std::fs::canonicalize(path).is_ok_and(|canonical_path| {
-            dunce::simplified(&canonical_path).starts_with(simple_canonical_temp)
-        })
-}
-
-fn audit_worktree_process_is_alive(path: &Path) -> bool {
-    let Some(pid) = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(audit_worktree_pid)
-    else {
-        return false;
-    };
-    process_is_alive(pid)
-}
-
-pub fn audit_worktree_pid(name: &str) -> Option<u32> {
-    name.strip_prefix("fallow-audit-base-")?
-        .split('-')
-        .next()?
-        .parse()
-        .ok()
-}
-
-#[cfg(unix)]
-pub fn process_is_alive(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .is_ok_and(|output| output.status.success())
-}
-
-#[cfg(windows)]
-pub fn process_is_alive(pid: u32) -> bool {
-    windows_process::is_alive(pid)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn process_is_alive(_pid: u32) -> bool {
-    true
-}
-
-#[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "Win32 process-query API (OpenProcess / WaitForSingleObject / CloseHandle / GetLastError) requires unsafe FFI"
-)]
-mod windows_process {
-    use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, GetLastError, HANDLE,
-        WAIT_OBJECT_0,
-    };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
-    };
-
-    /// RAII wrapper that calls `CloseHandle` on drop, mirroring `std::mem::drop`
-    /// semantics for kernel handles. Used so every exit path through
-    /// `is_alive` releases the handle without manual cleanup.
-    struct ProcessHandle(HANDLE);
-
-    impl Drop for ProcessHandle {
-        fn drop(&mut self) {
-            // SAFETY: `self.0` is a non-null handle obtained from a successful
-            // `OpenProcess` call. We have unique ownership (the value is only
-            // ever created inside `is_alive`), so this is the sole consumer.
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-
-    /// Cross-platform PID liveness check for Windows.
-    ///
-    /// Mirrors `kill -0 $pid` semantics: returns `true` when the process is
-    /// running OR when we cannot prove it dead (e.g., `ERROR_ACCESS_DENIED` on
-    /// processes owned by another session). Returns `false` only when the PID
-    /// definitively does not exist (`ERROR_INVALID_PARAMETER`) or the wait
-    /// reports the process has exited.
-    pub fn is_alive(pid: u32) -> bool {
-        // SAFETY: `OpenProcess` accepts any `u32` PID; it either returns a
-        // non-null handle we own, or null on failure with `GetLastError`
-        // describing why. No memory is borrowed across the FFI boundary.
-        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if raw.is_null() {
-            // SAFETY: `GetLastError` reads thread-local storage set by the
-            // failing `OpenProcess` call. It has no preconditions.
-            let err = unsafe { GetLastError() };
-            #[expect(
-                clippy::match_same_arms,
-                reason = "named arm documents the cross-session case"
-            )]
-            return match err {
-                ERROR_INVALID_PARAMETER => false,
-                ERROR_ACCESS_DENIED => true,
-                _ => true,
-            };
-        }
-        let handle = ProcessHandle(raw);
-        // SAFETY: `handle.0` is non-null (checked above) and owned by the
-        // `ProcessHandle` RAII wrapper.
-        let wait_result = unsafe { WaitForSingleObject(handle.0, 0) };
-        wait_result != WAIT_OBJECT_0
-    }
-}
-
 impl Drop for BaseWorktree {
     fn drop(&mut self) {
         if self.persistent {
@@ -2310,6 +1969,10 @@ impl Drop for BaseWorktree {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
+
+#[cfg(test)]
+#[path = "base_worktree_cleanup_tests.rs"]
+mod cleanup_tests;
 
 #[cfg(test)]
 mod tests {

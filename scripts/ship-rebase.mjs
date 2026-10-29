@@ -10,10 +10,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { branchVersionBumps } from "./check-version-bumps.mjs";
 import { runCliMain } from "./cli-main.mjs";
 import { contractSurfacePaths } from "./contract-surfaces.mjs";
 import {
   checkRebase,
+  fetchShipRefs,
   git,
   leasePushArgs,
   run,
@@ -57,6 +59,14 @@ Options:
                     this commit (git rebase --onto <base> <commit>).
   --push            Push the result with a lease on the old branch tip
                     when all checks pass.
+  --if-needed       Rebase only when a squash merge of the branch is not
+                    safe as it is. The rebase runs when the merge into the
+                    base conflicts, when the branch changes CHANGELOG.md,
+                    when the branch and the base both change a generated
+                    file, or when the merge loses a version bump of the
+                    branch. Otherwise the script prints the merge command
+                    for the current head and exits with 0. It has no effect
+                    with --upstream.
   -h, --help        Show this help.
 
 The rebase, the checks and the push run in a temporary worktree with a
@@ -591,11 +601,92 @@ const checkResult = (cwd, log, options, rebased, state) => {
   });
 };
 
+// `git merge-tree` exits with 1 when the merge has conflicts.
+const MERGE_TREE_CONFLICT_EXIT = 1;
+
+/** Paths that `from..to` changes. */
+const changedPaths = (cwd, from, to) =>
+  new Set(
+    git(cwd, ["diff", "--name-only", "--no-renames", "-z", from, to])
+      .split("\0")
+      .filter((path) => path !== ""),
+  );
+
+/**
+ * The reasons why a squash merge of the old branch tip into the base is not
+ * safe without a rebase. An empty list means that the merge has no
+ * conflict, keeps each version bump of the branch, and needs no
+ * mechanical resolution that the rebase does. The bumps of the branch come
+ * from its own commits, because a merge of the base into the branch moves
+ * the merge base past an equal bump.
+ */
+const rebaseReasons = (cwd, { oldBase, oldTip, baseTip }) => {
+  const merge = run("git", ["merge-tree", "--write-tree", "--no-messages", baseTip, oldTip], {
+    cwd,
+    allowFailure: true,
+  });
+  if (merge.status === MERGE_TREE_CONFLICT_EXIT) {
+    return ["The merge into the base has a conflict."];
+  }
+  if (merge.status !== 0) {
+    throw new Error(`git merge-tree failed (exit ${merge.status})\n${merge.stderr.trim()}`);
+  }
+  const mergeTree = merge.stdout.trim().split("\n")[0];
+  const reasons = [];
+  const branchPaths = changedPaths(cwd, oldBase, oldTip);
+  if (branchPaths.has(CHANGELOG)) {
+    reasons.push(`The branch changes ${CHANGELOG}.`);
+  }
+  const basePaths = changedPaths(cwd, oldBase, baseTip);
+  const generated = [...GENERATED].filter((path) => branchPaths.has(path) && basePaths.has(path));
+  if (generated.length > 0) {
+    reasons.push(
+      formatProblem("Generated files that the branch and the base both change", generated),
+    );
+  }
+  reasons.push(
+    ...checkVersions(
+      branchVersionBumps(cwd, baseTip, oldTip),
+      versionChanges(cwd, baseTip, mergeTree),
+    ),
+  );
+  return reasons;
+};
+
+/**
+ * With `--if-needed`, report whether the branch can merge without a rebase.
+ * Returns 0 when it can, or `null` when the rebase must run.
+ */
+const skipNeedlessRebase = (cwd, log, options) => {
+  if (!options.ifNeeded || options.upstream !== null) {
+    return null;
+  }
+  const refs = fetchShipRefs(cwd, options);
+  const reasons = rebaseReasons(cwd, refs);
+  if (reasons.length > 0) {
+    log(`Rebase needed for ${refs.branch}:\n${reasons.map((reason) => `  ${reason}`).join("\n")}`);
+    return null;
+  }
+  const pr = options.pr ?? "<number>";
+  log(
+    [
+      `No rebase needed: ${refs.branch} merges into ${options.base} without a conflict and keeps each version bump.`,
+      "Merge the reviewed head without a rebase:",
+      `  gh pr merge ${pr} --auto --squash --match-head-commit ${refs.oldTip} --subject "<conventional subject> (#${pr})"`,
+    ].join("\n"),
+  );
+  return 0;
+};
+
 /**
  * Rebase the branch in a temporary worktree and run the checks. Print the
  * report to `log` and return the exit code.
  */
 const shipRebase = (cwd, options, log = console.log) => {
+  const skipped = skipNeedlessRebase(cwd, log, options);
+  if (skipped !== null) {
+    return skipped;
+  }
   const state = { generated: new Set(), cacheFiles: new Set(), bumped: [] };
   return shipBranch(cwd, log, options, {
     resolveConflicts: (worktree) => resolveMechanical(worktree, state),

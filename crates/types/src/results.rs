@@ -32,6 +32,11 @@ use crate::output_dead_code::{
 pub use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
 };
+#[path = "results_component_health.rs"]
+mod component_health;
+
+pub use component_health::ERROR_ONLY_RESULT_KEYS;
+
 use crate::serde_path;
 use crate::suppress::closest_known_kind_name;
 
@@ -613,25 +618,17 @@ pub struct AnalysisResults {
     /// Skipped during serialization: rendered separately in JSON output.
     #[serde(skip)]
     pub entry_point_summary: Option<EntryPointSummary>,
-    /// Per-component render fan-in (JSX render SITES + distinct parents) plus the
-    /// precomputed concentration aggregates. DESCRIPTIVE blast-radius signal, not
-    /// an issue type: the component-graph analogue of module fan-in. `None` on
-    /// non-React projects (the dep gate fails and `render_edges` is empty).
-    /// Skipped during serialization (internal carrier, like
-    /// [`Self::export_usages`]); the public surface is the `VitalSigns`
-    /// aggregate, so bare `fallow` / `audit` never serialize it. See
-    /// [`RenderFanInMetric`].
+    /// Internal component render metrics, exposed through health aggregates.
     #[serde(skip)]
     pub render_fan_in: Option<RenderFanInMetric>,
-    /// Per-component React render/prop/hook intelligence. DESCRIPTIVE ambient
-    /// editor context (LSP code lens + per-prop hover), NOT an issue type: it is
-    /// never in `total_issues`. Empty on non-React projects (the dep gate fails
-    /// and `component_functions` is empty). Skipped during serialization
-    /// (in-process LSP carrier, like [`Self::render_fan_in`]); bare `fallow` /
-    /// `audit` never serialize it and the JSON / schema surface is unchanged.
-    /// See [`ReactComponentIntel`].
+    /// Internal component intelligence used by editor overlays.
     #[serde(skip)]
     pub react_component_intel: Vec<ReactComponentIntel>,
+    /// Reachable files in the discovery scope, captured before report filters.
+    /// Empty or deserialized scope cannot grant semantic usage credit.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub semantic_reachable_files: rustc_hash::FxHashSet<PathBuf>,
     /// Plugin-owned framework contracts carried only into the optional
     /// semantic reconciliation pass.
     #[serde(skip)]
@@ -807,6 +804,7 @@ struct AnalysisResultsMetadataMergeParts {
     entry_point_summary: Option<EntryPointSummary>,
     render_fan_in: Option<RenderFanInMetric>,
     react_component_intel: Vec<ReactComponentIntel>,
+    semantic_reachable_files: rustc_hash::FxHashSet<PathBuf>,
     semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
@@ -896,6 +894,7 @@ fn split_merge_parts(
         entry_point_summary,
         render_fan_in,
         react_component_intel,
+        semantic_reachable_files,
         semantic_framework_contracts,
     } = other;
 
@@ -975,6 +974,7 @@ fn split_merge_parts(
             entry_point_summary,
             render_fan_in,
             react_component_intel,
+            semantic_reachable_files,
             semantic_framework_contracts,
         },
     )
@@ -1175,8 +1175,8 @@ impl FindingIgnorePolicy for PropDrillingChainFinding {
 
 /// Source-owned health families hidden by `ignoreFindings`.
 ///
-/// These live outside the unconditional counted table: only enforced error prop
-/// chains contribute to `total_issues`; the other families remain advisory.
+/// These live outside the unconditional counted table: only explicit error
+/// findings contribute to `total_issues`; warnings remain advisory.
 macro_rules! uncounted_source_owned_result_fields {
     ($callback:ident $(, $arg:expr)? ) => {
         $callback! {
@@ -1201,7 +1201,7 @@ macro_rules! remove_configured_ignored_findings {
 
 macro_rules! counted_result_key_slice {
     ($($field:ident => $key:literal,)+) => {
-        &[$($key),+, "prop_drilling_chains"]
+        &[$($key),+, "prop_drilling_chains", "thin_wrappers", "duplicate_prop_shapes"]
     };
 }
 
@@ -1299,6 +1299,7 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         entry_point_summary: _entry_point_summary,
         render_fan_in: _render_fan_in,
         react_component_intel: _react_component_intel,
+        semantic_reachable_files: _semantic_reachable_files,
         semantic_framework_contracts: _semantic_framework_contracts,
     } = results;
 }
@@ -1410,24 +1411,8 @@ impl AnalysisResults {
     pub const fn total_issues(&self) -> usize {
         counted_analysis_result_fields!(counted_result_field_sum, self)
             + self.enforced_prop_drilling_count()
-    }
-
-    /// Prop-drilling chains that explicitly enforce the error policy.
-    /// Advisory warnings stay outside totals used by strict CI count gates.
-    #[must_use]
-    pub const fn enforced_prop_drilling_count(&self) -> usize {
-        let mut count = 0;
-        let mut index = 0;
-        while index < self.prop_drilling_chains.len() {
-            if matches!(
-                self.prop_drilling_chains.as_slice()[index].effective_severity,
-                Some(crate::output_dead_code::EffectiveSeverity::Error)
-            ) {
-                count += 1;
-            }
-            index += 1;
-        }
-        count
+            + self.enforced_thin_wrapper_count()
+            + self.enforced_duplicate_prop_shape_count()
     }
 
     /// Whether any issues were found.
@@ -1549,6 +1534,8 @@ impl AnalysisResults {
     }
 
     fn merge_metadata_and_security(&mut self, parts: AnalysisResultsMetadataMergeParts) {
+        self.semantic_reachable_files
+            .extend(parts.semantic_reachable_files);
         self.feature_flags.extend(parts.feature_flags);
         self.security_findings.extend(parts.security_findings);
         self.security_unresolved_edge_files += parts.security_unresolved_edge_files;

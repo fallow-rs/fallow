@@ -203,6 +203,14 @@ const FULL_ONLY_INSTALLS = [
     resolveFrom: "crates/napi/package.json",
     installCommand: "npm ci --prefix crates/napi",
   },
+  {
+    // The sidecar has its own package.json, so the root `npm ci` leaves it
+    // out. The type-aware workspace tests fail without it. `tsrs` is only in
+    // the sidecar manifest, so the probe cannot resolve from the root install.
+    dependency: "tsrs",
+    resolveFrom: "tools/type-aware-sidecar/package.json",
+    installCommand: "npm ci --prefix tools/type-aware-sidecar",
+  },
 ];
 
 export const CI_ONLY_GATES = [
@@ -294,8 +302,8 @@ Prerequisites:
   - Node.js 22 or newer and root dependencies installed with npm install
   - A stable Rust toolchain with rustfmt and clippy
   - editors/vscode dependencies installed with pnpm install
-  - Full mode also needs crates/napi dependencies installed with npm ci
-    and a platform compiler
+  - Full mode also needs crates/napi and tools/type-aware-sidecar
+    dependencies installed with npm ci, and a platform compiler
 
 CI-only gates not simulated by this local command:
 ${ciOnlyGateList()}

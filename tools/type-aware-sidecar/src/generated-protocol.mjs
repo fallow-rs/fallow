@@ -11,13 +11,17 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({
   backend: {
     family: "typescript-go",
     version: "7.0.2",
+    minimum_version: "7.0.0",
+    below_version: "8.0.0",
     package: "typescript",
   },
   experimental_backends: [
     {
       family: "tsrs",
       package: "tsrs",
-      version: "0.18.0-ts7.1.0-dev.20260929",
+      version: "0.20.1-ts7.1.0-beta",
+      minimum_version: "0.18.0",
+      below_version: "1.0.0",
     },
   ],
   sidecar: {

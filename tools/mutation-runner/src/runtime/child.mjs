@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
@@ -17,6 +17,14 @@ export const CHILD_ENV = Object.freeze({
 
 /** The prefix of the test diagnostic that carries the hits of a test. */
 export const HITS_DIAGNOSTIC = "fallow-mutation-hits:";
+
+/** The private integrity log shared by a test process and its Node children. */
+export const overlayErrorsPath = (overlayPath) => `${overlayPath}.errors`;
+
+/** Records incomplete instrumentation even when a test ignores its child's result. */
+export const recordOverlayError = (overlayPath, message) => {
+  appendFileSync(overlayErrorsPath(overlayPath), `${message}\n`);
+};
 
 /** Reads one variable of the child environment and removes it. */
 export const takeChildEnv = (name) => {

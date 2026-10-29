@@ -121,10 +121,13 @@ fn output_formats_schema() -> Vec<String> {
 
 fn exit_codes_schema() -> serde_json::Value {
     let entries = [
-        (0, "Success (no error-severity issues found)"),
+        (
+            0,
+            "Success: no enforced gate failed. Bare fallow in a machine format (json, sarif, codeclimate, the GitHub formats, the comment and review formats) does not enforce findings without --fail-on-issues, so it exits 0 on findings. Read gate_outcomes: status \"fail\" with enforced false is a failing gate that did not set the exit code",
+        ),
         (
             1,
-            "Error-severity issues found (per rules config, or --fail-on-issues promotes warn to error)",
+            "An enforced gate failed, for example error-severity findings (per rules config, or --fail-on-issues promotes warn to error). This is an analysis result, not a tool failure",
         ),
         (
             2,
@@ -539,6 +542,10 @@ fn apply_health_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
         | "high-crap-score" => {
             m.filter_flag = Some("--complexity");
             m.suppress = Some(("complexity", false));
+        }
+        "long-file" => {
+            m.filter_flag = Some("--complexity");
+            m.suppress = Some(("complexity", true));
         }
         "refactoring-target" => {
             m.filter_flag = Some("--targets");
@@ -1315,6 +1322,8 @@ mod tests {
         let rows = schema["issue_types"].as_array().unwrap();
 
         let expected: FxHashSet<&str> = TOTAL_ISSUE_RESULT_KEYS.iter().copied().collect();
+        assert!(expected.contains("duplicate_prop_shapes"));
+        assert!(expected.contains("thin_wrappers"));
         let mut counted = FxHashSet::default();
         let mut advisory = FxHashSet::default();
 
@@ -1407,10 +1416,7 @@ mod tests {
         }
 
         assert_eq!(expected, counted);
-        assert_eq!(
-            FxHashSet::from_iter(["duplicate_prop_shapes", "thin_wrappers"]),
-            advisory
-        );
+        assert!(advisory.is_empty());
     }
 
     #[test]
@@ -1426,10 +1432,20 @@ mod tests {
             .map(|row| row["id"].as_str().unwrap())
             .collect();
 
-        assert_eq!(
-            FxHashSet::from_iter(["duplicate-prop-shape", "thin-wrapper"]),
-            missing
-        );
+        assert!(missing.is_empty());
+        for (code, check_name) in [
+            ("duplicate-prop-shape", "fallow/duplicate-prop-shape"),
+            ("thin-wrapper", "fallow/thin-wrapper"),
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| row["id"].as_str() == Some(code))
+                .expect("component-health rule must be present");
+            assert_eq!(
+                row["codeclimate_check_names"],
+                serde_json::json!([check_name])
+            );
+        }
 
         for row in rows {
             if row["command"].as_str() == Some("dead-code")

@@ -68,6 +68,10 @@ fn parameter_and_assignment_destructures_credit_class_members() {
         unused,
         [
             ("Service", "dead"),
+            ("Service", "deadArrayIndex"),
+            ("Service", "deadArraySpread"),
+            ("Service", "deadGetterOther"),
+            ("Service", "deadThisGetter"),
             ("Service", "signatureOnly"),
             ("Service", "untypedOnly")
         ]

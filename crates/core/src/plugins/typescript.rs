@@ -1,7 +1,8 @@
 //! TypeScript plugin.
 //!
 //! Detects TypeScript projects and parses `tsconfig.json` for references,
-//! extended configs, type packages, language service plugins, and array extends.
+//! extended configs, type packages, language service plugins, content mapper
+//! packages, and array extends.
 #![expect(
     clippy::excessive_nesting,
     reason = "tsconfig AST parsing requires deep nesting"
@@ -161,6 +162,8 @@ impl Plugin for TypeScriptPlugin {
         }
 
         parse_tsconfig_plugins(&parse_source, parse_path, &mut result);
+
+        parse_tsconfig_content_mappers(&parse_source, parse_path, &mut result);
 
         parse_tsconfig_references(&parse_source, parse_path, root, &mut result);
 
@@ -360,6 +363,59 @@ fn collect_tsconfig_plugin_name(
             result.referenced_dependencies.push(dep);
         }
     }
+}
+
+/// Extract `contentMappers[].package` from a tsconfig as referenced dependencies.
+///
+/// TypeScript 7.1 loads each named package to map non-TypeScript files (for
+/// example `.vue`) into the program. Relative and absolute paths name local
+/// files, not packages, so they credit no dependency.
+fn parse_tsconfig_content_mappers(source: &str, path: &Path, result: &mut PluginResult) {
+    use oxc_ast::ast::{Expression, ObjectPropertyKind};
+
+    use oxc_span::SourceType;
+
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        let Some(obj) = config_parser::find_config_object(&parsed.program) else {
+            return;
+        };
+
+        let mappers = obj.properties.iter().find_map(|prop| {
+            if let ObjectPropertyKind::ObjectProperty(p) = prop
+                && object_property_key_is(&p.key, "contentMappers")
+                && let Expression::ArrayExpression(arr) = &p.value
+            {
+                return Some(arr);
+            }
+            None
+        });
+        let Some(mappers) = mappers else {
+            return;
+        };
+
+        for el in &mappers.elements {
+            let Some(Expression::ObjectExpression(mapper)) = el.as_expression() else {
+                continue;
+            };
+            for prop in &mapper.properties {
+                if let ObjectPropertyKind::ObjectProperty(p) = prop
+                    && object_property_key_is(&p.key, "package")
+                    && let Expression::StringLiteral(s) = &p.value
+                {
+                    let specifier = s.value.text();
+                    if specifier.is_empty()
+                        || specifier.starts_with('.')
+                        || specifier.starts_with('/')
+                    {
+                        continue;
+                    }
+                    let dep = crate::resolve::extract_package_name(&specifier);
+                    result.referenced_dependencies.push(dep);
+                }
+            }
+        }
+    });
 }
 
 /// Extract `references[].path` from a tsconfig and add them as setup files.
@@ -732,6 +788,43 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"typescript-plugin-css-modules".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_config_content_mappers_credits_packages() {
+        let source = r#"{
+            "compilerOptions": {"strict": true},
+            "contentMappers": [
+                {"package": "@vue/content-mapper", "extensions": [".vue"]},
+                {"package": "svelte-content-mapper/register", "extensions": [".svelte"]},
+                {"package": "./local/mapper.js", "extensions": [".foo"]}
+            ]
+        }"#;
+        let plugin = TypeScriptPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("tsconfig.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(
+            result.referenced_dependencies,
+            vec![
+                "@vue/content-mapper".to_string(),
+                "svelte-content-mapper".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_null_content_mappers_credits_nothing() {
+        let source = r#"{"contentMappers": null}"#;
+        let plugin = TypeScriptPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("tsconfig.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(result.referenced_dependencies.is_empty());
     }
 
     #[test]

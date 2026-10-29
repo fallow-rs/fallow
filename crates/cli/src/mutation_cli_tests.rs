@@ -252,6 +252,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         retried: false,
         attempts: Vec::new(),
         cached: false,
+        resumed: false,
         type_error_codes: Vec::new(),
     }
 }
@@ -272,6 +273,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         },
         runner: None,
         cache: None,
+        resume: None,
         summary: MutationSummary::from_results(&mutants),
         functions: Vec::<MutationFunctionResult>::new(),
         mutants,
@@ -883,6 +885,27 @@ fn cached_results_get_one_line_with_the_opt_out() {
     assert!(
         text.contains(
             "Cache: 2 results came from an earlier run. Pass --no-cache to run each mutant.\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_resumed_run_says_which_journal_results_it_did_not_reuse() {
+    let mut resumed = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Killed)],
+        Vec::new(),
+    );
+    resumed.resume = Some(fallow_output::MutationResumeOutput {
+        journal: ".fallow/mutation/journal.jsonl".to_owned(),
+        reused: 3,
+        rejected: 2,
+        note: None,
+    });
+    let text = run_text(&resumed, &OPTIONS);
+    assert!(
+        text.contains(
+            "Resumed: 3 results came from the journal of an earlier run, 2 not reused from the journal because their inputs changed.\n"
         ),
         "{text}"
     );

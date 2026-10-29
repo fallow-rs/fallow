@@ -401,6 +401,8 @@ struct ContextualParameterTypes {
 
 enum FunctionTypeAliasBinding {
     Function(ContextualParameterTypes),
+    /// `type X = ReturnType<typeof useFooStore>`, mapped to `useFooStore`.
+    Store(String),
     ClassSelf,
     NonFunction,
 }
@@ -983,7 +985,7 @@ pub(crate) struct ModuleInfoExtractor {
     child_process_namespace_bindings: FxHashSet<String>,
     node_path_namespace_bindings: FxHashSet<String>,
     node_url_file_url_to_path_bindings: FxHashSet<String>,
-    current_module_file_path_bindings: FxHashSet<String>,
+    current_module_path_bindings: FxHashMap<String, declarations::ModulePathBinding>,
     child_process_fork_target_bindings: FxHashMap<String, Vec<String>>,
     static_string_bindings: FxHashMap<String, Vec<String>>,
     static_string_arrays: FxHashMap<String, Vec<String>>,
@@ -1122,12 +1124,12 @@ pub(crate) struct ModuleInfoExtractor {
     module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,
     /// Nested lexical sanitizer binding stack for functions and blocks.
     sanitizer_binding_stack: Vec<FxHashMap<String, Option<SanitizerScope>>>,
-    /// Module-scope literal-backed string allowlists. `false` means the name
-    /// shadows an outer allowlist but is not trusted itself.
+    /// Module-scope literal-backed string allowlists; `false` shadows without trust.
     module_literal_allowlist_bindings: FxHashMap<String, bool>,
-    /// Module-scope literal constants that can be propagated into security sink
-    /// argument classification.
+    /// Module-scope literal constants for security sink argument classification.
     module_static_sink_literals: FxHashMap<String, SinkLiteralValue>,
+    /// Module-scope `const` locals bound to a trusted module-relative path.
+    module_trusted_path_bindings: FxHashSet<String>,
     /// Nested lexical literal allowlist bindings.
     literal_allowlist_binding_stack: Vec<FxHashMap<String, bool>>,
     /// Module-scope locals initialized from risky literal regex patterns.
@@ -1160,13 +1162,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// as the store (`(s: X)` or `(props: { store: X })`) bind to the factory so
     /// `s.member` / `props.store.member` credit the store member through the
     /// existing `binding_target_names` remap (issue #1489 Case 2). Working state
-    /// only; never persisted.
-    ///
-    /// Resolution is source-order-dependent (recorded during the walk, the same
-    /// constraint as class type-param resolution): an alias declared BELOW its
-    /// first consuming param is not in the map yet when the param is processed,
-    /// so that one ordering keeps the false positive. The inline
-    /// `ReturnType<typeof useStore>` annotation needs no alias and is unaffected.
+    /// only; never persisted. An alias in a function body or block is a
+    /// `FunctionTypeAliasBinding::Store` in `function_type_alias_scopes`.
     type_alias_store_factory: FxHashMap<String, String>,
     /// SvelteKit `load()` return-object keys harvested from a `load` export.
     /// Basename-gated to page-load producers in `parse.rs` (cleared for any
@@ -1335,7 +1332,7 @@ pub(crate) struct PendingTypedReactProps {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SecurityPathSinkBinding {
     span_start: u32,
-    arg_index: u32,
+    arg_count: u32,
 }
 
 impl ModuleInfoExtractor {

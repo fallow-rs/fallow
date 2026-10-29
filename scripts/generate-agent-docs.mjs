@@ -47,7 +47,9 @@
  * vendored skill tree, so the public skills surface is untouched). `--check`
  * fails when a recorded seed no longer matches, naming the cell and printing
  * both seeds; a plain run re-records them, so re-accepting a seed is one
- * command.
+ * command. One check survives re-recording: when a `Key Flags` seed gains a
+ * flag, the curated cell must name that flag, or every run fails and keeps the
+ * old seed. A cell may still drop seed flags that are not new.
  *
  * Cell escaping contract: `|` becomes `\|`, newline/whitespace runs collapse
  * to one space, backticks and angle brackets pass through untouched (they
@@ -710,6 +712,67 @@ export const hasCuratedSeedDrift = ({ added, changed, removed }) =>
 
 const cellLabel = (cell) => `${cell.section} / ${cell.row} / ${cell.column}`;
 
+const KEY_FLAGS_COLUMN = "Key Flags";
+
+/** Backticked flag names in a `Key Flags` seed. Non-flag arguments are skipped. */
+const seedFlags = (seed) => [...seed.matchAll(/`(-[^`\s]+)`/g)].map((match) => match[1]);
+
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** True when `flag` occurs in `cell` as a whole flag name, so `--max-dead` is not
+ * covered by `--max-dead-files`. Trailing values such as `<n>` are allowed. */
+const cellNamesFlag = (cell, flag) =>
+  new RegExp(`(?<![\\w-])${escapeRegExp(flag)}(?![\\w-])`).test(cell);
+
+/** Changed `Key Flags` seeds whose curated cell does not name a flag that the
+ * new seed has and the recorded seed did not. `publishedCells` is a list of
+ * `{ file, rows }`, where `rows` maps a commands row key to its curated cell.
+ * A cell may drop seed flags on purpose, so only NEW seed flags are required.
+ * The seed holds only the first `MAX_SEEDED_KEY_FLAGS` flags, so an old flag
+ * that moves into that window also counts as new. The record keeps no full flag
+ * list to tell the two cases apart. */
+const missingNewKeyFlags = (comparison, publishedCells) => {
+  const gaps = [];
+  for (const cell of comparison.changed) {
+    if (cell.section !== "commands" || cell.column !== KEY_FLAGS_COLUMN) {
+      continue;
+    }
+    const recorded = new Set(seedFlags(cell.recordedSeed));
+    const newFlags = seedFlags(cell.seed).filter((flag) => !recorded.has(flag));
+    for (const { file, rows } of publishedCells) {
+      const published = rows.get(cell.row);
+      if (published === undefined) {
+        continue;
+      }
+      const missing = newFlags.filter((flag) => !cellNamesFlag(published, flag));
+      if (missing.length > 0) {
+        gaps.push({ ...cell, file, missing });
+      }
+    }
+  }
+  return gaps;
+};
+
+/** Print the gaps, if any. Returns true when the run must fail. */
+const reportMissingNewKeyFlags = (gaps) => {
+  if (gaps.length === 0) {
+    return false;
+  }
+  console.error(formatMissingNewKeyFlags(gaps));
+  return true;
+};
+
+const formatMissingNewKeyFlags = (gaps) =>
+  [
+    `CURATED KEY FLAGS GAP: ${gaps.length} curated cell(s) do not name a flag that is new in their seed`,
+    ...gaps.flatMap((gap) => [
+      `  ${cellLabel(gap)} in ${gap.file}`,
+      `    missing: ${gap.missing.map(code).join(", ")}`,
+    ]),
+    "Add each missing flag to the curated cell, then run `npm run generate:contracts` again.",
+    "The seed record keeps the old seed until the cell names every new flag.",
+  ].join("\n");
+
 /** Report per-cell curated seed drift.
  *
  * `recording` is whether this run rewrites the committed record, not whether it
@@ -924,7 +987,7 @@ const parseArgs = (argv) => {
 /** Compare the seeds the manifest produces now against the committed record,
  * report per-cell drift, and (outside `--check`) re-record them. Returns 1 when
  * `--check` found drift. */
-const processCuratedSeeds = ({ adoptedSections, opts, schema }) => {
+const processCuratedSeeds = ({ adoptedSections, keyFlagCells, opts, schema }) => {
   const seeds = curatedSeeds(
     schema,
     SECTION_IDS.filter((sectionId) => adoptedSections.has(sectionId)),
@@ -934,18 +997,24 @@ const processCuratedSeeds = ({ adoptedSections, opts, schema }) => {
   const inPlace = resolve(outputFile) === resolve(recordFile);
   const comparison = compareCuratedSeeds(readCuratedSeedRecord(recordFile), seeds);
   const drifted = hasCuratedSeedDrift(comparison);
+  const gaps = missingNewKeyFlags(comparison, keyFlagCells);
 
   if (opts.check) {
     if (drifted) {
       console.error(
         formatCuratedSeedDrift(comparison, { recording: false, recordPath: recordFile }),
       );
+      reportMissingNewKeyFlags(gaps);
       return 1;
     }
     console.log(`up to date: ${recordFile}`);
     return 0;
   }
 
+  // Recording the new seed would silence `--check`, so keep the old record.
+  if (reportMissingNewKeyFlags(gaps)) {
+    return 1;
+  }
   if (drifted) {
     // A staged run points at the committed record, because that is the file a
     // reader can inspect and `npm run generate:contracts` re-records.
@@ -962,6 +1031,24 @@ const processCuratedSeeds = ({ adoptedSections, opts, schema }) => {
   return 0;
 };
 
+/** Curated `Key Flags` cell per row of the commands table in a rendered file,
+ * as a list with zero or one `{ file, rows }` entry. */
+const publishedKeyFlagCells = (file, text) => {
+  if (sectionIsAbsent(text, "commands")) {
+    return [];
+  }
+  const start = "<!-- generated:commands:start -->";
+  const block = text.slice(
+    text.indexOf(start) + start.length,
+    text.indexOf("<!-- generated:commands:end -->"),
+  );
+  const rows = new Map();
+  for (const [key, cells] of parseExistingTable(block).rows) {
+    rows.set(key, cells.get(KEY_FLAGS_COLUMN) ?? "");
+  }
+  return [{ file, rows }];
+};
+
 const collectAdoptedSections = (text, sectionIds, adopted) => {
   for (const sectionId of sectionIds) {
     if (!sectionIsAbsent(text, sectionId)) {
@@ -976,6 +1063,7 @@ export const main = (argv = process.argv.slice(2)) => {
 
   let drifted = 0;
   const adoptedSections = new Set();
+  const keyFlagCells = [];
   for (const [targetIndex, target] of opts.targets.entries()) {
     const outputTarget = opts.outputTargets[targetIndex] ?? target;
     const skillFile = join(target, "SKILL.md");
@@ -1001,6 +1089,7 @@ export const main = (argv = process.argv.slice(2)) => {
       const cliBefore = readFileSync(cliReferenceFile, "utf8");
       collectAdoptedSections(cliBefore, CLI_REFERENCE_SECTION_IDS, adoptedSections);
       const cliAfter = regenerateCliReferenceMd(cliBefore, schema, cliReferenceFile);
+      keyFlagCells.push(...publishedKeyFlagCells(cliReferenceFile, cliAfter));
       if (
         processFile({
           file: cliReferenceFile,
@@ -1061,7 +1150,7 @@ export const main = (argv = process.argv.slice(2)) => {
     }
   }
 
-  drifted += processCuratedSeeds({ adoptedSections, opts, schema });
+  drifted += processCuratedSeeds({ adoptedSections, keyFlagCells, opts, schema });
   return drifted === 0 ? 0 : 1;
 };
 

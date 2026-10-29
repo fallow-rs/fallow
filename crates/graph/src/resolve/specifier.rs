@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use globset::{Glob, GlobSetBuilder};
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
@@ -28,6 +27,7 @@ use super::path_info::{
     normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
+use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
@@ -541,9 +541,7 @@ fn tsconfig_applies_to_file(
         return false;
     };
     // `references` paths are joined verbatim, so the directory can carry `./`
-    // and `..` segments. Normalize once: the `include`/`exclude` globs are
-    // built from this string and a literal `./` or `..` never matches a
-    // normalized file path.
+    // and `..` segments that a normalized file path never has.
     let tsconfig_dir = normalize_path_lexically(tsconfig_path.parent().unwrap_or(root));
     let tsconfig_dir = tsconfig_dir.as_path();
     if let Some(files) = json.get("files").and_then(Value::as_array) {
@@ -566,41 +564,6 @@ fn tsconfig_applies_to_file(
         .get("exclude")
         .and_then(Value::as_array)
         .is_some_and(|exclude| glob_values_match(tsconfig_dir, exclude, from_file))
-}
-
-fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
-    let mut builder = GlobSetBuilder::new();
-    let mut has_patterns = false;
-    for value in values.iter().filter_map(Value::as_str) {
-        let mut pattern = resolve_tsconfig_relative_path(base_dir, value);
-        if !has_glob_meta(value) && pattern.is_dir() {
-            pattern = pattern.join("**/*");
-        }
-        let Some(pattern) = pattern.to_str() else {
-            continue;
-        };
-        let Ok(glob) = Glob::new(pattern) else {
-            continue;
-        };
-        builder.add(glob);
-        has_patterns = true;
-    }
-    has_patterns && builder.build().is_ok_and(|set| set.is_match(path))
-}
-
-fn has_glob_meta(value: &str) -> bool {
-    value
-        .bytes()
-        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']' | b'{'))
-}
-
-fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
-    let path = Path::new(path);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        base_dir.join(path)
-    }
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
@@ -2192,6 +2155,10 @@ fn try_tsconfig_root_dirs(
 }
 
 #[cfg(test)]
+#[path = "specifier_tsconfig_include_tests.rs"]
+mod tsconfig_include_tests;
+
+#[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -2206,7 +2173,7 @@ mod tests {
 
     use super::super::package_credit::package_usage_name_for_resolved_package;
     use super::{
-        SpecifierNormalization, extension_alias_matches, glob_values_match, has_glob_meta,
+        SpecifierNormalization, extension_alias_matches, glob_values_match,
         is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
         is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
         is_safe_static_dir_relative_path, is_style_file, is_tsconfig_error,
@@ -2785,33 +2752,6 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // ---- has_glob_meta (lines 370-374) ----
-
-    #[test]
-    fn has_glob_meta_detects_star_wildcard() {
-        assert!(has_glob_meta("src/**/*.ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_detects_question_mark() {
-        assert!(has_glob_meta("src/?.ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_detects_bracket_group() {
-        assert!(has_glob_meta("src/[abc].ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_detects_brace_group() {
-        assert!(has_glob_meta("src/{a,b}.ts"));
-    }
-
-    #[test]
-    fn has_glob_meta_plain_path_returns_false() {
-        assert!(!has_glob_meta("src/components"));
-    }
-
     // ---- path_alias_specificity (lines 734-738) ----
 
     #[test]
@@ -3087,17 +3027,16 @@ mod tests {
         );
     }
 
-    // ---- glob_values_match: invalid glob is skipped (line 362) ----
+    // ---- glob_values_match: a stray bracket is literal text ----
 
     #[test]
-    fn glob_values_match_invalid_glob_pattern_is_skipped() {
+    fn glob_values_match_stray_bracket_is_literal_text() {
         let base = Path::new("/project");
+        let values = [serde_json::json!("[invalid/*")];
         let source = Path::new("/project/src/index.ts");
-        let result = glob_values_match(base, &[serde_json::json!("[invalid")], source);
-        assert!(
-            !result,
-            "an invalid glob pattern must not accidentally match"
-        );
+        assert!(!glob_values_match(base, &values, source));
+        let literal = Path::new("/project/[invalid/index.ts");
+        assert!(glob_values_match(base, &values, literal));
     }
 
     // ---- glob_values_match: no patterns at all returns false ----
@@ -3185,13 +3124,6 @@ mod tests {
         assert!(is_bare_style_subpath("antd/lib/style/index.less"));
     }
 
-    // ---- has_glob_meta: closing brace or bracket alone ----
-
-    #[test]
-    fn has_glob_meta_closing_bracket_detected() {
-        assert!(has_glob_meta("src/[a-z]"));
-    }
-
     // ---- path_alias_specificity: wildcard-only pattern ----
 
     #[test]
@@ -3215,7 +3147,7 @@ mod tests {
 
     /// Build a `ResolveContext` rooted at `root` with empty lookup tables and
     /// hand it to `f`. Enough for helpers that only read tsconfigs from disk.
-    fn with_ctx_at_root<F: FnOnce(&ResolveContext<'_>)>(root: &Path, f: F) {
+    pub(super) fn with_ctx_at_root<F: FnOnce(&ResolveContext<'_>)>(root: &Path, f: F) {
         with_ctx_at_root_and_files(root, &[], f);
     }
 

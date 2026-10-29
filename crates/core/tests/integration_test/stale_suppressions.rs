@@ -48,6 +48,121 @@ fn suppression_needed_only_in_production_is_not_stale() {
     );
 }
 
+/// Issue #3962: an `unused-enum-member` suppression on a member that only a
+/// test file reads is needed under `--production`. The run without
+/// `--production` must not report it stale.
+#[test]
+fn enum_member_suppression_needed_only_in_production_is_not_stale() {
+    let root = fixture_path("stale-suppression-production-only");
+    let results =
+        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+
+    let stale_lines: Vec<u32> = results
+        .stale_suppressions
+        .iter()
+        .filter(|s| s.path.ends_with("src/kind.ts"))
+        .map(|s| s.line)
+        .collect();
+    assert!(
+        !stale_lines.contains(&2),
+        "suppression for the test-only enum member must not be stale, found: {stale_lines:?}"
+    );
+    assert!(
+        stale_lines.contains(&5),
+        "suppression for an enum member that production code reads must stay stale, found: {stale_lines:?}"
+    );
+
+    let production = fallow_core::analyze(&create_production_config(root))
+        .expect("production analysis should succeed");
+    let production_stale: Vec<u32> = production
+        .stale_suppressions
+        .iter()
+        .filter(|s| s.path.ends_with("src/kind.ts"))
+        .map(|s| s.line)
+        .collect();
+    assert!(
+        !production_stale.contains(&2),
+        "suppression for the test-only enum member must not be stale under production mode, found: {production_stale:?}"
+    );
+    assert!(
+        production
+            .unused_enum_members
+            .iter()
+            .all(|m| m.member.member_name != "A"),
+        "production mode must consume the suppression for the test-only enum member"
+    );
+}
+
+/// Stale suppression lines in `file` of the members fixture, without and with
+/// `--production`.
+fn production_only_member_stale_lines(file: &str) -> (Vec<u32>, Vec<u32>) {
+    let root = fixture_path("stale-suppression-production-only-members");
+    let lines = |results: fallow_core::results::AnalysisResults| -> Vec<u32> {
+        results
+            .stale_suppressions
+            .iter()
+            .filter(|s| s.path.ends_with(file))
+            .map(|s| s.line)
+            .collect()
+    };
+    let default =
+        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+    let production = fallow_core::analyze(&create_production_config(root))
+        .expect("production analysis should succeed");
+    (lines(default), lines(production))
+}
+
+/// An `unused-class-member` suppression on a method that only a test file
+/// calls is needed under `--production`. The run without `--production` must
+/// not report it stale.
+#[test]
+fn class_member_suppression_needed_only_in_production_is_not_stale() {
+    let (default, production) = production_only_member_stale_lines("src/counter.ts");
+    assert!(
+        !default.contains(&2),
+        "suppression for the test-only class member must not be stale, found: {default:?}"
+    );
+    assert!(
+        default.contains(&5),
+        "suppression for a class member that production code calls must stay stale, found: {default:?}"
+    );
+    assert!(
+        !production.contains(&2),
+        "suppression for the test-only class member must not be stale under production mode, found: {production:?}"
+    );
+}
+
+/// A class member suppression in a file that only a test reaches stays stale.
+/// Production mode reports that file as unused and never scans its members.
+#[test]
+fn class_member_suppression_in_test_only_reachable_file_stays_stale() {
+    let (default, _) = production_only_member_stale_lines("src/gauge.ts");
+    assert!(
+        default.contains(&2),
+        "suppression in a file that only a test reaches must stay stale, found: {default:?}"
+    );
+}
+
+/// An `unused-store-member` suppression on a store member that only a test
+/// file reads is needed under `--production`. The run without `--production`
+/// must not report it stale.
+#[test]
+fn store_member_suppression_needed_only_in_production_is_not_stale() {
+    let (default, production) = production_only_member_stale_lines("src/store.ts");
+    assert!(
+        !default.contains(&10),
+        "suppression for the test-only store member must not be stale, found: {default:?}"
+    );
+    assert!(
+        default.contains(&12),
+        "suppression for a store member that production code reads must stay stale, found: {default:?}"
+    );
+    assert!(
+        !production.contains(&10),
+        "suppression for the test-only store member must not be stale under production mode, found: {production:?}"
+    );
+}
+
 #[test]
 fn stale_next_line_suppression_on_used_export() {
     let root = fixture_path("stale-suppressions");

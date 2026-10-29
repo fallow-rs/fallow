@@ -409,6 +409,7 @@ OUT=$(cd "$RUNNER_TMP" && env \
   FALLOW_MAX_CYCLOMATIC= \
   FALLOW_MAX_COGNITIVE= \
   FALLOW_MAX_CRAP= \
+  FALLOW_MAX_FILE_LINES= \
   FALLOW_COVERAGE=coverage/coverage-final.json \
   FALLOW_PRODUCTION_COVERAGE= \
   FALLOW_COVERAGE_ROOT=/ci/workspace \
@@ -500,6 +501,24 @@ done < "$SELECTION_WORK/fallow-analysis-args.bin"
 assert_contains "$SELECTION_ARGS" "audit " "audit selection: the command is audit"
 assert_contains "$SELECTION_ARGS" "--skip dead-code,dupes" "audit selection: FALLOW_SKIP reaches audit"
 rm -rf "$SELECTION_WORK"
+
+# --- Health forwards FALLOW_MAX_FILE_LINES ---
+
+FILE_LINES_WORK="$RUNNER_TMP/health-file-lines"
+mkdir -p "$FILE_LINES_WORK"
+run_generated_gitlab_fixture "$FILE_LINES_WORK" \
+  FALLOW_COMMAND=health \
+  FALLOW_MAX_FILE_LINES=800 >/dev/null
+FILE_LINES_ARGS=""
+while IFS= read -r -d '' arg; do
+  FILE_LINES_ARGS+="${arg} "
+done < "$FILE_LINES_WORK/fallow-analysis-args.bin"
+assert_contains "$FILE_LINES_ARGS" "--max-file-lines 800" "health: FALLOW_MAX_FILE_LINES reaches health"
+OUT=$(run_generated_gitlab_fixture "$FILE_LINES_WORK" \
+  FALLOW_COMMAND=health \
+  FALLOW_MAX_FILE_LINES=lots)
+assert_contains "$OUT" "max-file-lines must be a positive integer" "health: a non-numeric FALLOW_MAX_FILE_LINES fails early"
+rm -rf "$FILE_LINES_WORK"
 
 # --- Baseline staleness gate (issue #2673) ---
 

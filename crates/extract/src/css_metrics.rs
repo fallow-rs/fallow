@@ -373,7 +373,7 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
     analytics.max_nesting_depth = analytics.max_nesting_depth.max(depth);
 
     let (a, b, c, complexity) = rule_selector_metrics(style);
-    let metric = CssRuleMetric {
+    let mut metric = CssRuleMetric {
         line: style.loc.line.saturating_add(1),
         col: style.loc.column,
         specificity_a: a,
@@ -383,10 +383,15 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
         declaration_count: saturate_u16(declaration_count),
         important_count: saturate_u16(important),
         nesting_depth: depth,
+        selector: String::new(),
     };
 
     if is_notable(&metric) {
         if analytics.notable_rules.len() < MAX_NOTABLE_RULES {
+            metric.selector = style
+                .selectors
+                .to_css_string(PrinterOptions::default())
+                .unwrap_or_default();
             analytics.notable_rules.push(metric);
         } else {
             analytics.notable_truncated = true;

@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   COMMIT_SETTLE_MS,
+  compareWithMain,
   followMain,
+  ghMainReaders,
   parseGhChecks,
   parseGhMergeable,
   parseGhRuns,
@@ -631,10 +633,13 @@ const checkRun = (name, status, conclusion) => ({
 const withMinChecks = (args) =>
   args.includes("--min-checks") ? args : ["--min-checks", "1", ...args];
 
-const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) => {
+const runWithFakeGh = ({ selected, rollups, runs = workflowRuns(), prRuns = [[]] }, args = []) => {
   const root = mkdtempSync(join(tmpdir(), "ship-wait-checks-"));
   try {
-    writeFileSync(join(root, "responses.json"), JSON.stringify({ selected, rollups, runs }));
+    writeFileSync(
+      join(root, "responses.json"),
+      JSON.stringify({ selected, rollups, runs, prRuns }),
+    );
     writeFileSync(
       join(root, "gh"),
       [
@@ -655,7 +660,12 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) 
         '} else if (args.some((arg) => arg.includes("statusCheckRollup"))) {',
         '  const index = calls.filter((call) => call.some((arg) => arg.includes("statusCheckRollup"))).length - 1;',
         "  const reply = responses.rollups[Math.min(index, responses.rollups.length - 1)];",
-        '  process.stdout.write(typeof reply === "string" ? reply : JSON.stringify(reply));',
+        '  process.stdout.write(typeof reply === "string" ? reply : JSON.stringify({ headRefOid: "a".repeat(40), ...reply }));',
+        '} else if (args[0] === "run" && args[1] === "list") {',
+        '  const index = calls.filter((call) => call[0] === "run" && call[1] === "list").length - 1;',
+        "  const reply = responses.prRuns[Math.min(index, responses.prRuns.length - 1)];",
+        "  if (reply?.error) { process.stderr.write(reply.error); process.exit(1); }",
+        "  process.stdout.write(JSON.stringify(reply));",
         '} else if (args[0] === "api") {',
         "  const reply = responses.runs[args[1]];",
         '  if (!reply || reply.error) { process.stderr.write(reply?.error ?? "missing workflow run"); process.exit(1); }',
@@ -697,6 +707,153 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) 
 const rollupReads = (calls) =>
   calls.filter((args) => args.some((arg) => arg.includes("statusCheckRollup")));
 const fakeGhOptions = { skip: process.platform === "win32" };
+
+const prWorkflow = (fields = {}) => ({
+  databaseId: 300,
+  workflowDatabaseId: 7,
+  workflowName: "CodeQL",
+  status: "pending",
+  url: `${RUN_URL}/300`,
+  headSha: "a".repeat(40),
+  event: "pull_request",
+  ...fields,
+});
+
+test("the CLI waits for a queued PR workflow before its checks exist", fakeGhOptions, () => {
+  for (const cliArgs of [[], ["--required"]]) {
+    const result = runWithFakeGh(
+      {
+        selected: [check("CI", "pass")],
+        rollups: [{ statusCheckRollup: [checkRun("CI", "COMPLETED", "SUCCESS")] }],
+        prRuns: [[prWorkflow()], [prWorkflow({ status: "completed" })]],
+      },
+      cliArgs,
+    );
+
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(
+      rollupReads(result.calls).length,
+      2,
+      "the queued workflow must finish before passing",
+    );
+    const reads = result.calls.filter((args) => args[0] === "run" && args[1] === "list");
+    assert.equal(reads.length, 2);
+    assert.ok(reads.every((args) => args[args.indexOf("--commit") + 1] === "a".repeat(40)));
+    assert.ok(reads.every((args) => args[args.indexOf("--event") + 1] === "pull_request"));
+  }
+});
+
+test("a PR with no check rollup waits for its queued workflow", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    selected: [],
+    rollups: [
+      { statusCheckRollup: null },
+      { statusCheckRollup: [checkRun("CI", "COMPLETED", "SUCCESS")] },
+    ],
+    prRuns: [[prWorkflow()], [prWorkflow({ status: "completed" })]],
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(rollupReads(result.calls).length, 2);
+});
+
+test("PR workflow discovery ignores maintenance events and other heads", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    selected: [],
+    rollups: [{ statusCheckRollup: [checkRun("CI", "COMPLETED", "SUCCESS")] }],
+    prRuns: [[prWorkflow({ event: "workflow_run" }), prWorkflow({ headSha: "b".repeat(40) })]],
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(rollupReads(result.calls).length, 1);
+});
+
+test("required-only mode ignores a registered optional workflow", fakeGhOptions, () => {
+  const result = runWithFakeGh(
+    {
+      selected: [check("CI", "pass")],
+      rollups: [
+        {
+          statusCheckRollup: [
+            checkRun("CI", "COMPLETED", "SUCCESS"),
+            { ...checkRun("Optional", "IN_PROGRESS", null), detailsUrl: `${RUN_URL}/300/job/1` },
+          ],
+        },
+      ],
+      prRuns: [[prWorkflow()]],
+    },
+    ["--required"],
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(rollupReads(result.calls).length, 1);
+  assert.doesNotMatch(result.stdout, /CodeQL workflow/u);
+});
+
+test(
+  "a required workflow remains pending after its first required job passes",
+  fakeGhOptions,
+  () => {
+    const result = runWithFakeGh(
+      {
+        selected: [check("CI", "pass")],
+        rollups: [
+          {
+            statusCheckRollup: [
+              { ...checkRun("CI", "COMPLETED", "SUCCESS"), detailsUrl: `${RUN_URL}/300/job/1` },
+            ],
+          },
+        ],
+        prRuns: [[prWorkflow()], [prWorkflow({ status: "completed" })]],
+      },
+      ["--required"],
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(rollupReads(result.calls).length, 2);
+  },
+);
+
+test(
+  "required checks stay pending while their replacement workflow registers setup jobs",
+  fakeGhOptions,
+  () => {
+    const required = {
+      ...checkRun("Analyze (rust)", "COMPLETED", "SUCCESS"),
+      detailsUrl: `${RUN_URL}/${EARLIER_RUN}/job/1`,
+      startedAt: EARLIER_START,
+    };
+    const setup = {
+      ...checkRun("Detect Rust changes", "COMPLETED", "SUCCESS"),
+      detailsUrl: `${RUN_URL}/300/job/1`,
+      startedAt: NEWER_START,
+    };
+    for (const workflowDatabaseId of [7, 8]) {
+      const result = runWithFakeGh(
+        {
+          selected: [check("Analyze (rust)", "pass")],
+          rollups: [{ statusCheckRollup: [required, setup] }],
+          prRuns: [
+            [prWorkflow({ workflowDatabaseId })],
+            [prWorkflow({ workflowDatabaseId, status: "completed" })],
+          ],
+        },
+        ["--required"],
+      );
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(rollupReads(result.calls).length, workflowDatabaseId === 7 ? 2 : 1);
+    }
+  },
+);
+
+test("workflow discovery failures cannot pass a successful rollup", fakeGhOptions, () => {
+  for (const response of [{ error: "HTTP 502" }, null, {}, [prWorkflow({ headSha: null })]]) {
+    const result = runWithFakeGh({
+      selected: [],
+      rollups: [{ statusCheckRollup: [checkRun("CI", "COMPLETED", "SUCCESS")] }],
+      prRuns: [response],
+    });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /all checks passed/u);
+    assert.match(result.stderr, /HTTP 502|invalid pull-request workflow runs/u);
+  }
+});
 
 const EARLIER_START = "2026-10-05T11:05:44Z";
 const NEWER_START = "2026-10-05T11:05:51Z";
@@ -1637,4 +1794,94 @@ test("a cancelled check next to a shared failure keeps exit code 1", fakeGhOptio
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /FAIL \(also on main dddddddddddd\): Cargo Deny/u);
   assert.match(result.stdout, /^ {2}CANCEL: Tests/mu);
+});
+
+const MERGE = "a".repeat(40);
+const PARENT = "b".repeat(40);
+const GRANDPARENT = "c".repeat(40);
+const commitHistory = `repos/{owner}/{repo}/commits?sha=${MERGE}&per_page=11`;
+// A fake `gh api`: each endpoint returns its JSON, and an unknown endpoint fails.
+const fakeApi = (responses) => (endpoint) =>
+  endpoint in responses
+    ? { status: 0, stdout: JSON.stringify(responses[endpoint]), stderr: "" }
+    : { status: 1, stdout: "", stderr: `unexpected endpoint ${endpoint}` };
+const history = (...shas) => fakeApi({ [commitHistory]: shas.map((sha) => ({ sha })) });
+// The workflow runs of each earlier commit, as `gh run list --commit` reports them.
+const fakeRuns = (runsBySha) => (sha) =>
+  sha in runsBySha ? { ok: true, checks: runsBySha[sha] } : { ok: false, error: "no runs" };
+const commitReaders = (api, runsBySha) =>
+  ghMainReaders({ commit: MERGE }, api, fakeRuns(runsBySha));
+const failedCommit = (...checks) => ({ status: "fail", checks });
+const reportCommit = (result) => {
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label: "Commit aaaaaaaaaaaa", minChecks: null, commit: MERGE },
+    (line) => lines.push(line),
+    (line) => lines.push(line),
+  );
+  return { code, lines };
+};
+
+test("a commit run that also failed on the parent commit exits with code 4", () => {
+  const result = compareWithMain(
+    failedCommit(check("Benchmarks", "fail"), check("CI", "pass")),
+    commitReaders(history(MERGE, PARENT, GRANDPARENT), {
+      [PARENT]: [check("Benchmarks", "fail"), check("CI", "pass")],
+    }),
+  );
+  const { code, lines } = reportCommit(result);
+
+  assert.equal(code, 4, lines.join("\n"));
+  assert.match(lines[0], /each failed check also failed on an earlier commit of main/u);
+  assert.match(lines[1], /FAIL \(also on main bbbbbbbbbbbb\): Benchmarks/u);
+});
+
+test("a commit run that passed on the parent commit stays a failure of the commit", () => {
+  const result = compareWithMain(
+    failedCommit(check("CI", "fail")),
+    commitReaders(history(MERGE, PARENT), { [PARENT]: [check("CI", "pass")] }),
+  );
+  const { code, lines } = reportCommit(result);
+
+  assert.equal(code, 1, lines.join("\n"));
+  assert.match(lines[1], /^ {2}FAIL: CI/u);
+});
+
+test("a cancelled or running run on an earlier commit moves the comparison to an older commit", () => {
+  const result = compareWithMain(
+    failedCommit(check("Benchmarks", "fail")),
+    commitReaders(history(MERGE, PARENT, GRANDPARENT), {
+      [PARENT]: [check("Benchmarks", "cancel"), check("Benchmarks", "pending")],
+      [GRANDPARENT]: [check("Benchmarks", "fail")],
+    }),
+  );
+
+  assert.equal(result.status, "shared-with-main");
+  assert.equal(result.checks[0].main, GRANDPARENT);
+});
+
+test("a commit history that does not start at the commit counts as a failed read", () => {
+  const result = compareWithMain(
+    failedCommit(check("Benchmarks", "fail")),
+    commitReaders(history(PARENT, GRANDPARENT), {}),
+  );
+  const { code, lines } = reportCommit(result);
+
+  assert.equal(code, 1, lines.join("\n"));
+  assert.match(lines.at(-1), /Read of the main checks failed/u);
+});
+
+test("a pull request comparison with a cancelled newest main run uses the older run", () => {
+  const api = fakeApi({
+    [MAIN_COMMITS]: [{ sha: NEWEST_MAIN }, { sha: OLDER_MAIN }],
+    [mainCheckEndpoint(NEWEST_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "cancelled"),
+    [mainCheckEndpoint(OLDER_MAIN, "Cargo Deny")]: mainRun("Cargo Deny", "completed", "failure"),
+  });
+  const result = compareWithMain(
+    failedCommit(check("Cargo Deny", "fail")),
+    ghMainReaders({ repo: null }, api),
+  );
+
+  assert.equal(result.checks[0].main, OLDER_MAIN);
 });

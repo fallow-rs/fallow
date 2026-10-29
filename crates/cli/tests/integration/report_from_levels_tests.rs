@@ -427,12 +427,12 @@ fn old_report_note_counts_one_finding_in_the_singular() {
 }
 
 #[test]
-fn old_report_note_skips_findings_whose_level_never_uses_the_rules() {
+fn old_component_report_keeps_sarif_findings_and_uses_rule_fallback() {
     let store = empty_root();
     let config = store.path().join("config.json");
     std::fs::write(
         &config,
-        r#"{"rules":{"thin-wrapper":"error","unused-dependencies":"off"}}"#,
+        r#"{"rules":{"thin-wrapper":"warn","unused-dependencies":"off"}}"#,
     )
     .expect("write config");
     let fixture = fixture_path("thin-wrapper");
@@ -445,19 +445,55 @@ fn old_report_note_skips_findings_whose_level_never_uses_the_rules() {
             .is_empty(),
         "the fixture must have a thin-wrapper finding"
     );
+    assert_eq!(envelope["total_issues"], 0);
+    assert!(envelope["summary"].get("thin_wrappers").is_none());
+    // Warning findings preserve the uncounted shape of historical component reports.
     strip_severity(&mut envelope);
     let old = saved_path(&store, "old.json");
     std::fs::write(&old, envelope.to_string()).expect("write old report");
 
     let render_root = empty_root();
-    for format in ["codeclimate", "sarif"] {
-        let output = report_from(&old, render_root.path(), format, &[]);
-        assert!(
-            !output.stderr.contains("carry no severity")
-                && !output.stderr.contains("carries no severity"),
-            "{format}: a thin-wrapper level never uses the rules, so no fallback note, \
-             stderr:\n{}",
-            output.stderr
-        );
-    }
+    let output = report_from(&old, render_root.path(), "sarif", &[]);
+    assert!(
+        output
+            .stderr
+            .contains("1 finding in the saved report carries no severity"),
+        "missing-severity component findings need the fallback note, stderr:\n{}",
+        output.stderr
+    );
+    assert_eq!(
+        sarif_level(&parse_json(&output), "fallow/thin-wrapper", "src/App.tsx"),
+        "warning"
+    );
+
+    std::fs::write(
+        &config,
+        r#"{"rules":{"thin-wrapper":"error","unused-dependencies":"off"}}"#,
+    )
+    .expect("write error config");
+    let configured = report_from(
+        &old,
+        render_root.path(),
+        "sarif",
+        &["--config", utf8(&config)],
+    );
+    assert_eq!(
+        sarif_level(
+            &parse_json(&configured),
+            "fallow/thin-wrapper",
+            "src/App.tsx"
+        ),
+        "error"
+    );
+    assert!(!configured.stderr.contains(NOTE), "{}", configured.stderr);
+
+    let issues = parse_json(&report_from(&old, render_root.path(), "codeclimate", &[]));
+    assert!(
+        issues
+            .as_array()
+            .expect("CodeClimate array")
+            .iter()
+            .all(|issue| issue["check_name"] != "fallow/thin-wrapper"),
+        "CodeClimate requires a saved explicit component error: {issues}"
+    );
 }

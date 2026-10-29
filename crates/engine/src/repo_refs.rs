@@ -17,6 +17,9 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{EngineError, EngineResult};
 
+pub use crate::base_worktree_orphans::*;
+pub use crate::base_worktree_registration::*;
+
 const RAW_MATERIALIZATION_MARKER: &str = "fallow-raw-materialized-v1";
 
 /// Host directories shared with detached audit base views.
@@ -81,10 +84,10 @@ pub struct ResolvedAuditBase {
     pub inherited_refs: Vec<String>,
 }
 
-/// Temporary detached worktree for comparing audit results against a base ref.
+/// Temporary detached snapshot for comparing audit results against a base ref.
+/// [`Self::create`] deregisters it from Git, and `Drop` removes the directory.
 #[derive(Debug)]
 pub struct TemporaryBaseWorktree {
-    repo_root: PathBuf,
     path: PathBuf,
 }
 
@@ -98,19 +101,25 @@ impl TemporaryBaseWorktree {
     /// # Errors
     ///
     /// Returns an engine error when the temp path cannot be generated, `git`
-    /// cannot be started, or the worktree cannot be created.
+    /// cannot be started, or the worktree cannot be created or deregistered.
     pub fn create(
         repo_root: &Path,
         base_ref: &str,
         workspace_patterns: &[String],
     ) -> EngineResult<Self> {
+        sweep_orphan_audit_worktrees(repo_root);
         let path = base_worktree_path()?;
         create_detached_base_worktree(repo_root, &path, base_ref)?;
-        materialize_base_dependency_context(repo_root, &path, workspace_patterns);
-        Ok(Self {
-            repo_root: repo_root.to_path_buf(),
-            path,
-        })
+        if let Err(error) = deregister_base_worktree(repo_root, &path) {
+            remove_registered_worktree(repo_root, &path);
+            let _ = fs::remove_dir_all(&path);
+            return Err(EngineError::new(format!(
+                "could not deregister the temporary worktree for base ref `{base_ref}`: {error}"
+            )));
+        }
+        let worktree = Self { path };
+        materialize_base_dependency_context(repo_root, &worktree.path, workspace_patterns);
+        Ok(worktree)
     }
 
     /// Path to the detached worktree.
@@ -1196,14 +1205,9 @@ fn remove_registered_worktree(repo_root: &Path, destination: &Path) {
 
 impl Drop for TemporaryBaseWorktree {
     fn drop(&mut self) {
-        let mut command = git_command(&self.repo_root);
-        command
-            .arg("worktree")
-            .arg("remove")
-            .arg("--force")
-            .arg(&self.path);
-        let _ = command.output();
-        let _ = std::fs::remove_dir_all(&self.path);
+        // The snapshot was deregistered in `create`, so cleanup removes only
+        // the directory and runs no `git` subprocess.
+        let _ = fs::remove_dir_all(&self.path);
     }
 }
 
@@ -1577,16 +1581,9 @@ fn base_worktree_name(nanos: u128) -> String {
     format!("fallow-audit-base-{}-{nanos}-{seq}", std::process::id())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "canonical engine-owned git spawn wrapper for repository refs"
-)]
+/// Repository probes run in `root` through the shared engine Git wrapper.
 fn git_command(root: &Path) -> Command {
-    let mut command = Command::new("git");
-    crate::changed_files::clear_ambient_git_env(&mut command);
-    // Repository probes never consume input and must not retain an embedder's protocol stdin.
-    command.stdin(Stdio::null()).arg("-C").arg(root);
-    command
+    crate::git_env::git_command(root)
 }
 
 /// Run `git <args>` in `root` and return trimmed, non-empty stdout, or `None`
@@ -2545,14 +2542,7 @@ mod tests {
                 .is_none(),
             "an uninitialized gitlink directory must remain empty"
         );
-        assert!(
-            git(
-                worktree.path(),
-                &["ls-files", "--stage", "vendor/submodule"]
-            )
-            .starts_with(&format!("160000 {gitlink_commit} 0\t")),
-            "the linked worktree index must retain the gitlink object id"
-        );
+        // No index after deregistration: `base_worktree_registration` checks it.
 
         let path = worktree.path().to_path_buf();
         drop(worktree);

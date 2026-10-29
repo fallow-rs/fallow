@@ -58,6 +58,7 @@ pub fn fix_intent(issue: &CiIssue) -> Option<&'static str> {
             Some("Split branches or add focused tests around the risky path.")
         }
         "fallow/unresolved-import" => Some("Fix the import path or install the missing package."),
+        "fallow/long-file" => Some("Move cohesive groups of exports into their own modules."),
         _ => None,
     }
 }

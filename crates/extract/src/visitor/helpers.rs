@@ -9,10 +9,13 @@ use rustc_hash::FxHashMap;
 
 #[path = "helpers_heritage_names.rs"]
 mod heritage_names;
+#[path = "helpers_return_bindings.rs"]
+mod return_bindings;
 use crate::js_text::JsText;
 use crate::{MemberInfo, MemberKind};
 use fallow_types::extract::{AngularInputMember, AngularOutputMember};
 use heritage_names::{extract_static_expression_name, extract_type_name};
+use return_bindings::{collect_getter_binding, collect_method_return_binding};
 
 pub struct AngularComponentMetadata {
     pub template_url: Option<String>,
@@ -1416,6 +1419,8 @@ where
                         &mut bindings,
                         &mut origins,
                     );
+                } else if matches!(method.kind, MethodDefinitionKind::Method) {
+                    collect_method_return_binding(method, &resolve, &mut bindings);
                 }
             }
             ClassElement::PropertyDefinition(prop) => {
@@ -1627,35 +1632,6 @@ fn collect_constructor_param_bindings(
         }
         bindings.push((id.name.to_string(), resolved));
     }
-}
-
-/// Push an instance binding for a non-private typed getter's return type.
-fn collect_getter_binding(
-    method: &oxc_ast::ast::MethodDefinition<'_>,
-    resolve: &impl Fn(String) -> Option<String>,
-    resolve_origin: &impl Fn(&TSType<'_>) -> Option<Span>,
-    bindings: &mut Vec<(String, String)>,
-    origins: &mut FxHashMap<String, Span>,
-) {
-    if matches!(method.accessibility, Some(TSAccessibility::Private)) {
-        return;
-    }
-    let Some(name) = method.key.static_name() else {
-        return;
-    };
-    let Some(type_annotation) = method.value.return_type.as_deref() else {
-        return;
-    };
-    let Some(type_name) = extract_type_annotation_name(type_annotation) else {
-        return;
-    };
-    let Some(resolved) = resolve(type_name) else {
-        return;
-    };
-    if let Some(origin) = resolve_origin(&type_annotation.type_annotation) {
-        origins.insert(name.text().into_owned(), origin);
-    }
-    bindings.push((name.text().into_owned(), resolved));
 }
 
 /// Push an instance binding for a non-private property: typed annotation first,

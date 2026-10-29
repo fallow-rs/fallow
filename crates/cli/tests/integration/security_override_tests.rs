@@ -229,3 +229,96 @@ fn security_client_server_leak_override_on_the_server_module_does_not_apply() {
         ]
     );
 }
+
+/// Run `fallow security --format json` and return the `dead_code.kind` of each
+/// tainted-sink candidate, keyed by path (issue #3853).
+fn run_security_dead_code(root: &Path) -> Vec<(String, Option<String>)> {
+    let out = Command::new(fallow_bin())
+        .args(["security", "--format", "json", "--quiet", "--no-cache"])
+        .arg("--root")
+        .arg(root)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("run fallow security");
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("security output should be valid JSON");
+    let mut rows: Vec<(String, Option<String>)> = json["security_findings"]
+        .as_array()
+        .expect("security_findings array")
+        .iter()
+        .filter(|finding| finding["kind"] == "tainted-sink")
+        .map(|finding| {
+            (
+                finding["path"].as_str().expect("path").replace('\\', "/"),
+                finding["dead_code"]["kind"].as_str().map(str::to_owned),
+            )
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// Write a project with an `eval` sink in an unused file (`scripts/inject.js`)
+/// and one in an unused export (`src/lib.js`), plus the given `overrides`.
+fn write_dead_code_project(root: &Path, overrides: &str) {
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::create_dir_all(root.join("scripts")).expect("scripts dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "security-dead-code-fixture", "private": true, "type": "module", "main": "src/index.js" }"#,
+    )
+    .expect("package");
+    std::fs::write(
+        root.join("src/index.js"),
+        "import { used } from \"./lib.js\";\nexport const value = used();\n",
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/lib.js"),
+        "export function used() {\n  return 1;\n}\nexport const run = (code) => eval(code);\n",
+    )
+    .expect("lib");
+    std::fs::write(root.join("scripts/inject.js"), SINK_SOURCE).expect("inject");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(r#"{{ "overrides": {overrides} }}"#),
+    )
+    .expect("config");
+}
+
+#[test]
+fn security_dead_code_note_follows_unused_files_and_exports_overrides() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_dead_code_project(dir.path(), "[]");
+    assert_eq!(
+        run_security_dead_code(dir.path()),
+        vec![
+            (
+                "scripts/inject.js".to_owned(),
+                Some("unused-file".to_owned())
+            ),
+            ("src/lib.js".to_owned(), Some("unused-export".to_owned())),
+        ],
+        "without overrides both sinks carry the dead-code note"
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_dead_code_project(
+        dir.path(),
+        r#"[
+            { "files": ["scripts/**"], "rules": { "unused-files": "off" } },
+            { "files": ["src/lib.js"], "rules": { "unused-exports": "off" } }
+        ]"#,
+    );
+    assert_eq!(
+        run_security_dead_code(dir.path()),
+        vec![
+            ("scripts/inject.js".to_owned(), None),
+            ("src/lib.js".to_owned(), None),
+        ],
+        "an off override removes the dead-code note for matching files"
+    );
+}

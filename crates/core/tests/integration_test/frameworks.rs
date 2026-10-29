@@ -1022,6 +1022,61 @@ fn vite_alias_replacement_through_local_path_helper_resolves() {
     }
 }
 
+/// A Vite alias can use a regular expression as its `find` value. An anchored
+/// literal key and a `^prefix/(.*)$` capture with a `/$1` replacement map to
+/// the prefix alias model, so the replacement files are reachable.
+#[test]
+fn vite_alias_with_regex_find_resolves() {
+    let root = fixture_path("vite-alias-regex-find");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|u| u.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted_names.contains(&"virtual-logger"),
+        "regex alias key must not be an unlisted dependency: {unlisted_names:?}"
+    );
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved.contains(&"@/format"),
+        "regex capture alias must resolve: {unresolved:?}"
+    );
+    assert!(
+        !unresolved.contains(&"~/pad"),
+        "regex slash prefix alias must resolve: {unresolved:?}"
+    );
+
+    let unused_file_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.file.path.strip_prefix(&root).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for file in [
+        "src/node-module-shim.ts",
+        "src/logger.ts",
+        "src/format.ts",
+        "src/lib/pad.ts",
+    ] {
+        assert!(
+            !unused_file_paths.contains(&file.to_string()),
+            "{file} must be reachable through the regex alias: {unused_file_paths:?}"
+        );
+    }
+    assert!(
+        unused_file_paths.contains(&"src/orphan.ts".to_string()),
+        "control file must stay unused: {unused_file_paths:?}"
+    );
+}
+
 #[test]
 fn webpack_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("webpack-alias-project");

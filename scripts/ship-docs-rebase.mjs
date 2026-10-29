@@ -112,6 +112,9 @@ const runCheck =
  * code.
  */
 const shipDocsRebase = (cwd, options, log = console.log) => {
+  if (options.ifNeeded) {
+    throw new Error("--if-needed applies to ship-rebase.mjs only. Run this script without it.");
+  }
   if (!existsSync(join(cwd, GENERATOR))) {
     throw new Error(`${cwd} has no ${GENERATOR}. Run this script in a fallow-rs/docs checkout.`);
   }

@@ -706,6 +706,8 @@ pub(super) struct CssReferenceSurface {
     css_module_bracket_properties: rustc_hash::FxHashSet<String>,
     dynamic_prefixes_reversed: SortedPrefixLookup,
     dynamic_literals: rustc_hash::FxHashSet<String>,
+    /// Extensions of the server-side template files the surface read, sorted.
+    template_extensions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -734,6 +736,7 @@ struct CssReferenceSurfaceBuilder {
     dynamic_corpus: String,
     source_corpus: String,
     dynamic_interpolants: rustc_hash::FxHashSet<String>,
+    template_extensions: std::collections::BTreeSet<String>,
 }
 
 impl CssReferenceSurfaceBuilder {
@@ -758,11 +761,16 @@ impl CssReferenceSurfaceBuilder {
             css_module_bracket_properties,
             dynamic_prefixes_reversed: SortedPrefixLookup::new(dynamic_prefixes_reversed),
             dynamic_literals,
+            template_extensions: self.template_extensions.into_iter().collect(),
         }
     }
 }
 
 impl CssReferenceSurface {
+    pub(super) fn template_extensions(&self) -> &[String] {
+        &self.template_extensions
+    }
+
     fn references(&self, class: &str) -> bool {
         self.static_tokens.contains(class)
             || self.dynamic_class_referenced(class)
@@ -807,7 +815,10 @@ impl CssReferenceSurface {
     }
 }
 
-const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
+/// Text that follows a class prefix when the rest of the class is computed:
+/// JavaScript template literals and concatenation, plus the `{{` echo of
+/// template languages (`grid--{{ columns }}` in Liquid, Nunjucks, Blade).
+const INTERP_MARKERS: [&str; 7] = ["${", "' +", "'+", "\" +", "\"+", "` +", "{{"];
 
 fn css_module_property_alias(class: &str) -> Option<String> {
     if !class.contains('-') {
@@ -1076,7 +1087,9 @@ fn collect_css_reference_surface_file(
     };
     surface.source_corpus.push_str(&source);
     surface.source_corpus.push('\n');
-    let is_markup_surface = extension.is_some_and(is_markup_source_extension);
+    let is_markup_surface = extension.is_some_and(is_markup_source_extension)
+        || (matches!(extension, Some("js" | "mjs" | "cjs")) && has_jsx_class_attribute(&source));
+    collect_dom_class_reference_surface(surface, &source);
     if !is_markup_surface {
         return;
     }
@@ -1097,56 +1110,126 @@ fn collect_css_reference_surface_file(
     }
 }
 
+/// True when a `.js` file holds JSX: a `className` attribute after whitespace
+/// whose value is a quoted string or an expression container. Such a file is a
+/// markup surface, the same as a `.jsx` file. A DOM property assignment
+/// (`el.className = ...`) does not count.
+fn has_jsx_class_attribute(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    source.match_indices("className=").any(|(start, attr)| {
+        start
+            .checked_sub(1)
+            .is_some_and(|before| bytes[before].is_ascii_whitespace())
+            && matches!(bytes.get(start + attr.len()), Some(b'{' | b'"' | b'\''))
+    })
+}
+
+/// Credit the classes that a source file applies through DOM class APIs
+/// (`className =`, `classList.*`, `setAttribute('class', ...)`, `class:`
+/// object properties). For a plain JS/TS file, only those values count, not
+/// every string in the file.
+fn collect_dom_class_reference_surface(surface: &mut CssReferenceSurfaceBuilder, source: &str) {
+    let scan = crate::css::scan_dom_class_values(source);
+    surface.static_tokens.extend(scan.static_tokens);
+    for value in scan.dynamic_values {
+        collect_dynamic_class_interpolants(&value, &mut surface.dynamic_interpolants);
+        surface.dynamic_corpus.push_str(&value);
+        surface.dynamic_corpus.push('\n');
+    }
+}
+
+/// Walks the project for Markdown and template files. The walk uses the
+/// ignore-file rules of source discovery (`.gitignore`, `.ignore`, the global
+/// gitignore), skips `ignorePatterns`, `health.ignore` and the build and
+/// dependency directories, reads only regular files, and skips a file over
+/// the `--max-file-size` limit.
+#[expect(
+    clippy::filetype_is_file,
+    reason = "only regular files are read: a FIFO or a device file can block the read"
+)]
 fn collect_markdown_reference_surface_files(
     surface: &mut CssReferenceSurfaceBuilder,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) {
-    collect_markdown_reference_surface_dir(surface, &config.root, config, ignore_set);
-}
-
-fn collect_markdown_reference_surface_dir(
-    surface: &mut CssReferenceSurfaceBuilder,
-    dir: &std::path::Path,
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let relative = path.strip_prefix(&config.root).unwrap_or(&path);
-        if ignore_set.is_match(relative) || is_skipped_markdown_reference_path(relative) {
+    let root = config.root.clone();
+    let mut builder = fallow_config::source_walk_builder(&config.root);
+    builder.filter_entry(move |entry| {
+        let relative = entry
+            .path()
+            .strip_prefix(&root)
+            .unwrap_or_else(|_| entry.path());
+        !is_skipped_markdown_reference_path(relative)
+    });
+    for entry in builder.build().flatten() {
+        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;
         }
-        let Ok(file_type) = entry.file_type() else {
+        let path = entry.path();
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) || config.ignore_patterns.is_match(relative) {
             continue;
-        };
-        if file_type.is_dir() {
-            collect_markdown_reference_surface_dir(surface, &path, config, ignore_set);
+        }
+        if let Some(limit) = config.max_file_size_bytes
+            && entry
+                .metadata()
+                .is_ok_and(|metadata| metadata.len() > limit)
+        {
             continue;
         }
         let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(extension, Some("md" | "mdx")) {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        surface.source_corpus.push_str(&source);
-        surface.source_corpus.push('\n');
-        let scan = crate::css::scan_markup_class_tokens(&source);
-        for token in scan.static_tokens {
-            surface.static_tokens.insert(token.value);
-        }
-        collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
-        if scan.has_dynamic {
-            collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
-            surface.dynamic_corpus.push_str(&source);
-            surface.dynamic_corpus.push('\n');
+        if matches!(extension, Some("md" | "mdx")) {
+            collect_markdown_reference_surface_file(surface, path);
+        } else {
+            collect_template_reference_surface_file(surface, path, config);
         }
     }
+}
+
+fn collect_markdown_reference_surface_file(
+    surface: &mut CssReferenceSurfaceBuilder,
+    path: &std::path::Path,
+) {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    surface.source_corpus.push_str(&source);
+    surface.source_corpus.push('\n');
+    let scan = crate::css::scan_markup_class_tokens(&source);
+    for token in scan.static_tokens {
+        surface.static_tokens.insert(token.value);
+    }
+    collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
+    if scan.has_dynamic {
+        collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
+        surface.dynamic_corpus.push_str(&source);
+        surface.dynamic_corpus.push('\n');
+    }
+}
+
+/// A server-side template file (Liquid, Nunjucks, Blade, and the extensions in
+/// `markupExtensions`) applies classes through syntax that no scanner here
+/// models (`{% if %}`, `@class([...])`, `class="{{ x }}"`). Its whole text
+/// therefore joins the dynamic corpus, so any class-like word in it counts as
+/// referenced (issue #3917).
+fn collect_template_reference_surface_file(
+    surface: &mut CssReferenceSurfaceBuilder,
+    path: &std::path::Path,
+    config: &ResolvedConfig,
+) {
+    let Some(extension) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| fallow_config::template_markup_extension(name, &config.markup_extensions))
+    else {
+        return;
+    };
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    surface.template_extensions.insert(extension.to_owned());
+    surface.dynamic_corpus.push_str(&source);
+    surface.dynamic_corpus.push('\n');
 }
 
 fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
@@ -1165,9 +1248,14 @@ fn is_skipped_markdown_reference_path(relative: &std::path::Path) -> bool {
                     | "dist"
                     | "build"
                     | "target"
+                    | "vendor"
                     | "coverage"
                     | ".turbo"
                     | ".cache"
+                    | ".output"
+                    | "out"
+                    | ".venv"
+                    | "storage"
             )
         )
     })
@@ -1203,7 +1291,10 @@ fn push_unreferenced_css_class_candidates(
             && !class_matches_dependency_prefix(&class, dependency_prefixes)
         {
             out.push(UnreferencedCssClass {
-                actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
+                actions: vec![CssCandidateAction::verify_unreferenced_class(
+                    &class,
+                    reference_surface.template_extensions(),
+                )],
                 class,
                 path: rel.to_string(),
                 line,
@@ -1314,6 +1405,37 @@ mod tests {
     }
 
     #[test]
+    fn template_files_are_dynamic_references_with_echo_prefixes() {
+        let surface = reference_surface(&[
+            (
+                "sections/banner.liquid",
+                "<div class=\"banner__content--{{ position }}\">{% render 'card-icon' %}</div>",
+            ),
+            (
+                "resources/views/card.blade.php",
+                "<div @class(['card-wrapper', 'card-wrapper--open' => $open])></div>",
+            ),
+            (
+                "vendor/theme/menu.liquid",
+                "<div class=\"vendor-menu\"></div>",
+            ),
+            ("notes/ignored.tpl", "<div class=\"custom-tpl\"></div>"),
+            (".ignore", "drafts/\n"),
+            ("drafts/menu.liquid", "<div class=\"draft-menu\"></div>"),
+        ]);
+
+        assert!(surface.references("banner__content--top"));
+        assert!(surface.references("card-icon"));
+        assert!(surface.references("card-wrapper"));
+        assert!(surface.references("card-wrapper--open"));
+        assert!(!surface.references("vendor-menu"));
+        assert!(!surface.references("custom-tpl"));
+        assert!(!surface.references("draft-menu"));
+        assert!(!surface.references("banner__media"));
+        assert_eq!(surface.template_extensions(), ["blade.php", "liquid"]);
+    }
+
+    #[test]
     fn css_module_property_index_preserves_conservative_prefix_matching() {
         let surface = reference_surface(&[(
             "src/styles.ts",
@@ -1327,5 +1449,55 @@ mod tests {
         assert!(surface.references("navigation-item"));
         assert!(!surface.references("button-secondary"));
         assert!(!surface.references("navigation-link"));
+    }
+
+    #[test]
+    fn plain_ts_dom_class_apis_credit_only_their_values() {
+        let surface = reference_surface(&[(
+            "src/dom.ts",
+            r"
+                export const helper = 'panel-helper';
+                export const build = (el: HTMLElement, kind: string) => {
+                    el.className = 'panel-assigned';
+                    el.classList.toggle(`panel-kind-${kind}`, true);
+                    return { class: 'panel-object' };
+                };
+            ",
+        )]);
+
+        assert!(surface.references("panel-assigned"));
+        assert!(surface.references("panel-object"));
+        assert!(surface.references("panel-kind-wide"));
+        assert!(!surface.references("panel-helper"));
+    }
+
+    #[test]
+    fn js_file_with_jsx_is_a_markup_surface() {
+        let surface = reference_surface(&[(
+            "src/CodeBlock.js",
+            r"
+                const extra = 'code-block-extra';
+                export const CodeBlock = () => <code className={styles.codeBlockLines} />;
+            ",
+        )]);
+
+        assert!(surface.references("codeBlockLines"));
+        assert!(surface.references("code-block-extra"));
+    }
+
+    #[test]
+    fn markup_file_credits_dom_class_api_values() {
+        // The quoted-token scan splits `gallery__item` at `_`. The DOM class
+        // API value keeps the whole class.
+        let surface = reference_surface(&[(
+            "src/Gallery.tsx",
+            r#"
+                const attrs = { className: 'gallery__item' };
+                export const Gallery = () => <figure className="gallery-frame" />;
+            "#,
+        )]);
+
+        assert!(surface.references("gallery__item"));
+        assert!(surface.references("gallery-frame"));
     }
 }

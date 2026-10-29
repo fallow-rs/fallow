@@ -299,6 +299,7 @@ fn make_component_rollup_violation(
         threshold_source: applied
             .override_index
             .map(|_| fallow_output::ThresholdSource::Override),
+        max_file_lines: None,
     }
 }
 

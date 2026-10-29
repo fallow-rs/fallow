@@ -40,6 +40,7 @@
 pub mod angular;
 pub mod component_contracts;
 pub mod glimmer;
+mod recovery;
 mod scanners;
 mod shared;
 mod svelte;

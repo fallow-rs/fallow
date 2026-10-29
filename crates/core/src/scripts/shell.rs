@@ -103,6 +103,50 @@ fn starts_windows_path(source: &str) -> bool {
 pub(super) const BUN_RUNTIME_FLAGS: &[&str] =
     &["--bun", "--watch", "--hot", "--smol", "--no-clear-screen"];
 
+/// Check if a command is a shell built-in (not an npm package).
+pub(super) fn is_builtin_command(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "echo"
+            | "cat"
+            | "cp"
+            | "mv"
+            | "rm"
+            | "mkdir"
+            | "rmdir"
+            | "ls"
+            | "cd"
+            | "pwd"
+            | "test"
+            | "true"
+            | "false"
+            | "exit"
+            | "export"
+            | "source"
+            | "which"
+            | "chmod"
+            | "chown"
+            | "touch"
+            | "find"
+            | "grep"
+            | "sed"
+            | "awk"
+            | "xargs"
+            | "tee"
+            | "sort"
+            | "uniq"
+            | "wc"
+            | "head"
+            | "tail"
+            | "sleep"
+            | "wait"
+            | "kill"
+            | "sh"
+            | "bash"
+            | "zsh"
+    )
+}
+
 /// Split a script string on shell operators (`&&`, `||`, `;`, `|`, `&`).
 /// Respects single and double quotes.
 pub fn split_shell_operators(script: &str) -> Vec<&str> {

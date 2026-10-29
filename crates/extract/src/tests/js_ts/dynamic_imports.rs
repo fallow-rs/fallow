@@ -1560,6 +1560,280 @@ fn child_process_fork_credits_new_url_runner_binding() {
 }
 
 #[test]
+fn child_process_fork_credits_path_join_of_module_directory() {
+    let sources = dynamic_sources(
+        "import { fork } from 'child_process';\n\
+         import path from 'path';\n\
+         import { fileURLToPath } from 'url';\n\
+         const CHILD = path.join(\n\
+           path.dirname(fileURLToPath(import.meta.url)),\n\
+           'WinnerReplayChild.ts',\n\
+         );\n\
+         export function replay() { return fork(CHILD, []); }",
+    );
+
+    assert_eq!(sources, vec!["./WinnerReplayChild.ts".to_string()]);
+}
+
+#[test]
+fn child_process_fork_credits_module_directory_binding() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import * as path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const __filename = fileURLToPath(import.meta.url);\n\
+         const here = path.dirname(__filename);\n\
+         fork(path.resolve(here, 'workers', 'child.ts'));",
+    );
+
+    assert_eq!(sources, vec!["./workers/child.ts".to_string()]);
+}
+
+#[test]
+fn child_process_fork_credits_dirname_globals() {
+    let sources = dynamic_sources(
+        "const { fork } = require('child_process');\n\
+         const path = require('path');\n\
+         fork(path.join(__dirname, '../shared/child.js'));\n\
+         fork(path.join(import.meta.dirname, 'esm-child.js'));",
+    );
+
+    assert_eq!(
+        sources,
+        vec![
+            "../shared/child.js".to_string(),
+            "./esm-child.js".to_string()
+        ]
+    );
+}
+
+#[test]
+fn child_process_fork_skips_computed_join_segment() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const dir = path.dirname(fileURLToPath(import.meta.url));\n\
+         fork(path.join(dir, name));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a computed segment is unknown: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_cwd_join() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         fork(path.join(process.cwd(), 'cwd-child.js'));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "the working directory is not the module directory: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_parent_only_join() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const dir = path.dirname(fileURLToPath(import.meta.url));\n\
+         fork(path.join(dir, '..'));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a directory is not a module: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_absolute_resolve_segment() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const dir = path.dirname(fileURLToPath(import.meta.url));\n\
+         fork(path.resolve(dir, '/abs.js'));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "an absolute segment leaves the module directory: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_normalizes_mid_path_parent_segment() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const dir = path.dirname(fileURLToPath(import.meta.url));\n\
+         fork(path.join(dir, 'a/../b.ts'));",
+    );
+
+    assert_eq!(
+        sources,
+        vec!["./b.ts".to_string()],
+        "a mid-path parent segment cancels the segment before it"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_shadowed_dirname_parameter() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         function run(__dirname) { fork(path.join(__dirname, 'param-child.js')); }",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a parameter named __dirname is not the module directory: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_shadowed_path_binding() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         function run(path) { fork(path.join(__dirname, 'child.js')); }",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a local path binding is not node:path: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_shadowed_file_url_to_path() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         function run(fileURLToPath) {\n\
+           fork(path.join(path.dirname(fileURLToPath(import.meta.url)), 'x.ts'));\n\
+         }",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a local fileURLToPath binding is not node:url: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_credits_dirname_of_filename() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         fork(path.join(path.dirname(__filename), 'cjs-child.js'));",
+    );
+
+    assert_eq!(
+        sources,
+        vec!["./cjs-child.js".to_string()],
+        "path.dirname(__filename) is the module directory"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_shadowed_filename() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         function run(__filename) {\n\
+           fork(path.join(path.dirname(__filename), 'child.js'));\n\
+         }",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a parameter named __filename is not the module file: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_rebound_dirname_constant() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const __dirname = '/srv/app';\n\
+         fork(path.join(__dirname, 'child.js'));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a __dirname constant with another value is not the module directory: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_rebound_filename_constant() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const __filename = process.argv[1];\n\
+         fork(path.join(path.dirname(__filename), 'child.js'));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "a __filename constant with another value is not the module file: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_skips_imported_dirname() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         import { __dirname } from './paths';\n\
+         fork(path.join(__dirname, 'child.js'));",
+    );
+
+    assert!(
+        sources.is_empty(),
+        "an imported __dirname is the directory of another module: {sources:?}"
+    );
+}
+
+#[test]
+fn child_process_fork_credits_module_path_constants() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         import path from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const __filename = fileURLToPath(import.meta.url);\n\
+         const __dirname = path.dirname(__filename);\n\
+         fork(path.join(__dirname, 'esm-child.js'));",
+    );
+
+    assert_eq!(
+        sources,
+        vec!["./esm-child.js".to_string()],
+        "ESM constants that hold the module path count"
+    );
+}
+
+#[test]
 fn unrelated_fork_call_is_not_credited() {
     let sources = dynamic_sources(
         "import { fork } from './process-utils';\n\

@@ -67,6 +67,7 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `high-cognitive-complexity` | `--complexity` | - | `// fallow-ignore-next-line complexity` | Function has high cognitive complexity |
 | `high-complexity` | `--complexity` | - | `// fallow-ignore-next-line complexity` | Function exceeds both complexity thresholds |
 | `high-crap-score` | `--complexity` | - | `// fallow-ignore-next-line complexity` | Function has a high CRAP score (complexity combined with low coverage) |
+| `long-file` | `--complexity` | - | `// fallow-ignore-file complexity` | File has more lines than the file-length threshold |
 | `refactoring-target` | `--targets` | - | - | File identified as a high-priority refactoring candidate |
 | `css-token-drift` | - | - | `// fallow-ignore-next-line css-token-drift` | CSS or CSS-in-JS hardcoded styling value bypasses the design token system |
 | `css-duplicate-block` | - | - | `// fallow-ignore-next-line css-duplicate-block` | CSS or CSS-in-JS declaration block is duplicated across rules |

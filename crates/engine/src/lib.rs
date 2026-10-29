@@ -56,6 +56,8 @@ pub mod flags;
 pub(crate) mod graph {
     pub use fallow_graph::graph::*;
 }
+mod base_worktree_orphans;
+mod base_worktree_registration;
 #[path = "git_env.rs"]
 mod git_env;
 pub mod guard;

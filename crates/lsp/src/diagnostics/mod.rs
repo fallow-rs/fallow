@@ -495,7 +495,6 @@ mod severity_gate {
             },
         }
     }
-
     /// COMPILE-TIME drift gate: exhaustively destructure `AnalysisResults` with
     /// NO `..` so a NEW field is a compile error here, forcing the author to
     /// classify it. Each binding is sorted into one of two buckets:
@@ -595,6 +594,7 @@ mod severity_gate {
             // Project-wide abstain flag for the `unused-load-data-key` detector;
             // an observability bool, not a per-finding diagnostic.
             unused_load_data_keys_global_abstain: _,
+            semantic_reachable_files: _,
             semantic_framework_contracts: _,
             // No editor surface in v1: TypeScript already strikes deprecated
             // names through in the editor. The finding is for cleanup sweeps

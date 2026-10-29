@@ -889,7 +889,7 @@ export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "su
 /**
  * Which complexity threshold was exceeded.
  */
-export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all")
+export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all" | "file_lines")
 /**
  * Severity tier indicating how far a function exceeds complexity thresholds.
  *
@@ -937,7 +937,7 @@ export type ThresholdSource = "override"
  * BOTH `increase-coverage` AND `refactor-function`, plus the trailing
  * `suppress-line`.
  */
-export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line")
+export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line" | "split-file")
 /**
  * Audit-mode class of a complexity finding against the base snapshot.
  */
@@ -1368,6 +1368,14 @@ export type CoverageSetupPackageManager = ("npm" | "pnpm" | "yarn" | "bun")
  * Runtime environment coverage capture must instrument.
  */
 export type CoverageSetupRuntimeTarget = ("node" | "browser")
+/**
+ * CI provider of a Fallow Cloud setup plan.
+ */
+export type CoverageSetupCiProvider = "github_actions"
+/**
+ * Outcome of `fallow coverage setup --cloud --wait`.
+ */
+export type CoverageSetupWaitOutcome = ("complete" | "timeout" | "error")
 /**
  * Schema-version discriminator for [`CoverageAnalyzeOutput`].
  */
@@ -3557,6 +3565,14 @@ total_issues: number
  * Prop chains whose saved effective severity explicitly enforces error policy.
  */
 prop_drilling_chains?: number
+/**
+ * Thin wrappers whose saved effective severity explicitly enforces error policy.
+ */
+thin_wrappers?: number
+/**
+ * Duplicate prop shapes whose saved effective severity explicitly enforces error policy.
+ */
+duplicate_prop_shapes?: number
 /**
  * Unused source files.
  */
@@ -6948,11 +6964,11 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
- * Rule severity of this finding. This type never gates the run, so the
- * value does not change the exit code. `fallow report --from` reads it
- * for the SARIF level, so the level does not depend on the config at
- * render time. Absent in output from older versions. Not part of the
- * finding identity, baseline keys or fingerprints.
+ * Rule severity of this finding. Explicit errors enforce analysis gates;
+ * warnings stay advisory, including under strict flags. Saved reports
+ * retain this value for CI levels without the original config. Absent
+ * in output from older versions. Not part of finding identity, baseline
+ * keys or fingerprints.
  */
 effective_severity?: (EffectiveSeverity | null)
 }
@@ -7014,11 +7030,11 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
- * Rule severity of this finding. This type never gates the run, so the
- * value does not change the exit code. `fallow report --from` reads it
- * for the SARIF level, so the level does not depend on the config at
- * render time. Absent in output from older versions. Not part of the
- * finding identity, baseline keys or fingerprints.
+ * Rule severity of this finding. Explicit errors enforce analysis gates;
+ * warnings stay advisory, including under strict flags. Saved reports
+ * retain this value for CI levels without the original config. Absent
+ * in output from older versions. Not part of finding identity, baseline
+ * keys or fingerprints.
  */
 effective_severity?: (EffectiveSeverity | null)
 }
@@ -8019,11 +8035,12 @@ export interface HealthFinding {
  */
 path: string
 /**
- * Function name, or a synthesized name for anonymous functions.
+ * Function name, or a synthesized name for anonymous functions. A
+ * file-length finding has the name `<file>`.
  */
 name: string
 /**
- * 1-based line the function starts on.
+ * 1-based line the function starts on. A file-length finding has `1`.
  */
 line: number
 /**
@@ -8047,7 +8064,8 @@ standard_cyclomatic?: (number | null)
  */
 cognitive: number
 /**
- * Lines of code in the function body.
+ * Lines of code in the function body. On a file-length finding, the
+ * physical line count of the file.
  */
 line_count: number
 /**
@@ -8143,6 +8161,12 @@ effective_thresholds?: (HealthEffectiveThresholds | null)
  * Source of the effective thresholds. Omitted when thresholds are global.
  */
 threshold_source?: (ThresholdSource | null)
+/**
+ * File-length ceiling in physical lines that the file exceeded. Present
+ * only on a file-level finding (`exceeded: "file_lines"`), where
+ * `line_count` holds the physical line count of the file.
+ */
+max_file_lines?: (number | null)
 /**
  * Machine-actionable fix and suppress hints.
  */
@@ -8489,7 +8513,9 @@ files_analyzed: number
  */
 functions_analyzed: number
 /**
- * Functions exceeding at least one complexity or CRAP threshold.
+ * Complexity findings before `--top`: functions exceeding at least one
+ * complexity or CRAP threshold, plus file-length findings
+ * (`exceeded: "file_lines"`).
  */
 functions_above_threshold: number
 /**
@@ -8517,6 +8543,12 @@ max_crap_threshold: number
  * here; this is the global default.
  */
 max_unit_size_threshold: number
+/**
+ * Global file-length ceiling (`health.maxFileLines` or
+ * `--max-file-lines`) in physical lines. Absent when the file-length
+ * check is off.
+ */
+max_file_lines_threshold?: (number | null)
 /**
  * Files with a computed maintainability score; absent when file scoring
  * did not run.
@@ -8646,6 +8678,10 @@ max_crap?: (number | null)
  * Unit-size ceiling set by the override, when it sets one.
  */
 max_unit_size?: (number | null)
+/**
+ * File-length ceiling set by the override, when it sets one.
+ */
+max_file_lines?: (number | null)
 }
 /**
  * Current complexity metrics for a matched threshold override entry.
@@ -11077,13 +11113,10 @@ defined_font_faces: string[]
 referenced_font_families: string[]
 }
 /**
- * Structural CSS metrics for a single style rule, computed from the parsed CSS
- * syntax tree. A rule is recorded only when it crosses a structural floor (an
- * id selector, a complex selector, a `!important` declaration, or deep
- * nesting), so the vector stays bounded on normal stylesheets.
- *
- * Not persisted in the extraction cache: `fallow health` computes these
- * on demand from the CSS source, so there is no `bitcode` derive.
+ * Structural CSS metrics for one style rule of the parsed CSS. Only a rule
+ * over a structural floor (an id selector, a complex selector, `!important`,
+ * or deep nesting) is recorded, so the vector stays bounded. Not cached:
+ * `fallow health` computes these from the CSS source (no `bitcode` derive).
  */
 export interface CssRuleMetric {
 /**
@@ -13686,6 +13719,10 @@ next_steps: string[]
  */
 warnings: string[]
 /**
+ * Fallow Cloud plan, present only for `fallow coverage setup --cloud`.
+ */
+cloud?: (CoverageSetupCloud | null)
+/**
  * `_meta` block with docs and field definitions, when requested.
  */
 _meta?: {
@@ -13759,6 +13796,112 @@ path: string
  * The snippet source text.
  */
 content: string
+}
+/**
+ * Fallow Cloud plan of `fallow coverage setup --cloud`.
+ *
+ * The beacon, the inventory, the source maps and the deployment registration
+ * must all carry the same commit SHA. The plan names only the environment
+ * variable names of keys, never a key value.
+ */
+export interface CoverageSetupCloud {
+/**
+ * Fallow Cloud project id (`owner/repo`), or null when it was not detected.
+ */
+project_id?: (string | null)
+/**
+ * Commit SHA that `--wait` checks: `--git-sha`, else `HEAD` of the
+ * working tree, or null outside a git repository.
+ */
+git_sha?: (string | null)
+/**
+ * Fallow Cloud API base URL.
+ */
+endpoint: string
+/**
+ * Environment variable that holds the full API key in CI and on the server.
+ */
+api_key_env: string
+/**
+ * Environment variable that holds the ingest-only browser key, when a
+ * member runs in the browser.
+ */
+browser_key_env?: (string | null)
+/**
+ * Environment variables the server snippets read the deployed commit SHA
+ * from, in order.
+ */
+commit_sha_env: string[]
+ci: CoverageSetupCi
+source_maps: CoverageSetupSourceMaps
+/**
+ * Activation endpoint that reports each setup step, or null without a
+ * project id.
+ */
+activation_url?: (string | null)
+/**
+ * Command that waits until the cloud reports every step as done.
+ */
+wait_command: string
+/**
+ * Result of `--wait`, present only when the command waited.
+ */
+wait?: (CoverageSetupWait | null)
+}
+/**
+ * CI steps of a Fallow Cloud setup plan.
+ */
+export interface CoverageSetupCi {
+provider: CoverageSetupCiProvider
+/**
+ * Existing workflow files that look like a deploy workflow, relative to
+ * the project root.
+ */
+workflows_detected: string[]
+/**
+ * Workflow steps to add to the job that builds and deploys.
+ */
+steps: string
+/**
+ * Where the steps go and what they need.
+ */
+instructions: string
+}
+/**
+ * Source map guidance of a Fallow Cloud setup plan.
+ */
+export interface CoverageSetupSourceMaps {
+/**
+ * Whether the CI steps upload source maps.
+ */
+needed: boolean
+/**
+ * Build output directories the maps are uploaded from, one per bundled
+ * workspace member, relative to the project root. Empty when no upload
+ * is needed.
+ */
+dirs: string[]
+/**
+ * Why the upload is or is not needed.
+ */
+reason: string
+}
+/**
+ * Result of `fallow coverage setup --cloud --wait`.
+ */
+export interface CoverageSetupWait {
+outcome: CoverageSetupWaitOutcome
+/**
+ * The last activation response body (`data`) from the cloud, unchanged,
+ * or null when no read succeeded. New step ids and states can appear.
+ */
+activation?: {
+[k: string]: unknown
+}
+/**
+ * Error text when the outcome is `error`.
+ */
+message?: (string | null)
 }
 /**
  * Envelope emitted by `fallow coverage analyze --format json`.
@@ -19914,6 +20057,10 @@ runner?: (MutationRunnerOutput | null)
  * started.
  */
 cache?: (MutationCacheOutput | null)
+/**
+ * The resume facts. Absent without `--resume`.
+ */
+resume?: (MutationResumeOutput | null)
 summary: MutationSummary
 /**
  * Each mutant, ranked mutants first.
@@ -20049,6 +20196,36 @@ stored: number
 not_keyed: string[]
 }
 /**
+ * The resume facts of a `--resume` run.
+ */
+export interface MutationResumeOutput {
+/**
+ * The path of the outcome journal, relative to the project root. When
+ * the cache directory is outside the root, the path is absolute: the
+ * report has no other cache path, so no other rule applies. The file
+ * stays only when the run did not complete. A run with
+ * `completion.status: complete` removes it.
+ */
+journal: string
+/**
+ * The mutants whose status came from the journal. They did not run.
+ */
+reused: number
+/**
+ * The journal results whose key does not match this run, because an
+ * input of the mutant changed. These results were not reused from the
+ * journal. The mutant ran again, or its status came from the result
+ * cache.
+ */
+rejected: number
+/**
+ * Why the run did not read a journal and started from the beginning,
+ * for example because no journal exists. Absent when the run read the
+ * journal.
+ */
+note?: (string | null)
+}
+/**
  * The totals of a run.
  */
 export interface MutationSummary {
@@ -20173,6 +20350,11 @@ attempts?: MutantAttempt[]
  * The mutant did not run in this run. `--no-cache` runs each mutant.
  */
 cached?: boolean
+/**
+ * True when the status comes from the journal of an interrupted run
+ * (`--resume`). The mutant did not run in this run.
+ */
+resumed?: boolean
 /**
  * The TypeScript diagnostic codes of the new errors of a
  * `compile_error` mutant, sorted, at most 8.
@@ -20355,7 +20537,8 @@ changed_paths: string[]
  */
 export interface MutationRunIssue {
 /**
- * A stable kebab-case code: `runtime-error`, `static-map-miss`,
+ * A stable kebab-case code: `cache-write-failed`,
+ * `journal-write-failed`, `runtime-error`, `static-map-miss`,
  * `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
  * or `worktree-check-failed`.
  */

@@ -177,3 +177,17 @@ impl<'a> ConfigExportCredit<'a> {
             .any(|exports| exports.iter().any(|e| e == "*" || e == export_name))
     }
 }
+
+/// Check whether an export name is covered by config ignore rules or plugin rules.
+pub fn is_export_ignored(
+    export_name: &str,
+    matching_ignore: &[&[String]],
+    matching_plugin: &[&[&str]],
+) -> bool {
+    matching_ignore
+        .iter()
+        .any(|exports| exports.iter().any(|e| e == "*" || e == export_name))
+        || matching_plugin
+            .iter()
+            .any(|exports| exports.contains(&"*") || exports.contains(&export_name))
+}

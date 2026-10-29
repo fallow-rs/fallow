@@ -131,6 +131,7 @@ export interface ComplexityOptions extends TypeAwareAnalysisOptions {
   maxCyclomatic?: number;
   maxCognitive?: number;
   maxCrap?: number;
+  maxFileLines?: number;
   top?: number;
   sort?: ComplexitySort;
   complexityBreakdown?: boolean;

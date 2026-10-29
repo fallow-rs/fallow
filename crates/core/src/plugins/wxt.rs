@@ -192,7 +192,7 @@ mod tests {
     fn resolve_config_ignores_dynamic_modules() {
         let plugin = WxtPlugin;
         let source = r"
-            const moduleName = '@wxt-dev/module-svelte';
+            import { moduleName } from './modules';
             export default defineConfig({ modules: [moduleName] });
         ";
 

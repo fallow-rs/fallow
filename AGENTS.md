@@ -76,8 +76,10 @@ ownership and high-value paths. Important invariants:
 - Resolve current flags and commands from `fallow --help` and
   `fallow <command> --help`, not from copied flag catalogues.
 
-Exit codes are `0` for success without error-severity findings, `1` for
-error-severity findings, and `2` for invalid input or execution errors. Some
+Exit codes are `0` when no enforced gate failed, `1` when an enforced gate
+failed (findings, not a tool failure), and `2` for invalid input or execution
+errors. Bare `fallow` in a machine format exits 0 on findings unless you pass
+`--fail-on-issues`. To gate, pass that flag or read `gate_outcomes`. Some
 runtime workflows define additional documented exit codes.
 
 ## Validation

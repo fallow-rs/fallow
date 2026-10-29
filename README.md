@@ -185,7 +185,7 @@ GitLab CI:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.36.0/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.37.0/ci/gitlab-ci.yml'
 
 fallow:
   extends: .fallow
@@ -268,8 +268,10 @@ Exit codes and the JSON error format are in [In pull requests](#in-pull-requests
 
 To report a missing framework plugin or a false positive, [open an issue](https://github.com/fallow-rs/fallow/issues). [CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup. [docs/README.md](docs/README.md) is the entry point for maintainer documentation.
 
-<a href="https://github.com/fallow-rs/fallow/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=fallow-rs/fallow" alt="Contributors">
+Thank you to everyone who contributes code, bug reports and ideas.
+
+<a href="https://github.com/fallow-rs/fallow/blob/badges/CONTRIBUTORS.md">
+  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/badges/contributors.png" alt="Contributors, including people who open issues. Follow the link for their names.">
 </a>
 
 ## License

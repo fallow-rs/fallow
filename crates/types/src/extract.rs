@@ -1332,13 +1332,10 @@ impl FunctionComplexity {
     }
 }
 
-/// Structural CSS metrics for a single style rule, computed from the parsed CSS
-/// syntax tree. A rule is recorded only when it crosses a structural floor (an
-/// id selector, a complex selector, a `!important` declaration, or deep
-/// nesting), so the vector stays bounded on normal stylesheets.
-///
-/// Not persisted in the extraction cache: `fallow health` computes these
-/// on demand from the CSS source, so there is no `bitcode` derive.
+/// Structural CSS metrics for one style rule of the parsed CSS. Only a rule
+/// over a structural floor (an id selector, a complex selector, `!important`,
+/// or deep nesting) is recorded, so the vector stays bounded. Not cached:
+/// `fallow health` computes these from the CSS source (no `bitcode` derive).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssRuleMetric {
@@ -1360,6 +1357,9 @@ pub struct CssRuleMetric {
     pub important_count: u16,
     /// Style-rule nesting depth (0 = top level).
     pub nesting_depth: u8,
+    /// Selector list of a notable rule, for audit keys. Never serialized.
+    #[serde(skip)]
+    pub selector: String,
 }
 
 /// A style rule's declaration-block fingerprint and location, for cross-file

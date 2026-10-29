@@ -7,11 +7,10 @@
 use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::time::SystemTime;
 
 use colored::Colorize as _;
-use fallow_engine::changed_files::clear_ambient_git_env;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -22,6 +21,7 @@ use crate::api::{
     retry_delay_for_status, sanitize_network_error, should_retry_status,
     try_api_agent_with_timeout,
 };
+use crate::coverage::generated_line_starts;
 use crate::coverage::source_map_sources::{
     UnresolvedMap, find_unresolved_map, warn_unresolved_maps,
 };
@@ -235,12 +235,10 @@ fn package_json_repository_name(root: &Path) -> Option<String> {
 }
 
 fn git_origin_repo_name(root: &Path) -> Option<String> {
-    let mut command = Command::new("git");
-    command
+    let output = fallow_engine::changed_files::git_command_in(root)
         .args(["remote", "get-url", "origin"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -535,7 +533,50 @@ struct PreparedSourceMap {
 }
 
 fn prepare_source_map(candidate: &SourceMapCandidate) -> MapOutcome {
-    prepare_source_map_with_open(candidate, securely_open_source_map, MAX_MAP_BYTES)
+    let mut outcome =
+        prepare_source_map_with_open(candidate, securely_open_source_map, MAX_MAP_BYTES);
+    if let MapOutcome::Ready(prepared) = &mut outcome {
+        let generated = read_generated_file(candidate);
+        generated_line_starts::set_line_starts(&mut prepared.source_map, generated.as_deref());
+    }
+    outcome
+}
+
+/// The generated script next to a map (`app.js` for `app.js.map`), read with
+/// the same build-directory guard as the map. `None` when the map does not
+/// name a script, the script is missing, outside the build directory, larger
+/// than the field allows, or not UTF-8.
+fn read_generated_file(candidate: &SourceMapCandidate) -> Option<String> {
+    let map_name = candidate.path.file_name()?.to_str()?;
+    let script_name = map_name.strip_suffix(".map")?;
+    if ![".js", ".mjs", ".cjs"]
+        .iter()
+        .any(|extension| script_name.ends_with(extension))
+    {
+        return None;
+    }
+    let path = candidate.path.with_file_name(script_name);
+    let resolved_path = std::fs::canonicalize(&path).ok()?;
+    if !resolved_path.starts_with(&candidate.canonical_root) {
+        return None;
+    }
+    let script = SourceMapCandidate {
+        path,
+        resolved_path,
+        ..candidate.clone()
+    };
+    let file = securely_open_source_map(&script).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > generated_line_starts::MAX_GENERATED_BYTES {
+        return None;
+    }
+    // Read one byte past the cap: a script that grew after the metadata check
+    // gives no field instead of the line starts of a cut copy.
+    let mut text = String::new();
+    file.take(generated_line_starts::MAX_GENERATED_BYTES + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    (text.len() as u64 <= generated_line_starts::MAX_GENERATED_BYTES).then_some(text)
 }
 
 fn prepare_source_map_with_open(
@@ -1764,5 +1805,109 @@ mod tests {
         let err = compile_glob_set(&["a[b".to_owned()], "--include")
             .expect_err("an unterminated character class must be rejected");
         assert!(matches!(err, UploadSourceMapsError::Validation(_)));
+    }
+
+    fn prepared_map(build_dir: &Path, map_name: &str) -> serde_json::Value {
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&[], "--exclude").unwrap();
+        let maps = collect_source_maps(build_dir, build_dir, &include, &exclude, false).unwrap();
+        let candidate = maps
+            .iter()
+            .find(|map| map.file_name == map_name)
+            .expect("collected map");
+        match prepare_source_map(candidate) {
+            MapOutcome::Ready(prepared) => prepared.source_map,
+            _ => panic!("map must be ready"),
+        }
+    }
+
+    #[test]
+    fn prepare_source_map_adds_line_starts_of_the_generated_file_as_last_key() {
+        let build_dir = tempdir().expect("build dir");
+        std::fs::write(
+            build_dir.path().join("chunk.js"),
+            "import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};",
+        )
+        .expect("chunk");
+        std::fs::write(
+            build_dir.path().join("chunk.js.map"),
+            r#"{"version":3,"sources":["src/a.ts"],"x_fallow_line_starts":[0,1],"mappings":"AAAA"}"#,
+        )
+        .expect("map");
+
+        let source_map = prepared_map(build_dir.path(), "chunk.js.map");
+
+        let object = source_map.as_object().expect("map object");
+        assert_eq!(
+            object.keys().next_back().map(String::as_str),
+            Some("x_fallow_line_starts")
+        );
+        assert_eq!(
+            object["x_fallow_line_starts"],
+            serde_json::json!([0, 23, 34, 38])
+        );
+    }
+
+    #[test]
+    fn prepare_source_map_drops_a_stale_field_without_a_generated_file() {
+        let build_dir = tempdir().expect("build dir");
+        std::fs::write(
+            build_dir.path().join("orphan.js.map"),
+            r#"{"version":3,"sources":[],"mappings":"","x_fallow_line_starts":[0,9]}"#,
+        )
+        .expect("map");
+
+        let source_map = prepared_map(build_dir.path(), "orphan.js.map");
+
+        assert!(source_map.get("x_fallow_line_starts").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_source_map_ignores_a_generated_file_that_links_outside_the_build_dir() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempdir().expect("outside dir");
+        let secret = outside.path().join("secret.js");
+        std::fs::write(&secret, "a\nb\nc").expect("secret");
+        let build_dir = tempdir().expect("build dir");
+        symlink(&secret, build_dir.path().join("app.js")).expect("script symlink");
+        std::fs::write(
+            build_dir.path().join("app.js.map"),
+            r#"{"version":3,"sources":[],"mappings":""}"#,
+        )
+        .expect("map");
+
+        let source_map = prepared_map(build_dir.path(), "app.js.map");
+
+        assert!(source_map.get("x_fallow_line_starts").is_none());
+    }
+
+    #[test]
+    fn prepare_source_map_reads_mjs_and_skips_non_scripts_and_non_utf8() {
+        let build_dir = tempdir().expect("build dir");
+        let empty_map = r#"{"version":3,"sources":[],"mappings":""}"#;
+        std::fs::write(build_dir.path().join("worker.mjs"), "a\r\nb").expect("mjs");
+        std::fs::write(build_dir.path().join("worker.mjs.map"), empty_map).expect("mjs map");
+        std::fs::write(build_dir.path().join("app.css"), "a\nb").expect("css");
+        std::fs::write(build_dir.path().join("app.css.map"), empty_map).expect("css map");
+        std::fs::write(build_dir.path().join("latin1.js"), b"a\n\xe9").expect("latin1");
+        std::fs::write(build_dir.path().join("latin1.js.map"), empty_map).expect("latin1 map");
+        std::fs::create_dir(build_dir.path().join("dir.js")).expect("directory");
+        std::fs::write(build_dir.path().join("dir.js.map"), empty_map).expect("dir map");
+
+        // The carriage return stays on line 1, as in the browser offset.
+        assert_eq!(
+            prepared_map(build_dir.path(), "worker.mjs.map")["x_fallow_line_starts"],
+            serde_json::json!([0, 3])
+        );
+        for map_name in ["app.css.map", "latin1.js.map", "dir.js.map"] {
+            assert!(
+                prepared_map(build_dir.path(), map_name)
+                    .get("x_fallow_line_starts")
+                    .is_none(),
+                "{map_name} must not get line starts"
+            );
+        }
     }
 }

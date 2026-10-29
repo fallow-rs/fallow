@@ -1,6 +1,7 @@
 //! Atomic dead-code reconciliation for validated semantic responses.
 
 use super::*;
+use crate::type_aware::manifest::supports_guarded_fix;
 
 pub(super) fn apply_dead_code_response(
     root: &Path,
@@ -200,10 +201,10 @@ fn plan_response_results(
     let mut type_coupling = None;
     let mut query_summaries = Vec::new();
     let mut source_cache = FxHashMap::default();
-    let unreachable_files = results
-        .unused_files
+    let reachable_files = results
+        .semantic_reachable_files
         .iter()
-        .filter_map(|finding| protocol_path(root, &finding.file.path).ok())
+        .filter_map(|path| protocol_path(root, path).ok())
         .collect::<BTreeSet<_>>();
 
     for result in &response.results {
@@ -223,9 +224,8 @@ fn plan_response_results(
         let mut summary = query_summary(result);
         match target {
             QueryTarget::ClassMember(index) => {
-                // Guarded-fix evidence comes from the default backend only.
-                let fix_supported =
-                    query_supports_guarded_fix(query) && response.backend == BACKEND_FAMILY;
+                let fix_supported = query_supports_guarded_fix(query)
+                    && supports_guarded_fix(&response.backend, &response.backend_version);
                 let decision = retain_non_crediting_evidence(
                     decode_candidate_decision(
                         root,
@@ -234,7 +234,7 @@ fn plan_response_results(
                         fix_supported,
                         &mut source_cache,
                     )?,
-                    &unreachable_files,
+                    &reachable_files,
                     &mut summary,
                 );
                 candidates.record_class(results, *index, decision)?;
@@ -242,7 +242,7 @@ fn plan_response_results(
             QueryTarget::UnusedExport(index) => {
                 let decision = retain_non_crediting_evidence(
                     decode_candidate_decision(root, query, result, false, &mut source_cache)?,
-                    &unreachable_files,
+                    &reachable_files,
                     &mut summary,
                 );
                 candidates.record_export(results, *index, decision)?;
@@ -250,7 +250,7 @@ fn plan_response_results(
             QueryTarget::UnusedType(index) => {
                 let decision = retain_non_crediting_evidence(
                     decode_candidate_decision(root, query, result, false, &mut source_cache)?,
-                    &unreachable_files,
+                    &reachable_files,
                     &mut summary,
                 );
                 candidates.record_type(results, *index, decision)?;
@@ -417,34 +417,32 @@ fn project_metadata(projects: Vec<SemanticProjectResponse>) -> Vec<TypeAwareProj
 
 fn retain_non_crediting_evidence(
     mut decision: SemanticCandidateDecision,
-    unreachable_files: &BTreeSet<PathBuf>,
+    reachable_files: &BTreeSet<PathBuf>,
     summary: &mut SemanticQuerySummary,
 ) -> SemanticCandidateDecision {
-    if decision.decision != SemanticCandidateDecisionKind::ConfirmedUsed
-        || decision.evidence.is_empty()
-    {
+    if decision.decision != SemanticCandidateDecisionKind::ConfirmedUsed {
         return decision;
     }
 
     let only_unreachable = decision
         .evidence
         .iter()
-        .all(|evidence| unreachable_files.contains(&evidence.path));
+        .all(|evidence| !reachable_files.contains(&evidence.path));
     let only_re_exports = decision
         .evidence
         .iter()
         .all(|evidence| evidence.role.contains("re-export"));
     let all_non_crediting = decision.evidence.iter().all(|evidence| {
-        unreachable_files.contains(&evidence.path) || evidence.role.contains("re-export")
+        !reachable_files.contains(&evidence.path) || evidence.role.contains("re-export")
     });
     if !all_non_crediting {
         return decision;
     }
     let (action, assertion, explanation) = if only_unreachable {
         (
-            "Review the unreachable consumer files before removing this declaration.",
+            "Review the consumer evidence against the reachable analysis scope before removing this declaration.",
             "retained-unreachable-evidence",
-            "came only from files unreachable from analyzed entry points",
+            "did not include a proven consumer in the reachable analysis scope",
         )
     } else if only_re_exports {
         (
@@ -456,7 +454,7 @@ fn retain_non_crediting_evidence(
         (
             "Confirm that a reachable consumer reads this binding before removing it.",
             "retained-non-crediting-evidence",
-            "combined reads from unreachable files with re-export declarations that had no proven reachable consumer",
+            "combined reads outside the reachable analysis scope with re-export declarations that had no proven reachable consumer",
         )
     };
     decision.decision = SemanticCandidateDecisionKind::RetainedAbstained;
@@ -544,11 +542,14 @@ mod tests {
 
     #[test]
     fn checker_evidence_only_from_unreachable_files_cannot_refute_dead_code() {
-        let unreachable = BTreeSet::from([PathBuf::from("src/orphan.ts")]);
+        let reachable = BTreeSet::from([
+            PathBuf::from("src/index.ts"),
+            PathBuf::from("src/barrel.ts"),
+        ]);
         let mut query_summary = summary();
         let decision = retain_non_crediting_evidence(
             confirmed_used("src/orphan.ts"),
-            &unreachable,
+            &reachable,
             &mut query_summary,
         );
 
@@ -562,24 +563,57 @@ mod tests {
 
     #[test]
     fn reachable_checker_evidence_still_refutes_dead_code() {
-        let unreachable = BTreeSet::from([PathBuf::from("src/orphan.ts")]);
-        let mut query_summary = summary();
-        let decision = retain_non_crediting_evidence(
-            confirmed_used("src/index.ts"),
-            &unreachable,
-            &mut query_summary,
-        );
-
-        assert_eq!(
-            decision.decision,
-            SemanticCandidateDecisionKind::ConfirmedUsed
-        );
-        assert_eq!(query_summary.status, SemanticCompleteness::Complete);
+        let results = AnalysisResults {
+            semantic_reachable_files: [
+                PathBuf::from("src/index.ts"),
+                PathBuf::from("src/source.ts"),
+            ]
+            .into_iter()
+            .collect(),
+            ..AnalysisResults::default()
+        };
+        let serialized = serde_json::to_value(&results).expect("serialize results");
+        assert!(serialized.get("semantic_reachable_files").is_none());
+        let restored: AnalysisResults = serde_json::from_value(serialized).expect("read report");
+        for path in ["src/index.ts", "src/source.ts"] {
+            let mut candidate = confirmed_used("src/excluded.test.ts");
+            candidate
+                .evidence
+                .push(confirmed_used(path).evidence.remove(0));
+            for (scope, expected) in [
+                (
+                    &results.semantic_reachable_files,
+                    SemanticCandidateDecisionKind::ConfirmedUsed,
+                ),
+                (
+                    &restored.semantic_reachable_files,
+                    SemanticCandidateDecisionKind::RetainedAbstained,
+                ),
+            ] {
+                let mut query_summary = summary();
+                let decision = retain_non_crediting_evidence(
+                    candidate.clone(),
+                    &scope.iter().cloned().collect(),
+                    &mut query_summary,
+                );
+                assert_eq!(decision.decision, expected);
+            }
+            candidate.evidence.clear();
+            let mut query_summary = summary();
+            assert_eq!(
+                retain_non_crediting_evidence(candidate, &BTreeSet::new(), &mut query_summary)
+                    .decision,
+                SemanticCandidateDecisionKind::RetainedAbstained
+            );
+        }
     }
 
     #[test]
     fn truncated_unreachable_evidence_fails_closed() {
-        let unreachable = BTreeSet::from([PathBuf::from("src/orphan.ts")]);
+        let reachable = BTreeSet::from([
+            PathBuf::from("src/index.ts"),
+            PathBuf::from("src/barrel.ts"),
+        ]);
         let mut candidate = confirmed_used("src/orphan.ts");
         candidate.total_evidence_count = 41;
         candidate.truncated = true;
@@ -587,7 +621,7 @@ mod tests {
         query_summary.total_evidence_count = 41;
         query_summary.truncated = true;
 
-        let decision = retain_non_crediting_evidence(candidate, &unreachable, &mut query_summary);
+        let decision = retain_non_crediting_evidence(candidate, &reachable, &mut query_summary);
 
         assert_eq!(
             decision.decision,
@@ -602,8 +636,11 @@ mod tests {
         let mut candidate = confirmed_used("src/barrel.ts");
         candidate.evidence[0].role = "re-export".to_string();
         let mut query_summary = summary();
-        let decision =
-            retain_non_crediting_evidence(candidate, &BTreeSet::new(), &mut query_summary);
+        let decision = retain_non_crediting_evidence(
+            candidate,
+            &BTreeSet::from([PathBuf::from("src/barrel.ts")]),
+            &mut query_summary,
+        );
 
         assert_eq!(
             decision.decision,
@@ -614,7 +651,10 @@ mod tests {
 
     #[test]
     fn mixed_unreachable_and_re_export_evidence_cannot_refute_dead_code() {
-        let unreachable = BTreeSet::from([PathBuf::from("src/orphan.ts")]);
+        let reachable = BTreeSet::from([
+            PathBuf::from("src/index.ts"),
+            PathBuf::from("src/barrel.ts"),
+        ]);
         let mut candidate = confirmed_used("src/orphan.ts");
         let mut re_export = candidate.evidence[0].clone();
         re_export.path = PathBuf::from("src/barrel.ts");
@@ -622,7 +662,7 @@ mod tests {
         candidate.evidence.push(re_export);
         let mut query_summary = summary();
 
-        let decision = retain_non_crediting_evidence(candidate, &unreachable, &mut query_summary);
+        let decision = retain_non_crediting_evidence(candidate, &reachable, &mut query_summary);
 
         assert_eq!(
             decision.decision,

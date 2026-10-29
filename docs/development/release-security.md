@@ -12,6 +12,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `release-context` | Bind the dispatch to `main`, the release version, and an absent tag | Read only |
 | `pgo-profile` | Build an instrumented binary, train the PGO profile on pinned public fixtures, and upload only the profile | Read only |
 | `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
+| `authenticode` | Add an Authenticode signature to the Windows executables and NAPI addons, then replace their build artifacts | Artifact Signing OIDC in `windows-signing` |
 | `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
 | `validate` | Reusable release validation, including the similar-code sidecar dependency audit | Read only |
 | `musl-smoke` | Run the exact unsigned musl binaries in a digest-pinned Alpine container on x64 and arm64 | Read only |
@@ -71,6 +72,49 @@ The frozen `@vscode/vsce@4.0.0` supports `--oidc`, requesting audience
 authority. Their graphs and binary signing keys are independent of this mode
 selection. Account policies, mode activation, legacy-token revocation and
 real publication require separate owner actions.
+
+## Windows Authenticode signing
+
+Windows Smart App Control and SmartScreen block an unsigned executable that
+has no reputation. They do not know the Ed25519 signature that `sign` adds. The
+`authenticode` job signs every Fallow Windows file with Azure Artifact Signing:
+the CLI, multicall, LSP, MCP and similar-code executables, and the NAPI addon.
+The certificate subject is `Fallow B.V.`. The job never signs third-party
+files, such as the TypeScript binary in the type-aware VSIX.
+
+The job runs in its own `windows-signing` environment, not in `release`. The
+publisher jobs in `release` run third-party tools with `id-token: write`. With
+a shared subject, a compromised tool could request a signature as Fallow B.V.
+The `windows-signing` deployment branch policy admits `main` only, and no
+other job may use the environment.
+
+`WINDOWS_SIGNING_MODE` in the `windows-signing` environment selects the mode. `off`, or no value, keeps the build artifacts unchanged and prints a
+warning. `authenticode` requires these nonsecret variables in the same
+environment:
+
+| Variable | Value |
+|---|---|
+| `WINDOWS_SIGNING_CLIENT_ID` | Client ID of the Entra app with the Certificate Profile Signer role |
+| `WINDOWS_SIGNING_TENANT_ID` | Tenant ID of that app and of the Artifact Signing account |
+| `WINDOWS_SIGNING_ENDPOINT` | Regional account endpoint, for example `https://neu.codesigning.azure.net/` |
+| `WINDOWS_SIGNING_ACCOUNT` | Artifact Signing account name |
+| `WINDOWS_SIGNING_PROFILE` | Public Trust certificate profile name |
+
+The Entra app federates with issuer
+`https://token.actions.githubusercontent.com`, subject
+`repo:fallow-rs/fallow:environment:windows-signing` and audience
+`api://AzureADTokenExchange`. The repository uses the default OIDC subject, so
+the subject must not use the immutable ID format. The app holds only the
+Artifact Signing Certificate Profile Signer role on the signing account.
+
+The job runs after `build` and before `sign`. It downloads the raw payload,
+the NAPI addon and the release archive, and checks that each archive entry has
+the same bytes as the raw payload. After signing, it requires a valid,
+timestamped signature with `O=Fallow B.V.` on every file. It then rebuilds the
+archive from the signed files and uploads all three artifacts again under their
+build names. `sign`, `npm-prep`, `vscode-prep` and `release-assets` therefore
+read only signed Windows files. Authenticode changes the file bytes, so it must
+come before the Ed25519 signature and before every checksum.
 
 ## Marketplace Entra federation
 
@@ -197,6 +241,9 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   crates.io accepts an environment claim when a config sets none, and rejects a
   token without the matching claim once it does, so the pin is what stops an
   edited workflow on another ref from publishing crates over OIDC.
+- Run `authenticode` alone in the `windows-signing` environment, with a
+  main-only deployment branch policy. The Entra signing app trusts only that
+  environment subject.
 - Keep `pgo-profile` outside the `release` environment and without
   credentials. It installs the dependencies of public fixtures with
   `--ignore-scripts`. It uploads only the merged `.profdata` file, as the
@@ -309,8 +356,9 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 - Keep artifact inventory and package-name constants aligned with the build
   matrix.
 - Make `release-verified` wait for `similar-code-conformance`, which validates
-  the exact Linux x64 sidecar artifact against the committed F32 Candle
-  baseline before any publication job can start.
+  the exact Linux x64, macOS arm64, and macOS x64 sidecar artifacts against
+  the committed F32 Candle baseline before any publication job can start. The
+  macOS legs cover the Accelerate build.
 - Keep the similar-code sidecar dependency audit in `release-validation.yml`.
   Its `cargo audit` call ignores exactly the advisory IDs in
   `tools/similar-code-sidecar/audit-allowlist.json`. The pre-flight

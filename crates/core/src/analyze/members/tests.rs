@@ -42,6 +42,7 @@ fn find_unused_members(
         ignore_decorators,
         public_api_entry_points: &FxHashSet::default(),
         lit_active: false,
+        report_unmatched_patterns: true,
     });
     (
         results.enum_members,

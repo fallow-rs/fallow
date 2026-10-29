@@ -2435,11 +2435,11 @@ pub struct ThinWrapperFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
-    /// Rule severity of this finding. This type never gates the run, so the
-    /// value does not change the exit code. `fallow report --from` reads it
-    /// for the SARIF level, so the level does not depend on the config at
-    /// render time. Absent in output from older versions. Not part of the
-    /// finding identity, baseline keys or fingerprints.
+    /// Rule severity of this finding. Explicit errors enforce analysis gates;
+    /// warnings stay advisory, including under strict flags. Saved reports
+    /// retain this value for CI levels without the original config. Absent
+    /// in output from older versions. Not part of finding identity, baseline
+    /// keys or fingerprints.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -2499,11 +2499,11 @@ pub struct DuplicatePropShapeFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
-    /// Rule severity of this finding. This type never gates the run, so the
-    /// value does not change the exit code. `fallow report --from` reads it
-    /// for the SARIF level, so the level does not depend on the config at
-    /// render time. Absent in output from older versions. Not part of the
-    /// finding identity, baseline keys or fingerprints.
+    /// Rule severity of this finding. Explicit errors enforce analysis gates;
+    /// warnings stay advisory, including under strict flags. Saved reports
+    /// retain this value for CI levels without the original config. Absent
+    /// in output from older versions. Not part of finding identity, baseline
+    /// keys or fingerprints.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

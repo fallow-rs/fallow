@@ -110,6 +110,40 @@ fn a_project_without_tests_reports_no_coverage_without_a_companion() {
     assert_eq!(report.summary.coverage, Some(0.0));
 }
 
+/// A complete run that starts no test runner never reads the journal, so it
+/// must not remove the interrupted journal of another scope.
+#[test]
+fn a_resume_without_a_test_run_keeps_the_journal_of_another_scope() {
+    let project = small_project();
+    let cache = project.path().join(".fallow");
+    fs::create_dir_all(cache.join("mutation")).expect("dir");
+    fs::write(cache.join(".gitignore"), "*\n").expect("write");
+    let journal = cache.join("mutation/journal.jsonl");
+    let text = "{\"journal_format\":1}\n{\"id\":\"m1\",\"key\":\"k1\",\"status\":\"killed\"}\n";
+    fs::write(&journal, text).expect("write");
+    commit_all(project.path());
+
+    let mut resumed = options(project.path(), MutationRunScope::All);
+    resumed.resume = true;
+    let report = run_mutation(&resumed).expect("run");
+    assert!(report.runner.is_none());
+    assert_eq!(
+        report.completion.status,
+        fallow_output::MutationCompletionStatus::Complete
+    );
+    let resume = report.resume.as_ref().expect("the resume facts");
+    assert_eq!(
+        resume.note.as_deref(),
+        Some("the run read no journal, because no mutant needs a test run")
+    );
+    assert!(
+        !crate::mutation::remove_finished_mutation_journal(&resumed.analysis, &report)
+            .expect("settle"),
+        "a run that did not write the journal does not remove it"
+    );
+    assert_eq!(fs::read_to_string(&journal).expect("kept"), text);
+}
+
 /// A `node:test` project with a Vue component. The test does not import the
 /// component, because Node cannot load it.
 fn component_project(runner: &str) -> tempfile::TempDir {
@@ -653,7 +687,7 @@ mod end_to_end {
 
         let runner = report.runner.as_ref().expect("a runner ran");
         assert_eq!(runner.name, "vitest");
-        assert_eq!(runner.version, "5.0.4");
+        assert_eq!(runner.version, "5.0.5");
         assert_eq!(runner.runtime.name, "node");
         assert_eq!(
             report.completion.status,
@@ -821,6 +855,88 @@ mod end_to_end {
         assert_eq!(runner.name, "node-test");
         assert_eq!(runner.runtime.name, "node");
         assert_math_statuses(&report);
+    }
+
+    /// Issue #3783: a run that stops early keeps the final results in its
+    /// journal, also with `--no-cache`, and `--resume` runs only the others.
+    #[test]
+    fn a_resumed_run_reuses_the_journal_of_a_partial_run() {
+        use crate::mutation::discovery::RuntimeKind;
+        use crate::mutation::{Operator, remove_finished_mutation_journal};
+        let Some(package) = child_runner_package("node-test", RuntimeKind::Node) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/node-basic"),
+            &["package.json", "src/math.ts", "test/math.test.ts"],
+        );
+        let scope = MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]);
+        let journal = root.join(".fallow/mutation/journal.jsonl");
+
+        let mut partial = options(&root, scope.clone());
+        assert!(partial.analysis.no_cache);
+        partial.max_mutants = Some(2);
+        let first = run_mutation(&partial).expect("the partial run completes");
+        assert_eq!(first.completion.status, MutationCompletionStatus::Partial);
+        assert!(first.resume.is_none(), "no --resume, no resume facts");
+        let journaled = fs::read_to_string(&journal)
+            .expect("--no-cache still writes the journal")
+            .lines()
+            .count()
+            - 1;
+        assert!(journaled > 0, "the partial run journals its kills");
+        assert!(
+            !remove_finished_mutation_journal(&partial.analysis, &first).expect("settle"),
+            "a partial run keeps its journal"
+        );
+        assert!(journal.is_file());
+
+        let mut resumed = options(&root, scope);
+        resumed.resume = true;
+        let second = run_mutation(&resumed).expect("the resumed run completes");
+        let resume = second.resume.clone().expect("the resume facts");
+        assert_eq!(resume.journal, ".fallow/mutation/journal.jsonl");
+        assert_eq!(resume.reused, journaled);
+        assert_eq!(resume.rejected, 0);
+        assert_eq!(resume.note, None);
+        let reused = second
+            .mutants
+            .iter()
+            .filter(|mutant| mutant.resumed)
+            .count();
+        assert_eq!(reused, journaled);
+        assert!(second.mutants.iter().all(|mutant| !mutant.cached));
+        assert_math_statuses(&second);
+        assert!(
+            remove_finished_mutation_journal(&resumed.analysis, &second).expect("settle"),
+            "a complete run removes the journal"
+        );
+        assert!(!journal.exists());
+
+        let fresh = run_mutation(&resumed).expect("a resume without a journal runs");
+        let resume = fresh.resume.clone().expect("the resume facts");
+        assert_eq!(
+            resume.note.as_deref(),
+            Some("the run started from the beginning, because no journal exists")
+        );
+        assert_eq!(resume.reused, 0);
+        assert_math_statuses(&fresh);
+
+        let mut other = resumed;
+        other.operators = Some(vec![Operator::ArithmeticOperator]);
+        let error = run_mutation(&other).expect_err("other operators do not resume");
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_RESUME_MISMATCH")
+        );
+        assert_eq!(error.exit_code, 2);
+        assert!(
+            error
+                .message
+                .contains("operators (journal: each operator, this run: arithmetic-operator)"),
+            "{}",
+            error.message
+        );
     }
 
     /// The acceptance case of #3470: a `node:test` run gives no
@@ -1066,7 +1182,7 @@ mod end_to_end {
         let files = [
             (
                 "package.json",
-                r#"{"name":"mutation-discovery-repro","private":true,"type":"module","scripts":{"test":"vitest run","test:integration":"vitest run --config vitest.integration.config.mjs"},"devDependencies":{"vitest":"5.0.4"}}"#
+                r#"{"name":"mutation-discovery-repro","private":true,"type":"module","scripts":{"test":"vitest run","test:integration":"vitest run --config vitest.integration.config.mjs"},"devDependencies":{"vitest":"5.0.5"}}"#
                     .to_owned(),
             ),
             (

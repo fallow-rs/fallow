@@ -922,9 +922,8 @@ pub fn merge_codex(
 }
 
 fn is_git_tracked(root: &Path, relative: &str) -> bool {
-    Command::new("git")
+    fallow_engine::changed_files::git_command_in(root)
         .args(["ls-files", "--error-unmatch", relative])
-        .current_dir(root)
         .output()
         .is_ok_and(|output| output.status.success())
 }

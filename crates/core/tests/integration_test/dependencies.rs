@@ -1294,6 +1294,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
+        markup_extensions: vec![],
         overrides: vec![],
         regression: None,
         audit: fallow_config::AuditConfig::default(),

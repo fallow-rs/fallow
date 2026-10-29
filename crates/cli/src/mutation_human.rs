@@ -14,8 +14,8 @@ use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
-    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
-    MutationTypecheckOutput, TestReachClass,
+    MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
+    MutationStaleReason, MutationTypecheckOutput, TestReachClass,
 };
 use rustc_hash::FxHashMap;
 
@@ -661,6 +661,31 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
             plural(cache.hits, "result came", "results came")
         );
     }
+    if let Some(resume) = &report.resume {
+        let _ = writeln!(out, "{}", resume_line(resume));
+    }
+}
+
+/// The line of a `--resume` run.
+fn resume_line(resume: &MutationResumeOutput) -> String {
+    if let Some(note) = &resume.note {
+        return format!("Resumed: {note} ({}).", resume.journal);
+    }
+    let mut line = format!(
+        "Resumed: {} {} from the journal of an earlier run",
+        resume.reused,
+        plural(resume.reused, "result came", "results came")
+    );
+    if resume.rejected > 0 {
+        let _ = write!(
+            line,
+            ", {} not reused from the journal because {} changed",
+            resume.rejected,
+            plural(resume.rejected, "its inputs", "their inputs")
+        );
+    }
+    line.push('.');
+    line
 }
 
 /// The line of the survivor type check (`--typecheck`).

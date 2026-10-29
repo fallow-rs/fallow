@@ -58,6 +58,24 @@ These causes made a person act on a Dependabot pull request in the past:
 - `github/codeql-action` sub-actions on different versions. The
   `codeql-action` group in `.github/dependabot.yml` prevents this.
 
+## Security overrides
+
+The root toolchain overrides `fast-uri` 3 to its patched release. Lockfile
+regeneration during a Commitlint update previously restored a vulnerable
+version. Remove the override when the parent dependency requires a patched
+version, then run the root audit and repository script suites.
+
+The isolated Marketplace and Open VSX publishers override `@azure/msal-node`
+to the patched major because Azure Identity still requests the vulnerable
+major. The extension applies the same override in `pnpm-workspace.yaml`.
+Remove these overrides when Azure Identity's supported range includes the
+patched release, and rerun the publisher authentication and extension suites.
+
+The extension also overrides Mocha's `diff` and `serialize-javascript`
+dependencies. Keep Mocha compatible with the VS Code engine floor. Remove an
+override when Mocha requests a patched version, then run the extension's
+integration suites in the oldest supported host.
+
 ## Setup
 
 | Setting | Scope | Use |

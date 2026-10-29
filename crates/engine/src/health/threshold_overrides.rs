@@ -35,6 +35,7 @@ pub(super) struct ThresholdOverrideResolver {
     entries: Vec<CompiledThresholdOverride>,
     pub(super) global: GlobalHealthThresholds,
     cyclomatic_policy: fallow_config::CyclomaticPolicy,
+    max_file_lines: u32,
 }
 
 impl ThresholdOverrideResolver {
@@ -64,6 +65,7 @@ impl ThresholdOverrideResolver {
                         max_cognitive: override_entry.max_cognitive,
                         max_crap: override_entry.max_crap,
                         max_unit_size: override_entry.max_unit_size,
+                        max_file_lines: override_entry.max_file_lines,
                     },
                     reason: override_entry.reason.clone(),
                 }
@@ -73,7 +75,52 @@ impl ThresholdOverrideResolver {
             entries,
             global,
             cyclomatic_policy: fallow_config::CyclomaticPolicy::Standard,
+            max_file_lines: 0,
         }
+    }
+
+    /// Set the global file-length ceiling (`health.maxFileLines` or
+    /// `--max-file-lines`). `0` turns the check off.
+    #[must_use]
+    pub(super) const fn with_max_file_lines(mut self, max_file_lines: u32) -> Self {
+        self.max_file_lines = max_file_lines;
+        self
+    }
+
+    /// The global file-length ceiling. `0` means off.
+    #[must_use]
+    pub(super) const fn max_file_lines(&self) -> u32 {
+        self.max_file_lines
+    }
+
+    /// Resolve the file-length ceiling of one file, with the matching
+    /// override entries. Entries with a `functions` list do not apply: the
+    /// config validation rejects `maxFileLines` on them. `0` means off.
+    #[must_use]
+    pub(super) fn resolve_max_file_lines(
+        &self,
+        relative: &Path,
+    ) -> (u32, Vec<ThresholdOverrideMatch<'_>>) {
+        let mut effective = self.max_file_lines;
+        let mut matches = Vec::new();
+        for entry in &self.entries {
+            if !entry.functions.is_empty() || !entry.matchers.is_match(relative) {
+                continue;
+            }
+            if let Some(max_file_lines) = entry.configured.max_file_lines {
+                effective = max_file_lines;
+                matches.push(ThresholdOverrideMatch { entry });
+            }
+        }
+        (effective, matches)
+    }
+
+    /// Whether any override entry sets `maxFileLines`.
+    #[must_use]
+    pub(super) fn has_file_lines_overrides(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.configured.max_file_lines.is_some())
     }
 
     /// Set the cyclomatic policy (`health.cyclomaticPolicy`) of the gates.
@@ -248,6 +295,7 @@ fn configured_dimensions(
     if configured.max_cyclomatic.is_some()
         || configured.max_cognitive.is_some()
         || configured.max_unit_size.is_some()
+        || configured.max_file_lines.is_some()
     {
         dimensions.push(ThresholdOverrideDimension::Complexity);
     }
@@ -367,6 +415,59 @@ impl ThresholdOverrideStateTracker {
                     cognitive,
                     crap: None,
                     line_count,
+                }),
+                reason: matched.entry.reason.clone(),
+                dimension: ThresholdOverrideDimension::Complexity,
+            });
+        }
+    }
+
+    /// Record the rows of the `maxFileLines` entries that match one file.
+    ///
+    /// A file-length ceiling of `0` is off, so it never breaches. The row
+    /// belongs to the complexity dimension and names the file-level unit
+    /// `<file>`. A suppressed file reads `stale`, as a suppressed function
+    /// does in [`record_complexity`](Self::record_complexity).
+    pub(super) fn record_file_lines(
+        &mut self,
+        file: FileLinesContext<'_>,
+        matches: &[ThresholdOverrideMatch<'_>],
+        global_max_file_lines: u32,
+        effective_max_file_lines: u32,
+        effective: fallow_output::HealthEffectiveThresholds,
+    ) {
+        let breaches = |limit: u32| !file.suppressed && limit > 0 && file.line_count > limit;
+        let global_exceeded = breaches(global_max_file_lines);
+        let local_exceeded = breaches(effective_max_file_lines);
+        let status = if global_exceeded && !local_exceeded {
+            fallow_output::ThresholdOverrideStatus::Active
+        } else if !global_exceeded {
+            fallow_output::ThresholdOverrideStatus::Stale
+        } else {
+            fallow_output::ThresholdOverrideStatus::Insufficient
+        };
+        let outstanding = if local_exceeded {
+            vec![ThresholdOverrideDimension::Complexity]
+        } else {
+            Vec::new()
+        };
+        for matched in matches {
+            self.matched_indexes.insert(matched.entry.index);
+            self.push_state(ThresholdOverrideStateInput {
+                status,
+                override_index: matched.entry.index,
+                outstanding: outstanding.clone(),
+                path: Some(file.path.to_path_buf()),
+                function: Some(fallow_output::FILE_LINES_FINDING_NAME.to_string()),
+                line: Some(1),
+                col: Some(0),
+                configured_thresholds: matched.entry.configured,
+                effective_thresholds: effective,
+                metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                    cyclomatic: 0,
+                    cognitive: 0,
+                    crap: None,
+                    line_count: Some(file.line_count),
                 }),
                 reason: matched.entry.reason.clone(),
                 dimension: ThresholdOverrideDimension::Complexity,
@@ -586,6 +687,14 @@ impl ThresholdOverrideStateTracker {
     }
 }
 
+/// One file and its physical line count, for the file-length recorder.
+#[derive(Clone, Copy)]
+pub(super) struct FileLinesContext<'a> {
+    pub(super) path: &'a Path,
+    pub(super) line_count: u32,
+    pub(super) suppressed: bool,
+}
+
 /// One function's identity (path, name and position) and measured complexity
 /// metrics, bundled so `record_complexity` takes the function descriptor as a
 /// single parameter instead of seven.
@@ -666,6 +775,7 @@ mod tests {
             max_cognitive: None,
             max_crap: None,
             max_unit_size: None,
+            max_file_lines: None,
             reason: None,
         }];
         let resolver = ThresholdOverrideResolver::new(&overrides, global);

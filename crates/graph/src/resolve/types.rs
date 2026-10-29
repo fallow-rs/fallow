@@ -247,7 +247,7 @@ impl<'a> ResolvedSourceEdge<'a> {
 /// The `Arc<[T]>` fields are refcounted views of the same allocations owned by
 /// the source [`fallow_types::extract::ModuleInfo`], not copies; see the note
 /// on that struct.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedModule {
     /// Unique file identifier.
     pub file_id: FileId,

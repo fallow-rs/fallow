@@ -1,8 +1,6 @@
-//! The editor narrows dead-code findings to the changed files after the
-//! type-aware pass. That pass reads `unused_files` as its set of unreachable
-//! files. A scope before the pass removes an unused file outside the changed
-//! files from that set, and a reference in that file then credits a real
-//! finding in a changed file.
+//! The editor narrows findings after semantic reconciliation. The reachable
+//! analysis scope survives that report filter, so an orphan consumer outside
+//! the changed files cannot credit a finding in a changed file.
 
 #![expect(
     clippy::unwrap_used,

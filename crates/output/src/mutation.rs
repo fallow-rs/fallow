@@ -397,6 +397,10 @@ pub struct MutantResult {
     /// The mutant did not run in this run. `--no-cache` runs each mutant.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cached: bool,
+    /// True when the status comes from the journal of an interrupted run
+    /// (`--resume`). The mutant did not run in this run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumed: bool,
     /// The TypeScript diagnostic codes of the new errors of a
     /// `compile_error` mutant, sorted, at most 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -492,6 +496,30 @@ pub struct MutationCacheOutput {
     /// resolve (`dynamic-imports`), and files that a test reads
     /// (`file-reads`). A change to them does not invalidate a cached result.
     pub not_keyed: Vec<String>,
+}
+
+/// The resume facts of a `--resume` run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationResumeOutput {
+    /// The path of the outcome journal, relative to the project root. When
+    /// the cache directory is outside the root, the path is absolute: the
+    /// report has no other cache path, so no other rule applies. The file
+    /// stays only when the run did not complete. A run with
+    /// `completion.status: complete` removes it.
+    pub journal: String,
+    /// The mutants whose status came from the journal. They did not run.
+    pub reused: usize,
+    /// The journal results whose key does not match this run, because an
+    /// input of the mutant changed. These results were not reused from the
+    /// journal. The mutant ran again, or its status came from the result
+    /// cache.
+    pub rejected: usize,
+    /// Why the run did not read a journal and started from the beginning,
+    /// for example because no journal exists. Absent when the run read the
+    /// journal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// The results of the mutants of one function.
@@ -634,7 +662,8 @@ pub struct MutationWorktreeCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationRunIssue {
-    /// A stable kebab-case code: `runtime-error`, `static-map-miss`,
+    /// A stable kebab-case code: `cache-write-failed`,
+    /// `journal-write-failed`, `runtime-error`, `static-map-miss`,
     /// `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
     /// or `worktree-check-failed`.
     pub code: String,
@@ -738,6 +767,9 @@ pub struct MutationReport {
     /// started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache: Option<MutationCacheOutput>,
+    /// The resume facts. Absent without `--resume`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<MutationResumeOutput>,
     /// The totals.
     pub summary: MutationSummary,
     /// Each mutant, ranked mutants first.
@@ -1124,6 +1156,7 @@ mod tests {
             retried: false,
             attempts: Vec::new(),
             cached: false,
+            resumed: false,
             type_error_codes: Vec::new(),
         }
     }
@@ -1262,6 +1295,7 @@ mod tests {
             retried: false,
             attempts: Vec::new(),
             cached: false,
+            resumed: false,
             type_error_codes: Vec::new(),
         };
         let value = serde_json::to_value(&result).expect("serializes");
@@ -1320,6 +1354,7 @@ mod tests {
                 attempt(MutantStatus::Survived, 12, None),
             ],
             cached: false,
+            resumed: false,
             type_error_codes: Vec::new(),
         };
         let value = serde_json::to_value(&result).expect("serializes");

@@ -291,6 +291,7 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
                         retried: false,
                         attempts: Vec::new(),
                         cached,
+                        resumed: false,
                     },
                 )
             })

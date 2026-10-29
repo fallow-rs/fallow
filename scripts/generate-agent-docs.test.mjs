@@ -972,6 +972,75 @@ test("a moved seed fails --check by name while the published cell still looks in
   }
 });
 
+test("a plain run fails when a curated Key Flags cell lacks a flag that is new in its seed", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { main } = await import("./generate-agent-docs.mjs");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-docs-key-flags-"));
+  const references = join(dir, "references");
+  const cliReference = join(references, "cli-reference.md");
+  const schemaPath = join(dir, "schema.json");
+  const seedRecord = join(dir, "seeds.json");
+  const args = ["--schema", schemaPath, "--target", dir, "--seed-record", seedRecord];
+  mkdirSync(references, { recursive: true });
+  writeFileSync(schemaPath, JSON.stringify(SCHEMA));
+  writeFileSync(join(dir, "SKILL.md"), DOC);
+  writeFileSync(cliReference, DOC_CLI_REFERENCE);
+
+  const errors = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+  console.error = (message) => errors.push(String(message));
+  console.log = () => {};
+
+  try {
+    // The curated dead-code cell drops most seed flags on purpose; that is allowed.
+    assert.equal(main(args), 0);
+    assert.equal(main([...args, "--check"]), 0);
+
+    // A new flag enters the seed. `--file` falls off the end of the seed, and
+    // the cell may keep dropping it, but it must name `--max-dead`.
+    const withNewFlag = {
+      ...SCHEMA,
+      commands: SCHEMA.commands.map((command) =>
+        command.name === "dead-code"
+          ? { ...command, flags: [stringFlag("--max-dead"), ...command.flags] }
+          : command,
+      ),
+    };
+    writeFileSync(schemaPath, JSON.stringify(withNewFlag));
+
+    assert.equal(main(args), 1);
+    const report = errors.join("\n");
+    assert.match(report, /commands \/ dead-code \/ Key Flags/);
+    assert.match(report, /`--max-dead`/);
+    assert.doesNotMatch(report, /`--file`/);
+    // The failed run does not accept the new seed, so --check keeps failing.
+    assert.equal(main([...args, "--check"]), 1);
+
+    // A flag name that only shares a prefix does not count as coverage.
+    const published = readFileSync(cliReference, "utf8");
+    writeFileSync(
+      cliReference,
+      published.replace("| `--changed-since` |", "| `--changed-since`, `--max-dead-files` |"),
+    );
+    assert.equal(main(args), 1);
+
+    writeFileSync(
+      cliReference,
+      published.replace("| `--changed-since` |", "| `--changed-since`, `--max-dead <n>` |"),
+    );
+    assert.equal(main(args), 0);
+    assert.equal(main([...args, "--check"]), 0);
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+    rmSync(dir, { recursive: true });
+  }
+});
+
 test("the committed seed record matches the committed capability manifest", async () => {
   const { readFileSync } = await import("node:fs");
   const { CURATED_SEED_RECORD_PATH } = await import("./generate-agent-docs.mjs");

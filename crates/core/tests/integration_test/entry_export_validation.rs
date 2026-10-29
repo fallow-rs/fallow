@@ -191,6 +191,37 @@ fn postcss_config_default_export_is_framework_used_with_include_entry_exports() 
     );
 }
 
+#[test]
+fn commonjs_postcss_config_keys_are_credited_through_the_default_export() {
+    // Issue #3876: `module.exports = { plugins }` is the default export that
+    // PostCSS loads, so its keys are not unused exports.
+    for include_entry_exports in [false, true] {
+        let mut config = create_config(fixture_path("postcss-cjs-config"));
+        config.include_entry_exports = include_entry_exports;
+        let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+        let config_exports: Vec<&str> = results
+            .unused_exports
+            .iter()
+            .filter(|export| export.export.path.ends_with("postcss.config.cjs"))
+            .map(|export| export.export.export_name.as_str())
+            .collect();
+        assert!(
+            config_exports.is_empty(),
+            "keys of postcss.config.cjs should be credited (includeEntryExports: \
+             {include_entry_exports}), found: {config_exports:?}"
+        );
+        assert!(
+            results.unused_exports.iter().any(|export| {
+                export.export.path.ends_with("src/helpers.cjs")
+                    && export.export.export_name == "unusedKey"
+            }),
+            "a CommonJS module without a config credit keeps its findings: {:?}",
+            results.unused_exports
+        );
+    }
+}
+
 fn config_default_credit_findings(include_entry_exports: bool) -> Vec<(String, String)> {
     let root = fixture_path("config-default-export-credit");
     let mut config = create_config(root);

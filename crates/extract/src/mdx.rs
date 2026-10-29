@@ -136,6 +136,7 @@ struct MdxStatementScanner<'a> {
     prose_lines: Vec<(usize, &'a str)>,
     code_lines: Vec<&'a str>,
     collecting_statement: bool,
+    boundary: StatementBoundary,
     code_fence: Option<CodeFence>,
 }
 
@@ -198,13 +199,21 @@ impl<'a> MdxStatementScanner<'a> {
 
     fn push_statement_start(&mut self, line_start: usize, line: &'a str, statement: &str) {
         self.blocks.push(vec![(line_start, line)]);
-        self.collecting_statement = !parses_as_typescript(statement);
+        self.boundary = StatementBoundary::default();
+        self.boundary.push(line);
+        self.collecting_statement =
+            !self.boundary.may_complete() || !parses_as_typescript(statement);
     }
 
     fn push_multiline_line(&mut self, line_start: usize, line: &'a str) {
         if let Some(block) = self.blocks.last_mut() {
             block.push((line_start, line));
-            self.collecting_statement = !statement_block_is_accepted(block);
+            self.boundary.push(line);
+            // Whitespace cannot complete a rejected prefix, including in the
+            // parser fallback for JSX and regex literals.
+            if !line.trim().is_empty() && self.boundary.may_complete() {
+                self.collecting_statement = !statement_block_is_accepted(block);
+            }
         }
     }
 
@@ -214,6 +223,111 @@ impl<'a> MdxStatementScanner<'a> {
             prose_lines: self.prose_lines,
             code_lines: self.code_lines,
         }
+    }
+}
+
+/// Defer parser probes while a delimiter is open. Regex and JSX need parser
+/// context, so encountering them keeps the parser as the completion oracle.
+#[derive(Default)]
+struct StatementBoundary {
+    closers: Vec<u8>,
+    mode: BoundaryMode,
+}
+
+#[derive(Default)]
+enum BoundaryMode {
+    #[default]
+    Code,
+    String {
+        quote: u8,
+        escaped: bool,
+    },
+    Template {
+        escaped: bool,
+    },
+    Comment,
+    Parser,
+}
+
+impl StatementBoundary {
+    fn push(&mut self, line: &str) {
+        let mut bytes = line.bytes().peekable();
+        while let Some(byte) = bytes.next() {
+            match &mut self.mode {
+                BoundaryMode::Parser => return,
+                BoundaryMode::Comment => {
+                    if byte == b'*' && bytes.next_if_eq(&b'/').is_some() {
+                        self.mode = BoundaryMode::Code;
+                    }
+                }
+                BoundaryMode::Template { escaped } => {
+                    if *escaped {
+                        *escaped = false;
+                    } else if byte == b'\\' {
+                        *escaped = true;
+                    } else if byte == b'`' {
+                        self.mode = BoundaryMode::Code;
+                    } else if byte == b'$' && bytes.next_if_eq(&b'{').is_some() {
+                        // A substitution resumes template text at its closing brace.
+                        self.closers.push(b'`');
+                        self.mode = BoundaryMode::Code;
+                    }
+                }
+                BoundaryMode::String { quote, escaped } => {
+                    if *escaped {
+                        if byte == b'\r' {
+                            bytes.next_if_eq(&b'\n');
+                        }
+                        *escaped = false;
+                    } else if byte == b'\\' {
+                        *escaped = true;
+                    } else if byte == *quote {
+                        self.mode = BoundaryMode::Code;
+                    } else if matches!(byte, b'\r' | b'\n') {
+                        // An invalid string can make later punctuation ambiguous.
+                        self.mode = BoundaryMode::Parser;
+                    }
+                }
+                BoundaryMode::Code => match byte {
+                    b'\'' | b'"' => {
+                        self.mode = BoundaryMode::String {
+                            quote: byte,
+                            escaped: false,
+                        };
+                    }
+                    b'/' => match bytes.next() {
+                        Some(b'/') => {
+                            // MDX splits at LF, but JavaScript also ends a line
+                            // comment at CR and Unicode paragraph separators.
+                            if line.contains(['\r', '\u{2028}', '\u{2029}']) {
+                                self.mode = BoundaryMode::Parser;
+                            }
+                            return;
+                        }
+                        Some(b'*') => self.mode = BoundaryMode::Comment,
+                        _ => self.mode = BoundaryMode::Parser,
+                    },
+                    b'`' => self.mode = BoundaryMode::Template { escaped: false },
+                    b'<' => self.mode = BoundaryMode::Parser,
+                    b'(' => self.closers.push(b')'),
+                    b'[' => self.closers.push(b']'),
+                    b'{' => self.closers.push(b'}'),
+                    b')' | b']' | b'}' => match self.closers.pop() {
+                        Some(b'`') if byte == b'}' => {
+                            self.mode = BoundaryMode::Template { escaped: false };
+                        }
+                        Some(closer) if closer == byte => {}
+                        _ => self.mode = BoundaryMode::Parser,
+                    },
+                    _ => {}
+                },
+            }
+        }
+    }
+
+    fn may_complete(&self) -> bool {
+        matches!(self.mode, BoundaryMode::Parser)
+            || (self.closers.is_empty() && matches!(self.mode, BoundaryMode::Code))
     }
 }
 
@@ -557,6 +671,8 @@ pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u
 
 #[cfg(all(test, not(miri)))]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     #[test]
@@ -628,6 +744,47 @@ mod tests {
         assert!(result.contains("export const meta"));
         assert!(result.contains("title: 'Hello'"));
         assert!(!result.contains("# Title"));
+    }
+
+    #[test]
+    fn long_multiline_export_preserves_facts_without_reparsing_every_prefix() {
+        let mut source = String::from("export const metadata = {\n");
+        for index in 0..8192 {
+            writeln!(source, "  field{index}: 'value',").expect("writing to a string succeeds");
+        }
+        source.push_str("};\nimport { Card } from './card';\n<Card />\n");
+        let started = std::time::Instant::now();
+        assert_eq!(export_names(&source), vec!["metadata".to_string()]);
+        assert_eq!(import_sources(&source), vec!["./card".to_string()]);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "a multiline declaration must not reparse every growing prefix"
+        );
+    }
+
+    #[test]
+    fn long_template_export_preserves_nested_substitutions_without_prefix_retries() {
+        let mut source = String::from("export const metadata = `\n");
+        source.push_str(&"  nested ${ { value: `inner ${'}'}` }.value }\n".repeat(8192));
+        source.push_str("`;\nimport { Card } from './card';\n<Card />\n");
+        let started = std::time::Instant::now();
+        assert_eq!(export_names(&source), vec!["metadata".to_string()]);
+        assert_eq!(import_sources(&source), vec!["./card".to_string()]);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "template substitutions must not reparse every growing prefix"
+        );
+    }
+
+    #[test]
+    fn inline_line_terminators_end_comments_before_closing_delimiters() {
+        for separator in ["\r", "\u{2028}", "\u{2029}"] {
+            let source = format!(
+                "export const metadata = {{ // comment{separator} value: 'kept' }};\n\n# Prose\n"
+            );
+            assert_eq!(export_names(&source), vec!["metadata".to_string()]);
+            assert!(!extract_mdx_statements(&source).contains("# Prose"));
+        }
     }
 
     #[test]

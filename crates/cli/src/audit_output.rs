@@ -22,7 +22,6 @@ use crate::report::sink::outln;
 use super::keys::{
     annotate_dead_code_json, annotate_domain_demotions_json, annotate_domain_json,
     annotate_dupes_json, annotate_health_json, annotate_stale_suppressions_json,
-    styling_finding_key,
 };
 use super::{AuditResult, AuditSummary, AuditVerdict, DupeDemotionDiffSource};
 use complexity_notes::worsened_class_label;
@@ -846,9 +845,10 @@ fn styling_finding_audit_context(
         return styling_finding_audit_context_label(severity, &rule, None, result.attribution.gate);
     };
     let (rule, severity) = styling_finding_rule_context(&health.config.rules, &finding.code);
-    let base_state = result.base_snapshot.as_ref().map(|snapshot| {
-        let key = styling_finding_key(finding, &health.config.root);
-        if snapshot.styling.contains(&key) {
+    // The audit run sets the typed flag for each styling finding when it has
+    // a base snapshot.
+    let base_state = result.base_snapshot.as_ref().map(|_| {
+        if finding.internal.introduced == Some(false) {
             format!(
                 "inherited styling debt from {}",
                 short_base_ref(&result.base_ref)

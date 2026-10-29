@@ -783,6 +783,7 @@ pub(super) fn native_rule_id(title: &str) -> String {
         }
         _ if title.starts_with("High complexity") => Some("fallow/high-complexity"),
         _ if title.starts_with("High CRAP score") => Some("fallow/high-crap-score"),
+        _ if title.starts_with("Long file") => Some("fallow/long-file"),
         _ if title.starts_with("Refactoring target") => Some("fallow/refactoring-target"),
         _ if title.starts_with("Runtime coverage") => {
             let normalized = title.replace('_', "-");

@@ -18,13 +18,15 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use crate::plugins::ConfigExportCredit;
+use crate::plugins::{ConfigExportCredit, is_export_ignored};
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
 #[path = "unused_exports_adapter.rs"]
 mod adapter;
 use adapter::aliased_import_adapters;
+#[path = "unused_exports_cjs.rs"]
+mod cjs;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
@@ -173,20 +175,6 @@ fn matchers_for_module<'a>(
         .map(|rule| rule.exports.as_slice())
         .collect();
     (mi, mp)
-}
-
-/// Check whether an export name is covered by config ignore rules or plugin rules.
-fn is_export_ignored(
-    export_name: &str,
-    matching_ignore: &[&[String]],
-    matching_plugin: &[&[&str]],
-) -> bool {
-    matching_ignore
-        .iter()
-        .any(|exports| exports.iter().any(|e| e == "*" || e == export_name))
-        || matching_plugin
-            .iter()
-            .any(|exports| exports.contains(&"*") || exports.contains(&export_name))
 }
 
 fn local_export_binding_name(export: &ExportInfo) -> Option<&str> {
@@ -665,12 +653,7 @@ fn unused_export_candidate_is_skipped(
         return true;
     }
 
-    ConfigExportCredit::credits(match_ctx.config_credited_exports, export_str)
-        || is_export_ignored(
-            export_str,
-            match_ctx.matching_ignore,
-            match_ctx.matching_plugin,
-        )
+    cjs::is_credited(module, export_str, match_ctx)
 }
 
 fn build_unused_export(

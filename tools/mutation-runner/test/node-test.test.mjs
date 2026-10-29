@@ -186,6 +186,9 @@ const createSubprocessProject = () => {
     [`project/${CLI_TEST}`]: [
       'import assert from "node:assert/strict";',
       'import { execFileSync, fork } from "node:child_process";',
+      'import { copyFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";',
+      'import { tmpdir } from "node:os";',
+      'import { join } from "node:path";',
       'import { test } from "node:test";',
       'import { fileURLToPath } from "node:url";',
       'import { add } from "../src/math.mjs";',
@@ -205,6 +208,15 @@ const createSubprocessProject = () => {
       '  await new Promise((resolve) => child.once("close", resolve));',
       '  assert.equal(output, "");',
       "  assert.equal(message.sum, 4);",
+      "});",
+      'test("copy", (t) => {',
+      "  assert.ok(Number.isFinite(add(2, 2)));",
+      '  const directory = realpathSync(mkdtempSync(join(tmpdir(), "copied-cli-")));',
+      "  t.after(() => rmSync(directory, { recursive: true, force: true }));",
+      '  const copied = join(directory, "renamed.mjs");',
+      '  copyFileSync(path("math.mjs"), copied);',
+      '  const out = execFileSync(process.execPath, [copied, "2", "2"], { encoding: "utf8" });',
+      '  assert.equal(out.trim(), "4");',
       "});",
       'test("env", () => {',
       "  assert.ok(Number.isFinite(add(2, 2)));",
@@ -266,17 +278,19 @@ describe("node-test adapter with a test that starts a Node child process", () =>
       [
         { name: "cli", status: "pass" },
         { name: "fork", status: "pass" },
+        { name: "copy", status: "pass" },
         { name: "env", status: "pass" },
       ],
     );
     assert.deepEqual(dryRun.hits, {
       [`${CLI_TEST}::cli`]: ["s1"],
       [`${CLI_TEST}::fork`]: ["s1"],
+      [`${CLI_TEST}::copy`]: ["s1"],
       [`${CLI_TEST}::env`]: ["s1"],
     });
   });
 
-  for (const name of ["cli", "fork"]) {
+  for (const name of ["cli", "fork", "copy"]) {
     test(`the child process of the ${name} test loads the active mutant`, async () => {
       const result = await request({
         type: "run",

@@ -55,6 +55,7 @@ pub(super) struct HealthOutputBuildInput<'a, R> {
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
+    max_file_lines: u32,
     workspaces: &'a [WorkspaceInfo],
     files_analyzed: usize,
     total_functions: usize,
@@ -112,6 +113,7 @@ pub(super) fn prepare_health_output_context<R>(
             max_cyclomatic: input.scope.max_cyclomatic,
             max_cognitive: input.scope.max_cognitive,
             max_crap: input.scope.max_crap,
+            max_file_lines: input.scope.max_file_lines,
             workspaces: input.workspaces,
             files_analyzed,
             total_functions,
@@ -207,6 +209,8 @@ pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
     );
     report.summary.cyclomatic_policy =
         (!cyclomatic_policy.is_standard()).then_some(cyclomatic_policy);
+    report.summary.max_file_lines_threshold =
+        (build.max_file_lines > 0).then_some(build.max_file_lines);
 
     Ok(HealthOutputParts {
         report,

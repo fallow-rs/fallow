@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-node",
-  "version": "3.36.0",
+  "version": "3.37.0",
   "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript: health, complexity, duplication, architecture, and unused code.",
   "main": "loader.js",
   "types": "index.d.ts",
@@ -67,15 +67,15 @@
     "@napi-rs/cli": "3.10.8"
   },
   "optionalDependencies": {
-    "@fallow-cli/fallow-node-darwin-arm64": "3.36.0",
-    "@fallow-cli/fallow-node-darwin-x64": "3.36.0",
-    "@fallow-cli/fallow-node-linux-arm64-gnu": "3.36.0",
-    "@fallow-cli/fallow-node-linux-arm64-musl": "3.36.0",
-    "@fallow-cli/fallow-node-linux-x64-gnu": "3.36.0",
-    "@fallow-cli/fallow-node-linux-x64-musl": "3.36.0",
-    "@fallow-cli/fallow-node-win32-arm64-msvc": "3.36.0",
-    "@fallow-cli/fallow-node-win32-x64-msvc": "3.36.0",
-    "fallow-similar-code": "3.36.0",
-    "fallow-type-aware": "3.36.0"
+    "@fallow-cli/fallow-node-darwin-arm64": "3.37.0",
+    "@fallow-cli/fallow-node-darwin-x64": "3.37.0",
+    "@fallow-cli/fallow-node-linux-arm64-gnu": "3.37.0",
+    "@fallow-cli/fallow-node-linux-arm64-musl": "3.37.0",
+    "@fallow-cli/fallow-node-linux-x64-gnu": "3.37.0",
+    "@fallow-cli/fallow-node-linux-x64-musl": "3.37.0",
+    "@fallow-cli/fallow-node-win32-arm64-msvc": "3.37.0",
+    "@fallow-cli/fallow-node-win32-x64-msvc": "3.37.0",
+    "fallow-similar-code": "3.37.0",
+    "fallow-type-aware": "3.37.0"
   }
 }

@@ -157,6 +157,7 @@ variables:
   FALLOW_MAX_CYCLOMATIC: ""
   FALLOW_MAX_COGNITIVE: ""
   FALLOW_MAX_CRAP: ""             # Maximum CRAP score (default 30.0); pair with coverage data for accurate per-function scoring
+  FALLOW_MAX_FILE_LINES: ""       # Maximum physical lines per file (default 0, off)
   FALLOW_COVERAGE: ""             # Istanbul coverage-final.json for accurate CRAP scoring (health/audit/default combined)
   FALLOW_PRODUCTION_COVERAGE: ""  # Path to paid runtime coverage input (V8 dir/file or Istanbul coverage-final.json)
   FALLOW_COVERAGE_ROOT: ""        # Rebase Istanbul file paths before matching coverage or runtime coverage input
@@ -497,6 +498,7 @@ variables:
 
       for name_val in "min-tokens:$FALLOW_MIN_TOKENS" "min-lines:$FALLOW_MIN_LINES" \
                       "max-cyclomatic:$FALLOW_MAX_CYCLOMATIC" "max-cognitive:$FALLOW_MAX_COGNITIVE" \
+                      "max-file-lines:$FALLOW_MAX_FILE_LINES" \
                       "top:$FALLOW_TOP" "min-commits:$FALLOW_MIN_COMMITS" "threads:$FALLOW_THREADS" \
                       "min-invocations-hot:$FALLOW_MIN_INVOCATIONS_HOT" "min-observation-volume:$FALLOW_MIN_OBSERVATION_VOLUME"; do
         name="${name_val%%:*}"; val="${name_val#*:}"
@@ -667,6 +669,7 @@ variables:
           [ -n "$FALLOW_MAX_CYCLOMATIC" ]     && ARGS+=(--max-cyclomatic "$FALLOW_MAX_CYCLOMATIC")
           [ -n "$FALLOW_MAX_COGNITIVE" ]      && ARGS+=(--max-cognitive "$FALLOW_MAX_COGNITIVE")
           [ -n "$FALLOW_MAX_CRAP" ]           && ARGS+=(--max-crap "$FALLOW_MAX_CRAP")
+          [ -n "$FALLOW_MAX_FILE_LINES" ]     && ARGS+=(--max-file-lines "$FALLOW_MAX_FILE_LINES")
           [ -n "$FALLOW_COVERAGE" ]           && ARGS+=(--coverage "$FALLOW_COVERAGE")
           [ -n "$FALLOW_PRODUCTION_COVERAGE" ] && ARGS+=(--runtime-coverage "$FALLOW_PRODUCTION_COVERAGE")
           [ -n "$FALLOW_COVERAGE_ROOT" ]      && ARGS+=(--coverage-root "$FALLOW_COVERAGE_ROOT")

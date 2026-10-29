@@ -165,6 +165,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         retried: false,
         attempts: Vec::new(),
         cached: false,
+        resumed: false,
         type_error_codes: Vec::new(),
     };
     let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
@@ -185,6 +186,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             retried: result.retried,
             attempts: result.attempts.clone(),
             cached: result.cached,
+            resumed: result.resumed,
             ..base
         },
         (MutantDisposition::NoCoverage, None) => MutantResult {
@@ -549,6 +551,7 @@ mod tests {
                             ),
                             attempts: Vec::new(),
                             cached: false,
+                            resumed: false,
                         },
                     )
                 })

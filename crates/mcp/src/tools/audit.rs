@@ -321,8 +321,9 @@ fn requires_cli_fallback(params: &AuditParams) -> bool {
 }
 
 /// Build the typed audit options. A stop through `cancellation` is safe for
-/// the base-ref worktree: `TemporaryBaseWorktree` removes it on drop, also
-/// when the run returns early with the cancellation error.
+/// the base-ref worktree: `TemporaryBaseWorktree` is not registered with Git
+/// during the run and removes its directory on drop, also when the run
+/// returns early with the cancellation error.
 fn audit_options_from_params(
     params: &AuditParams,
     cancellation: Option<Arc<AtomicBool>>,

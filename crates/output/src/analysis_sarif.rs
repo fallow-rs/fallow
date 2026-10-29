@@ -267,6 +267,11 @@ fn health_complexity_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<ser
             "warning",
         ),
         rule_builder(
+            "fallow/long-file",
+            "File has more lines than the file-length threshold",
+            "note",
+        ),
+        rule_builder(
             "fallow/refactoring-target",
             "File identified as a high-priority refactoring candidate",
             "warning",
@@ -474,6 +479,14 @@ fn health_complexity_sarif_message(
                 ),
             )
         }
+        ExceededThreshold::FileLines => (
+            "fallow/long-file",
+            format!(
+                "File has {} lines (threshold: {})",
+                finding.line_count,
+                finding.max_file_lines.unwrap_or_default(),
+            ),
+        ),
     }
 }
 
@@ -773,6 +786,7 @@ mod tests {
             contributions: Vec::new(),
             effective_thresholds: effective,
             threshold_source: effective.map(|_| crate::ThresholdSource::Override),
+            max_file_lines: None,
         }
     }
 

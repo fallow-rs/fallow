@@ -1,0 +1,6 @@
+{
+  "name": "issue-3960-this-method-return-type-member",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

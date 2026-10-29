@@ -438,6 +438,7 @@ fn build_health_summary(
         max_cognitive_threshold: input.max_cognitive,
         max_crap_threshold: input.max_crap,
         max_unit_size_threshold: input.max_unit_size,
+        max_file_lines_threshold: None,
         files_scored: summary_file_score_count(opts, input.files_scored),
         average_maintainability: summary_average_maintainability(
             opts,

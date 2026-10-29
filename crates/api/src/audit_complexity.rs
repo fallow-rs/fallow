@@ -300,6 +300,7 @@ fn exceeded_metric_increased(
     (exceeded.includes_cyclomatic() && head.cyclomatic > base.cyclomatic)
         || (exceeded.includes_cognitive() && head.cognitive > base.cognitive)
         || (exceeded.includes_crap() && measured_crap_grew(head, base))
+        || (exceeded.is_file_lines() && line_count_grew(base.line_count, head.line_count))
 }
 
 /// Whether `head` exceeds a metric that `base` did not exceed in its own run,
@@ -629,6 +630,7 @@ mod tests {
             contributions: Vec::new(),
             effective_thresholds: None,
             threshold_source: None,
+            max_file_lines: None,
         })
     }
 

@@ -196,6 +196,7 @@ pub struct ComplexityOptions {
     pub max_cyclomatic: Option<u32>,
     pub max_cognitive: Option<u32>,
     pub max_crap: Option<f64>,
+    pub max_file_lines: Option<u32>,
     pub top: Option<u32>,
     pub sort: Option<String>,
     pub complexity_breakdown: Option<bool>,
@@ -660,6 +661,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
                 .map(|n| narrow_to_u16("maxCognitive", n))
                 .transpose()?,
             max_crap: value.max_crap,
+            max_file_lines: value.max_file_lines,
             top: value.top.map(|n| n as usize),
             sort: parse_complexity_sort(value.sort)?,
             complexity_breakdown: value.complexity_breakdown.unwrap_or(false),
@@ -1310,6 +1312,7 @@ mod tests {
             max_cyclomatic: Some(42),
             max_cognitive: Some(21),
             max_crap: Some(18.5),
+            max_file_lines: Some(500),
             top: Some(5),
             sort: Some(" Severity ".to_string()),
             complexity_breakdown: Some(true),
@@ -1335,6 +1338,7 @@ mod tests {
         assert_eq!(options.max_cyclomatic, Some(42));
         assert_eq!(options.max_cognitive, Some(21));
         assert_eq!(options.max_crap, Some(18.5));
+        assert_eq!(options.max_file_lines, Some(500));
         assert_eq!(options.top, Some(5));
         assert!(matches!(options.sort, api::ComplexitySort::Severity));
         assert!(options.complexity_breakdown);

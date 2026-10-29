@@ -199,9 +199,11 @@ pub enum HealthFindingActionType {
     /// tier is `partial` or `high` (some test path exists; add targeted
     /// assertions for uncovered branches).
     IncreaseCoverage,
-    /// Suppress with an HTML comment at the top of the template. Used for
-    /// synthetic Angular `<template>` findings on `.html` files where a
-    /// line suppression cannot be expressed.
+    /// Suppress for the whole file. Used for synthetic Angular `<template>`
+    /// findings on `.html` files where a line suppression cannot be
+    /// expressed (an HTML comment at the top of the template), and for
+    /// file-length findings (`// fallow-ignore-file complexity` at the top of
+    /// the file).
     SuppressFile,
     /// Suppress with a next-line comment above the reported line: the
     /// inline `// fallow-ignore-next-line complexity` form above a function
@@ -209,6 +211,9 @@ pub enum HealthFindingActionType {
     /// `<!-- fallow-ignore-next-line complexity -->` form for synthetic
     /// `<template>` findings in `.svelte`, `.vue`, and `.astro` files.
     SuppressLine,
+    /// Split a file that exceeds `health.maxFileLines` into smaller modules.
+    /// Emitted only on a file-length finding (`exceeded: "file_lines"`).
+    SplitFile,
 }
 
 /// Suggested action attached to a [`HotspotEntry`].

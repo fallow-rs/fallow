@@ -1,0 +1,11 @@
+{
+  "name": "issue-3961-oxlint-js-plugin-directory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "oxlint": "1.0.0"
+  }
+}

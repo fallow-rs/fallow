@@ -340,9 +340,25 @@ impl ModuleInfoExtractor {
         let BindingPattern::BindingIdentifier(id) = &declarator.id else {
             return;
         };
+        // A lexical loop head binding at module level is not a module binding.
+        if self.sink_literal_name_is_shadowed(id.name.as_str()) {
+            return;
+        }
+        let enum_prefix = static_enum_member_key(id.name.as_str(), "");
+        if self.module_static_sink_literals.contains_key(&enum_prefix) {
+            self.module_static_sink_literals
+                .retain(|key, _| !key.starts_with(&enum_prefix));
+        }
         if decl.kind != VariableDeclarationKind::Const {
             self.module_static_sink_literals.remove(id.name.as_str());
+            self.module_trusted_path_bindings.remove(id.name.as_str());
             return;
+        }
+        if self.is_trusted_static_path_expr(init) {
+            self.module_trusted_path_bindings
+                .insert(id.name.to_string());
+        } else {
+            self.module_trusted_path_bindings.remove(id.name.as_str());
         }
         if let Some(value) = self.static_sink_literal_value(init) {
             self.module_static_sink_literals
@@ -350,6 +366,54 @@ impl ModuleInfoExtractor {
         } else {
             self.module_static_sink_literals.remove(id.name.as_str());
         }
+    }
+
+    /// Record a string enum member as a module-scope sink literal. The key
+    /// `Enum.MEMBER` cannot collide with a plain identifier binding. The marker
+    /// key `Enum.` lets a later binding of the same name drop the members.
+    pub(in crate::visitor) fn record_static_enum_member_literal(
+        &mut self,
+        enum_name: &str,
+        member_name: &str,
+        value: String,
+    ) {
+        self.module_static_sink_literals
+            .entry(static_enum_member_key(enum_name, ""))
+            .or_insert(SinkLiteralValue::Null);
+        self.module_static_sink_literals.insert(
+            static_enum_member_key(enum_name, member_name),
+            SinkLiteralValue::String(value),
+        );
+    }
+
+    fn static_enum_member_value(
+        &self,
+        object: &Expression<'_>,
+        member: &str,
+    ) -> Option<SinkLiteralValue> {
+        let Expression::Identifier(object) = unwrap_static_expr(object) else {
+            return None;
+        };
+        if member.is_empty()
+            || self.namespace_depth > 0
+            || self.sink_literal_name_is_shadowed(object.name.as_str())
+        {
+            return None;
+        }
+        self.module_static_sink_literals
+            .get(&static_enum_member_key(object.name.as_str(), member))
+            .cloned()
+    }
+
+    /// Whether a nested scope declares `name`. The direct object binding roots
+    /// also hold catch parameters, loop head bindings, and namespace locals,
+    /// which `nested_declaration_stack` does not track.
+    fn sink_literal_name_is_shadowed(&self, name: &str) -> bool {
+        self.nested_scope_shadows(name)
+            || self
+                .scoped_direct_object_binding_roots
+                .iter()
+                .any(|roots| roots.contains(name))
     }
 
     pub(super) fn static_sink_literal_value(
@@ -360,10 +424,22 @@ impl ModuleInfoExtractor {
             return Some(value);
         }
         match unwrap_static_expr(expr) {
-            Expression::Identifier(ident) if !self.nested_scope_shadows(ident.name.as_str()) => {
+            Expression::Identifier(ident)
+                if !self.sink_literal_name_is_shadowed(ident.name.as_str()) =>
+            {
                 self.module_static_sink_literals
                     .get(ident.name.as_str())
                     .cloned()
+            }
+            Expression::StaticMemberExpression(member) => {
+                self.static_enum_member_value(&member.object, member.property.name.as_str())
+            }
+            Expression::ComputedMemberExpression(member) => {
+                let Expression::StringLiteral(property) = unwrap_static_expr(&member.expression)
+                else {
+                    return None;
+                };
+                self.static_enum_member_value(&member.object, &property.value.text())
             }
             Expression::UnaryExpression(unary)
                 if unary.operator == UnaryOperator::UnaryNegation
@@ -682,4 +758,8 @@ impl ModuleInfoExtractor {
             .cloned()
             .unwrap_or_default()
     }
+}
+
+fn static_enum_member_key(enum_name: &str, member_name: &str) -> String {
+    format!("{enum_name}.{member_name}")
 }

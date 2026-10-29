@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.36.0",
+  "version": "3.37.0",
   "mcpName": "io.github.fallow-rs/fallow",
   "description": "Codebase intelligence for TypeScript and JavaScript: health, complexity, duplication, architecture, styling drift, and unused code from one graph. CLI, LSP, and MCP server. Zero config for over 100 frameworks.",
   "license": "MIT",
@@ -54,6 +54,7 @@
     "./scripts/*": "./scripts/*",
     "./skills/*": "./skills/*",
     "./schema.json": "./schema.json",
+    "./rule-pack-schema.json": "./rule-pack-schema.json",
     "./capabilities.json": "./capabilities.json",
     "./issue-registry.json": "./issue-registry.json"
   },
@@ -67,11 +68,13 @@
   "files": [
     "bin",
     "scripts",
+    "!scripts/*.test.js",
     "skills",
     "!skills/_artifacts",
     "types",
     "README.md",
     "schema.json",
+    "rule-pack-schema.json",
     "capabilities.json",
     "issue-registry.json"
   ],
@@ -86,17 +89,17 @@
     "detect-libc": "2.1.2"
   },
   "devDependencies": {
-    "@tanstack/intent": "0.5.5"
+    "@tanstack/intent": "0.5.6"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "3.36.0",
-    "@fallow-cli/darwin-x64": "3.36.0",
-    "@fallow-cli/linux-x64-gnu": "3.36.0",
-    "@fallow-cli/linux-arm64-gnu": "3.36.0",
-    "@fallow-cli/linux-x64-musl": "3.36.0",
-    "@fallow-cli/linux-arm64-musl": "3.36.0",
-    "@fallow-cli/win32-arm64-msvc": "3.36.0",
-    "@fallow-cli/win32-x64-msvc": "3.36.0",
-    "fallow-type-aware": "3.36.0"
+    "@fallow-cli/darwin-arm64": "3.37.0",
+    "@fallow-cli/darwin-x64": "3.37.0",
+    "@fallow-cli/linux-x64-gnu": "3.37.0",
+    "@fallow-cli/linux-arm64-gnu": "3.37.0",
+    "@fallow-cli/linux-x64-musl": "3.37.0",
+    "@fallow-cli/linux-arm64-musl": "3.37.0",
+    "@fallow-cli/win32-arm64-msvc": "3.37.0",
+    "@fallow-cli/win32-x64-msvc": "3.37.0",
+    "fallow-type-aware": "3.37.0"
   }
 }

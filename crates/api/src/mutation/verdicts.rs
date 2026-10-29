@@ -243,6 +243,7 @@ mod tests {
             retried: false,
             attempts: Vec::new(),
             cached: false,
+            resumed: false,
             type_error_codes: Vec::new(),
         }
     }
@@ -267,6 +268,7 @@ mod tests {
             },
             runner: None,
             cache: None,
+            resume: None,
             summary: MutationSummary::from_results(&mutants),
             functions: vec![MutationFunctionResult {
                 file: "src/a.ts".to_owned(),

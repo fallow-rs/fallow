@@ -6,29 +6,10 @@
 use std::path::Path;
 
 use super::PluginResult;
+use super::alias_replacement::{
+    alias_target_is_source_file, credit_unrouted_replacement, is_bare_package_specifier,
+};
 use super::config_parser;
-
-/// Source-file extensions an alias replacement may name. A mock alias always
-/// points at a JS/TS file; directory targets (`@` -> `src`) have no extension
-/// and are not seeded as entry points.
-const ALIAS_SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
-
-/// True when `spec` is a bare npm package specifier (not a relative path, URL,
-/// `data:`, or `@/` / `~/` / `#` style path alias key).
-fn is_bare_package_specifier(spec: &str) -> bool {
-    crate::resolve::is_bare_specifier(spec)
-        && crate::resolve::is_valid_package_name(spec)
-        && !crate::resolve::is_path_alias(spec)
-}
-
-/// True when a normalized alias replacement names a local source file (by
-/// extension), as opposed to a directory.
-fn alias_target_is_source_file(normalized: &str) -> bool {
-    Path::new(normalized)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ALIAS_SOURCE_EXTENSIONS.contains(&ext))
-}
 
 /// Apply one alias entry to the plugin result.
 ///
@@ -64,6 +45,7 @@ pub(super) fn process_test_alias(
     result
         .path_aliases
         .push((find.to_owned(), normalized.clone()));
+    credit_unrouted_replacement(result, find, &normalized, config_path);
     if alias_target_is_source_file(&normalized) {
         result.setup_files.push(root.join(&normalized));
     }
@@ -146,6 +128,112 @@ mod tests {
     }
     fn root() -> std::path::PathBuf {
         std::path::PathBuf::from("/project")
+    }
+
+    #[test]
+    fn path_specifier_key_credits_every_replacement_export() {
+        for find in ["./clock.js", "../src/clock", "/abs/clock.js"] {
+            let mut result = PluginResult::default();
+            process_test_alias(
+                &mut result,
+                find,
+                "./test/stubs/clock.ts",
+                false,
+                &cfg(),
+                &root(),
+            );
+            assert_eq!(
+                result.entry_export_credits,
+                vec![crate::plugins::UsedExportRule::new(
+                    "test/stubs/clock.ts",
+                    ["*"]
+                )],
+                "key `{find}` must credit the replacement exports"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_or_directory_alias_adds_no_entry_export_credit() {
+        let mut result = PluginResult::default();
+        process_test_alias(
+            &mut result,
+            "vscode",
+            "./mock/vscode.ts",
+            false,
+            &cfg(),
+            &root(),
+        );
+        process_test_alias(&mut result, "@", "src", false, &cfg(), &root());
+        assert!(
+            result.entry_export_credits.is_empty(),
+            "the resolver routes these imports through the alias: {:?}",
+            result.entry_export_credits
+        );
+    }
+
+    #[test]
+    fn installed_bare_key_credits_every_replacement_export() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/@scope/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "@scope/pkg" }"#)
+            .expect("write manifest");
+        let config_path = root.join("vitest.config.ts");
+
+        let mut result = PluginResult::default();
+        process_test_alias(
+            &mut result,
+            "@scope/pkg",
+            "./mocks/pkg.ts",
+            false,
+            &config_path,
+            root,
+        );
+        for find in ["@lib", "~/lib", "missing-pkg"] {
+            process_test_alias(
+                &mut result,
+                find,
+                "./src/lib/index.ts",
+                false,
+                &config_path,
+                root,
+            );
+        }
+        assert_eq!(
+            result.entry_export_credits,
+            vec![crate::plugins::UsedExportRule::new("mocks/pkg.ts", ["*"])],
+            "only the installed package key credits the replacement exports"
+        );
+    }
+
+    #[test]
+    fn hoisted_bare_key_credits_replacement_of_nested_config() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).expect("create package dir");
+        std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg" }"#).expect("write manifest");
+        let config_path = root.join("packages/app/vitest.config.ts");
+
+        let mut result = PluginResult::default();
+        process_test_alias(
+            &mut result,
+            "pkg",
+            "./mocks/pkg.ts",
+            false,
+            &config_path,
+            root,
+        );
+        assert_eq!(
+            result.entry_export_credits,
+            vec![crate::plugins::UsedExportRule::new(
+                "packages/app/mocks/pkg.ts",
+                ["*"]
+            )],
+            "a package hoisted above the config directory is installed"
+        );
     }
 
     #[test]

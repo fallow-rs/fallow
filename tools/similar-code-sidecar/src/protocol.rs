@@ -706,6 +706,6 @@ mod tests {
         let mut reader = BufReader::new(Cursor::new(b"{\"operation\":\"shutdown\"}\n"));
         let mut output = Vec::new();
         serve(&mut reader, &mut output, &paths).expect("serve shutdown");
-        assert!(output.is_empty());
+        assert_eq!(output, b"");
     }
 }

@@ -3,6 +3,7 @@
 use fallow_extract::CssInJsObjectSheets;
 use fallow_extract::css::StylesheetTokens;
 use fallow_extract::css_classes::MarkupClassScan;
+use fallow_extract::dom_classes::DomClassScan;
 use fallow_extract::sfc::SfcStyle;
 use fallow_extract::tailwind::TailwindArbitraryUse;
 use fallow_types::extract::{CssAnalytics, ExportInfo};
@@ -24,6 +25,12 @@ pub fn extract_css_module_exports(source: &str, is_scss: bool) -> Vec<ExportInfo
 #[must_use]
 pub fn scan_markup_class_tokens(source: &str) -> MarkupClassScan {
     fallow_extract::css_classes::scan_markup_class_tokens(source)
+}
+
+/// Scan plain JS/TS code for the values that DOM class APIs receive.
+#[must_use]
+pub fn scan_dom_class_values(source: &str) -> DomClassScan {
+    fallow_extract::dom_classes::scan_dom_class_values(source)
 }
 
 /// Return whether two class tokens differ by one edit.

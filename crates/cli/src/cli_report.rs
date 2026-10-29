@@ -691,11 +691,11 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         envelope["kind"].as_str(),
         Some("dead-code" | "architecture")
     ) {
-        normalize_historical_prop_count(&mut envelope)?;
+        normalize_historical_component_counts(&mut envelope)?;
     }
     for key in ["check", "dead_code"] {
         if let Some(section) = envelope.get_mut(key) {
-            normalize_historical_prop_count(section)?;
+            normalize_historical_component_counts(section)?;
         }
     }
     let grouped_by = envelope
@@ -761,7 +761,7 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         }
     }
     if !current_schema {
-        normalize_historical_prop_count(&mut envelope)?;
+        normalize_historical_component_counts(&mut envelope)?;
     }
     Ok(SavedEnvelope {
         envelope,
@@ -801,6 +801,7 @@ fn validate_current_grouped_dead_code(
     let mut declared_grouped_total = 0_u64;
     let mut current_grouped_total = 0_u64;
     let mut historical_grouped_total = 0_u64;
+    let mut previous_grouped_total = 0_u64;
     for (index, group) in groups.iter().enumerate() {
         let Some(group_object) = group.as_object() else {
             return Err(format!(
@@ -830,8 +831,8 @@ fn validate_current_grouped_dead_code(
                         "saved grouped dead-code envelope group {index} is incompatible with this Fallow version: {error}"
                     )
                 })?;
-        let (actual_total, historical_total) = saved_prop_totals(&results);
-        if declared_total != actual_total && declared_total != historical_total {
+        let (actual_total, previous_total, historical_total) = saved_component_totals(&results);
+        if ![actual_total, previous_total, historical_total].contains(&declared_total) {
             return Err(format!(
                 "saved grouped dead-code envelope group {index} declares {declared_total} findings but contains {actual_total}"
             ));
@@ -839,51 +840,62 @@ fn validate_current_grouped_dead_code(
         declared_grouped_total = declared_grouped_total.saturating_add(declared_total);
         current_grouped_total = current_grouped_total.saturating_add(actual_total);
         historical_grouped_total = historical_grouped_total.saturating_add(historical_total);
+        previous_grouped_total = previous_grouped_total.saturating_add(previous_total);
     }
     if root_total != declared_grouped_total
-        || (root_total != current_grouped_total && root_total != historical_grouped_total)
+        || ![
+            current_grouped_total,
+            previous_grouped_total,
+            historical_grouped_total,
+        ]
+        .contains(&root_total)
     {
         return Err(format!(
             "saved grouped dead-code envelope declares {root_total} findings but its groups contain {declared_grouped_total} under inconsistent count policies"
         ));
     }
     if root_total != current_grouped_total {
-        reject_current_prop_counter(root.get("summary"))?;
+        reject_current_component_counters(
+            root.get("summary"),
+            root_total != previous_grouped_total,
+        )?;
         for group in groups {
-            normalize_historical_prop_count(group)?;
+            normalize_historical_component_counts(group)?;
         }
         root.insert("total_issues".to_owned(), current_grouped_total.into());
     }
     Ok(())
 }
 
-fn saved_prop_totals(results: &fallow_types::results::AnalysisResults) -> (u64, u64) {
+fn saved_component_totals(results: &fallow_types::results::AnalysisResults) -> (u64, u64, u64) {
     let current = u64::try_from(results.total_issues()).unwrap_or(u64::MAX);
-    let errors = u64::try_from(results.enforced_prop_drilling_count()).unwrap_or(u64::MAX);
-    (current, current.saturating_sub(errors))
+    let shape_errors = u64::try_from(
+        results.enforced_thin_wrapper_count() + results.enforced_duplicate_prop_shape_count(),
+    )
+    .unwrap_or(u64::MAX);
+    let prop_errors = u64::try_from(results.enforced_prop_drilling_count()).unwrap_or(u64::MAX);
+    let previous = current.saturating_sub(shape_errors);
+    (current, previous, previous.saturating_sub(prop_errors))
 }
 
-fn reject_current_prop_counter(summary: Option<&serde_json::Value>) -> Result<(), String> {
-    if summary.is_some_and(|summary| summary.get("prop_drilling_chains").is_some()) {
-        return Err("saved dead-code envelope has a current prop-drilling counter but an inconsistent finding total".to_owned());
+fn reject_current_component_counters(
+    summary: Option<&serde_json::Value>,
+    migrate_prop: bool,
+) -> Result<(), String> {
+    for key in fallow_types::results::ERROR_ONLY_RESULT_KEYS {
+        if *key == "prop_drilling_chains" && !migrate_prop {
+            continue;
+        }
+        if summary.is_some_and(|summary| summary.get(key).is_some()) {
+            return Err("saved dead-code envelope has a current component counter but an inconsistent finding total".to_owned());
+        }
     }
     Ok(())
 }
 
-/// Earlier schema-10 producers saved error severity while excluding prop chains
-/// from totals. The positive summary counter distinguishes current producers.
-fn normalize_historical_prop_count(envelope: &mut serde_json::Value) -> Result<(), String> {
-    if !envelope
-        .get("prop_drilling_chains")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|chains| {
-            chains
-                .iter()
-                .any(|chain| chain["effective_severity"].as_str() == Some("error"))
-        })
-    {
-        return Ok(());
-    }
+/// Earlier schema-10 producers excluded some explicit component-health errors
+/// from totals. Positive summary counters distinguish the current policies.
+fn normalize_historical_component_counts(envelope: &mut serde_json::Value) -> Result<(), String> {
     let Some(declared) = envelope
         .get("total_issues")
         .and_then(serde_json::Value::as_u64)
@@ -895,11 +907,11 @@ fn normalize_historical_prop_count(envelope: &mut serde_json::Value) -> Result<(
     else {
         return Ok(());
     };
-    let (current, historical) = saved_prop_totals(&results);
-    if declared == current || declared != historical {
+    let (current, previous, historical) = saved_component_totals(&results);
+    if declared == current || ![previous, historical].contains(&declared) {
         return Ok(());
     }
-    reject_current_prop_counter(envelope.get("summary"))?;
+    reject_current_component_counters(envelope.get("summary"), declared != previous)?;
     if let Some(summary) = envelope
         .get_mut("summary")
         .and_then(serde_json::Value::as_object_mut)
@@ -911,10 +923,21 @@ fn normalize_historical_prop_count(envelope: &mut serde_json::Value) -> Result<(
             return Err("saved dead-code summary has an inconsistent finding total".to_owned());
         }
         summary.insert("total_issues".to_owned(), current.into());
-        summary.insert(
-            "prop_drilling_chains".to_owned(),
-            (current - historical).into(),
-        );
+        for (key, count) in [
+            (
+                "prop_drilling_chains",
+                results.enforced_prop_drilling_count(),
+            ),
+            ("thin_wrappers", results.enforced_thin_wrapper_count()),
+            (
+                "duplicate_prop_shapes",
+                results.enforced_duplicate_prop_shape_count(),
+            ),
+        ] {
+            if count > 0 {
+                summary.insert(key.to_owned(), count.into());
+            }
+        }
     }
     envelope["total_issues"] = current.into();
     Ok(())

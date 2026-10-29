@@ -4,6 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::template_usage::TemplateUsage;
 
+use super::recovery::RecoveryScanner;
 use super::scanners::{
     is_html_tag_start, scan_bracket_section, scan_curly_section, scan_html_tag, scan_paren_section,
 };
@@ -106,6 +107,7 @@ pub(super) fn collect_template_usage_with_bound_targets(
 /// skipped.
 fn template_body_ranges(source: &str, comment_ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
+    let mut scanner = RecoveryScanner::new(source);
     // Cursor past the last fully-consumed root template body, so nested
     // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped rather
     // than rescanned as separate roots.
@@ -125,7 +127,7 @@ fn template_body_ranges(source: &str, comment_ranges: &[(usize, usize)]) -> Vec<
             continue;
         }
         let body_start = open.end();
-        let Some(body_end) = find_template_body_end(source, body_start) else {
+        let Some(body_end) = find_template_body_end(source, body_start, &mut scanner) else {
             continue;
         };
         ranges.push((body_start, body_end));
@@ -304,7 +306,11 @@ fn strip_wrapping_quotes(expr: &str) -> Option<&str> {
 /// `body_start`, counting nested `<template>` opens so a slot template's close
 /// does not terminate the root body early. Returns the byte index of the `<` of
 /// the matching `</template>`, or `None` if the markup is unbalanced.
-fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
+fn find_template_body_end(
+    source: &str,
+    body_start: usize,
+    scanner: &mut RecoveryScanner<'_>,
+) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut index = body_start;
     let mut depth: usize = 1;
@@ -327,13 +333,13 @@ fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
         // Skip a `{{ }}` interpolation as a unit, so a `<` inside the
         // expression (`{{ 1 < 2 }}`) cannot consume a later `</template>`.
         if bytes[index..].starts_with(b"{{")
-            && let Some((_, next_index)) = scan_curly_section(source, index, 2, 2)
+            && let Some((_, next_index)) = scanner.curly_section(index, 2)
         {
             index = next_index;
             continue;
         }
         if is_html_tag_start(source, index)
-            && let Some((tag, next_index)) = scan_html_tag(source, index)
+            && let Some((tag, next_index)) = scanner.html_tag(index)
         {
             let trimmed = tag.trim();
             if is_template_close_tag(trimmed) {
@@ -837,6 +843,39 @@ mod tests {
 
     fn imported(names: &[&str]) -> FxHashSet<String> {
         names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    #[test]
+    fn incomplete_vue_tags_preserve_prior_usage_without_repeated_scanning() {
+        const TAG_COUNTS: [usize; 2] = [128, 512];
+        const MAX_SCAN_STEPS_PER_SOURCE_BYTE: usize = 16;
+        const CONTROL: &str = "{ready}";
+
+        let (section, control) =
+            crate::cost::measure(|| super::scan_curly_section(CONTROL, 0, 1, 1));
+        assert_eq!(section, Some(("ready", CONTROL.len())));
+        assert!(
+            control.walk_steps >= "ready".len(),
+            "delimiter scans must record work"
+        );
+
+        for repeated_tags in TAG_COUNTS {
+            let source = format!(
+                "<template><Used/>{}</template><template><After/></template>",
+                "<a{".repeat(repeated_tags)
+            );
+            let (usage, work) = crate::cost::measure(|| {
+                collect_template_usage(&source, &imported(&["Used", "After"]))
+            });
+            assert!(usage.used_bindings.contains("Used"));
+            assert!(usage.used_bindings.contains("After"));
+            assert!(
+                work.walk_steps <= MAX_SCAN_STEPS_PER_SOURCE_BYTE * source.len(),
+                "incomplete Vue tags exceeded the linear scan budget: {} steps for {} source bytes",
+                work.walk_steps,
+                source.len()
+            );
+        }
     }
 
     fn bound_targets(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {

@@ -1,0 +1,65 @@
+//! The `AuditOptions` of the hidden review-brief benchmark.
+
+use super::*;
+
+#[expect(
+    clippy::ref_option,
+    reason = "the hidden benchmark options mirror the production AuditOptions contract"
+)]
+pub(super) fn audit_review_benchmark_options<'a>(
+    root: &'a Path,
+    config_path: &'a Option<PathBuf>,
+    cache_dir: &'a Path,
+    threads: usize,
+) -> AuditOptions<'a> {
+    AuditOptions {
+        root,
+        config_path,
+        cache_dir,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads,
+        quiet: true,
+        allow_remote_extends: false,
+        changed_since: None,
+        production: false,
+        production_dead_code: Some(false),
+        production_health: Some(false),
+        production_dupes: Some(false),
+        workspace: None,
+        changed_workspaces: None,
+        explain: false,
+        explain_skipped: false,
+        performance: false,
+        group_by: None,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        fail_on_stale_baseline: false,
+        max_crap: None,
+        file_lines_check: false,
+        coverage: None,
+        coverage_root: None,
+        gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
+        include_entry_exports: false,
+        show_cascade: false,
+        fail_on_parse_error: false,
+        analyses: AuditAnalysisSelection::ALL,
+        css: false,
+        css_deep: false,
+        runtime_coverage: None,
+        min_invocations_hot: 0,
+        brief: true,
+        max_decisions: 4,
+        walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
+        walkthrough_file: None,
+        show_deprioritized: false,
+        scope: None,
+    }
+}

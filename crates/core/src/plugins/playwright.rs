@@ -1325,6 +1325,16 @@ mod tests {
                 "outside/live.pw.ts",
             ),
             (
+                "const shared = { testDir: './wrong', testMatch: '*.pw.ts' }; export default { ...shared, testDir: './ui' };",
+                "ui/live.pw.ts",
+                "wrong/live.pw.ts",
+            ),
+            (
+                "const shared = { testDir: './ui', testMatch: '*.pw.ts' }; export default { testDir: './wrong', ...shared };",
+                "ui/live.pw.ts",
+                "wrong/live.pw.ts",
+            ),
+            (
                 "export default { testDir:'./ui', [key]:'./tests', testMatch:'*.pw.ts', projects:[{name:'chromium'}] };",
                 "tests/live.pw.ts",
                 "outside/live.pw.ts",

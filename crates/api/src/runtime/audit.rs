@@ -105,6 +105,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
             cache_dir: Some(&config.cache_dir),
             changed_files,
             inherited_base_refs: &resolved_base.inherited_refs,
+            compare_line_counts: config.health.file_lines_check_enabled(),
         },
     )?
     else {
@@ -1700,5 +1701,239 @@ mod tests {
             resolved.description.as_deref(),
             Some("merge-base with origin/main")
         );
+    }
+
+    fn registered_worktree_count(root: &Path) -> usize {
+        let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(root)
+            .output()
+            .expect("git worktree list");
+        assert!(output.status.success(), "git worktree list failed");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count()
+    }
+
+    /// #3885: the base snapshot of the programmatic audit, which MCP also
+    /// uses, is not registered with Git while the base analysis reads it.
+    #[test]
+    fn programmatic_base_snapshot_is_unregistered_during_base_analysis() {
+        use crate::audit_run::AuditBackend as _;
+
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"base-snapshot","main":"index.ts"}"#,
+        )
+        .expect("write manifest");
+        std::fs::write(root.join("index.ts"), "export const used = 1;\n").expect("write entry");
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        let options = AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                ..AnalysisOptions::default()
+            },
+            ..AuditOptions::default()
+        };
+        let analysis = analysis_options_for_audit(&options, "HEAD");
+        let resolved = audit_section_context(&analysis).expect("context resolves");
+        let config = load_programmatic_audit_config(&resolved).expect("config loads");
+        let backend = ProgrammaticAuditBackend {
+            options: &options,
+            analysis: &analysis,
+            resolved: &resolved,
+            config: &config,
+        };
+
+        let checkout = backend
+            .create_base_checkout("HEAD", None)
+            .unwrap_or_else(|_| panic!("base checkout is created"));
+        assert_eq!(
+            registered_worktree_count(root),
+            1,
+            "only the main worktree may be registered while the base analysis runs"
+        );
+        let base = backend
+            .run_base(checkout.path(), None)
+            .unwrap_or_else(|_| panic!("base analysis runs on the unregistered snapshot"));
+        assert!(base.subanalyses.dead_code.is_some());
+        assert_eq!(registered_worktree_count(root), 1);
+
+        let path = checkout.path().to_path_buf();
+        drop(checkout);
+        assert!(!path.exists(), "the base snapshot is removed on drop");
+        assert_eq!(registered_worktree_count(root), 1);
+    }
+
+    #[cfg(unix)]
+    fn commit_all(root: &Path, message: &str) {
+        git(root, &["add", "-f", "."]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                message,
+            ],
+        );
+    }
+
+    /// The base commit is untrusted. A gitdir that it commits under the name
+    /// of the snapshot stub, or as a nested bare repository, must not run its
+    /// config during the audit.
+    #[cfg(unix)]
+    #[test]
+    fn audit_never_runs_a_git_config_from_the_base_commit() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path().join("repo");
+        let marker = project.path().join("fsmonitor-ran");
+        std::fs::create_dir_all(&root).expect("create repo");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"crafted-base","main":"index.ts"}"#,
+        )
+        .expect("write manifest");
+        std::fs::write(root.join("index.ts"), "export const used = 1;\n").expect("write entry");
+        for dir in ["fallow-audit-unregistered", "pkg"] {
+            let gitdir = root.join(dir);
+            std::fs::create_dir_all(gitdir.join("objects")).expect("create objects");
+            std::fs::create_dir_all(gitdir.join("refs")).expect("create refs");
+            std::fs::write(gitdir.join("objects/.keep"), "").expect("write keep");
+            std::fs::write(gitdir.join("refs/.keep"), "").expect("write keep");
+            std::fs::write(gitdir.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");
+            std::fs::write(
+                gitdir.join("config"),
+                format!(
+                    "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = \"touch '{}'; false\"\n",
+                    marker.display()
+                ),
+            )
+            .expect("write config");
+        }
+        git(&root, &["init", "-b", "main"]);
+        commit_all(&root, "base");
+        std::fs::write(root.join("index.ts"), "export const used = 2;\n").expect("change entry");
+        commit_all(&root, "head");
+        let options = AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root),
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD~1".to_owned()),
+            ..AuditOptions::default()
+        };
+
+        let output = run_audit(&options).unwrap_or_else(|_| panic!("audit runs"));
+
+        assert!(output.base_snapshot.is_some(), "the base pass must run");
+        assert!(
+            !marker.exists(),
+            "a Git config from the base commit ran a command"
+        );
+    }
+
+    /// #3885: a programmatic audit removes the snapshots of a dead owner,
+    /// registered or not, and keeps the snapshot of a live owner. The dead
+    /// owner's snapshots are made older than the age floor of the cleanup.
+    #[cfg(unix)]
+    #[test]
+    fn audit_removes_snapshots_of_dead_owners_only() {
+        const DEAD_PID: u32 = 99_999_998;
+        assert!(!fallow_engine::repo_refs::process_is_alive(DEAD_PID));
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path().join("repo");
+        std::fs::create_dir_all(&root).expect("create repo");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"orphans","main":"index.ts"}"#,
+        )
+        .expect("write manifest");
+        std::fs::write(root.join("index.ts"), "export const used = 1;\n").expect("write entry");
+        git(&root, &["init", "-b", "main"]);
+        commit_all(&root, "base");
+        std::fs::write(root.join("index.ts"), "export const used = 2;\n").expect("change entry");
+        commit_all(&root, "head");
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let temp = std::env::temp_dir();
+        let dead = temp.join(format!("fallow-audit-base-{DEAD_PID}-{nanos}-0"));
+        let dead_registered = temp.join(format!("fallow-audit-base-{DEAD_PID}-{nanos}-1"));
+        let alive = temp.join(format!(
+            "fallow-audit-base-{}-{nanos}-900000",
+            std::process::id()
+        ));
+        for dir in [&dead, &alive] {
+            std::fs::create_dir_all(dir).expect("create leftover");
+            std::fs::write(dir.join("index.ts"), "").expect("write leftover file");
+        }
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                dead_registered.to_str().expect("UTF-8 path"),
+                "HEAD",
+            ],
+        );
+        let old = std::time::SystemTime::now()
+            - fallow_engine::repo_refs::ORPHAN_MIN_AGE
+            - std::time::Duration::from_secs(60);
+        for dir in [&dead, &dead_registered, &alive] {
+            std::fs::File::open(dir)
+                .and_then(|handle| handle.set_modified(old))
+                .expect("age the leftover");
+        }
+        assert_eq!(registered_worktree_count(&root), 2);
+        let options = AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.clone()),
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD~1".to_owned()),
+            ..AuditOptions::default()
+        };
+
+        let output = run_audit(&options).unwrap_or_else(|_| panic!("audit runs"));
+
+        let alive_kept = alive.is_dir();
+        let _ = std::fs::remove_dir_all(&alive);
+        assert!(output.base_snapshot.is_some(), "the base pass must run");
+        assert!(!dead.exists(), "the leftover of a dead owner is removed");
+        assert!(!dead_registered.exists());
+        assert_eq!(
+            registered_worktree_count(&root),
+            1,
+            "the registration of a dead owner is removed"
+        );
+        assert!(alive_kept, "the snapshot of a live owner stays");
     }
 }

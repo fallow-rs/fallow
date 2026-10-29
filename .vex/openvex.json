@@ -7,19 +7,6 @@
   "statements": [
     {
       "vulnerability": {
-        "name": "GHSA-73rr-hh4g-fpgx"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Development dependency, not in the bundled extension; the parent package range blocks the patched version. Source: editors/vscode/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
         "name": "RUSTSEC-2024-0436"
       },
       "products": [

@@ -551,6 +551,63 @@ impl ModuleInfoExtractor {
         collector.refs
     }
 
+    /// Prepare the visit of a method body. Record the `this` return binding,
+    /// then set the method span and reset the independent `this` depth.
+    /// Return the previous span and depth, which the caller restores after the
+    /// walk.
+    pub(super) fn enter_method_definition(
+        &mut self,
+        method: &MethodDefinition<'_>,
+    ) -> (Option<Span>, usize) {
+        self.record_this_return_binding(method);
+        let previous_span = self.class_method_function_span.replace(method.value.span);
+        let previous_depth = std::mem::replace(&mut self.independent_this_depth, 0);
+        (previous_span, previous_depth)
+    }
+
+    /// Record a `this` binding for an instance method or getter that declares
+    /// a named return type: `this.<name>()` for a method, `this.<name>` for a
+    /// getter. A chain such as `this.current()?.onDown?.()` inside the class
+    /// then credits `ReturnType.onDown` (issue #3960). The key is scoped to
+    /// the enclosing class, and only code of that class reaches `this`, so a
+    /// private or a `#`-private member also gives a binding. A static member
+    /// gives no binding. A return type that names a type parameter of the
+    /// method gives no binding, because that name has no meaning outside the
+    /// method.
+    fn record_this_return_binding(&mut self, method: &MethodDefinition<'_>) {
+        let call_suffix = match method.kind {
+            MethodDefinitionKind::Method => "()",
+            MethodDefinitionKind::Get => "",
+            _ => return,
+        };
+        if method.r#static || self.class_scope_stack.is_empty() {
+            return;
+        }
+        let Some(type_annotation) = method.value.return_type.as_deref() else {
+            return;
+        };
+        let name = match &method.key {
+            PropertyKey::PrivateIdentifier(id) => format!("#{}", id.name),
+            key => match key.static_name() {
+                Some(name) => name.text().into_owned(),
+                None => return,
+            },
+        };
+        let names_method_type_param = extract_type_annotation_name(type_annotation)
+            .zip(method.value.type_parameters.as_deref())
+            .is_some_and(|(type_name, params)| {
+                params
+                    .params
+                    .iter()
+                    .any(|param| param.name.name.as_str() == type_name)
+            });
+        if names_method_type_param {
+            return;
+        }
+        let key = self.this_member_key(&format!("{name}{call_suffix}"));
+        self.record_typed_binding(&key, type_annotation);
+    }
+
     pub(super) fn record_typed_binding(
         &mut self,
         binding_name: &str,

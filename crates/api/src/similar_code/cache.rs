@@ -261,6 +261,10 @@ pub(super) fn clear(provider_cache_dir: &Path, project_root: &Path) -> Result<bo
 }
 
 pub(super) fn parameter_digest() -> [u8; 32] {
+    parameter_digest_for(EMBEDDING_SEMANTICS_VERSION)
+}
+
+fn parameter_digest_for(embedding_semantics_version: u32) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(MODEL_ID.as_bytes());
     hasher.update([0]);
@@ -271,7 +275,7 @@ pub(super) fn parameter_digest() -> [u8; 32] {
     hasher.update((MODEL_MAX_TOKENS as u64).to_le_bytes());
     hasher.update(WIRE_PROTOCOL_VERSION.to_le_bytes());
     hasher.update(EXTRACTION_SEMANTICS_VERSION.to_le_bytes());
-    hasher.update(EMBEDDING_SEMANTICS_VERSION.to_le_bytes());
+    hasher.update(embedding_semantics_version.to_le_bytes());
     hasher.finalize().into()
 }
 
@@ -773,6 +777,22 @@ mod tests {
         let mut drifted = encode_cache(&values, &FxHashSet::default());
         drifted[16] ^= 1;
         assert!(decode_cache(&drifted).is_none());
+    }
+
+    #[test]
+    fn vectors_of_the_previous_embedding_semantics_are_not_loaded() {
+        // Embedding semantics v2: macOS builds compute vectors with Accelerate,
+        // so every v1 vector cache must clear one time.
+        const PREVIOUS: u32 = 1;
+        assert_eq!(EMBEDDING_SEMANTICS_VERSION, PREVIOUS + 1);
+
+        let digest = SimilarCodeSourceDigest::new([6; 32]);
+        let mut values = FxHashMap::default();
+        values.insert(digest, entry(0.25, false));
+        let mut previous = encode_cache(&values, &FxHashSet::default());
+        previous[16..20].copy_from_slice(&PREVIOUS.to_le_bytes());
+        previous[24..56].copy_from_slice(&parameter_digest_for(PREVIOUS));
+        assert!(decode_cache(&previous).is_none());
     }
 
     #[test]

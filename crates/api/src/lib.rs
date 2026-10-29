@@ -1050,6 +1050,9 @@ pub struct ComplexityOptions {
     pub max_cognitive: Option<u16>,
     /// Override for the CRAP score threshold.
     pub max_crap: Option<f64>,
+    /// Override for the file-length threshold in physical lines. `0` turns
+    /// the check off.
+    pub max_file_lines: Option<u32>,
     /// Cap on the number of reported findings.
     pub top: Option<usize>,
     /// Sort order for complexity findings.
@@ -1103,6 +1106,8 @@ pub struct ComplexityThresholdOverrides {
     pub max_cognitive: Option<u16>,
     /// Override for the CRAP score threshold.
     pub max_crap: Option<f64>,
+    /// Override for the file-length threshold in physical lines.
+    pub max_file_lines: Option<u32>,
 }
 
 /// Coverage inputs accepted by the programmatic API.
@@ -1351,6 +1356,7 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
             max_cyclomatic: options.max_cyclomatic,
             max_cognitive: options.max_cognitive,
             max_crap: options.max_crap,
+            max_file_lines: options.max_file_lines,
         },
         top: options.top,
         sort: options.sort,
@@ -1450,6 +1456,7 @@ const fn thresholds_to_engine(
         max_cyclomatic: thresholds.max_cyclomatic,
         max_cognitive: thresholds.max_cognitive,
         max_crap: thresholds.max_crap,
+        max_file_lines: thresholds.max_file_lines,
     }
 }
 

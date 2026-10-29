@@ -15,6 +15,9 @@ use super::{
 };
 use crate::js_text::JsText;
 
+#[path = "visit_impl_trusted_paths.rs"]
+mod trusted_paths;
+
 fn statement_exits_current_flow(stmt: &Statement<'_>) -> bool {
     match stmt {
         Statement::ReturnStatement(_) | Statement::ThrowStatement(_) => true,
@@ -416,11 +419,14 @@ impl ModuleInfoExtractor {
         let Some(binding) = self.path_sink_binding(local) else {
             return;
         };
-        self.sanitized_sink_args.push(SanitizedSinkArg {
-            span_start: binding.span_start,
-            arg_index: binding.arg_index,
-            scope: SanitizerScope::Path,
-        });
+        // The guard checks the call result, so it covers every path segment.
+        for arg_index in 0..binding.arg_count {
+            self.sanitized_sink_args.push(SanitizedSinkArg {
+                span_start: binding.span_start,
+                arg_index,
+                scope: SanitizerScope::Path,
+            });
+        }
     }
 
     pub(super) fn record_fail_closed_guard_after_statement(&mut self, stmt: &Statement<'_>) {
@@ -500,7 +506,7 @@ impl ModuleInfoExtractor {
         Some(rel.name.as_str())
     }
 
-    fn is_node_path_method_call(&self, call: &CallExpression<'_>, method: &str) -> bool {
+    pub(super) fn is_node_path_method_call(&self, call: &CallExpression<'_>, method: &str) -> bool {
         let Expression::StaticMemberExpression(member) = &call.callee else {
             return false;
         };
@@ -530,7 +536,7 @@ impl ModuleInfoExtractor {
         }
         Some(SecurityPathSinkBinding {
             span_start: call.span.start,
-            arg_index: 0,
+            arg_count: u32::try_from(call.arguments.len()).unwrap_or(u32::MAX),
         })
     }
 

@@ -80,7 +80,9 @@ const defineLazy = (target: JsonObject, key: string, load: () => void): void => 
       load();
       return target[key];
     },
-    set: (value: unknown) => setValue(target, key, value),
+    set: (value: unknown) => {
+      setValue(target, key, value);
+    },
   });
 };
 

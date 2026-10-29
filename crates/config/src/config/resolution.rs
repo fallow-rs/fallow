@@ -329,6 +329,10 @@ pub struct ResolvedConfig {
     /// Globs for files loaded dynamically at runtime; matching files are
     /// seeded as entry points so they stay reachable.
     pub dynamically_loaded: Vec<String>,
+    /// Template extensions from `markupExtensions`, in addition to
+    /// [`super::DEFAULT_MARKUP_EXTENSIONS`]: normalized, sorted, and
+    /// deduplicated. Their files count as CSS class references only.
+    pub markup_extensions: Vec<String>,
     /// Per-file severity overrides with globs pre-compiled, in config order.
     pub overrides: Vec<ResolvedOverride>,
     /// Authored Git baseline refs keyed by workspace root; validated against
@@ -409,6 +413,7 @@ const NON_DETECTION_CONFIG_KEYS: &[&str] = &[
     "similarCode",
     "mutation",
     "health",
+    "markupExtensions",
     "security",
     "fix",
     "codeowners",
@@ -1062,6 +1067,7 @@ impl FallowConfig {
             quiet,
             external_plugins: plugins.external_plugins,
             dynamically_loaded: self.dynamically_loaded,
+            markup_extensions: super::resolve_markup_extensions(&self.markup_extensions),
             overrides: path_policy.overrides,
             workspace_changed_since,
             workspace_patterns,
@@ -1373,8 +1379,6 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
-            rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
             type_aware: crate::TypeAwareConfig::default(),
@@ -1391,6 +1395,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
+            ..Default::default()
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -1434,8 +1439,6 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
-            rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
                 rules: PartialRulesConfig {
@@ -1458,6 +1461,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
+            ..Default::default()
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -1506,8 +1510,6 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
-            rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![
                 ConfigOverride {
                     files: vec!["*.ts".to_string()],
@@ -1539,6 +1541,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
+            ..Default::default()
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -1586,8 +1589,6 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
-            rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: vec!["**/ui/**".to_string()],
                 rules: PartialRulesConfig {
@@ -1611,6 +1612,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
+            ..Default::default()
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -1718,8 +1720,6 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
-            rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: files.clone(),
                 rules: PartialRulesConfig {
@@ -1742,6 +1742,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
+            ..Default::default()
         };
         for _ in 0..10 {
             let _ = build_config().resolve(
@@ -1789,8 +1790,6 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: production.into(),
             plugins: vec![],
-            rule_packs: vec![],
-            dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
             type_aware: crate::TypeAwareConfig::default(),
@@ -1807,6 +1806,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
+            ..Default::default()
         }
     }
 

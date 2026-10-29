@@ -402,6 +402,17 @@
           },
           "description": "Non-fatal problems encountered during detection."
         },
+        "cloud": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSetupCloud"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fallow Cloud plan, present only for `fallow coverage setup --cloud`."
+        },
         "_meta": {
           "description": "`_meta` block with docs and field definitions, when requested."
         }
@@ -3367,7 +3378,7 @@
         },
         "functions_above_threshold": {
           "type": "integer",
-          "description": "Functions exceeding at least one complexity or CRAP threshold."
+          "description": "Complexity findings before `--top`: functions exceeding at least one\ncomplexity or CRAP threshold, plus file-length findings\n(`exceeded: \"file_lines\"`)."
         },
         "max_cyclomatic_threshold": {
           "type": "integer",
@@ -3395,6 +3406,13 @@
         "max_unit_size_threshold": {
           "type": "integer",
           "description": "Effective global unit-size ceiling (`health.maxUnitSize`, maximum\nfunction length in lines) for this run. Sits alongside the other three\n`max_*_threshold` siblings so a consumer reading the summary sees every\nconfigured threshold. Per-file `thresholdOverrides` are not reflected\nhere; this is the global default."
+        },
+        "max_file_lines_threshold": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Global file-length ceiling (`health.maxFileLines` or\n`--max-file-lines`) in physical lines. Absent when the file-length\ncheck is off."
         },
         "files_scored": {
           "type": [
@@ -3518,11 +3536,11 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, or a synthesized name for anonymous functions."
+          "description": "Function name, or a synthesized name for anonymous functions. A\nfile-length finding has the name `<file>`."
         },
         "line": {
           "type": "integer",
-          "description": "1-based line the function starts on."
+          "description": "1-based line the function starts on. A file-length finding has `1`."
         },
         "col": {
           "type": "integer",
@@ -3545,7 +3563,7 @@
         },
         "line_count": {
           "type": "integer",
-          "description": "Lines of code in the function body."
+          "description": "Lines of code in the function body. On a file-length finding, the\nphysical line count of the file."
         },
         "param_count": {
           "type": "integer",
@@ -3686,6 +3704,13 @@
             }
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
+        },
+        "max_file_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "File-length ceiling in physical lines that the file exceeded. Present\nonly on a file-level finding (`exceeded: \"file_lines\"`), where\n`line_count` holds the physical line count of the file."
         },
         "actions": {
           "type": "array",
@@ -6163,6 +6188,14 @@
           "type": "integer",
           "description": "Prop chains whose saved effective severity explicitly enforces error policy."
         },
+        "thin_wrappers": {
+          "type": "integer",
+          "description": "Thin wrappers whose saved effective severity explicitly enforces error policy."
+        },
+        "duplicate_prop_shapes": {
+          "type": "integer",
+          "description": "Duplicate prop shapes whose saved effective severity explicitly enforces error policy."
+        },
         "unused_files": {
           "type": "integer",
           "description": "Unused source files."
@@ -8029,6 +8062,11 @@
           "type": "string",
           "const": "all",
           "description": "Cyclomatic, cognitive, and CRAP all exceeded."
+        },
+        {
+          "type": "string",
+          "const": "file_lines",
+          "description": "The file has more physical lines than `health.maxFileLines`. The\nfinding describes the whole file: `name` is `<file>`, `line_count` is\nthe line count of the file, and `max_file_lines` is the ceiling."
         }
       ],
       "description": "Which complexity threshold was exceeded."
@@ -9106,12 +9144,17 @@
         {
           "type": "string",
           "const": "suppress-file",
-          "description": "Suppress with an HTML comment at the top of the template. Used for\nsynthetic Angular `<template>` findings on `.html` files where a\nline suppression cannot be expressed."
+          "description": "Suppress for the whole file. Used for synthetic Angular `<template>`\nfindings on `.html` files where a line suppression cannot be\nexpressed (an HTML comment at the top of the template), and for\nfile-length findings (`// fallow-ignore-file complexity` at the top of\nthe file)."
         },
         {
           "type": "string",
           "const": "suppress-line",
           "description": "Suppress with a next-line comment above the reported line: the\ninline `// fallow-ignore-next-line complexity` form above a function\nor Angular decorator, or the markup\n`<!-- fallow-ignore-next-line complexity -->` form for synthetic\n`<template>` findings in `.svelte`, `.vue`, and `.astro` files."
+        },
+        {
+          "type": "string",
+          "const": "split-file",
+          "description": "Split a file that exceeds `health.maxFileLines` into smaller modules.\nEmitted only on a file-length finding (`exceeded: \"file_lines\"`)."
         }
       ],
       "description": "Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types\nemitted by `build_health_finding_actions`. A single finding's `actions`\narray may carry multiple entries of different types: a finding that\nexceeded both cyclomatic and CRAP at `coverage_tier: partial` will get\nBOTH `increase-coverage` AND `refactor-function`, plus the trailing\n`suppress-line`."
@@ -12190,11 +12233,11 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, or a synthesized name for anonymous functions."
+          "description": "Function name, or a synthesized name for anonymous functions. A\nfile-length finding has the name `<file>`."
         },
         "line": {
           "type": "integer",
-          "description": "1-based line the function starts on."
+          "description": "1-based line the function starts on. A file-length finding has `1`."
         },
         "col": {
           "type": "integer",
@@ -12217,7 +12260,7 @@
         },
         "line_count": {
           "type": "integer",
-          "description": "Lines of code in the function body."
+          "description": "Lines of code in the function body. On a file-length finding, the\nphysical line count of the file."
         },
         "param_count": {
           "type": "integer",
@@ -12358,6 +12401,13 @@
             }
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
+        },
+        "max_file_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "File-length ceiling in physical lines that the file exceeded. Present\nonly on a file-level finding (`exceeded: \"file_lines\"`), where\n`line_count` holds the physical line count of the file."
         }
       },
       "required": [
@@ -16768,6 +16818,13 @@
             "null"
           ],
           "description": "Unit-size ceiling set by the override, when it sets one."
+        },
+        "max_file_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "File-length ceiling set by the override, when it sets one."
         }
       },
       "description": "Threshold values configured by a single override entry."
@@ -18190,7 +18247,7 @@
         "important_count",
         "nesting_depth"
       ],
-      "description": "Structural CSS metrics for a single style rule, computed from the parsed CSS\nsyntax tree. A rule is recorded only when it crosses a structural floor (an\nid selector, a complex selector, a `!important` declaration, or deep\nnesting), so the vector stays bounded on normal stylesheets.\n\nNot persisted in the extraction cache: `fallow health` computes these\non demand from the CSS source, so there is no `bitcode` derive."
+      "description": "Structural CSS metrics for one style rule of the parsed CSS. Only a rule\nover a structural floor (an id selector, a complex selector, `!important`,\nor deep nesting) is recorded, so the vector stays bounded. Not cached:\n`fallow health` computes these from the CSS source (no `bitcode` derive)."
     },
     "CssAnalyticsSummary": {
       "type": "object",
@@ -19190,7 +19247,7 @@
               "type": "null"
             }
           ],
-          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
+          "description": "Rule severity of this finding. Explicit errors enforce analysis gates;\nwarnings stay advisory, including under strict flags. Saved reports\nretain this value for CI levels without the original config. Absent\nin output from older versions. Not part of finding identity, baseline\nkeys or fingerprints."
         }
       },
       "required": [
@@ -19269,7 +19326,7 @@
               "type": "null"
             }
           ],
-          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
+          "description": "Rule severity of this finding. Explicit errors enforce analysis gates;\nwarnings stay advisory, including under strict flags. Saved reports\nretain this value for CI levels without the original config. Absent\nin output from older versions. Not part of finding identity, baseline\nkeys or fingerprints."
         }
       },
       "required": [
@@ -32687,6 +32744,17 @@
           ],
           "description": "The result cache. Absent with `--no-cache`, and when no companion\nstarted."
         },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationResumeOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The resume facts. Absent without `--resume`."
+        },
         "summary": {
           "description": "The totals.",
           "$ref": "#/definitions/MutationSummary"
@@ -33550,6 +33618,10 @@
           "type": "boolean",
           "description": "True when the status comes from the result cache of an earlier run.\nThe mutant did not run in this run. `--no-cache` runs each mutant."
         },
+        "resumed": {
+          "type": "boolean",
+          "description": "True when the status comes from the journal of an interrupted run\n(`--resume`). The mutant did not run in this run."
+        },
         "type_error_codes": {
           "type": "array",
           "items": {
@@ -33751,7 +33823,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "A stable kebab-case code: `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `typecheck-failed`, `worktree-changed`\nor `worktree-check-failed`."
+          "description": "A stable kebab-case code: `cache-write-failed`,\n`journal-write-failed`, `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `typecheck-failed`, `worktree-changed`\nor `worktree-check-failed`."
         },
         "message": {
           "type": "string",
@@ -34689,6 +34761,226 @@
         }
       ],
       "description": "How `fallow health` counts cyclomatic complexity for its gates.\n\nThe policy changes the cyclomatic value that the `maxCyclomatic` gate reads\nand the cyclomatic value in every CRAP score. It does not change the health\nscore, the complexity density, or the hotspot ranking: those keep the\nstandard count so that grades stay comparable across projects."
+    },
+    "MutationResumeOutput": {
+      "type": "object",
+      "properties": {
+        "journal": {
+          "type": "string",
+          "description": "The path of the outcome journal, relative to the project root. When\nthe cache directory is outside the root, the path is absolute: the\nreport has no other cache path, so no other rule applies. The file\nstays only when the run did not complete. A run with\n`completion.status: complete` removes it."
+        },
+        "reused": {
+          "type": "integer",
+          "description": "The mutants whose status came from the journal. They did not run."
+        },
+        "rejected": {
+          "type": "integer",
+          "description": "The journal results whose key does not match this run, because an\ninput of the mutant changed. These results were not reused from the\njournal. The mutant ran again, or its status came from the result\ncache."
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the run did not read a journal and started from the beginning,\nfor example because no journal exists. Absent when the run read the\njournal."
+        }
+      },
+      "required": [
+        "journal",
+        "reused",
+        "rejected"
+      ],
+      "description": "The resume facts of a `--resume` run."
+    },
+    "CoverageSetupCi": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "description": "CI provider the steps are written for.",
+          "$ref": "#/definitions/CoverageSetupCiProvider"
+        },
+        "workflows_detected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Existing workflow files that look like a deploy workflow, relative to\nthe project root."
+        },
+        "steps": {
+          "type": "string",
+          "description": "Workflow steps to add to the job that builds and deploys."
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Where the steps go and what they need."
+        }
+      },
+      "required": [
+        "provider",
+        "workflows_detected",
+        "steps",
+        "instructions"
+      ],
+      "description": "CI steps of a Fallow Cloud setup plan."
+    },
+    "CoverageSetupCloud": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fallow Cloud project id (`owner/repo`), or null when it was not detected."
+        },
+        "git_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Commit SHA that `--wait` checks: `--git-sha`, else `HEAD` of the\nworking tree, or null outside a git repository."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Fallow Cloud API base URL."
+        },
+        "api_key_env": {
+          "type": "string",
+          "description": "Environment variable that holds the full API key in CI and on the server."
+        },
+        "browser_key_env": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Environment variable that holds the ingest-only browser key, when a\nmember runs in the browser."
+        },
+        "commit_sha_env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Environment variables the server snippets read the deployed commit SHA\nfrom, in order."
+        },
+        "ci": {
+          "description": "CI steps that upload the inventory and source maps and register the\ndeployment.",
+          "$ref": "#/definitions/CoverageSetupCi"
+        },
+        "source_maps": {
+          "description": "Whether the production build needs a source map upload.",
+          "$ref": "#/definitions/CoverageSetupSourceMaps"
+        },
+        "activation_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Activation endpoint that reports each setup step, or null without a\nproject id."
+        },
+        "wait_command": {
+          "type": "string",
+          "description": "Command that waits until the cloud reports every step as done."
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSetupWait"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Result of `--wait`, present only when the command waited."
+        }
+      },
+      "required": [
+        "endpoint",
+        "api_key_env",
+        "commit_sha_env",
+        "ci",
+        "source_maps",
+        "wait_command"
+      ],
+      "description": "Fallow Cloud plan of `fallow coverage setup --cloud`.\n\nThe beacon, the inventory, the source maps and the deployment registration\nmust all carry the same commit SHA. The plan names only the environment\nvariable names of keys, never a key value."
+    },
+    "CoverageSetupSourceMaps": {
+      "type": "object",
+      "properties": {
+        "needed": {
+          "type": "boolean",
+          "description": "Whether the CI steps upload source maps."
+        },
+        "dirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Build output directories the maps are uploaded from, one per bundled\nworkspace member, relative to the project root. Empty when no upload\nis needed."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the upload is or is not needed."
+        }
+      },
+      "required": [
+        "needed",
+        "dirs",
+        "reason"
+      ],
+      "description": "Source map guidance of a Fallow Cloud setup plan."
+    },
+    "CoverageSetupWait": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "description": "How the wait ended.",
+          "$ref": "#/definitions/CoverageSetupWaitOutcome"
+        },
+        "activation": {
+          "description": "The last activation response body (`data`) from the cloud, unchanged,\nor null when no read succeeded. New step ids and states can appear."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Error text when the outcome is `error`."
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "description": "Result of `fallow coverage setup --cloud --wait`."
+    },
+    "CoverageSetupCiProvider": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "github_actions",
+          "description": "GitHub Actions workflow steps."
+        }
+      ],
+      "description": "CI provider of a Fallow Cloud setup plan."
+    },
+    "CoverageSetupWaitOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "The cloud reported every step as done."
+        },
+        {
+          "type": "string",
+          "const": "timeout",
+          "description": "The wait timed out before every step was done."
+        },
+        {
+          "type": "string",
+          "const": "error",
+          "description": "The activation endpoint could not be read."
+        }
+      ],
+      "description": "Outcome of `fallow coverage setup --cloud --wait`."
     }
   }
 }

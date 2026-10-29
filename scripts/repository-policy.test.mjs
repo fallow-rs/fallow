@@ -19,7 +19,7 @@ import { releasedSkillNames } from "./released-skills.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /** The published release this branch evolves from. */
-const RELEASED_TAG = "v3.36.0";
+const RELEASED_TAG = "v3.37.0";
 
 const markdownFilesUnder = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -85,6 +85,19 @@ const quotedBenchmarkNumbers = (document) => [
     ),
   ),
 ];
+
+test("isolated publishers and the mutation runner receive dependency updates", () => {
+  const config = readFileSync(".github/dependabot.yml", "utf8");
+  for (const directory of [
+    "/.github/publishers/marketplace",
+    "/.github/publishers/open-vsx",
+    "/tools/mutation-runner",
+  ]) {
+    const update = dependabotUpdate(config, "npm", directory);
+    assert.match(update, /interval: weekly/u, directory);
+    assert.match(update, /default-days: 7/u, directory);
+  }
+});
 
 test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
   const config = readFileSync(".github/dependabot.yml", "utf8");
@@ -374,6 +387,34 @@ test("similar-code sidecar docs follow the canonical protocol versions", () => {
   );
 });
 
+test("similar-code sidecar links Accelerate only on macOS", () => {
+  const manifest = readFileSync("tools/similar-code-sidecar/Cargo.toml", "utf8");
+  const sections = new Map();
+  let current = null;
+  for (const line of manifest.split(/\r?\n/u)) {
+    const header = /^\[(.+)\]\s*$/u.exec(line);
+    if (header) {
+      current = header[1];
+      sections.set(current, []);
+    } else if (current !== null) {
+      sections.get(current).push(line);
+    }
+  }
+  const body = (name) => (sections.get(name) ?? []).join("\n");
+  const macos = body(`target.'cfg(target_os = "macos")'.dependencies`);
+
+  // Only candle-core gets the feature: that is the measured configuration.
+  assert.match(
+    macos,
+    /^candle = \{ package = "candle-core", version = "=0\.11\.0", features = \["accelerate"\] \}$/mu,
+  );
+  assert.doesNotMatch(macos, /candle-nn|candle-transformers/u);
+  for (const [name, lines] of sections) {
+    if (name === `target.'cfg(target_os = "macos")'.dependencies`) continue;
+    assert.doesNotMatch(lines.join("\n"), /accelerate/u, `[${name}] must not enable accelerate`);
+  }
+});
+
 test("NAPI declarations have one canonical public source", () => {
   const packageJson = readJson("crates/napi/package.json");
   const entry = readFileSync("crates/napi/index.d.ts", "utf8");
@@ -467,7 +508,10 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(defaultBackend.package, "typescript");
   assert.equal(sidecarPackage.dependencies.typescript, defaultBackend.version);
   for (const backend of optionalBackends) {
-    assert.equal(sidecarPackage.peerDependencies[backend.package], backend.version);
+    // npm excludes prerelease versions such as tsrs `0.20.1-ts7.1.0-beta` from
+    // every bounded range, so `*` is the one peer range that accepts any
+    // installed tsrs without a warning. The sidecar enforces the real range.
+    assert.equal(sidecarPackage.peerDependencies[backend.package], "*");
     assert.equal(sidecarPackage.peerDependenciesMeta[backend.package].optional, true);
     assert.equal(sidecarPackage.devDependencies[backend.package], backend.version);
     assert.equal(sidecarLock.packages[`node_modules/${backend.package}`].version, backend.version);
@@ -504,8 +548,9 @@ test("VS Code public release verification stays exact and credential-free", () =
   const verifier = readFileSync("scripts/vscode-public-verify.mjs", "utf8");
   const releaseSecurity = readFileSync("docs/development/release-security.md", "utf8");
   const releaseProcedure = readFileSync("docs/development/release-procedure.md", "utf8");
-  assert.equal(vscodePackage.devDependencies["@vscode/vsce"], "4.0.0");
-  assert.equal(vscodePackage.devDependencies.ovsx, "1.2.0");
+  for (const cli of ["@vscode/vsce", "ovsx"]) {
+    assert.match(vscodePackage.devDependencies[cli], /^\d+\.\d+\.\d+$/u, cli);
+  }
   assert.match(verifier, /from "\.\.\/editors\/vscode\/scripts\/vsix-targets\.mjs"/u);
   assert.match(verifier, /VSIX_VARIANTS\.map\(\(\{ target \}\) => target\)/u);
   assert.match(verifier, /marketplace\.visualstudio\.com\/.*extensionquery/u);

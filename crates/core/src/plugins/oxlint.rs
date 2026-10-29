@@ -27,6 +27,9 @@ const CONFIG_PATTERNS: &[&str] = &[
 
 const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
+/// Module extensions that a local plugin file can have, in probe order.
+const MODULE_EXTENSIONS: &[&str] = &["js", "mjs", "cjs", "ts", "mts", "cts"];
+
 const TOOLING_DEPENDENCIES: &[&str] = &["oxlint", "oxlint-tsgolint"];
 
 const ULTRACITE_JS_PLUGINS_SOURCE: &str = "ultracite/oxlint/js-plugins";
@@ -265,9 +268,16 @@ fn credit_config_specifier(
     specifier: &str,
 ) {
     if is_local_specifier(specifier) {
-        result
-            .setup_files
-            .push(resolve_config_relative_path(config_path, root, specifier));
+        let path =
+            resolve_local_module_file(resolve_config_relative_path(config_path, root, specifier));
+        // Oxlint loads the default export of a local plugin file (issue #3871).
+        if let Ok(relative) = path.strip_prefix(root) {
+            result.push_entry_export_credit(
+                config_parser::path_to_config_string(relative),
+                ["default"],
+            );
+        }
+        result.setup_files.push(path);
     } else if is_package_specifier(specifier) {
         result
             .referenced_dependencies
@@ -293,6 +303,55 @@ fn resolve_config_relative_path(config_path: &Path, root: &Path, specifier: &str
         root.join(config_path)
     };
     config_parser::lexical_normalize(&config_abs.parent().unwrap_or(root).join(specifier))
+}
+
+/// Resolve a local plugin specifier to the file that Oxlint loads. A
+/// specifier can name the file without its extension, or a directory. A
+/// directory resolves through its `package.json` `main` field, then through
+/// an `index` file (issue #3961). An unresolved path stays as written.
+fn resolve_local_module_file(path: PathBuf) -> PathBuf {
+    if path.is_file() {
+        return path;
+    }
+    if let Some(file) = with_module_extension(&path) {
+        return file;
+    }
+    if !path.is_dir() {
+        return path;
+    }
+    let main_file = package_main(&path).and_then(|main| {
+        let main_path = config_parser::lexical_normalize(&path.join(main));
+        if main_path.is_file() {
+            return Some(main_path);
+        }
+        with_module_extension(&main_path).or_else(|| index_file(&main_path))
+    });
+    main_file.or_else(|| index_file(&path)).unwrap_or(path)
+}
+
+fn package_main(dir: &Path) -> Option<String> {
+    let source = std::fs::read_to_string(dir.join("package.json")).ok()?;
+    let manifest: serde_json::Value = serde_json::from_str(&source).ok()?;
+    manifest
+        .get("main")
+        .and_then(serde_json::Value::as_str)
+        .filter(|main| !main.is_empty())
+        .map(str::to_owned)
+}
+
+fn with_module_extension(path: &Path) -> Option<PathBuf> {
+    let file_name = path.file_name()?.to_str()?;
+    MODULE_EXTENSIONS
+        .iter()
+        .map(|extension| path.with_file_name(format!("{file_name}.{extension}")))
+        .find(|candidate| candidate.is_file())
+}
+
+fn index_file(dir: &Path) -> Option<PathBuf> {
+    MODULE_EXTENSIONS
+        .iter()
+        .map(|extension| dir.join(format!("index.{extension}")))
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(test)]

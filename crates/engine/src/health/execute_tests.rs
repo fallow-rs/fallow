@@ -158,6 +158,7 @@ fn collect_findings_uses_threshold_override_as_local_ceiling() {
         max_cognitive: Some(25),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: Some("approved assembly".to_string()),
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -200,6 +201,7 @@ fn collect_findings_reports_when_local_ceiling_is_exceeded() {
         max_cognitive: Some(25),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -241,6 +243,7 @@ fn collect_findings_reports_stale_override_when_under_global_thresholds() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -276,6 +279,7 @@ fn threshold_override_tracker_reports_no_match_only_when_requested() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -391,6 +395,7 @@ fn no_match_rows_name_the_dimensions_the_entry_configures() {
         max_cognitive: None,
         max_crap,
         max_unit_size,
+        max_file_lines: None,
         reason: None,
     };
     let dimensions = |overrides: &[fallow_config::HealthThresholdOverride]| {
@@ -491,6 +496,7 @@ fn make_finding(name: &str, exceeded: ExceededThreshold) -> ComplexityViolation 
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        max_file_lines: None,
     }
 }
 
@@ -803,6 +809,7 @@ fn filter_complexity_findings_by_diff_keeps_hotspot_overlapping_diff_line() {
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        max_file_lines: None,
     }];
     let diff = build_diff(
         "diff --git a/src/big.ts b/src/big.ts\n\
@@ -845,6 +852,7 @@ fn filter_complexity_findings_by_diff_drops_finding_outside_diff() {
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        max_file_lines: None,
     }];
     let diff = build_diff(
         "diff --git a/src/big.ts b/src/big.ts\n\
@@ -887,6 +895,7 @@ fn filter_complexity_findings_by_diff_handles_zero_line_count() {
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        max_file_lines: None,
     }];
     let diff = build_diff(
         "diff --git a/src/a.ts b/src/a.ts\n\
@@ -1010,6 +1019,7 @@ fn collect_large_functions_respects_max_unit_size_override() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: Some(500),
+        max_file_lines: None,
         reason: None,
     }]);
     let vital_signs = dominant_unit_size_vital_signs();
@@ -2205,6 +2215,7 @@ fn make_class_finding(
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        max_file_lines: None,
     }
 }
 
@@ -2241,6 +2252,7 @@ fn make_template_finding(
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        max_file_lines: None,
     }
 }
 
@@ -2571,6 +2583,7 @@ fn override_row_names_crap_as_the_outstanding_dimension() {
         max_cognitive: Some(500),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -2622,6 +2635,7 @@ fn crap_only_override_row_names_complexity_as_outstanding() {
         max_cognitive: None,
         max_crap: Some(500.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -2671,6 +2685,7 @@ fn override_configuring_every_ceiling_reports_nothing_outstanding() {
         max_cognitive: Some(500),
         max_crap: Some(500.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -2740,6 +2755,7 @@ fn a_configured_ceiling_that_is_still_breached_reports_insufficient_and_outstand
         max_cognitive: Some(500),
         max_crap: Some(40.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -2788,6 +2804,7 @@ fn a_partly_configured_complexity_override_still_reports_the_surviving_dimension
         max_cognitive: None,
         max_crap: Some(5000.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -2854,6 +2871,7 @@ fn a_superseded_override_row_reports_the_resolved_ceiling_not_its_own() {
             max_cognitive: None,
             max_crap: None,
             max_unit_size: None,
+            max_file_lines: None,
             reason: None,
         },
         fallow_config::HealthThresholdOverride {
@@ -2863,6 +2881,7 @@ fn a_superseded_override_row_reports_the_resolved_ceiling_not_its_own() {
             max_cognitive: Some(100),
             max_crap: None,
             max_unit_size: None,
+            max_file_lines: None,
             reason: None,
         },
     ]);
@@ -2916,6 +2935,7 @@ fn a_suppressed_unit_reports_a_stale_crap_row_and_still_counts_as_matched() {
         max_cognitive: None,
         max_crap: Some(100.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/supp.ts");
@@ -2965,6 +2985,7 @@ fn a_suppressed_unit_reports_a_stale_complexity_row_and_still_counts_as_matched(
         max_cognitive: None,
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let (applied, matches) = resolver.resolve(Path::new("src/supp.ts"), "gnarly");
@@ -3013,6 +3034,7 @@ fn a_max_unit_size_override_still_scores_a_suppressed_unit() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: Some(500),
+        max_file_lines: None,
         reason: None,
     }]);
     let (applied, matches) = resolver.resolve(Path::new("src/supp.ts"), "gnarly");
@@ -3057,6 +3079,7 @@ fn threshold_override_metrics_carry_line_count_on_complexity_rows_only() {
         max_cognitive: Some(500),
         max_crap: Some(500.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let absolute = Path::new("/project/src/Widget.svelte");
@@ -3123,6 +3146,7 @@ fn same_named_units_do_not_steal_each_others_outstanding_dimensions() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/handlers.js");
@@ -3194,6 +3218,7 @@ fn a_component_rollup_does_not_steal_its_anchor_methods_outstanding_dimension() 
         max_cognitive: Some(500),
         max_crap: Some(40.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/widget.component.ts");
@@ -3249,6 +3274,7 @@ fn a_component_rollup_is_measured_against_the_override_ceilings() {
         max_cognitive: Some(500),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }];
     let component_ts = PathBuf::from("/proj/src/widget.component.ts");
@@ -3288,6 +3314,7 @@ fn a_surviving_component_rollup_publishes_its_override_ceilings() {
         max_cognitive: Some(20),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }];
     let component_ts = PathBuf::from("/proj/src/widget.component.ts");
@@ -3343,6 +3370,7 @@ fn a_component_scoped_entry_that_silences_the_rollup_is_not_reported_no_match() 
         max_cognitive: Some(500),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }];
     let resolver = rollup_resolver(&overrides, 3, 3);
@@ -3405,6 +3433,7 @@ fn a_crap_only_component_entry_that_emits_no_row_is_still_reported_no_match() {
         max_cognitive: None,
         max_crap: Some(500.0),
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }];
     let resolver = rollup_resolver(&overrides, 3, 3);
@@ -3458,6 +3487,7 @@ fn a_surviving_component_rollup_row_names_its_outstanding_dimension() {
         max_cognitive: Some(20),
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }];
     let resolver = rollup_resolver(&overrides, 3, 3);
@@ -3507,6 +3537,7 @@ fn a_component_rollup_row_does_not_score_a_unit_size_term() {
         max_cognitive: Some(500),
         max_crap: None,
         max_unit_size: Some(40),
+        max_file_lines: None,
         reason: None,
     }];
     let resolver = rollup_resolver(&overrides, 3, 3);
@@ -3562,6 +3593,7 @@ fn a_unit_size_only_override_reports_a_complexity_row_when_it_matches() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: Some(500),
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -3614,6 +3646,7 @@ fn a_unit_size_only_override_that_is_still_breached_reports_insufficient() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: Some(100),
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -3659,6 +3692,7 @@ fn a_unit_size_breach_and_a_complexity_finding_name_one_outstanding_dimension() 
         max_cognitive: None,
         max_crap: None,
         max_unit_size: Some(100),
+        max_file_lines: None,
         reason: None,
     }]);
     let absolute = Path::new("/project/src/Widget.svelte");
@@ -3706,6 +3740,7 @@ fn a_cyclomatic_only_override_is_insufficient_when_cognitive_still_breaches() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: None,
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");
@@ -3762,6 +3797,7 @@ fn a_unit_size_only_override_is_not_stale_while_complexity_still_fires() {
         max_cognitive: None,
         max_crap: None,
         max_unit_size: Some(500),
+        max_file_lines: None,
         reason: None,
     }]);
     let relative = Path::new("src/Widget.svelte");

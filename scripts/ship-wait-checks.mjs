@@ -3,7 +3,9 @@
 // Wait until the checks of a pull request, or the workflow runs of a commit,
 // are complete. Right after a push, GitHub can report no checks or only the
 // first few, and "nothing pending" is then true too early. For a pull request,
-// the --min-checks guard waits until at least that count of checks exists. For
+// include queued workflows before they register any checks. Known optional
+// workflows remain excluded in required-only mode.
+// The --min-checks guard waits until at least that count of checks exists. For
 // a commit, the runs that GitHub created are the expected set, and the wait
 // ends when they stay complete for a short settle time. GitHub starts no
 // pull_request workflow for a pull request that conflicts with its base, so
@@ -86,6 +88,10 @@ Wait until a pull request has at least --min-checks checks and none of them
 is pending. Then print a summary of the checks. With --commit, wait for the
 workflow runs of a commit instead, for example a merge commit on main.
 
+Pull request waits also discover unfinished workflows on the reported head,
+including workflows queued before any jobs exist. With --required, a workflow
+with registered checks is ignored when none of its checks is selected.
+
 With --commit, the expected set is the set of runs that GitHub created for
 the commit. Path filters decide which workflows a push starts, so the count
 changes from commit to commit. The wait ends when all runs are complete and
@@ -148,14 +154,22 @@ cancelled, or when --follow-main reaches the maximum count of moves, 2 for
 invalid input, failed reads for the full --error-window, a timeout, a failed read
 of ${FOLLOW_REF}, or an ${FOLLOW_REF} that does not contain the given commit,
 3 when the pull request conflicts with its base branch, 4 when each failed
-check of the pull request also fails on ${FOLLOW_BRANCH} (--pr only).
+check also fails on ${FOLLOW_BRANCH}.
 
 With --pr, the script compares each failed check with the newest completed
 run of the same check name on the newest ${MAIN_COMMIT_LIMIT} commits of ${FOLLOW_BRANCH}. A check that
 also fails on ${FOLLOW_BRANCH} gets the line "FAIL (also on ${FOLLOW_BRANCH} <sha>)". When all failed
 checks fail on ${FOLLOW_BRANCH} too, the exit code is 4: wait for the fix on ${FOLLOW_BRANCH}, merge
 ${FOLLOW_BRANCH} into the branch, push, and wait again. A cancelled check, or a failed
-check that ${FOLLOW_BRANCH} does not have, keeps exit code 1.`;
+check that ${FOLLOW_BRANCH} does not have, keeps exit code 1.
+
+With --commit, the script compares each failed check in the same way with
+the ${MAIN_COMMIT_LIMIT} commits before the given commit. With --follow-main, these are
+still the commits before the given commit, not before the newer commit that
+the wait moved to. A check that also failed before the commit gets the same
+line, and when all failed checks failed before, the exit code is 4: the
+failure does not come from the commit. A cancelled or running run on ${FOLLOW_BRANCH} does not count,
+so the comparison moves to an older commit.`;
 
 const formatSeconds = (ms) => {
   const seconds = Math.round(ms / SECOND);
@@ -672,7 +686,7 @@ const currentRollupChecks = (rollup, readRun, names) => {
  * for duplicate or canceled workflow checks; `{ fresh: true }` also requests
  * current run status. `names` limits checks to the required selection.
  */
-export const parseGhPrRollup = (
+const parseGhPrRollup = (
   { error, status, stdout, stderr },
   { readRun = null, names = null } = {},
 ) => {
@@ -847,13 +861,108 @@ const HEAD_UPDATE_PENDING = {
   checks: [{ name: "pull request head update", bucket: "pending" }],
 };
 
-/** Read the rollup of the pull request head, or a pending check for a stale head. */
-const readHeadRollup = (args, { head, readRun, names }) => {
+/** Read PR workflows that can be queued before any check is registered. */
+const readPrWorkflows = ({ head, repo }) => {
+  const args = [
+    "run",
+    "list",
+    "--commit",
+    head,
+    "--event",
+    "pull_request",
+    "--limit",
+    String(RUN_LIST_LIMIT),
+    "--json",
+    "databaseId,workflowDatabaseId,workflowName,status,url,headSha,event",
+  ];
+  if (repo !== null) args.push("--repo", repo);
+  const read = parseGhApi(spawnSync("gh", args, { encoding: "utf8" }));
+  if (!read.ok) return read;
+  if (
+    !Array.isArray(read.data) ||
+    read.data.some(
+      (run) =>
+        !Number.isSafeInteger(run?.databaseId) ||
+        run.databaseId <= 0 ||
+        !Number.isSafeInteger(run.workflowDatabaseId) ||
+        run.workflowDatabaseId <= 0 ||
+        typeof run.workflowName !== "string" ||
+        typeof run.status !== "string" ||
+        typeof run.event !== "string" ||
+        !FULL_SHA_PATTERN.test(run.headSha) ||
+        typeof run.url !== "string" ||
+        GITHUB_RUN_URL_PATTERN.exec(run.url)?.[3] !== String(run.databaseId),
+    )
+  )
+    return { ok: false, error: "gh printed invalid pull-request workflow runs" };
+  return {
+    ok: true,
+    runs: read.data.filter((run) => run.headSha === head && run.event === "pull_request"),
+  };
+};
+
+/** Match required checks across attempts of the same workflow, using immutable IDs. */
+const requiredWorkflowSelector = ({ checks, registered, readRun, head }) => {
+  let selectedWorkflows = null;
+  return (run) => {
+    const belongs = (link) =>
+      typeof link === "string" && (link === run.url || link.startsWith(`${run.url}/`));
+    const known = registered.some((check) => belongs(check.detailsUrl ?? check.targetUrl));
+    if (!known || checks.some((check) => belongs(check.link))) return { ok: true, required: true };
+    if (selectedWorkflows === null) {
+      selectedWorkflows = new Set();
+      for (const check of checks) {
+        const metadata = readRun(check.link);
+        if (!metadata.ok) return metadata;
+        if (metadata.run?.head === head) selectedWorkflows.add(metadata.run.workflowId);
+      }
+    }
+    return { ok: true, required: selectedWorkflows.has(run.workflowDatabaseId) };
+  };
+};
+
+/** Keep unregistered jobs pending without adding completed passes to the check count. */
+const pendingWorkflowChecks = (runs, { names, ...context }) => {
+  const selectRequired = requiredWorkflowSelector(context);
+  const checks = [];
+  for (const run of runs) {
+    if (run.status === "completed") continue;
+    if (names !== null) {
+      const selected = selectRequired(run);
+      if (!selected.ok) return selected;
+      if (!selected.required) continue;
+    }
+    checks.push({
+      name: `${run.workflowName} workflow (${run.databaseId})`,
+      bucket: "pending",
+      link: run.url,
+    });
+  }
+  return { ok: true, checks };
+};
+
+/** Read current-head checks together with workflows that have not registered checks. */
+const readHeadRollup = (args, { head, readRun, names, repo }) => {
   const view = spawnSync("gh", args, { encoding: "utf8" });
   if (head !== null && isStaleHead(view, head)) {
     return HEAD_UPDATE_PENDING;
   }
-  return parseGhPrRollup(view, { readRun, names });
+  const current = parseGhPrRollup(view, { readRun, names });
+  if (!current.ok) return current;
+  const actualHead = reportedHead(view.stdout);
+  if (!FULL_SHA_PATTERN.test(actualHead)) {
+    return { ok: false, error: "gh printed an invalid pull-request head" };
+  }
+  const workflows = readPrWorkflows({ head: actualHead, repo });
+  if (!workflows.ok) return workflows;
+  const pending = pendingWorkflowChecks(workflows.runs, {
+    names,
+    checks: current.checks,
+    registered: JSON.parse(view.stdout).statusCheckRollup ?? [],
+    readRun,
+    head: actualHead,
+  });
+  return pending.ok ? { ok: true, checks: [...current.checks, ...pending.checks] } : pending;
 };
 
 /**
@@ -898,11 +1007,11 @@ const ghChecksReader = ({ pr, repo, required, head = null, log = console.log }) 
         return { ok: false, error: "gh printed invalid required-check selection" };
       }
       if (selected.checks.length === 0) {
-        return fallback(() => readHeadRollup(args, { head, readRun, names: null }));
+        return fallback(() => readHeadRollup(args, { head, readRun, names: null, repo }));
       }
     }
     const names = selected === null ? null : new Set(selected.checks.map(({ name }) => name));
-    const current = readHeadRollup(args, { head, readRun, names });
+    const current = readHeadRollup(args, { head, readRun, names, repo });
     if (!current.ok || selected === null) {
       return current;
     }
@@ -1042,11 +1151,56 @@ const parseGhCheckRuns = (result, name) => {
 const ghApi = (endpoint) => spawnSync("gh", ["api", endpoint], { encoding: "utf8" });
 
 /**
- * The readers of main for `compareWithMain`. Without --repo, gh fills in the
+ * The commits before `commit`, newest first, from a `gh api .../commits`
+ * result that starts at `commit`.
+ */
+const parseEarlierCommits = (result, commit) => {
+  const read = parseGhCommits(result);
+  if (!read.ok) {
+    return read;
+  }
+  if (read.shas[0] !== commit) {
+    return { ok: false, error: `the history of ${shortSha(commit)} does not start at it` };
+  }
+  return { ok: true, shas: read.shas.slice(1) };
+};
+
+/** The completed workflow runs of `name` on `sha`, as checks. */
+const completedRuns = (sha, name, readRuns) => {
+  const read = readRuns(sha);
+  if (!read.ok) {
+    return read;
+  }
+  return {
+    ok: true,
+    checks: read.checks.filter((check) => check.name === name && check.bucket !== "pending"),
+  };
+};
+
+/**
+ * The readers of main for `compareWithMain`. With --pr, the comparison reads
+ * the job check runs of the newest commits of main. With --commit, it reads
+ * the workflow runs of the commits before the given commit, because a commit
+ * wait reports workflow runs. So a failure that main had before the merge
+ * does not count against the merge. Without --repo, gh fills in the
  * `{owner}/{repo}` placeholder from the repository of the working directory.
  */
-const ghMainReaders = ({ repo }, api = ghApi) => {
+export const ghMainReaders = (
+  { repo = null, commit = null },
+  api = ghApi,
+  readRuns = (sha) => ghRunsReader({ commit: sha, repo })(),
+) => {
   const base = `repos/${repo ?? "{owner}/{repo}"}`;
+  if (commit !== null) {
+    return {
+      readMainCommits: () =>
+        parseEarlierCommits(
+          api(`${base}/commits?sha=${commit}&per_page=${MAIN_COMMIT_LIMIT + 1}`),
+          commit,
+        ),
+      readMainChecks: (sha, name) => completedRuns(sha, name, readRuns),
+    };
+  }
   return {
     readMainCommits: () =>
       parseGhCommits(api(`${base}/commits?sha=${FOLLOW_BRANCH}&per_page=${MAIN_COMMIT_LIMIT}`)),
@@ -1062,8 +1216,9 @@ const ghMainReaders = ({ repo }, api = ghApi) => {
 
 /**
  * The newest of `shas` with a completed run of `name`, when all its completed
- * runs of `name` fail, else null. Returns `{ ok: true, sha }` or
- * `{ ok: false, error }`.
+ * runs of `name` fail, else null. A cancelled run does not count, because a
+ * newer push to main cancels the runs of the older commits. Returns
+ * `{ ok: true, sha }` or `{ ok: false, error }`.
  */
 const mainFailure = (name, shas, readMainChecks) => {
   for (const sha of shas) {
@@ -1071,15 +1226,16 @@ const mainFailure = (name, shas, readMainChecks) => {
     if (!read.ok) {
       return read;
     }
-    if (read.checks.length > 0) {
-      return { ok: true, sha: read.checks.every(({ bucket }) => bucket === "fail") ? sha : null };
+    const finished = read.checks.filter(({ bucket }) => bucket !== "cancel");
+    if (finished.length > 0) {
+      return { ok: true, sha: finished.every(({ bucket }) => bucket === "fail") ? sha : null };
     }
   }
   return { ok: true, sha: null };
 };
 
 /**
- * Compare the failed checks of a failed pull request wait with main.
+ * Compare the failed checks of a failed pull request or commit wait with main.
  *
  * `readMainCommits()` returns `{ ok: true, shas }`, newest first.
  * `readMainChecks(sha, name)` returns the completed runs of `name` on `sha`
@@ -1088,7 +1244,7 @@ const mainFailure = (name, shas, readMainChecks) => {
  * `shared-with-main` when every failed or cancelled check has `main`. A
  * failed read keeps the result and adds `mainError`.
  */
-const compareWithMain = (result, { readMainCommits, readMainChecks }) => {
+export const compareWithMain = (result, { readMainCommits, readMainChecks }) => {
   if (result.status !== "fail") {
     return result;
   }
@@ -1160,7 +1316,10 @@ export const reportChecks = (
           ? `${label}: all ${checks.length} runs passed, and no run started or changed for ${settleMinutes} minutes (${summary}).`
           : `${label}: all ${checks.length} checks passed, fewer than --min-checks ${minChecks}, and no check started or changed for ${settleMinutes} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
-    "shared-with-main": `${label}: checks failed, and each failed check also fails on ${FOLLOW_BRANCH} (${summary}). Wait for the fix on ${FOLLOW_BRANCH}, merge ${FOLLOW_BRANCH} into the branch, push, and wait again.`,
+    "shared-with-main":
+      commit === null
+        ? `${label}: checks failed, and each failed check also fails on ${FOLLOW_BRANCH} (${summary}). Wait for the fix on ${FOLLOW_BRANCH}, merge ${FOLLOW_BRANCH} into the branch, push, and wait again.`
+        : `${label}: checks failed, and each failed check also failed on an earlier commit of ${FOLLOW_BRANCH} (${summary}). The failure does not come from this commit.`,
     timeout:
       minChecks === null
         ? `${label}: timed out with ${checks.length} checks (${summary}).`
@@ -1213,7 +1372,7 @@ const main = async () => {
       readHead: gitHeadReader(runGit),
       isAncestor: gitAncestorChecker(runGit),
     });
-    return reportChecks(result, {
+    return reportChecks(compareWithMain(result, ghMainReaders(options)), {
       ...options,
       label: commitLabel(result.commit),
       settleMs: COMMIT_SETTLE_MS,
@@ -1221,7 +1380,10 @@ const main = async () => {
   }
   if (options.commit !== null) {
     const result = await waitForCommitRuns({ ...options, readChecks: ghRunsReader(options) });
-    return reportChecks(result, { ...options, settleMs: COMMIT_SETTLE_MS });
+    return reportChecks(compareWithMain(result, ghMainReaders(options)), {
+      ...options,
+      settleMs: COMMIT_SETTLE_MS,
+    });
   }
   if (options.head === undefined) {
     console.error(HEAD_WARNING);

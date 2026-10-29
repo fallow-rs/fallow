@@ -1963,9 +1963,6 @@ mod trace_provenance;
 mod used_export_names;
 mod used_export_rule;
 
-pub(crate) use used_export_rule::ConfigExportCredit;
-pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};
-
 pub(crate) use module_federation::runtime_remotes;
 pub use registry::{
     AggregatedPluginResult, PluginRegistry, PluginToolingDependencies, PluginToolingEvidence,
@@ -1976,6 +1973,8 @@ pub(crate) use tooling::{
 };
 pub use trace_provenance::{ExportCredits, build_trace_provenance};
 pub use used_export_names::UsedExportNames;
+pub(crate) use used_export_rule::{ConfigExportCredit, is_export_ignored};
+pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};
 
 fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
     let imports = config_parser::extract_imports(source, config_path);
@@ -2039,6 +2038,7 @@ fn canonical_test_environment(environment: &str) -> &str {
 mod adonis;
 mod ag_ui;
 mod alchemy;
+mod alias_replacement;
 mod angular;
 mod astro;
 mod ava;

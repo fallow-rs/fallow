@@ -18,6 +18,7 @@ mod blocks;
 mod collect;
 mod emit;
 mod id;
+mod logging_only;
 mod operator;
 mod regex;
 

@@ -45,6 +45,16 @@ invariants in this file.
    branches="$(gh api repos/fallow-rs/fallow/environments/release/deployment-branch-policies \
      --jq '[.branch_policies[].name] | join(",")')"
    [ "$branches" = "main" ] || { echo "release environment admits: ${branches:-nothing}" >&2; exit 1; }
+   signing_branches="$(gh api repos/fallow-rs/fallow/environments/windows-signing/deployment-branch-policies \
+     --jq '[.branch_policies[].name] | join(",")')"
+   [ "$signing_branches" = "main" ] || { echo "windows-signing environment admits: ${signing_branches:-nothing}" >&2; exit 1; }
+   signing_vars="$(gh variable list --repo fallow-rs/fallow --env windows-signing --json name,value)"
+   signing_mode="$(jq -r '.[] | select(.name == "WINDOWS_SIGNING_MODE") | .value' <<<"$signing_vars")"
+   case "${signing_mode:-off}" in
+     authenticode|off) ;;
+     *) echo "Unsupported WINDOWS_SIGNING_MODE: $signing_mode" >&2; exit 1 ;;
+   esac
+   [ "${signing_mode:-off}" = authenticode ] || echo "NOTE: Windows binaries ship without an Authenticode signature" >&2
    repo_secrets="$(gh secret list --repo fallow-rs/fallow --json name --jq '.[].name')"
    env_secrets="$(gh secret list --repo fallow-rs/fallow --env release --json name --jq '.[].name')"
    repo_vars="$(gh variable list --repo fallow-rs/fallow --json name,value)"
@@ -474,8 +484,9 @@ invariants in this file.
     approve, then rerun the failed jobs of the same run. Monitor the run through
     `status=completed` and `conclusion=success`; a successful watch command
     alone is not sufficient evidence. Require `similar-code-conformance` to have
-    validated the exact Linux x64 sidecar artifact against the committed F32
-    Candle baseline before `release-verified`. Also require both `musl smoke`
+    validated the exact Linux x64, macOS arm64, and macOS x64 sidecar
+    artifacts against the committed F32 Candle baseline before
+    `release-verified`. Also require both `musl smoke`
     legs to pass before `release-verified` (see [musl smoke](#musl-smoke)),
     and require the `Publish VS Code Marketplace
     targets`, `Publish Open VSX targets`, `Verify public VS Code registry

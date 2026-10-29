@@ -2258,44 +2258,50 @@ mod tests {
     ///
     /// A truncated parse is also the most dangerous thing cancellation
     /// produces: served from a cache it would read as a project with fewer
-    /// modules long after the cancellation was forgotten. The second half
+    /// modules long after the cancellation was forgotten. The first half
     /// asserts it is not retained.
     #[test]
     fn a_cancelled_parse_stops_partway_and_leaves_no_truncated_cache_behind() {
         let project = parse_loop_project();
         let root = project.path();
 
-        // Warm the page cache, so the timed run measures parsing.
-        drop(uncached_session(root).parse_modules(false, None));
+        // A token set before the call must stop every item. This half has no
+        // timing, so it proves on any runner that the loop reads the token.
+        let token = Arc::new(AtomicBool::new(true));
+        let session = uncached_session(root).with_cancellation(Arc::clone(&token));
+        let stopped = session.parse_modules(false, Some(&token));
+        assert!(stopped.modules.is_empty(), "the loop never read the token");
+        assert!(
+            session.parsed_cache.lock().expect("parse cache").is_none(),
+            "a truncated parse must not be retained as this session's warm cache"
+        );
 
+        // Warm the page cache, then time only the parse, as the attempts do.
+        drop(uncached_session(root).parse_modules(false, None));
+        let session = uncached_session(root);
         let started = Instant::now();
-        let full = uncached_session(root).parse_modules(false, None);
+        let full_count = session.parse_modules(false, None).modules.len();
         let full_parse = started.elapsed();
-        let full_count = full.modules.len();
         assert_eq!(
             full_count, PARSE_LOOP_FILES,
             "the fixture must parse every generated module"
         );
-        assert!(
-            full_parse >= Duration::from_millis(20),
-            "the fixture is too small to cancel part way through: {full_parse:?}"
-        );
 
-        // Where the flip lands is a scheduling outcome, so this retries until
-        // one attempt lands strictly inside the loop. Every attempt asserts the
-        // property; the retry only chooses an attempt that measures the stop
-        // part way through rather than at the entry guard.
-        let mut partial = None;
-        let mut cancelled_session = None;
-        for attempt in 1..=6_u32 {
+        // Where the flip lands is a scheduling outcome, and a later parse can
+        // run faster or slower than the timed one. So a bisection finds the
+        // delay: a parse that finished shortens it, a parse that stopped at
+        // once makes it longer, and a parse that stopped part way ends it.
+        let mut shorter_than = None::<Duration>;
+        let mut longer_than = Duration::ZERO;
+        let mut delay = full_parse / 2;
+        let mut stopped_part_way = false;
+        for _ in 0..16 {
             let token = Arc::new(AtomicBool::new(false));
-            // Build the session before arming the watchdog. Discovery runs in
-            // the constructor, and a delay spent there would leave the token
-            // already set when the loop starts.
+            // Discovery runs in the constructor, so build the session before
+            // the watchdog starts its delay.
             let session = uncached_session(root).with_cancellation(Arc::clone(&token));
             let watchdog = {
                 let token = Arc::clone(&token);
-                let delay = full_parse * attempt / 6;
                 std::thread::spawn(move || {
                     std::thread::sleep(delay);
                     token.store(true, Ordering::SeqCst);
@@ -2305,31 +2311,24 @@ mod tests {
             watchdog.join().expect("watchdog thread");
 
             let parsed = cancelled.modules.len();
-            assert!(
-                parsed < full_count,
-                "the parse returned all {full_count} modules, so the loop never read the token"
-            );
-            cancelled_session = Some(session);
-            if parsed > 0 {
-                partial = Some(parsed);
+            if parsed == full_count {
+                shorter_than = Some(delay);
+            } else if parsed == 0 {
+                longer_than = delay;
+            } else {
+                stopped_part_way = true;
                 break;
             }
+            delay = match shorter_than {
+                Some(upper) => (longer_than + upper) / 2,
+                None => delay * 2,
+            };
         }
-        let parsed = partial.expect(
-            "no attempt flipped the token while the loop was running, so this never measured a \
-             stop part way through",
-        );
-        assert!(parsed < full_count);
-
         assert!(
-            cancelled_session
-                .expect("a cancelled session")
-                .parsed_cache
-                .lock()
-                .expect("parse cache")
-                .is_none(),
-            "a truncated parse must not be retained as this session's warm cache"
+            stopped_part_way,
+            "no attempt in 16 stopped the parse part way through"
         );
+
         let recovered = uncached_session(root).parse_modules(false, None);
         assert_eq!(
             recovered.modules.len(),

@@ -162,7 +162,7 @@ fn probe_history(root: &Path) -> Result<String, WorkspaceDiagnosticKind> {
 }
 
 fn run_git(root: &Path, args: &[&str]) -> Option<String> {
-    let output = crate::git_env::git_command()
+    let output = crate::git_env::git_command(root)
         .args(args)
         .current_dir(root)
         .stderr(Stdio::null())
@@ -425,7 +425,7 @@ mod tests {
     const BASE_EPOCH: u64 = 1_700_000_000;
 
     fn git(root: &Path, args: &[&str], epoch: Option<u64>) {
-        let mut command = crate::git_env::git_command();
+        let mut command = crate::git_env::git_command(root);
         command.current_dir(root).args(args).stdout(Stdio::null());
         if let Some(epoch) = epoch {
             let stamp = format!("{epoch} +0000");

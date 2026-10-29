@@ -25,6 +25,10 @@ use retry_set::{confirmation_tests, fastest_first, retry_extra_ms, whole_files};
 
 pub(super) mod control;
 mod retry_set;
+mod stored;
+
+pub use stored::{CachedResult, OutcomeJournal, ResultLookup};
+use stored::{FirstRuns, job_key, journal_first_run, journal_retry, record_stored};
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
@@ -88,30 +92,9 @@ pub struct ScheduleConfig {
     pub deadline: Option<Instant>,
     /// The result cache. `None` runs each covered mutant.
     pub cache: Option<Arc<dyn ResultLookup>>,
-}
-
-/// A result of an earlier run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CachedResult {
-    pub status: MutantStatus,
-    pub killed_by: Option<String>,
-    pub duration_ms: Option<u64>,
-}
-
-/// Looks up the result of a mutant from an earlier run.
-pub trait ResultLookup: std::fmt::Debug + Send + Sync {
-    /// The cache key of `mutant` with these covering tests and their test
-    /// files, for the runner that `ready` describes.
-    fn key(
-        &self,
-        ready: &Ready,
-        mutant: &ScheduledMutant,
-        tests: &[String],
-        test_files: &[String],
-    ) -> String;
-
-    /// The stored result of `mutant_id` under `key`.
-    fn get(&self, mutant_id: &str, key: &str) -> Option<CachedResult>;
+    /// The outcome journal. It receives each final result when it is final,
+    /// and gives the results of an interrupted earlier run on `--resume`.
+    pub journal: Option<Arc<dyn OutcomeJournal>>,
 }
 
 /// The result of one mutant.
@@ -129,6 +112,9 @@ pub struct MutantOutcome {
     /// True when the result comes from the result cache. The mutant did not
     /// run.
     pub cached: bool,
+    /// True when the result comes from the journal of an interrupted run.
+    /// The mutant did not run.
+    pub resumed: bool,
 }
 
 impl MutantOutcome {
@@ -142,6 +128,7 @@ impl MutantOutcome {
             retried: false,
             attempts: Vec::new(),
             cached: false,
+            resumed: false,
         }
     }
 }
@@ -198,7 +185,8 @@ pub struct ScheduleOutcome {
     pub unretried: Vec<String>,
     pub timings: ScheduleTimings,
     pub workers: usize,
-    /// The cache key of each mutant that ran. Empty without a cache.
+    /// The cache key of each mutant that ran or that the journal resumed.
+    /// Empty without a cache and without a journal.
     pub cache_keys: FxHashMap<String, String>,
     /// The pending mutants that took the place of an uncovered planned
     /// mutant inside the `--max-mutants` limit, in rank order.
@@ -280,7 +268,7 @@ struct Job {
     static_mutant: bool,
     /// The sorted test files of `tests`.
     test_files: Vec<String>,
-    /// The result cache key. `None` without a cache.
+    /// The result cache key. `None` without a cache and without a journal.
     cache_key: Option<String>,
     /// The tests and the timeout of the retry of a survivor, when the retry
     /// runs more tests than the first run. A test can read a value that an
@@ -1238,6 +1226,7 @@ struct JobContext<'a> {
     dry_files: &'a [String],
     ready: &'a Ready,
     cache: Option<&'a dyn ResultLookup>,
+    journal: Option<&'a dyn OutcomeJournal>,
 }
 
 /// The issue of a mutant that the dry run hit, while the static map reaches
@@ -1252,30 +1241,6 @@ fn static_map_miss_issue(mutant: &ScheduledMutant) -> ScheduleIssue {
         mutant_id: Some(mutant.id.clone()),
         stderr_tail: None,
     }
-}
-
-/// The stored result of `mutant` under `key`, with its covering `tests`.
-fn cached_outcome(
-    cache: Option<&dyn ResultLookup>,
-    key: Option<&String>,
-    mutant: &ScheduledMutant,
-    tests: &[String],
-    static_mutant: bool,
-) -> Option<MutantOutcome> {
-    let hit = cache?.get(&mutant.id, key?)?;
-    let mut covering_tests = tests.to_vec();
-    covering_tests.sort_unstable();
-    Some(MutantOutcome {
-        status: hit.status,
-        killed_by: hit.killed_by,
-        covering_tests,
-        static_mutant,
-        duration_ms: hit.duration_ms,
-        // The cache stores a survivor only after its retry.
-        retried: hit.status == MutantStatus::Survived,
-        attempts: Vec::new(),
-        cached: true,
-    })
 }
 
 /// Where a mutant of [`build_jobs`] comes from.
@@ -1301,11 +1266,7 @@ fn build_jobs(
     context: &JobContext<'_>,
     outcome: &mut ScheduleOutcome,
 ) -> Vec<Job> {
-    let JobContext {
-        dry_files,
-        ready,
-        cache,
-    } = *context;
+    let (dry_files, ready) = (context.dry_files, context.ready);
     let caps = ready.capabilities;
     let mut regular = Vec::new();
     let mut statics = Vec::new();
@@ -1375,11 +1336,15 @@ fn build_jobs(
             .collect();
         test_files.sort_unstable();
         test_files.dedup();
-        let cache_key = cache.map(|cache| cache.key(ready, mutant, &tests, &test_files));
-        if let Some(cached) =
-            cached_outcome(cache, cache_key.as_ref(), mutant, &tests, static_mutant)
-        {
-            outcome.results.insert(mutant.id.clone(), cached);
+        let cache_key = job_key(context, mutant, &tests, &test_files);
+        if record_stored(
+            context,
+            cache_key.as_ref(),
+            mutant,
+            &tests,
+            static_mutant,
+            outcome,
+        ) {
             continue;
         }
         let job = Job {
@@ -1419,11 +1384,17 @@ struct Phase<'a> {
     memo: &'a ControlMemo,
     /// Receives the count of finished jobs after each job.
     report: &'a (dyn Fn(usize) + Sync),
+    /// Receives each finished job before the phase records it.
+    finished: Finished<'a>,
 }
+
+/// Receives each finished job of a phase, on the worker thread.
+type Finished<'a> = &'a (dyn Fn(&Job, &Attempt) + Sync);
 
 impl Phase<'_> {
     /// Adds a finished job and reports the new count of finished jobs.
     fn push(&self, job: Job, attempt: Attempt) {
+        (self.finished)(&job, &attempt);
         let done = self.attempts.lock().ok().map(|mut attempts| {
             attempts.push((job, attempt));
             attempts.len()
@@ -1493,12 +1464,13 @@ type WarmLink = (Box<dyn CompanionLink>, FxHashSet<String>);
 /// Runs `jobs` on up to `concurrency` workers. The first worker takes
 /// `primary`, a companion that already did its dry run. `event` makes the
 /// progress event of the phase from the finished and the total jobs.
+/// `finished` receives each finished job on its worker thread.
 fn run_phase(
     runner: PhaseRunner<'_>,
     dry_files: &[String],
     jobs: Vec<Job>,
     deadline: Option<PhaseDeadline>,
-    primary: Option<WarmLink>,
+    (primary, finished): (Option<WarmLink>, Finished<'_>),
     event: fn(usize, usize) -> MutationProgress,
 ) -> Result<(Vec<(Job, Attempt)>, usize), ScheduleError> {
     let workers = runner.config.concurrency.max(1).min(jobs.len().max(1));
@@ -1522,6 +1494,7 @@ fn run_phase(
         ),
         memo: runner.memo,
         report: &report,
+        finished,
     };
     let mut primary = primary;
     std::thread::scope(|scope| {
@@ -1586,8 +1559,23 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
             retried: false,
             attempts: Vec::new(),
             cached: false,
+            resumed: false,
         },
     );
+}
+
+/// The final status of a retried job from its first status and the retry.
+/// A kill by a test that the first run did not execute is no disagreement
+/// with the first run. The worker already confirmed it with a control run.
+fn retry_status(first: MutantStatus, job: &Job, retry: &Attempt) -> MutantStatus {
+    if first == MutantStatus::Survived
+        && retry.status == MutantStatus::Killed
+        && job.is_new_killer(retry.killed_by.as_ref())
+    {
+        MutantStatus::Killed
+    } else {
+        retried_status(first, retry.status)
+    }
 }
 
 /// Records `test` as a baseline failure of a restarted companion that
@@ -1837,12 +1825,22 @@ fn retry_suspects(
         .collect();
     retry_files.sort();
     retry_files.dedup();
+    let firsts: FirstRuns = suspects
+        .iter()
+        .filter_map(|job| {
+            let first = outcome.results.get(&job.id)?;
+            Some((job.id.clone(), (first.status, first.duration_ms)))
+        })
+        .collect();
+    let finished = |job: &Job, attempt: &Attempt| {
+        journal_retry(runner.config, &firsts, job, attempt);
+    };
     let (retries, _) = run_phase(
         runner,
         &retry_files,
         suspects,
         runner.config.deadline.map(PhaseDeadline::retries),
-        None,
+        (None, &finished),
         |done, total| MutationProgress::Retries { done, total },
     )?;
     note_control_failures(outcome, facts, runner.memo);
@@ -1853,17 +1851,7 @@ fn retry_suspects(
         }
         let first = outcome.results.get(&job.id);
         let first_status = first.map_or(MutantStatus::Survived, |first| first.status);
-        // A kill by a test that the first run did not execute is no
-        // disagreement with the first run. The worker already confirmed it
-        // with a control run.
-        let status = if first_status == MutantStatus::Survived
-            && attempt.status == MutantStatus::Killed
-            && job.is_new_killer(attempt.killed_by.as_ref())
-        {
-            MutantStatus::Killed
-        } else {
-            retried_status(first_status, attempt.status)
-        };
+        let status = retry_status(first_status, &job, &attempt);
         // A kill reports the run that killed the mutant. Each other status
         // keeps the first run, so a retry never shortens a timeout.
         let duration_ms = if status == MutantStatus::Killed {
@@ -2072,6 +2060,7 @@ fn checked_jobs(
     )?;
     let (jobs, known) = if failed.is_empty() {
         outcome.results.extend(first_jobs.results);
+        outcome.cache_keys.extend(first_jobs.cache_keys);
         outcome.issues.extend(first_jobs.issues);
         outcome.promoted = first_jobs.promoted;
         (jobs, known)
@@ -2169,16 +2158,18 @@ pub fn run_schedule_with_progress(
         dry_files: &dry_files,
         ready: &ready,
         cache: config.cache.as_deref(),
+        journal: config.journal.as_deref(),
     };
     let mutants_started = Instant::now();
     let (jobs, (link, known)) =
         checked_jobs(runner, plan, &mut facts, &context, link, &mut outcome)?;
+    let finished = |job: &Job, attempt: &Attempt| journal_first_run(config, job, attempt);
     let (attempts, workers) = run_phase(
         runner,
         &dry_files,
         jobs,
         PhaseDeadline::first_pass(config, &outcome.timings),
-        Some((link, known)),
+        (Some((link, known)), &finished),
         |done, total| MutationProgress::Mutants { done, total },
     )?;
     outcome.workers = workers;

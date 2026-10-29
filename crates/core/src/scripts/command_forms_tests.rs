@@ -183,7 +183,9 @@ fn a_task_runner_forwards_no_entry() {
 /// selects a workspace or a directory runs the script in another location,
 /// so no file becomes an entry of the calling package.
 fn assert_npm_consumes_values(group: &[&str]) {
-    let scripts = [("gen", "node scripts/gen.js")];
+    // `mocha` runs every forwarded file, so a flag value that npm forwards
+    // would become an entry.
+    let scripts = [("gen", "mocha scripts/gen.js")];
     for flag in group {
         for command in [
             format!("npm run gen {flag} cfg/value.ts src/a.ts"),
@@ -232,7 +234,7 @@ fn npm_publish_flags_take_a_value() {
 
 #[test]
 fn npm_flags_named_in_the_issue_take_a_value() {
-    let scripts = [("gen", "node scripts/gen.js")];
+    let scripts = [("gen", "mocha scripts/gen.js")];
     for flag in [
         "--tag",
         "--scope",
@@ -256,7 +258,7 @@ fn npm_flags_named_in_the_issue_take_a_value() {
 
 #[test]
 fn a_declared_script_named_after_a_linter_keeps_its_targets() {
-    let scripts = [("eslint", "node tools/check.js")];
+    let scripts = [("eslint", "mocha tools/check.js")];
     for command in [
         "yarn eslint src/a.ts",
         "yarn run eslint src/a.ts",

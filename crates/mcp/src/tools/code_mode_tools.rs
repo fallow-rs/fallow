@@ -611,6 +611,7 @@ fn combined_options_from_params(
             max_cyclomatic: params.max_cyclomatic,
             max_cognitive: params.max_cognitive,
             max_crap: params.max_crap,
+            max_file_lines: params.max_file_lines,
             coverage: coverage.coverage,
             coverage_root: coverage.coverage_root,
             complexity: params.complexity.unwrap_or(true),
@@ -951,6 +952,41 @@ mod tests {
             options.health_options.coverage_root.as_deref(),
             Some(std::path::Path::new("/ci/workspace"))
         );
+    }
+
+    #[test]
+    fn combined_forwards_max_file_lines() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","main":"index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            project.path().join("index.ts"),
+            "export const a = 1;\nexport const b = 2;\nexport const c = 3;\nexport const d = 4;\n",
+        )
+        .expect("write source");
+        let params = CombinedParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            max_file_lines: Some(3),
+            ..CombinedParams::default()
+        };
+
+        let json = run_combined_api_value(&params, None)
+            .expect("combined run")
+            .expect("in-process result");
+        let findings = json["health"]["findings"]
+            .as_array()
+            .expect("health findings");
+        let file_finding = findings
+            .iter()
+            .find(|finding| finding["exceeded"] == "file_lines")
+            .unwrap_or_else(|| panic!("file-length finding: {json}"));
+        assert_eq!(file_finding["path"], "index.ts");
+        assert_eq!(file_finding["line_count"], 4);
+        assert_eq!(file_finding["max_file_lines"], 3);
     }
 
     /// Bare `fallow` runs type-aware analysis when the config turns it on.

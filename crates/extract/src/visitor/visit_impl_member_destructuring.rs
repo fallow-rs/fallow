@@ -9,6 +9,7 @@
 use oxc_ast::ast::*;
 
 use std::borrow::Cow;
+use std::cell::Cell;
 
 use super::super::{BindingTarget, ModuleInfoExtractor};
 use super::{static_member_object_name, unwrap_static_expr};
@@ -27,8 +28,86 @@ impl<'a> ModuleInfoExtractor {
         // can be resolved through `binding_target_names`; record the access at
         // the destructuring site instead. This is the object-pattern parity
         // of the existing `instance.member` path (see #2560).
-        if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
-            self.record_object_destructure(DestructureObject::Binding(pattern), init);
+        let steps = DestructureSteps::default();
+        let depth = DefaultDepth::new(&steps);
+        match &declarator.id {
+            BindingPattern::ObjectPattern(pattern) => {
+                self.record_object_destructure(DestructureObject::Binding(pattern), init, depth);
+            }
+            BindingPattern::ArrayPattern(pattern) => {
+                self.record_array_destructure(pattern, init, depth);
+            }
+            _ => {}
+        }
+    }
+
+    /// Credit the members that a binding pattern element reads from `source`.
+    /// A default value is a second possible source.
+    fn record_binding_destructure(
+        &mut self,
+        pattern: &BindingPattern<'a>,
+        source: &Expression<'a>,
+        depth: DefaultDepth<'_>,
+    ) {
+        if !depth.take() {
+            return;
+        }
+        match pattern {
+            BindingPattern::ObjectPattern(pattern) => {
+                self.record_object_destructure(DestructureObject::Binding(pattern), source, depth);
+            }
+            BindingPattern::ArrayPattern(pattern) => {
+                self.record_array_destructure(pattern, source, depth);
+            }
+            BindingPattern::AssignmentPattern(assignment) => {
+                self.record_binding_destructure(&assignment.left, source, depth);
+                if let Some(depth) = depth.into_default() {
+                    self.record_binding_destructure(&assignment.left, &assignment.right, depth);
+                }
+            }
+            BindingPattern::BindingIdentifier(_) => {}
+        }
+    }
+
+    /// `const [{ m }] = [instance]` reads `m` from the element at the same
+    /// index of an array literal. A spread can move each later element to
+    /// another index, so no element at or after a spread is a source. A
+    /// default value stays a source at each index.
+    fn record_array_destructure(
+        &mut self,
+        pattern: &ArrayPattern<'a>,
+        source: &Expression<'a>,
+        depth: DefaultDepth<'_>,
+    ) {
+        if !depth.take() {
+            return;
+        }
+        let values = match unwrap_static_expr(source) {
+            Expression::ArrayExpression(array) => &array.elements[..],
+            _ => &[],
+        };
+        let mut after_spread = false;
+        for (index, element) in pattern.elements.iter().enumerate() {
+            if !depth.take() {
+                return;
+            }
+            let value = values.get(index);
+            after_spread |= matches!(value, Some(ArrayExpressionElement::SpreadElement(_)));
+            let Some(element) = element else {
+                continue;
+            };
+            match value.and_then(ArrayExpressionElement::as_expression) {
+                Some(value) if !after_spread => {
+                    self.record_binding_destructure(element, value, depth.nested());
+                }
+                _ => {
+                    if let BindingPattern::AssignmentPattern(assignment) = element
+                        && let Some(depth) = depth.into_default()
+                    {
+                        self.record_binding_destructure(&assignment.left, &assignment.right, depth);
+                    }
+                }
+            }
         }
     }
 
@@ -39,7 +118,11 @@ impl<'a> ModuleInfoExtractor {
         expr: &AssignmentExpression<'a>,
     ) {
         if let AssignmentTarget::ObjectAssignmentTarget(target) = &expr.left {
-            self.record_object_destructure(DestructureObject::Assignment(target), &expr.right);
+            self.record_object_destructure(
+                DestructureObject::Assignment(target),
+                &expr.right,
+                DefaultDepth::new(&DestructureSteps::default()),
+            );
         }
     }
 
@@ -51,21 +134,25 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         source: &Expression<'a>,
+        depth: DefaultDepth<'_>,
     ) {
+        if !depth.take() {
+            return;
+        }
         let source = unwrap_static_expr(source);
         if let Expression::ObjectExpression(object) = source {
-            self.record_literal_destructure(pattern, object);
+            self.record_literal_destructure(pattern, object, depth);
             return;
         }
         let Some(path) = static_member_object_name(source) else {
-            self.record_nested_entries(&pattern.entries(), None);
+            self.record_nested_entries(&pattern.entries(), None, depth);
             return;
         };
         let ident = match source {
             Expression::Identifier(ident) => Some(&**ident),
             _ => None,
         };
-        self.record_source_path_destructure(pattern, &path, ident);
+        self.record_source_path_destructure(pattern, &path, ident, depth);
     }
 
     /// `const { m } = holder` reads `holder.m`. A local class instance credits
@@ -77,12 +164,13 @@ impl<'a> ModuleInfoExtractor {
         pattern: DestructureObject<'_, 'a>,
         path: &str,
         source: Option<&IdentifierReference<'_>>,
+        depth: DefaultDepth<'_>,
     ) {
         let entries = pattern.entries();
         if let Some(BindingTarget::Class(class_name)) = self.resolve_bound_object_name(path) {
             let keys: Vec<_> = entries.iter().map(|entry| entry.key.clone()).collect();
             self.credit_destructured_class_members(&class_name, source, &keys, pattern.has_rest());
-            self.record_nested_entries(&entries, Some(path));
+            self.record_nested_entries(&entries, Some(path), depth);
             return;
         }
         if pattern.has_rest() || entries.iter().any(|entry| entry.key.is_none()) {
@@ -92,10 +180,10 @@ impl<'a> ModuleInfoExtractor {
             if !self.imported_root_is_shadowed(path) {
                 self.record_whole_object_identifier_use(path);
             }
-            self.record_nested_entries(&entries, Some(path));
+            self.record_nested_entries(&entries, Some(path), depth);
             return;
         }
-        self.record_path_destructure(pattern, path);
+        self.record_path_destructure(pattern, path, depth);
     }
 
     /// Whether the root of `path` is an import local that a nested declaration
@@ -109,16 +197,26 @@ impl<'a> ModuleInfoExtractor {
 
     /// Credit the nested patterns of `entries`. Each one reads its default and,
     /// when the source has a static `path`, the member `path.key`.
-    fn record_nested_entries(&mut self, entries: &[DestructureEntry<'_, 'a>], path: Option<&str>) {
+    fn record_nested_entries(
+        &mut self,
+        entries: &[DestructureEntry<'_, 'a>],
+        path: Option<&str>,
+        depth: DefaultDepth<'_>,
+    ) {
         for entry in entries {
+            if !depth.take() {
+                return;
+            }
             let Some(nested) = entry.nested else {
                 continue;
             };
-            if let Some(default) = entry.default {
-                self.record_object_destructure(nested, default);
+            if let Some(default) = entry.default
+                && let Some(depth) = depth.into_default()
+            {
+                self.record_object_destructure(nested, default, depth);
             }
             if let (Some(path), Some(key)) = (path, entry.key.as_deref()) {
-                self.record_path_destructure(nested, &format!("{path}.{key}"));
+                self.record_path_destructure(nested, &format!("{path}.{key}"), depth.nested());
             }
         }
     }
@@ -131,25 +229,34 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         pattern: DestructureObject<'_, 'a>,
         object: &ObjectExpression<'a>,
+        depth: DefaultDepth<'_>,
     ) {
         for property in &object.properties {
+            if !depth.take() {
+                return;
+            }
             if let ObjectPropertyKind::SpreadProperty(spread) = property {
-                self.record_object_destructure(pattern, &spread.argument);
+                self.record_object_destructure(pattern, &spread.argument, depth);
             }
         }
         for entry in pattern.entries() {
+            if !depth.take() {
+                return;
+            }
             let Some(nested) = entry.nested else {
                 continue;
             };
-            if let Some(default) = entry.default {
-                self.record_object_destructure(nested, default);
+            if let Some(default) = entry.default
+                && let Some(depth) = depth.into_default()
+            {
+                self.record_object_destructure(nested, default, depth);
             }
             if let Some(value) = entry
                 .key
                 .as_deref()
                 .and_then(|key| object_literal_property_value(object, key))
             {
-                self.record_object_destructure(nested, value);
+                self.record_object_destructure(nested, value, depth.nested());
             }
         }
     }
@@ -157,17 +264,30 @@ impl<'a> ModuleInfoExtractor {
     /// A nested pattern under a static source path reads the same members as
     /// the equivalent member expression, so each key goes through the
     /// `path.key` access path that `visit_static_member_expression` uses.
-    fn record_path_destructure(&mut self, pattern: DestructureObject<'_, 'a>, path: &str) {
+    fn record_path_destructure(
+        &mut self,
+        pattern: DestructureObject<'_, 'a>,
+        path: &str,
+        depth: DefaultDepth<'_>,
+    ) {
+        if !depth.take() {
+            return;
+        }
         for entry in pattern.entries() {
-            if let (Some(nested), Some(default)) = (entry.nested, entry.default) {
-                self.record_object_destructure(nested, default);
+            if !depth.take() {
+                return;
+            }
+            if let (Some(nested), Some(default)) = (entry.nested, entry.default)
+                && let Some(depth) = depth.into_default()
+            {
+                self.record_object_destructure(nested, default, depth);
             }
             let Some(key) = entry.key.as_deref() else {
                 continue;
             };
             self.record_named_member_access(path, key);
             if let Some(nested) = entry.nested {
-                self.record_path_destructure(nested, &format!("{path}.{key}"));
+                self.record_path_destructure(nested, &format!("{path}.{key}"), depth.nested());
             }
         }
     }
@@ -194,7 +314,11 @@ impl<'a> ModuleInfoExtractor {
                 self.record_typed_member_destructuring(pattern, &type_annotation.type_annotation);
             }
             if let Some(initializer) = param.initializer.as_deref() {
-                self.record_object_destructure(DestructureObject::Binding(pattern), initializer);
+                self.record_object_destructure(
+                    DestructureObject::Binding(pattern),
+                    initializer,
+                    DefaultDepth::new(&DestructureSteps::default()),
+                );
             }
         }
     }
@@ -216,6 +340,10 @@ impl<'a> ModuleInfoExtractor {
                     Some(BindingPattern::ObjectPattern(pattern)) => {
                         DestructureObject::Binding(pattern)
                     }
+                    Some(BindingPattern::ArrayPattern(pattern)) => {
+                        self.record_for_of_array_destructure(pattern, &stmt.right);
+                        return;
+                    }
                     _ => return,
                 }
             }
@@ -224,6 +352,8 @@ impl<'a> ModuleInfoExtractor {
             }
             _ => return,
         };
+        let steps = DestructureSteps::default();
+        let depth = DefaultDepth::new(&steps);
         let iterable = unwrap_static_expr(&stmt.right);
         let Expression::ArrayExpression(array) = iterable else {
             self.record_iterable_element_destructure(pattern, iterable);
@@ -233,7 +363,26 @@ impl<'a> ModuleInfoExtractor {
             if let ArrayExpressionElement::SpreadElement(spread) = element {
                 self.record_iterable_element_destructure(pattern, &spread.argument);
             } else if let Some(element) = element.as_expression() {
-                self.record_object_destructure(pattern, element);
+                self.record_object_destructure(pattern, element, depth);
+            }
+        }
+    }
+
+    /// `for (const [{ m }] of [[instance]])` destructures each element of an
+    /// array literal with the array pattern.
+    fn record_for_of_array_destructure(
+        &mut self,
+        pattern: &ArrayPattern<'a>,
+        iterable: &Expression<'a>,
+    ) {
+        let Expression::ArrayExpression(array) = unwrap_static_expr(iterable) else {
+            return;
+        };
+        let steps = DestructureSteps::default();
+        let depth = DefaultDepth::new(&steps);
+        for element in &array.elements {
+            if let Some(element) = element.as_expression() {
+                self.record_array_destructure(pattern, element, depth);
             }
         }
     }
@@ -262,7 +411,12 @@ impl<'a> ModuleInfoExtractor {
     /// `({ k: { m } }: typeof holder)` destructures the type of the value
     /// `holder`, so it reads the same members as `const { k: { m } } = holder`.
     fn record_typeof_destructure(&mut self, pattern: &ObjectPattern<'a>, path: &str) {
-        self.record_source_path_destructure(DestructureObject::Binding(pattern), path, None);
+        self.record_source_path_destructure(
+            DestructureObject::Binding(pattern),
+            path,
+            None,
+            DefaultDepth::new(&DestructureSteps::default()),
+        );
     }
 
     /// `({ member }: Service) => ...` reads `Service.member`. The annotation is
@@ -350,6 +504,68 @@ impl<'a> ModuleInfoExtractor {
                 member: member.to_string(),
             });
         }
+    }
+}
+
+/// The deepest nested pattern level at which a destructure walk still reads a
+/// default. A pattern with a default is walked once for the source and once
+/// for the default, so the walks of one sub-pattern double at each level that
+/// has a default. Below this level, a sub-pattern reads only its source, so
+/// the walks of one sub-pattern stay at most `2^MAX_DESTRUCTURE_DEFAULT_DEPTH`.
+/// Sibling elements and properties do not double the walks, so they have no
+/// limit.
+const MAX_DESTRUCTURE_DEFAULT_DEPTH: usize = 8;
+
+/// The most steps that one destructure statement takes. A step is one
+/// pattern node or one sibling entry. The depth limit bounds the walks of one
+/// sub-pattern, but a wide source or a source with many spreads still walks
+/// the pattern many times. This cap bounds that total.
+const MAX_DESTRUCTURE_STEPS: usize = 1 << 16;
+
+/// The steps that one destructure statement has left.
+struct DestructureSteps(Cell<usize>);
+
+impl Default for DestructureSteps {
+    fn default() -> Self {
+        Self(Cell::new(MAX_DESTRUCTURE_STEPS))
+    }
+}
+
+/// The nested pattern level of the current destructure walk, and the steps
+/// that its destructure statement has left.
+#[derive(Clone, Copy)]
+struct DefaultDepth<'s> {
+    level: usize,
+    steps: &'s DestructureSteps,
+}
+
+impl<'s> DefaultDepth<'s> {
+    const fn new(steps: &'s DestructureSteps) -> Self {
+        Self { level: 0, steps }
+    }
+
+    /// The level of a nested pattern one level further down.
+    const fn nested(self) -> Self {
+        Self {
+            level: self.level.saturating_add(1),
+            steps: self.steps,
+        }
+    }
+
+    /// The level for a walk of a default one level further down, or `None`
+    /// below the deepest level that reads a default.
+    fn into_default(self) -> Option<Self> {
+        (self.level < MAX_DESTRUCTURE_DEFAULT_DEPTH).then(|| self.nested())
+    }
+
+    /// Use one step. Returns `false` when the statement has no step left.
+    fn take(self) -> bool {
+        let left = self.steps.0.get();
+        if left == 0 {
+            return false;
+        }
+        self.steps.0.set(left - 1);
+        true
     }
 }
 
@@ -451,14 +667,24 @@ fn object_literal_property_value<'b, 'a>(
         if !property.key.static_name().is_some_and(|name| name == key) {
             return None;
         }
-        match property.kind {
-            PropertyKind::Init => Some(&property.value),
-            PropertyKind::Get => getter_return_value(&property.value),
-            PropertyKind::Set => None,
-        }
+        object_property_value(property)
     })
 }
 
+/// The value that reading an object literal property gives: the value of a
+/// plain property, or the value that a getter returns. A setter gives none.
+pub(in crate::visitor) fn object_property_value<'b, 'a>(
+    property: &'b ObjectProperty<'a>,
+) -> Option<&'b Expression<'a>> {
+    match property.kind {
+        PropertyKind::Init => Some(&property.value),
+        PropertyKind::Get => getter_return_value(&property.value),
+        PropertyKind::Set => None,
+    }
+}
+
+/// The value that a getter `get key() { return value }` gives, when its body
+/// is that one return statement.
 fn getter_return_value<'b, 'a>(value: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
     let Expression::FunctionExpression(getter) = value else {
         return None;

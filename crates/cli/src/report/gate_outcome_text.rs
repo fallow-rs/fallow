@@ -328,6 +328,45 @@ pub fn exit_reason_line(
     Some(line)
 }
 
+/// The stderr line of a bare machine run that exits 0 although a findings gate
+/// failed, or `None` when no such gate failed.
+///
+/// Without `--fail-on-issues`, bare `fallow` in a machine format publishes the
+/// findings gates with `enforced: false` and exits 0, while `fallow dead-code`
+/// exits 1 on the same findings. Without this line, the exit code looks like a
+/// pass (#3826). `format` is the `--format` spelling, so the line names the
+/// run the way the user typed it.
+pub fn unenforced_gates_line(
+    gates: Option<&fallow_output::GateOutcomes>,
+    format: &str,
+) -> Option<String> {
+    let envelope = serde_json::json!({ "gate_outcomes": gates? });
+    let failed: Vec<GateLine> = read_gate_outcomes(&envelope)
+        .into_iter()
+        .filter(|gate| {
+            gate.status == "fail"
+                && !gate.enforced
+                && crate::gates::FAIL_ON_ISSUES_GATES
+                    .iter()
+                    .any(|name| name.as_str() == gate.name)
+        })
+        .collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let refs: Vec<&GateLine> = failed.iter().collect();
+    let (noun, pronoun) = if refs.len() == 1 {
+        ("gate", "it")
+    } else {
+        ("gates", "them")
+    };
+    Some(format!(
+        "Exit code 0: {noun} {} failed, but bare fallow does not enforce {pronoun} in \
+         --format {format}. To exit 1 on {pronoun}, pass --fail-on-issues.",
+        join(&refs)
+    ))
+}
+
 /// The hint for a findings gate under `--fail-on-issues` or `--ci`. A rule
 /// set to `warn` does not help there, because the flag promotes it to `error`.
 const FAIL_ON_ISSUES_HINT: &str = "Under --fail-on-issues (also set by --ci), a rule set to \
@@ -339,8 +378,8 @@ fn exit_hint(name: &str) -> Option<&'static str> {
     match name {
         "health-findings" => Some(
             "To report complexity findings without a failure, set the rules \
-             complexity-cyclomatic, complexity-cognitive and complexity-crap to \"warn\", \
-             or run `fallow health --report-only`.",
+             complexity-cyclomatic, complexity-cognitive, complexity-crap and \
+             complexity-file-lines to \"warn\", or run `fallow health --report-only`.",
         ),
         "error-severity-findings" => {
             Some("To report a finding type without a failure, set its rule to \"warn\".")
@@ -939,5 +978,53 @@ mod tests {
         assert!(
             exit_reason_line(Some(&only_regression), 1, false, &[GateName::Regression]).is_none()
         );
+    }
+
+    #[test]
+    fn the_unenforced_line_names_only_failing_findings_gates_that_are_not_enforced() {
+        use fallow_output::{GateName, GateOutcome, GateStatus};
+        let gates = typed_gates(&[
+            (
+                GateName::ErrorSeverityFindings,
+                crate::gates::error_severity_outcome(2, false),
+            ),
+            (
+                GateName::HealthFindings,
+                crate::gates::health_findings_outcome(0, false),
+            ),
+            (
+                GateName::StaleBaseline,
+                GateOutcome::measured(GateStatus::Fail, false, 1.0, 0.0),
+            ),
+        ]);
+        assert_eq!(
+            unenforced_gates_line(Some(&gates), "sarif").as_deref(),
+            Some(
+                "Exit code 0: gate error-severity-findings (2 at or above error) failed, but \
+                 bare fallow does not enforce it in --format sarif. To exit 1 on it, pass \
+                 --fail-on-issues."
+            )
+        );
+
+        let both = typed_gates(&[
+            (
+                GateName::ErrorSeverityFindings,
+                crate::gates::error_severity_outcome(2, false),
+            ),
+            (
+                GateName::HealthFindings,
+                crate::gates::health_findings_outcome(3, false),
+            ),
+        ]);
+        let line = unenforced_gates_line(Some(&both), "json").expect("two gates failed");
+        assert!(line.contains("gates error-severity-findings"), "{line}");
+        assert!(line.contains("enforce them"), "{line}");
+
+        let enforced = typed_gates(&[(
+            GateName::ErrorSeverityFindings,
+            crate::gates::error_severity_outcome(2, true),
+        )]);
+        assert!(unenforced_gates_line(Some(&enforced), "json").is_none());
+        assert!(unenforced_gates_line(None, "json").is_none());
     }
 }

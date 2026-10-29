@@ -617,7 +617,11 @@ impl ModuleInfoExtractor {
             span,
         } = input;
         let arg_literal = self.static_sink_literal_value(arg_expr);
-        let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
+        // A path built only from trusted module-relative bases and literal
+        // segments is treated like a literal (issue #3711).
+        let arg_is_non_literal = arg_literal.is_none()
+            && is_non_literal_arg(arg_expr)
+            && !self.is_trusted_static_path_expr(arg_expr);
         if arg_is_non_literal
             && should_skip_clamped_resource_amplification_arg(
                 callee_path,

@@ -905,7 +905,7 @@ fn resolve_options_name(
     depth: usize,
     options: &mut ResolvedOptions,
 ) -> bool {
-    if let Some(init) = config_parser::find_stable_binding_init(program, name) {
+    if let Some(init) = config_parser::find_stable_binding_init(program, name, false) {
         return resolve_options_init(program, path, init, depth + 1, options);
     }
     let Some((specifier, imported_name)) =
@@ -1691,7 +1691,7 @@ mod tests {
     fn an_entry_whose_target_is_not_readable_is_reported_once_beside_its_siblings() {
         let (config, declarations) = standalone(
             r"
-            const widget = './src/Widget.tsx';
+            import { widget } from './targets';
             export default {
                 exposes: {
                     './Button': './src/Button.tsx',
@@ -1765,7 +1765,7 @@ mod tests {
     fn exposes_array_element_without_a_readable_target_is_reported() {
         let (config, declarations) = standalone(
             r"
-            const widget = './src/Widget.tsx';
+            import { widget } from './targets';
             export default { exposes: ['./src/Button.tsx', widget] };
             ",
         );
@@ -1913,7 +1913,7 @@ mod tests {
     fn shorthand_remotes_property_reports_the_key() {
         let (config, declarations) = standalone(
             r"
-            const remotes = { checkout: 'checkout@https://example.test/remoteEntry.js' };
+            import { remotes } from './remotes';
             export default { remotes };
             ",
         );

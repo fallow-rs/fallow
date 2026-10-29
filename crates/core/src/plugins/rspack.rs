@@ -55,7 +55,7 @@ define_plugin! {
         );
 
         let require_deps =
-            config_parser::extract_config_require_strings(source, config_path, "plugins");
+            config_parser::extract_each_config_require_strings(source, config_path, "plugins");
         for dep in &require_deps {
             result
                 .referenced_dependencies
@@ -63,7 +63,7 @@ define_plugin! {
         }
 
         let externals =
-            config_parser::extract_config_shallow_strings(source, config_path, "externals");
+            config_parser::extract_each_config_shallow_strings(source, config_path, "externals");
         for ext in &externals {
             result
                 .referenced_dependencies
@@ -91,6 +91,28 @@ define_plugin! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_config_reads_plugins_and_externals_of_each_config() {
+        let source = r#"
+            module.exports = [
+                { entry: "./src/a.js", externals: ["lodash"] },
+                { entry: "./src/b.js", plugins: [require("my-plugin")] },
+            ];
+        "#;
+        let result = RspackPlugin.resolve_config(
+            std::path::Path::new("/project/rspack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/a.js", "src/b.js"]);
+        for dep in ["lodash", "my-plugin"] {
+            assert!(
+                result.referenced_dependencies.contains(&dep.to_string()),
+                "{dep}"
+            );
+        }
+    }
 
     #[test]
     fn resolve_config_entry_string() {

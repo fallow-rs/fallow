@@ -57,6 +57,10 @@
 # Optional context_keywords matches zero-arg sinks that were captured only
 # because the surrounding variable or property name is security sensitive.
 #
+# Optional variadic = true makes a row also match every argument after
+# arg_index (for example each `path.join` segment). A variadic row reports at
+# most one candidate per call.
+#
 # Multiple [[matcher]] rows may share an `id` (e.g. dangerous-html spans three
 # shapes). Uniqueness is keyed on the full row (id + sink_shape +
 # callee_patterns), not on `id` alone.
@@ -394,6 +398,7 @@ effect = "storage"
 sink_shape = "member-call"
 callee_patterns = ["path.join", "path.resolve"]
 arg_index = 0
+variadic = true
 import_provenance = "node:path"
 evidence_template = "Non-literal path component passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
 

@@ -10,6 +10,7 @@ import {
   formatScoreLabel,
   gradeIcon,
   gradeThemeColor,
+  isFileLengthFinding,
   severityIcon,
   severityThemeColor,
   topPenalties,
@@ -149,19 +150,35 @@ const buildScoreLeaves = (report: HealthReport): HealthLeafItem[] => {
 const visibleComplexityFindings = (report: HealthReport): HealthReport["findings"] =>
   (report.findings ?? []).slice(0, getHealthTopFindings());
 
+type ComplexityFinding = HealthReport["findings"][number];
+
+const functionTooltip = (finding: ComplexityFinding, relative: string): string => {
+  const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
+  return `${finding.name} (${finding.severity})\ncyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}\n${relative}:${finding.line}`;
+};
+
+const fileLengthTooltip = (finding: ComplexityFinding, relative: string): string => {
+  const limit =
+    typeof finding.max_file_lines === "number" ? `, limit ${finding.max_file_lines}` : "";
+  return `File length (${finding.severity})\n${finding.line_count} lines${limit}\n${relative}`;
+};
+
 const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
   visibleComplexityFindings(report).map((finding) => {
     const { relative } = resolveWorkspaceFilePath(finding.path);
-    const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
-    const tooltip = `${finding.name} (${finding.severity})\ncyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}\n${relative}:${finding.line}`;
-    const complexityTarget = { path: finding.path, line: finding.line };
+    const fileLength = isFileLengthFinding(finding);
+    const tooltip = fileLength
+      ? fileLengthTooltip(finding, relative)
+      : functionTooltip(finding, relative);
+    // A file-length finding has no function, so it has no per-line breakdown.
+    const complexityTarget = fileLength ? undefined : { path: finding.path, line: finding.line };
     const detail = new HealthLeafItem(formatComplexityOffense(finding), undefined, {
       tooltip,
       open: { path: finding.path, line: finding.line, col: finding.col },
       complexityTarget,
     });
     return new HealthLeafItem(
-      `${middleElidePath(relative)}:${finding.line}`,
+      fileLength ? middleElidePath(relative) : `${middleElidePath(relative)}:${finding.line}`,
       severityIcon(finding.severity),
       {
         iconColor: severityThemeColor(finding.severity),

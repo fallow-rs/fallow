@@ -185,7 +185,7 @@ fn options_object<'a>(
     match unwrap_type_wrappers(argument) {
         Expression::ObjectExpression(object) => Some(object),
         Expression::Identifier(identifier) => {
-            let init = config_parser::find_stable_binding_init(program, &identifier.name)?;
+            let init = config_parser::find_stable_binding_init(program, &identifier.name, false)?;
             match unwrap_type_wrappers(init) {
                 Expression::ObjectExpression(object) => Some(object),
                 _ => None,

@@ -72,6 +72,80 @@ fn oxlint_ts_config_credits_object_specifiers_and_local_plugins() {
 }
 
 #[test]
+fn local_js_plugin_default_export_is_used_with_include_entry_exports() {
+    // Issue #3871: oxlint loads the default export of a local jsPlugins file.
+    let root = fixture_path("issue-607-oxlint-ts-config");
+    let mut config = create_config(root);
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let plugin_exports: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .filter(|export| {
+            export
+                .export
+                .path
+                .ends_with(std::path::Path::new("plugins/local-plugin.js"))
+        })
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+
+    assert_eq!(
+        plugin_exports,
+        vec!["unusedHelper"],
+        "only the named export of the local plugin stays reportable"
+    );
+}
+
+#[test]
+fn local_js_plugin_directory_and_extensionless_specifiers_credit_the_resolved_file() {
+    // Issue #3961: a jsPlugins entry can name a directory (resolved through
+    // `package.json` `main` or `index.js`) or a file without its extension.
+    let root = fixture_path("issue-3961-oxlint-js-plugin-directory");
+    let mut config = create_config(root.clone());
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            let relative = export
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            format!("{relative}:{}", export.export.export_name)
+        })
+        .collect();
+    unused_exports.sort();
+
+    assert_eq!(
+        unused_exports,
+        vec![
+            "plugins/bare-plugin.js:unusedHelper",
+            "plugins/dir-plugin/lib/plugin.js:unusedHelper",
+            "plugins/index-plugin/index.js:unusedHelper",
+            "src/index.ts:app",
+        ],
+        "the default export of each resolved plugin file is credited"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused_files.is_empty(),
+        "resolved plugin files are support entry files, got {unused_files:?}"
+    );
+}
+
+#[test]
 fn ultracite_selected_js_plugins_credit_only_selected_dependencies() {
     let root = fixture_path("ultracite-oxlint-js-plugins");
     let config = create_config(root);
