@@ -271,7 +271,7 @@ To report a missing framework plugin or a false positive, [open an issue](https:
 Thank you to everyone who contributes code, bug reports and ideas.
 
 <a href="https://github.com/fallow-rs/fallow/blob/badges/CONTRIBUTORS.md">
-  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/badges/contributors.svg" alt="Contributors, including people who open issues. Follow the link for their names.">
+  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/badges/contributors.png" alt="Contributors, including people who open issues. Follow the link for their names.">
 </a>
 
 ## License

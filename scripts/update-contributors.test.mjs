@@ -8,6 +8,11 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { collectContributors, generateContributors } from "./update-contributors.mjs";
 
+const AVATAR_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNk+M/wHwAEBgIAe2BNVAAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 const user = (login, id, type = "User") => ({
   login,
   id,
@@ -38,7 +43,7 @@ test("the CLI generates credits when its path contains spaces and percent signs"
     globalThis.fetch = async (input) => {
       const url = new URL(input);
       if (url.origin === "https://avatars.githubusercontent.com") {
-        return new Response("avatar", { headers: { "content-type": "image/png" } });
+        return new Response(Buffer.from(${JSON.stringify(AVATAR_PNG.toString("base64"))}, "base64"), { headers: { "content-type": "image/png" } });
       }
       if (url.pathname.endsWith("/contributors")) return Response.json(${JSON.stringify([user("coder", 1)])});
       if (url.pathname.endsWith("/issues")) return Response.json(${JSON.stringify([{ user: user("reporter", 2), state: "closed" }])});
@@ -104,7 +109,7 @@ test("generates complete, deterministic files from every API page without exposi
     if (url.origin === "https://avatars.githubusercontent.com") {
       assert.equal(options.headers, undefined, "avatar requests must not receive credentials");
       assert.equal(url.searchParams.get("s"), "64");
-      return new Response(Buffer.from("avatar"), { headers: { "content-type": "image/png" } });
+      return new Response(AVATAR_PNG, { headers: { "content-type": "image/png" } });
     }
     assert.equal(url.origin, "https://api.github.com");
     assert.equal(options.headers.Authorization, "Bearer private-token");
@@ -141,7 +146,7 @@ test("generates complete, deterministic files from every API page without exposi
   );
   const svg = await readFile(join(outputDirectory, "contributors.svg"), "utf8");
   const markdown = await readFile(join(outputDirectory, "CONTRIBUTORS.md"), "utf8");
-  assert.match(svg, /data:image\/png;base64,YXZhdGFy/);
+  assert.match(svg, /data:image\/png;base64,iVBORw0KGgo/);
   assert.match(svg, /alice, bob, carol, zoe/);
   assert.doesNotMatch(svg, /private-token|https:\/\/avatars/);
   assert.match(markdown, /\[alice\]\(https:\/\/github\.com\/alice\)/);

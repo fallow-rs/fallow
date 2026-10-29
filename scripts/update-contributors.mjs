@@ -10,6 +10,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const AVATAR_SIZE = 64;
 const AVATAR_BATCH_SIZE = 8;
 const MAX_AVATAR_BYTES = 256_000;
+const PNG_SIGNATURE = Buffer.from("89504e470d0a1a0a", "hex");
 const COLUMNS = 12;
 const CELL_SIZE = 56;
 const IMAGE_SIZE = 48;
@@ -120,7 +121,11 @@ export const generateContributors = async ({
         const bytes = Buffer.from(await response.arrayBuffer());
         if (bytes.length === 0 || bytes.length > MAX_AVATAR_BYTES)
           throw new Error("Invalid GitHub avatar size");
-        return `data:${type};base64,${bytes.toString("base64")}`;
+        // GitHub can serve resized PNG bytes while retaining an image/gif header.
+        const mimeType = bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
+          ? "image/png"
+          : type;
+        return `data:${mimeType};base64,${bytes.toString("base64")}`;
       }),
     );
     avatars.push(...batch);
