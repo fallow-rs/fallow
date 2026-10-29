@@ -408,8 +408,27 @@ fn config_path_rejects_pretty_because_it_is_not_json() {
         output.code, 2,
         "path mode should reject JSON presentation flags"
     );
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.contains("--pretty requires JSON output"));
+    let error = parse_json(&output);
+    assert_eq!(error["error"], true);
+    assert_eq!(error["exit_code"], 2);
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--pretty requires JSON output"))
+    );
+    assert!(output.stderr.is_empty());
+    assert!(output.stdout.lines().count() > 1);
+
+    let human = run_fallow_raw(&[
+        "config",
+        "--path",
+        "--root",
+        root.to_str().expect("fixture path should be UTF-8"),
+        "--pretty",
+    ]);
+    assert_eq!(human.code, 2);
+    assert!(human.stdout.is_empty());
+    assert!(human.stderr.contains("--pretty requires JSON output"));
 }
 
 #[test]
@@ -549,8 +568,16 @@ fn human_only_commands_reject_pretty_even_with_json_format_selected() {
 
     for output in [template, hooks, impact, coverage] {
         assert_eq!(output.code, 2);
-        assert!(output.stdout.is_empty());
-        assert!(output.stderr.contains("--pretty requires JSON output"));
+        let error = parse_json(&output);
+        assert_eq!(error["error"], true);
+        assert_eq!(error["exit_code"], 2);
+        assert!(
+            error["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("--pretty requires JSON output"))
+        );
+        assert!(output.stderr.is_empty());
+        assert!(output.stdout.lines().count() > 1);
     }
 }
 
