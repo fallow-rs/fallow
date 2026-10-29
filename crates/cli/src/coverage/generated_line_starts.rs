@@ -16,6 +16,9 @@
 //! and a `//# chunkId=` line at the end of a script, and does not change the
 //! map. Line 1 then starts after the snippet. When the script shows only one
 //! half of that layout, the offsets are unknown and the field is left out.
+//!
+//! `tests/fixtures/served-line-starts-contract.json` holds the cases that this
+//! code and the Fallow Cloud upload helper must both pass.
 
 /// The source map field.
 pub(super) const LINE_STARTS_FIELD: &str = "x_fallow_line_starts";
@@ -218,6 +221,32 @@ mod tests {
         // "é" is one UTF-16 unit and two UTF-8 bytes; "😀" is two units and four bytes.
         assert_eq!(served_line_starts("é\n😀\nx"), Some(vec![0, 2, 5]));
         assert_eq!(served_line_starts("\u{feff}ab\ncd"), Some(vec![0, 3]));
+    }
+
+    /// Fallow Cloud runs the same cases against its upload helper, so a change
+    /// on either side that alters a result fails one of the two suites.
+    #[test]
+    fn served_line_starts_match_the_shared_contract() {
+        let path = std::path::Path::new(
+            &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/served-line-starts-contract.json");
+        let text = std::fs::read_to_string(&path).expect("read contract fixture");
+        let contract: serde_json::Value = serde_json::from_str(&text).expect("parse contract");
+        assert_eq!(contract["schemaVersion"], 1);
+        let cases = contract["cases"].as_array().expect("cases array");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().expect("name");
+            let served = case["served"].as_str().expect("served");
+            let expected: Option<Vec<u64>> = case["starts"].as_array().map(|starts| {
+                starts
+                    .iter()
+                    .map(|start| start.as_u64().expect("start number"))
+                    .collect()
+            });
+            assert_eq!(served_line_starts(served), expected, "case: {name}");
+        }
     }
 
     #[test]

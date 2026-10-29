@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "description": "Line starts of a served browser script for the x_fallow_line_starts source map field. Each case gives the served script text and the expected starts: the offset, in UTF-16 code units, of column 0 of each generated line, or null when the layout is unknown and the field must be left out. Any implementation of these rules must give the same result for every case.",
+  "cases": [
+    {
+      "name": "empty script",
+      "served": "",
+      "starts": [
+        0
+      ]
+    },
+    {
+      "name": "one line without a line break",
+      "served": "export{t};",
+      "starts": [
+        0
+      ]
+    },
+    {
+      "name": "plain lines",
+      "served": "import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};",
+      "starts": [
+        0,
+        23,
+        34,
+        38
+      ]
+    },
+    {
+      "name": "line break at the end",
+      "served": "import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n",
+      "starts": [
+        0,
+        23,
+        34,
+        38,
+        49
+      ]
+    },
+    {
+      "name": "CRLF line ends count the carriage return",
+      "served": "a\r\nbc\r\nd",
+      "starts": [
+        0,
+        3,
+        7
+      ]
+    },
+    {
+      "name": "byte order mark is not counted",
+      "served": "\ufeffimport{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};",
+      "starts": [
+        0,
+        23,
+        34,
+        38
+      ]
+    },
+    {
+      "name": "two-byte UTF-8 character is one UTF-16 unit",
+      "served": "é\nx",
+      "starts": [
+        0,
+        2
+      ]
+    },
+    {
+      "name": "surrogate pair is two UTF-16 units",
+      "served": "😀\n😀😀\nx",
+      "starts": [
+        0,
+        3,
+        8
+      ]
+    },
+    {
+      "name": "PostHog snippet and trailer",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": [
+        309,
+        332,
+        343,
+        347,
+        358
+      ]
+    },
+    {
+      "name": "PostHog snippet and trailer with a line break at the end",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\n",
+      "starts": [
+        309,
+        332,
+        343,
+        347,
+        358,
+        407
+      ]
+    },
+    {
+      "name": "trailing whitespace after the trailer",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc  \n\n",
+      "starts": [
+        309,
+        332,
+        343,
+        347,
+        358,
+        409,
+        410
+      ]
+    },
+    {
+      "name": "PostHog layout with a byte order mark and a surrogate pair",
+      "served": "\ufeff!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();const s=\"😀\";\nx\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": [
+        309,
+        323,
+        325
+      ]
+    },
+    {
+      "name": "PostHog layout with CRLF line ends",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();a\r\nb\r\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\r\n",
+      "starts": [
+        309,
+        312,
+        315,
+        365
+      ]
+    },
+    {
+      "name": "snippet and trailer with different ids",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=11111111-2222-3333-4444-555555555555",
+      "starts": null
+    },
+    {
+      "name": "trailer without a snippet",
+      "served": "import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": null
+    },
+    {
+      "name": "snippet without a trailer",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};",
+      "starts": null
+    },
+    {
+      "name": "uppercase chunk id in both halves",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01A1843F-C040-7940-891B-0AE120E501FC\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01A1843F-C040-7940-891B-0AE120E501FC",
+      "starts": null
+    },
+    {
+      "name": "snippet id that does not parse",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"not-a-chunk-id\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};",
+      "starts": null
+    },
+    {
+      "name": "trailer id that does not parse",
+      "served": "import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=not-a-chunk-id",
+      "starts": null
+    },
+    {
+      "name": "trailer id one character too long",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc0",
+      "starts": null
+    },
+    {
+      "name": "snippet start without the id",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis\nimport{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": null
+    },
+    {
+      "name": "snippet with a broken end",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){ }}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": null
+    },
+    {
+      "name": "chunk id comment that is not the last line",
+      "served": "//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\nx",
+      "starts": [
+        0,
+        49
+      ]
+    },
+    {
+      "name": "chunk id comment in the middle of the script",
+      "served": "a\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\nb",
+      "starts": [
+        0,
+        2,
+        51
+      ]
+    },
+    {
+      "name": "chunk id comment that does not start a line",
+      "served": "a//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": [
+        0
+      ]
+    }
+  ]
+}
