@@ -93,7 +93,10 @@ reads: the shell empties that file before the generator reads it.
 
 `evidence/jina-v2-code-f32-candle.json` records the similarities of the
 `fallow-similar-code` companion. The companion runs the F32 model with Candle
-on the CPU. The release build checks each companion binary against this file:
+on the CPU. The release build checks three signed companion binaries against
+this file, each on its own platform: Linux x64 (the plain CPU build), macOS
+arm64, and macOS x64 (the Accelerate builds). The other Linux and Windows
+binaries use the same plain CPU build as Linux x64. Run the check locally:
 
 ```bash
 npm run --silent conformance:semantic-clones:candle -- --pretty

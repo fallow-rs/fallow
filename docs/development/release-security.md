@@ -356,8 +356,9 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 - Keep artifact inventory and package-name constants aligned with the build
   matrix.
 - Make `release-verified` wait for `similar-code-conformance`, which validates
-  the exact Linux x64 sidecar artifact against the committed F32 Candle
-  baseline before any publication job can start.
+  the exact Linux x64, macOS arm64, and macOS x64 sidecar artifacts against
+  the committed F32 Candle baseline before any publication job can start. The
+  macOS legs cover the Accelerate build.
 - Keep the similar-code sidecar dependency audit in `release-validation.yml`.
   Its `cargo audit` call ignores exactly the advisory IDs in
   `tools/similar-code-sidecar/audit-allowlist.json`. The pre-flight

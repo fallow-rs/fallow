@@ -737,7 +737,20 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(similarCodeConformance, /needs: \[build, sign\]/);
   assert.match(similarCodeConformance, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(similarCodeConformance, /id-token: write|contents: write/);
-  assert.match(similarCodeConformance, /fallow-similar-code-linux-x64-gnu/);
+  // The macOS binaries link Apple Accelerate, a separate numeric path from the
+  // Linux binary, so each one runs the conformance check on its own platform.
+  const conformanceLegs = Array.from(
+    similarCodeConformance.matchAll(/^\s+- npm_dir: (\S+)\n\s+os: (\S+)$/gmu),
+    (match) => `${match[1]}@${match[2]}`,
+  );
+  assert.deepEqual(conformanceLegs.toSorted(), [
+    "darwin-arm64@macos-latest",
+    "darwin-x64@macos-15-intel",
+    "linux-x64-gnu@ubuntu-26.04",
+  ]);
+  assert.match(similarCodeConformance, /runs-on: \$\{\{ matrix\.os \}\}/u);
+  assert.match(similarCodeConformance, /name: fallow-similar-code-\$\{\{ matrix\.npm_dir \}\}/u);
+  assert.doesNotMatch(similarCodeConformance, /stat --format/u);
   assert.match(similarCodeConformance, /verify-binary\.mjs/);
   assert.match(similarCodeConformance, /release_binary_max_bytes/);
   // The dependency audit lives in release validation, which `validate` calls.

@@ -1285,13 +1285,26 @@ jobs:
       contents: read
 
   similar-code-conformance:
-    name: Similar-code production conformance
+    name: Similar-code production conformance (${{ matrix.npm_dir }})
     if: ${{ !inputs.auth_check }}
     needs: [build, sign]
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      # Each leg runs one signed companion binary on its own platform. The
+      # macOS binaries link Apple Accelerate, so they use a different numeric
+      # path than the Linux binary. All legs compare against one baseline.
+      matrix:
+        include:
+          - npm_dir: linux-x64-gnu
+            os: ubuntu-26.04
+          - npm_dir: darwin-arm64
+            os: macos-latest
+          - npm_dir: darwin-x64
+            os: macos-15-intel
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1301,15 +1314,17 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Download exact Linux x64 similar-code provider
+      - name: Download exact similar-code provider
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: fallow-similar-code-linux-x64-gnu
+          name: fallow-similar-code-${{ matrix.npm_dir }}
           path: ${{ runner.temp }}/fallow-similar-code
 
       - name: Prepare exact provider and isolated model cache
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
         run: |
-          echo "SIDECAR_BIN=$RUNNER_TEMP/fallow-similar-code/fallow-similar-code-linux-x64-gnu" >> "$GITHUB_ENV"
+          echo "SIDECAR_BIN=$RUNNER_TEMP/fallow-similar-code/fallow-similar-code-${FALLOW_NPM_DIR}" >> "$GITHUB_ENV"
           echo "FALLOW_SIMILAR_CODE_CACHE_DIR=$RUNNER_TEMP/fallow-similar-code-cache" >> "$GITHUB_ENV"
 
       - name: Verify signed provider and release size ceiling
@@ -1319,7 +1334,7 @@ jobs:
           set -euo pipefail
           chmod +x "$SIDECAR_BIN"
           node .github/scripts/verify-binary.mjs "$SIDECAR_BIN" "${SIDECAR_BIN}.sig"
-          actual_bytes=$(stat --format=%s "$SIDECAR_BIN")
+          actual_bytes=$(wc -c < "$SIDECAR_BIN" | tr -d '[:space:]')
           maximum_bytes=$(jq -r '.release_binary_max_bytes' tools/similar-code-sidecar/audit-allowlist.json)
           if [ "$actual_bytes" -gt "$maximum_bytes" ]; then
             echo "::error::Similar-code provider is ${actual_bytes} bytes, above ${maximum_bytes}"
@@ -1340,19 +1355,21 @@ jobs:
           "$SIDECAR_BIN" setup --local --json
 
       - name: Compare production Candle output with the compact baseline
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
         run: |
           node scripts/semantic-clone-candle-conformance.mjs \
             --sidecar-bin "$SIDECAR_BIN" \
             --pretty > similar-code-candle-conformance.json
           jq -r '
-            ["## Similar-code production conformance", "", "| Case | Similarity | Selected |", "| --- | ---: | :---: |"],
+            ["## Similar-code production conformance (\(env.FALLOW_NPM_DIR))", "", "| Case | Similarity | Selected |", "| --- | ---: | :---: |"],
             (.cases[] | "| \(.id) | \(.similarity) | \(.selected) |")
           ' similar-code-candle-conformance.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload compact production conformance evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: similar-code-candle-conformance
+          name: similar-code-candle-conformance-${{ matrix.npm_dir }}
           path: similar-code-candle-conformance.json
           if-no-files-found: error
           retention-days: 30
