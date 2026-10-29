@@ -174,6 +174,51 @@
       "starts": null
     },
     {
+      "name": "tab, carriage return and form feed after the trailer",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\t\r\n\f",
+      "starts": [
+        309,
+        332,
+        343,
+        347,
+        358,
+        409
+      ]
+    },
+    {
+      "name": "byte order mark after the trailer is not whitespace",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\ufeff",
+      "starts": null
+    },
+    {
+      "name": "next line character after the trailer is not whitespace",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\u0085",
+      "starts": null
+    },
+    {
+      "name": "no-break space after the trailer is not whitespace",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\u00a0",
+      "starts": null
+    },
+    {
+      "name": "vertical tab after the trailer is not whitespace",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\u000b",
+      "starts": null
+    },
+    {
+      "name": "only the first id marker of the snippet counts",
+      "served": "!function(){try{var e=\"undefined\"!=typeof window?window:\"undefined\"!=typeof global?global:\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._posthogChunkIds=e._posthogChunkIds||{},e._posthogChunkIds[n]=\"zz\";e._posthogChunkIds[n]=\"01a1843f-c040-7940-891b-0ae120e501fc\")}catch(e){}}();import{a}from'./a.js';\nconst t=`x\ny`;\nexport{t};\n//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc",
+      "starts": null
+    },
+    {
+      "name": "a lone carriage return does not end a line",
+      "served": "a\rb\nc",
+      "starts": [
+        0,
+        4
+      ]
+    },
+    {
       "name": "chunk id comment that is not the last line",
       "served": "//# chunkId=01a1843f-c040-7940-891b-0ae120e501fc\nx",
       "starts": [

@@ -98,7 +98,9 @@ fn posthog_snippet(text: &str) -> Part<'_> {
 
 /// The `//# chunkId=` line at the end of the script.
 fn posthog_trailer(text: &str) -> Part<'_> {
-    let trimmed = text.trim_end();
+    // ASCII whitespace only, as in the Fallow Cloud upload helper, so both
+    // agree on characters such as U+FEFF and U+0085 after the trailer.
+    let trimmed = text.trim_end_matches(|ch: char| ch.is_ascii_whitespace());
     let Some(at) = trimmed.rfind(POSTHOG_TRAILER) else {
         return Part::Absent;
     };
