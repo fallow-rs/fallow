@@ -265,17 +265,20 @@ pub struct RuntimeCoverageSummary {
     /// local single-capture artifacts that do not carry cloud receipt metadata.
     pub last_received_at: Option<String>,
     /// Number of functions the sidecar could observe in the V8 or Istanbul
-    /// dump.
-    pub functions_tracked: usize,
+    /// dump. Null for a partial cloud capture, which reports positive
+    /// execution evidence only.
+    pub functions_tracked: Option<usize>,
     /// Tracked functions that received at least one invocation.
     pub functions_hit: usize,
-    /// Tracked functions that were never invoked.
-    pub functions_unhit: usize,
+    /// Tracked functions that were never invoked. Null for a partial cloud
+    /// capture, which cannot prove that a function never ran.
+    pub functions_unhit: Option<usize>,
     /// Functions the sidecar could not track (lazy-parsed, worker thread,
     /// dynamic code, unresolved source map).
     pub functions_untracked: usize,
     /// Ratio of functions_hit / functions_tracked, expressed as a percent.
-    pub coverage_percent: f64,
+    /// Null for a partial cloud capture, because the denominator is unknown.
+    pub coverage_percent: Option<f64>,
     /// Total number of observed invocations across all functions. Denominator
     /// for low-traffic classification.
     pub trace_count: u64,
@@ -291,6 +294,15 @@ pub struct RuntimeCoverageSummary {
     /// agent pipelines can surface the same signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_quality: Option<RuntimeCoverageCaptureQuality>,
+}
+
+impl RuntimeCoverageSummary {
+    /// Functions with runtime observations: the tracked total, or the hit
+    /// total when a partial capture does not measure the tracked total.
+    #[must_use]
+    pub fn observed_functions(&self) -> usize {
+        self.functions_tracked.unwrap_or(self.functions_hit)
+    }
 }
 
 /// Quality-of-capture signals emitted by the sidecar so the CLI can explain

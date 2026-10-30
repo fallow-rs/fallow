@@ -51,12 +51,21 @@ fn render_runtime_summary(
         verdict
     ));
     lines.push(format!(
-        "  {} tracked, {} hit, {} unhit, {} untracked ({:.1}% covered)",
-        thousands(production.summary.functions_tracked),
+        "  {} tracked, {} hit, {} unhit, {} untracked ({}% covered)",
+        production
+            .summary
+            .functions_tracked
+            .map_or_else(|| "unknown".to_owned(), thousands),
         thousands(production.summary.functions_hit),
-        thousands(production.summary.functions_unhit),
+        production
+            .summary
+            .functions_unhit
+            .map_or_else(|| "unknown".to_owned(), thousands),
         thousands(production.summary.functions_untracked),
-        production.summary.coverage_percent,
+        production
+            .summary
+            .coverage_percent
+            .map_or_else(|| "unknown".to_owned(), |percent| format!("{percent:.1}")),
     ));
     if production.summary.trace_count > 0 || production.summary.period_days > 0 {
         lines.push(format!(

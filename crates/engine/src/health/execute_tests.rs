@@ -1386,11 +1386,11 @@ fn fx_summary(
     fallow_output::RuntimeCoverageSummary {
         data_source: fallow_output::RuntimeCoverageDataSource::Local,
         last_received_at: None,
-        functions_tracked: tracked,
+        functions_tracked: Some(tracked),
         functions_hit: hit,
-        functions_unhit: unhit,
+        functions_unhit: Some(unhit),
         functions_untracked: untracked,
-        coverage_percent,
+        coverage_percent: Some(coverage_percent),
         trace_count: 512,
         period_days: 7,
         deployments_seen: 2,
@@ -1531,11 +1531,11 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
         report.verdict,
         fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
     );
-    assert_eq!(report.summary.functions_tracked, 3);
+    assert_eq!(report.summary.functions_tracked, Some(3));
     assert_eq!(report.summary.functions_hit, 0);
-    assert_eq!(report.summary.functions_unhit, 2);
+    assert_eq!(report.summary.functions_unhit, Some(2));
     assert_eq!(report.summary.functions_untracked, 1);
-    assert!((report.summary.coverage_percent - 0.0).abs() < 0.05);
+    assert!((report.summary.coverage_percent.unwrap_or(f64::NAN) - 0.0).abs() < 0.05);
     assert_eq!(report.hot_paths.len(), 1);
     assert_eq!(report.hot_paths[0].function, "hotAlpha");
 }
@@ -1592,11 +1592,11 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
         report.verdict,
         fallow_output::RuntimeCoverageReportVerdict::Clean
     );
-    assert_eq!(report.summary.functions_tracked, 2);
+    assert_eq!(report.summary.functions_tracked, Some(2));
     assert_eq!(report.summary.functions_hit, 1);
-    assert_eq!(report.summary.functions_unhit, 1);
+    assert_eq!(report.summary.functions_unhit, Some(1));
     assert_eq!(report.summary.functions_untracked, 0);
-    assert!((report.summary.coverage_percent - 50.0).abs() < 0.05);
+    assert!((report.summary.coverage_percent.unwrap_or(f64::NAN) - 50.0).abs() < 0.05);
 }
 
 #[test]

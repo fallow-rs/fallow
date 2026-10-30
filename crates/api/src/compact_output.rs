@@ -1164,13 +1164,18 @@ fn build_runtime_coverage_compact_lines(
     production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
 ) -> Vec<String> {
+    let summary = &production.summary;
+    let count_or_null =
+        |count: Option<usize>| count.map_or_else(|| "null".to_owned(), |value| value.to_string());
     let mut lines = vec![format!(
-        "runtime-coverage-summary:functions_tracked={},functions_hit={},functions_unhit={},functions_untracked={},coverage_percent={:.1},trace_count={},period_days={},deployments_seen={}",
-        production.summary.functions_tracked,
+        "runtime-coverage-summary:functions_tracked={},functions_hit={},functions_unhit={},functions_untracked={},coverage_percent={},trace_count={},period_days={},deployments_seen={}",
+        count_or_null(summary.functions_tracked),
         production.summary.functions_hit,
-        production.summary.functions_unhit,
+        count_or_null(summary.functions_unhit),
         production.summary.functions_untracked,
-        production.summary.coverage_percent,
+        summary
+            .coverage_percent
+            .map_or_else(|| "null".to_owned(), |percent| format!("{percent:.1}")),
         production.summary.trace_count,
         production.summary.period_days,
         production.summary.deployments_seen,

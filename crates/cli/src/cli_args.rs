@@ -2594,9 +2594,9 @@ pub enum CoverageCli {
         #[arg(long, value_name = "SHA")]
         git_sha: Option<String>,
 
-        /// Bind the upload to a Vercel deployment. Defaults to
-        /// $VERCEL_DEPLOYMENT_ID only when $VERCEL=1.
-        /// The cloud verifies the deployment against the supplied git SHA.
+        /// Bind the upload to a Vercel deployment. Defaults to $VERCEL_DEPLOYMENT_ID
+        /// only when $VERCEL=1. With Vercel OIDC authentication, the cloud verifies
+        /// the deployment against the supplied git SHA.
         #[arg(long, value_name = "DEPLOYMENT_ID")]
         vercel_deployment_id: Option<String>,
 
@@ -2671,9 +2671,9 @@ pub enum CoverageCli {
         #[arg(long, value_name = "SHA")]
         git_sha: Option<String>,
 
-        /// Bind the upload to a Vercel deployment. Defaults to
-        /// $VERCEL_DEPLOYMENT_ID only when $VERCEL=1.
-        /// The cloud verifies the deployment against the supplied git SHA.
+        /// Bind the upload to a Vercel deployment. Defaults to $VERCEL_DEPLOYMENT_ID
+        /// only when $VERCEL=1. With Vercel OIDC authentication, the cloud verifies
+        /// the deployment against the supplied git SHA.
         #[arg(long, value_name = "DEPLOYMENT_ID")]
         vercel_deployment_id: Option<String>,
 
