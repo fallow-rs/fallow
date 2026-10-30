@@ -33,6 +33,12 @@ enum GateBlocker {
     /// `jq` is not on PATH. The script exits 0 after one stderr line, which a
     /// PreToolUse hook never shows.
     JqMissing,
+    /// A native-capable gate cannot find either supported JSON reader.
+    JsonReaderMissing,
+    /// A candidate launcher exists, but status cannot execute project code.
+    NativeReaderUnverified,
+    /// The installed native gate differs from the verified managed template.
+    ModifiedNativeGate,
     /// PATH resolves a different fallow than this build, and the gate runs
     /// what PATH resolves.
     PathVersion(String),
@@ -51,28 +57,128 @@ struct SurfaceStatus {
     blocker: Option<GateBlocker>,
 }
 
-/// What the installed gate script finds at run time, probed once per report.
+/// Evidence available from inventorying a native gate and its launchers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeGateState {
+    Available,
+    Missing,
+    Modified,
+    Unverified,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct GateRuntime {
     jq_missing: bool,
+    /// Native script identity and the reader evidence available without execution.
+    native_gates: Vec<(String, NativeGateState)>,
     /// Version reported by the `fallow` on PATH when it is not this build.
     path_version: Option<String>,
 }
 
 impl GateRuntime {
-    fn probe() -> Self {
+    fn probe(root: &Path, hooks: &crate::setup_hooks::HooksStatusReport) -> Self {
         Self {
             jq_missing: mcp::find_on_path("jq").is_none(),
-            path_version: path_fallow_drift(),
+            native_gates: [&hooks.claude, &hooks.codex_gate]
+                .into_iter()
+                .filter_map(|status| native_gate_probe(root, status))
+                .collect(),
+            path_version: path_fallow_drift(root),
         }
     }
 
-    fn blocker(&self) -> Option<GateBlocker> {
+    fn blocker(&self, path: &str) -> Option<GateBlocker> {
+        let native = self.native_gates.iter().find(|(gate, _)| gate == path);
+        if matches!(native, Some((_, NativeGateState::Modified))) {
+            return Some(GateBlocker::ModifiedNativeGate);
+        }
         if self.jq_missing {
-            return Some(GateBlocker::JqMissing);
+            match native {
+                Some((_, NativeGateState::Available)) => {}
+                Some((_, NativeGateState::Missing)) => return Some(GateBlocker::JsonReaderMissing),
+                Some((_, NativeGateState::Unverified)) => {
+                    return Some(GateBlocker::NativeReaderUnverified);
+                }
+                _ => return Some(GateBlocker::JqMissing),
+            }
         }
         self.path_version.clone().map(GateBlocker::PathVersion)
     }
+}
+
+fn native_gate_probe(
+    root: &Path,
+    status: &crate::setup_hooks::HookSurfaceStatus,
+) -> Option<(String, NativeGateState)> {
+    if !status.installed {
+        return None;
+    }
+    let script = root.join(&status.path);
+    let text = read_optional_text(&script).ok().flatten()?;
+    if !text.contains("# Native JSON protocol: fallow-gate-json-v1") {
+        return None;
+    }
+    let trusted = crate::setup_hooks::rendered_gate_script();
+    if !gate_matches_template(&text, &trusted) {
+        return Some((status.path.clone(), NativeGateState::Modified));
+    }
+    Some((status.path.clone(), native_reader_inventory(root)))
+}
+
+/// Header comment that records which fallow version wrote the gate.
+const INSTALLER_VERSION_LINE: &str = "# Installer version: ";
+
+/// Compares an installed gate with the managed template line by line. The
+/// installer version comment changes with each fallow release, so it does not
+/// make a gate modified. Every other byte must match. CRLF line endings count
+/// as an edit, because bash cannot run a script with them.
+fn gate_matches_template(installed: &str, trusted: &str) -> bool {
+    normalized_gate_lines(installed).eq(normalized_gate_lines(trusted))
+}
+
+fn normalized_gate_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split('\n').map(|line| {
+        if line.starts_with(INSTALLER_VERSION_LINE) {
+            INSTALLER_VERSION_LINE
+        } else {
+            line
+        }
+    })
+}
+
+fn native_reader_inventory(root: &Path) -> NativeGateState {
+    let current = std::env::current_exe()
+        .ok()
+        .and_then(|path| dunce::canonicalize(path).ok());
+    let candidate_state = |candidate: &Path| {
+        if current.as_ref().is_some_and(|current| {
+            dunce::canonicalize(candidate).is_ok_and(|candidate| &candidate == current)
+        }) {
+            NativeGateState::Available
+        } else {
+            NativeGateState::Unverified
+        }
+    };
+    if let Some(path) = mcp::find_on_path("fallow") {
+        return candidate_state(&path);
+    }
+    let package_runner = mcp::find_on_path("yarn").is_some() || mcp::find_on_path("npx").is_some();
+    for anchor in root.ancestors() {
+        let candidate = anchor.join("node_modules/.bin/fallow");
+        if candidate.is_file() {
+            return if anchor == root {
+                candidate_state(&candidate)
+            } else {
+                // An ancestor can supply JSON decoding without being a runner
+                // that the gate can find from this audit root.
+                NativeGateState::Unverified
+            };
+        }
+        if package_runner && anchor.join("package.json").is_file() {
+            return NativeGateState::Unverified;
+        }
+    }
+    NativeGateState::Missing
 }
 
 /// Version of the `fallow` PATH resolves, when that binary is not this one and
@@ -83,9 +189,28 @@ impl GateRuntime {
 /// nothing resolves, when PATH resolves this very executable, or when the
 /// probe fails: the gate has further fallbacks and an unreadable binary is not
 /// evidence of drift.
-fn path_fallow_drift() -> Option<String> {
-    let candidate = mcp::find_on_path("fallow")?;
-    let resolved = dunce::canonicalize(&candidate).unwrap_or(candidate);
+fn path_fallow_drift(root: &Path) -> Option<String> {
+    let candidate = std::path::absolute(mcp::find_on_path("fallow")?).ok()?;
+    let resolved = dunce::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+    // Resolve directory aliases without losing ownership of a final symlink.
+    let entry = candidate
+        .parent()
+        .and_then(|parent| dunce::canonicalize(parent).ok())
+        .and_then(|parent| candidate.file_name().map(|name| parent.join(name)));
+    let owned_by = |owner: &Path| {
+        candidate.starts_with(owner)
+            || resolved.starts_with(owner)
+            || entry.as_ref().is_some_and(|path| path.starts_with(owner))
+    };
+    let project = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let project_launcher = project.ancestors().any(|anchor| {
+        let owns_project = anchor.parent().is_some()
+            && (anchor.join(".git").exists() || anchor.join("package.json").is_file());
+        (owns_project && owned_by(anchor)) || owned_by(&anchor.join("node_modules"))
+    });
+    if owned_by(&project) || project_launcher {
+        return None;
+    }
     let current = std::env::current_exe()
         .ok()
         .map(|exe| dunce::canonicalize(&exe).unwrap_or(exe));
@@ -209,7 +334,7 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     ));
 
     let hooks = build_hooks_status(root);
-    let runtime = GateRuntime::probe();
+    let runtime = GateRuntime::probe(root, &hooks);
     rows.push(hook_row(Some(Harness::Claude), &hooks.claude, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex_gate, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
@@ -359,7 +484,7 @@ fn hook_row(
     // block is managed prose and carries no script version.
     let script_version = status.script_version.as_deref();
     let blocker = match script_version {
-        Some(_) if status.installed => runtime.blocker(),
+        Some(_) if status.installed => runtime.blocker(&status.path),
         _ => None,
     };
     let script_stale = script_version.is_some_and(|version| version != env!("CARGO_PKG_VERSION"));
@@ -388,6 +513,15 @@ fn hook_row(
     match &blocker {
         Some(GateBlocker::JqMissing) => {
             parts.push("jq is not on PATH, so the gate exits without auditing".to_string());
+        }
+        Some(GateBlocker::JsonReaderMissing) => {
+            parts.push("the gate cannot find a native Fallow JSON reader or jq, so it exits without auditing".to_string());
+        }
+        Some(GateBlocker::ModifiedNativeGate) => {
+            parts.push("the installed native gate differs from this build's managed script; its runtime is unverified".to_string());
+        }
+        Some(GateBlocker::NativeReaderUnverified) => {
+            parts.push("a native reader launcher is present, but its runtime is unverified; status does not execute project launchers or package managers".to_string());
         }
         Some(GateBlocker::PathVersion(version)) => {
             parts.push(format!(
@@ -431,6 +565,39 @@ fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
             reason:
                 "The agent gate script needs jq to read the tool input. Without it the script exits 0 after a single stderr line, which a PreToolUse hook never shows, so every commit and push passes ungated. Install jq."
                     .to_string(),
+            mutating: false,
+        });
+    }
+    if surfaces
+        .iter()
+        .any(|row| row.blocker == Some(GateBlocker::JsonReaderMissing))
+    {
+        next.push(NextAction {
+            id: "gate-json-reader",
+            command: "fallow hooks gate-runtime probe".to_string(),
+            reason: "The gate needs a current Fallow binary on PATH or in the project to read JSON. Upgrade that installation, or install jq for compatibility with an older binary. Project trust still needs approval in the harness.".to_string(),
+            mutating: false,
+        });
+    }
+    if surfaces
+        .iter()
+        .any(|row| row.blocker == Some(GateBlocker::NativeReaderUnverified))
+    {
+        next.push(NextAction {
+            id: "gate-reader-unverified",
+            command: "fallow hooks gate-runtime probe".to_string(),
+            reason: "After approving this project's code, run this probe with the gate's Fallow installation. Status inventories local launchers and package managers without executing them; native support is not yet verified.".to_string(),
+            mutating: false,
+        });
+    }
+    if surfaces
+        .iter()
+        .any(|row| row.blocker == Some(GateBlocker::ModifiedNativeGate))
+    {
+        next.push(NextAction {
+            id: "gate-script-refresh",
+            command: "fallow hooks install --target agent --force --dry-run".to_string(),
+            reason: "Review the installed gate's edits and this preview before replacing it. Status does not execute modified hook scripts or verify their runtime.".to_string(),
             mutating: false,
         });
     }
@@ -613,6 +780,7 @@ mod tests {
     fn missing_jq_makes_the_gate_stale_and_names_the_reason() {
         let runtime = GateRuntime {
             jq_missing: true,
+            native_gates: Vec::new(),
             path_version: None,
         };
         let row = hook_row(
@@ -640,9 +808,45 @@ mod tests {
     }
 
     #[test]
+    fn native_gate_readiness_tracks_its_reader_instead_of_jq() {
+        for ready in [true, false] {
+            let runtime = GateRuntime {
+                jq_missing: true,
+                native_gates: vec![(
+                    ".claude/hooks/fallow-gate.sh".to_string(),
+                    if ready {
+                        NativeGateState::Available
+                    } else {
+                        NativeGateState::Missing
+                    },
+                )],
+                path_version: None,
+            };
+            let row = hook_row(
+                Some(Harness::Claude),
+                &claude_gate(Some(env!("CARGO_PKG_VERSION"))),
+                &runtime,
+            );
+            if ready {
+                assert_eq!(row.state, SurfaceState::Installed);
+                assert_eq!(row.blocker, None);
+            } else {
+                assert_eq!(row.state, SurfaceState::Stale);
+                assert_eq!(row.blocker, Some(GateBlocker::JsonReaderMissing));
+                assert!(
+                    status_next_actions(&[row])
+                        .iter()
+                        .any(|action| action.id == "gate-json-reader")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_different_fallow_on_path_makes_the_gate_stale() {
         let runtime = GateRuntime {
             jq_missing: false,
+            native_gates: Vec::new(),
             path_version: Some("3.17.0".to_string()),
         };
         let row = hook_row(
@@ -671,6 +875,7 @@ mod tests {
         status.installed = false;
         let runtime = GateRuntime {
             jq_missing: true,
+            native_gates: Vec::new(),
             path_version: Some("3.17.0".to_string()),
         };
         let row = hook_row(Some(Harness::Claude), &status, &runtime);
@@ -695,6 +900,7 @@ mod tests {
         };
         let runtime = GateRuntime {
             jq_missing: true,
+            native_gates: Vec::new(),
             path_version: Some("3.17.0".to_string()),
         };
         let row = hook_row(Some(Harness::Codex), &status, &runtime);
@@ -711,5 +917,48 @@ mod tests {
         );
         assert_eq!(parse_version_output("3.17.0").as_deref(), Some("3.17.0"));
         assert_eq!(parse_version_output(""), None);
+    }
+
+    fn probe_installed_gate(text: &str) -> NativeGateState {
+        let dir = tempfile::tempdir().unwrap();
+        let status = claude_gate(Some(env!("CARGO_PKG_VERSION")));
+        let script = dir.path().join(&status.path);
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, text).unwrap();
+        native_gate_probe(dir.path(), &status).unwrap().1
+    }
+
+    #[test]
+    fn native_gate_from_an_older_installer_version_is_not_modified() {
+        let older = crate::setup_hooks::FALLOW_GATE_SCRIPT
+            .replace("@@FALLOW_INSTALLER_VERSION@@", "0.0.1-older");
+        assert_ne!(older, crate::setup_hooks::rendered_gate_script());
+        assert_ne!(probe_installed_gate(&older), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn native_gate_with_crlf_line_endings_is_modified() {
+        // Bash cannot run a script with CRLF line endings, so it is not healthy.
+        let crlf = crate::setup_hooks::rendered_gate_script().replace('\n', "\r\n");
+        assert_eq!(probe_installed_gate(&crlf), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn native_gate_with_an_edit_is_modified() {
+        let edited = crate::setup_hooks::rendered_gate_script().replacen(
+            "set -euo pipefail",
+            "set -euo pipefail\ntouch /tmp/x",
+            1,
+        );
+        assert_eq!(probe_installed_gate(&edited), NativeGateState::Modified);
+        let edited_version_line = crate::setup_hooks::rendered_gate_script().replacen(
+            "# Installer version: ",
+            "touch /tmp/x # Installer version: ",
+            1,
+        );
+        assert_eq!(
+            probe_installed_gate(&edited_version_line),
+            NativeGateState::Modified
+        );
     }
 }
