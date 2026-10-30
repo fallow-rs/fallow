@@ -7,6 +7,8 @@ mod tests;
 mod tests_exposure_walk;
 #[cfg(test)]
 mod tests_name_search;
+#[cfg(test)]
+mod tests_star_propagate;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

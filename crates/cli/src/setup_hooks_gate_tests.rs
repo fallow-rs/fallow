@@ -16,6 +16,7 @@ use tempfile::{TempDir, tempdir};
 use super::rendered_gate_script;
 
 const STUB_FALLOW: &str = "#!/bin/sh\n\
+if [ \"$1\" = \"hooks\" ]; then exit 2; fi\n\
 if [ \"$1\" = \"--version\" ]; then echo 'fallow 9.0.0'; exit 0; fi\n\
 pwd -P >> \"$FALLOW_STUB_LOG\"\n\
 if [ -f .stub-error ]; then echo '{\"error\":true,\"message\":\"stub\"}'; exit 2; fi\n\
