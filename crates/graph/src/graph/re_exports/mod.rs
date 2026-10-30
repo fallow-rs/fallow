@@ -5,6 +5,8 @@ mod propagate;
 mod tests;
 #[cfg(test)]
 mod tests_exposure_walk;
+#[cfg(test)]
+mod tests_star_propagate;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
