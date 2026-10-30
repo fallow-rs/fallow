@@ -129,16 +129,15 @@ fn native_gate_probe(
 const INSTALLER_VERSION_LINE: &str = "# Installer version: ";
 
 /// Compares an installed gate with the managed template line by line. The
-/// installer version comment changes with each fallow release and CRLF line
-/// endings come from a checkout setting, so neither makes a gate modified.
-/// Every other byte must match.
+/// installer version comment changes with each fallow release, so it does not
+/// make a gate modified. Every other byte must match. CRLF line endings count
+/// as an edit, because bash cannot run a script with them.
 fn gate_matches_template(installed: &str, trusted: &str) -> bool {
     normalized_gate_lines(installed).eq(normalized_gate_lines(trusted))
 }
 
 fn normalized_gate_lines(text: &str) -> impl Iterator<Item = &str> {
     text.split('\n').map(|line| {
-        let line = line.strip_suffix('\r').unwrap_or(line);
         if line.starts_with(INSTALLER_VERSION_LINE) {
             INSTALLER_VERSION_LINE
         } else {
@@ -938,9 +937,10 @@ mod tests {
     }
 
     #[test]
-    fn native_gate_with_crlf_line_endings_is_not_modified() {
+    fn native_gate_with_crlf_line_endings_is_modified() {
+        // Bash cannot run a script with CRLF line endings, so it is not healthy.
         let crlf = crate::setup_hooks::rendered_gate_script().replace('\n', "\r\n");
-        assert_ne!(probe_installed_gate(&crlf), NativeGateState::Modified);
+        assert_eq!(probe_installed_gate(&crlf), NativeGateState::Modified);
     }
 
     #[test]

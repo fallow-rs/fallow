@@ -90,12 +90,18 @@ gate_skip_not_git_write() {
 # a variable. A plain pattern on the raw payload then skips a command that
 # cannot be a git commit or push, before the reader search below starts
 # launchers. A git write puts `git` before `commit`, `push` or an expansion in
-# the command text. A JSON `\u` escape can hide a word, so such a payload
-# always goes to the exact parse.
+# the command text. The match drops quote and backslash characters first, as
+# gate_loose_write does, so `g''it commit` still goes to the exact parse. A
+# JSON `\u` escape can hide a word, so such a payload always goes there too.
 INPUT="$(cat)"
 case "$INPUT" in
-  *'\u'* | *git*commit* | *git*push* | *git*'$'*) ;;
-  *) gate_skip_not_git_write ;;
+  *'\u'*) ;;
+  *)
+    case "${INPUT//[\'\"\\]/}" in
+      *git*commit* | *git*push* | *git*'$'*) ;;
+      *) gate_skip_not_git_write ;;
+    esac
+    ;;
 esac
 
 gate_find_json_runner || true

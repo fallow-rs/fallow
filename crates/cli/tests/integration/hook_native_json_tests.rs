@@ -682,3 +682,21 @@ fn gate_launcher_probes_never_read_the_hook_payload() {
     assert!(calls.contains("npx"), "{calls}");
     assert!(!calls.contains("tool_input"), "a probe read stdin: {calls}");
 }
+
+#[test]
+fn gate_audits_quote_obfuscated_git_writes() {
+    let (_temp, root, script, bin) = fixture();
+    for command in ["g''it commit -m x", "git com''mit -m x", "g\"i\"t push"] {
+        let payload = serde_json::to_vec(
+            &serde_json::json!({"cwd": root, "tool_input": {"command": command}}),
+        )
+        .unwrap();
+        let output = run_gate(&root, &script, &bin, &payload);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "`{command}` skipped the audit: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
