@@ -20515,7 +20515,7 @@
           "items": {
             "type": "string"
           },
-          "description": "A capped, path-sorted sample of the affected root-relative paths (at most\n[`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in\n[`affected_count`](Self::affected_count) and the distribution in\n[`affected_by_dir`](Self::affected_by_dir); use this list to jump to\nrepresentative files, NEVER to enumerate the blast radius or to infer its\nshape. Because it is a prefix of the sorted set, it clusters in whichever\ndirectory sorts first. To reconstruct the full set, run\n`fallow check --impact-closure <path>` once per changed file and union the\nresults: that flag seeds from a single file, so no single command\nreproduces this changeset-wide union."
+          "description": "A capped, path-sorted sample of the affected root-relative paths (at most\n[`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in\n[`affected_count`](Self::affected_count) and the distribution in\n[`affected_by_dir`](Self::affected_by_dir); use this list to jump to\nrepresentative files, NEVER to enumerate the blast radius or to infer its\nshape. Because it is a prefix of the sorted set, it clusters in whichever\ndirectory sorts first. To reconstruct the full set, run\n`fallow dead-code --impact-closure <path>` once per changed file and union the\nresults: that flag seeds from a single file, so no single command\nreproduces this changeset-wide union."
         },
         "affected_by_dir": {
           "type": "array",

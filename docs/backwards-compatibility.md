@@ -1171,7 +1171,7 @@ These are documented for the rare CI script that depended on the old behavior. N
   is untouched and uncapped; it is not a subset of `affected_not_shown`,
   because the gap deliberately skips story and test consumers that the affected
   set counts. To reconstruct the full affected set, run
-  `fallow check --impact-closure <path>` once per changed file and union the
+  `fallow dead-code --impact-closure <path>` once per changed file and union the
   results: that flag seeds from a single file, so no single command reproduces
   the changeset-wide union.
 

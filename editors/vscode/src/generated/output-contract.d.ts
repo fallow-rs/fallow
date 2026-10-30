@@ -18178,7 +18178,7 @@ affected_count: number
  * representative files, NEVER to enumerate the blast radius or to infer its
  * shape. Because it is a prefix of the sorted set, it clusters in whichever
  * directory sorts first. To reconstruct the full set, run
- * `fallow check --impact-closure <path>` once per changed file and union the
+ * `fallow dead-code --impact-closure <path>` once per changed file and union the
  * results: that flag seeds from a single file, so no single command
  * reproduces this changeset-wide union.
  */
