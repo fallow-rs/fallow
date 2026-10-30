@@ -421,8 +421,78 @@ fn fix_writes_through_symlinked_config() {
 
 #[test]
 fn fix_without_yes_in_non_tty_exits_2() {
-    let output = run_fallow("fix", "basic-project", &["--format", "json", "--quiet"]);
+    let dir = crate::common::copy_fixture("basic-project");
+    let source = dir.path().join("src/utils.ts");
+    let before = std::fs::read(&source).unwrap();
+    let output = run_fallow_in_root("fix", dir.path(), &["--format", "json", "--quiet"]);
     assert_eq!(output.code, 2, "fix without --yes in non-TTY should exit 2");
+    let error = parse_json(&output);
+    assert_eq!(error["code"], "FALLOW_FIX_CONFIRMATION_REQUIRED");
+    assert_eq!(
+        error["help"],
+        "Run `fallow fix --dry-run` and review the preview, then pass --yes to apply the approved changes."
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), before);
+
+    let preview = run_fallow_in_root(
+        "fix",
+        dir.path(),
+        &["--dry-run", "--format", "json", "--quiet"],
+    );
+    assert_eq!(preview.code, 0, "{}", preview.stderr);
+    assert_eq!(parse_json(&preview)["dry_run"], true);
+    assert_eq!(std::fs::read(&source).unwrap(), before);
+}
+
+#[test]
+fn fix_mixed_line_endings_reports_recovery_before_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"mixed-eol","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from './lib';\nused();\n",
+    )
+    .unwrap();
+    let source = root.join("src/lib.ts");
+    let original =
+        b"export const used = (): void => {};\r\nexport const unused = (): void => {};\n";
+    std::fs::write(&source, original).unwrap();
+    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    let json = parse_json(&output);
+    let skip = json["fixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|fix| fix["skip_reason"] == "mixed_line_endings")
+        .expect("the mixed-line-ending file should be reported as skipped");
+    assert_eq!(skip["path"], "src/lib.ts");
+    assert_eq!(
+        skip["help"],
+        "Normalize this file to consistent LF or CRLF line endings, then run `fallow fix --dry-run` and review the new preview."
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+
+    std::fs::write(
+        &source,
+        String::from_utf8_lossy(original).replace("\r\n", "\n"),
+    )
+    .unwrap();
+    let retried = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(retried.code, 0, "{}", retried.stderr);
+    assert!(
+        parse_json(&retried)["fixes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fix| { fix["type"] == "remove_export" && fix["name"] == "unused" })
+    );
 }
 
 #[test]
@@ -900,6 +970,12 @@ fn fix_dry_run_withholds_every_removal_a_degraded_parse_distorted() {
         .find(|fix| fix["type"] == "remove_dependency")
         .expect("the dependency entry is still reported, as a withholding");
     assert_eq!(dep_entry["package"], "lodash");
+    for skip in [export_skip, dep_entry] {
+        assert_eq!(
+            skip["help"],
+            "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
+        );
+    }
     assert_eq!(
         dep_entry["skip_reason"],
         "low_confidence_incomplete_analysis"
@@ -1274,6 +1350,10 @@ fn fix_apply_does_not_delete_an_enum_member_a_skipped_file_references() {
         .find(|fix| fix["type"] == "remove_enum_member")
         .expect("the withheld member is reported, not silently dropped");
     assert_eq!(withheld["skipped"], serde_json::json!(true));
+    assert_eq!(
+        withheld["help"],
+        "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
+    );
     assert_eq!(
         withheld["skip_reason"].as_str(),
         Some("low_confidence_incomplete_analysis"),

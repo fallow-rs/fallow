@@ -2,8 +2,8 @@ import path from "node:path";
 
 import { ast } from "./backend.mjs";
 
-import { canonicalFileIdentity } from "./file-identity.mjs";
 import {
+  declarationsForSymbol,
   projectSourceFiles,
   relativePath,
   semanticQueryIdentity,
@@ -29,22 +29,14 @@ const isModuleEdgeDeclaration = (node) => isImportDeclaration(node) || isExportD
 const moduleSpecifier = (node) => {
   if (!isModuleEdgeDeclaration(node)) return undefined;
   if (!node.moduleSpecifier) return undefined;
-  return isStringLiteralLikeNode(node.moduleSpecifier) ? node.moduleSpecifier.text : null;
+  return isStringLiteralLikeNode(node.moduleSpecifier) ? node.moduleSpecifier : undefined;
 };
 
-const resolveLocalModule = (sourceFile, specifier, files) => {
-  if (!specifier?.startsWith(".")) return undefined;
-  const base = path.resolve(path.dirname(sourceFile.fileName), specifier);
-  const candidates = [
-    base,
-    `${base}.ts`,
-    `${base}.tsx`,
-    `${base}.js`,
-    `${base}.jsx`,
-    path.join(base, "index.ts"),
-    path.join(base, "index.tsx"),
-  ];
-  return candidates.map(canonicalFileIdentity).find((candidate) => files.has(candidate));
+const resolveProjectModule = (project, specifier, files) => {
+  const symbol = project.checker.getSymbolAtLocation(specifier);
+  return declarationsForSymbol(project, symbol)
+    .map((declaration) => sourceFileIdentity(declaration.getSourceFile()))
+    .find((identity) => files.has(identity));
 };
 
 const addReverseModuleEdge = (reverse, provider, consumer) => {
@@ -53,9 +45,9 @@ const addReverseModuleEdge = (reverse, provider, consumer) => {
   reverse.set(provider, consumers);
 };
 
-const recordModuleEdge = (reverse, sourceFile, consumer, files, specifier) => {
+const recordModuleEdge = (project, reverse, consumer, files, specifier) => {
   if (specifier === undefined) return;
-  const provider = resolveLocalModule(sourceFile, specifier, files);
+  const provider = resolveProjectModule(project, specifier, files);
   if (provider) addReverseModuleEdge(reverse, provider, consumer);
 };
 
@@ -68,11 +60,11 @@ const hasUnresolvedDynamicImport = (node, sourceFile) => {
   return !argument || !isStringLiteralLikeNode(argument);
 };
 
-const scanModuleSource = (sourceFile, files, reverse) => {
+const scanModuleSource = (project, sourceFile, files, reverse) => {
   const consumer = sourceFileIdentity(sourceFile);
   let hasDynamicBehavior = false;
   visit(sourceFile, (node) => {
-    recordModuleEdge(reverse, sourceFile, consumer, files, moduleSpecifier(node));
+    recordModuleEdge(project, reverse, consumer, files, moduleSpecifier(node));
     hasDynamicBehavior ||= hasUnresolvedDynamicImport(node, sourceFile);
   });
   return hasDynamicBehavior;
@@ -84,7 +76,7 @@ const moduleGraph = (project) => {
   const reverse = new Map();
   let hasDynamicBehavior = false;
   for (const sourceFile of sources) {
-    const sourceHasDynamicBehavior = scanModuleSource(sourceFile, files, reverse);
+    const sourceHasDynamicBehavior = scanModuleSource(project, sourceFile, files, reverse);
     hasDynamicBehavior ||= sourceHasDynamicBehavior;
   }
   return { reverse, hasDynamicBehavior };

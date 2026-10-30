@@ -1517,10 +1517,10 @@ fallow inspect --file src/api.ts --cloud --format compact
 | `--file <PATH>` | Inspect one project-relative file |
 | `--symbol <FILE:EXPORT>` | Inspect one exported symbol. Supporting dead-code, duplication, complexity, and security evidence is file-scoped in the first version |
 | `--churn` | Add target-level git churn evidence. Off by default; missing git history is reported as `unavailable` |
-| `--cloud` | Add the `cloud` evidence section for a `--file` target: Fallow Cloud production data per local function (state, calls, error groups, CPU ms per hour, never-run branches). Off by default. Key: `$FALLOW_API_KEY`, else the key that `fallow cloud login` stored. The section `status` is `ok`, `no_key`, `plan_required`, `unavailable` or `untracked`; a status other than `ok` never fails the run |
+| `--cloud` | Add the `cloud` evidence section for a `--file` target: Fallow Cloud production data per local function (state, calls, error groups, CPU ms per hour, never-run branches). Off by default. Key: `$FALLOW_API_KEY`, else the key that `fallow cloud login` stored. The section `status` is `ok`, `no_key`, `plan_required`, `unavailable` or `untracked`; a status other than `ok` never fails the run. Requires fallow 3.38.0 or later |
 | `--repo <OWNER/REPO>` | Fallow Cloud repository for `--cloud`. Precedence: this flag > `$FALLOW_REPO` > the `origin` git remote |
 
-`--format compact` prints plain text of about 1 KB, one line per item and no colors: a `fallow <path>` header, `finding <kind> <path:line> <text>` lines, `prod <name:line> <text>` lines (functions with errors first, then `never_called`, then local functions without production data, then the rest), a `cloud <status>: <text>` line for a status other than `ok`, and `truncated <n> more` when the byte cap cuts lines.
+`--format compact` for `inspect` requires fallow 3.38.0 or later. It prints plain text of about 1 KB, one line per item and no colors: a `fallow <path>` header, `finding <kind> <path:line> <text>` lines, `prod <name:line> <text>` lines (functions with errors first, then `never_called`, then local functions without production data, then the rest), a `cloud <status>: <text>` line for a status other than `ok`, and `truncated <n> more` when the byte cap cuts lines.
 
 Local functions pair with deployed functions by `stable_id` first, then by the name plus the ordinal among the same-name functions of the file. A local function without a pair goes to `unpaired_local` with the note `no production data (new or moved since deploy)`. A `null` count means "not measured", never zero.
 
@@ -1708,7 +1708,7 @@ Pack files can also reference the published schema directly: `"$schema": "https:
 
 ## `cloud`: Log In to Fallow Cloud
 
-Connect this machine to Fallow Cloud without copying a key. `login` runs the device flow: it prints a code and a URL, and after a user approves the code in the dashboard the cloud creates a read-only API key (`fallow_read_k1_`) for that user, organization and machine. The CLI stores the key and never prints it. Agents must not run `login`; only the user may approve it.
+Requires fallow 3.38.0 or later. Connect this machine to Fallow Cloud without copying a key. `login` runs the device flow: it prints a code and a URL, and after a user approves the code in the dashboard the cloud creates a read-only API key (`fallow_read_k1_`) for that user, organization and machine. The CLI stores the key and never prints it. Agents must not run `login`; only the user may approve it.
 
 ```bash
 fallow cloud login
