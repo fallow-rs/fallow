@@ -8,6 +8,8 @@ mod tests_exposure_walk;
 #[cfg(test)]
 mod tests_name_search;
 #[cfg(test)]
+mod tests_namespace_targets;
+#[cfg(test)]
 mod tests_star_propagate;
 
 use std::collections::VecDeque;
