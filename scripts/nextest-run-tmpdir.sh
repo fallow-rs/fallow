@@ -18,8 +18,9 @@ set -eu
 base="${TMPDIR:-/tmp}"
 base="${base%/}"
 # `-name` comes first: the name test needs no stat call, and a shared temp
-# directory can hold tens of thousands of entries.
-find "$base" -maxdepth 1 -name 'fallow-nextest.*' -type d -mmin +120 \
+# directory can hold tens of thousands of entries. `-H` follows a base that is
+# a symlink (on macOS `/tmp` links to `/private/tmp`).
+find -H "$base" -maxdepth 1 -name 'fallow-nextest.*' -type d -mmin +120 \
   -exec rm -rf {} + 2>/dev/null || true
 dir="$(mktemp -d "$base/fallow-nextest.XXXXXX")"
 echo "TMPDIR=$dir" >> "$NEXTEST_ENV"
