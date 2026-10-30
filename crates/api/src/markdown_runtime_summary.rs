@@ -2,10 +2,6 @@ use std::fmt::Write as _;
 
 use super::format_window;
 
-fn count_or_unknown(count: Option<usize>) -> String {
-    count.map_or_else(|| "unknown".to_owned(), |value| value.to_string())
-}
-
 /// Write the runtime-coverage summary header and capture-quality lines.
 pub(super) fn write_runtime_coverage_summary(
     out: &mut String,
@@ -21,16 +17,13 @@ pub(super) fn write_runtime_coverage_summary(
     }
     let _ = writeln!(
         out,
-        "## Runtime Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
+        "## Runtime Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {:.1}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
         production.verdict,
-        count_or_unknown(production.summary.functions_tracked),
+        production.summary.functions_tracked,
         production.summary.functions_hit,
-        count_or_unknown(production.summary.functions_unhit),
+        production.summary.functions_unhit,
         production.summary.functions_untracked,
-        production
-            .summary
-            .coverage_percent
-            .map_or_else(|| "unknown".to_owned(), |percent| format!("{percent:.1}")),
+        production.summary.coverage_percent,
         production.summary.trace_count,
         production.summary.period_days,
         production.summary.deployments_seen,

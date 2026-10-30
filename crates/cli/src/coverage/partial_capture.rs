@@ -1,9 +1,6 @@
 //! Limit managed partial captures to positive execution evidence.
 
-use fallow_output::{
-    RuntimeCoverageCaptureQuality, RuntimeCoverageDataSource, RuntimeCoverageReport,
-    RuntimeCoverageSummary,
-};
+use fallow_output::RuntimeCoverageReport;
 
 use super::cloud_client::{
     CloudNeverCalledSource, CloudRuntimeContext, CloudRuntimeWarning, CloudTrackingState,
@@ -45,19 +42,13 @@ pub(super) fn print_runtime_summary(report: &RuntimeCoverageReport) {
         return;
     }
     println!("Runtime coverage: {}", report.verdict);
-    let count_or_unknown = |count: Option<usize>| {
-        count.map_or_else(|| "unknown".to_owned(), |value| value.to_string())
-    };
     println!(
-        "  {} tracked, {} hit, {} unhit, {} untracked ({}% covered)",
-        count_or_unknown(report.summary.functions_tracked),
+        "  {} tracked, {} hit, {} unhit, {} untracked ({:.1}% covered)",
+        report.summary.functions_tracked,
         report.summary.functions_hit,
-        count_or_unknown(report.summary.functions_unhit),
+        report.summary.functions_unhit,
         report.summary.functions_untracked,
-        report
-            .summary
-            .coverage_percent
-            .map_or_else(|| "unknown".to_owned(), |percent| format!("{percent:.1}")),
+        report.summary.coverage_percent,
     );
 }
 
@@ -72,28 +63,5 @@ pub(super) fn report_verdict(
         fallow_output::RuntimeCoverageReportVerdict::Clean
     } else {
         fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
-    }
-}
-
-/// A partial capture reports positive execution evidence only. The server turns
-/// never-called functions into untracked ones, so the tracked total, the unhit
-/// total and the coverage percent are not measured and serialize as null.
-pub(super) fn cloud_report_summary(
-    snapshot: &CloudRuntimeContext,
-    capture_quality: Option<RuntimeCoverageCaptureQuality>,
-) -> RuntimeCoverageSummary {
-    let measured = snapshot.capture_policy.is_none();
-    RuntimeCoverageSummary {
-        data_source: RuntimeCoverageDataSource::Cloud,
-        last_received_at: snapshot.summary.last_received_at.clone(),
-        functions_tracked: measured.then_some(snapshot.summary.functions_tracked),
-        functions_hit: snapshot.summary.functions_hit,
-        functions_unhit: measured.then_some(snapshot.summary.functions_unhit),
-        functions_untracked: snapshot.summary.functions_untracked,
-        coverage_percent: measured.then_some(snapshot.summary.coverage_percent),
-        trace_count: snapshot.summary.trace_count,
-        period_days: snapshot.window.period_days,
-        deployments_seen: snapshot.summary.deployments_seen,
-        capture_quality,
     }
 }

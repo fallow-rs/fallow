@@ -31,7 +31,7 @@ use fallow_output::{
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
     RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageRiskBand,
-    RuntimeCoverageSchemaVersion, RuntimeCoverageVerdict,
+    RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
@@ -872,10 +872,7 @@ fn merge_cloud_snapshot(
         schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: super::partial_capture::report_verdict(snapshot, &findings),
         signals: Vec::new(),
-        summary: super::partial_capture::cloud_report_summary(
-            snapshot,
-            cloud_capture_quality(snapshot),
-        ),
+        summary: cloud_report_summary(snapshot),
         findings,
         hot_paths,
         blast_radius,
@@ -910,6 +907,22 @@ fn sort_cloud_runtime_entries(
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.function.cmp(&right.function))
     });
+}
+
+fn cloud_report_summary(snapshot: &CloudRuntimeContext) -> RuntimeCoverageSummary {
+    RuntimeCoverageSummary {
+        data_source: RuntimeCoverageDataSource::Cloud,
+        last_received_at: snapshot.summary.last_received_at.clone(),
+        functions_tracked: snapshot.summary.functions_tracked,
+        functions_hit: snapshot.summary.functions_hit,
+        functions_unhit: snapshot.summary.functions_unhit,
+        functions_untracked: snapshot.summary.functions_untracked,
+        coverage_percent: snapshot.summary.coverage_percent,
+        trace_count: snapshot.summary.trace_count,
+        period_days: snapshot.window.period_days,
+        deployments_seen: snapshot.summary.deployments_seen,
+        capture_quality: cloud_capture_quality(snapshot),
+    }
 }
 
 struct RuntimeTrustOutput {
@@ -3112,7 +3125,7 @@ export const createStore = (rows: string[]) => {
             schema_version: RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
-            summary: fallow_output::RuntimeCoverageSummary::default(),
+            summary: RuntimeCoverageSummary::default(),
             findings: vec![
                 runtime_finding("fallow:prod:00000001"),
                 runtime_finding("fallow:prod:00000002"),

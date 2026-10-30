@@ -2250,33 +2250,24 @@
           "description": "Timestamp of the newest runtime payload included in the report. Null for\nlocal single-capture artifacts that do not carry cloud receipt metadata."
         },
         "functions_tracked": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "description": "Number of functions the sidecar could observe in the V8 or Istanbul\ndump. Null for a partial cloud capture, which reports positive\nexecution evidence only."
+          "type": "integer",
+          "description": "Number of functions the sidecar could observe in the V8 or Istanbul\ndump."
         },
         "functions_hit": {
           "type": "integer",
           "description": "Tracked functions that received at least one invocation."
         },
         "functions_unhit": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "description": "Tracked functions that were never invoked. Null for a partial cloud\ncapture, which cannot prove that a function never ran."
+          "type": "integer",
+          "description": "Tracked functions that were never invoked."
         },
         "functions_untracked": {
           "type": "integer",
           "description": "Functions the sidecar could not track (lazy-parsed, worker thread,\ndynamic code, unresolved source map)."
         },
         "coverage_percent": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "description": "Ratio of functions_hit / functions_tracked, expressed as a percent.\nNull for a partial cloud capture, because the denominator is unknown."
+          "type": "number",
+          "description": "Ratio of functions_hit / functions_tracked, expressed as a percent."
         },
         "trace_count": {
           "type": "integer",
@@ -2304,8 +2295,11 @@
       },
       "required": [
         "data_source",
+        "functions_tracked",
         "functions_hit",
+        "functions_unhit",
         "functions_untracked",
+        "coverage_percent",
         "trace_count",
         "period_days",
         "deployments_seen"

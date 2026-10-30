@@ -9751,19 +9751,17 @@ data_source: RuntimeCoverageDataSource
 last_received_at?: (string | null)
 /**
  * Number of functions the sidecar could observe in the V8 or Istanbul
- * dump. Null for a partial cloud capture, which reports positive
- * execution evidence only.
+ * dump.
  */
-functions_tracked?: (number | null)
+functions_tracked: number
 /**
  * Tracked functions that received at least one invocation.
  */
 functions_hit: number
 /**
- * Tracked functions that were never invoked. Null for a partial cloud
- * capture, which cannot prove that a function never ran.
+ * Tracked functions that were never invoked.
  */
-functions_unhit?: (number | null)
+functions_unhit: number
 /**
  * Functions the sidecar could not track (lazy-parsed, worker thread,
  * dynamic code, unresolved source map).
@@ -9771,9 +9769,8 @@ functions_unhit?: (number | null)
 functions_untracked: number
 /**
  * Ratio of functions_hit / functions_tracked, expressed as a percent.
- * Null for a partial cloud capture, because the denominator is unknown.
  */
-coverage_percent?: (number | null)
+coverage_percent: number
 /**
  * Total number of observed invocations across all functions. Denominator
  * for low-traffic classification.

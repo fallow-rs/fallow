@@ -641,10 +641,7 @@ fn partial_cloud_capture_preserves_calls_and_withholds_cold_claims() {
         let report = &parse_json(&output)["runtime_coverage"];
         assert_eq!(report["actionable"], false);
         assert_eq!(report["verdict"], "unknown");
-        assert!(report["summary"]["coverage_percent"].is_null(), "{report}");
-        assert!(report["summary"]["functions_tracked"].is_null(), "{report}");
-        assert!(report["summary"]["functions_unhit"].is_null(), "{report}");
-        assert_eq!(report["summary"]["functions_hit"], 1);
+        assert_eq!(report["summary"]["coverage_percent"].as_f64(), Some(50.0));
         assert!(
             report["warnings"]
                 .as_array()
