@@ -9,15 +9,17 @@
 # probe. A private directory per run keeps the probe at the entries of this
 # run only.
 #
-# The script also removes the directories of runs that started more than one
-# day ago, so the directories do not grow without limit.
+# Nothing removes the directory at the end of a run, and `cargo mutants` starts
+# one run per mutant. So the script removes each run directory with an mtime
+# older than two hours. The mtime of the directory changes each time a test
+# creates or removes a fixture in it, so a run that is active stays.
 set -eu
 
 base="${TMPDIR:-/tmp}"
 base="${base%/}"
 # `-name` comes first: the name test needs no stat call, and a shared temp
 # directory can hold tens of thousands of entries.
-find "$base" -maxdepth 1 -name 'fallow-nextest.*' -type d -mmin +1440 \
+find "$base" -maxdepth 1 -name 'fallow-nextest.*' -type d -mmin +120 \
   -exec rm -rf {} + 2>/dev/null || true
 dir="$(mktemp -d "$base/fallow-nextest.XXXXXX")"
 echo "TMPDIR=$dir" >> "$NEXTEST_ENV"

@@ -1,11 +1,16 @@
 # cargo-nextest configuration. CI selects a profile with `--profile`.
 # Local `cargo nextest run` keeps the default profile.
 
-experimental = ["setup-scripts"]
+# 0.9.123 is the first version with the table form of `[experimental]`.
+nextest-version = "0.9.123"
+
+[experimental]
+setup-scripts = true
 
 # Each run gets its own TMPDIR. Without it, the audit base snapshot caches
 # that earlier runs left in the shared temp directory make each `fallow
 # audit` in the suite probe thousands of stale entries. See the script.
+# The other profiles inherit this rule from `default`.
 [scripts.setup.run-tmpdir]
 command = "scripts/nextest-run-tmpdir.sh"
 

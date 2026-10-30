@@ -251,9 +251,11 @@ checkout exists.
 ### Test temp directory
 
 On Unix hosts, `cargo nextest run` gives each run its own `TMPDIR`. The setup
-script `scripts/nextest-run-tmpdir.sh` creates the directory and removes the
-directories of runs that started more than one day ago. `.config/nextest.toml`
-attaches the script to every profile.
+script `scripts/nextest-run-tmpdir.sh` creates the directory. It also removes
+each run directory that has not changed for two hours, because nothing removes
+a directory at the end of its run. `.config/nextest.toml` attaches the script
+to the `default` profile, and the other profiles inherit it. The config needs
+nextest 0.9.123 or later.
 
 The reason is the audit base snapshot cache. Each `fallow audit` in the suite
 leaves one cache entry in the temp directory, and each later audit probes all
@@ -261,6 +263,12 @@ entries. The fixture of a test is gone after the test, so its entry stays for
 the 30-day age limit. In a shared temp directory, a local suite run then
 spends most of its audit time on this probe. `cargo test` does not run the
 setup script, so it keeps the shared temp directory.
+
+On a long-lived host, the entries of earlier runs stay in the shared temp
+directory until their age limit. To remove them once, run
+`fallow audit-cache prune --max-age-days 0` from a repository. With age `0`,
+the command removes the entries whose recorded owner directory is gone. Add
+`--dry-run` to see the decisions first.
 
 ## CI placement
 
