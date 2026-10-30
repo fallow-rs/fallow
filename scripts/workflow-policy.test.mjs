@@ -920,6 +920,16 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   assert.match(npmPublish, /^\s+id: publish$/mu);
   assert.match(npmPublish, /fallow_sha256: \$\{\{ steps\.publish\.outputs\.fallow_sha256 \}\}/u);
   assert.match(npmPublish, /echo "fallow_sha256=\$digest" >> "\$GITHUB_OUTPUT"/u);
+  // A rerun after the stage approval finds the root public and skips it.
+  // The digest must still reach the gate, or the wait fails with an empty
+  // expected sha256 and no rerun can recover the run (v3.38.0).
+  const digestOutput = npmPublish.indexOf('echo "fallow_sha256=$digest" >> "$GITHUB_OUTPUT"');
+  const publishedSkip = npmPublish.indexOf('if npm view "$name@$version" version');
+  assert.notEqual(publishedSkip, -1, "npm-publish must skip a published tarball");
+  assert.ok(
+    digestOutput < publishedSkip,
+    "npm-publish must write the root digest before it skips a published tarball",
+  );
   assert.match(gate, /^\s+needs: npm-publish$/mu);
   assert.match(gate, /permissions:\n\s+contents: read/u);
   assert.doesNotMatch(gate, /^\s+environment:|secrets\.|id-token: write|actions\/checkout/mu);

@@ -1983,16 +1983,20 @@ jobs:
               continue
             fi
             echo "Publishing $name@$version from $file"
+            digest=$(sha256sum "$file" | cut -d' ' -f1)
+            # npm-root-approved compares the public tarball against this
+            # digest before any VSIX is published. Write it before the
+            # published check: a rerun after the stage approval skips the
+            # public root, and the gate still needs the digest (v3.38.0).
+            if is_staged_name "$name"; then
+              echo "fallow_sha256=$digest" >> "$GITHUB_OUTPUT"
+            fi
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "  Already published, skipping"
               index=$((index + 1))
               continue
             fi
             if is_staged_name "$name"; then
-              digest=$(sha256sum "$file" | cut -d' ' -f1)
-              # npm-root-approved compares the public tarball against this
-              # digest before any VSIX is published.
-              echo "fallow_sha256=$digest" >> "$GITHUB_OUTPUT"
               # One stage call per run, never a probing publish: every attempt
               # signs and logs a provenance statement before npm answers. The
               # token stays empty so authentication always uses the
