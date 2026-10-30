@@ -401,6 +401,10 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
     let mut results = input.results;
     apply_config_fixable_to_duplicate_exports(&mut results, input.config_fixable);
     harmonize_multi_kind_suppress_line_actions(&mut results);
+    let mut meta = input.meta;
+    if let Some(meta) = meta.as_mut() {
+        crate::retain_reported_rules(meta, [&results]);
+    }
     CheckOutput {
         schema_version: SchemaVersion(input.schema_version),
         version: ToolVersion(input.version),
@@ -427,7 +431,7 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
         gate_outcomes: None,
         request_outcomes: None,
         package_baselines: Vec::new(),
-        meta: input.meta,
+        meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     }

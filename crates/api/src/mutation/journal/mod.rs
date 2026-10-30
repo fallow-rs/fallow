@@ -32,7 +32,7 @@ use super::scheduler::{CachedResult, OutcomeJournal, ResultLookup, ScheduledMuta
 pub const JOURNAL_FILE: &str = "journal.jsonl";
 /// The version of the line format. A change to the header or the line shape
 /// needs a new version.
-pub const JOURNAL_FORMAT: u32 = 1;
+pub const JOURNAL_FORMAT: u32 = 2;
 /// The length of a run directory hash in a mismatch message.
 const SHOWN_HASH_LEN: usize = 12;
 /// The largest journal that `--resume` reads. A line is about 200 bytes, so
@@ -63,6 +63,8 @@ pub struct JournalHeader {
     /// The operator names. `None` uses each operator.
     pub operators: Option<Vec<String>>,
     pub allow_side_effects: bool,
+    #[serde(default)]
+    pub kill_matrix: bool,
 }
 
 impl JournalHeader {
@@ -101,6 +103,11 @@ impl JournalHeader {
             ),
             ("scope", self.scope.clone(), current.scope.clone()),
             (
+                "kill matrix",
+                self.kill_matrix.to_string(),
+                current.kill_matrix.to_string(),
+            ),
+            (
                 "operators",
                 operators(&self.operators),
                 operators(&current.operators),
@@ -127,6 +134,12 @@ struct Line {
     status: MutantStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     killed_by: Option<String>,
+    /// All observed failing tests, sorted. Timeouts do not count.
+    #[serde(default)]
+    killing_tests: Vec<String>,
+    /// True only for exact requested membership with terminal pass or fail results.
+    #[serde(default)]
+    kill_matrix_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     duration_ms: Option<u64>,
 }
@@ -409,6 +422,8 @@ impl OutcomeJournal for Journal {
         }
         Some(CachedResult {
             status: line.status,
+            killing_tests: line.killing_tests.clone(),
+            kill_matrix_complete: line.kill_matrix_complete,
             killed_by: line.killed_by.clone(),
             duration_ms: line.duration_ms,
         })
@@ -419,6 +434,8 @@ impl OutcomeJournal for Journal {
             id: mutant_id.to_owned(),
             key: key.to_owned(),
             status: result.status,
+            killing_tests: result.killing_tests.clone(),
+            kill_matrix_complete: result.kill_matrix_complete,
             killed_by: result.killed_by.clone(),
             duration_ms: result.duration_ms,
         };

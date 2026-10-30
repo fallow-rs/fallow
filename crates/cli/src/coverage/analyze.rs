@@ -282,7 +282,11 @@ fn local_health_options<'a>(
 }
 
 fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
-    let api_key = match resolve_api_key(args.api_key.as_deref(), CloudCommand::Analyze) {
+    let api_key = match resolve_api_key(
+        args.api_key.as_deref(),
+        args.api_endpoint.as_deref(),
+        CloudCommand::Analyze,
+    ) {
         Ok(api_key) => api_key,
         Err(err) => return emit_cloud_error(&err, ctx.output),
     };
@@ -356,18 +360,12 @@ fn runtime_coverage_source_env_is_cloud() -> bool {
 
 pub(super) fn resolve_api_key(
     explicit: Option<&str>,
+    api_endpoint: Option<&str>,
     command: CloudCommand,
 ) -> Result<String, CloudError> {
-    if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
-        return Ok(value.to_owned());
-    }
-    if let Ok(value) = std::env::var("FALLOW_API_KEY") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    Err(CloudError::Auth(cloud_api_key_missing_message(command)))
+    crate::coverage::credentials::resolve_api_key(explicit, api_endpoint)
+        .map(|resolved| resolved.key)
+        .ok_or_else(|| CloudError::Auth(cloud_api_key_missing_message(command)))
 }
 
 pub(super) fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudError> {
@@ -2090,7 +2088,7 @@ mod tests {
     #[test]
     fn resolve_api_key_prefers_trimmed_explicit_value() {
         assert_eq!(
-            resolve_api_key(Some("  fallow_live_token  "), CloudCommand::Analyze)
+            resolve_api_key(Some("  fallow_live_token  "), None, CloudCommand::Analyze)
                 .expect("explicit key should resolve"),
             "fallow_live_token"
         );

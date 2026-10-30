@@ -208,6 +208,7 @@ pub const COMMANDS_WITHOUT_ANALYSIS_ENVELOPE: &[(&str, &str)] = &[
     ("setup-hooks", "deprecated alias of hook installation"),
     ("coverage", "runtime coverage setup and analysis"),
     ("license", "license management"),
+    ("cloud", "Fallow Cloud login and logout"),
     ("telemetry", "telemetry settings"),
     ("schema", "capability manifest"),
 ];

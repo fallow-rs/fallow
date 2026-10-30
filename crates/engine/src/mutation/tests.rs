@@ -1223,3 +1223,36 @@ fn a_runner_config_file_and_its_imports_are_support_files() {
         "the runner config at the root and each file that it reaches through static imports are support files, so a change to a config fragment changes the result cache key"
     );
 }
+
+#[test]
+fn direct_export_test_files_are_retained_without_changing_public_reach_fields() {
+    let plan = plan_all(&fixture("mutation-test-reach"));
+    let add = plan
+        .mutants
+        .iter()
+        .filter_map(|mutant| mutant.test_reach.as_ref())
+        .find(|reach| reach.export_name.as_deref() == Some("add"))
+        .expect("add reach");
+    assert_eq!(add.export_test_files, ["src/math.test.ts"]);
+    assert_eq!(add.reach, ExportTestReach::Direct);
+    assert!(
+        add.tests.is_empty(),
+        "the public tests field remains mocked-only"
+    );
+    let value = serde_json::to_value(add).expect("reach JSON");
+    assert!(
+        value.get("export_test_files").is_none(),
+        "internal reach must not change the wire contract"
+    );
+    let mocked = plan
+        .mutants
+        .iter()
+        .filter(|mutant| mutant.file == "src/service.ts")
+        .filter_map(|mutant| mutant.test_reach.as_ref())
+        .find(|reach| reach.export_name.as_deref() == Some("price"))
+        .expect("mocked service reach");
+    assert_eq!(mocked.reach, ExportTestReach::MockedOnly);
+    assert_eq!(mocked.mocked_targets, ["src/service.ts"]);
+    assert_eq!(value["export_name"], "add");
+    assert_eq!(value["tests"], serde_json::json!([]));
+}

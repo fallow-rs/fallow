@@ -24,6 +24,9 @@ Coverage 80.0%  no coverage 1
 ● No coverage (1): no test reaches these mutants
   src/c.ts  1 mutant
 
+Test kill evidence: unavailable
+  kill-matrix-disabled: this run did not collect all killing tests. Use --kill-matrix.
+
 Pruned: 1 side-effect-sink
 
 Next

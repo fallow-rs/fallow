@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use fallow_output::{
     COMBINED_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, check_meta, dupes_meta,
-    harmonize_dead_code_health_suppress_line_actions, health_meta, serialize_combined_json_output,
-    strip_root_prefix,
+    harmonize_dead_code_health_suppress_line_actions, health_meta, retain_reported_rules,
+    serialize_combined_json_output, strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
@@ -112,6 +112,12 @@ pub fn serialize_combined_json(
             .check
             .get_or_insert_with(fallow_types::envelope::Meta::default);
         check_meta.type_aware = Some(type_aware);
+    }
+    if let (Some(results), Some(check_meta)) = (
+        check_results.as_ref(),
+        meta.as_mut().and_then(|meta| meta.check.as_mut()),
+    ) {
+        retain_reported_rules(check_meta, [results]);
     }
 
     let output = CombinedOutput {

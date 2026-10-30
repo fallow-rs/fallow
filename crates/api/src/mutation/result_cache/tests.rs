@@ -275,6 +275,7 @@ fn each_query_part_changes_the_key() {
 
 fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> ScheduleOutcome {
     ScheduleOutcome {
+        test_files: FxHashMap::default(),
         ready: None,
         results: results
             .iter()
@@ -283,6 +284,8 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
                     id.to_owned(),
                     MutantOutcome {
                         status,
+                        killing_tests: Vec::new(),
+                        kill_matrix_complete: false,
                         killed_by: (status == MutantStatus::Killed)
                             .then(|| "test/a.test.ts::adds".to_owned()),
                         covering_tests: vec!["test/a.test.ts::adds".to_owned()],
@@ -418,4 +421,35 @@ fn the_least_recently_used_entries_leave_above_the_cap() {
     assert!(cache.get("old", "k1").is_none(), "the oldest entry left");
     assert!(cache.get("used", "k2").is_some(), "a hit keeps an entry");
     assert!(cache.get("new", "k3").is_some());
+}
+
+#[test]
+fn matrix_cache_roundtrip_keeps_complete_killers_and_rejects_partial_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let cache = open(dir.path());
+    let mut run = outcome(
+        &[
+            ("m1", MutantStatus::Killed, false),
+            ("m2", MutantStatus::Killed, false),
+        ],
+        &[("m1", "matrix:k1"), ("m2", "matrix:k2")],
+    );
+    let first = run.results.get_mut("m1").unwrap();
+    first.killing_tests = vec![
+        "test/a.test.ts::adds".to_owned(),
+        "test/a.test.ts::again".to_owned(),
+    ];
+    first.kill_matrix_complete = true;
+    cache.record(&run);
+    cache.save().unwrap();
+    let next = open(dir.path());
+    let hit = next.get("m1", "matrix:k1").unwrap();
+    assert_eq!(
+        hit.killing_tests,
+        ["test/a.test.ts::adds", "test/a.test.ts::again"]
+    );
+    assert!(hit.kill_matrix_complete);
+    assert!(next.get("m1", "k1").is_none());
+    assert!(next.get("m2", "matrix:k2").is_none());
 }

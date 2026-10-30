@@ -182,6 +182,7 @@ jobs:
               - 'crates/engine/src/health/coverage_v8/**'
               - 'crates/engine/src/trace_error.rs'
               - 'crates/cli/src/signal/**'
+              - 'crates/cli/src/coverage/credentials.rs'
               - 'crates/cli/src/write_scope.rs'
               - 'crates/cli/Cargo.toml'
               - 'crates/process/src/scoped_child.rs'

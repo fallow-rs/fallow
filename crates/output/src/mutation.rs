@@ -13,19 +13,19 @@ use crate::audit_test_reach::TestReachClass;
 use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
-pub const MUTATION_SCHEMA_VERSION: u32 = 1;
+pub const MUTATION_SCHEMA_VERSION: u32 = 2;
 /// Current mutation plan schema version.
 pub const MUTATION_PLAN_SCHEMA_VERSION: u32 = 1;
 /// Current mutation inspect schema version.
-pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 1;
+pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 2;
 
 /// Version singleton for a mutation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum MutationSchemaVersion {
-    /// Initial independent contract.
-    #[serde(rename = "1")]
-    V1,
+    /// Adds complete kill matrix evidence.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// Version singleton for a mutation plan.
@@ -359,15 +359,21 @@ pub struct MutantResult {
     /// The test that killed the mutant in this run. Absent for a kill by an
     /// error outside a test.
     ///
-    /// This is evidence of one run, not a stable fact. A run stops at the
-    /// first failing test, and it runs the fastest covering test first, so a
-    /// second run on the same code can name another covering test. No
+    /// This is evidence of one run, not a stable fact. A normal run stops at
+    /// the first failing test. A kill matrix run retains each failing test
+    /// in `killing_tests`. Tests run in measured fastest-first order, so a
+    /// second run on the same code can name another first killer. No
     /// fingerprint or baseline comparison uses this field.
     ///
     /// The retry of a survivor also runs the other tests of its test files,
     /// so this test can be absent from `covering_tests`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed_by: Option<String>,
+    /// All observed failing tests, sorted. Timeouts do not count. Empty
+    /// outside `--kill-matrix`; `killed_by` keeps the first killer.
+    pub killing_tests: Vec<String>,
+    /// True only for exact requested membership with terminal pass or fail results.
+    pub kill_matrix_complete: bool,
     /// The tests that reached the mutant in the dry run, sorted by test id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub covering_tests: Vec<String>,
@@ -420,6 +426,11 @@ pub struct MutantAttempt {
     /// The test that killed the mutant in this run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed_by: Option<String>,
+    /// All observed failing tests, sorted. Timeouts do not count. Empty
+    /// outside `--kill-matrix`; `killed_by` keeps the first killer.
+    pub killing_tests: Vec<String>,
+    /// True only for exact requested membership with terminal pass or fail results.
+    pub kill_matrix_complete: bool,
     /// How the run detected the mutant. Absent for a run that did not detect
     /// it, and absent when the runner did not state the kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -745,6 +756,66 @@ pub struct MutationTypecheckOutput {
     pub skipped: Vec<MutationTypecheckSkip>,
 }
 
+/// The quality of observed test-to-mutant evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationKillMatrixStatus {
+    /// Each eligible test has a terminal result for each covered mutant.
+    Complete,
+    /// At least one result is missing or inconclusive.
+    Incomplete,
+    /// The run did not request a kill matrix.
+    Unavailable,
+}
+
+/// The observed mutant kills of one eligible test.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationTestKillRow {
+    /// The runner test id.
+    pub test_id: String,
+    /// The root-relative test file.
+    pub file: String,
+    /// The observed killed mutant ids, sorted.
+    pub kills: Vec<String>,
+    /// The mutant ids that no other eligible test kills, sorted.
+    pub unique_kills: Vec<String>,
+    /// The tests whose kill sets contain this full kill set, sorted.
+    pub subsuming_tests: Vec<String>,
+    /// Conservative evidence notes, sorted.
+    pub notes: Vec<String>,
+}
+
+/// Redundancy signals over the observed mutants. Candidates need review.
+/// Removing candidates together can remove all tests for a mutant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationKillMatrix {
+    /// Whether the matrix supports candidate analysis.
+    pub status: MutationKillMatrixStatus,
+    /// Why evidence is unavailable or incomplete, sorted.
+    pub reasons: Vec<String>,
+    /// Each eligible test with observed coverage, sorted by test id.
+    pub tests: Vec<MutationTestKillRow>,
+    /// Tests with nonempty kills and no unique kills, sorted by test id.
+    pub candidates: Vec<String>,
+    /// Tests with coverage and no observed kills, sorted by test id.
+    pub coverage_without_kills: Vec<String>,
+}
+
+impl Default for MutationKillMatrix {
+    fn default() -> Self {
+        Self {
+            status: MutationKillMatrixStatus::Unavailable,
+            reasons: vec!["kill-matrix-disabled".to_owned()],
+            tests: Vec::new(),
+            candidates: Vec::new(),
+            coverage_without_kills: Vec::new(),
+        }
+    }
+}
+
 /// The envelope of `fallow mutation`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -757,6 +828,8 @@ pub struct MutationReport {
     pub elapsed_ms: ElapsedMs,
     /// Whether the result is conclusive.
     pub completion: MutationCompletion,
+    /// The observed kill matrix and candidate review signals.
+    pub kill_matrix: MutationKillMatrix,
     /// The mutated code.
     pub scope: MutationScopeOutput,
     /// The runner. Absent when no companion started, for example when no
@@ -977,9 +1050,9 @@ pub struct MutationPlanOutput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum MutationInspectSchemaVersion {
-    /// Initial independent contract.
-    #[serde(rename = "1")]
-    V1,
+    /// Adds complete kill matrix evidence.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// Whether the saved report still describes the current file.
@@ -1056,6 +1129,11 @@ pub struct MutationInspectOutput {
     pub static_test_files: Vec<String>,
     /// The test that killed the mutant in the run of the report.
     pub killed_by: Option<String>,
+    /// All observed failing tests, sorted. Timeouts do not count. Empty
+    /// outside `--kill-matrix`; `killed_by` keeps the first killer.
+    pub killing_tests: Vec<String>,
+    /// True only for exact requested membership with terminal pass or fail results.
+    pub kill_matrix_complete: bool,
 }
 
 /// Serialize a mutation report with its root discriminator.
@@ -1145,6 +1223,8 @@ mod tests {
             },
             status,
             prune_reason: None,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             covering_tests: covering_tests
                 .iter()
@@ -1287,6 +1367,8 @@ mod tests {
             },
             status: MutantStatus::NoCoverage,
             prune_reason: None,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             covering_tests: Vec::new(),
             static_mutant: false,
@@ -1311,7 +1393,9 @@ mod tests {
                 "function": "add",
                 "function_line": 1,
                 "rank": 1,
-                "status": "no_coverage"
+                "status": "no_coverage",
+                "killing_tests": [],
+                "kill_matrix_complete": false
             })
         );
     }
@@ -1320,6 +1404,8 @@ mod tests {
         let attempt = |status, duration_ms, failure_kind| MutantAttempt {
             status,
             duration_ms: Some(duration_ms),
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             failure_kind,
             detail: None,
@@ -1339,6 +1425,8 @@ mod tests {
             },
             status: MutantStatus::Flaky,
             prune_reason: None,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             covering_tests: Vec::new(),
             static_mutant: false,
@@ -1361,8 +1449,8 @@ mod tests {
         assert_eq!(
             value["attempts"],
             serde_json::json!([
-                {"status": "timeout", "duration_ms": 5000, "failure_kind": "timeout"},
-                {"status": "survived", "duration_ms": 12}
+                {"status": "timeout", "duration_ms": 5000, "failure_kind": "timeout", "killing_tests": [], "kill_matrix_complete": false},
+                {"status": "survived", "duration_ms": 12, "killing_tests": [], "kill_matrix_complete": false}
             ])
         );
         assert_eq!(value["retried"], serde_json::json!(true));

@@ -291,7 +291,7 @@ pub fn telemetry_workflow_for_command(
             | Command::Schema
             | Command::Viz { .. },
         ) => telemetry::Workflow::ProjectInventory,
-        Some(Command::License { .. }) => telemetry::Workflow::License,
+        Some(Command::License { .. } | Command::Cloud { .. }) => telemetry::Workflow::License,
         Some(
             Command::SimilarCode { .. }
             | Command::Init { .. }

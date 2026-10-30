@@ -80,6 +80,9 @@ pub fn scrub_analysis_env(cmd: &mut Command) {
     cmd.env_remove("FALLOW_COVERAGE")
         .env_remove("FALLOW_COVERAGE_ROOT")
         .env_remove("FALLOW_PACKAGE_BASELINES")
+        // A key that `fallow cloud login` stored on the developer machine must
+        // not reach a test.
+        .env("FALLOW_CREDENTIAL_STORE", "none")
         // A test suite started inside a Claude Code session must not get the
         // plugin hint on stderr.
         .env_remove("CLAUDECODE")

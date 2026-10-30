@@ -6,11 +6,6 @@ use crate::params::CloudRuntimeContextParams;
 
 use super::{push_global, push_remote_extends, run_tool_with_limit, typed_validation_error_body};
 
-/// Bearer token for the cloud pull. It stays an environment variable of the
-/// server process rather than a tool parameter: a key sent as a call argument
-/// would be recorded in every agent transcript that made the call.
-const API_KEY_ENV: &str = "FALLOW_API_KEY";
-
 /// Widest window the cloud runtime-context endpoint serves, mirroring the
 /// CLI's `--coverage-period` bound so an out-of-range request is refused here
 /// instead of costing a round trip.
@@ -24,13 +19,20 @@ pub async fn run_get_cloud_runtime_context(
     binary: &str,
     params: CloudRuntimeContextParams,
 ) -> Result<CallToolResult, McpError> {
-    match build_get_cloud_runtime_context_args(&params, api_key_is_set()) {
+    match build_get_cloud_runtime_context_args(&params) {
         Ok(args) => {
-            run_tool_with_limit(
+            run_cloud_tool(
                 binary,
                 "get_cloud_runtime_context",
                 &args,
                 params.max_output_bytes,
+                || {
+                    cloud_api_key_missing_body(
+                        "get_cloud_runtime_context",
+                        CloudCommand::Analyze,
+                        RUNTIME_CONTEXT_ALTERNATIVE,
+                    )
+                },
             )
             .await
         }
@@ -38,13 +40,43 @@ pub async fn run_get_cloud_runtime_context(
     }
 }
 
-/// Whether the server environment carries a usable API key. A variable set to
-/// whitespace counts as unset, as it does for the CLI.
-pub(super) fn api_key_is_set() -> bool {
-    std::env::var(API_KEY_ENV).is_ok_and(|value| !value.trim().is_empty())
+const RUNTIME_CONTEXT_ALTERNATIVE: &str =
+    "For a local coverage dump instead, call check_runtime_coverage with a `coverage` path.";
+
+/// Run a cloud tool through the CLI. The CLI resolves the key with the same
+/// order as every other cloud command (`FALLOW_API_KEY`, then the key that
+/// `fallow cloud login` stored). The CLI checks the key before any analysis,
+/// so a call without a key stops fast. That refusal comes back as the typed
+/// `cloud_api_key_missing` body.
+pub(super) async fn run_cloud_tool(
+    binary: &str,
+    tool: &'static str,
+    args: &[String],
+    max_output_bytes: Option<usize>,
+    refusal: impl FnOnce() -> String,
+) -> Result<CallToolResult, McpError> {
+    let result = run_tool_with_limit(binary, tool, args, max_output_bytes).await?;
+    if result.is_error == Some(true)
+        && result
+            .content
+            .iter()
+            .filter_map(|block| block.as_text())
+            .any(|text| is_missing_key_refusal(&text.text))
+    {
+        return Ok(CallToolResult::error(vec![ContentBlock::text(refusal())]));
+    }
+    Ok(result)
 }
 
-/// The typed refusal of a cloud tool called without `FALLOW_API_KEY`.
+/// Whether CLI output is the refusal of a cloud command without a key.
+pub(super) fn is_missing_key_refusal(text: &str) -> bool {
+    text.contains(MISSING_KEY_REFUSAL_START)
+}
+
+/// The first sentence of `cloud_api_key_missing_message`.
+const MISSING_KEY_REFUSAL_START: &str = "Cloud runtime coverage requires an API key.";
+
+/// The typed refusal of a cloud tool when the CLI found no key.
 /// `command` is the CLI command the tool runs, so the message matches the
 /// CLI refusal of that command word for word.
 pub(super) fn cloud_api_key_missing_body(
@@ -56,8 +88,8 @@ pub(super) fn cloud_api_key_missing_body(
         cloud_api_key_missing_message(command),
         "cloud_api_key_missing",
         &format!(
-            "Set FALLOW_API_KEY in the environment the MCP server runs in and restart it. \
-             The tool takes no key parameter. {alternative}"
+            "Run `fallow cloud login`, or set FALLOW_API_KEY in the environment the MCP server \
+             runs in and restart it. The tool takes no key parameter. {alternative}"
         ),
         &format!("{tool}.api_key"),
     )
@@ -89,23 +121,12 @@ pub(super) fn cloud_repo_param<'a>(tool: &str, raw: &'a str) -> Result<&'a str, 
     Ok(repo)
 }
 
-/// Build CLI arguments for the `get_cloud_runtime_context` tool.
-///
-/// `api_key_is_set` is injected rather than read here so the builder's
-/// refusals are testable without mutating the process environment that
-/// concurrent tests in this binary share.
+/// Build CLI arguments for the `get_cloud_runtime_context` tool. The key is
+/// never a tool parameter: a key sent as a call argument would be recorded in
+/// every transcript that made the call. The CLI reads it.
 pub fn build_get_cloud_runtime_context_args(
     params: &CloudRuntimeContextParams,
-    api_key_is_set: bool,
 ) -> Result<Vec<String>, String> {
-    if !api_key_is_set {
-        return Err(cloud_api_key_missing_body(
-            "get_cloud_runtime_context",
-            CloudCommand::Analyze,
-            "For a local coverage dump instead, call check_runtime_coverage with a `coverage` path.",
-        ));
-    }
-
     let repo = cloud_repo_param("get_cloud_runtime_context", &params.repo)?;
 
     if let Some(period_days) = params.period_days

@@ -157,6 +157,8 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         location: location(mutant),
         status: MutantStatus::Pending,
         prune_reason: prune_reason(mutant),
+        killing_tests: Vec::new(),
+        kill_matrix_complete: false,
         killed_by: None,
         covering_tests: Vec::new(),
         static_mutant: false,
@@ -179,6 +181,8 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             Some(result),
         ) => MutantResult {
             status: result.status,
+            killing_tests: result.killing_tests.clone(),
+            kill_matrix_complete: result.kill_matrix_complete,
             killed_by: result.killed_by.clone(),
             covering_tests: result.covering_tests.clone(),
             static_mutant: result.static_mutant,
@@ -499,6 +503,7 @@ mod tests {
                 reach: ExportTestReach::MockedOnly,
                 export_name: Some("add".to_owned()),
                 tests: vec!["test/a.test.ts".to_owned()],
+                export_test_files: Vec::new(),
                 mocked_targets: vec!["src/a.ts".to_owned()],
             }),
         }
@@ -532,6 +537,7 @@ mod tests {
 
     fn outcome(results: &[(&str, MutantStatus)]) -> ScheduleOutcome {
         ScheduleOutcome {
+            test_files: FxHashMap::default(),
             ready: None,
             results: results
                 .iter()
@@ -540,6 +546,8 @@ mod tests {
                         (*id).to_owned(),
                         MutantOutcome {
                             status: *status,
+                            killing_tests: Vec::new(),
+                            kill_matrix_complete: false,
                             killed_by: (*status == MutantStatus::Killed)
                                 .then(|| "test/a.test.ts::t1".to_owned()),
                             covering_tests: vec!["test/a.test.ts::t1".to_owned()],

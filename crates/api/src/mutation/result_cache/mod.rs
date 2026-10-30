@@ -42,7 +42,7 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 pub const RESULT_CACHE_FILE: &str = "results.json";
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 4;
+const FORMAT_VERSION: u32 = 5;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The inputs of a test that the key does not hash.
@@ -217,6 +217,12 @@ struct Entry {
     status: MutantStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     killed_by: Option<String>,
+    /// All observed failing tests, sorted. Timeouts do not count.
+    #[serde(default)]
+    killing_tests: Vec<String>,
+    /// True only for exact requested membership with terminal pass or fail results.
+    #[serde(default)]
+    kill_matrix_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     duration_ms: Option<u64>,
     /// The inputs of a test that the key does not hash.
@@ -400,7 +406,11 @@ impl ResultCache {
             let Some(result) = outcome.results.get(id) else {
                 continue;
             };
-            if result.cached || !is_cacheable(result.status) || outcome.unretried.contains(id) {
+            if result.cached
+                || !is_cacheable(result.status)
+                || outcome.unretried.contains(id)
+                || (key.starts_with("matrix:") && !result.kill_matrix_complete)
+            {
                 continue;
             }
             state.entries.insert(
@@ -408,6 +418,8 @@ impl ResultCache {
                 Entry {
                     key: key.clone(),
                     status: result.status,
+                    killing_tests: result.killing_tests.clone(),
+                    kill_matrix_complete: result.kill_matrix_complete,
                     killed_by: result.killed_by.clone(),
                     duration_ms: result.duration_ms,
                     not_keyed: NOT_KEYED.iter().map(|&item| item.to_owned()).collect(),
@@ -503,6 +515,8 @@ impl ResultLookup for ResultCache {
                 entry.generation = generation;
                 CachedResult {
                     status: entry.status,
+                    killing_tests: entry.killing_tests.clone(),
+                    kill_matrix_complete: entry.kill_matrix_complete,
                     killed_by: entry.killed_by.clone(),
                     duration_ms: entry.duration_ms,
                 }

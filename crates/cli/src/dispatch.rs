@@ -22,18 +22,18 @@ use crate::dupes::{DupesOptions, DupesOverrides};
 use crate::error::emit_error;
 use crate::health::HealthOptions;
 use crate::list::ListOptions;
-use crate::runtime_support::{
-    AnalysisKind, ConfigLoadOptions, LoadConfigArgs, load_config, load_config_for_analysis,
-};
+use crate::runtime_support::{AnalysisKind, LoadConfigArgs, load_config};
 use crate::{
     DEFAULT_MIN_INVOCATIONS_HOT, DispatchContext, audit, audit_cache_prune, base_worktree,
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
-    config, coverage, dupes, error, explain, fix, flags, guard, health, init, inspect, json_style,
-    license, list, migrate, mutation_cli, onboarding, plugin_check, regression,
-    regression_save_targets, report, resolve_audit_baseline_path, rule_pack, security, selector,
-    setup_hooks, similar_code_cli, suppressions, telemetry, trace_chain, trace_dependency,
-    trace_error, trace_path, viz, watch,
+    config, coverage, dupes, error, explain, fix, flags, guard, health, init, json_style, license,
+    list, migrate, mutation_cli, onboarding, plugin_check, regression, regression_save_targets,
+    report, resolve_audit_baseline_path, rule_pack, security, setup_hooks, similar_code_cli,
+    suppressions, telemetry, trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
 };
+
+#[path = "dispatch_inspect.rs"]
+mod inspect_dispatch;
 
 fn dispatch_mutation_command(
     dispatch: &DispatchContext<'_>,
@@ -159,12 +159,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         Command::Mutation { subcommand, args } => {
             dispatch_mutation_command(dispatch, subcommand, args)
         }
-        Command::Inspect {
-            file,
-            symbol,
-            symbol_chain,
-            churn,
-        } => dispatch_inspect_command(dispatch, file, symbol, symbol_chain, churn),
+        inspect @ Command::Inspect { .. } => inspect_dispatch::dispatch_inspect(dispatch, inspect),
         Command::Trace {
             symbol,
             dependency,
@@ -307,6 +302,9 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
         Command::License { subcommand } => {
             dispatch_license_command(subcommand, output, dispatch.json_style)
+        }
+        Command::Cloud { subcommand } => {
+            inspect_dispatch::dispatch_cloud(subcommand, output, dispatch.json_style)
         }
         Command::Telemetry { .. } => unreachable!("handled before root validation"),
         Command::Coverage { subcommand } => dispatch_coverage_command(dispatch, &subcommand),
@@ -690,81 +688,6 @@ fn enable_check_filter(filters: &mut IssueFilters, flag: &str, active: bool) {
             "check command uses unregistered dead-code filter flag {flag}"
         );
     }
-}
-
-fn dispatch_inspect_command(
-    dispatch: &DispatchContext<'_>,
-    file: Option<String>,
-    symbol: Option<String>,
-    symbol_chain: bool,
-    churn: bool,
-) -> ExitCode {
-    let target = match (file, symbol) {
-        (Some(file), None) => inspect::InspectTarget::File { file },
-        (None, Some(symbol)) => match selector::parse_file_symbol_selector(&symbol) {
-            Some((file, export_name)) => inspect::InspectTarget::Symbol {
-                file: file.to_string(),
-                export_name: export_name.to_string(),
-            },
-            None => {
-                return emit_error(
-                    "--symbol must be formatted as FILE:EXPORT",
-                    2,
-                    dispatch.output,
-                );
-            }
-        },
-        _ => {
-            return emit_error(
-                "inspect requires exactly one of --file or --symbol",
-                2,
-                dispatch.output,
-            );
-        }
-    };
-
-    let churn_config = if churn {
-        match load_config_for_analysis(
-            dispatch.root,
-            &dispatch.cli.config,
-            ConfigLoadOptions {
-                output: dispatch.output,
-                no_cache: dispatch.cli.no_cache,
-                threads: dispatch.threads,
-                production_override: None,
-                quiet: dispatch.quiet,
-                allow_remote_extends: dispatch.cli.allow_remote_extends,
-            },
-            fallow_config::ProductionAnalysis::Health,
-        ) {
-            Ok(config) => Some(config),
-            Err(code) => return code,
-        }
-    } else {
-        None
-    };
-
-    inspect::run_inspect(&inspect::InspectOptions {
-        root: dispatch.root,
-        config_path: dispatch.cli.config.as_ref(),
-        output: dispatch.output,
-        json_style: dispatch.json_style,
-        no_cache: dispatch.cli.no_cache,
-        no_production: dispatch.cli.no_production,
-        max_file_size: dispatch.cli.max_file_size,
-        threads: dispatch.threads,
-        quiet: dispatch.quiet,
-        production: dispatch.cli.production,
-        workspace: dispatch.cli.workspace.as_ref(),
-        target,
-        churn_cache_dir: churn_config
-            .as_ref()
-            .map(|config| config.cache_dir.as_path()),
-        symbol_chain,
-        type_aware: dispatch.cli.type_aware_override(),
-        type_aware_projects: &dispatch.cli.type_aware_project,
-        type_aware_require: dispatch.cli.type_aware_require.map(Into::into),
-    })
 }
 
 /// The call-chain flags of `fallow trace FILE:SYMBOL`.

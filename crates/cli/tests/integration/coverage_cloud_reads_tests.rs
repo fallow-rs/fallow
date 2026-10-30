@@ -561,6 +561,7 @@ fn run_without_api_key(args: &[&str]) -> serde_json::Value {
         .env("RUST_LOG", "")
         .env_remove("FALLOW_API_KEY")
         .env_remove("FALLOW_API_URL")
+        .env("FALLOW_CREDENTIAL_STORE", "none")
         .output()
         .expect("run fallow");
     let stdout = String::from_utf8_lossy(&output.stdout);

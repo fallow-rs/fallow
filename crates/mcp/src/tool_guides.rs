@@ -147,9 +147,9 @@ const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
         topic: "FALLOW_API_KEY",
         summary: "Where the key comes from and what an absent one returns.",
-        detail: r#"The key is read from `FALLOW_API_KEY` in the MCP server process environment. Configure it where the server is launched; it never travels in a tool call. A whitespace-only key counts as absent. Restart the server after exporting a new value. The server does not inherit later changes to its launch environment.
+        detail: r#"The key never travels in a tool call. The CLI that the tool runs reads `FALLOW_API_KEY` in the MCP server process environment, else the key that `fallow cloud login` stored on the machine. A whitespace-only key counts as absent. Restart the server after exporting a new value. The server does not inherit later changes to its launch environment.
 
-A call without a key is refused before any subprocess starts. It returns `isError` and a body carrying `error: true`, `exit_code: 2`, `code: "cloud_api_key_missing"`, and the same remediation sentence the CLI prints for `coverage analyze --cloud`. This refusal does not justify retrying with different parameters: the tool cannot answer without a key. Use the local `check_runtime_coverage` with a `coverage` path as the alternative."#,
+A call without a key stops before the analysis starts. It returns `isError` and a body carrying `error: true`, `exit_code: 2`, `code: "cloud_api_key_missing"`, and the same remediation sentence the CLI prints for `coverage analyze --cloud`. This refusal does not justify retrying with different parameters: the tool cannot answer without a key. Use the local `check_runtime_coverage` with a `coverage` path as the alternative."#,
     },
     ToolGuideSection {
         topic: "root",

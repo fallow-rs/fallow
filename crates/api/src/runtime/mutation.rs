@@ -748,6 +748,7 @@ fn open_stores(
         scope: scope_label(options, planned.base_ref.as_deref(), root),
         operators: planned.operators.clone(),
         allow_side_effects: options.allow_side_effects,
+        kill_matrix: options.kill_matrix,
     };
     let run_journal = start_journal(options, planned, mutation_cache, &header, keys)?;
     Ok((result_cache, run_journal))
@@ -971,6 +972,7 @@ fn execute(
             options: init_options(runner, &root, &plan.test_files),
         },
         runner: range.clone(),
+        kill_matrix: options.kill_matrix,
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),
         runner_timeout: options.runner_timeout.unwrap_or(DEFAULT_RUNNER_TIMEOUT),
         deadline,
@@ -1158,9 +1160,17 @@ pub fn run_mutation_with_progress(
     errors.extend(typecheck.issue);
     let timings = run_timings(outcome, execution.setup_ms, plan_ms, typecheck_ms);
     Ok(MutationReport {
-        schema_version: MutationSchemaVersion::V1,
+        schema_version: MutationSchemaVersion::V2,
         version: tool_version(),
         elapsed_ms: ElapsedMs(millis(started.elapsed())),
+        kill_matrix: crate::mutation::kill_matrix::build(
+            options.kill_matrix,
+            &results,
+            &baseline,
+            &completion,
+            &plan.mutants,
+            outcome.map(|outcome| &outcome.test_files),
+        ),
         completion,
         scope: scope_output(options, planned.base_ref.clone()),
         runner: execution.runner,

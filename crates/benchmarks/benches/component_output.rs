@@ -94,6 +94,7 @@ fn create_inspect_output() -> InspectOutput {
             api_surface: None,
             symbol_impact: None,
             targeted_tests: None,
+            cloud: None,
         },
         warnings: Vec::new(),
         meta: None,

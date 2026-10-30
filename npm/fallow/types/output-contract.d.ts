@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field. A `--lean` document is not a root branch: it validates against `LeanOutput`.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -1255,6 +1255,14 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Status of the [`InspectCloudEvidence`] section.
+ */
+export type InspectCloudStatus = ("ok" | "no_key" | "plan_required" | "unavailable" | "untracked")
+/**
+ * How a local function was paired with a deployed function.
+ */
+export type InspectCloudMatch = ("stable_id" | "name_ordinal")
+/**
  * Whether a whole-word text search for an export name finds a consumer that
  * the module graph resolves. The levels sort from best to worst.
  */
@@ -1768,11 +1776,15 @@ export type SimilarCodeCacheClearSchemaVersion = "1"
 /**
  * Version singleton for a mutation report.
  */
-export type MutationSchemaVersion = "1"
+export type MutationSchemaVersion = "2"
 /**
  * Why a run is partial.
  */
 export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "test-files-not-discovered" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
+/**
+ * The quality of observed test-to-mutant evidence.
+ */
+export type MutationKillMatrixStatus = ("complete" | "incomplete" | "unavailable")
 /**
  * Which code a run mutates.
  */
@@ -1800,7 +1812,7 @@ export type MutationPlanDisposition = ("planned" | "pending" | "no_coverage" | "
 /**
  * Version singleton for a mutation inspect packet.
  */
-export type MutationInspectSchemaVersion = "1"
+export type MutationInspectSchemaVersion = "2"
 /**
  * Whether the saved report still describes the current file.
  */
@@ -12304,6 +12316,12 @@ symbol_impact?: (InspectEvidenceSection | null)
  * Present only for a symbol target in type-aware mode.
  */
 targeted_tests?: (InspectEvidenceSection | null)
+/**
+ * OPT-IN Fallow Cloud production evidence for a file target. Present
+ * only when `--cloud` was requested. A missing key, a plan gate or an
+ * unreachable cloud is a section status, never a failed run.
+ */
+cloud?: (InspectCloudEvidence | null)
 }
 /**
  * One evidence section: status, the scope the evidence covers, and either a
@@ -12322,6 +12340,161 @@ message?: (string | null)
 data?: {
 [k: string]: unknown
 }
+}
+/**
+ * `evidence.cloud` block: production data of the target file from Fallow
+ * Cloud, paired with the functions of the local file.
+ *
+ * `null` in a count means "not measured", never zero.
+ */
+export interface InspectCloudEvidence {
+status: InspectCloudStatus
+/**
+ * Explanation for a status other than `ok`, or a note on an `ok`
+ * section (for example that the cloud left out functions).
+ */
+message?: (string | null)
+/**
+ * Fallow Cloud repository that was read, when it was resolved.
+ */
+repo?: (string | null)
+/**
+ * Newest deployment commit with data for the file.
+ */
+latest_sha?: (string | null)
+/**
+ * Days of production data the cloud read covers.
+ */
+period_days?: (number | null)
+/**
+ * File summary from the cloud. `None` when the cloud was not read.
+ */
+summary?: (InspectCloudSummary | null)
+/**
+ * Local functions paired with a deployed function.
+ */
+functions: InspectCloudFunction[]
+/**
+ * Local functions without a deployed function.
+ */
+unpaired_local: InspectCloudUnpairedFunction[]
+}
+/**
+ * File summary of the [`InspectCloudEvidence`] section.
+ */
+export interface InspectCloudSummary {
+/**
+ * Deployed functions of the file.
+ */
+functions: number
+/**
+ * Functions that ran in the period.
+ */
+called: number
+/**
+ * Functions that were tracked and did not run.
+ */
+never_called: number
+/**
+ * Functions without production data.
+ */
+untracked: number
+/**
+ * Calls of all functions of the file. `None` when not measured.
+ */
+calls?: (number | null)
+/**
+ * Error groups of the file. `None` when not measured.
+ */
+error_groups?: (number | null)
+/**
+ * Error events of the file. `None` when not measured.
+ */
+error_events?: (number | null)
+/**
+ * One-line summary from the cloud.
+ */
+text: string
+}
+/**
+ * One local function with its production data.
+ */
+export interface InspectCloudFunction {
+/**
+ * Function name in the local file.
+ */
+name: string
+/**
+ * 1-based start line in the local file.
+ */
+line: number
+/**
+ * Stable id of the deployed function.
+ */
+stable_id?: (string | null)
+match: InspectCloudMatch
+/**
+ * Tracking state in the current deployment: `called`, `never_called` or
+ * `untracked`.
+ */
+state: string
+/**
+ * Tracking state over the whole period, earlier deployments included.
+ * `called` with `state` `never_called` means that the function did not
+ * run in this deployment, but ran in an earlier one. `None` when the
+ * cloud does not say.
+ */
+period_state?: (string | null)
+/**
+ * Calls in the period. `None` when not measured.
+ */
+calls?: (number | null)
+/**
+ * Error counts. `None` when error capture did not cover the function.
+ */
+errors?: (InspectCloudErrors | null)
+/**
+ * Self CPU milliseconds per profiled hour. `None` when not measured.
+ */
+cpu_ms_per_hour?: (number | null)
+/**
+ * Branch ranges that never ran. `None` when not measured.
+ */
+never_run_ranges?: (number | null)
+/**
+ * One-line summary from the cloud.
+ */
+summary: string
+}
+/**
+ * Error counts of one function.
+ */
+export interface InspectCloudErrors {
+/**
+ * Error groups attributed to the function.
+ */
+groups: number
+/**
+ * Error events attributed to the function.
+ */
+events: number
+}
+/**
+ * One local function without a deployed function.
+ */
+export interface InspectCloudUnpairedFunction {
+/**
+ * Function name in the local file.
+ */
+name: string
+/**
+ * 1-based start line in the local file.
+ */
+line: number
+/**
+ * Why the function has no production data.
+ */
+note: string
 }
 /**
  * Result of tracing an export: why it is considered used or unused.
@@ -20049,6 +20222,7 @@ schema_version: MutationSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 completion: MutationCompletion
+kill_matrix: MutationKillMatrix
 scope: MutationScopeOutput
 /**
  * The runner. Absent when no companion started, for example when no
@@ -20125,6 +20299,58 @@ status: MutationCompletionStatus
  * Why the run is partial, sorted. Empty for a complete run.
  */
 reasons: MutationIncompleteReason[]
+}
+/**
+ * Redundancy signals over the observed mutants. Candidates need review.
+ * Removing candidates together can remove all tests for a mutant.
+ */
+export interface MutationKillMatrix {
+status: MutationKillMatrixStatus
+/**
+ * Why evidence is unavailable or incomplete, sorted.
+ */
+reasons: string[]
+/**
+ * Each eligible test with observed coverage, sorted by test id.
+ */
+tests: MutationTestKillRow[]
+/**
+ * Tests with nonempty kills and no unique kills, sorted by test id.
+ */
+candidates: string[]
+/**
+ * Tests with coverage and no observed kills, sorted by test id.
+ */
+coverage_without_kills: string[]
+}
+/**
+ * The observed mutant kills of one eligible test.
+ */
+export interface MutationTestKillRow {
+/**
+ * The runner test id.
+ */
+test_id: string
+/**
+ * The root-relative test file.
+ */
+file: string
+/**
+ * The observed killed mutant ids, sorted.
+ */
+kills: string[]
+/**
+ * The mutant ids that no other eligible test kills, sorted.
+ */
+unique_kills: string[]
+/**
+ * The tests whose kill sets contain this full kill set, sorted.
+ */
+subsuming_tests: string[]
+/**
+ * Conservative evidence notes, sorted.
+ */
+notes: string[]
 }
 /**
  * The scope of a plan or a run.
@@ -20308,15 +20534,25 @@ prune_reason?: (string | null)
  * The test that killed the mutant in this run. Absent for a kill by an
  * error outside a test.
  *
- * This is evidence of one run, not a stable fact. A run stops at the
- * first failing test, and it runs the fastest covering test first, so a
- * second run on the same code can name another covering test. No
+ * This is evidence of one run, not a stable fact. A normal run stops at
+ * the first failing test. A kill matrix run retains each failing test
+ * in `killing_tests`. Tests run in measured fastest-first order, so a
+ * second run on the same code can name another first killer. No
  * fingerprint or baseline comparison uses this field.
  *
  * The retry of a survivor also runs the other tests of its test files,
  * so this test can be absent from `covering_tests`.
  */
 killed_by?: (string | null)
+/**
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
+ */
+killing_tests: string[]
+/**
+ * True only for exact requested membership with terminal pass or fail results.
+ */
+kill_matrix_complete: boolean
 /**
  * The tests that reached the mutant in the dry run, sorted by test id.
  */
@@ -20425,6 +20661,15 @@ duration_ms?: (number | null)
  * The test that killed the mutant in this run.
  */
 killed_by?: (string | null)
+/**
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
+ */
+killing_tests: string[]
+/**
+ * True only for exact requested membership with terminal pass or fail results.
+ */
+kill_matrix_complete: boolean
 /**
  * How the run detected the mutant. Absent for a run that did not detect
  * it, and absent when the runner did not state the kind.
@@ -20891,6 +21136,15 @@ static_test_files: string[]
  * The test that killed the mutant in the run of the report.
  */
 killed_by?: (string | null)
+/**
+ * All observed failing tests, sorted. Timeouts do not count. Empty
+ * outside `--kill-matrix`; `killed_by` keeps the first killer.
+ */
+killing_tests: string[]
+/**
+ * True only for exact requested membership with terminal pass or fail results.
+ */
+kill_matrix_complete: boolean
 }
 /**
  * The code of one mutant, from the current file.

@@ -64,6 +64,8 @@ mod impact;
 mod inspect_envelopes;
 mod issue_contract;
 mod json_paths;
+mod lean_pass;
+mod lean_profile;
 mod list_envelopes;
 mod mutation;
 mod next_steps;
@@ -302,18 +304,24 @@ pub use impact::{
     serialize_cross_repo_impact_json_output, serialize_impact_json_output,
 };
 pub use inspect_envelopes::{
-    ExplainOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
-    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
-    InspectSymbolIdentity, InspectTargetDescriptor, serialize_explain_json_output,
-    serialize_inspect_json_output,
+    ExplainOutput, InspectCloudErrors, InspectCloudEvidence, InspectCloudFunction,
+    InspectCloudMatch, InspectCloudStatus, InspectCloudSummary, InspectCloudUnpairedFunction,
+    InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
+    InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
+    InspectTargetDescriptor, serialize_explain_json_output, serialize_inspect_json_output,
 };
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, ARCHITECTURE_DOCS,
     ARCHITECTURE_RESULT_KEYS, CHECK_DOCS, CODECLIMATE_RESULT_CODES, IssueOutputContract,
     TsAliasMeta, architecture_meta, check_meta, issue_output_contract_by_code,
-    issue_output_contracts, rule_docs_url,
+    issue_output_contracts, retain_reported_rules, rule_docs_url,
 };
 pub use json_paths::{normalize_uri, strip_root_prefix};
+pub use lean_pass::{LEAN_TABLE_CAP, apply_lean_profile};
+pub use lean_profile::{
+    LEAN_PROFILE, LEAN_PROFILE_KINDS, LeanDiagnosticGroup, LeanMeta, LeanOutput, LeanOutputKind,
+    LeanProfile, LeanSharedActionText,
+};
 pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
     ListBoundariesOutput, ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspaceInfo,
@@ -325,14 +333,15 @@ pub use mutation::{
     MutantTestReach, MutationBaselineFailure, MutationCacheOutput, MutationCompletion,
     MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
     MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
-    MutationInspectStatus, MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile,
-    MutationPlanMutant, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
-    MutationResumeOutput, MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput,
-    MutationSchemaVersion, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
-    MutationStaleReason, MutationStatusCounts, MutationSummary, MutationTimings,
-    MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict,
-    MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
-    MutationWorktreeCheck, serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationPlanCountsOutput,
+    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationPlanOutput,
+    MutationPlanSchemaVersion, MutationReport, MutationResumeOutput, MutationRunIssue,
+    MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind,
+    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationStatusCounts,
+    MutationSummary, MutationTestKillRow, MutationTimings, MutationTypecheckOutput,
+    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict, MutationVerdictInput,
+    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
     serialize_mutation_plan_json_output,
 };
 pub use next_steps::{

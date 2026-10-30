@@ -3,7 +3,7 @@ use fallow_config::OutputFormat;
 
 use super::{Cli, Command, CoverageCli, ImpactCli, RulePackCli};
 use crate::cli_hooks::HooksCli;
-use crate::json_style::JsonStyle;
+use crate::json_style::{JsonStyle, LeanStyle};
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum Format {
@@ -124,11 +124,64 @@ pub fn resolve_format(cli: &Cli) -> FormatConfig {
         payload_is_json,
         quiet,
         fail_on_issues,
-        json_style: if cli.pretty {
-            JsonStyle::Pretty
-        } else {
-            JsonStyle::Compact
-        },
+        json_style: resolve_json_style(cli),
+    }
+}
+
+fn resolve_json_style(cli: &Cli) -> JsonStyle {
+    if cli.json.lean {
+        return JsonStyle::Lean(LeanStyle {
+            pretty: cli.json.pretty,
+            table_cap: lean_table_cap(cli),
+        });
+    }
+    if cli.json.pretty {
+        JsonStyle::Pretty
+    } else {
+        JsonStyle::Compact
+    }
+}
+
+/// `--full-tables` keeps every row. A `--top` on `fallow health` replaces the
+/// default cap, so the lean tables follow the row count that the user chose.
+fn lean_table_cap(cli: &Cli) -> Option<usize> {
+    if cli.json.full_tables {
+        return None;
+    }
+    let top = match cli.command.as_ref() {
+        Some(Command::Health { top, .. }) => *top,
+        _ => None,
+    };
+    Some(top.unwrap_or(fallow_output::LEAN_TABLE_CAP))
+}
+
+/// Error text when `--pretty` or `--lean` cannot apply to this run.
+pub fn json_presentation_error(cli: &Cli, fmt: &FormatConfig) -> Option<&'static str> {
+    if cli.json.pretty && !fmt.payload_is_json {
+        return Some(
+            "--pretty requires JSON output. Use --format json --pretty, or remove --pretty.",
+        );
+    }
+    if cli.json.lean && !fmt.payload_is_json {
+        return Some("--lean requires JSON output. Use --format json --lean, or remove --lean.");
+    }
+    unsupported_lean_use(cli)
+}
+
+/// `--lean` changes only the dead-code, health and combined envelopes, so
+/// another command rejects it instead of writing its full shape.
+fn unsupported_lean_use(cli: &Cli) -> Option<&'static str> {
+    if !cli.json.lean {
+        return None;
+    }
+    match cli.command.as_ref() {
+        None | Some(Command::Check { .. }) => None,
+        Some(Command::Health { top, .. }) => (cli.json.full_tables && top.is_some()).then_some(
+            "--full-tables keeps every table row, but --top cuts the tables. Remove one of them.",
+        ),
+        Some(_) => Some(
+            "--lean applies to `fallow dead-code`, `fallow health` and bare `fallow`. Remove --lean.",
+        ),
     }
 }
 
@@ -225,5 +278,41 @@ pub fn apply_ci_defaults(
         (ci_output, true, fail_on_issues)
     } else {
         (output, quiet, fail_on_issues)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn lean_is_accepted_only_on_commands_with_a_lean_envelope() {
+        let parse = |command: &[&str]| {
+            let mut argv = vec!["fallow"];
+            argv.extend_from_slice(command);
+            argv.extend(["--format", "json", "--lean"]);
+            Cli::try_parse_from(argv).expect("--lean parses before validation")
+        };
+        for accepted in [
+            &[][..],
+            &["dead-code"],
+            &["check"],
+            &["health"],
+            &["health", "--top", "3"],
+        ] {
+            assert_eq!(unsupported_lean_use(&parse(accepted)), None, "{accepted:?}");
+        }
+        for rejected in [&["dupes"][..], &["audit"], &["architecture"], &["list"]] {
+            assert!(
+                unsupported_lean_use(&parse(rejected)).is_some(),
+                "{rejected:?}"
+            );
+        }
+        assert!(
+            unsupported_lean_use(&parse(&["health", "--top", "3", "--full-tables"])).is_some(),
+            "--full-tables cannot restore rows that --top cut"
+        );
     }
 }

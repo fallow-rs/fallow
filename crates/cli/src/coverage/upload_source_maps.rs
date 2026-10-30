@@ -522,8 +522,14 @@ fn validate_file_name(file_name: &str) -> Result<(), UploadSourceMapsError> {
 }
 
 fn resolve_api_key() -> Result<String, UploadSourceMapsError> {
-    env_non_empty("FALLOW_API_KEY")
-        .ok_or_else(|| UploadSourceMapsError::Validation("FALLOW_API_KEY is required".to_owned()))
+    crate::coverage::credentials::resolve_write_api_key(None)
+        .map(|resolved| resolved.key)
+        .ok_or_else(|| {
+            UploadSourceMapsError::Validation(
+                "FALLOW_API_KEY is required (a live key; the read-only key of `fallow cloud login` cannot upload)"
+                    .to_owned(),
+            )
+        })
 }
 
 #[derive(Debug, Clone)]

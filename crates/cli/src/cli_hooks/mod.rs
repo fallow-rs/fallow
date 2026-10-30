@@ -5,6 +5,8 @@ use crate::error::emit_error;
 use crate::init;
 use crate::setup_hooks;
 
+mod hook_runtime;
+
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HooksTargetArg {
     /// Shell-level Git pre-commit hook under .git/hooks/ or .husky/.
@@ -15,6 +17,13 @@ pub enum HooksTargetArg {
 
 #[derive(clap::Subcommand)]
 pub enum HooksCli {
+    /// Internal JSON bridge used by generated agent gates.
+    #[command(hide = true)]
+    GateRuntime {
+        #[arg(value_enum)]
+        operation: hook_runtime::Operation,
+    },
+
     /// Show installed hook state for Git, Claude, and Codex surfaces.
     Status,
 
@@ -88,6 +97,7 @@ pub fn run_hooks_command(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     match subcommand {
+        HooksCli::GateRuntime { operation } => hook_runtime::run(operation),
         HooksCli::Status => setup_hooks::run_hooks_status(root, output, json_style),
         install @ HooksCli::Install { .. } => run_hooks_install(root, install, output),
         uninstall @ HooksCli::Uninstall { .. } => run_hooks_uninstall(root, &uninstall, output),

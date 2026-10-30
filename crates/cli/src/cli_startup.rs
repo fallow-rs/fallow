@@ -253,7 +253,14 @@ fn resolve_validated_root(
         })?
     };
     validate::validate_root(&raw_root).map_err(|e| {
-        emit_known_failure_with_style(&e, 2, output, json_style, telemetry::FailureReason::Config)
+        telemetry::note_failure_reason(telemetry::FailureReason::Config);
+        crate::error::emit_programmatic_error(
+            &fallow_api::ProgrammaticError::new(e, 2)
+                .with_code("FALLOW_INVALID_ROOT")
+                .with_help("Pass --root with an existing, readable project directory."),
+            output,
+            json_style,
+        )
     })
 }
 
@@ -549,6 +556,17 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
         parse_error_output_format(std::env::args_os().skip(1)),
         fallow_config::OutputFormat::Json
     ) {
+        if exit_code != 0 {
+            return crate::error::emit_programmatic_error(
+                &fallow_api::ProgrammaticError::new(err.to_string().trim(), exit_code)
+                    .with_code("FALLOW_INVALID_CLI_ARGUMENTS")
+                    .with_help(
+                        "Run `fallow --help` or `fallow <command> --help` to check accepted arguments and required values.",
+                    ),
+                fallow_config::OutputFormat::Json,
+                parse_error_json_style(std::env::args_os().skip(1)),
+            );
+        }
         return crate::error::emit_error_with_style(
             err.to_string().trim(),
             exit_code,
@@ -725,6 +743,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
         Command::CiTemplate { .. } => Some("ci-template"),
         Command::Migrate { .. } => Some("migrate"),
         Command::License { .. } => Some("license"),
+        Command::Cloud { .. } => Some("cloud"),
         Command::Telemetry { .. } => Some("telemetry"),
         Command::Coverage { .. } => Some("coverage"),
         Command::SetupHooks { .. } => Some("setup-hooks"),
@@ -774,6 +793,7 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
                 | Command::Flags { .. }
                 | Command::Migrate { .. }
                 | Command::License { .. }
+                | Command::Cloud { .. }
                 | Command::Coverage { .. }
                 | Command::Hooks { .. }
                 | Command::SetupHooks { .. }

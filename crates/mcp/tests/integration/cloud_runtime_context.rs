@@ -11,8 +11,7 @@
 //! on the argument builder cannot reach: that a `tools/call` with a key
 //! actually reaches the runtime-context endpoint and comes back as the same
 //! `runtime_coverage` block the local tools return, and that a server started
-//! without a key refuses the call with a typed body instead of spawning
-//! anything. Both run the built `fallow-mcp` binary over stdio with a
+//! without a key refuses the call with a typed body. Both run the built `fallow-mcp` binary over stdio with a
 //! throwaway HTTP server standing in for Fallow Cloud.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -236,6 +235,31 @@ fn get_cloud_deployment_changes_reads_the_change_report() {
     );
 }
 
+/// The CLI reads the key, so a key that `fallow cloud login` stored works
+/// without `FALLOW_API_KEY` in the server environment.
+#[test]
+fn a_key_from_cloud_login_reaches_the_cloud_without_the_environment_variable() {
+    let (endpoint, request, handle) = serve_once(RUNTIME_CONTEXT_BODY);
+    let config_home = tempfile::tempdir().expect("config home");
+    let credentials = config_home.path().join("fallow");
+    std::fs::create_dir_all(&credentials).expect("credentials dir");
+    std::fs::write(
+        credentials.join("credentials"),
+        serde_json::json!({ "version": 1, "keys": { endpoint.clone(): "fallow_read_k1_stored" } })
+            .to_string(),
+    )
+    .expect("credentials file");
+    let mut server = McpServer::start_with_stored_key(&endpoint, config_home.path());
+    let result = server.call_cloud_runtime_context();
+    handle.join().expect("stub server joins");
+    assert_ne!(result["isError"], true, "call must succeed: {result}");
+    let request = request.lock().expect("request lock").to_lowercase();
+    assert!(
+        request.contains("authorization: bearer fallow_read_k1_stored"),
+        "the request must carry the stored key: {request}"
+    );
+}
+
 #[test]
 fn the_scoped_cloud_tools_refuse_without_a_key() {
     let mut server = McpServer::start(None);
@@ -341,14 +365,7 @@ impl McpServer {
     /// API key, or, with `None`, one with neither, which is the shape the
     /// refusal path needs.
     fn start(api_endpoint: Option<&str>) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
-        command
-            .env("FALLOW_BIN", crate::fallow_binary())
-            .env("FALLOW_TELEMETRY_DISABLED", "1")
-            .env("NO_COLOR", "1")
-            .env("RUST_LOG", "")
-            .env_remove("FALLOW_REPO")
-            .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE");
+        let mut command = Self::command();
         match api_endpoint {
             Some(endpoint) => {
                 command
@@ -359,10 +376,38 @@ impl McpServer {
             None => {
                 command
                     .env_remove("FALLOW_API_URL")
-                    .env_remove("FALLOW_API_KEY");
+                    .env_remove("FALLOW_API_KEY")
+                    .env("FALLOW_CREDENTIAL_STORE", "none");
             }
         }
+        Self::spawn(command)
+    }
 
+    /// Start a server without `FALLOW_API_KEY` whose only key is the one
+    /// `fallow cloud login` wrote to the credentials file under `config_home`.
+    fn start_with_stored_key(api_endpoint: &str, config_home: &std::path::Path) -> Self {
+        let mut command = Self::command();
+        command
+            .env("FALLOW_API_URL", api_endpoint)
+            .env_remove("FALLOW_API_KEY")
+            .env("FALLOW_CREDENTIAL_STORE", "file")
+            .env("XDG_CONFIG_HOME", config_home);
+        Self::spawn(command)
+    }
+
+    fn command() -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
+        command
+            .env("FALLOW_BIN", crate::fallow_binary())
+            .env("FALLOW_TELEMETRY_DISABLED", "1")
+            .env("NO_COLOR", "1")
+            .env("RUST_LOG", "")
+            .env_remove("FALLOW_REPO")
+            .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE");
+        command
+    }
+
+    fn spawn(mut command: Command) -> Self {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

@@ -280,6 +280,8 @@ mod tests {
             },
             status,
             prune_reason: None,
+            killing_tests: Vec::new(),
+            kill_matrix_complete: false,
             killed_by: None,
             covering_tests: vec!["src/a.test.ts > a".to_owned()],
             static_mutant: false,

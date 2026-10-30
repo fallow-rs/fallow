@@ -5,15 +5,17 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use crate::params::{CloudDeploymentChangesParams, CloudReviewPacketParams};
 
 use super::cloud_runtime_context::{
-    MAX_PERIOD_DAYS, api_key_is_set, cloud_api_key_missing_body, cloud_repo_param,
-    push_trimmed_flag,
+    MAX_PERIOD_DAYS, cloud_api_key_missing_body, cloud_repo_param, push_trimmed_flag,
+    run_cloud_tool,
 };
-use super::{push_global, run_tool_with_limit, typed_validation_error_body};
+use super::{push_global, typed_validation_error_body};
 
 /// Per-list limit of the review-packet scope on the cloud.
 const REVIEW_PACKET_MAX_SCOPE: usize = 1000;
 /// Page size limit of the deployment change report.
 const MAX_CHANGE_LIMIT: u16 = 200;
+/// The alternative that the missing-key refusal of these tools names.
+const NO_KEY_ALTERNATIVE: &str = "Without a key, no cloud tool can answer.";
 /// Change kinds the deployment change report accepts as a filter.
 const DEPLOYMENT_CHANGE_KINDS: &[&str] = &[
     "stopped",
@@ -29,13 +31,20 @@ pub async fn run_get_cloud_review_packet(
     binary: &str,
     params: CloudReviewPacketParams,
 ) -> Result<CallToolResult, McpError> {
-    match build_get_cloud_review_packet_args(&params, api_key_is_set()) {
+    match build_get_cloud_review_packet_args(&params) {
         Ok(args) => {
-            run_tool_with_limit(
+            run_cloud_tool(
                 binary,
                 "get_cloud_review_packet",
                 &args,
                 params.max_output_bytes,
+                || {
+                    cloud_api_key_missing_body(
+                        "get_cloud_review_packet",
+                        CloudCommand::ReviewPacket,
+                        NO_KEY_ALTERNATIVE,
+                    )
+                },
             )
             .await
         }
@@ -49,13 +58,20 @@ pub async fn run_get_cloud_deployment_changes(
     binary: &str,
     params: CloudDeploymentChangesParams,
 ) -> Result<CallToolResult, McpError> {
-    match build_get_cloud_deployment_changes_args(&params, api_key_is_set()) {
+    match build_get_cloud_deployment_changes_args(&params) {
         Ok(args) => {
-            run_tool_with_limit(
+            run_cloud_tool(
                 binary,
                 "get_cloud_deployment_changes",
                 &args,
                 params.max_output_bytes,
+                || {
+                    cloud_api_key_missing_body(
+                        "get_cloud_deployment_changes",
+                        CloudCommand::DeploymentChanges,
+                        NO_KEY_ALTERNATIVE,
+                    )
+                },
             )
             .await
         }
@@ -64,21 +80,10 @@ pub async fn run_get_cloud_deployment_changes(
 }
 
 /// Build CLI arguments for the `get_cloud_review_packet` tool.
-///
-/// `api_key_is_set` is injected so the refusals are testable without a
-/// change to the shared process environment.
 pub fn build_get_cloud_review_packet_args(
     params: &CloudReviewPacketParams,
-    api_key_is_set: bool,
 ) -> Result<Vec<String>, String> {
     const TOOL: &str = "get_cloud_review_packet";
-    if !api_key_is_set {
-        return Err(cloud_api_key_missing_body(
-            TOOL,
-            CloudCommand::ReviewPacket,
-            "Without a key, no cloud tool can answer.",
-        ));
-    }
     let repo = cloud_repo_param(TOOL, &params.repo)?;
     check_period(params.period_days, TOOL)?;
     let files = params.files.as_deref().unwrap_or_default();
@@ -140,16 +145,8 @@ pub fn build_get_cloud_review_packet_args(
 /// Build CLI arguments for the `get_cloud_deployment_changes` tool.
 pub fn build_get_cloud_deployment_changes_args(
     params: &CloudDeploymentChangesParams,
-    api_key_is_set: bool,
 ) -> Result<Vec<String>, String> {
     const TOOL: &str = "get_cloud_deployment_changes";
-    if !api_key_is_set {
-        return Err(cloud_api_key_missing_body(
-            TOOL,
-            CloudCommand::DeploymentChanges,
-            "Without a key, no cloud tool can answer.",
-        ));
-    }
     let repo = cloud_repo_param(TOOL, &params.repo)?;
     if let Some(change) = params.change.as_deref().map(str::trim)
         && !change.is_empty()

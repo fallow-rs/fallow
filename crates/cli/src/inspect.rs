@@ -15,11 +15,19 @@ use fallow_output::{
     InspectTargetDescriptor,
 };
 
+#[path = "inspect_cloud.rs"]
+mod cloud;
+#[path = "inspect_compact.rs"]
+mod compact;
+
 #[derive(Clone)]
 pub enum InspectTarget {
     File { file: String },
     Symbol { file: String, export_name: String },
 }
+
+/// Error text for an output format that inspect does not support.
+const UNSUPPORTED_FORMAT_MESSAGE: &str = "inspect supports --format json, human or compact";
 
 pub struct InspectOptions<'a> {
     pub root: &'a Path,
@@ -42,12 +50,22 @@ pub struct InspectOptions<'a> {
     /// Only meaningful for a SYMBOL target. Default off (best-effort, off the
     /// ranked path).
     pub symbol_chain: bool,
+    /// OPT-IN Fallow Cloud production evidence for a file target. `None`
+    /// keeps the network entirely off the default path.
+    pub cloud: Option<InspectCloudOptions>,
     /// Include project-wide TypeScript semantic evidence for symbol targets.
     pub type_aware: Option<bool>,
     /// Explicit TypeScript project configs for semantic analysis.
     pub type_aware_projects: &'a [PathBuf],
     /// Whether incomplete semantic evidence is advisory or gating.
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
+}
+
+/// Options of the OPT-IN `cloud` evidence section.
+#[derive(Debug, Clone, Default)]
+pub struct InspectCloudOptions {
+    /// `--repo`; `None` falls back to `$FALLOW_REPO`, then the git remote.
+    pub repo: Option<String>,
 }
 
 #[derive(Debug)]
@@ -93,8 +111,11 @@ impl NormalizedTarget {
 }
 
 pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
-    if !matches!(opts.output, OutputFormat::Json | OutputFormat::Human) {
-        return emit_error("inspect supports --format json or human", 2, opts.output);
+    if !matches!(
+        opts.output,
+        OutputFormat::Json | OutputFormat::Human | OutputFormat::Compact
+    ) {
+        return emit_error(UNSUPPORTED_FORMAT_MESSAGE, 2, opts.output);
     }
     let transport = ProcessChildJsonTransport;
     let bundle = match build_inspect_bundle(opts, &transport) {
@@ -129,8 +150,30 @@ fn build_inspect_bundle(
         );
     }
 
-    let (evidence, type_aware, semantic_warnings) =
-        build_inspect_evidence(opts, &target, &trace_file, trace_export.clone(), transport);
+    let (evidence, type_aware, semantic_warnings) = std::thread::scope(|scope| {
+        let cloud = opts
+            .cloud
+            .as_ref()
+            .filter(|_| target.export_name.is_none())
+            .map(|cloud| {
+                let file = target.file.as_str();
+                scope.spawn(move || {
+                    cloud::collect_cloud_section(opts.root, file, cloud.repo.as_deref())
+                })
+            });
+        let (mut evidence, type_aware, warnings) =
+            build_inspect_evidence(opts, &target, &trace_file, trace_export.clone(), transport);
+        evidence.cloud = cloud.map(|handle| {
+            handle.join().unwrap_or_else(|_| {
+                fallow_output::InspectCloudEvidence::status_only(
+                    fallow_output::InspectCloudStatus::Unavailable,
+                    "cloud evidence worker panicked".to_owned(),
+                    None,
+                )
+            })
+        });
+        (evidence, type_aware, warnings)
+    });
     warnings.extend(semantic_warnings);
     push_inspect_warnings(&mut warnings, &evidence);
 
@@ -241,6 +284,7 @@ fn build_inspect_evidence(
         api_surface: semantic.api_surface,
         symbol_impact: semantic.symbol_impact,
         targeted_tests: semantic.targeted_tests,
+        cloud: None,
     };
     (evidence, semantic.type_aware, semantic.warnings)
 }
@@ -713,7 +757,11 @@ fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> Exit
             print_human(&bundle, opts.quiet);
             ExitCode::SUCCESS
         }
-        _ => emit_error("inspect supports --format json or human", 2, opts.output),
+        OutputFormat::Compact => {
+            outln!("{}", compact::render(&bundle).trim_end());
+            ExitCode::SUCCESS
+        }
+        _ => emit_error(UNSUPPORTED_FORMAT_MESSAGE, 2, opts.output),
     }
 }
 
@@ -739,6 +787,9 @@ fn print_human(bundle: &InspectOutput, quiet: bool) {
     if let Some(section) = bundle.evidence.symbol_chain.as_ref() {
         print_evidence_summary("symbol_chain", section);
     }
+    if let Some(cloud) = bundle.evidence.cloud.as_ref() {
+        print_cloud_summary(cloud);
+    }
     if let Some(section) = bundle.evidence.semantic_trace.as_ref() {
         print_evidence_summary("semantic_trace", section);
     }
@@ -757,6 +808,20 @@ fn print_human(bundle: &InspectOutput, quiet: bool) {
             outln!("  warning: {warning}");
         }
     }
+}
+
+fn print_cloud_summary(cloud: &fallow_output::InspectCloudEvidence) {
+    let detail = match (cloud.message.as_deref(), cloud.summary.as_ref()) {
+        (Some(message), _) => format!(" ({message})"),
+        (None, Some(summary)) => format!(
+            " (paired: {}, unpaired local: {}; {})",
+            cloud.functions.len(),
+            cloud.unpaired_local.len(),
+            summary.text
+        ),
+        (None, None) => String::new(),
+    };
+    outln!("  cloud: {} [file]{detail}", cloud.status.as_str());
 }
 
 fn json_display(value: &impl serde::Serialize) -> String {
@@ -1297,6 +1362,7 @@ fn inspect_benchmark_options(root: &Path, threads: usize) -> InspectOptions<'_> 
         },
         churn_cache_dir: None,
         symbol_chain: false,
+        cloud: None,
         type_aware: None,
         type_aware_projects: &[],
         type_aware_require: None,
@@ -1433,6 +1499,7 @@ mod tests {
             target,
             churn_cache_dir: None,
             symbol_chain: false,
+            cloud: None,
             type_aware: None,
             type_aware_projects: &[],
             type_aware_require: None,

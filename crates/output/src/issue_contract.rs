@@ -5,6 +5,7 @@ pub use fallow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
 use fallow_types::issue_meta::{
     IssueResultMeta, issue_meta_by_code, issue_result_meta_by_code, result_issue_metas,
 };
+use fallow_types::results::AnalysisResults;
 
 const DOCS_BASE: &str = "https://fallow.tools/docs";
 
@@ -88,7 +89,7 @@ pub fn check_meta() -> Meta {
         );
     }
     rules.insert(
-        "missing-suppression-reason".to_string(),
+        MISSING_SUPPRESSION_REASON_CODE.to_string(),
         MetaRule {
             name: Some("Missing Suppression Reason".to_string()),
             description: Some("A fallow-ignore-next-line or fallow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional.".to_string()),
@@ -123,6 +124,49 @@ pub fn check_meta() -> Meta {
         ]),
         ..Meta::default()
     }
+}
+
+/// Rule code of the stale-suppression findings that report a missing reason.
+const MISSING_SUPPRESSION_REASON_CODE: &str = "missing-suppression-reason";
+/// Rule code of the other stale-suppression findings.
+const STALE_SUPPRESSION_CODE: &str = "stale-suppression";
+
+/// Keep only the `_meta.rules` entries of rules that have a finding in one
+/// of `results`. A grouped report passes the results of each group it shows.
+///
+/// A rule without a finding in the run tells the reader nothing about the
+/// report, so `--explain` lists only the rules the report uses. The CLI, the
+/// MCP server and the programmatic API call this on the same results, so the
+/// three list the same rules.
+pub fn retain_reported_rules<'a>(
+    meta: &mut Meta,
+    results: impl IntoIterator<Item = &'a AnalysisResults>,
+) {
+    let results: Vec<&AnalysisResults> = results.into_iter().collect();
+    let reported: Vec<&'static str> = issue_output_contracts()
+        .filter(|contract| {
+            results.iter().any(|results| {
+                // A result key without a mapping keeps its rule, so a new
+                // result family never loses its explanation.
+                results
+                    .result_key_has_findings(contract.result_key)
+                    .unwrap_or(true)
+            })
+        })
+        .map(|contract| contract.code)
+        .collect();
+    let stale = || {
+        results
+            .iter()
+            .flat_map(|results| results.stale_suppressions.iter())
+    };
+    let missing_reason = stale().any(|finding| finding.missing_reason);
+    let stale_without_missing_reason = stale().any(|finding| !finding.missing_reason);
+    meta.rules.retain(|code, _| match code.as_str() {
+        MISSING_SUPPRESSION_REASON_CODE => missing_reason,
+        STALE_SUPPRESSION_CODE => stale_without_missing_reason,
+        code => reported.contains(&code),
+    });
 }
 
 fn component_error_metric(name: &str) -> MetaMetric {
@@ -197,6 +241,68 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    fn stale_suppression(missing_reason: bool) -> fallow_types::results::StaleSuppression {
+        fallow_types::results::StaleSuppression {
+            path: std::path::PathBuf::from("src/a.ts"),
+            line: 1,
+            col: 0,
+            origin: fallow_types::results::SuppressionOrigin::JsdocTag {
+                export_name: "a".to_string(),
+                reason: None,
+            },
+            missing_reason,
+            finding_id: None,
+            actions: Vec::new(),
+            effective_severity: None,
+        }
+    }
+
+    #[test]
+    fn every_contract_result_key_maps_to_a_result_array() {
+        let results = AnalysisResults::default();
+        for contract in issue_output_contracts() {
+            assert_eq!(
+                results.result_key_has_findings(contract.result_key),
+                Some(false),
+                "{} has no result array mapping",
+                contract.result_key
+            );
+        }
+    }
+
+    #[test]
+    fn retain_reported_rules_keeps_only_rules_with_findings() {
+        let mut meta = check_meta();
+        retain_reported_rules(&mut meta, [&AnalysisResults::default()]);
+        assert!(
+            meta.rules.is_empty(),
+            "no finding, no rule: {:?}",
+            meta.rules
+        );
+
+        let mut meta = check_meta();
+        let mut results = AnalysisResults::default();
+        results.stale_suppressions.push(stale_suppression(true));
+        retain_reported_rules(&mut meta, [&results]);
+        assert_eq!(
+            meta.rules.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["missing-suppression-reason"],
+            "a missing reason does not list the stale-suppression rule"
+        );
+
+        let mut meta = check_meta();
+        let mut other_group = AnalysisResults::default();
+        other_group
+            .stale_suppressions
+            .push(stale_suppression(false));
+        retain_reported_rules(&mut meta, [&results, &other_group]);
+        assert_eq!(
+            meta.rules.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["missing-suppression-reason", "stale-suppression"],
+            "a grouped report lists the rules of every group"
+        );
+    }
 
     #[test]
     fn architecture_meta_lists_only_architecture_rules() {

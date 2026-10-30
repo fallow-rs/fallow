@@ -164,7 +164,11 @@ fn review_packet(args: &ReviewPacketArgs, root: &Path) -> Result<Value, CloudErr
         .as_deref()
         .map(|sha| validate_sha(sha, "--commit-sha"))
         .transpose()?;
-    let auth = resolve_auth(args.api_key.as_deref(), CloudCommand::ReviewPacket)?;
+    let auth = resolve_auth(
+        args.api_key.as_deref(),
+        args.api_endpoint.as_deref(),
+        CloudCommand::ReviewPacket,
+    )?;
     let repo = resolve_repo(args.repo.as_deref(), root)?;
     let body = review_packet_body(
         &files,
@@ -208,7 +212,11 @@ fn deployment_changes(args: &DeploymentChangesArgs, root: &Path) -> Result<Value
             "--limit must be between 1 and {MAX_CHANGE_LIMIT}, got {limit}"
         )));
     }
-    let auth = resolve_auth(args.api_key.as_deref(), CloudCommand::DeploymentChanges)?;
+    let auth = resolve_auth(
+        args.api_key.as_deref(),
+        args.api_endpoint.as_deref(),
+        CloudCommand::DeploymentChanges,
+    )?;
     let repo = resolve_repo(args.repo.as_deref(), root)?;
     let mut query = Vec::new();
     if let Some(base) = base {
@@ -241,9 +249,13 @@ fn deployment_changes(args: &DeploymentChangesArgs, root: &Path) -> Result<Value
     send_and_parse(&auth, &url, &CloudBody::None, "deployment-changes", &repo)
 }
 
-fn resolve_auth(explicit: Option<&str>, command: CloudCommand) -> Result<CloudAuth, CloudError> {
+fn resolve_auth(
+    explicit: Option<&str>,
+    api_endpoint: Option<&str>,
+    command: CloudCommand,
+) -> Result<CloudAuth, CloudError> {
     Ok(CloudAuth {
-        api_key: resolve_api_key(explicit, command)?,
+        api_key: resolve_api_key(explicit, api_endpoint, command)?,
         agent_source: detected_agent_source(),
     })
 }

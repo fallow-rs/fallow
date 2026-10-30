@@ -160,6 +160,9 @@ mod tests {
         [
             "run_tool(",
             "run_tool_with_limit(",
+            // The cloud tools run the CLI through this wrapper of
+            // `run_tool_with_limit`.
+            "run_cloud_tool(",
             "run_tool_with_timeout(",
             "run_tool_with_stdin_timeout(",
             "run_tool_with_top_level_warnings(",

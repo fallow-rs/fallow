@@ -184,6 +184,173 @@ pub struct InspectEvidence {
     /// Present only for a symbol target in type-aware mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targeted_tests: Option<InspectEvidenceSection>,
+    /// OPT-IN Fallow Cloud production evidence for a file target. Present
+    /// only when `--cloud` was requested. A missing key, a plan gate or an
+    /// unreachable cloud is a section status, never a failed run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<InspectCloudEvidence>,
+}
+
+/// `evidence.cloud` block: production data of the target file from Fallow
+/// Cloud, paired with the functions of the local file.
+///
+/// `null` in a count means "not measured", never zero.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InspectCloudEvidence {
+    /// Outcome of the cloud read.
+    pub status: InspectCloudStatus,
+    /// Explanation for a status other than `ok`, or a note on an `ok`
+    /// section (for example that the cloud left out functions).
+    pub message: Option<String>,
+    /// Fallow Cloud repository that was read, when it was resolved.
+    pub repo: Option<String>,
+    /// Newest deployment commit with data for the file.
+    pub latest_sha: Option<String>,
+    /// Days of production data the cloud read covers.
+    pub period_days: Option<u16>,
+    /// File summary from the cloud. `None` when the cloud was not read.
+    pub summary: Option<InspectCloudSummary>,
+    /// Local functions paired with a deployed function.
+    pub functions: Vec<InspectCloudFunction>,
+    /// Local functions without a deployed function.
+    pub unpaired_local: Vec<InspectCloudUnpairedFunction>,
+}
+
+impl InspectCloudEvidence {
+    /// Section that carries only a status and an explanation.
+    #[must_use]
+    pub fn status_only(status: InspectCloudStatus, message: String, repo: Option<String>) -> Self {
+        Self {
+            status,
+            message: Some(message),
+            repo,
+            latest_sha: None,
+            period_days: None,
+            summary: None,
+            functions: Vec::new(),
+            unpaired_local: Vec::new(),
+        }
+    }
+}
+
+/// Status of the [`InspectCloudEvidence`] section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum InspectCloudStatus {
+    /// The cloud answered with production data for the file.
+    Ok,
+    /// No usable API key. Run `fallow cloud login` or set `FALLOW_API_KEY`.
+    NoKey,
+    /// The organization has no plan with production data.
+    PlanRequired,
+    /// The cloud could not answer (network, server error, timeout).
+    Unavailable,
+    /// The cloud has no production data for the file.
+    Untracked,
+}
+
+impl InspectCloudStatus {
+    /// Wire name of the status.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::NoKey => "no_key",
+            Self::PlanRequired => "plan_required",
+            Self::Unavailable => "unavailable",
+            Self::Untracked => "untracked",
+        }
+    }
+}
+
+/// File summary of the [`InspectCloudEvidence`] section.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InspectCloudSummary {
+    /// Deployed functions of the file.
+    pub functions: u64,
+    /// Functions that ran in the period.
+    pub called: u64,
+    /// Functions that were tracked and did not run.
+    pub never_called: u64,
+    /// Functions without production data.
+    pub untracked: u64,
+    /// Calls of all functions of the file. `None` when not measured.
+    pub calls: Option<u64>,
+    /// Error groups of the file. `None` when not measured.
+    pub error_groups: Option<u64>,
+    /// Error events of the file. `None` when not measured.
+    pub error_events: Option<u64>,
+    /// One-line summary from the cloud.
+    pub text: String,
+}
+
+/// How a local function was paired with a deployed function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum InspectCloudMatch {
+    /// The stable id of the local function equals the deployed one.
+    StableId,
+    /// Same name and same ordinal among the same-name functions of the file.
+    NameOrdinal,
+}
+
+/// Error counts of one function.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InspectCloudErrors {
+    /// Error groups attributed to the function.
+    pub groups: u64,
+    /// Error events attributed to the function.
+    pub events: u64,
+}
+
+/// One local function with its production data.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InspectCloudFunction {
+    /// Function name in the local file.
+    pub name: String,
+    /// 1-based start line in the local file.
+    pub line: u32,
+    /// Stable id of the deployed function.
+    pub stable_id: Option<String>,
+    /// How the local function was paired.
+    #[serde(rename = "match")]
+    pub match_kind: InspectCloudMatch,
+    /// Tracking state in the current deployment: `called`, `never_called` or
+    /// `untracked`.
+    pub state: String,
+    /// Tracking state over the whole period, earlier deployments included.
+    /// `called` with `state` `never_called` means that the function did not
+    /// run in this deployment, but ran in an earlier one. `None` when the
+    /// cloud does not say.
+    pub period_state: Option<String>,
+    /// Calls in the period. `None` when not measured.
+    pub calls: Option<u64>,
+    /// Error counts. `None` when error capture did not cover the function.
+    pub errors: Option<InspectCloudErrors>,
+    /// Self CPU milliseconds per profiled hour. `None` when not measured.
+    pub cpu_ms_per_hour: Option<f64>,
+    /// Branch ranges that never ran. `None` when not measured.
+    pub never_run_ranges: Option<u64>,
+    /// One-line summary from the cloud.
+    pub summary: String,
+}
+
+/// One local function without a deployed function.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InspectCloudUnpairedFunction {
+    /// Function name in the local file.
+    pub name: String,
+    /// 1-based start line in the local file.
+    pub line: u32,
+    /// Why the function has no production data.
+    pub note: String,
 }
 
 /// One evidence section: status, the scope the evidence covers, and either a
@@ -375,6 +542,7 @@ mod tests {
                 api_surface: None,
                 symbol_impact: None,
                 targeted_tests: None,
+                cloud: None,
             },
             warnings: Vec::new(),
             meta: Some(fallow_types::envelope::Meta {

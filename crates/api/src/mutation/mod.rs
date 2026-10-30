@@ -8,6 +8,7 @@
 pub(crate) mod companion;
 pub(crate) mod discovery;
 pub(crate) mod journal;
+pub(crate) mod kill_matrix;
 pub(crate) mod last_report;
 pub(crate) mod manifest;
 pub(crate) mod node_args;
@@ -117,6 +118,8 @@ pub struct MutationRunOptions {
     /// Only an explicit caller option can set this, never project config,
     /// because the run has no sandbox copy.
     pub allow_side_effects: bool,
+    /// Execute all covering tests and retain complete killing test sets.
+    pub kill_matrix: bool,
     /// The maximum number of covered mutants to run, in rank order. A
     /// mutant that no dry-run test covers is `no_coverage` and does not
     /// count. The others become `pending`.
