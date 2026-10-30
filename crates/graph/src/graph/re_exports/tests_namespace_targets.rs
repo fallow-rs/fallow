@@ -9,7 +9,7 @@ use crate::resolve::{
 };
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use fallow_types::extract::{
-    ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
+    ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, ReExportInfo, VisibilityTag,
 };
 use oxc_span::Span;
 
@@ -176,12 +176,31 @@ fn namespace_exposure_includes_default_after_reaching_the_same_module_through_a_
     }
 }
 
-/// With nothing observed and no entry point, a namespace re-export has no
-/// consumer to credit, so Phase 2c must not record a reference route for it.
-/// Route provenance is only tracked when a test root replaces a module.
-#[test]
-fn unobserved_namespace_re_export_records_no_reference_route() {
-    let test_root = module(0, "root.test.ts");
+/// Build a namespace re-export with route provenance on and no entry point.
+/// Route provenance is only tracked when a test root replaces a module. With
+/// `consumer`, the test root reads one member of the namespace.
+fn namespace_re_export_with_route_provenance(consumer: bool) -> ModuleGraph {
+    let mut test_root = module(0, "root.test.ts");
+    if consumer {
+        test_root.resolved_imports = vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./barrel.ts".to_string(),
+                imported_name: ImportedName::Named("ns".to_string()),
+                local_name: "ns".to_string(),
+                is_type_only: false,
+                is_type_only_star: false,
+                from_style: false,
+                span: Span::new(0, 10),
+                source_span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(2)),
+        }];
+        test_root.member_accesses = vec![MemberAccess {
+            object: "ns".to_string(),
+            member: "sourceValue".to_string(),
+        }]
+        .into();
+    }
     let mut source = module(1, "source.ts");
     source.exports = vec![named_export("sourceValue")].into();
     let mut barrel = module(2, "barrel.ts");
@@ -205,12 +224,33 @@ fn unobserved_namespace_re_export_records_no_reference_route() {
         &test_roots,
         &files,
     );
-
     assert!(graph.modules.iter().all(|module| !module.is_entry_point()));
+    graph
+}
+
+/// With nothing observed and no entry point, a namespace re-export has no
+/// consumer to credit, so Phase 2c must not record a reference route for it.
+#[test]
+fn unobserved_namespace_re_export_records_no_reference_route() {
+    let graph = namespace_re_export_with_route_provenance(false);
+
     assert!(!export_is_used(&graph, FileId(1), "sourceValue"));
     assert!(
         graph.reference_routes.graphs.is_empty(),
         "no consumer can use a route for the unobserved namespace re-export"
+    );
+}
+
+/// The same fixture with a consumer records a route, which shows that route
+/// provenance is on and the empty result above is not a fixture accident.
+#[test]
+fn consumed_namespace_re_export_records_a_reference_route() {
+    let graph = namespace_re_export_with_route_provenance(true);
+
+    assert!(export_is_used(&graph, FileId(1), "sourceValue"));
+    assert!(
+        !graph.reference_routes.graphs.is_empty(),
+        "the consumer's namespace member access must record its route"
     );
 }
 
