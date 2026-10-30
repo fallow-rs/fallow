@@ -7,6 +7,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.38.0] - 2026-10-30
+
+### Added
+
+- **`fallow coverage setup --cloud` plans a Fallow Cloud setup in one command.** Fallow Cloud joins runtime coverage to the static inventory only when the beacon, the inventory, the source maps and the deployment registration carry the same commit SHA. The plan gives each step that SHA:
+  - The beacon snippets send coverage over HTTP with `commitSha` from the platform env (`FALLOW_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `RENDER_GIT_COMMIT`, `RAILWAY_GIT_COMMIT_SHA`, or `VITE_FALLOW_COMMIT_SHA` for a browser bundle) and `coverageOrigin: "production"`.
+  - The new `cloud.ci.steps` are GitHub Actions steps: a checkout with `fetch-depth: 0`, `upload-inventory`, `upload-source-maps` for each bundled workspace member, and the deployment registration, all for `$GITHUB_SHA`. In a workspace with more members, each beacon gets a `runtimeSurface` tag.
+  - The plan names the key variables (`FALLOW_API_KEY`, `VITE_FALLOW_API_KEY`), never a key value, and it writes nothing. A project id, `--git-sha` or `--api-endpoint` that is not safe in a shell command exits 2.
+  - `--json` adds the `cloud` object to the setup envelope. Without `--cloud` the envelope does not change.
+  - `--wait` polls the Fallow Cloud activation endpoint for the SHA until every step is done. It retries a network error, a rate limit or a server error. It exits 0 when the setup is complete, 1 on a timeout (`--wait-timeout`, default 600 seconds), and 2 on an auth, key scope or input error. The last activation body goes into `cloud.wait.activation` unchanged.
+
+- **`fallow health` can report files that are too long.** Set `health.maxFileLines` (or pass `--max-file-lines <N>`) to report each file with more physical lines than the limit. Blank lines and comment lines count. A final newline does not add a line. The default is `0`, so the check is off and existing runs do not change. The finding is a complexity finding with `exceeded: "file_lines"`, the name `<file>`, the line count in `line_count`, and the limit in the new field `max_file_lines`. It shows in every format that lists health findings, with the SARIF and CodeClimate rule id `fallow/long-file`. The new `complexity-file-lines` rule (default `error`) decides if the finding fails the run. `thresholdOverrides[].maxFileLines` sets a different limit for some files, and `0` turns the check off for them. `// fallow-ignore-file complexity` hides the finding. In `fallow audit`, a long file that did not grow by 5 lines or more stays inherited, so you can enable the limit on an existing project and stop further growth. A long file that grew is worsened, and a file that crosses the limit is introduced. Comment-only and blank-line changes also count for this check. The MCP `check_health` tool, the MCP Code Mode `combined` tool and the Node bindings accept `max_file_lines` / `maxFileLines`. The GitHub Action has the `max-file-lines` input, and the GitLab template has the `FALLOW_MAX_FILE_LINES` variable. The VS Code Health view shows a long file with its line count and limit. The audit base snapshot cache version changes, so the next audit computes a new base snapshot.
+
+- **`fallow coverage upload-source-maps` records the line starts of each generated script.** Each uploaded map now carries `x_fallow_line_starts`: for every generated line, the offset in the served script of column 0 of that line, in UTF-16 code units. Fallow Cloud uses it to attribute a browser Long Animation Frame, which names its entry point by a character offset, in a chunk with more than one line, also when the entry has no function name. The field is the last key of the map. The CLI reads the script next to each `.js`, `.mjs` or `.cjs` map with the same build-directory guard as the map. When `posthog-cli sourcemap process` has put its chunk id snippet in front of line 1, line 1 starts after the snippet. A missing script, a script that is not UTF-8, larger than 50 MiB or longer than 1,000,000 lines, or an unknown layout gives no field, and a stale field in the map is removed.
+
+- **`fallow mutation --kill-matrix` reports redundant test candidates.** The opt-in mode runs all covering tests of each mutant with bail disabled and reports a test when its complete observed kill set adds no unique mutant. Review each candidate before you remove a test. The mode can increase execution time.
+
+- **`--lean` trims the JSON report for agent context.** The new global flag
+  works with `--format json` on `fallow dead-code`, `fallow health` and the
+  bare `fallow` run. A lean document leaves out empty arrays and zero
+  dead-code summary counts, and keeps one workspace diagnostic per kind, with
+  a `count` when the kind has more than one. It keeps the first 10 rows of
+  the health tables `hotspots`, `file_scores` and `large_functions`, and
+  `<table>_omitted` gives the number of rows left out. `--full-tables` keeps
+  every row. `fallow health --top` cuts the tables as before. Repeated action text moves to `_meta.actions`, and an action without a
+  text field reads it there. The root field `profile: "lean"` marks the
+  shape, which `docs/output-schema.json` describes as `LeanOutput`. Runs
+  without `--lean` write the full shape as before. Other commands reject the
+  flag, and `fallow report --from` refuses a lean document.
+  (Closes [#3992](https://github.com/fallow-rs/fallow/issues/3992))
+
+- **`fallow cloud login` stores a read-only Fallow Cloud key without copy and paste.** The command runs the device flow, shows a code and a URL, and stores the key that the cloud creates after you approve the code. The key goes to the OS keychain (service `fallow-cloud`), or to `~/.config/fallow/credentials` with mode 0600 when no keychain is available. `fallow cloud logout` removes it. All commands that read production data now read keys in one order: `--api-key`, `$FALLOW_API_KEY`, the keychain, then the credentials file. The MCP cloud tools use the same order. Upload commands and `coverage setup --cloud --wait` still read only `--api-key` and `$FALLOW_API_KEY`, because the stored key is read-only. Only an organization owner can approve a key; when a member approves the code, the command prints the reason from the cloud. `FALLOW_CREDENTIAL_STORE=file` or `none` limits the stores.
+- **`fallow inspect --file <path> --cloud` adds production data per function.** The new `cloud` evidence section reads the Fallow Cloud file context and pairs each local function with its deployed function by `stable_id`, then by the name and its ordinal among same-name functions. Each paired function carries its state in this deployment, its state over the period, calls, error groups, CPU milliseconds per hour and never-run branch ranges. A local function without a pair is listed with the note `no production data (new or moved since deploy)`, or with a separate note when the cloud withheld never_called rows because the data is not actionable yet. The read has one attempt and a 2 second limit. A missing key, a plan gate, an unreachable cloud or a file without data is a section status (`no_key`, `plan_required`, `unavailable`, `untracked`), never a failed run. `--repo` selects the repository.
+- **`fallow inspect --format compact` prints about 1 KB of plain text per file.** One line per static finding and one line per function with production data, no colors, and a `truncated <n> more` line when the byte cap cuts lines. Editor hooks can add the text to the context as it is.
+
+- **Inventory and source-map uploads accept a Vercel deployment binding.** Use `--vercel-deployment-id`, or `VERCEL_DEPLOYMENT_ID` during a Vercel build. The cloud verifies the deployment against the upload SHA.
+
+### Changed
+
+- **The `mutation` and `mutation-inspect` JSON envelopes move to schema version `"2"`.** The mutation journal and the result cache also change format: `--resume` refuses a journal from an older release, and cached mutant outcomes run again once.
+
+- **The fallow skill says that `covered_by_test` can be `false`.** Fallow Cloud now reports `false` when a test or CI run tracked a function and never called it. The MCP reference names the three values, and a hot function with `false` is a high-risk edit, the same as `null`.
+
+- **`fallow flags` gives `medium` confidence to more generic SDK names when the file has no flag import.** The names are `isOn`, `isOff`, `useConfig`, `variation`, `getVariant` and `hasFeature`. Other code also uses these names, for example a product `getVariant('oak-30x40')` or a switch `lamp.isOn()`. Before, each call with a string argument was an `sdk_call` with `high` confidence. A file that imports a flag SDK or a flag module keeps `high`. A name in `flags.sdkPatterns` also stays `high`. `useExperiment` and the other vendor names stay `high`.
+
+- **`--explain` lists only the rules of the reported findings.** `_meta.rules`
+  in dead-code, architecture and combined JSON now holds only the rule codes
+  that have a finding in the run, and a run without findings has no `rules`
+  key. The CLI, the MCP server and the programmatic API list the same rules.
+  `fallow explain <rule>` still gives the text of any rule.
+  (Closes [#3992](https://github.com/fallow-rs/fallow/issues/3992))
+
+### Fixed
+
+- **`fallow coverage upload-inventory` now names a function that is assigned to a declared variable.** For `let startLoad; startLoad = () => {}`, the inventory named the function `(anonymous_N)`. `oxc-coverage-instrument` 0.16.0 and later name it after the variable (`startLoad`), so the runtime function and the inventory function did not join in Fallow Cloud. The inventory now follows the same rule as the instrumenter for an assigned function:
+  - Only a plain `=` gives a name. A compound or logical operator (`+=`, `||=`, `&&=`, `??=`) gives none.
+  - Parentheses around the value do not matter: `x = (() => {})` gives `x`.
+  - An assigned class does not give the name to its first field arrow.
+  - A function inside the target, as in `f(() => 1).x = () => 2`, does not take the target name.
+
+- **`fallow coverage upload-inventory` now ranks the own name of a function above the name of its binding, as `oxc-coverage-instrument` and `Function.prototype.name` do.** The inventory gave `f` for `const f = function g() {}` and `k` for `{ k: function own() {} }`. The instrumenter gives `g` and `own`, so these functions did not join in Fallow Cloud. The inventory now uses one rule for a declarator, an object property and an assignment:
+  - A function with its own name keeps it: `const f = function g() {}` gives `g`, `{ k: function own() {} }` gives `own` and `x = function own() {}` gives `own`.
+  - Parentheses around the value do not matter: `const f = (() => {})` gives `f` and `{ k: (() => {}) }` gives `k`.
+  - A class value takes no binding name: `const C = class D {}` names only its constructor and methods.
+
+  The stable id of a renamed function changes, because the name is one of its inputs. `fallow coverage analyze` matches an unused export to a function by name or by line. A function with its own name that starts on the line after its export (`export const f =` and then `function g() {}`) now matches neither, so a never-called function of this shape gets `review_required` and not `safe_to_delete`.
+
+- **`fallow coverage upload-inventory` now gives a callee name only to a function that is a direct argument of the call, as `oxc-coverage-instrument` does.** The inventory also named a function deeper in an argument after the callee: `foo([() => 1])` gave `foo`, and so did a JSX attribute, an object property or a `??` operand inside an argument. When an argument function took its own or its parent name, the callee name went to the next unnamed function inside it: `foo(x = () => () => 2)` gave `foo` for the inner arrow. These functions now stay `(anonymous_N)`, as in the instrumenter. An optional call on a callee that is not a member access also gives no callee name: `foo?.(() => 1)` gives `(anonymous_N)`, and `a.b?.(() => 1)` still gives `b`.
+
+- **`fallow coverage upload-inventory` now names more functions after their binding, as `oxc-coverage-instrument` does.**
+  - A default value takes the name of its binding: `function f(cb = () => 1)` gives `cb`, `function Button({ onClick = () => {} })` gives `onClick` and `const { k: v = () => 1 } = o` gives `v`.
+  - A parenthesized anonymous default export takes `default`: `export default (() => 1)`.
+
+- **An `unused-enum-member` suppression that only `--production` needs is no
+  longer reported stale in a run without `--production`.** Production mode
+  excludes test files. An enum member that only a test file reads is unused
+  there, so its `fallow-ignore-next-line unused-enum-member` comment is
+  necessary. A run without `--production` now scans the enum members again
+  without the files that production mode excludes. It keeps the comment out of
+  `stale-suppression` when that scan reports the member. The comment stays
+  stale when a production file reads the member. Thanks @Smrtnyk for the
+  report.
+  (Closes [#3962](https://github.com/fallow-rs/fallow/issues/3962))
+
+- **`fallow dead-code` no longer reports the default export of a local Oxlint `jsPlugins` entry that names a directory or a file without its extension.** Fallow credited the default export only when the entry named the plugin file, for example `"./plugin/index.js"`. Fallow now resolves the entry to the file that Oxlint loads. A directory resolves through the `main` field of its `package.json`, then through its `index` file. A path without an extension resolves to the file with a `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` extension. Other exports of the plugin file stay reportable. Thanks to @Smrtnyk for the report.
+  (Closes [#3961](https://github.com/fallow-rs/fallow/issues/3961))
+
+- **`fallow dead-code` credits a member access on the declared return type of a method or getter that a class calls through `this`.** A call such as `this.current()?.onDown?.()`, where `private current(): Tool | undefined`, now credits `Tool.onDown`. The implementer `SelectTool.onDown` is no longer reported as an unused class member. The fix also covers a `#`-private method (`this.#current()`) and a private getter (`this.active?.onDown?.()`). A static method and a return type that names a type parameter of the method give no credit. Thanks @Smrtnyk for the report.
+  (Closes [#3960](https://github.com/fallow-rs/fallow/issues/3960))
+
+- **`fallow dead-code` no longer reports the exports of a Vitest alias replacement file that stands in for a relative import.** An entry such as `{ find: "./clock.js", replacement: "./test/stubs/clock.ts" }` swaps the original file for a stub. Fallow resolves the relative import to the original file, so the stub had no consumer. With `includeEntryExports`, fallow reported the exports of the stub as unused. Fallow now credits every export of a replacement file when the alias key is a relative or absolute path. Thanks @Smrtnyk for the report.
+  (Closes [#3963](https://github.com/fallow-rs/fallow/issues/3963))
+
+- **`fallow audit --base` keeps an unchanged styling finding inherited after a line shift.** Before, a line added above an existing CSS rule marked its `css-*` finding as introduced, and the new-only gate could fail on it. The audit now matches a styling finding by its code, sub-kind, file and value, not by its line. A `css-selector-complexity` finding also uses the selector of its rule, so a new rule with an equal specificity is still introduced. When a file has equal findings, each one keeps its own identity, and the finding on a line that the change added is the introduced one. The base snapshot cache version changes, so the next audit computes a new base snapshot. Thanks [@cheetahbyte](https://github.com/cheetahbyte) for the report. (Closes [#3956](https://github.com/fallow-rs/fallow/issues/3956))
+
+- **An `unused-class-member` or `unused-store-member` suppression that only
+  `--production` needs is no longer reported stale in a run without
+  `--production`.** Production mode excludes test files. A class member or a
+  Pinia store member that only a test file reads is unused there, so its
+  `fallow-ignore-next-line` comment is necessary. A run without `--production`
+  now scans these members again without the files that production mode
+  excludes. That scan uses the `usedClassMembers`, `ignoreDecorators`, plugin
+  and Lit inputs of the run. The comment stays stale when a production file
+  reads the member. A member comment in a file that only a test reaches now
+  stays stale for all three member kinds, because production mode reports that
+  file as unused. This extends the fix for
+  [#3962](https://github.com/fallow-rs/fallow/issues/3962) to the other member
+  kinds.
+
+- **`fallow dead-code` no longer reports the exports of an alias replacement file for two more alias shapes.** Fallow applies a config alias only when the normal resolution of an import fails, so these replacement files had no consumer. With `includeEntryExports`, fallow reported their exports as unused. Fallow now credits every export of the replacement file in these cases:
+  - A Vitest or Vite alias with a bare key for an installed package, such as `{ "@scope/pkg": "./__mocks__/@scope/pkg.ts" }` with `node_modules/@scope/pkg` present. The import resolves to the real package.
+  - A top-level `resolve.alias` with a relative key in a Vite mode config, such as `vite.config.prod.ts`. The import resolves to the original file.
+
+  An alias key for a package that is not installed, and a path-alias key such as `@lib`, keep precise export tracking, because the import resolves to the replacement file.
+
+- **`fallow dead-code` no longer reports a webpack `resolve.alias` replacement file as unused when the alias key names an installed package.** For example, `{ "react-native-keychain": path.resolve(__dirname, "src/shims/react-native-keychain.js") }` with `node_modules/react-native-keychain` present. Webpack loads the replacement file, but fallow applies a config alias only when the normal resolution of an import fails, so the import resolved to the real package. Fallow now makes the replacement file an entry point and, with `includeEntryExports`, credits all of its exports. An exact-match key such as `react-native-keychain$`, and a relative key such as `./src/clock.js`, get the same treatment. An alias key for a package that is not installed, and a path-alias key such as `@lib`, keep precise tracking, because the import resolves to the replacement file.
+
+- **`fallow dead-code` now reads a config that a function builds from local bindings.** Before, fallow reported the entries and alias targets of such a config as unused files. An example is a webpack config that exports `(env, argv) => { const common = {...}; const web = { ...common, entry: {...} }; return [bg, web]; }`. Fallow does not run the config code. The changes are:
+  - Fallow reads a local `const` or `let` binding with a literal value in the returned value of a config function. This applies to a returned identifier, an array element, a property value and an object spread such as `...common` or `...common.resolve`. When a spread and a key set the same property, the last value wins. This also applies to a function that the file exports through a binding, such as `const config = (env) => {...}; module.exports = config;`.
+  - Fallow also reads a spread of a stable top-level constant, such as `export default { ...base, test }`, and a top-level constant that a config function returns, such as `module.exports = () => base;`. These changes apply to all plugins that read a JavaScript or TypeScript config, for example Vite, Vitest, Playwright and Electron.
+  - A top-level `return config` gives the config also when a branch `return` gives no object, such as `if (!env) return null;` or `return mergeConfig(config, overrides);`. When a branch `return` gives an object, fallow reads that object, as before. A returned array always gives the configs of the array.
+  - For webpack and rspack, fallow reads up to 64 configs of an exported array, also when a function returns the array. Each config resolves its entries against its own `context`. Module Federation `exposes` resolve against the `context` only when all configs declare the same `context`, because fallow does not know which config holds the plugin call. Fallow collects the loaders, the `plugins` requires and the `externals` of all configs. For webpack, fallow also collects the aliases of all configs.
+  - Fallow does not read a binding that the config can change. This includes a write, a method such as `push`, a call such as `Object.assign`, and a change through an alias such as `const { resolve } = common`, `({ resolve: r } = common)`, `const list = [common]` or `for (const c of [common])`. An object literal such as `const config = { mode, entry }` changes `entry` only through the `entry` key, as in `config.entry.admin = x`, not through `config.devtool = x` or `config.plugins.push(x)`. An alias keeps that key path, so `const plugins = config.plugins; plugins.push(x)` does not change `entry` either. A call to a function of the same file changes its argument only when the body of that function changes its parameter, also under the same key path. A call to an imported or unknown function, such as `addAnalyzer(config)` with `addAnalyzer` from `require`, does not count as a change, because fallow does not see what the function does. Fallow also does not read a `var` binding, a destructured binding or the result of a call.
+
+- **A Vite alias with a regular expression `find` now resolves.** Before, fallow read `find` only as a string. An alias such as `{ find: /^node:module$/, replacement: p('./src/shim.ts') }` was dropped, so the import of `node:module` did not reach the replacement file and the file was reported as unused. Fallow now reads three regex shapes:
+  - An anchored literal, such as `/^node:module$/` or `/^@scope\/pkg$/`. The alias key is the literal.
+  - An anchored prefix with one capture of the rest, such as `/^@\/(.*)$/`, when the replacement ends with `/$1`. The alias key is the prefix, and the replacement is the directory before `/$1`.
+  - An anchored prefix that ends with a slash, such as `/^@\//`, when the replacement ends with a slash, such as `'/src/lib/'`. The alias key is the prefix with its slash.
+
+  A replacement can also be a template literal that starts with a path call, such as `` `${path.resolve(__dirname, 'src')}/$1` ``. Other regex shapes, a regex with a flag other than `u` or `v`, and a replacement that uses a capture in another position still give no alias, because fallow matches aliases by prefix. For the same reason, an exact key such as `/^lodash$/` also matches `lodash/fp`, which Vite does not alias. A capture key such as `/^@\/(.*)$/` also matches `@` alone. Thanks [@VariableVince](https://github.com/VariableVince) for the report.
+
+- **The fallow skill puts the audit styling fields under `complexity`.** The MCP reference said that `styling_findings`, `css_analytics` and `styling_health` are under the health sub-result. The `fallow audit` JSON has no `health` key: these fields are in the nested `complexity` block.
+
+- **An import such as `country-flag-icons` or `@/features/checkout/api` no longer confirms a flag file.** Before, the words `flag`, `feature` and `toggle` anywhere in an import source made a generic SDK call `high`. Now one path segment must name a flag vendor or flags, for example `@unleash/proxy-client-react`, `flags/next`, `@/lib/flags` or `./featureFlags`. An import such as `./ThemeToggle` also no longer confirms a flag file.
+
+- **`fallow flags` no longer reports a call to a project function with a generic SDK name.** When a file declares `isEnabled`, or imports `getVariant` from a module of the project, and imports no flag SDK or flag module, a call such as `getVariant('oak-30x40')` is not a flag. An import from a flag module of the project, such as `./featureFlags`, `./flags.server` or `./flagUtils`, still reports with `high`. An import from a module such as `./featureGate`, `@/lib/features` or `./experiments` still reports with `medium`. The extraction cache version changes, so the first run after the update parses all files again.
+
+- **`fallow dead-code` no longer makes entry points of the arguments that a package script gives to the script that a runtime runs, and no longer expands a glob from the arguments of a program that it does not know.** In `node tool.js src/**/*.js`, `node` runs `tool.js` only, so the glob after the script is data and no longer makes every file in `src/` an entry point. The same applies to `tsx`, `ts-node`, `bun`, `deno run`, `nodemon`, a shell, and to the value of an option after the script, such as `--input src/lib/b.js`. A program that fallow does not know, such as `watchee -f './src/**/*'`, expands no glob. Its literal file arguments and option values, such as `jscodeshift -t codemods/transform.js`, stay entry points. When such a program runs a known program (`time node x.js`, `infisical run -- node x.js`), the rules of that program apply. Test runners, bundlers, and compilers (`mocha`, `vitest`, `jest`, `esbuild`, `tsup`, `webpack`, `tsc`, `bun build`, `deno serve`, and others) keep their file arguments as entry points. A relative module path of a runtime flag that loads code (`-r ./setup.js`, `--import=./register.js`, `bun --preload ./preload.js`) stays an entry point. The rules also apply to the shell helpers that a script runs, to CI steps, and to Dockerfile commands. Thanks @waldoluisribeiro for the report.
+  (Closes [#3967](https://github.com/fallow-rs/fallow/issues/3967))
+
+- **The fallow skill lists the file-length limit.** The CLI reference now lists `--max-file-lines` in the `fallow health` flags.
+
+- **Mutation testing instruments temporary Node source copies.** Byte-identical
+  copies of a unique planned source load its instrumented code. Copies that
+  match several planned sources make the run incomplete, even when a test
+  ignores the child result.
+  (Closes [#3950](https://github.com/fallow-rs/fallow/issues/3950))
+
+- **`--type-aware` accepts the tsrs and TypeScript versions that a project already installs.** Before, the experimental tsrs backend (`FALLOW_TYPE_AWARE_BACKEND=tsrs`) needed exactly `tsrs@0.18.0-ts7.1.0-dev.20260929`, which has no Windows binary. A newer tsrs such as `0.20.1-ts7.1.0-beta` was rejected, and Fallow fell back to syntactic analysis. The companion now accepts any tsrs from `0.18.0` up to (not including) `1.0.0`, and any TypeScript 7 release on the default backend, also a prerelease. Only `major.minor.patch` counts, so the tsrs build tag does not matter. `fallow type-aware status` and the JSON `type_aware.backend_version` now show the version that the companion resolved. A version outside the range gives a message with the supported range and a tested version to install. The `tsrs` peer dependency of `fallow-type-aware` is now `*`, so npm does not warn about the tsrs that a project already has. Guarded fixes still need the tested `typescript@7.0.2` backend: another version refines findings but makes no fix eligible. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#3998](https://github.com/fallow-rs/fallow/issues/3998))
+
+- **Type-aware symbol impact follows compiler-resolved imports and re-exports.** Explicit `.js` imports that resolve to TypeScript sources now retain transitive affected files and targeted tests, including their shortest provenance paths.
+
+- **CLI JSON errors include recovery guidance for invalid arguments, invalid roots and missing fix confirmation.** Stable codes identify each failure, and `help` describes the next step. Existing exit statuses are preserved.
+- **Skipped fixes explain how to obtain a fresh preview.** JSON skip records include `help` for changed files, mixed line endings and incomplete analysis while preserving the safety skips.
+- **Invalid JSON presentation options return structured JSON errors.** Unsupported `--lean` combinations preserve the selected compact or pretty output style.
+
+- **Agent gates can read tool input and audit reports without jq.** Generated gates use a native Fallow JSON reader when they can find one. Older installations keep the jq fallback. Large blocking reports retain the blocking exit code when their displayed findings are truncated. Command routing, audit roots and report writes keep their existing behavior. `fallow agent status` inventories reader launchers without executing project code and reports unverified local runtimes separately from pending project trust. The gate skips a command that cannot be a git commit or push before it searches for a reader, so other Bash calls stay fast. An unedited gate from an older Fallow version does not report as modified.
+- **The released Fallow skill routes complete agent onboarding through `fallow agent install`.** It checks the resulting status and reports runtime blockers before calling the setup ready. Explicit requests for only a hook keep the narrower hook workflow.
+
+- **Inventory uploads omit churn from shallow Git history.** Partial histories are omitted on both fresh and cached uploads.
+- **Cloud analysis treats managed partial captures as positive execution evidence.** Human and Markdown reports withhold application coverage percentages and cold-code conclusions.
+
+### Performance
+
+- **`fallow similar-code` computes vectors about 2.7x faster on Apple silicon.** The macOS builds of `fallow-similar-code` (darwin-arm64 and darwin-x64) now link the Accelerate framework through the `accelerate` feature of `candle-core`. On an Apple M5, 200 real functions took 14.8 s instead of 40.7 s. The speedup on Intel Macs was not measured. Inference stays F32 on the CPU with a batch size of one. Linux and Windows builds do not change. The vectors change only in the last digits: over 19,900 function pairs, the largest change in cosine similarity was 0.000001. Embedding semantics go from v1 to v2, so every vector cache clears one time. After the update, run `fallow similar-code setup --local` one time. Setup reuses the model files that are already verified and downloads nothing.
+  (Closes [#3993](https://github.com/fallow-rs/fallow/issues/3993))
+
 ## [3.37.0] - 2026-10-27
 
 ### Added
@@ -16235,7 +16402,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.37.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.38.0...HEAD
+[3.38.0]: https://github.com/fallow-rs/fallow/compare/v3.37.0...v3.38.0
 [3.37.0]: https://github.com/fallow-rs/fallow/compare/v3.36.0...v3.37.0
 [3.36.0]: https://github.com/fallow-rs/fallow/compare/v3.35.0...v3.36.0
 [3.35.0]: https://github.com/fallow-rs/fallow/compare/v3.34.1...v3.35.0

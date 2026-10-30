@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-similar-code-darwin-x64",
-  "version": "3.37.0",
+  "version": "3.38.0",
   "description": "Fallow similar-code sidecar binary for macOS x64 (Intel)",
   "license": "MIT",
   "repository": {
