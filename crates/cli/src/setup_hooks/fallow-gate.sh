@@ -44,7 +44,8 @@ gate_json() {
 gate_try_json_runner() {
   local anchor="$1" probe
   shift
-  probe="$(cd "$anchor" && "$@" hooks gate-runtime probe 2>/dev/null)" || return 1
+  # A probe never gets the hook stdin, so a launcher cannot read the payload.
+  probe="$(cd "$anchor" && "$@" hooks gate-runtime probe </dev/null 2>/dev/null)" || return 1
   [ "$probe" = fallow-gate-json-v1 ] || return 1
   GATE_JSON_DIR="$anchor"
   GATE_JSON_RUNNER=("$@")
@@ -78,13 +79,31 @@ gate_find_json_runner() {
   gate_json_anchor "$anchor"
 }
 
+gate_skip_not_git_write() {
+  if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+    echo "fallow-gate: not a git commit/push, skipping audit." >&2
+  fi
+  exit 0
+}
+
+# The hook runs on every Bash tool call. Read the payload first and keep it in
+# a variable. A plain pattern on the raw payload then skips a command that
+# cannot be a git commit or push, before the reader search below starts
+# launchers. A git write puts `git` before `commit`, `push` or an expansion in
+# the command text. A JSON `\u` escape can hide a word, so such a payload
+# always goes to the exact parse.
+INPUT="$(cat)"
+case "$INPUT" in
+  *'\u'* | *git*commit* | *git*push* | *git*'$'*) ;;
+  *) gate_skip_not_git_write ;;
+esac
+
 gate_find_json_runner || true
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ] && ! command -v jq >/dev/null 2>&1; then
   echo "fallow-gate: no native JSON reader or jq found, skipping audit. Upgrade fallow on PATH or install it in the project." >&2
   exit 0
 fi
 
-INPUT="$(cat)"
 SESSION_CWD=""
 if [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ]; then
   GATE_INPUT="$(mktemp)"
@@ -257,10 +276,7 @@ else
 fi
 set +f
 if [ "$GIT_WRITE" -eq 0 ]; then
-  if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
-    echo "fallow-gate: not a git commit/push, skipping audit." >&2
-  fi
-  exit 0
+  gate_skip_not_git_write
 fi
 
 # The hook process can start in a directory that is not the session directory.

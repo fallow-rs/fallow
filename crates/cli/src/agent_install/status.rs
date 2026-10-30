@@ -119,10 +119,32 @@ fn native_gate_probe(
         return None;
     }
     let trusted = crate::setup_hooks::rendered_gate_script();
-    if text != trusted {
+    if !gate_matches_template(&text, &trusted) {
         return Some((status.path.clone(), NativeGateState::Modified));
     }
     Some((status.path.clone(), native_reader_inventory(root)))
+}
+
+/// Header comment that records which fallow version wrote the gate.
+const INSTALLER_VERSION_LINE: &str = "# Installer version: ";
+
+/// Compares an installed gate with the managed template line by line. The
+/// installer version comment changes with each fallow release and CRLF line
+/// endings come from a checkout setting, so neither makes a gate modified.
+/// Every other byte must match.
+fn gate_matches_template(installed: &str, trusted: &str) -> bool {
+    normalized_gate_lines(installed).eq(normalized_gate_lines(trusted))
+}
+
+fn normalized_gate_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split('\n').map(|line| {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.starts_with(INSTALLER_VERSION_LINE) {
+            INSTALLER_VERSION_LINE
+        } else {
+            line
+        }
+    })
 }
 
 fn native_reader_inventory(root: &Path) -> NativeGateState {
@@ -896,5 +918,47 @@ mod tests {
         );
         assert_eq!(parse_version_output("3.17.0").as_deref(), Some("3.17.0"));
         assert_eq!(parse_version_output(""), None);
+    }
+
+    fn probe_installed_gate(text: &str) -> NativeGateState {
+        let dir = tempfile::tempdir().unwrap();
+        let status = claude_gate(Some(env!("CARGO_PKG_VERSION")));
+        let script = dir.path().join(&status.path);
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, text).unwrap();
+        native_gate_probe(dir.path(), &status).unwrap().1
+    }
+
+    #[test]
+    fn native_gate_from_an_older_installer_version_is_not_modified() {
+        let older = crate::setup_hooks::FALLOW_GATE_SCRIPT
+            .replace("@@FALLOW_INSTALLER_VERSION@@", "0.0.1-older");
+        assert_ne!(older, crate::setup_hooks::rendered_gate_script());
+        assert_ne!(probe_installed_gate(&older), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn native_gate_with_crlf_line_endings_is_not_modified() {
+        let crlf = crate::setup_hooks::rendered_gate_script().replace('\n', "\r\n");
+        assert_ne!(probe_installed_gate(&crlf), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn native_gate_with_an_edit_is_modified() {
+        let edited = crate::setup_hooks::rendered_gate_script().replacen(
+            "set -euo pipefail",
+            "set -euo pipefail\ntouch /tmp/x",
+            1,
+        );
+        assert_eq!(probe_installed_gate(&edited), NativeGateState::Modified);
+        let edited_version_line = crate::setup_hooks::rendered_gate_script().replacen(
+            "# Installer version: ",
+            "touch /tmp/x # Installer version: ",
+            1,
+        );
+        assert_eq!(
+            probe_installed_gate(&edited_version_line),
+            NativeGateState::Modified
+        );
     }
 }

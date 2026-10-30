@@ -226,7 +226,7 @@ fn native_json_gate_handles_safe_calls_and_invalid_external_data() {
     assert!(invalid.status.success());
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("cannot read audit report"));
     for invalid in [
-        br#"{"tool_input":{"command":[]}}"#.as_slice(),
+        br#"{"tool_input":{"command":["git","push"]}}"#.as_slice(),
         br#"{"tool_input":{"command":"git\u0000push"}}"#.as_slice(),
     ] {
         let result = run_gate(&root, &script, &bin, invalid);
@@ -615,4 +615,70 @@ fn native_json_status_does_not_execute_ancestor_owned_tools() {
             );
         }
     }
+}
+
+/// Replaces the fallow stub with `yarn` and `npx` stubs that record each
+/// call and the stdin they receive, and adds a package.json so the gate
+/// tries them as launchers.
+fn launcher_probe_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf, PathBuf) {
+    let (temp, root, script, bin) = fixture();
+    std::fs::remove_file(bin.join("fallow")).unwrap();
+    std::fs::write(root.join("package.json"), "{}").unwrap();
+    let marker = temp.path().join("launcher-probe-calls");
+    for launcher in ["yarn", "npx"] {
+        write_executable(
+            &bin.join(launcher),
+            &format!(
+                "#!/bin/sh\necho {launcher} >> '{marker}'\ncat >> '{marker}'\nexit 1\n",
+                marker = marker.display()
+            ),
+        );
+    }
+    (temp, root, script, bin, marker)
+}
+
+#[test]
+fn gate_skips_launcher_probes_for_a_command_that_is_not_a_git_write() {
+    let (_temp, root, script, bin, marker) = launcher_probe_fixture();
+    for command in ["ls -la", "cargo test", "git status --short"] {
+        let payload = serde_json::to_vec(
+            &serde_json::json!({"cwd": root, "tool_input": {"command": command}}),
+        )
+        .unwrap();
+        let output = run_gate(&root, &script, &bin, &payload);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !marker.exists(),
+            "`{command}` ran a launcher probe: {}",
+            std::fs::read_to_string(&marker).unwrap_or_default()
+        );
+    }
+
+    // A git write still searches for a reader, so the check above is not vacuous.
+    let payload = serde_json::to_vec(
+        &serde_json::json!({"cwd": root, "tool_input": {"command": "git commit -m test"}}),
+    )
+    .unwrap();
+    let output = run_gate(&root, &script, &bin, &payload);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(marker.exists(), "a git write must probe the launchers");
+}
+
+#[test]
+fn gate_launcher_probes_never_read_the_hook_payload() {
+    let (_temp, root, script, bin, marker) = launcher_probe_fixture();
+    let payload = serde_json::to_vec(
+        &serde_json::json!({"cwd": root, "tool_input": {"command": "git push origin main"}}),
+    )
+    .unwrap();
+    let output = run_gate(&root, &script, &bin, &payload);
+    assert_eq!(output.status.code(), Some(0));
+    let calls = std::fs::read_to_string(&marker).unwrap();
+    assert!(calls.contains("npx"), "{calls}");
+    assert!(!calls.contains("tool_input"), "a probe read stdin: {calls}");
 }
