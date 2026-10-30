@@ -138,17 +138,37 @@ pub fn send(
     send_with_timing(auth, url, body, operation, CloudTiming::DEFAULT)
 }
 
+/// [`send`] with one attempt and a short total timeout, for a read that runs
+/// inside an editor hook. The hook has a short budget of its own, so a second
+/// attempt would only come after the hook stopped the run.
+pub fn send_once_with_total_timeout(
+    auth: &CloudAuth,
+    url: &str,
+    body: &CloudBody<'_>,
+    operation: &str,
+    total_timeout_secs: u64,
+) -> Result<CloudOutcome, CloudError> {
+    let timing = CloudTiming {
+        total_timeout_secs,
+        max_attempts: 1,
+        ..CloudTiming::DEFAULT
+    };
+    send_with_timing(auth, url, body, operation, timing)
+}
+
 /// Timeouts and retry delay for [`send_with_timing`].
 #[derive(Clone, Copy)]
 struct CloudTiming {
     total_timeout_secs: u64,
     max_retry_delay: Duration,
+    max_attempts: u8,
 }
 
 impl CloudTiming {
     const DEFAULT: Self = Self {
         total_timeout_secs: CLOUD_TOTAL_TIMEOUT_SECS,
         max_retry_delay: Duration::from_secs(MAX_RETRY_DELAY_SECS),
+        max_attempts: MAX_ATTEMPTS,
     };
 }
 
@@ -178,7 +198,7 @@ fn run_attempts(
     loop {
         let (status, retry_after, bytes, gzip) = match attempt_once() {
             Ok(raw) => raw,
-            Err(AttemptError::Timeout) if attempt < MAX_ATTEMPTS => {
+            Err(AttemptError::Timeout) if attempt < timing.max_attempts => {
                 std::thread::sleep(timing.max_retry_delay);
                 attempt += 1;
                 continue;
@@ -190,13 +210,13 @@ fn run_attempts(
                     attempt,
                 )));
             }
-            Err(AttemptError::Interrupted(_)) if attempt < MAX_ATTEMPTS => {
+            Err(AttemptError::Interrupted(_)) if attempt < timing.max_attempts => {
                 attempt += 1;
                 continue;
             }
             Err(AttemptError::Failed(err) | AttemptError::Interrupted(err)) => return Err(err),
         };
-        if is_retryable_status(status) && attempt < MAX_ATTEMPTS {
+        if is_retryable_status(status) && attempt < timing.max_attempts {
             let delay =
                 retry_delay_for_status(status, retry_after.as_deref(), attempt, SystemTime::now());
             std::thread::sleep(delay.min(timing.max_retry_delay));
@@ -424,7 +444,30 @@ mod tests {
         CloudTiming {
             total_timeout_secs: 1,
             max_retry_delay: Duration::from_millis(10),
+            max_attempts: MAX_ATTEMPTS,
         }
+    }
+
+    #[test]
+    fn one_attempt_timing_does_not_retry_a_timeout_or_an_outage() {
+        let timing = CloudTiming {
+            max_attempts: 1,
+            ..fast_timing()
+        };
+        let mut calls = 0;
+        let result = run_attempts("file-context", timing, || {
+            calls += 1;
+            Err(AttemptError::Timeout)
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+        let mut calls = 0;
+        let result = run_attempts("file-context", timing, || {
+            calls += 1;
+            Ok((503, None, Vec::new(), false))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
     }
 
     fn ok_answer() -> RawResponse {

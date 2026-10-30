@@ -29,13 +29,13 @@ impl CloudCommand {
     }
 }
 
-/// Refusal emitted when no Fallow Cloud API key is available. Names the
-/// environment variable first because that is the only route the MCP tools
-/// have; the flag and the command line of `command` follow for the CLI surface.
+/// Refusal emitted when no Fallow Cloud API key is available. It names the
+/// three key sources: the key that `fallow cloud login` stores, the
+/// environment variable and the flag. The command line of `command` follows.
 #[must_use]
 pub fn cloud_api_key_missing_message(command: CloudCommand) -> String {
     format!(
-        "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... {}",
+        "Cloud runtime coverage requires an API key.\n\nRun `fallow cloud login`, set FALLOW_API_KEY, or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... {}",
         command.example()
     )
 }

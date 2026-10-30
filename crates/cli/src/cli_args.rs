@@ -108,6 +108,7 @@ Automation and CI:
 
 Runtime coverage:
   coverage       Set up or analyze runtime coverage data
+  cloud          Log in to Fallow Cloud and store a read-only API key
   license        Manage the paid-feature license
   telemetry      Manage opt-in product telemetry
 
@@ -1034,6 +1035,33 @@ pub enum Command {
         /// hotspot subsystem. Default off to avoid git-history latency.
         #[arg(long)]
         churn: bool,
+
+        /// OPT-IN: attach Fallow Cloud production evidence for a `--file`
+        /// target as the `cloud` evidence section: calls, errors, CPU and
+        /// never-run branches per function. The API key is $FALLOW_API_KEY,
+        /// else the key that `fallow cloud login` stored. A missing key, a
+        /// plan gate or an unreachable cloud is a section status, never a
+        /// failed run.
+        #[arg(long, conflicts_with = "symbol")]
+        cloud: bool,
+
+        /// Fallow Cloud repository for `--cloud`. Precedence: this flag >
+        /// $FALLOW_REPO > the `origin` git remote.
+        #[arg(long, value_name = "OWNER/REPO", requires = "cloud")]
+        repo: Option<String>,
+    },
+
+    /// Connect this machine to Fallow Cloud.
+    ///
+    /// `login` runs the device flow: it shows a code and a URL, and after
+    /// you approve the code in the dashboard it stores a read-only API key
+    /// in the OS keychain (service `fallow-cloud`), or in
+    /// `~/.config/fallow/credentials` (mode 0600) when no keychain is
+    /// available. `--api-key` and $FALLOW_API_KEY still win over the
+    /// stored key. `logout` removes the stored key.
+    Cloud {
+        #[command(subcommand)]
+        subcommand: CloudCli,
     },
 
     /// Trace a symbol's call chain, or the shortest import path between two
@@ -2375,62 +2403,6 @@ pub enum AuditCacheCli {
     },
 }
 
-#[derive(clap::Subcommand)]
-pub enum LicenseCli {
-    /// Activate a license JWT.
-    ///
-    /// JWT input precedence: positional arg > `--from-file` > stdin (`-`).
-    /// All paths normalize whitespace before crypto verification.
-    Activate {
-        /// JWT as a positional argument.
-        #[arg(value_name = "JWT")]
-        jwt: Option<String>,
-
-        /// Path to a file containing the JWT.
-        #[arg(long, value_name = "PATH")]
-        from_file: Option<PathBuf>,
-
-        /// Read JWT from stdin.
-        #[arg(long, conflicts_with_all = ["jwt", "from_file"])]
-        stdin: bool,
-
-        /// Start a 30-day email-gated trial in one step.
-        ///
-        /// The trial endpoint is rate-limited to 5 requests per hour per IP.
-        /// In CI or behind a shared NAT, start the trial from a developer
-        /// machine and set FALLOW_LICENSE (or FALLOW_LICENSE_PATH) on the
-        /// runner instead of re-running `activate --trial` per job.
-        #[arg(long, requires = "email")]
-        trial: bool,
-
-        /// Email address for the trial flow.
-        #[arg(long, value_name = "ADDR")]
-        email: Option<String>,
-    },
-    /// Show the active license tier, seats, features, and days remaining.
-    Status,
-    /// Fetch a fresh JWT from `api.fallow.cloud` (network-only).
-    ///
-    /// The stored license JWT is the primary identity proof. When it is
-    /// missing, or the cloud reports it as too stale to exchange, the request
-    /// is retried with a full-access API key.
-    Refresh {
-        /// Fallow Cloud API key (bearer token) used when the stored license
-        /// JWT cannot be refreshed.
-        ///
-        /// Precedence: this flag > $FALLOW_API_KEY. Generate at
-        /// <https://fallow.cloud/settings#api-keys>.
-        ///
-        /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
-        /// secret on the command line may be visible to other processes via
-        /// `ps` and can leak into shell history or process audit logs.
-        #[arg(long, value_name = "KEY")]
-        api_key: Option<String>,
-    },
-    /// Remove the local license file.
-    Deactivate,
-}
-
 #[derive(Clone, Copy, clap::Subcommand)]
 pub enum TelemetryCli {
     /// Show effective telemetry state, precedence, and controls.
@@ -2486,7 +2458,7 @@ pub enum CoverageCli {
         #[arg(long, visible_alias = "runtime-coverage-cloud")]
         cloud: bool,
 
-        /// Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        /// Fallow Cloud API key. Order: flag > $FALLOW_API_KEY > `fallow cloud login` key.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
@@ -2774,7 +2746,7 @@ pub enum CoverageCli {
     /// `--changed-since`), then $FALLOW_AUDIT_BASE, then the merge-base with
     /// the upstream or the remote default branch.
     ReviewPacket {
-        /// Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        /// Fallow Cloud API key. Order: flag > $FALLOW_API_KEY > `fallow cloud login` key.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
@@ -2817,7 +2789,7 @@ pub enum CoverageCli {
     /// base deployment commit with `--base <sha>`; without it, the cloud
     /// picks the previous deployment with production runtime.
     DeploymentChanges {
-        /// Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        /// Fallow Cloud API key. Order: flag > $FALLOW_API_KEY > `fallow cloud login` key.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
@@ -3106,6 +3078,9 @@ impl From<TypeAwareRequireArg> for fallow_config::TypeAwareRequire {
 #[path = "cli_args_health.rs"]
 mod health_args;
 pub use health_args::*;
+#[path = "cli_args_cloud.rs"]
+mod cloud_args;
+pub use cloud_args::*;
 
 /// CLI mirror of [`fallow_config::AuditGate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]

@@ -363,18 +363,26 @@ fn full_tables_requires_lean() {
 
 #[test]
 fn lean_is_rejected_on_commands_without_a_lean_envelope() {
-    for command in ["dupes", "audit", "architecture"] {
-        let output = run_fallow(
-            command,
-            "basic-project",
-            &["--format", "json", "--lean", "--quiet"],
-        );
-        assert_eq!(output.code, 2, "{command} rejects --lean");
-        assert!(
-            output.stderr.contains("--lean applies to"),
-            "{command} names where --lean applies: {}",
-            output.stderr
-        );
+    for command in ["dupes", "audit", "architecture", "fix"] {
+        for pretty in [false, true] {
+            let mut args = vec!["--format", "json", "--lean", "--quiet"];
+            if pretty {
+                args.push("--pretty");
+            }
+            let output = run_fallow(command, "basic-project", &args);
+            assert_eq!(output.code, 2, "{command} rejects --lean");
+            let error = parse(&output.stdout);
+            assert_eq!(error["error"], true);
+            assert_eq!(error["exit_code"], 2);
+            assert!(
+                error["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("--lean applies to")),
+                "{command} names where --lean applies: {error}"
+            );
+            assert!(output.stderr.is_empty(), "JSON errors stay on stdout");
+            assert_eq!(output.stdout.lines().count() > 1, pretty);
+        }
     }
 }
 
@@ -398,7 +406,16 @@ fn full_tables_and_top_are_rejected_together() {
         output.code, 2,
         "--top cuts rows that --full-tables cannot restore"
     );
-    assert!(output.stderr.contains("--full-tables"), "{}", output.stderr);
+    let error = parse(&output.stdout);
+    assert_eq!(error["error"], true);
+    assert_eq!(error["exit_code"], 2);
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--full-tables")),
+        "{error}"
+    );
+    assert!(output.stderr.is_empty(), "JSON errors stay on stdout");
 }
 
 #[test]

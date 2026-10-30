@@ -238,24 +238,16 @@ pub(super) fn take_last_two_segments(path: &str) -> Option<String> {
 }
 
 pub(super) fn resolve_api_key(explicit: Option<&str>) -> Result<String, String> {
-    if let Some(explicit) = explicit {
-        let trimmed = explicit.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    if let Ok(from_env) = std::env::var("FALLOW_API_KEY") {
-        let trimmed = from_env.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    Err(
-        "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY>. Generate at \
-         https://fallow.cloud/settings#api-keys."
-            .to_owned(),
-    )
+    crate::coverage::credentials::resolve_write_api_key(explicit)
+        .map(|resolved| resolved.key)
+        .ok_or_else(|| MISSING_WRITE_KEY.to_owned())
 }
+
+/// The refusal of an upload without a live key. The key that `fallow cloud
+/// login` stores is read-only, so it does not count here.
+const MISSING_WRITE_KEY: &str = "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY> with a live key. \
+     Generate at https://fallow.cloud/settings#api-keys. The read-only key of \
+     `fallow cloud login` cannot upload.";
 
 pub(super) fn endpoint_url(
     override_endpoint: Option<&str>,

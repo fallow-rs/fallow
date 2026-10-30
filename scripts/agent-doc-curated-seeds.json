@@ -88,6 +88,18 @@
     },
     {
       "section": "commands",
+      "row": "cloud",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "cloud",
+      "column": "Purpose",
+      "seed": "Connect this machine to Fallow Cloud"
+    },
+    {
+      "section": "commands",
       "row": "config",
       "column": "Key Flags",
       "seed": "`--path`"
@@ -282,7 +294,7 @@
       "section": "commands",
       "row": "inspect",
       "column": "Key Flags",
-      "seed": "`--file`, `--symbol`, `--symbol-chain`, `--churn`"
+      "seed": "`--file`, `--symbol`, `--symbol-chain`, `--churn`, `--cloud`, `--repo`"
     },
     {
       "section": "commands",

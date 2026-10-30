@@ -153,7 +153,15 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
     if !opts.dry_run && !opts.yes && !std::io::stdin().is_terminal() {
         let msg = "fix command requires --yes (or --force) in non-interactive environments. \
                    Use --dry-run to preview changes first, then pass --yes to confirm.";
-        return crate::error::emit_error(msg, 2, opts.output);
+        return crate::error::emit_programmatic_error(
+            &fallow_api::ProgrammaticError::new(msg, 2)
+                .with_code("FALLOW_FIX_CONFIRMATION_REQUIRED")
+                .with_help(
+                    "Run `fallow fix --dry-run` and review the preview, then pass --yes to apply the approved changes.",
+                ),
+            opts.output,
+            crate::error::requested_json_style(),
+        );
     }
 
     let mut config = match crate::runtime_support::load_config(
@@ -527,6 +535,7 @@ fn push_withheld_enum_member_entry(
         "applied": false,
         "skipped": true,
         "skip_reason": plan::SkipReason::LowConfidenceIncompleteAnalysis.as_wire_str(),
+        "help": plan::SkipReason::LowConfidenceIncompleteAnalysis.help(),
         "reachability_caveats": tokens,
     }));
 }
@@ -779,6 +788,7 @@ fn build_skipped_records(
                 "path": relative.to_string_lossy().replace('\\', "/"),
                 "skipped": true,
                 "skip_reason": skip.reason.as_wire_str(),
+                "help": skip.reason.help(),
             });
             if !skip.caveats.is_empty() {
                 let tokens: Vec<&str> = skip
@@ -1009,6 +1019,32 @@ fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_changed_skip_reports_how_to_refresh_the_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("source.ts");
+        let original = "export const value = 1;\n";
+        std::fs::write(&file, original).unwrap();
+        let mut hashes = CapturedHashes::default();
+        hashes.insert(
+            file.clone(),
+            xxhash_rust::xxh3::xxh3_64(original.as_bytes()),
+        );
+        let mut plan = FixPlan::for_root(dir.path()).unwrap();
+        assert!(plan::read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan).is_some());
+
+        let changed = "export const value = 2;\n";
+        std::fs::write(&file, changed).unwrap();
+        assert!(plan::read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan).is_none());
+        let records = build_skipped_records(dir.path(), plan.skipped(), OutputFormat::Json);
+        assert_eq!(records[0]["skip_reason"], "content_changed");
+        assert_eq!(
+            records[0]["help"],
+            "Run `fallow fix --dry-run` again to refresh the analysis, review the new preview, then apply the approved changes with --yes."
+        );
+        assert_eq!(std::fs::read_to_string(file).unwrap(), changed);
+    }
 
     #[test]
     fn aborted_batch_marks_every_planned_fix_unapplied() {

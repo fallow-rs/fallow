@@ -1372,8 +1372,29 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "--cloud",
+          "type": "bool",
+          "required": false,
+          "description": "OPT-IN: attach Fallow Cloud production evidence for a `--file` target as the `cloud` evidence section: calls, errors, CPU and never-run branches per function. The API key is $FALLOW_API_KEY, else the key that `fallow cloud login` stored. A missing key, a plan gate or an unreachable cloud is a section status, never a failed run",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--repo",
+          "type": "string",
+          "required": false,
+          "description": "Fallow Cloud repository for `--cloud`. Precedence: this flag > $FALLOW_REPO > the `origin` git remote"
         }
       ]
+    },
+    {
+      "name": "cloud",
+      "description": "Connect this machine to Fallow Cloud",
+      "flags": []
     },
     {
       "name": "trace",
@@ -7126,9 +7147,10 @@
     "FALLOW_COV_BIN": "Explicit path override for the fallow-cov runtime-coverage sidecar binary.",
     "FALLOW_COV_BINARY_PATH": "Secondary explicit path override for the fallow-cov sidecar, checked after FALLOW_COV_BIN (air-gapped installs, distro-packaged sidecars, shared Docker images).",
     "FALLOW_RUNTIME_COVERAGE_SOURCE": "Set to cloud to select cloud runtime coverage in fallow coverage analyze without passing --cloud.",
-    "FALLOW_REPO": "owner/repo fallback for fallow coverage analyze --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
+    "FALLOW_REPO": "owner/repo fallback for fallow coverage analyze --cloud and fallow inspect --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
     "FALLOW_API_URL": "Base URL override for Fallow Cloud API calls (license refresh, trial, coverage uploads).",
-    "FALLOW_API_KEY": "Fallow Cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
+    "FALLOW_API_KEY": "Fallow Cloud bearer token for coverage upload and cloud read commands (wins over the key that fallow cloud login stored), and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
+    "FALLOW_CREDENTIAL_STORE": "Credential store for the key that fallow cloud login writes: auto (default: OS keychain, else ~/.config/fallow/credentials), file (credentials file only) or none (no stored key is read or written).",
     "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for Fallow Cloud and provider HTTP calls (replaces the default WebPKI roots).",
     "FALLOW_UPDATE_CHECK": "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
     "FALLOW_CLAUDE_CODE_HINT": "Set to off/0/false/no/disabled to suppress the one-line Claude Code plugin hint on stderr. Fallow writes the hint only inside a Claude Code session (CLAUDECODE or CLAUDE_CODE_CHILD_SESSION), for human output without --quiet, outside CI, and when no Fallow plugin or skill is set up for the project. Default on.",

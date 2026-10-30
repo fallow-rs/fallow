@@ -83,6 +83,7 @@ mod health_v8_private_method_tests;
 mod hook_native_json_tests;
 mod impact_store_schema_tests;
 mod init_tests;
+mod inspect_cloud_tests;
 mod inspect_tests;
 mod json_format_tests;
 mod json_style_aux_commands_tests;

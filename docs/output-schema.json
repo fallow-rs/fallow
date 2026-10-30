@@ -19998,6 +19998,17 @@
             }
           ],
           "description": "Test entry points reachable from the exact symbol, with provenance.\nPresent only for a symbol target in type-aware mode."
+        },
+        "cloud": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectCloudEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "OPT-IN Fallow Cloud production evidence for a file target. Present\nonly when `--cloud` was requested. A missing key, a plan gate or an\nunreachable cloud is a section status, never a failed run."
         }
       },
       "required": [
@@ -35311,6 +35322,293 @@
         }
       },
       "description": "The most common text of one action type. Actions with other text keep\ntheir own field."
+    },
+    "InspectCloudEvidence": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Outcome of the cloud read.",
+          "$ref": "#/definitions/InspectCloudStatus"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Explanation for a status other than `ok`, or a note on an `ok`\nsection (for example that the cloud left out functions)."
+        },
+        "repo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fallow Cloud repository that was read, when it was resolved."
+        },
+        "latest_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Newest deployment commit with data for the file."
+        },
+        "period_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Days of production data the cloud read covers."
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectCloudSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "File summary from the cloud. `None` when the cloud was not read."
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InspectCloudFunction"
+          },
+          "description": "Local functions paired with a deployed function."
+        },
+        "unpaired_local": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InspectCloudUnpairedFunction"
+          },
+          "description": "Local functions without a deployed function."
+        }
+      },
+      "required": [
+        "status",
+        "functions",
+        "unpaired_local"
+      ],
+      "description": "`evidence.cloud` block: production data of the target file from Fallow\nCloud, paired with the functions of the local file.\n\n`null` in a count means \"not measured\", never zero."
+    },
+    "InspectCloudStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "ok",
+          "description": "The cloud answered with production data for the file."
+        },
+        {
+          "type": "string",
+          "const": "no_key",
+          "description": "No usable API key. Run `fallow cloud login` or set `FALLOW_API_KEY`."
+        },
+        {
+          "type": "string",
+          "const": "plan_required",
+          "description": "The organization has no plan with production data."
+        },
+        {
+          "type": "string",
+          "const": "unavailable",
+          "description": "The cloud could not answer (network, server error, timeout)."
+        },
+        {
+          "type": "string",
+          "const": "untracked",
+          "description": "The cloud has no production data for the file."
+        }
+      ],
+      "description": "Status of the [`InspectCloudEvidence`] section."
+    },
+    "InspectCloudSummary": {
+      "type": "object",
+      "properties": {
+        "functions": {
+          "type": "integer",
+          "description": "Deployed functions of the file."
+        },
+        "called": {
+          "type": "integer",
+          "description": "Functions that ran in the period."
+        },
+        "never_called": {
+          "type": "integer",
+          "description": "Functions that were tracked and did not run."
+        },
+        "untracked": {
+          "type": "integer",
+          "description": "Functions without production data."
+        },
+        "calls": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Calls of all functions of the file. `None` when not measured."
+        },
+        "error_groups": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Error groups of the file. `None` when not measured."
+        },
+        "error_events": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Error events of the file. `None` when not measured."
+        },
+        "text": {
+          "type": "string",
+          "description": "One-line summary from the cloud."
+        }
+      },
+      "required": [
+        "functions",
+        "called",
+        "never_called",
+        "untracked",
+        "text"
+      ],
+      "description": "File summary of the [`InspectCloudEvidence`] section."
+    },
+    "InspectCloudFunction": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Function name in the local file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based start line in the local file."
+        },
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of the deployed function."
+        },
+        "match": {
+          "description": "How the local function was paired.",
+          "$ref": "#/definitions/InspectCloudMatch"
+        },
+        "state": {
+          "type": "string",
+          "description": "Tracking state in the current deployment: `called`, `never_called` or\n`untracked`."
+        },
+        "period_state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Tracking state over the whole period, earlier deployments included.\n`called` with `state` `never_called` means that the function did not\nrun in this deployment, but ran in an earlier one. `None` when the\ncloud does not say."
+        },
+        "calls": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Calls in the period. `None` when not measured."
+        },
+        "errors": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectCloudErrors"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Error counts. `None` when error capture did not cover the function."
+        },
+        "cpu_ms_per_hour": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Self CPU milliseconds per profiled hour. `None` when not measured."
+        },
+        "never_run_ranges": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Branch ranges that never ran. `None` when not measured."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line summary from the cloud."
+        }
+      },
+      "required": [
+        "name",
+        "line",
+        "match",
+        "state",
+        "summary"
+      ],
+      "description": "One local function with its production data."
+    },
+    "InspectCloudMatch": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "stable_id",
+          "description": "The stable id of the local function equals the deployed one."
+        },
+        {
+          "type": "string",
+          "const": "name_ordinal",
+          "description": "Same name and same ordinal among the same-name functions of the file."
+        }
+      ],
+      "description": "How a local function was paired with a deployed function."
+    },
+    "InspectCloudErrors": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "integer",
+          "description": "Error groups attributed to the function."
+        },
+        "events": {
+          "type": "integer",
+          "description": "Error events attributed to the function."
+        }
+      },
+      "required": [
+        "groups",
+        "events"
+      ],
+      "description": "Error counts of one function."
+    },
+    "InspectCloudUnpairedFunction": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Function name in the local file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based start line in the local file."
+        },
+        "note": {
+          "type": "string",
+          "description": "Why the function has no production data."
+        }
+      },
+      "required": [
+        "name",
+        "line",
+        "note"
+      ],
+      "description": "One local function without a deployed function."
     }
   }
 }

@@ -1255,6 +1255,14 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Status of the [`InspectCloudEvidence`] section.
+ */
+export type InspectCloudStatus = ("ok" | "no_key" | "plan_required" | "unavailable" | "untracked")
+/**
+ * How a local function was paired with a deployed function.
+ */
+export type InspectCloudMatch = ("stable_id" | "name_ordinal")
+/**
  * Whether a whole-word text search for an export name finds a consumer that
  * the module graph resolves. The levels sort from best to worst.
  */
@@ -12305,6 +12313,12 @@ symbol_impact?: (InspectEvidenceSection | null)
  * Present only for a symbol target in type-aware mode.
  */
 targeted_tests?: (InspectEvidenceSection | null)
+/**
+ * OPT-IN Fallow Cloud production evidence for a file target. Present
+ * only when `--cloud` was requested. A missing key, a plan gate or an
+ * unreachable cloud is a section status, never a failed run.
+ */
+cloud?: (InspectCloudEvidence | null)
 }
 /**
  * One evidence section: status, the scope the evidence covers, and either a
@@ -12323,6 +12337,161 @@ message?: (string | null)
 data?: {
 [k: string]: unknown
 }
+}
+/**
+ * `evidence.cloud` block: production data of the target file from Fallow
+ * Cloud, paired with the functions of the local file.
+ *
+ * `null` in a count means "not measured", never zero.
+ */
+export interface InspectCloudEvidence {
+status: InspectCloudStatus
+/**
+ * Explanation for a status other than `ok`, or a note on an `ok`
+ * section (for example that the cloud left out functions).
+ */
+message?: (string | null)
+/**
+ * Fallow Cloud repository that was read, when it was resolved.
+ */
+repo?: (string | null)
+/**
+ * Newest deployment commit with data for the file.
+ */
+latest_sha?: (string | null)
+/**
+ * Days of production data the cloud read covers.
+ */
+period_days?: (number | null)
+/**
+ * File summary from the cloud. `None` when the cloud was not read.
+ */
+summary?: (InspectCloudSummary | null)
+/**
+ * Local functions paired with a deployed function.
+ */
+functions: InspectCloudFunction[]
+/**
+ * Local functions without a deployed function.
+ */
+unpaired_local: InspectCloudUnpairedFunction[]
+}
+/**
+ * File summary of the [`InspectCloudEvidence`] section.
+ */
+export interface InspectCloudSummary {
+/**
+ * Deployed functions of the file.
+ */
+functions: number
+/**
+ * Functions that ran in the period.
+ */
+called: number
+/**
+ * Functions that were tracked and did not run.
+ */
+never_called: number
+/**
+ * Functions without production data.
+ */
+untracked: number
+/**
+ * Calls of all functions of the file. `None` when not measured.
+ */
+calls?: (number | null)
+/**
+ * Error groups of the file. `None` when not measured.
+ */
+error_groups?: (number | null)
+/**
+ * Error events of the file. `None` when not measured.
+ */
+error_events?: (number | null)
+/**
+ * One-line summary from the cloud.
+ */
+text: string
+}
+/**
+ * One local function with its production data.
+ */
+export interface InspectCloudFunction {
+/**
+ * Function name in the local file.
+ */
+name: string
+/**
+ * 1-based start line in the local file.
+ */
+line: number
+/**
+ * Stable id of the deployed function.
+ */
+stable_id?: (string | null)
+match: InspectCloudMatch
+/**
+ * Tracking state in the current deployment: `called`, `never_called` or
+ * `untracked`.
+ */
+state: string
+/**
+ * Tracking state over the whole period, earlier deployments included.
+ * `called` with `state` `never_called` means that the function did not
+ * run in this deployment, but ran in an earlier one. `None` when the
+ * cloud does not say.
+ */
+period_state?: (string | null)
+/**
+ * Calls in the period. `None` when not measured.
+ */
+calls?: (number | null)
+/**
+ * Error counts. `None` when error capture did not cover the function.
+ */
+errors?: (InspectCloudErrors | null)
+/**
+ * Self CPU milliseconds per profiled hour. `None` when not measured.
+ */
+cpu_ms_per_hour?: (number | null)
+/**
+ * Branch ranges that never ran. `None` when not measured.
+ */
+never_run_ranges?: (number | null)
+/**
+ * One-line summary from the cloud.
+ */
+summary: string
+}
+/**
+ * Error counts of one function.
+ */
+export interface InspectCloudErrors {
+/**
+ * Error groups attributed to the function.
+ */
+groups: number
+/**
+ * Error events attributed to the function.
+ */
+events: number
+}
+/**
+ * One local function without a deployed function.
+ */
+export interface InspectCloudUnpairedFunction {
+/**
+ * Function name in the local file.
+ */
+name: string
+/**
+ * 1-based start line in the local file.
+ */
+line: number
+/**
+ * Why the function has no production data.
+ */
+note: string
 }
 /**
  * Result of tracing an export: why it is considered used or unused.

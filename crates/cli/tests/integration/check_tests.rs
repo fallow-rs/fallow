@@ -557,6 +557,32 @@ fn type_aware_class_method_impact_uses_exact_owner_identity() {
             .all(|consumer| consumer["path"] != "src/repository.ts"),
         "the same-named AuditRepository.save declaration is not a consumer"
     );
+    assert_eq!(
+        json["affected_files"],
+        serde_json::json!([
+            {
+                "path": "src/index.ts",
+                "relation": "transitive-consumer",
+                "distance": 2,
+                "via": ["src/index.ts", "src/service.ts"]
+            },
+            {
+                "path": "test/service.test.ts",
+                "relation": "transitive-consumer",
+                "distance": 3,
+                "via": ["test/service.test.ts", "src/index.ts", "src/service.ts"]
+            }
+        ])
+    );
+    assert_eq!(
+        json["targeted_tests"],
+        serde_json::json!([{
+            "path": "test/service.test.ts",
+            "relation": "targeted-test",
+            "distance": 3,
+            "via": ["test/service.test.ts", "src/index.ts", "src/service.ts"]
+        }])
+    );
 
     let preview = run_fallow_raw_with_type_aware_sidecar(&[
         "fix",

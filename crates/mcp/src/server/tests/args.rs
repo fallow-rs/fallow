@@ -2213,32 +2213,18 @@ fn cloud_runtime_context(repo: &str) -> CloudRuntimeContextParams {
     }
 }
 
-/// The refusal has to happen here, before a subprocess exists: the CLI would
-/// otherwise run a full static analysis of the project only to discover that
-/// it has nothing to join it against.
+/// The key is never a builder input: the CLI resolves it, so a key that
+/// `fallow cloud login` stored works the same as `FALLOW_API_KEY`.
 #[test]
-fn get_cloud_runtime_context_without_a_key_refuses_before_building_args() {
-    let err = build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/web"), false)
-        .expect_err("a missing key must refuse the call");
-    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
-    assert_eq!(body["error"].as_bool(), Some(true));
-    assert_eq!(body["exit_code"].as_i64(), Some(2));
-    assert_eq!(body["code"].as_str(), Some("cloud_api_key_missing"));
-    assert_eq!(
-        body["message"].as_str(),
-        Some(
-            fallow_types::cloud::cloud_api_key_missing_message(
-                fallow_types::cloud::CloudCommand::Analyze
-            )
-            .as_str()
-        ),
-        "the MCP refusal must read exactly as the CLI's does"
-    );
+fn get_cloud_runtime_context_builds_args_without_a_key_check() {
+    let args = build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/web"))
+        .expect("the builder does not read the key");
+    assert!(!args.iter().any(|arg| arg.contains("api-key")));
 }
 
 #[test]
 fn get_cloud_runtime_context_minimal_emits_the_cloud_pull() {
-    let args = build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/web"), true)
+    let args = build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/web"))
         .expect("a repo plus a key is enough");
     assert_eq!(args[0], "coverage");
     assert_eq!(args[1], "analyze");
@@ -2272,7 +2258,7 @@ fn get_cloud_runtime_context_forwards_every_selector() {
         threads: Some(8),
         max_output_bytes: None,
     };
-    let args = build_get_cloud_runtime_context_args(&params, true).expect("selectors are valid");
+    let args = build_get_cloud_runtime_context_args(&params).expect("selectors are valid");
     assert!(
         args.windows(2).any(|pair| pair == ["--repo", "acme/web"]),
         "a padded repo must reach the cloud trimmed: {args:?}"
@@ -2303,23 +2289,17 @@ fn get_cloud_runtime_context_forwards_every_selector() {
 fn cloud_tools_reject_a_dot_only_repo() {
     for repo in [".", "..", " ... "] {
         let refusals = [
-            build_get_cloud_runtime_context_args(&cloud_runtime_context(repo), true)
+            build_get_cloud_runtime_context_args(&cloud_runtime_context(repo))
                 .expect_err("runtime context must refuse"),
-            build_get_cloud_review_packet_args(
-                &CloudReviewPacketParams {
-                    repo: repo.to_string(),
-                    ..CloudReviewPacketParams::default()
-                },
-                true,
-            )
+            build_get_cloud_review_packet_args(&CloudReviewPacketParams {
+                repo: repo.to_string(),
+                ..CloudReviewPacketParams::default()
+            })
             .expect_err("review packet must refuse"),
-            build_get_cloud_deployment_changes_args(
-                &CloudDeploymentChangesParams {
-                    repo: repo.to_string(),
-                    ..CloudDeploymentChangesParams::default()
-                },
-                true,
-            )
+            build_get_cloud_deployment_changes_args(&CloudDeploymentChangesParams {
+                repo: repo.to_string(),
+                ..CloudDeploymentChangesParams::default()
+            })
             .expect_err("deployment changes must refuse"),
         ];
         for refusal in refusals {
@@ -2330,13 +2310,13 @@ fn cloud_tools_reject_a_dot_only_repo() {
             );
         }
     }
-    build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/.github"), true)
+    build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/.github"))
         .expect("dots inside a repository name stay valid");
 }
 
 #[test]
 fn get_cloud_runtime_context_rejects_an_empty_repo_and_an_unservable_window() {
-    let empty = build_get_cloud_runtime_context_args(&cloud_runtime_context("   "), true)
+    let empty = build_get_cloud_runtime_context_args(&cloud_runtime_context("   "))
         .expect_err("an empty repo must refuse");
     assert_eq!(
         parse_typed_validation_code(&empty).as_deref(),
@@ -2345,7 +2325,7 @@ fn get_cloud_runtime_context_rejects_an_empty_repo_and_an_unservable_window() {
 
     let mut params = cloud_runtime_context("acme/web");
     params.period_days = Some(91);
-    let too_wide = build_get_cloud_runtime_context_args(&params, true)
+    let too_wide = build_get_cloud_runtime_context_args(&params)
         .expect_err("a window the cloud does not serve must refuse");
     assert_eq!(
         parse_typed_validation_code(&too_wide).as_deref(),
@@ -2353,8 +2333,8 @@ fn get_cloud_runtime_context_rejects_an_empty_repo_and_an_unservable_window() {
     );
 
     params.period_days = Some(0);
-    let zero = build_get_cloud_runtime_context_args(&params, true)
-        .expect_err("a zero-day window must refuse");
+    let zero =
+        build_get_cloud_runtime_context_args(&params).expect_err("a zero-day window must refuse");
     assert_eq!(
         parse_typed_validation_code(&zero).as_deref(),
         Some("cloud_period_out_of_range")
@@ -3224,7 +3204,7 @@ fn get_cloud_review_packet_forwards_files_functions_and_selectors() {
         root: Some("/repo".to_string()),
         ..CloudReviewPacketParams::default()
     };
-    let args = build_get_cloud_review_packet_args(&params, true).expect("valid params");
+    let args = build_get_cloud_review_packet_args(&params).expect("valid params");
     assert_eq!(args[0], "coverage");
     assert_eq!(args[1], "review-packet");
     assert!(has_pair(&args, "--repo", "acme/web"));
@@ -3240,24 +3220,14 @@ fn get_cloud_review_packet_forwards_files_functions_and_selectors() {
 }
 
 #[test]
-fn get_cloud_review_packet_refuses_without_key_repo_or_valid_scope() {
+fn get_cloud_review_packet_refuses_without_repo_or_valid_scope() {
     let params = CloudReviewPacketParams {
         repo: "acme/web".to_string(),
         ..CloudReviewPacketParams::default()
     };
-    let err = build_get_cloud_review_packet_args(&params, false).expect_err("no key");
-    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
-    assert_eq!(body["code"], "cloud_api_key_missing");
-    assert_eq!(body["context"], "get_cloud_review_packet.api_key");
-    assert_eq!(
-        body["message"],
-        fallow_types::cloud::cloud_api_key_missing_message(
-            fallow_types::cloud::CloudCommand::ReviewPacket
-        ),
-        "the MCP refusal must read exactly as the CLI's does"
-    );
+    build_get_cloud_review_packet_args(&params).expect("the builder does not read the key");
 
-    let err = build_get_cloud_review_packet_args(&CloudReviewPacketParams::default(), true)
+    let err = build_get_cloud_review_packet_args(&CloudReviewPacketParams::default())
         .expect_err("no repo");
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["code"], "cloud_repo_missing");
@@ -3267,7 +3237,7 @@ fn get_cloud_review_packet_refuses_without_key_repo_or_valid_scope() {
         period_days: Some(91),
         ..CloudReviewPacketParams::default()
     };
-    let err = build_get_cloud_review_packet_args(&wide, true).expect_err("period");
+    let err = build_get_cloud_review_packet_args(&wide).expect_err("period");
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["code"], "cloud_period_out_of_range");
 
@@ -3276,7 +3246,7 @@ fn get_cloud_review_packet_refuses_without_key_repo_or_valid_scope() {
         files: Some(vec!["src/a.ts".to_string(); 1001]),
         ..CloudReviewPacketParams::default()
     };
-    let err = build_get_cloud_review_packet_args(&too_many, true).expect_err("scope");
+    let err = build_get_cloud_review_packet_args(&too_many).expect_err("scope");
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["code"], "cloud_scope_too_large");
 }
@@ -3292,7 +3262,7 @@ fn get_cloud_deployment_changes_forwards_sha_base_and_paging() {
         cursor: Some("NTA".to_string()),
         ..CloudDeploymentChangesParams::default()
     };
-    let args = build_get_cloud_deployment_changes_args(&params, true).expect("valid params");
+    let args = build_get_cloud_deployment_changes_args(&params).expect("valid params");
     assert_eq!(args[1], "deployment-changes");
     assert!(has_pair(&args, "--repo", "acme/web"));
     assert!(has_pair(&args, "--sha", "abc1234"));
@@ -3305,7 +3275,7 @@ fn get_cloud_deployment_changes_forwards_sha_base_and_paging() {
         repo: "acme/web".to_string(),
         ..CloudDeploymentChangesParams::default()
     };
-    let args = build_get_cloud_deployment_changes_args(&minimal, true).expect("valid params");
+    let args = build_get_cloud_deployment_changes_args(&minimal).expect("valid params");
     assert!(!args.contains(&"--sha".to_string()));
     assert!(!args.contains(&"--base".to_string()));
 }
@@ -3317,7 +3287,7 @@ fn get_cloud_deployment_changes_refuses_bad_filters() {
         change: Some("vanished".to_string()),
         ..CloudDeploymentChangesParams::default()
     };
-    let err = build_get_cloud_deployment_changes_args(&bad_change, true).expect_err("change");
+    let err = build_get_cloud_deployment_changes_args(&bad_change).expect_err("change");
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["code"], "cloud_change_kind_invalid");
 
@@ -3326,18 +3296,7 @@ fn get_cloud_deployment_changes_refuses_bad_filters() {
         limit: Some(0),
         ..CloudDeploymentChangesParams::default()
     };
-    let err = build_get_cloud_deployment_changes_args(&bad_limit, true).expect_err("limit");
+    let err = build_get_cloud_deployment_changes_args(&bad_limit).expect_err("limit");
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["code"], "cloud_limit_out_of_range");
-
-    let err = build_get_cloud_deployment_changes_args(&bad_limit, false).expect_err("key");
-    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
-    assert_eq!(body["context"], "get_cloud_deployment_changes.api_key");
-    assert_eq!(
-        body["message"],
-        fallow_types::cloud::cloud_api_key_missing_message(
-            fallow_types::cloud::CloudCommand::DeploymentChanges
-        ),
-        "the MCP refusal must read exactly as the CLI's does"
-    );
 }

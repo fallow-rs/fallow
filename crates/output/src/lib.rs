@@ -304,10 +304,11 @@ pub use impact::{
     serialize_cross_repo_impact_json_output, serialize_impact_json_output,
 };
 pub use inspect_envelopes::{
-    ExplainOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
-    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
-    InspectSymbolIdentity, InspectTargetDescriptor, serialize_explain_json_output,
-    serialize_inspect_json_output,
+    ExplainOutput, InspectCloudErrors, InspectCloudEvidence, InspectCloudFunction,
+    InspectCloudMatch, InspectCloudStatus, InspectCloudSummary, InspectCloudUnpairedFunction,
+    InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
+    InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
+    InspectTargetDescriptor, serialize_explain_json_output, serialize_inspect_json_output,
 };
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, ARCHITECTURE_DOCS,

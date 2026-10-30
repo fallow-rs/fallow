@@ -1413,9 +1413,9 @@ pub struct CheckRuntimeCoverageParams {
 
 /// Parameters for `get_cloud_runtime_context`, the cloud-backed sibling of
 /// `check_runtime_coverage`. There is no `coverage` path because the runtime
-/// facts come from Fallow Cloud, and no API-key field because the key is read
-/// from `FALLOW_API_KEY` in the server environment rather than crossing the
-/// wire on every call.
+/// facts come from Fallow Cloud, and no API-key field because the key does not
+/// cross the wire on every call. The CLI reads `FALLOW_API_KEY` in the server
+/// environment, else the key that `fallow cloud login` stored.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct CloudRuntimeContextParams {
     /// Repository Fallow Cloud holds runtime facts for, as `owner/repo`.
@@ -1481,7 +1481,7 @@ pub struct CloudFunctionTarget {
 }
 
 /// Parameters for `get_cloud_review_packet`. The API key comes from
-/// `FALLOW_API_KEY` in the server environment.
+/// `FALLOW_API_KEY` in the server environment, else from `fallow cloud login`.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct CloudReviewPacketParams {
     /// Repository as `owner/repo`. Required.
@@ -1514,7 +1514,7 @@ pub struct CloudReviewPacketParams {
 }
 
 /// Parameters for `get_cloud_deployment_changes`. The API key comes from
-/// `FALLOW_API_KEY` in the server environment.
+/// `FALLOW_API_KEY` in the server environment, else from `fallow cloud login`.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct CloudDeploymentChangesParams {
     /// Repository as `owner/repo`. Required.
