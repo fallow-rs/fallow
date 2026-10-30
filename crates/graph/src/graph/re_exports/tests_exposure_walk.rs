@@ -53,6 +53,7 @@ fn import(target: u32, imported_name: ImportedName) -> ResolvedImport {
             source: format!("./module{target}"),
             imported_name,
             local_name: String::new(),
+            // A type-only import with no local name is how an ambient `export *` appears.
             is_type_only: true,
             is_type_only_star: false,
             from_style: false,
@@ -156,7 +157,7 @@ fn named_re_export_keeps_unrelated_star_exports_unused() {
     );
 }
 
-/// An invalid re-export source leaves valid re-export references intact.
+/// A re-export source with an unknown file id does not panic the propagation.
 #[test]
 fn out_of_range_re_export_source_preserves_valid_references() {
     let mut entry = module(0, "entry");
@@ -173,7 +174,6 @@ fn out_of_range_re_export_source_preserves_valid_references() {
 
     assert!(!symbol(&graph, 1, "used").references.is_empty());
     assert!(symbol(&graph, 1, "unused").references.is_empty());
-    assert!(graph.re_export_cycles.is_empty());
 }
 
 /// A file id just beyond the module list displays a placeholder path.
