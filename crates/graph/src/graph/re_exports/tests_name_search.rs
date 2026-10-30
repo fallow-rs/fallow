@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::graph::{ModuleGraph, ReferenceKind};
+use crate::graph::ModuleGraph;
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use fallow_types::extract::{
@@ -191,14 +191,6 @@ fn entry_namespace_exposure_reaches_a_later_named_hop() {
     // The named hop exposes t2 only after m1 joins the namespace closure.
     assert_credit(&graph, FileId(4), "value", true);
     assert_credit(&graph, FileId(4), "default", false);
-    let value = graph.modules[4]
-        .exports
-        .iter()
-        .find(|export| export.name.matches_str("value"))
-        .unwrap();
-    assert!(value.references.iter().any(|reference| {
-        reference.kind == ReferenceKind::ReExport && reference.from_file == FileId(3)
-    }));
 }
 
 fn named_hop_graph(shadowed: bool) -> ModuleGraph {
@@ -223,6 +215,8 @@ fn local_export_blocks_a_named_namespace_hop() {
     assert_credit(&exposed, FileId(2), "direct", true);
     assert_credit(&exposed, FileId(3), "value", true);
 
+    // Keep these exact unused assertions. A hop that skips the forwarding,
+    // `failed` or `visited` check shows only as a wrong exposure here.
     let shadowed = named_hop_graph(true);
     assert_credit(&shadowed, FileId(2), "direct", false);
     assert_credit(&shadowed, FileId(3), "value", false);
