@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use super::capture_propagation_visits;
 use super::propagate::count_star_name_checks;
 use crate::graph::{ExportNamespace, ExportSymbol, ModuleGraph};
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
@@ -97,12 +98,14 @@ fn export_states(
     module: usize,
     name: &str,
 ) -> Vec<(bool, Vec<ExportNamespace>)> {
-    graph.modules[module]
+    let mut states: Vec<_> = graph.modules[module]
         .exports
         .iter()
         .filter(|export| export.name.matches_str(name))
         .map(|export| (export.is_type_only, reference_namespaces(export)))
-        .collect()
+        .collect();
+    states.sort_unstable_by_key(|(is_type_only, _)| !*is_type_only);
+    states
 }
 
 /// A single star checks each imported source name exactly once.
@@ -149,8 +152,21 @@ fn star_change_requeues_an_earlier_barrel() {
     let mut consumer = module(3, "d_consumer");
     consumer.resolved_imports = vec![named_import(2, "Item", false)];
 
-    let graph = build(&[inner, leaf, outer, consumer], 3);
+    let (graph, visits) = capture_propagation_visits(|| build(&[inner, leaf, outer, consumer], 3));
 
+    let inner_edge = (FileId(0), FileId(1));
+    let outer_edge = (FileId(2), FileId(0));
+    let first_inner = visits.iter().position(|visit| *visit == inner_edge);
+    let first_outer = visits.iter().position(|visit| *visit == outer_edge);
+    assert!(
+        first_inner < first_outer,
+        "the inner star must run before the outer star, so only a requeue can forward the reference: {visits:?}"
+    );
+    assert_eq!(
+        visits.iter().filter(|visit| **visit == inner_edge).count(),
+        2,
+        "the outer star change must requeue the inner star once: {visits:?}"
+    );
     assert_eq!(
         reference_namespaces(&graph.modules[1].exports[0]),
         vec![ExportNamespace::Value],
@@ -247,7 +263,7 @@ fn star_synthesizes_type_for_a_self_re_exported_alias() {
 
     assert_eq!(
         export_states(&graph, 2, "Item"),
-        vec![(false, vec![]), (true, vec![ExportNamespace::Type]),],
+        vec![(true, vec![ExportNamespace::Type]), (false, vec![])],
         "the value-shaped alias stub cannot stand in for its originating type"
     );
     assert_eq!(
