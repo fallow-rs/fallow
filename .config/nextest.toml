@@ -1,6 +1,19 @@
 # cargo-nextest configuration. CI selects a profile with `--profile`.
 # Local `cargo nextest run` keeps the default profile.
 
+experimental = ["setup-scripts"]
+
+# Each run gets its own TMPDIR. Without it, the audit base snapshot caches
+# that earlier runs left in the shared temp directory make each `fallow
+# audit` in the suite probe thousands of stale entries. See the script.
+[scripts.setup.run-tmpdir]
+command = "scripts/nextest-run-tmpdir.sh"
+
+[[profile.default.scripts]]
+platform = { host = "cfg(unix)" }
+filter = "all()"
+setup = "run-tmpdir"
+
 # CI runs every test so one run shows every failure. No retries: a retry
 # hides a flaky test. The JUnit report gives per-test timings and a
 # failure record. It is written to target/nextest/ci/junit.xml.

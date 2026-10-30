@@ -142,6 +142,7 @@ jobs:
               - 'deny.toml'
               - '.clippy.toml'
               - '.config/nextest.toml'
+              - 'scripts/nextest-run-tmpdir.sh'
               - 'rust-toolchain.toml'
             windows-rust:
               - 'crates/core/src/discover/walk.rs'

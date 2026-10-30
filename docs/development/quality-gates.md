@@ -248,6 +248,20 @@ When a guessed companion path is absent, the check prints `skipped:` with the
 path it tried. It still reports a missing expected document when the companion
 checkout exists.
 
+### Test temp directory
+
+On Unix hosts, `cargo nextest run` gives each run its own `TMPDIR`. The setup
+script `scripts/nextest-run-tmpdir.sh` creates the directory and removes the
+directories of runs that started more than one day ago. `.config/nextest.toml`
+attaches the script to every profile.
+
+The reason is the audit base snapshot cache. Each `fallow audit` in the suite
+leaves one cache entry in the temp directory, and each later audit probes all
+entries. The fixture of a test is gone after the test, so its entry stays for
+the 30-day age limit. In a shared temp directory, a local suite run then
+spends most of its audit time on this probe. `cargo test` does not run the
+setup script, so it keeps the shared temp directory.
+
 ## CI placement
 
 The repository uses the GitHub free plan: 20 concurrent jobs, and 5 of them on
