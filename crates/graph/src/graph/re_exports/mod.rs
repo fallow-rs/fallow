@@ -3,6 +3,8 @@
 mod propagate;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_name_search;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
