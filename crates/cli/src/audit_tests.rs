@@ -791,8 +791,9 @@ fn reusable_cache_gc_reclaims_sidecar_orphan_even_when_age_gc_disabled() {
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
 
+#[cfg(unix)]
 #[test]
-fn reusable_cache_gc_preserves_lock_file_after_removal() {
+fn reusable_cache_gc_removes_lock_file_with_the_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-lockfile");
     let worktree_path = create_unregistered_reusable_cache(&repo);
@@ -814,10 +815,9 @@ fn reusable_cache_gc_preserves_lock_file_after_removal() {
         "sweep should still remove the worktree directory",
     );
     assert!(
-        lock_path.exists(),
-        "sweep MUST NOT delete the `.lock` file (lock-lifecycle invariant)",
+        !lock_path.exists(),
+        "sweep should unlink the `.lock` file of the entry it reclaims",
     );
-    let _ = fs::remove_file(&lock_path);
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
 
@@ -1160,6 +1160,87 @@ fn sweep_report_apply_keeps_deregistered_current_path_and_removes_released_sha()
     cleanup_reusable_worktree(&repo, &released_path);
 }
 
+#[cfg(unix)]
+#[test]
+fn sweep_reclaims_bare_lock_sidecar() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-report-lock-only");
+    let cache_path = tmp
+        .path()
+        .join("fallow-audit-base-cache-0123456789abcdef-root-fedcba9876543210");
+    let lock_path = reusable_worktree_lock_path(&cache_path);
+    fs::write(&lock_path, "").expect("bare lock sidecar should be written");
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Skip,
+        SweepScope::All,
+    );
+
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == cache_path)
+        .expect("a bare lock sidecar must fold back into a reported candidate");
+    assert_eq!(entry.disposition, SweepDisposition::ReclaimedLockOnly);
+    assert_eq!(entry.pass, SweepPass::Foreign);
+    assert_eq!(entry.disposition.reason(), "orphaned-lock");
+    assert_eq!(
+        report.removed, 0,
+        "a lock sidecar does not count as a reclaimed cache in the stderr summary",
+    );
+    assert!(
+        !lock_path.exists(),
+        "a lock sidecar without a cache must be reclaimed",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sweep_reclaims_lock_sidecar_with_the_aged_entry() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-aged-lock");
+    let cache_path = tmp
+        .path()
+        .join("fallow-audit-base-cache-0123456789abcdef-root-0123456789abcdef");
+    fs::create_dir(&cache_path).expect("cache dir should be created");
+    let lock_path = reusable_worktree_lock_path(&cache_path);
+    fs::write(&lock_path, "").expect("lock sidecar should be written");
+    let last_used = reusable_worktree_last_used_path(&cache_path);
+    fs::write(&last_used, "").expect("last-used sidecar should be written");
+    let old = SystemTime::now() - Duration::from_hours(40 * 24);
+    fs::File::options()
+        .write(true)
+        .open(&last_used)
+        .and_then(|file| file.set_modified(old))
+        .expect("last-used mtime should be set");
+
+    let report = sweep_reusable_caches_with_report(
+        &repo,
+        Some(Duration::from_hours(30 * 24)),
+        tmp.path(),
+        SweepMode::Apply,
+        SweepSizes::Skip,
+        SweepScope::All,
+    );
+
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.path == cache_path)
+        .expect("the aged entry should be reported");
+    assert_eq!(entry.disposition, SweepDisposition::ReclaimedAged);
+    assert!(!cache_path.exists());
+    assert!(
+        !lock_path.exists(),
+        "the lock sidecar must go with the reclaimed entry, not stay as a lock-only leftover",
+    );
+}
+
+#[cfg(not(unix))]
 #[test]
 fn sweep_report_counts_bare_lock_sidecar_as_lock_only() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
@@ -1185,13 +1266,8 @@ fn sweep_report_counts_bare_lock_sidecar_as_lock_only() {
         .find(|entry| entry.path == cache_path)
         .expect("a bare lock sidecar must fold back into a reported candidate");
     assert_eq!(entry.disposition, SweepDisposition::KeptLockOnly);
-    assert_eq!(entry.pass, SweepPass::Foreign);
     assert_eq!(entry.disposition.reason(), "lock-only");
-    assert_eq!(report.removed, 0);
-    assert!(
-        lock_path.exists(),
-        "the `.lock` sidecar must never be deleted",
-    );
+    assert!(lock_path.exists(), "Windows keeps the `.lock` sidecar");
 }
 
 #[test]
@@ -1549,7 +1625,7 @@ fn failed_reusable_cache_rebuild_leaves_no_matching_readiness() {
 }
 
 #[test]
-fn retained_reusable_lock_makes_remove_skip_then_succeed_and_preserve_lock() {
+fn retained_reusable_lock_makes_remove_skip_then_succeed() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-remove-retained-lock");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
@@ -1577,11 +1653,12 @@ fn retained_reusable_lock_makes_remove_skip_then_succeed_and_preserve_lock() {
     );
     assert!(!reusable_worktree_sha_path(&cache_path).exists());
     assert!(!reusable_worktree_last_used_path(&cache_path).exists());
-    assert!(
+    assert_eq!(
         lock_path.exists(),
-        "cache removal must preserve the lock file"
+        cfg!(windows),
+        "cache removal unlinks the lock file on Unix and keeps it on Windows",
     );
-    fs::remove_file(lock_path).expect("test lock file should be removable");
+    let _ = fs::remove_file(lock_path);
 }
 
 #[test]
@@ -1778,9 +1855,10 @@ fn root_removal_reclaims_legacy_sha_siblings_without_touching_unrelated_root() {
         !second.exists(),
         "uncontended legacy sibling must be removed"
     );
-    assert!(
+    assert_eq!(
         second_lock_path.exists(),
-        "legacy lock file must be preserved"
+        cfg!(windows),
+        "the removed sibling's lock file goes on Unix and stays on Windows",
     );
     assert!(
         unrelated.is_dir(),
@@ -1792,9 +1870,10 @@ fn root_removal_reclaims_legacy_sha_siblings_without_touching_unrelated_root() {
     assert!(!first.exists());
     assert!(!reusable_worktree_sha_path(&first).exists());
     assert!(!reusable_worktree_last_used_path(&first).exists());
-    assert!(
+    assert_eq!(
         first_lock_path.exists(),
-        "held legacy lock file must be preserved"
+        cfg!(windows),
+        "the lock file goes with the entry once its holder released it (Unix)",
     );
     assert!(
         unrelated.is_dir(),

@@ -121,6 +121,7 @@ struct PruneCounts {
     skipped: usize,
     failed: usize,
     lock_only: usize,
+    lock_reclaimed: usize,
     owner_live: usize,
     /// Legacy pre-#1815 registrations cleared while the cache directory stayed
     /// warm on disk; a subset of `kept`, and never part of `reclaimed_bytes`.
@@ -137,6 +138,7 @@ impl PruneCounts {
             skipped: 0,
             failed: 0,
             lock_only: 0,
+            lock_reclaimed: 0,
             owner_live: 0,
             deregistered: 0,
             reclaimed_bytes: 0,
@@ -155,6 +157,7 @@ impl PruneCounts {
             }
             match entry.disposition.reason() {
                 "lock-only" => counts.lock_only += 1,
+                "orphaned-lock" => counts.lock_reclaimed += 1,
                 "owner-live" => counts.owner_live += 1,
                 "legacy-deregistered" => counts.deregistered += 1,
                 _ => {}
@@ -227,17 +230,29 @@ fn print_prune_human(
     }
     println!("{}", header_line(scan_root, resolved));
     for entry in entries {
-        // Lock-only leftovers can number in the hundreds (issue #2169); they
+        // Lock-only leftovers can number in the thousands (issue #2169); they
         // collapse into one trailing count line instead of one row each.
-        if entry.disposition.reason() == "lock-only" {
+        if matches!(entry.disposition.reason(), "lock-only" | "orphaned-lock") {
             continue;
         }
         println!("{}", entry_row(entry, opts.dry_run));
     }
+    if counts.lock_reclaimed > 0 {
+        let verb = if opts.dry_run {
+            "would remove"
+        } else {
+            "removed"
+        };
+        let s = plural(counts.lock_reclaimed);
+        println!(
+            "  {verb} {} lock sidecar{s} with no cache",
+            counts.lock_reclaimed,
+        );
+    }
     if counts.lock_only > 0 {
         let s = plural(counts.lock_only);
         println!(
-            "  {} lock sidecar{s} with no cache remain (harmless, kept by design)",
+            "  {} lock sidecar{s} with no cache remain (harmless)",
             counts.lock_only,
         );
     }

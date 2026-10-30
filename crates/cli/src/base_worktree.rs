@@ -37,6 +37,13 @@ pub use scan::SweepScope;
 pub use scan::full_sweep_marker_path;
 use scan::{claim_full_sweep, scan_all_reusable_cache_paths, scan_cache_paths_with_hex_suffix};
 
+#[path = "base_worktree_lock.rs"]
+mod lock;
+pub use lock::ReusableWorktreeLock;
+#[cfg(all(test, unix))]
+use lock::lock_file_is_current;
+use lock::{reclaim_lock_only, remove_held_lock_file};
+
 pub struct BaseWorktree {
     path: PathBuf,
     persistent: bool,
@@ -244,51 +251,6 @@ impl Drop for WorktreeCleanupGuard<'_> {
             remove_audit_worktree(&self.repo_root, self.path);
             let _ = std::fs::remove_dir_all(self.path);
         }
-    }
-}
-
-/// Kernel-level advisory lock around the reusable-cache `reuse_or_create`
-/// critical section, backed by `std::fs::File::try_lock` (stable since Rust
-/// 1.89), which wraps `flock(2)` on Unix and `LockFileEx` on Windows.
-/// Concurrent acquirers either fall through (`None`) or observe a
-/// freshly-prepared cache after the holder releases.
-pub struct ReusableWorktreeLock {
-    file: std::fs::File,
-}
-
-impl ReusableWorktreeLock {
-    /// `context` names the caller's contention fallback in the debug
-    /// diagnostic ("falls back to a non-reusable worktree" is only true for
-    /// `reuse_or_create`; a GC sweep or prune skips the entry instead).
-    pub fn try_acquire(reusable_path: &Path, context: &'static str) -> Option<Self> {
-        let lock_path = reusable_worktree_lock_path(reusable_path);
-        let file = open_or_create_owned_sidecar(&lock_path).ok()?;
-        match file.try_lock() {
-            Ok(()) => Some(Self { file }),
-            Err(std::fs::TryLockError::WouldBlock) => {
-                tracing::debug!(
-                    path = %lock_path.display(),
-                    context,
-                    "reusable audit worktree lock contended",
-                );
-                None
-            }
-            Err(std::fs::TryLockError::Error(err)) => {
-                tracing::debug!(
-                    path = %lock_path.display(),
-                    error = %err,
-                    context,
-                    "could not acquire reusable audit worktree lock",
-                );
-                None
-            }
-        }
-    }
-}
-
-impl Drop for ReusableWorktreeLock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
     }
 }
 
@@ -634,11 +596,8 @@ fn load_audit_config(
 /// POSIX) would wipe every legitimately-warm pre-upgrade cache on the
 /// first run after upgrade.
 ///
-/// The `.lock` sidecar file is intentionally NOT deleted on removal: a
-/// racing acquirer of an unlinked-but-still-flocked inode plus a sibling
-/// `open(O_CREAT)` at the same path would produce two processes each
-/// holding a kernel flock on different inodes. Lock files are tens of
-/// bytes; leaking them is harmless.
+/// On Unix the `.lock` sidecar goes with the entry, unlinked under the lock;
+/// see [`ReusableWorktreeLock`] for why that is race-safe. Windows keeps it.
 pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
     sweep_old_reusable_caches_in(repo_root, max_age, quiet, &std::env::temp_dir());
 }
@@ -798,8 +757,12 @@ pub enum SweepDisposition {
     /// First encounter of a pre-upgrade entry without a `.last-used` sidecar;
     /// a sidecar is seeded so it ages from real last-use.
     KeptGraceSeeded,
-    /// Only a `.lock` sidecar survives (never deleted by design); there is no
-    /// directory, `.sha`, or `.last-used` left to reclaim.
+    /// Only a `.lock` sidecar survived, and the sweep unlinked it under the
+    /// lock (Unix only).
+    ReclaimedLockOnly,
+    /// Only a `.lock` sidecar survives and stays (Windows, or a lock file that
+    /// changed under the sweep); there is no directory, `.sha`, or
+    /// `.last-used` left to reclaim.
     KeptLockOnly,
     /// The orphan re-check under the lock found the directory rebuilt by a
     /// concurrent run.
@@ -821,7 +784,8 @@ impl SweepDisposition {
             | Self::ReclaimedAged
             | Self::ReclaimedOwnerMissing
             | Self::ReclaimedLegacyRegistered
-            | Self::ReclaimedOverCapacity => SweepDecision::Removed,
+            | Self::ReclaimedOverCapacity
+            | Self::ReclaimedLockOnly => SweepDecision::Removed,
             Self::KeptLegacyDeregistered
             | Self::KeptFresh
             | Self::KeptOwnerLive
@@ -846,6 +810,7 @@ impl SweepDisposition {
             Self::ReclaimedOwnerMissing => "owner-missing",
             Self::ReclaimedLegacyRegistered => "legacy-registered",
             Self::ReclaimedOverCapacity => "over-capacity",
+            Self::ReclaimedLockOnly => "orphaned-lock",
             Self::KeptLegacyDeregistered => "legacy-deregistered",
             Self::KeptFresh => "fresh",
             Self::KeptOwnerLive => "owner-live",
@@ -1085,7 +1050,7 @@ fn legacy_registered_pass(
                 }
             }
             SweepMode::Apply => {
-                let Some(_lock) = ReusableWorktreeLock::try_acquire(
+                let Some(lock) = ReusableWorktreeLock::try_acquire(
                     &path,
                     "legacy deregistration skips the entry",
                 ) else {
@@ -1129,6 +1094,7 @@ fn legacy_registered_pass(
                     );
                     SweepDisposition::RemoveFailed
                 } else {
+                    remove_held_lock_file(&lock);
                     SweepDisposition::ReclaimedLegacyRegistered
                 }
             }
@@ -1203,11 +1169,10 @@ fn reclaim_reusable_cache_entry(
 
 /// Reclaim the leftover sidecars of a cache directory that was deleted out
 /// from under them. Lock-guarded with a re-check so a concurrent rebuild that
-/// recreated the directory is preserved. The `.lock` sidecar is deliberately
-/// never removed (an unlinked-but-still-flocked inode plus a racer's
-/// `open(O_CREAT)` would split the lock across two inodes).
+/// recreated the directory is preserved. The `.lock` sidecar goes last, under
+/// the lock (see [`ReusableWorktreeLock`]).
 pub fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> SweepDisposition {
-    let Some(_lock) = ReusableWorktreeLock::try_acquire(path, GC_LOCK_CONTEXT) else {
+    let Some(lock) = ReusableWorktreeLock::try_acquire(path, GC_LOCK_CONTEXT) else {
         return SweepDisposition::SkippedLocked;
     };
     // Re-check under the lock: a concurrent `reuse_or_create` rebuild may
@@ -1216,8 +1181,11 @@ pub fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> SweepDisposi
         return SweepDisposition::KeptRecreated;
     }
     match remove_cache_entry_for_sweep(repo_root, path) {
-        Ok(CacheRemovalOutcome::Removed) => SweepDisposition::ReclaimedOrphan,
-        Ok(CacheRemovalOutcome::NothingLeft) => SweepDisposition::KeptLockOnly,
+        Ok(CacheRemovalOutcome::Removed) => {
+            remove_held_lock_file(&lock);
+            SweepDisposition::ReclaimedOrphan
+        }
+        Ok(CacheRemovalOutcome::NothingLeft) => reclaim_lock_only(&lock),
         Ok(CacheRemovalOutcome::NotOwned) => SweepDisposition::KeptNotOwned,
         Err(_) => SweepDisposition::RemoveFailed,
     }
@@ -1337,7 +1305,7 @@ fn classify_entry_dry_run(
 ) -> SweepDisposition {
     if !path.exists() {
         if !reusable_cache_entry_exists(path) {
-            return SweepDisposition::KeptLockOnly;
+            return classify_lock_only_dry_run(path);
         }
         return classify_would_remove(path, SweepDisposition::ReclaimedOrphan);
     }
@@ -1369,6 +1337,18 @@ fn classify_entry_dry_run(
         return SweepDisposition::KeptFresh;
     }
     classify_would_remove(path, SweepDisposition::ReclaimedAged)
+}
+
+/// Predict the lock-only outcome of an apply run: the sweep can open, and so
+/// unlink, only a lock file that this user owns.
+fn classify_lock_only_dry_run(path: &Path) -> SweepDisposition {
+    let trusted = std::fs::symlink_metadata(reusable_worktree_lock_path(path))
+        .is_ok_and(|metadata| sidecar_metadata_is_trusted(&metadata));
+    if cfg!(unix) && trusted {
+        SweepDisposition::ReclaimedLockOnly
+    } else {
+        SweepDisposition::KeptLockOnly
+    }
 }
 
 /// Apply the same up-front ownership classification to a dry-run
@@ -1410,12 +1390,15 @@ fn remove_cache_entry_under_lock(
     path: &Path,
     removed: SweepDisposition,
 ) -> SweepDisposition {
-    let Some(_lock) = ReusableWorktreeLock::try_acquire(path, GC_LOCK_CONTEXT) else {
+    let Some(lock) = ReusableWorktreeLock::try_acquire(path, GC_LOCK_CONTEXT) else {
         return SweepDisposition::SkippedLocked;
     };
     match remove_cache_entry_for_sweep(repo_root, path) {
-        Ok(CacheRemovalOutcome::Removed) => removed,
-        Ok(CacheRemovalOutcome::NothingLeft) => SweepDisposition::KeptLockOnly,
+        Ok(CacheRemovalOutcome::Removed) => {
+            remove_held_lock_file(&lock);
+            removed
+        }
+        Ok(CacheRemovalOutcome::NothingLeft) => reclaim_lock_only(&lock),
         Ok(CacheRemovalOutcome::NotOwned) => SweepDisposition::KeptNotOwned,
         Err(err) => {
             tracing::warn!(
@@ -1430,7 +1413,7 @@ fn remove_cache_entry_under_lock(
 
 enum CacheRemovalOutcome {
     Removed,
-    /// Nothing but the (never-deleted) `.lock` sidecar was left to remove.
+    /// Nothing but the `.lock` sidecar was left to remove.
     NothingLeft,
     /// The Unix uid ownership check rejected the entry; nothing was touched.
     NotOwned,
@@ -1688,7 +1671,7 @@ pub fn remove_reusable_audit_caches(
             // only the real removal reports.
             continue;
         }
-        let Some(_lock) =
+        let Some(lock) =
             ReusableWorktreeLock::try_acquire(&path, "cache removal reports the entry as skipped")
         else {
             report.skipped += 1;
@@ -1697,6 +1680,7 @@ pub fn remove_reusable_audit_caches(
         if remove_reusable_cache_entry_locked(requested_root, &path)? {
             report.removed += 1;
         }
+        remove_held_lock_file(&lock);
     }
     Ok(report)
 }
@@ -1708,8 +1692,8 @@ fn reusable_cache_entry_exists(path: &Path) -> bool {
 }
 
 /// Like [`reusable_cache_entry_exists`] but also counts a surviving `.lock`
-/// sidecar, which is deliberately never deleted and marks a real (if fully
-/// reclaimed) cache identity worth reporting.
+/// sidecar, which marks a real (if fully reclaimed) cache identity worth
+/// reporting.
 fn cache_entry_has_presence(path: &Path) -> bool {
     reusable_cache_entry_exists(path) || path_entry_exists(&reusable_worktree_lock_path(path))
 }

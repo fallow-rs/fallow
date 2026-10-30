@@ -446,9 +446,10 @@ fn audit_cache_prune_applies_policy_and_closes_counts() {
     assert!(!aged_path.exists(), "the aged entry must be removed");
     assert!(!cache_sidecar(&aged_path, ".sha").exists());
     assert!(!cache_sidecar(&aged_path, ".last-used").exists());
-    assert!(
+    assert_eq!(
         cache_sidecar(&aged_path, ".lock").exists(),
-        "the `.lock` sidecar must never be deleted",
+        cfg!(windows),
+        "the `.lock` sidecar goes with the entry on Unix and stays on Windows",
     );
     assert!(fresh_path.is_dir(), "a fresh entry must be kept");
     assert!(
@@ -506,8 +507,13 @@ fn audit_cache_prune_human_output_lists_rows_and_hints() {
         stdout.contains("owner live: "),
         "live-owner rows should name the owner: {stdout}"
     );
+    let lock_line = if cfg!(unix) {
+        "would remove 1 lock sidecar with no cache"
+    } else {
+        "1 lock sidecar with no cache remain (harmless)"
+    };
     assert!(
-        stdout.contains("1 lock sidecar with no cache remain (harmless, kept by design)"),
+        stdout.contains(lock_line),
         "lock-only entries should aggregate into one line: {stdout}"
     );
     assert!(
@@ -909,7 +915,11 @@ fn audit_gc_debug_diagnostics_require_explicit_rust_log() {
     assert!(
         // ANSI styling may sit between the field name and its value, so match
         // the reason value alone.
-        with_debug.stderr.contains("\"lock-only\""),
+        with_debug.stderr.contains(if cfg!(unix) {
+            "\"orphaned-lock\""
+        } else {
+            "\"lock-only\""
+        }),
         "the decision line should carry the reason field: {}",
         with_debug.stderr
     );
@@ -936,7 +946,7 @@ fn cache_sidecar(path: &Path, suffix: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn audit_cache_remove_requires_explicit_root_and_removes_sidecars_but_keeps_locks() {
+fn audit_cache_remove_requires_explicit_root_and_removes_sidecars() {
     let fixture = create_audit_fixture("cache-remove");
     let root = fixture.path();
     let base_sha = "0123456789abcdef0123456789abcdef01234567";
@@ -1030,9 +1040,12 @@ fn audit_cache_remove_requires_explicit_root_and_removes_sidecars_but_keeps_lock
         assert!(!path.exists(), "cache directory should be removed");
         assert!(!cache_sidecar(path, ".sha").exists());
         assert!(!cache_sidecar(path, ".last-used").exists());
-        assert!(cache_sidecar(path, ".lock").exists());
-        fs::remove_file(cache_sidecar(path, ".lock"))
-            .expect("test lock sidecar should be removable");
+        assert_eq!(
+            cache_sidecar(path, ".lock").exists(),
+            cfg!(windows),
+            "the `.lock` sidecar goes on Unix and stays on Windows",
+        );
+        let _ = fs::remove_file(cache_sidecar(path, ".lock"));
     }
 }
 

@@ -889,9 +889,13 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   `.last-used` grace seeding, and no git worktree deregistration. The legacy
   registered-cache pass is still enumerated read-only with the same
   `legacy-registered` / `legacy-deregistered` split an apply run reports.
-- `.lock` sidecars are permanent lock identities and are never deleted:
-  removing an unlinked-but-still-flocked inode while a racer re-creates the
-  path would split one lock across two inodes.
+- On Unix the sweep unlinks the `.lock` sidecar of a reclaimed entry while it
+  holds the flock, and reports a bare lock sidecar as `orphaned-lock`. This is
+  race-safe because `ReusableWorktreeLock::try_acquire` checks after the flock
+  that its fd is still the inode at the path, and opens the path again when
+  it is not. Without that check, a process that opened the old inode before
+  the unlink could hold a flock on it while another process locks the new
+  file. Windows keeps the `.lock` sidecar and reports `lock-only`.
 - Owner liveness for foreign entries is a NotFound-only probe on
   `std::fs::metadata`: only a definitive NotFound classifies the recorded
   owner root as dead. Every other probe error (EACCES, EIO, ENOTDIR) keeps
