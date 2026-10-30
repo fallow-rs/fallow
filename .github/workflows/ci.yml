@@ -190,6 +190,7 @@ jobs:
               - 'crates/process/src/process_tree.rs'
               - 'crates/process/src/registry.rs'
               - 'crates/cli/tests/drift/**'
+              - 'crates/cli/tests/integration/audit_tests.rs'
               - 'crates/cli/tests/integration/exit_code_tests.rs'
               - 'crates/cli/src/agent_install/mcp.rs'
               - 'crates/cli/src/agent_install/mod.rs'

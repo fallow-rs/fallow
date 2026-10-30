@@ -284,16 +284,15 @@ fn print_prune_human(
     } else {
         "reclaimed"
     };
-    let plural_entries = if counts.found == 1 {
-        "entry"
-    } else {
-        "entries"
-    };
+    // Lock sidecars have their own line above; counting them here would
+    // read as "0 B across 15000 of 15000 entries" on a host full of them.
+    let lock_entries = counts.lock_only + counts.lock_reclaimed;
+    let found = counts.found - lock_entries;
+    let plural_entries = if found == 1 { "entry" } else { "entries" };
     println!(
-        "{verb} {} across {} of {} {plural_entries}",
+        "{verb} {} across {} of {found} {plural_entries}",
         format_bytes(counts.reclaimed_bytes),
-        counts.removed,
-        counts.found,
+        counts.removed - counts.lock_reclaimed,
     );
 }
 

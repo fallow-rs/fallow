@@ -1628,8 +1628,8 @@ fn try_migrate_registered_current_cache(repo_root: &Path, path: &Path, base_sha:
 ///
 /// The root-owned entry and every SHA-suffixed entry from the old
 /// git-top-level identity are locked independently. Contended entries are
-/// reported as skipped. Lock files are permanent lock identities and are never
-/// removed.
+/// reported as skipped. On Unix the `.lock` file of a removed entry is
+/// unlinked under its lock (see [`ReusableWorktreeLock`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuditCacheRemovalReport {
     pub found: usize,

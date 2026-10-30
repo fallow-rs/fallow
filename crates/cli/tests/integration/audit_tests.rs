@@ -526,6 +526,10 @@ fn audit_cache_prune_human_output_lists_rows_and_hints() {
         stdout.contains("would reclaim "),
         "dry-run summary should use would-reclaim wording: {stdout}"
     );
+    assert!(
+        stdout.contains(" across 1 of 2 entries"),
+        "the summary counts caches only; lock sidecars have their own line: {stdout}"
+    );
 }
 
 #[test]
