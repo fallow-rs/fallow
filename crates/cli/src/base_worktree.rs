@@ -30,6 +30,13 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::report::plural;
 
+#[path = "base_worktree_scan.rs"]
+mod scan;
+pub use scan::SweepScope;
+#[cfg(test)]
+pub use scan::full_sweep_marker_path;
+use scan::{claim_full_sweep, scan_all_reusable_cache_paths, scan_cache_paths_with_hex_suffix};
+
 pub struct BaseWorktree {
     path: PathBuf,
     persistent: bool,
@@ -647,12 +654,14 @@ pub fn sweep_old_reusable_caches_in(
     quiet: bool,
     scan_root: &Path,
 ) {
+    let scope = claim_full_sweep(scan_root, SystemTime::now());
     let report = sweep_reusable_caches_with_report(
         repo_root,
         max_age,
         scan_root,
         SweepMode::Apply,
         SweepSizes::Skip,
+        scope,
     );
     log_sweep_entries(&report, SweepMode::Apply, max_age);
     let removed = report.removed;
@@ -935,6 +944,7 @@ pub fn sweep_reusable_caches_with_report(
     scan_root: &Path,
     mode: SweepMode,
     sizes: SweepSizes,
+    scope: SweepScope,
 ) -> SweepReport {
     let now = SystemTime::now();
     let mut report = SweepReport::default();
@@ -949,7 +959,9 @@ pub fn sweep_reusable_caches_with_report(
     // longer sees the deregistered caches.
     let owned_path = reusable_audit_worktree_path(repo_root);
     let mut paths = vec![owned_path.clone()];
-    paths.extend(scan_legacy_reusable_cache_paths(repo_root, scan_root));
+    if scope == SweepScope::All {
+        paths.extend(scan_legacy_reusable_cache_paths(repo_root, scan_root));
+    }
     paths.sort();
     paths.dedup();
 
@@ -960,10 +972,13 @@ pub fn sweep_reusable_caches_with_report(
     // own sweep, so its `cacheMaxAgeDays` setting, including `0`, governs;
     // the rest are abandoned and age out under this run's threshold.
     let scoped: FxHashSet<&PathBuf> = paths.iter().collect();
-    let foreign: Vec<PathBuf> = scan_all_reusable_cache_paths(scan_root)
-        .into_iter()
-        .filter(|path| !scoped.contains(path))
-        .collect();
+    let foreign: Vec<PathBuf> = match scope {
+        SweepScope::All => scan_all_reusable_cache_paths(scan_root)
+            .into_iter()
+            .filter(|path| !scoped.contains(path))
+            .collect(),
+        SweepScope::OwnedOnly => Vec::new(),
+    };
     drop(scoped);
 
     // Sizes are measured BEFORE the decision pass so removed entries still
@@ -1157,93 +1172,6 @@ fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
         return Vec::new();
     };
     scan_cache_paths_with_hex_suffix(&prefix, &std::env::temp_dir())
-}
-
-/// Enumerate every reusable cache entry in the temp dir, regardless of repo
-/// hash, for the cross-repo GC pass. Only names matching the two shapes
-/// fallow has ever minted are accepted: `<repo16>-<sha16>` (legacy) and
-/// `<repo16>-root-<root16>` (current). Sidecar entries fold back to their
-/// owning cache path like the repo-scoped scan.
-fn scan_all_reusable_cache_paths(scan_root: &Path) -> Vec<PathBuf> {
-    const GLOBAL_CACHE_PREFIX: &str = "fallow-audit-base-cache-";
-
-    let Ok(entries) = std::fs::read_dir(scan_root) else {
-        return Vec::new();
-    };
-    let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
-    let mut paths = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let cache_name = strip_cache_sidecar_suffix(name);
-        let Some(hash_suffix) = cache_name.strip_prefix(GLOBAL_CACHE_PREFIX) else {
-            continue;
-        };
-        if !cache_hash_suffix_is_valid(hash_suffix) {
-            continue;
-        }
-        let path = scan_root.join(cache_name);
-        if seen.insert(path.clone()) {
-            paths.push(path);
-        }
-    }
-    paths
-}
-
-fn cache_hash_suffix_is_valid(suffix: &str) -> bool {
-    fn is_hex16(part: &str) -> bool {
-        part.len() == 16 && part.bytes().all(|byte| byte.is_ascii_hexdigit())
-    }
-    if let Some((repo, root)) = suffix.split_once("-root-") {
-        return is_hex16(repo) && is_hex16(root);
-    }
-    suffix
-        .split_once('-')
-        .is_some_and(|(repo, sha)| is_hex16(repo) && is_hex16(sha))
-}
-
-fn scan_cache_paths_with_hex_suffix(prefix: &str, scan_root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(scan_root) else {
-        return Vec::new();
-    };
-    let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
-    let mut paths = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let cache_name = strip_cache_sidecar_suffix(name);
-        let Some(hash_suffix) = cache_name.strip_prefix(prefix) else {
-            continue;
-        };
-        if hash_suffix.len() != 16 || !hash_suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            continue;
-        }
-        let path = scan_root.join(cache_name);
-        if seen.insert(path.clone()) {
-            paths.push(path);
-        }
-    }
-    paths
-}
-
-/// Strip a known reusable-cache sidecar suffix so a sidecar entry maps to its
-/// owning cache directory name. Cache dir names end in a hex SHA prefix and
-/// never contain these suffixes, so the mapping is unambiguous.
-fn strip_cache_sidecar_suffix(name: &str) -> &str {
-    for suffix in [
-        REUSABLE_LAST_USED_SUFFIX,
-        REUSABLE_SHA_SUFFIX,
-        REUSABLE_LOCK_SUFFIX,
-    ] {
-        if let Some(stripped) = name.strip_suffix(suffix) {
-            return stripped;
-        }
-    }
-    name
 }
 
 /// Reclaim a single reusable-cache entry, reporting the per-entry outcome.

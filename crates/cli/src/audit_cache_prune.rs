@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use crate::base_worktree::{
     CacheMaxAgeSource, ResolvedCacheMaxAge, SweepDecision, SweepEntry, SweepMode, SweepPass,
-    SweepSizes, log_sweep_entries, resolve_cache_max_age_with_source,
+    SweepScope, SweepSizes, log_sweep_entries, resolve_cache_max_age_with_source,
     sweep_reusable_caches_with_report,
 };
 use crate::report::{format_bytes, plural};
@@ -56,6 +56,7 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
         &scan_root,
         mode,
         SweepSizes::Measure,
+        SweepScope::All,
     );
     report
         .entries

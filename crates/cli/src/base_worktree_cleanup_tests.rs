@@ -90,6 +90,7 @@ fn missing_legacy_cache_cleanup_reports_failed_git_removal() {
         temp.path(),
         SweepMode::Apply,
         SweepSizes::Skip,
+        SweepScope::All,
     );
 
     assert!(
@@ -127,6 +128,7 @@ fn assert_legacy_cache_cleanup_preserves_unrelated_registration(missing: bool) {
         temp.path(),
         SweepMode::DryRun,
         SweepSizes::Skip,
+        SweepScope::All,
     );
     assert!(
         dry_run
@@ -151,6 +153,7 @@ fn assert_legacy_cache_cleanup_preserves_unrelated_registration(missing: bool) {
         temp.path(),
         SweepMode::Apply,
         SweepSizes::Skip,
+        SweepScope::All,
     );
     assert!(
         applied

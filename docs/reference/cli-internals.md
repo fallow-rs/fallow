@@ -876,6 +876,14 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what
   audits actually reclaim.
+- The per-audit sweep scans the temp dir for legacy and cross-repo entries
+  at most once per hour (`FULL_SWEEP_INTERVAL` in `crates/cli/src/base_worktree_scan.rs`). The mtime of the
+  `fallow-audit-cache-sweep-<euid>.stamp` marker in the temp dir records the
+  last scan. Audits inside the interval sweep only the requested root's own
+  entry and the git-registered legacy entries (`SweepScope::OwnedOnly`), so
+  their cost does not grow with the number of entries in the temp dir. A
+  missing, old, future-dated or untrusted marker gives a full scan. Prune
+  always scans (`SweepScope::All`) and does not read or write the marker.
 - `--dry-run` performs zero filesystem mutation: no cache removal, no
   `.lock` sidecar creation (acquiring a lock would create one), no
   `.last-used` grace seeding, and no git worktree deregistration. The legacy

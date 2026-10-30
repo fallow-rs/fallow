@@ -104,10 +104,10 @@ fn completeness_gate_uses_effective_metadata_requirement() {
     assert!(type_aware_meta_completeness_failed(Some(&meta)));
 }
 use crate::base_worktree::{
-    CacheMaxAgeSource, SweepDecision, SweepDisposition, SweepMode, SweepPass, SweepSizes,
-    canonical_root_hash, legacy_reusable_audit_worktree_path, reclaim_orphan_cache_entry,
-    remove_reusable_audit_caches, resolve_cache_max_age_with_source, sweep_old_reusable_caches_in,
-    sweep_reusable_caches_with_report,
+    CacheMaxAgeSource, SweepDecision, SweepDisposition, SweepMode, SweepPass, SweepScope,
+    SweepSizes, canonical_root_hash, full_sweep_marker_path, legacy_reusable_audit_worktree_path,
+    reclaim_orphan_cache_entry, remove_reusable_audit_caches, resolve_cache_max_age_with_source,
+    sweep_old_reusable_caches_in, sweep_reusable_caches_with_report,
 };
 use std::{fs, process::Command};
 
@@ -566,6 +566,91 @@ fn reusable_cache_gc_removes_old_entry_with_backdated_sidecar() {
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
 
+/// Write the `.last-used` sidecar of a foreign cache entry whose directory is
+/// already gone, the cheapest candidate that the cross-repo pass reclaims.
+fn write_foreign_orphan_sidecar(scan_root: &Path) -> PathBuf {
+    let path = scan_root.join("fallow-audit-base-cache-3333333333333333-root-4444444444444444");
+    fs::write(
+        reusable_worktree_last_used_path(&path),
+        "/nonexistent/owner\n",
+    )
+    .expect("orphan sidecar should be written");
+    path
+}
+
+#[test]
+fn per_audit_sweep_skips_temp_dir_scan_within_interval() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-gc-interval");
+    let max_age = Some(Duration::from_hours(30 * 24));
+    sweep_old_reusable_caches_in(&repo, max_age, true, tmp.path());
+    let orphan = write_foreign_orphan_sidecar(tmp.path());
+    let owned = create_unregistered_reusable_cache(&repo);
+    write_sidecar_with_age(&owned, Duration::from_hours(31 * 24));
+
+    sweep_old_reusable_caches_in(&repo, max_age, true, tmp.path());
+
+    assert!(
+        reusable_worktree_last_used_path(&orphan).exists(),
+        "a second audit within the interval must not scan the temp dir",
+    );
+    assert!(
+        !owned.exists(),
+        "the requested root's own entry is swept on every audit",
+    );
+
+    let marker = fs::OpenOptions::new()
+        .write(true)
+        .open(full_sweep_marker_path(tmp.path()))
+        .expect("marker should exist after the first sweep");
+    marker
+        .set_modified(SystemTime::now() - Duration::from_hours(2))
+        .expect("set_modified should succeed");
+
+    sweep_old_reusable_caches_in(&repo, max_age, true, tmp.path());
+
+    assert!(
+        !reusable_worktree_last_used_path(&orphan).exists(),
+        "the first audit after the interval scans the temp dir again",
+    );
+    cleanup_reusable_worktree(&repo, &owned);
+}
+
+#[test]
+fn per_audit_sweep_scans_when_marker_is_from_the_future() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-gc-future-marker");
+    let marker = full_sweep_marker_path(tmp.path());
+    let file = fs::File::create(&marker).expect("marker should be created");
+    file.set_modified(SystemTime::now() + Duration::from_hours(24))
+        .expect("set_modified should succeed");
+    let orphan = write_foreign_orphan_sidecar(tmp.path());
+
+    sweep_old_reusable_caches_in(&repo, Some(Duration::from_hours(30 * 24)), true, tmp.path());
+
+    assert!(
+        !reusable_worktree_last_used_path(&orphan).exists(),
+        "a marker dated in the future must not suppress the sweep",
+    );
+}
+
+#[test]
+fn per_audit_sweep_ignores_marker_that_is_not_a_regular_file() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-gc-dir-marker");
+    fs::create_dir(full_sweep_marker_path(tmp.path())).expect("marker dir should be created");
+    let max_age = Some(Duration::from_hours(30 * 24));
+    sweep_old_reusable_caches_in(&repo, max_age, true, tmp.path());
+    let orphan = write_foreign_orphan_sidecar(tmp.path());
+
+    sweep_old_reusable_caches_in(&repo, max_age, true, tmp.path());
+
+    assert!(
+        !reusable_worktree_last_used_path(&orphan).exists(),
+        "an untrusted marker must not suppress the sweep",
+    );
+}
+
 #[test]
 fn reusable_cache_gc_keeps_fresh_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
@@ -893,6 +978,7 @@ fn sweep_report_classifies_aged_owned_entry() {
         tmp.path(),
         SweepMode::Apply,
         SweepSizes::Skip,
+        SweepScope::All,
     );
 
     let entry = report
@@ -934,6 +1020,7 @@ fn sweep_report_dry_run_previews_aged_entry_without_mutation() {
         tmp.path(),
         SweepMode::DryRun,
         SweepSizes::Measure,
+        SweepScope::All,
     );
 
     let entry = report
@@ -977,6 +1064,7 @@ fn sweep_report_dry_run_lists_legacy_registered_without_deregistering() {
         tmp.path(),
         SweepMode::DryRun,
         SweepSizes::Skip,
+        SweepScope::All,
     );
 
     assert!(
@@ -1021,6 +1109,7 @@ fn sweep_report_apply_keeps_deregistered_current_path_and_removes_released_sha()
         tmp.path(),
         SweepMode::Apply,
         SweepSizes::Measure,
+        SweepScope::All,
     );
 
     // Match by entry NAME: the report echoes the canonical paths git prints,
@@ -1087,6 +1176,7 @@ fn sweep_report_counts_bare_lock_sidecar_as_lock_only() {
         tmp.path(),
         SweepMode::Apply,
         SweepSizes::Skip,
+        SweepScope::All,
     );
 
     let entry = report
@@ -1142,6 +1232,7 @@ fn foreign_owner_behind_dangling_symlink_is_dead() {
         tmp.path(),
         SweepMode::Apply,
         SweepSizes::Skip,
+        SweepScope::All,
     );
 
     let entry = report
@@ -1186,6 +1277,7 @@ fn foreign_owner_with_unprobeable_root_is_kept_unverifiable() {
         tmp.path(),
         SweepMode::Apply,
         SweepSizes::Skip,
+        SweepScope::All,
     );
 
     fs::set_permissions(&guarded_parent, fs::Permissions::from_mode(0o755))
