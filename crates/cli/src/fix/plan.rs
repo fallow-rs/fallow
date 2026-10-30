@@ -57,6 +57,27 @@ impl SkipReason {
         }
     }
 
+    /// Explain how to obtain a new preview without bypassing a safety skip.
+    pub(super) fn help(self) -> &'static str {
+        match self {
+            Self::ContentChanged => {
+                "Run `fallow fix --dry-run` again to refresh the analysis, review the new preview, then apply the approved changes with --yes."
+            }
+            Self::MixedLineEndings => {
+                "Normalize this file to consistent LF or CRLF line endings, then run `fallow fix --dry-run` and review the new preview."
+            }
+            Self::LowConfidenceOffGraph => {
+                "Preserved because consumer coverage is incomplete. Check entry points and workspace coverage, then run `fallow fix --dry-run` and review the new preview."
+            }
+            Self::LowConfidenceUnresolvedImports => {
+                "Preserved because imports could not be resolved. Resolve import and configuration diagnostics, then run `fallow fix --dry-run` and review the new preview."
+            }
+            Self::LowConfidenceIncompleteAnalysis => {
+                "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
+            }
+        }
+    }
+
     /// True for conservative skips rather than recoverable failures.
     pub(super) fn is_intentional(self) -> bool {
         matches!(

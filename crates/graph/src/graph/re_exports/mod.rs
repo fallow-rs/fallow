@@ -4,6 +4,8 @@ mod propagate;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_exposure_walk;
+#[cfg(test)]
 mod tests_namespace_targets;
 
 use std::collections::VecDeque;

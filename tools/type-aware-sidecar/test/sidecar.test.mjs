@@ -1550,6 +1550,61 @@ test("protocol v7 reports exact-symbol impact and shortest targeted-test provena
   }
 });
 
+test("protocol v7 follows NodeNext JavaScript specifiers through TypeScript re-exports", () => {
+  const root = makeProject();
+  try {
+    const librarySource = "export const run = (value: string): string => value;\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "nodenext", moduleResolution: "nodenext" },
+        include: ["src/**/*.ts"],
+      }),
+    );
+    write(root, "src/library.ts", librarySource);
+    write(
+      root,
+      "src/consumer.ts",
+      'import { run } from "./library.js";\nexport const execute = (): string => run("ok");\n',
+    );
+    write(root, "src/index.ts", 'export { execute } from "./consumer.js";\n');
+    write(root, "src/consumer.test.ts", 'import { execute } from "./index.js";\nexecute();\n');
+    write(root, "src/unrelated.test.ts", 'import "./library.js";\n');
+    const run = symbolIdentity({
+      source: librarySource,
+      marker: "run",
+      file: "src/library.ts",
+      namespace: "value",
+      declarationKind: "variable",
+      exportedName: "run",
+    });
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 20, operation: "symbol-impact", symbol: run }]),
+    );
+    const impact = response.results[0];
+    assert.deepEqual(impact.data.direct_consumers, [
+      { path: "src/consumer.ts", namespace: "value" },
+    ]);
+    assert.deepEqual(impact.data.transitive_affected_files, [
+      {
+        path: "src/consumer.test.ts",
+        provenance: ["src/consumer.test.ts", "src/index.ts", "src/consumer.ts"],
+      },
+      { path: "src/index.ts", provenance: ["src/index.ts", "src/consumer.ts"] },
+    ]);
+    assert.deepEqual(impact.data.targeted_tests, [
+      {
+        path: "src/consumer.test.ts",
+        provenance: ["src/consumer.test.ts", "src/index.ts", "src/consumer.ts"],
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 includes a direct test consumer in targeted tests", () => {
   const root = makeProject();
   try {
