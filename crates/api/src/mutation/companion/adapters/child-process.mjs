@@ -156,11 +156,21 @@ const namePatternText = (parts) => parts.map(escapeRegExp).join(" ").replace(/\s
 const namePatternSource = (entries) =>
   `^(?:${[...new Set(entries.map((entry) => namePatternText(entry.parts)))].join("|")})$`;
 
-const failedEntry = (test, directories) => {
-  const entry = { test_id: test.testId, status: "fail", failure_kind: test.failureKind };
+/**
+ * The failure fields of a failed test: its failure kind, and its first error
+ * when it has one. A dry-run entry and a run entry carry the same fields.
+ */
+const failureFields = (test, directories) => {
+  const fields = { failure_kind: test.failureKind };
   const message = testErrorText(test.error, directories);
-  return message === null ? entry : { ...entry, message };
+  return message === null ? fields : { ...fields, message };
 };
+
+const failedEntry = (test, directories) => ({
+  test_id: test.testId,
+  status: "fail",
+  ...failureFields(test, directories),
+});
 
 const runEntry = (test, directories) =>
   test.status === "fail"
@@ -185,17 +195,22 @@ const runEntries = (result, entries, wanted, directories) => {
 const hasFailure = (tests, errors) =>
   errors.length > 0 || tests.some((test) => test.status === "fail");
 
-const dryRunEntry = (file, test, shared) => ({
-  shared,
-  hits: test.hits,
-  report: {
+const dryRunReport = (file, test, directories) => {
+  const report = {
     test_id: test.testId,
     file,
     name: test.name,
     line: test.line,
     duration_ms: test.durationMs,
     status: test.status,
-  },
+  };
+  return test.status === "fail" ? { ...report, ...failureFields(test, directories) } : report;
+};
+
+const dryRunEntry = (file, test, shared, directories) => ({
+  shared,
+  hits: test.hits,
+  report: dryRunReport(file, test, directories),
 });
 
 const addAll = (target, values) => {
@@ -211,8 +226,8 @@ const setupMs = (result) => {
 };
 
 /** Adds the result of one dry-run file to the summary. */
-const recordDryRunFile = (file, result, summary) => {
-  const entries = result.tests.map((test) => dryRunEntry(file, test, result.shared));
+const recordDryRunFile = (file, result, summary, directories) => {
+  const entries = result.tests.map((test) => dryRunEntry(file, test, result.shared, directories));
   summary.tests.push(...entries.map((entry) => entry.report));
   addAll(summary.staticHits, result.staticHits);
   addAll(summary.loaded, result.loaded);
@@ -244,6 +259,7 @@ const emptySummary = () => ({
  */
 const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
   const testIndex = new Map();
+  const directories = errorDirectories(init.root, init.run_dir);
 
   const dryRun = async (request) => {
     validateDryRun(request);
@@ -253,7 +269,7 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
     for (const file of files) {
       const result = await runFile(file, { mutantId: null });
       for (const test of result.tests) testIndex.set(test.testId, { file, parts: test.parts });
-      recordDryRunFile(file, result, summary);
+      recordDryRunFile(file, result, summary, directories);
     }
     return dryRunResult({
       started,
@@ -266,8 +282,6 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
 
   // A run starts one process for each file, in file order. With `bail`, a
   // failure stops the run before the next file.
-  const directories = errorDirectories(init.root, init.run_dir);
-
   const run = async (request) => {
     validateRun(request);
     const requested = [...new Set(request.test_ids)];

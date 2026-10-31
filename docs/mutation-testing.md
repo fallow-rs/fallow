@@ -677,7 +677,8 @@ slow or busy host can need more, because the dry run executes each test file.
 `baseline_failures` lists the tests and test files that fail with no active
 mutant. Their results decide no mutant status.
 
-- A test that fails in the first dry run never covers a mutant.
+- A test that fails in the first dry run never covers a mutant. Its message
+  is the first error of the test, in the shape that the next item describes.
 - A test that fails in a control run (see Run-path self-check) is also a
   baseline failure. Its message says that the test fails in a mutant run
   with no active mutant but passed in the dry run of its whole file. A test
@@ -696,7 +697,13 @@ mutant. Their results decide no mutant status.
   not pass there is a baseline failure of that companion, with the ids of the
   affected mutants in `mutant_ids`. The mutant runs with its other covering
   tests. Only a mutant with no covering test left is `runtime_error`, and its
-  `errors[]` entry names the mutant.
+  `errors[]` entry names the mutant. The message says that the test did not
+  pass in the dry run of a restarted companion, then gives the first error
+  of the test from the first restarted companion that sent one. The error
+  has the same shape and bounds as the error of a control-run failure, and
+  the human footer splits it in the same way. A test that passes in the
+  first dry run and fails after a restart can depend on state outside the
+  test, for example a file or the process id of the runner.
 - A static mutant needs a new companion before and after its run when the
   runner keeps modules loaded between runs (Vitest with `isolate: false`).
   After a reload of the worker gave `restart_required`, the companion that

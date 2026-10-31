@@ -1,6 +1,8 @@
 //! Control runs: runs of covering tests with no active mutant. A kill with
 //! no executed test, and a kill in a survivor retry by a test that the first
-//! run did not execute, need a control run of their tests.
+//! run did not execute, need a control run of their tests. The module also
+//! records the baseline failures of control runs and of the dry runs of
+//! restarted companions.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -8,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::super::protocol::{RunResult, RunStatus, TestStatus};
+use super::{BaselineFailure, DryRunFacts, ScheduleOutcome};
 
 /// Why a control run did not pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,18 +38,23 @@ impl FailedTest {
     /// line of the error, and the stack follows. With no error, the message
     /// is `reason`.
     pub(super) fn message(&self, reason: &str) -> String {
-        let Some(error) = self
-            .error
+        self.error
             .as_deref()
-            .map(str::trim)
-            .filter(|e| !e.is_empty())
-        else {
-            return reason.to_owned();
-        };
-        let kept = &error[..error.floor_char_boundary(MAX_TEST_ERROR_BYTES)];
-        let ellipsis = if kept.len() < error.len() { "..." } else { "" };
-        format!("{reason}: {kept}{ellipsis}")
+            .and_then(bounded_test_error)
+            .map_or_else(|| reason.to_owned(), |error| format!("{reason}: {error}"))
     }
+}
+
+/// The error of a test from the companion, trimmed and cut at
+/// [`MAX_TEST_ERROR_BYTES`]. Gives `None` for an error with no text.
+pub(super) fn bounded_test_error(error: &str) -> Option<String> {
+    let error = error.trim();
+    if error.is_empty() {
+        return None;
+    }
+    let kept = &error[..error.floor_char_boundary(MAX_TEST_ERROR_BYTES)];
+    let ellipsis = if kept.len() < error.len() { "..." } else { "" };
+    Some(format!("{kept}{ellipsis}"))
 }
 
 impl ControlFault {
@@ -132,22 +140,32 @@ pub(super) const CONTROL_RUN_FAILURE: &str = "the test fails in a mutant run wit
 /// test is not the cause.
 pub(super) const CONFIRMATION_RUN_FAILURE: &str = "the test fails with no active mutant in a run of each test of its file that passed in the dry run, but passed in the dry run of its whole file; it can depend on a test of its file that failed or was skipped in the dry run, or it can be flaky";
 
+/// The message of a covering test that did not pass in the dry run of a
+/// restarted companion.
+pub(super) const RESTARTED_DRY_RUN_FAILURE: &str =
+    "the test did not pass in the dry run of a restarted companion";
+
 /// The longest test error that a baseline failure keeps, in bytes. The
 /// companion bounds the error too. This bound guards the pipe from the
 /// companion.
 const MAX_TEST_ERROR_BYTES: usize = 8 * 1024;
 
-/// Splits the message of a control-run baseline failure into its fixed
-/// reason and the test error after it. Gives `None` for another message or
-/// for a reason with no test error.
+/// Splits the message of a baseline failure from a control run or from the
+/// dry run of a restarted companion into its fixed reason and the test error
+/// after it. Gives `None` for another message or for a reason with no test
+/// error.
 #[must_use]
 pub fn split_control_run_failure(message: &str) -> Option<(&str, &str)> {
-    [CONTROL_RUN_FAILURE, CONFIRMATION_RUN_FAILURE]
-        .into_iter()
-        .find_map(|reason| {
-            let error = message.strip_prefix(reason)?.strip_prefix(": ")?;
-            Some((reason, error))
-        })
+    [
+        CONTROL_RUN_FAILURE,
+        CONFIRMATION_RUN_FAILURE,
+        RESTARTED_DRY_RUN_FAILURE,
+    ]
+    .into_iter()
+    .find_map(|reason| {
+        let error = message.strip_prefix(reason)?.strip_prefix(": ")?;
+        Some((reason, error))
+    })
 }
 
 /// The first line of `message`.
@@ -207,11 +225,14 @@ pub(super) type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
 /// run. A fault of the companion is not stored, so a later mutant with the
 /// same tests runs the control again. The memo also keeps the tests
 /// that failed in a control run, each with the message of its baseline
-/// failure: each later mutant run leaves them out.
+/// failure: each later mutant run leaves them out. It also keeps the first
+/// error of each test that failed in the dry run of a restarted companion,
+/// for the baseline failure of that test.
 #[derive(Default)]
 pub(super) struct ControlMemo {
     entries: Mutex<FxHashMap<Vec<String>, ControlCell>>,
     pub(super) failed_tests: Mutex<BTreeMap<String, String>>,
+    restarted_dry_run_errors: Mutex<BTreeMap<String, String>>,
 }
 
 impl ControlMemo {
@@ -250,12 +271,87 @@ impl ControlMemo {
             .is_ok_and(|failed| failed.contains_key(test))
     }
 
+    /// Keeps the error of `test` from the dry run of a restarted companion.
+    /// The first error of a test stays.
+    pub(super) fn note_restarted_dry_run_error(&self, test: &str, error: &str) {
+        if let Ok(mut errors) = self.restarted_dry_run_errors.lock()
+            && !errors.contains_key(test)
+        {
+            errors.insert(test.to_owned(), error.to_owned());
+        }
+    }
+
+    /// The first error of `test` from the dry run of a restarted companion.
+    pub(super) fn restarted_dry_run_error(&self, test: &str) -> Option<String> {
+        self.restarted_dry_run_errors
+            .lock()
+            .ok()
+            .and_then(|errors| errors.get(test).cloned())
+    }
+
     /// Each failed test with the message of its baseline failure.
     pub(super) fn failed(&self) -> BTreeMap<String, String> {
         self.failed_tests
             .lock()
             .map(|failed| failed.clone())
             .unwrap_or_default()
+    }
+}
+
+/// Records `test` as a baseline failure of a restarted companion that
+/// affected `mutant_id`. The mutant ran with its other covering tests. The
+/// message keeps the first error of the test from the dry run of a
+/// restarted companion, when the companion sent one.
+pub(super) fn note_restarted_baseline_failure(
+    outcome: &mut ScheduleOutcome,
+    facts: &DryRunFacts,
+    memo: &ControlMemo,
+    test: String,
+    mutant_id: &str,
+) {
+    if let Some(failure) = outcome
+        .baseline_failures
+        .iter_mut()
+        .find(|failure| failure.test_id.as_deref() == Some(test.as_str()))
+    {
+        failure.mutant_ids.push(mutant_id.to_owned());
+        return;
+    }
+    outcome.baseline_failures.push(BaselineFailure {
+        file: facts.passing.get(&test).map(|(file, _)| file.clone()),
+        message: Some(
+            FailedTest {
+                error: memo.restarted_dry_run_error(&test),
+                test_id: test.clone(),
+            }
+            .message(RESTARTED_DRY_RUN_FAILURE),
+        ),
+        test_id: Some(test),
+        mutant_ids: vec![mutant_id.to_owned()],
+    });
+}
+
+/// Adds each test that failed in a control run during the mutant runs as a
+/// baseline failure. [`super::record`] then adds the mutants that ran without it.
+pub(super) fn note_control_failures(
+    outcome: &mut ScheduleOutcome,
+    facts: &DryRunFacts,
+    memo: &ControlMemo,
+) {
+    for (test, message) in memo.failed() {
+        if outcome
+            .baseline_failures
+            .iter()
+            .any(|failure| failure.test_id.as_deref() == Some(test.as_str()))
+        {
+            continue;
+        }
+        outcome.baseline_failures.push(BaselineFailure {
+            file: facts.passing.get(&test).map(|(file, _)| file.clone()),
+            test_id: Some(test),
+            message: Some(message),
+            mutant_ids: Vec::new(),
+        });
     }
 }
 
@@ -270,7 +366,11 @@ mod tests {
             test_id: "test/a.test.ts::adds".to_owned(),
             error: Some(error.to_owned()),
         };
-        for reason in [CONTROL_RUN_FAILURE, CONFIRMATION_RUN_FAILURE] {
+        for reason in [
+            CONTROL_RUN_FAILURE,
+            CONFIRMATION_RUN_FAILURE,
+            RESTARTED_DRY_RUN_FAILURE,
+        ] {
             let message = test.message(reason);
             assert_eq!(split_control_run_failure(&message), Some((reason, error)));
         }

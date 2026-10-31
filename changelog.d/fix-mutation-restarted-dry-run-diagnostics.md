@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow mutation` keeps the test error of a test that fails in a dry run.** Before, a failed test in the dry run of a restarted companion gave only a fixed reason in `baseline_failures[].message`, and a failed test in the first dry run gave no message. The assertion and the stack were lost, so you could not see why the test failed. Now the Vitest, Node test and Bun test companions send `failure_kind` and `message` for each failed dry-run test, in the same shape as a failed test of a run. The message of a restarted dry-run failure is the reason, then `: ` and the first error of the test. The human footer shows the reason on the `Message:` line and the error on the `Error:` line. The message of a first dry-run failure is the error of the test. The run stays `partial`.
+  (Closes [#4030](https://github.com/fallow-rs/fallow/issues/4030))

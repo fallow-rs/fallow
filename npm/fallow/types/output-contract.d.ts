@@ -20744,8 +20744,13 @@ file?: (string | null)
  */
 test_id?: (string | null)
 /**
- * The error message, for an error outside a test, or the reason for a
- * test that did not pass in the dry run of a restarted companion.
+ * The error message. For an error outside a test, the error. For a test
+ * that failed in the first dry run, the first error of the test. For a
+ * test that failed in a control run or in the dry run of a restarted
+ * companion, the reason, then `: ` and the first error of the test. A
+ * test error has its name and message on the first line and the stack
+ * frames of the project after it. Absent for a test of the first dry
+ * run when the companion sent no error.
  */
 message?: (string | null)
 /**
