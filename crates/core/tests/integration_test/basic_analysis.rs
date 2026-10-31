@@ -387,23 +387,68 @@ fn duplicate_exports_detected() {
     );
 }
 
-/// `src/gitlab/auth.ts` imports `configureAuth` under an alias from
-/// `src/ci/auth.ts` and exports its own `configureAuth`. `src/js/package.ts`
-/// imports `Package` under an alias, star-exports the same module and shadows
-/// `Package`. Both are adapters of the origin, not duplicates. The control
-/// pair in `src/control/` exports `format` independently and stays flagged.
+/// `src/js/package.ts` imports `Package` under an alias, star-exports the same
+/// module and shadows `Package`. It is an overlay of the origin, not a
+/// duplicate. `src/gitlab/auth.ts` imports `configureAuth` under an alias from
+/// `src/ci/auth.ts` and declares its own `configureAuth`. It is a wrapper with
+/// a different signature, so the pair stays flagged. The control pair in
+/// `src/control/` exports `format` independently and stays flagged.
 #[test]
-fn duplicate_export_adapter_wrapper_is_not_flagged() {
+fn duplicate_export_overlay_is_not_flagged_but_wrapper_is() {
     let root = fixture_path("duplicate-export-adapter-wrapper");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    let dup_names: Vec<&str> = results
+    let mut dup_names: Vec<&str> = results
         .duplicate_exports
         .iter()
         .map(|d| d.export.export_name.as_str())
         .collect();
-    assert_eq!(dup_names, vec!["format"], "found: {dup_names:?}");
+    dup_names.sort_unstable();
+    assert_eq!(
+        dup_names,
+        vec!["configureAuth", "format"],
+        "found: {dup_names:?}"
+    );
+}
+
+/// Issue #4024: `src/Url.ts` imports `encode` from `src/Base64.ts` under the
+/// alias `base64` and declares its own `encode`. Importers see two `encode`
+/// exports with different behavior, so the pair is reported.
+#[test]
+fn duplicate_export_aliased_import_wrapper_is_flagged() {
+    let root = fixture_path("duplicate-export-aliased-wrapper");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let groups: Vec<(&str, Vec<String>)> = results
+        .duplicate_exports
+        .iter()
+        .map(|d| {
+            let mut paths: Vec<String> = d
+                .export
+                .locations
+                .iter()
+                .map(|l| {
+                    l.path
+                        .strip_prefix(&root)
+                        .unwrap_or(&l.path)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            paths.sort();
+            (d.export.export_name.as_str(), paths)
+        })
+        .collect();
+    assert_eq!(
+        groups,
+        vec![(
+            "encode",
+            vec!["src/Base64.ts".to_string(), "src/Url.ts".to_string()]
+        )],
+        "found: {groups:?}"
+    );
 }
 
 #[test]
