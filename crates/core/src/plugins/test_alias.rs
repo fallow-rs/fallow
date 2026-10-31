@@ -45,7 +45,7 @@ pub(super) fn process_test_alias(
     result
         .path_aliases
         .push((find.to_owned(), normalized.clone()));
-    credit_unrouted_replacement(result, find, &normalized, config_path);
+    credit_unrouted_replacement(result, find, &normalized, config_path, root);
     if alias_target_is_source_file(&normalized) {
         result.setup_files.push(root.join(&normalized));
     }

@@ -356,6 +356,7 @@ fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path
                 key,
                 &normalized,
                 config_path,
+                root,
             ) {
                 result.push_entry_pattern(globset::escape(&normalized));
             }
