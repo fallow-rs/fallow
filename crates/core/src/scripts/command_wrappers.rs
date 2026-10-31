@@ -9,6 +9,12 @@ struct CommandWrapperSpec {
     separator: &'static str,
 }
 
+/// Maximum number of command wrappers, such as `vpx` or `dotenvx run --`,
+/// that one command segment follows. Each wrapper records the arguments after
+/// it, so a long chain costs wrappers times arguments. After the limit, the
+/// next wrapper counts as the command of the segment.
+pub(super) const MAX_COMMAND_WRAPPER_DEPTH: usize = 8;
+
 /// Known wrappers; `--` alone does not imply that a CLI executes another command.
 const COMMAND_WRAPPERS: &[CommandWrapperSpec] = &[
     CommandWrapperSpec {
@@ -96,5 +102,40 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    /// Each wrapper in a chain records the arguments after it, so the work
+    /// is wrappers times arguments. OSS-Fuzz issue 579712535 used about
+    /// 2.5 GB on a 300 KB script.
+    #[test]
+    fn long_command_wrapper_chain_is_bounded() {
+        const WRAPPERS: usize = 2_000;
+        const DIRECTORIES: usize = 2_000;
+        let script = format!(
+            "{}node --test {}",
+            "vpx ".repeat(WRAPPERS),
+            "d/ ".repeat(DIRECTORIES)
+        );
+        let commands = super::super::parse_script(&script);
+        let recorded: usize = commands
+            .iter()
+            .map(|command| command.file_args.len() + command.test_file_args.len())
+            .sum();
+        assert!(commands.len() <= super::MAX_COMMAND_WRAPPER_DEPTH + 1);
+        assert!(
+            recorded <= (super::MAX_COMMAND_WRAPPER_DEPTH + 1) * DIRECTORIES * 16,
+            "recorded {recorded} arguments"
+        );
+    }
+
+    #[test]
+    fn short_command_wrapper_chain_reaches_the_command() {
+        let commands = super::super::parse_script("vpx vpx vpx tsx scripts/gen.ts");
+        assert!(
+            commands
+                .iter()
+                .any(|command| command.binary == "tsx" && command.file_args == ["scripts/gen.ts"]),
+            "{commands:?}"
+        );
     }
 }

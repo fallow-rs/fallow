@@ -2625,7 +2625,7 @@ fn parse_command_segment(
         return outcomes;
     };
     let mut location = RunLocation::Here;
-    loop {
+    for _ in 0..command_wrappers::MAX_COMMAND_WRAPPER_DEPTH {
         let Some(target) = advance_package_manager(&tokens, idx, catalog) else {
             return outcomes;
         };
