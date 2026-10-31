@@ -757,3 +757,70 @@ fn vite_mode_config_relative_alias_replacement_exports_are_used() {
         "the stub replaces the original file at build time: {unused_files:?}"
     );
 }
+
+/// Issue #4035: the alias key `src/clock` is also a specifier that tsconfig
+/// `paths` (`src/*`) resolves. The resolver applies tsconfig `paths` before the
+/// alias fallback, so the import reaches the original file and the stub has no
+/// graph consumer. With `includeEntryExports`, the exports of the stub must stay
+/// credited. Exports of the original file stay reportable.
+#[test]
+fn tsconfig_paths_alias_replacement_exports_are_used_with_include_entry_exports() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "repro",
+            "private": true,
+            "type": "module",
+            "main": "src/index.ts",
+            "scripts": { "test": "vitest" },
+            "devDependencies": { "vitest": "4.0.0" }
+        }"#,
+    );
+    write(
+        &root.join("node_modules/vitest/package.json"),
+        r#"{ "name": "vitest", "version": "4.0.0", "bin": { "vitest": "vitest.mjs" } }"#,
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "module": "nodenext", "paths": { "src/*": ["./src/*"] } }, "include": ["src", "test"] }"#,
+    );
+    write(
+        &root.join("vitest.config.ts"),
+        r#"
+            export default {
+                resolve: {
+                    alias: [{ find: "src/clock", replacement: new URL("./test/stubs/clock.ts", import.meta.url).pathname }],
+                },
+            };
+        "#,
+    );
+    write(
+        &root.join("src/clock.ts"),
+        "export function now(): number { return Date.now(); }\nexport function unusedClock(): number { return 1; }\n",
+    );
+    write(
+        &root.join("src/index.ts"),
+        "import { now } from \"src/clock\";\n\nexport function stamp(): number {\n    return now();\n}\n",
+    );
+    write(
+        &root.join("test/stubs/clock.ts"),
+        "export function now(): number { return 0; }\n",
+    );
+    write(
+        &root.join("test/index.spec.ts"),
+        "import { stamp } from \"../src/index.js\";\n\nif (stamp() !== 0) {\n    throw new Error(\"stamp\");\n}\n",
+    );
+
+    let mut config = create_config(root.to_path_buf());
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        unused_export_keys(&results, root),
+        vec!["src/clock.ts:unusedClock".to_string()],
+        "only the unused export of the original file stays reportable"
+    );
+}

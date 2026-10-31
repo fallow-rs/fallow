@@ -284,6 +284,7 @@ define_plugin!(
                     &find,
                     &normalized,
                     config_path,
+                    root,
                 );
                 result.path_aliases.push((find, normalized));
             }
