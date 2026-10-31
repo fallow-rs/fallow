@@ -2,8 +2,10 @@
 // tracking issue. A deferral without a link is easy to lose after the merge.
 //
 // A deferral is one of these:
-// - a paragraph or list item under a "Not in this change", "Follow-ups" or
-//   "Out of scope" heading,
+// - a paragraph or list item under a heading that names work this change does
+//   not do, such as "Not in this change", "Follow-ups", "Out of scope", "Not
+//   covered", "Not in scope", "Future work" or "Known limit outside this
+//   change",
 // - a paragraph or list item that says the work is "a separate change", "left
 //   for a follow-up" or "out of scope".
 //
@@ -18,7 +20,10 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const DEFERRAL_HEADING =
-  /^#{1,6}\s*(?:not in this (?:change|pr)\b|follow-?ups?\b(?! after review)(?!.*\bin this (?:change|pr)\b)|out of scope\b|deferred\b)/iu;
+  /^#{1,6}\s*(?:not in this (?:change|pr)\b|(?:what (?:is|was) )?not (?:yet )?(?:covered|in scope|handled|addressed|done|fixed|included|implemented)\b|follow-?ups?\b(?! after review)(?!.*\bin this (?:change|pr)\b)|out of scope\b|deferred\b|(?:remaining|future) work\b|left out\b)/iu;
+// A heading that puts its subject outside this change anywhere in its text,
+// for example "Follow-up (not in this PR)" or "Known limit outside this change".
+const OUTSIDE_CHANGE_HEADING = /^#{1,6}\s.*\b(?:not in|outside(?: of)?) this (?:change|pr)\b/iu;
 const ANY_HEADING = /^#{1,6}\s/u;
 const BOLD_HEADING = /^(?:\*\*(.+?)\*\*|__(.+?)__):?$/u;
 const DEFERRAL_PHRASE =
@@ -95,6 +100,9 @@ const splitBlocks = (body) => {
   return blocks;
 };
 
+const isDeferralHeading = (heading) =>
+  DEFERRAL_HEADING.test(heading) || OUTSIDE_CHANGE_HEADING.test(heading);
+
 const closesSection = (level, deferralLevel) => deferralLevel !== null && level <= deferralLevel;
 
 /**
@@ -107,7 +115,7 @@ const closesSection = (level, deferralLevel) => deferralLevel !== null && level 
 const nextDeferralLevel = (heading, deferralLevel) => {
   const level = /^#+/u.exec(heading)[0].length;
   const open = closesSection(level, deferralLevel) ? null : deferralLevel;
-  if (open === null && DEFERRAL_HEADING.test(heading)) return level;
+  if (open === null && isDeferralHeading(heading)) return level;
   return open;
 };
 

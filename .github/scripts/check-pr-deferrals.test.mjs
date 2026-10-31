@@ -288,3 +288,43 @@ test("deferral sections include nested headings and end at the same or higher le
     }
   }
 });
+
+test("items under a heading that names work this change does not do need tracking", () => {
+  const item = "- `c8` keeps all its arguments.";
+  for (const heading of [
+    "## Not covered",
+    "## What is not covered",
+    "## Not in scope",
+    "## Not yet handled",
+    "## Not addressed",
+    "## Remaining work",
+    "## Future work",
+    "## Left out",
+    "## Known limit outside this change",
+    "## Follow-up (not in this PR)",
+    "**Not covered**",
+  ]) {
+    const body = `${heading}\n\n${item}\n\n## Test plan\n\n- cargo test`;
+    assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] }, heading);
+    const linked = body.replace("arguments.", "arguments (#3320).");
+    assert.deepEqual(checkPrDeferrals(linked), { ok: true }, heading);
+    const optedOut = body.replace("arguments.", "arguments. No follow-up planned.");
+    assert.deepEqual(checkPrDeferrals(optedOut), { ok: true }, heading);
+  }
+});
+
+test("ordinary headings about coverage, scope or limits are not deferral sections", () => {
+  for (const heading of [
+    "## Covered cases",
+    "## Scope",
+    "## Test coverage",
+    "## What is covered",
+    "## Follow-ups in this PR",
+    "## Remaining risk",
+    "## Known limits",
+    "## Notes",
+  ]) {
+    const body = `${heading}\n\n- \`c8\` keeps all its arguments.`;
+    assert.deepEqual(checkPrDeferrals(body), { ok: true }, heading);
+  }
+});
