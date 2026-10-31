@@ -722,9 +722,12 @@ jobs:
           cache-key: drift
 
       # The harness drives the MCP server as a separate binary and fails when
-      # it is missing, so build it before the test target.
+      # it is missing, so build it before the test target. One invocation for
+      # both packages resolves one feature set, so the test step reuses every
+      # artifact. A separate `cargo build -p fallow-mcp` resolves fewer
+      # dependency features and builds a second copy of most of the tree.
       - name: Build fallow-mcp
-        run: cargo build -p fallow-mcp
+        run: cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift
 
       # Fixed seed: a failure on a pull request reproduces locally with the
       # same command. See docs/development/drift-contract.md.
@@ -833,8 +836,10 @@ jobs:
       # The drift harness builds git fixtures, spawns the CLI and the MCP
       # server, and compares root-relative paths. A harness change must pass
       # here on Windows before it merges.
+      # One invocation for both packages builds each crate once. See the
+      # Build fallow-mcp step of the drift job.
       - name: Build fallow-mcp for the drift harness
-        run: cargo build -p fallow-mcp
+        run: cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift
       - name: Test drift harness on Windows
         run: cargo test -p fallow-cli --test drift -- --include-ignored
 
