@@ -68,7 +68,7 @@ pub fn find_kinds_on_path(
     })
 }
 
-/// Finds the first file of `names` in the absolute directories of
+/// Finds the first program of `names` in the absolute directories of
 /// `search_path`, directory by directory.
 fn find_on_path(search_path: &OsStr, names: &[OsString]) -> Option<PathBuf> {
     std::env::split_paths(search_path)
@@ -77,8 +77,23 @@ fn find_on_path(search_path: &OsStr, names: &[OsString]) -> Option<PathBuf> {
             names
                 .iter()
                 .map(|name| directory.join(name))
-                .find(|candidate| candidate.is_file())
+                .find(|candidate| is_program(candidate))
         })
+}
+
+/// Whether `path` is a file that can start. On Unix, as in a shell `PATH`
+/// lookup, a file without an execute bit does not count.
+fn is_program(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 /// Whether `path` is a bare command name such as `node`: one component and
@@ -176,6 +191,11 @@ fn discover_runtime_in(
     search_path: &OsStr,
 ) -> Result<JsRuntime, String> {
     let (kind, path) = if let Some(path) = explicit {
+        if path.as_os_str().is_empty() {
+            return Err(
+                "the runtime value is empty; pass a name such as node or a path".to_owned(),
+            );
+        }
         let path = if is_bare_name(path) {
             find_on_path(
                 search_path,
@@ -303,6 +323,33 @@ mod tests {
         let error = discover_runtime_in(Some(Path::new("node")), BOTH, cwd.path(), &empty)
             .expect_err("no node on PATH");
         assert!(error.contains("no `node` executable on PATH"), "{error}");
+    }
+
+    #[test]
+    fn a_path_lookup_skips_a_file_without_the_execute_bit() {
+        let plain = tempfile::tempdir().expect("dir");
+        let bin = tempfile::tempdir().expect("dir");
+        std::fs::write(plain.path().join("node"), "not a program\n").expect("write");
+        let node = fake_runtime(bin.path(), "node", "v24.20.0");
+        let search = std::env::join_paths([plain.path(), bin.path()]).expect("join");
+        assert_eq!(
+            find_kinds_on_path(&search, BOTH),
+            Some((RuntimeKind::Node, node.clone()))
+        );
+        let runtime = discover_runtime_in(Some(Path::new("node")), BOTH, plain.path(), &search)
+            .expect("the executable later on PATH wins");
+        assert_eq!(runtime.path, node);
+    }
+
+    #[test]
+    fn an_empty_explicit_runtime_is_a_clear_error() {
+        let cwd = tempfile::tempdir().expect("dir");
+        let error = discover_runtime_in(Some(Path::new("")), BOTH, cwd.path(), OsStr::new(""))
+            .expect_err("an empty runtime is invalid");
+        assert_eq!(
+            error,
+            "the runtime value is empty; pass a name such as node or a path"
+        );
     }
 
     #[test]
