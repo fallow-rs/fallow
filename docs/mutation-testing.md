@@ -887,6 +887,11 @@ fallow mutation src/math.ts --runner-config vitest.integration.config.mjs
   file of the plan that the selected config does not include stays visible as
   a `test-files-not-discovered` error, and the run is `partial`.
 
+`--runtime` takes a name or a file path. A bare name such as `node` or
+`bun`, without a path separator, is a `PATH` lookup, as in a shell. A path
+with a separator, such as `./bin/node`, is a file path. A relative file path
+resolves against the working directory.
+
 `--runtime` must name a runtime that the runner accepts. A Bun runtime for
 `node-test`, or a Node runtime for `bun-test`, exits with code 2 and
 `FALLOW_MUTATION_RUNTIME_NOT_FOUND`.
