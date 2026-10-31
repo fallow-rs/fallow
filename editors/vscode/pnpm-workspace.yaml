@@ -2,10 +2,16 @@ allowBuilds:
   '@vscode/vsce-sign': false
   keytar: false
 
+# minimatch 11.0.3 is younger than the 7-day minimum release age. Remove this entry after 2026-11-04.
+minimumReleaseAgeExclude:
+  - minimatch@11.0.3
+
 overrides:
   # Azure Identity still requests MSAL 6; the auth-code fix starts at 7.1.0.
   "@azure/msal-node": 7.1.1
   "brace-expansion@5": 5.0.12
+  # vscode-languageclient 10 requests minimatch 10; GHSA-g3hv-75wg-m249 is fixed from 11.0.1, and the client uses only the Minimatch class, which 11 keeps.
+  "minimatch@10": 11.0.3
   # Mocha 11 supports the VS Code host but still requests these older majors.
   "diff@7": 8.0.4
   "serialize-javascript@6": 7.1.4
