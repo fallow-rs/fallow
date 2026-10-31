@@ -1247,7 +1247,7 @@
           "name": "--runtime",
           "type": "string",
           "required": false,
-          "description": "The JavaScript runtime (default from PATH: `node` for node:test, `bun` for bun test, and `node`, then `bun`, for Vitest)"
+          "description": "The JavaScript runtime: a name on PATH such as `node`, or a file path (default from PATH: `node` for node:test, `bun` for bun test, and `node`, then `bun`, for Vitest)"
         },
         {
           "name": "--allow-dirty",

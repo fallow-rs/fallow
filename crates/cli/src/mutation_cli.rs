@@ -73,8 +73,9 @@ pub struct MutationArgs {
     /// The number of companion processes (default: half the logical cores).
     #[arg(long, value_name = "N")]
     pub concurrency: Option<usize>,
-    /// The JavaScript runtime (default from PATH: `node` for node:test, `bun`
-    /// for bun test, and `node`, then `bun`, for Vitest).
+    /// The JavaScript runtime: a name on PATH such as `node`, or a file path
+    /// (default from PATH: `node` for node:test, `bun` for bun test, and
+    /// `node`, then `bun`, for Vitest).
     #[arg(long, value_name = "PATH")]
     pub runtime: Option<PathBuf>,
     /// Run in a dirty git worktree. The run still reports the paths that it
