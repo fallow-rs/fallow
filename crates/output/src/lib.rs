@@ -262,13 +262,14 @@ pub use health_mutation::{
 pub use health_report::{HealthReport, HealthSection};
 pub use health_runtime_coverage::{
     OPTIMIZATION_TARGET_UNMATCHED_WARNING, RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction,
-    RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
-    RuntimeCoverageCostBasis, RuntimeCoverageDataSource, RuntimeCoverageDiscriminators,
-    RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
-    RuntimeCoverageImportanceEntry, RuntimeCoverageMessage, RuntimeCoverageOptimizationTarget,
-    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
-    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSignal,
-    RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
+    RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCapturePolicy, RuntimeCoverageCaptureQuality,
+    RuntimeCoverageConfidence, RuntimeCoverageCostBasis, RuntimeCoverageDataSource,
+    RuntimeCoverageDiscriminators, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+    RuntimeCoverageHotPath, RuntimeCoverageImportanceEntry, RuntimeCoverageMessage,
+    RuntimeCoverageOptimizationTarget, RuntimeCoverageProvenance, RuntimeCoverageReport,
+    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
+    RuntimeCoverageSignal, RuntimeCoverageSummary, RuntimeCoverageVerdict,
+    RuntimeCoverageWatermark,
 };
 pub use health_scores::{
     COGNITIVE_EXTRACTION_THRESHOLD, ClockProvenance, ClockSource, ComplexityViolation,

@@ -1867,7 +1867,7 @@ mod drift_tests {
             "DupesSchemaVersion must cover its CLI and programmatic lineages"
         );
         let current_string_versions = [
-            ("CoverageAnalyzeSchemaVersion", "2"),
+            ("CoverageAnalyzeSchemaVersion", "3"),
             ("CrossRepoImpactSchemaVersion", "2"),
             ("ImpactReportSchemaVersion", "2"),
             ("SecuritySchemaVersion", "8"),

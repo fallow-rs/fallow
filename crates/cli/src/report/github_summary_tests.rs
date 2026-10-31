@@ -419,3 +419,38 @@ fn dead_code_rows_render_in_one_order_for_any_input_order() {
     let c = flat.find("`src/c.ts`").expect("c");
     assert!(a < b && b < c, "rows follow path order: {flat}");
 }
+
+/// A positive-only capture has null tracked and unhit totals. The footer
+/// must not print them as 0 tracked and 0 unhit.
+#[test]
+fn health_summary_footer_withholds_totals_for_a_partial_capture() {
+    let env = serde_json::json!({
+        "elapsed_ms": 1,
+        "findings": [],
+        "summary": { "files_analyzed": 1, "functions_analyzed": 2 },
+        "runtime_coverage": {
+            "findings": [{
+                "path": "src/a.ts", "function": "a", "line": 1,
+                "verdict": "coverage_unavailable", "invocations": null,
+                "confidence": "none"
+            }],
+            "summary": {
+                "functions_tracked": null,
+                "functions_hit": 3,
+                "functions_unhit": null,
+                "functions_untracked": 5,
+                "coverage_percent": null,
+                "capture_policy": "positive_only"
+            }
+        }
+    });
+    let out = render_health_summary(&env);
+    assert!(
+        out.contains(
+            "Partial capture: **3** functions with positive execution evidence, **5** untracked"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("tracked functions"), "{out}");
+    assert!(!out.contains("unhit"), "{out}");
+}

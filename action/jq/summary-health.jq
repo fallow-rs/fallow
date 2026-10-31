@@ -92,6 +92,8 @@ else
   else "" end) +
   (if $complex > 0 then
     "\n\n**!** marks the dimension that breached.\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold), CRAP >= \(.summary.max_crap_threshold // 30))"
+  elif $prod > 0 and production_summary.capture_policy == "positive_only" then
+    "\n\nPartial capture: **\(production_summary.functions_hit // 0)** functions with positive execution evidence, **\(production_summary.functions_untracked // 0)** untracked"
   elif $prod > 0 then
     "\n\n**\(production_summary.functions_tracked // 0)** tracked functions, **\(production_summary.functions_hit // 0)** hit, **\(production_summary.functions_unhit // 0)** unhit, **\(production_summary.functions_untracked // 0)** untracked"
   else

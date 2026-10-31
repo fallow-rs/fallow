@@ -52,11 +52,11 @@ fn render_runtime_summary(
     ));
     lines.push(format!(
         "  {} tracked, {} hit, {} unhit, {} untracked ({:.1}% covered)",
-        thousands(production.summary.functions_tracked),
+        thousands(production.summary.functions_tracked.unwrap_or_default()),
         thousands(production.summary.functions_hit),
-        thousands(production.summary.functions_unhit),
+        thousands(production.summary.functions_unhit.unwrap_or_default()),
         thousands(production.summary.functions_untracked),
-        production.summary.coverage_percent,
+        production.summary.coverage_percent.unwrap_or_default(),
     ));
     if production.summary.trace_count > 0 || production.summary.period_days > 0 {
         lines.push(format!(

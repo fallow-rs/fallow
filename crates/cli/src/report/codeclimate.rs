@@ -2982,15 +2982,15 @@ mod tests {
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
                     last_received_at: None,
-                    functions_tracked: 10,
+                    functions_tracked: Some(10),
                     functions_hit: 8,
-                    functions_unhit: 2,
+                    functions_unhit: Some(2),
                     functions_untracked: 0,
-                    coverage_percent: 80.0,
+                    coverage_percent: Some(80.0),
                     trace_count: 1000,
                     period_days: 7,
                     deployments_seen: 1,
-                    capture_quality: None,
+                    ..Default::default()
                 },
                 findings: vec![RuntimeCoverageFinding {
                     id: "fallow:prod:aabbccdd".to_string(),
@@ -3055,15 +3055,15 @@ mod tests {
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
                     last_received_at: None,
-                    functions_tracked: 5,
+                    functions_tracked: Some(5),
                     functions_hit: 4,
-                    functions_unhit: 0,
+                    functions_unhit: Some(0),
                     functions_untracked: 1,
-                    coverage_percent: 80.0,
+                    coverage_percent: Some(80.0),
                     trace_count: 500,
                     period_days: 7,
                     deployments_seen: 1,
-                    capture_quality: None,
+                    ..Default::default()
                 },
                 findings: vec![RuntimeCoverageFinding {
                     id: "fallow:prod:11223344".to_string(),

@@ -1970,7 +1970,7 @@ fn health_capabilities(report: &HealthReport) -> VizHealthCapabilities {
     let runtime = report.runtime_coverage.as_ref().map_or_else(
         || VizAvailability::unavailable("observations", NO_RUNTIME_COVERAGE_REASON),
         |runtime| {
-            VizAvailability::complete(runtime.summary.functions_tracked, "observations", None)
+            VizAvailability::complete(runtime.summary.observed_functions(), "observations", None)
         },
     );
     VizHealthCapabilities {

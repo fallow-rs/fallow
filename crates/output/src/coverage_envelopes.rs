@@ -265,6 +265,11 @@ pub enum CoverageAnalyzeSchemaVersion {
     /// Expands the required semantic omission reason-code enum.
     #[serde(rename = "2")]
     V2,
+    /// Makes the runtime summary totals `functions_tracked`, `functions_unhit`
+    /// and `coverage_percent` nullable (null for a positive-only capture) and
+    /// adds `summary.capture_policy`.
+    #[serde(rename = "3")]
+    V3,
 }
 
 /// Envelope emitted by `fallow coverage analyze --format json`.
@@ -311,7 +316,7 @@ pub fn build_coverage_analyze_output(
     version: impl Into<String>,
 ) -> CoverageAnalyzeOutput {
     CoverageAnalyzeOutput {
-        schema_version: CoverageAnalyzeSchemaVersion::V2,
+        schema_version: CoverageAnalyzeSchemaVersion::V3,
         version: ToolVersion(version.into()),
         elapsed_ms: ElapsedMs(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)),
         runtime_coverage: report.clone(),
@@ -387,7 +392,7 @@ mod tests {
         .expect("coverage analyze should serialize");
 
         assert_eq!(value["kind"], "coverage-analyze");
-        assert_eq!(value["schema_version"], "2");
+        assert_eq!(value["schema_version"], "3");
         assert_eq!(value["elapsed_ms"], 7);
         assert_eq!(value["_meta"]["docs"], "coverage");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-2");

@@ -253,6 +253,17 @@ impl fmt::Display for RuntimeCoverageDataSource {
     }
 }
 
+/// Capture policy of the runtime evidence behind a report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCoverageCapturePolicy {
+    /// The capture records only functions that ran. A function without a call
+    /// is unknown, never "never called", so the tracked and unhit totals and
+    /// the coverage percent are null.
+    PositiveOnly,
+}
+
 /// Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -265,17 +276,20 @@ pub struct RuntimeCoverageSummary {
     /// local single-capture artifacts that do not carry cloud receipt metadata.
     pub last_received_at: Option<String>,
     /// Number of functions the sidecar could observe in the V8 or Istanbul
-    /// dump.
-    pub functions_tracked: usize,
+    /// dump. Null for a positive-only capture, which cannot observe a
+    /// function that did not run.
+    pub functions_tracked: Option<usize>,
     /// Tracked functions that received at least one invocation.
     pub functions_hit: usize,
-    /// Tracked functions that were never invoked.
-    pub functions_unhit: usize,
+    /// Tracked functions that were never invoked. Null for a positive-only
+    /// capture.
+    pub functions_unhit: Option<usize>,
     /// Functions the sidecar could not track (lazy-parsed, worker thread,
     /// dynamic code, unresolved source map).
     pub functions_untracked: usize,
     /// Ratio of functions_hit / functions_tracked, expressed as a percent.
-    pub coverage_percent: f64,
+    /// Null for a positive-only capture.
+    pub coverage_percent: Option<f64>,
     /// Total number of observed invocations across all functions. Denominator
     /// for low-traffic classification.
     pub trace_count: u64,
@@ -291,6 +305,20 @@ pub struct RuntimeCoverageSummary {
     /// agent pipelines can surface the same signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_quality: Option<RuntimeCoverageCaptureQuality>,
+    /// Capture policy of the runtime evidence. Absent for a full capture.
+    /// `positive_only` means the tracked and unhit totals and the coverage
+    /// percent are null.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_policy: Option<RuntimeCoverageCapturePolicy>,
+}
+
+impl RuntimeCoverageSummary {
+    /// Functions the capture observed: the tracked total, or for a
+    /// positive-only capture (no tracked total) the functions that ran.
+    #[must_use]
+    pub fn observed_functions(&self) -> usize {
+        self.functions_tracked.unwrap_or(self.functions_hit)
+    }
 }
 
 /// Quality-of-capture signals emitted by the sidecar so the CLI can explain
@@ -745,9 +773,7 @@ impl RuntimeCoverageReport {
     /// Whether this report contains only positive execution evidence.
     #[must_use]
     pub fn has_positive_only_capture(&self) -> bool {
-        self.warnings
-            .iter()
-            .any(|warning| warning.code == "positive_only_capture")
+        self.summary.capture_policy == Some(RuntimeCoverageCapturePolicy::PositiveOnly)
     }
 
     /// Set the `optimization_target_unmatched` warning from the hot paths that

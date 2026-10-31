@@ -7,15 +7,17 @@ use serde::Serialize;
 
 /// Current schema version for `fallow audit --format json`.
 ///
-/// Version 13 tracks the embedded health contract: the required
-/// `targets[].category` enum gained `resolve_hidden_coupling`.
-pub const AUDIT_SCHEMA_VERSION: u32 = 13;
+/// Version 14 tracks the embedded health contract: the runtime coverage summary fields
+/// `functions_tracked`, `functions_unhit` and `coverage_percent` are nullable
+/// (null for a positive-only capture), and `capture_policy` is new.
+pub const AUDIT_SCHEMA_VERSION: u32 = 14;
 
 /// Current schema version for bare combined JSON output.
 ///
-/// Version 14 tracks the embedded health contract: the required
-/// `targets[].category` enum gained `resolve_hidden_coupling`.
-pub const COMBINED_SCHEMA_VERSION: u32 = 14;
+/// Version 15 tracks the embedded health contract: the runtime coverage summary fields
+/// `functions_tracked`, `functions_unhit` and `coverage_percent` are nullable
+/// (null for a positive-only capture), and `capture_policy` is new.
+pub const COMBINED_SCHEMA_VERSION: u32 = 15;
 
 /// Schema projection for the audit envelope's exact version.
 #[cfg(feature = "schema")]

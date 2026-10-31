@@ -1741,6 +1741,12 @@ assert_contains "$OUT" "moderate" "moderate severity in table"
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-health.jq" "$FIXTURES/health-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No functions exceed" "clean: no functions exceed"
 
+echo "  summary-health.jq (partial capture footer):"
+OUT_PARTIAL=$(jq '.findings = [] | .runtime_coverage = {findings: [{path: "src/a.ts", function: "a", line: 1, verdict: "coverage_unavailable", invocations: null, confidence: "none"}], hot_paths: [], summary: {functions_tracked: null, functions_hit: 3, functions_unhit: null, functions_untracked: 5, coverage_percent: null, capture_policy: "positive_only"}}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/summary-health.jq" 2>&1)
+assert_contains "$OUT_PARTIAL" "Partial capture: **3** functions with positive execution evidence, **5** untracked" "partial capture: shows positive evidence only"
+assert_not_contains "$OUT_PARTIAL" "tracked functions" "partial capture: no tracked total"
+assert_not_contains "$OUT_PARTIAL" "unhit" "partial capture: no unhit total"
+
 echo "  summary-health.jq (delta header with trend):"
 assert_contains "$OUT" "Health: B (72.3)" "delta: shows grade and score"
 assert_contains "$OUT" "+7.2 pts vs previous" "delta: shows score delta"

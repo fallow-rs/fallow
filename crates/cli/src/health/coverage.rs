@@ -2018,12 +2018,11 @@ fn convert_response(
         signals: Vec::new(),
         summary: RuntimeCoverageSummary {
             data_source: RuntimeCoverageDataSource::Local,
-            last_received_at: None,
-            functions_tracked: response.summary.functions_tracked as usize,
+            functions_tracked: Some(response.summary.functions_tracked as usize),
             functions_hit: response.summary.functions_hit as usize,
-            functions_unhit: response.summary.functions_unhit as usize,
+            functions_unhit: Some(response.summary.functions_unhit as usize),
             functions_untracked: response.summary.functions_untracked as usize,
-            coverage_percent: clamped_percent,
+            coverage_percent: Some(clamped_percent),
             trace_count: response.summary.trace_count,
             period_days: response.summary.period_days,
             deployments_seen: response.summary.deployments_seen,
@@ -2032,6 +2031,7 @@ fn convert_response(
                 .capture_quality
                 .as_ref()
                 .map(map_capture_quality),
+            ..Default::default()
         },
         findings,
         hot_paths,
