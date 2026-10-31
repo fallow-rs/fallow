@@ -590,8 +590,10 @@ jobs:
         # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
+      # Partition 2 runs this step, and partition 1 runs the other extra steps,
+      # so the two partitions take about the same time.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
-        if: matrix.partition == 1
+        if: matrix.partition == 2
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
@@ -835,8 +837,10 @@ jobs:
       # here on Windows before it merges.
       - name: Build fallow-mcp for the drift harness
         run: cargo build -p fallow-mcp
+      # The drift tests spend most of their time on subprocesses and git, not
+      # on CPU, so twice as many test threads as cores shortens the step.
       - name: Test drift harness on Windows
-        run: cargo test -p fallow-cli --test drift -- --include-ignored
+        run: cargo test -p fallow-cli --test drift -- --include-ignored --test-threads 8
 
   windows-type-aware:
     name: Windows type-aware npm and transport
@@ -1689,10 +1693,15 @@ jobs:
           cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests --no-run
 
       # The Miri interpreter runs on one core, and `cargo miri test` runs the
-      # tests of a crate one after the other. The three crates run as three
-      # parallel processes, so the job takes as long as the slowest crate, not
-      # the sum of the three. `cargo miri nextest run` is slower: it starts a
-      # new Miri process for each test, and each start costs seconds.
+      # tests of a crate one after the other. Each unit below runs as its own
+      # parallel process, so the job takes as long as the slowest unit, not
+      # the sum. `cargo miri nextest run` is slower: it starts a new Miri
+      # process for each test, and each start costs seconds.
+      #
+      # fallow-graph takes about three times as long as the other crates, so
+      # it runs as three shards of about equal time. A test name filter matches
+      # a substring, and shard 3 skips every filter of shards 1 and 2. Thus
+      # each test runs in exactly one shard, and a new module goes to shard 3.
       #
       # Only suppress, CSS helpers, and visitor helpers of fallow-extract run
       # under Miri (pure data logic). Parser-heavy modules have no unsafe code
@@ -1707,6 +1716,10 @@ jobs:
       - name: Run Miri tests (fallow-types, fallow-graph, fallow-extract in parallel)
         run: |
           set -u
+          graph_shard_1=(graph::cycles graph::reachability)
+          graph_shard_2=(graph::re_exports graph::namespace_re_exports resolve::specifier)
+          graph_shard_3=()
+          for filter in "${graph_shard_1[@]}" "${graph_shard_2[@]}"; do graph_shard_3+=(--skip "$filter"); done
           run_crate() {
             local crate="$1"
             local start="$SECONDS"
@@ -1715,8 +1728,14 @@ jobs:
               fallow-types)
                 cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests || status=1
                 ;;
-              fallow-graph)
-                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests || status=1
+              fallow-graph-1)
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- "${graph_shard_1[@]}" --skip proptests || status=1
+                ;;
+              fallow-graph-2)
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- "${graph_shard_2[@]}" --skip proptests || status=1
+                ;;
+              fallow-graph-3)
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- "${graph_shard_3[@]}" --skip proptests || status=1
                 ;;
               fallow-extract)
                 export MIRIFLAGS=-Zmiri-tree-borrows
@@ -1732,7 +1751,7 @@ jobs:
           }
           logs="$RUNNER_TEMP/miri"
           mkdir -p "$logs"
-          crates=(fallow-types fallow-graph fallow-extract)
+          crates=(fallow-types fallow-graph-1 fallow-graph-2 fallow-graph-3 fallow-extract)
           pids=()
           # Stream each crate live with a prefix, so a run that hits the job
           # timeout still shows which test hung. The exit status goes to a file,
