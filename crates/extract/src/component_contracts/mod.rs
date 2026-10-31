@@ -1141,20 +1141,44 @@ impl ContractCollector<'_, '_> {
 }
 
 fn signature_shapes(signatures: &[TSSignature<'_>]) -> Option<Vec<PropShape>> {
-    signatures
-        .iter()
-        .map(|signature| {
-            let TSSignature::TSPropertySignature(property) = signature else {
-                return None;
-            };
-            Some(PropShape {
-                name: static_key(&property.key, property.computed)?,
-                span_start: property.span.start,
-                optional: property.optional,
-                has_default: false,
-            })
-        })
-        .collect()
+    let mut shapes: Vec<PropShape> = Vec::with_capacity(signatures.len());
+    for signature in signatures {
+        // `onClose(): void` declares the same prop as `onClose: () => void`.
+        // Call, construct, index, and accessor members keep the contract open.
+        let (key, computed, span_start, optional) = match signature {
+            TSSignature::TSPropertySignature(property) => (
+                &property.key,
+                property.computed,
+                property.span.start,
+                property.optional,
+            ),
+            TSSignature::TSMethodSignature(method)
+                if method.kind == TSMethodSignatureKind::Method =>
+            {
+                (
+                    &method.key,
+                    method.computed,
+                    method.span.start,
+                    method.optional,
+                )
+            }
+            _ => return None,
+        };
+        let name = static_key(key, computed)?;
+        // Overloads repeat one name. The prop is optional only when every
+        // overload marks it optional.
+        if let Some(shape) = shapes.iter_mut().find(|shape| shape.name == name) {
+            shape.optional &= optional;
+            continue;
+        }
+        shapes.push(PropShape {
+            name,
+            span_start,
+            optional,
+            has_default: false,
+        });
+    }
+    Some(shapes)
 }
 
 fn type_literal_shapes(ty: &TSType<'_>) -> Option<Vec<PropShape>> {

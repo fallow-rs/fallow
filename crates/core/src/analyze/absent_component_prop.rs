@@ -501,8 +501,18 @@ pub(super) fn find_absent_component_props(input: &AbsentPropInput<'_>) -> Vec<Ab
         for framework in &facts.incomplete_frameworks {
             index.block_framework(*framework, &mut blocked);
         }
-        if !facts.incomplete_frameworks.is_empty() {
+        // A DOM query, `innerHTML`, or an unsafe Lit directive marks only Lit as
+        // incomplete. Such a call can reach custom elements, and the Lit block
+        // covers them. It cannot supply props to an imported component of
+        // another framework, so only other gaps block the imported surfaces.
+        if facts
+            .incomplete_frameworks
+            .iter()
+            .any(|framework| *framework != ComponentFramework::Lit)
+        {
             index.block_imported_surfaces(module.file_id, &mut blocked);
+        }
+        if !facts.incomplete_frameworks.is_empty() {
             index.block_framework(ComponentFramework::Lit, &mut blocked);
         }
         for escape in &facts.escapes {
