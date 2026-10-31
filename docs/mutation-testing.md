@@ -890,7 +890,8 @@ fallow mutation src/math.ts --runner-config vitest.integration.config.mjs
 `--runtime` takes a name or a file path. A bare name such as `node` or
 `bun`, without a path separator, is a `PATH` lookup, as in a shell. A path
 with a separator, such as `./bin/node`, is a file path. A relative file path
-resolves against the working directory.
+resolves against the working directory. On Unix, the `PATH` lookup skips a
+file without an execute bit, as a shell does.
 
 `--runtime` must name a runtime that the runner accepts. A Bun runtime for
 `node-test`, or a Node runtime for `bun-test`, exits with code 2 and
