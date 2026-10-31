@@ -127,6 +127,17 @@ struct Env<'a> {
 }
 
 fn run(args: &[&str], root: &Path, env: &Env<'_>) -> CommandOutput {
+    run_with(args, root, env, |_| {})
+}
+
+/// [`run`] with a last change to the command, for example to give it a
+/// keychain.
+fn run_with(
+    args: &[&str],
+    root: &Path,
+    env: &Env<'_>,
+    customize: impl FnOnce(&mut Command),
+) -> CommandOutput {
     let mut command = Command::new(fallow_bin());
     command
         .args(args)
@@ -150,6 +161,7 @@ fn run(args: &[&str], root: &Path, env: &Env<'_>) -> CommandOutput {
         Some(key) => command.env("FALLOW_API_KEY", key),
         None => command.env_remove("FALLOW_API_KEY"),
     };
+    customize(&mut command);
     let output = command.output().expect("run fallow");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -279,6 +291,91 @@ fn inspect_cloud_without_a_key_reports_no_key_and_succeeds() {
         "{cloud}"
     );
     assert!(cloud["functions"].as_array().unwrap().is_empty());
+}
+
+/// Give the command a keychain: a fake `secret-tool` that never answers, as a
+/// locked keychain does while it shows an unlock prompt. Linux only, because
+/// on macOS the keychain tool has a fixed path.
+#[cfg(target_os = "linux")]
+fn hanging_keychain(tools: &Path) -> impl FnOnce(&mut Command) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tool = tools.join("secret-tool");
+    std::fs::write(&tool, "#!/bin/sh\nexec sleep 60\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(tools.to_path_buf())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    move |command: &mut Command| {
+        command
+            .env_remove("FALLOW_CREDENTIAL_STORE")
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+            .env("PATH", path);
+    }
+}
+
+/// The keychain read has a time limit of about one second. The bound here is
+/// far below the 60 s of the fake tool and leaves room for a slow CI runner.
+#[cfg(target_os = "linux")]
+const HUNG_KEYCHAIN_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+
+#[cfg(target_os = "linux")]
+#[test]
+fn inspect_cloud_with_a_hanging_keychain_reports_no_key_within_the_limit() {
+    let (dir, home) = project();
+    let tools = tempdir().unwrap();
+    let start = std::time::Instant::now();
+    let output = run_with(
+        INSPECT_JSON,
+        dir.path(),
+        &Env {
+            api_url: Some("http://127.0.0.1:9"),
+            api_key: None,
+            home: home.path(),
+        },
+        hanging_keychain(tools.path()),
+    );
+    let elapsed = start.elapsed();
+    assert!(elapsed < HUNG_KEYCHAIN_BOUND, "took {elapsed:?}");
+    assert_eq!(output.code, 0, "stderr={}", output.stderr);
+    assert_eq!(parse_json(&output)["evidence"]["cloud"]["status"], "no_key");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn inspect_cloud_with_a_hanging_keychain_uses_the_credentials_file() {
+    let (dir, home) = project();
+    let tools = tempdir().unwrap();
+    let (endpoint, captured, handle) = serve(vec![(200, file_context_body())]);
+    let config = home.path().join(".config").join("fallow");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("credentials"),
+        format!(r#"{{"version":1,"keys":{{"{endpoint}":"fallow_read_k1_fromfile"}}}}"#),
+    )
+    .unwrap();
+    let start = std::time::Instant::now();
+    let output = run_with(
+        INSPECT_JSON,
+        dir.path(),
+        &Env {
+            api_url: Some(&endpoint),
+            api_key: None,
+            home: home.path(),
+        },
+        hanging_keychain(tools.path()),
+    );
+    handle.join().expect("server joins");
+    let elapsed = start.elapsed();
+    assert!(elapsed < HUNG_KEYCHAIN_BOUND, "took {elapsed:?}");
+    assert_eq!(output.code, 0, "stderr={}", output.stderr);
+    assert_eq!(parse_json(&output)["evidence"]["cloud"]["status"], "ok");
+    let request = captured.lock().unwrap()[0].to_ascii_lowercase();
+    assert!(
+        request.contains("authorization: bearer fallow_read_k1_fromfile"),
+        "the key of the credentials file is sent: {request}"
+    );
 }
 
 #[test]

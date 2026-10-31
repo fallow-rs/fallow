@@ -17,10 +17,20 @@
 //! `FALLOW_CREDENTIAL_STORE=file` turns the keychain off for one process, and
 //! `FALLOW_CREDENTIAL_STORE=none` turns both stores off, for example on a
 //! shared CI runner or in a test.
+//!
+//! A locked keychain can show an unlock prompt and block the keychain tool.
+//! So each keychain call has a time limit: a short one for a read, and a
+//! longer one in `fallow cloud login` and `logout`, where a person can answer
+//! the prompt. At the limit, the tool is stopped and the call fails.
+//!
+//! A change to the credentials file holds an advisory lock on
+//! `credentials.lock` in the same directory, so two logins at the same time
+//! keep both keys. A change never replaces a file that does not parse.
 
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +44,16 @@ pub const API_KEY_ENV: &str = "FALLOW_API_KEY";
 const KEYCHAIN_LABEL: &str = "Fallow Cloud API key";
 /// Format version of the credentials file.
 const CREDENTIALS_VERSION: u32 = 1;
+/// Name of the lock file next to the credentials file.
+const LOCK_FILE_NAME: &str = "credentials.lock";
+/// Time limit of a keychain read in a command that a person does not watch,
+/// for example an editor hook that runs `fallow inspect --cloud`.
+const KEYCHAIN_READ_LIMIT: Duration = Duration::from_secs(1);
+/// Time limit of each keychain call in `fallow cloud login` and `logout`.
+/// It is longer, because a person can answer an unlock prompt there.
+const KEYCHAIN_INTERACTIVE_LIMIT: Duration = Duration::from_secs(60);
+/// Interval between two checks for the exit of a keychain tool.
+const KEYCHAIN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Where a resolved key came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +160,8 @@ pub fn stored_api_key(base_url: &str) -> Option<ResolvedKey> {
     if store_mode() == StoreMode::None {
         return None;
     }
-    if let Some(key) = keychain().and_then(|keychain| keychain.read(base_url)) {
+    if let Some(key) = keychain().and_then(|keychain| keychain.read(base_url, KEYCHAIN_READ_LIMIT))
+    {
         return Some(ResolvedKey {
             key,
             source: KeySource::Keychain,
@@ -169,7 +190,7 @@ pub fn store_api_key(base_url: &str, key: &str) -> Result<KeySource, String> {
         return Err(format!("{CREDENTIAL_STORE_ENV}=none turns key storage off"));
     }
     if let Some(keychain) = keychain()
-        && keychain.write(base_url, key)
+        && keychain.write(base_url, key, KEYCHAIN_INTERACTIVE_LIMIT)
     {
         // A stale file entry must not outlive a newer keychain entry.
         if let Some(path) = credentials_path() {
@@ -196,7 +217,8 @@ pub struct Removed {
 ///
 /// Returns a message when the credentials file cannot be rewritten.
 pub fn remove_api_key(base_url: &str) -> Result<Removed, String> {
-    let keychain = keychain().is_some_and(|keychain| keychain.delete(base_url));
+    let keychain =
+        keychain().is_some_and(|keychain| keychain.delete(base_url, KEYCHAIN_INTERACTIVE_LIMIT));
     let file = match credentials_path() {
         Some(path) => remove_from_file(&path, base_url)?,
         None => false,
@@ -223,15 +245,55 @@ struct CredentialsFile {
     keys: std::collections::BTreeMap<String, String>,
 }
 
+/// Read the file for a key lookup. A file that is missing or does not parse
+/// has no keys.
 fn read_credentials(path: &Path) -> CredentialsFile {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+    read_credentials_for_change(path).unwrap_or_default()
+}
+
+/// Read the file before a change. A missing or empty file has no keys. A file
+/// that does not parse is an error, so that a change cannot drop the keys of
+/// other API URLs.
+fn read_credentials_for_change(path: &Path) -> Result<CredentialsFile, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CredentialsFile::default());
+        }
+        Err(err) => return Err(format!("failed to read {}: {err}", path.display())),
+    };
+    if text.trim().is_empty() {
+        return Ok(CredentialsFile::default());
+    }
+    serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "{} does not parse as a credentials file ({err}). Fallow did not change it. \
+             Repair or remove the file, then try again",
+            path.display()
+        )
+    })
+}
+
+/// Take an exclusive advisory lock on the lock file next to `path`. The lock
+/// stays until the returned file is dropped. Every process that changes the
+/// credentials file takes it, so two changes cannot overlap.
+fn lock_credentials(path: &Path) -> Result<std::fs::File, String> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("invalid credentials path {}", path.display()))?;
+    create_private_dir(dir)?;
+    let lock_path = dir.join(LOCK_FILE_NAME);
+    let file = private_file_options()
+        .open(&lock_path)
+        .map_err(|err| format!("failed to open {}: {err}", lock_path.display()))?;
+    file.lock()
+        .map_err(|err| format!("failed to lock {}: {err}", lock_path.display()))?;
+    Ok(file)
 }
 
 fn write_to_file(path: &Path, base_url: &str, key: &str) -> Result<(), String> {
-    let mut credentials = read_credentials(path);
+    let _lock = lock_credentials(path)?;
+    let mut credentials = read_credentials_for_change(path)?;
     credentials.version = CREDENTIALS_VERSION;
     credentials.keys.insert(base_url.to_owned(), key.to_owned());
     write_credentials(path, &credentials)
@@ -241,7 +303,8 @@ fn remove_from_file(path: &Path, base_url: &str) -> Result<bool, String> {
     if !path.exists() {
         return Ok(false);
     }
-    let mut credentials = read_credentials(path);
+    let _lock = lock_credentials(path)?;
+    let mut credentials = read_credentials_for_change(path)?;
     if credentials.keys.remove(base_url).is_none() {
         return Ok(false);
     }
@@ -367,6 +430,73 @@ fn store_mode() -> StoreMode {
 
 const MACOS_SECURITY: &str = "/usr/bin/security";
 
+/// Run a keychain tool with `input` on stdin and return its exit status and
+/// stdout. Returns `None` when the tool does not start, when the input does
+/// not reach it, or when it does not exit within `limit`. At the limit, the
+/// tool is stopped.
+fn run_limited(mut command: Command, input: Option<&str>, limit: Duration) -> Option<Output> {
+    let deadline = Instant::now() + limit;
+    let stdin = if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    };
+    let mut child = command
+        .stdin(stdin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(input) = input {
+        // The input is one short line, much smaller than a pipe buffer, so
+        // this write does not wait for the tool. Dropping stdin closes it.
+        let wrote = child
+            .stdin
+            .take()
+            .is_some_and(|mut stdin| stdin.write_all(input.as_bytes()).is_ok());
+        if !wrote {
+            stop(&mut child);
+            return None;
+        }
+    }
+    // Read stdout on a thread, so a tool that fills the pipe cannot block
+    // the time limit.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    if let Some(mut stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes);
+            let _ = sender.send(bytes);
+        });
+    }
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let remaining = deadline
+                    .saturating_duration_since(Instant::now())
+                    .max(KEYCHAIN_POLL_INTERVAL);
+                let stdout = receiver.recv_timeout(remaining).unwrap_or_default();
+                return Some(Output {
+                    status,
+                    stdout,
+                    stderr: Vec::new(),
+                });
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(KEYCHAIN_POLL_INTERVAL),
+            Ok(None) | Err(_) => {
+                stop(&mut child);
+                return None;
+            }
+        }
+    }
+}
+
+/// Stop a keychain tool and reap it.
+fn stop(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// The `security -i` command line that stores `key` for `account`. Returns
 /// `None` when a value holds a character that the command parser of
 /// `security -i` can split or end on.
@@ -386,27 +516,31 @@ fn macos_add_command(account: &str, key: &str) -> Option<String> {
 }
 
 impl Keychain {
-    fn read(self, account: &str) -> Option<String> {
-        let output = match self {
-            Self::MacOs => Command::new(MACOS_SECURITY)
-                .args([
-                    "find-generic-password",
-                    "-s",
-                    KEYCHAIN_SERVICE,
-                    "-a",
-                    account,
-                    "-w",
-                ])
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output(),
-            Self::SecretTool => Command::new("secret-tool")
-                .args(["lookup", "service", KEYCHAIN_SERVICE, "account", account])
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output(),
-        }
-        .ok()?;
+    /// The command of the keychain tool with `args`.
+    fn command(self, args: &[&str]) -> Command {
+        let mut command = Command::new(match self {
+            Self::MacOs => MACOS_SECURITY,
+            Self::SecretTool => "secret-tool",
+        });
+        command.args(args);
+        command
+    }
+
+    fn read(self, account: &str, limit: Duration) -> Option<String> {
+        let command = match self {
+            Self::MacOs => self.command(&[
+                "find-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+            ]),
+            Self::SecretTool => {
+                self.command(&["lookup", "service", KEYCHAIN_SERVICE, "account", account])
+            }
+        };
+        let output = run_limited(command, None, limit)?;
         if !output.status.success() {
             return None;
         }
@@ -416,8 +550,8 @@ impl Keychain {
     }
 
     /// Write the key through stdin, so it never shows in the process list.
-    fn write(self, account: &str, key: &str) -> bool {
-        let (mut command, input) = match self {
+    fn write(self, account: &str, key: &str, limit: Duration) -> bool {
+        let (command, input) = match self {
             Self::MacOs => {
                 // `security add-generic-password -w` without a value reads the
                 // password from the terminal, not from stdin. So send the whole
@@ -425,13 +559,10 @@ impl Keychain {
                 let Some(input) = macos_add_command(account, key) else {
                     return false;
                 };
-                let mut command = Command::new(MACOS_SECURITY);
-                command.arg("-i");
-                (command, input)
+                (self.command(&["-i"]), input)
             }
-            Self::SecretTool => {
-                let mut command = Command::new("secret-tool");
-                command.args([
+            Self::SecretTool => (
+                self.command(&[
                     "store",
                     "--label",
                     KEYCHAIN_LABEL,
@@ -439,54 +570,35 @@ impl Keychain {
                     KEYCHAIN_SERVICE,
                     "account",
                     account,
-                ]);
-                (command, key.to_owned())
-            }
+                ]),
+                key.to_owned(),
+            ),
         };
-        let Ok(mut child) = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        else {
-            return false;
-        };
-        let wrote = child
-            .stdin
-            .take()
-            .is_some_and(|mut stdin| stdin.write_all(input.as_bytes()).is_ok());
-        let succeeded = child.wait().is_ok_and(|status| status.success());
-        if wrote && succeeded && self.read(account).as_deref() == Some(key) {
+        let succeeded =
+            run_limited(command, Some(&input), limit).is_some_and(|output| output.status.success());
+        if succeeded && self.read(account, limit).as_deref() == Some(key) {
             return true;
         }
         // Do not keep an entry that does not hold this key: reads use the
         // keychain before the file.
-        self.delete(account);
+        self.delete(account, limit);
         false
     }
 
-    fn delete(self, account: &str) -> bool {
-        let status = match self {
-            Self::MacOs => Command::new(MACOS_SECURITY)
-                .args([
-                    "delete-generic-password",
-                    "-s",
-                    KEYCHAIN_SERVICE,
-                    "-a",
-                    account,
-                ])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status(),
-            Self::SecretTool => Command::new("secret-tool")
-                .args(["clear", "service", KEYCHAIN_SERVICE, "account", account])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status(),
+    fn delete(self, account: &str, limit: Duration) -> bool {
+        let command = match self {
+            Self::MacOs => self.command(&[
+                "delete-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                account,
+            ]),
+            Self::SecretTool => {
+                self.command(&["clear", "service", KEYCHAIN_SERVICE, "account", account])
+            }
         };
-        status.is_ok_and(|status| status.success())
+        run_limited(command, None, limit).is_some_and(|output| output.status.success())
     }
 }
 
@@ -550,6 +662,87 @@ mod tests {
         assert!(!path.exists(), "an empty file is removed");
     }
 
+    #[test]
+    fn a_write_refuses_a_file_that_does_not_parse_and_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fallow").join("credentials");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let corrupt = "{\"version\":1,\"keys\":{\"https://api.fallow.cloud\":\"fallow_read_k1_a\"";
+        std::fs::write(&path, corrupt).unwrap();
+
+        let error = write_to_file(&path, "http://localhost:3000", "fallow_read_k1_b").unwrap_err();
+        assert!(
+            error.contains(&path.display().to_string()),
+            "the message names the file: {error}"
+        );
+        let error = remove_from_file(&path, "https://api.fallow.cloud").unwrap_err();
+        assert!(error.contains(&path.display().to_string()), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn concurrent_writes_for_different_urls_keep_every_entry() {
+        const WRITERS: usize = 16;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fallow").join("credentials");
+        let barrier = std::sync::Barrier::new(WRITERS);
+        std::thread::scope(|scope| {
+            for writer in 0..WRITERS {
+                let (path, barrier) = (&path, &barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    write_to_file(
+                        path,
+                        &format!("http://cloud-{writer}.invalid"),
+                        &format!("fallow_read_k1_{writer}"),
+                    )
+                    .unwrap();
+                });
+            }
+        });
+        let credentials = read_credentials(&path);
+        assert_eq!(credentials.keys.len(), WRITERS, "{:?}", credentials.keys);
+        for writer in 0..WRITERS {
+            assert_eq!(
+                credentials.keys[&format!("http://cloud-{writer}.invalid")],
+                format!("fallow_read_k1_{writer}")
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_keychain_tool_that_hangs_is_stopped_at_the_limit() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 30; echo fallow_read_k1_late"]);
+        let start = std::time::Instant::now();
+        let output = run_limited(command, None, std::time::Duration::from_millis(300));
+        assert!(output.is_none(), "a timeout gives no output");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_keychain_tool_inside_the_limit_gives_its_output_and_reads_stdin() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "read line; echo \"got:$line\""]);
+        let output = run_limited(
+            command,
+            Some("fallow_read_k1_abc\n"),
+            std::time::Duration::from_secs(10),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            "got:fallow_read_k1_abc"
+        );
+    }
+
     /// Writes, reads and removes a real OS keychain entry. Ignored by
     /// default, because CI has no keychain. Run it on a developer machine
     /// with `cargo test -p fallow-cli keychain_round_trip -- --ignored`.
@@ -558,21 +751,29 @@ mod tests {
     fn keychain_round_trip() {
         let keychain = keychain().expect("a keychain on this machine");
         let account = format!("http://keychain-probe.invalid/{}", std::process::id());
-        assert!(keychain.write(&account, "fallow_read_k1_probe"));
+        assert!(keychain.write(&account, "fallow_read_k1_probe", KEYCHAIN_INTERACTIVE_LIMIT));
         assert_eq!(
-            keychain.read(&account).as_deref(),
+            keychain
+                .read(&account, KEYCHAIN_INTERACTIVE_LIMIT)
+                .as_deref(),
             Some("fallow_read_k1_probe")
         );
         assert!(
-            keychain.write(&account, "fallow_read_k1_probe2"),
+            keychain.write(
+                &account,
+                "fallow_read_k1_probe2",
+                KEYCHAIN_INTERACTIVE_LIMIT
+            ),
             "an update replaces the key"
         );
         assert_eq!(
-            keychain.read(&account).as_deref(),
+            keychain
+                .read(&account, KEYCHAIN_INTERACTIVE_LIMIT)
+                .as_deref(),
             Some("fallow_read_k1_probe2")
         );
-        assert!(keychain.delete(&account));
-        assert_eq!(keychain.read(&account), None);
+        assert!(keychain.delete(&account, KEYCHAIN_INTERACTIVE_LIMIT));
+        assert_eq!(keychain.read(&account, KEYCHAIN_INTERACTIVE_LIMIT), None);
     }
 
     #[test]
