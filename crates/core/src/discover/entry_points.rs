@@ -233,10 +233,10 @@ impl<'a> DiscoveredPaths<'a> {
 /// What a package entry resolves against: the tsconfig output map of the
 /// package and, when known, the discovered files of the project.
 #[derive(Clone, Copy)]
-struct EntryTargets<'a> {
-    output_map: &'a TsconfigOutputMap,
+pub(super) struct EntryTargets<'a> {
+    pub(super) output_map: &'a TsconfigOutputMap,
     /// `None` keeps the disk check: a `lib/` file on disk stays the entry.
-    discovered: Option<IsDiscovered<'a>>,
+    pub(super) discovered: Option<IsDiscovered<'a>>,
 }
 
 fn resolve_entry_path_with_output_map(
@@ -292,13 +292,13 @@ fn record_or_warn_skipped_entry(
 /// `ShortCircuit` means an output-dir branch applied and carries the resolved
 /// entry (which may itself be `None` when validation rejected the candidate);
 /// `Continue` signals that filesystem probing should proceed.
-enum OutputDirEntry {
+pub(super) enum OutputDirEntry {
     ShortCircuit(Option<EntryPoint>),
     Continue,
 }
 
 /// Map an output-directory entry back to a source file, short-circuiting resolution.
-fn resolve_entry_via_output_dir(
+pub(super) fn resolve_entry_via_output_dir(
     base: &Path,
     entry: &str,
     canonical_root: &Path,
@@ -437,7 +437,7 @@ fn resolve_entry_via_filesystem_probe(
     None
 }
 
-fn entry_has_parent_dir(entry: &str) -> bool {
+pub(super) fn entry_has_parent_dir(entry: &str) -> bool {
     Path::new(entry)
         .components()
         .any(|component| matches!(component, Component::ParentDir))

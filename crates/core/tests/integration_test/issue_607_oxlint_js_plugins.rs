@@ -146,6 +146,42 @@ fn local_js_plugin_directory_and_extensionless_specifiers_credit_the_resolved_fi
 }
 
 #[test]
+fn local_js_plugin_directory_with_build_output_main_credits_the_source_file() {
+    // Issue #4034: the `main` field of a jsPlugins directory points at build
+    // output. The tsconfig maps that output back to `src/index.ts`, so the
+    // default export of the source file is credited.
+    let root = fixture_path("issue-4034-oxlint-js-plugin-dist");
+    let mut config = create_config(root.clone());
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            let relative = export
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            format!("{relative}:{}", export.export.export_name)
+        })
+        .collect();
+    unused_exports.sort();
+
+    assert_eq!(
+        unused_exports,
+        vec![
+            "packages/plugin/src/index.ts:unusedHelper",
+            "src/index.ts:app",
+        ],
+        "the default export of the mapped source file is credited"
+    );
+}
+
+#[test]
 fn ultracite_selected_js_plugins_credit_only_selected_dependencies() {
     let root = fixture_path("ultracite-oxlint-js-plugins");
     let config = create_config(root);

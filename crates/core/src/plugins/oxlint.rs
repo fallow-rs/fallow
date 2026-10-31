@@ -308,7 +308,9 @@ fn resolve_config_relative_path(config_path: &Path, root: &Path, specifier: &str
 /// Resolve a local plugin specifier to the file that Oxlint loads. A
 /// specifier can name the file without its extension, or a directory. A
 /// directory resolves through its `package.json` `main` field, then through
-/// an `index` file (issue #3961). An unresolved path stays as written.
+/// an `index` file (issue #3961). A `main` field that points at build output
+/// maps back to its source file, the same as a package entry (issue #4034).
+/// An unresolved path stays as written.
 fn resolve_local_module_file(path: PathBuf) -> PathBuf {
     if path.is_file() {
         return path;
@@ -320,6 +322,9 @@ fn resolve_local_module_file(path: PathBuf) -> PathBuf {
         return path;
     }
     let main_file = package_main(&path).and_then(|main| {
+        if let Some(source) = crate::discover::output_entry_source_file(&path, &main) {
+            return Some(source);
+        }
         let main_path = config_parser::lexical_normalize(&path.join(main));
         if main_path.is_file() {
             return Some(main_path);
@@ -357,6 +362,41 @@ fn index_file(dir: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_file(path: &Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().expect("file has a parent")).expect("create dir");
+        std::fs::write(path, contents).expect("write file");
+    }
+
+    #[test]
+    fn directory_main_in_unbuilt_output_dir_resolves_to_source() {
+        // Issue #4034: in a fresh clone the build output does not exist.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin = dir.path().join("plugin");
+        write_file(
+            &plugin.join("package.json"),
+            r#"{ "name": "plugin", "main": "./dist/index.js" }"#,
+        );
+        write_file(&plugin.join("src/index.ts"), "export default {};\n");
+
+        let resolved = resolve_local_module_file(plugin.clone());
+        assert_eq!(resolved, plugin.join("src/index.ts"));
+    }
+
+    #[test]
+    fn directory_main_outside_output_dir_stays_the_main_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin = dir.path().join("plugin");
+        write_file(
+            &plugin.join("package.json"),
+            r#"{ "name": "plugin", "main": "lib/plugin.js" }"#,
+        );
+        write_file(&plugin.join("lib/plugin.js"), "export default {};\n");
+        write_file(&plugin.join("src/index.ts"), "export default {};\n");
+
+        let resolved = resolve_local_module_file(plugin.clone());
+        assert_eq!(resolved, plugin.join("lib/plugin.js"));
+    }
 
     #[test]
     fn resolve_config_js_plugins() {

@@ -1,0 +1,12 @@
+{
+  "name": "issue-4034-oxlint-js-plugin-dist",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "oxlint": "1.0.0"
+  }
+}

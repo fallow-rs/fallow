@@ -2,6 +2,7 @@ mod entry_points;
 mod entry_report;
 mod infrastructure;
 mod orphan_declarations;
+mod output_entry_source;
 mod parse_scripts;
 mod walk;
 
@@ -24,6 +25,7 @@ pub(crate) use entry_report::{record_entry_pattern_effect, summarize_entry_point
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(crate) use infrastructure::discover_infrastructure_entry_points;
 pub(crate) use orphan_declarations::find_orphan_module_declaration_files;
+pub(crate) use output_entry_source::output_entry_source_file;
 pub(crate) use parse_scripts::CommandRefContext;
 pub use walk::{
     DiscoveredSources, HiddenDirMatch, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS,

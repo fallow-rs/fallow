@@ -1,0 +1,6 @@
+{
+  "name": "plugin",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "exports": { ".": "./dist/src/index.js" }
+}
