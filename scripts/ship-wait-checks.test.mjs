@@ -377,6 +377,33 @@ test("a pull request that conflicts with its base stops the wait with exit code 
   assert.match(lines[0], /no pull_request workflows/u);
 });
 
+test("a workflow run that waits for maintainer approval stops the wait with exit code 5", async () => {
+  const approval = check("CI workflow (300)", "approval");
+  const script = scripted([
+    { ok: true, checks: [check("Commitlint", "pass"), check("lint", "pending"), approval] },
+  ]);
+
+  const result = await wait(script, { minChecks: 3 });
+  const lines = [];
+  const code = reportChecks(result, { label: "PR 7", minChecks: 3 }, (line) => lines.push(line));
+
+  assert.equal(result.status, "approval");
+  assert.equal(script.reads(), 1);
+  assert.equal(code, 5);
+  assert.match(lines[0], /^PR 7: 1 workflow run waits for maintainer approval/u);
+  assert.match(lines[1], /APPROVAL: CI workflow \(300\) https:\/\/example\.invalid\//u);
+});
+
+test("a failed check wins over a run that waits for approval", async () => {
+  const script = scripted([
+    { ok: true, checks: [check("lint", "fail"), check("CI workflow (300)", "approval")] },
+  ]);
+
+  const result = await wait(script);
+
+  assert.equal(result.status, "fail");
+});
+
 test("an unknown or mergeable state keeps the wait going", async () => {
   const script = scripted([
     { ok: true, checks: [] },
@@ -740,6 +767,24 @@ test("the CLI waits for a queued PR workflow before its checks exist", fakeGhOpt
     assert.equal(reads.length, 2);
     assert.ok(reads.every((args) => args[args.indexOf("--commit") + 1] === "a".repeat(40)));
     assert.ok(reads.every((args) => args[args.indexOf("--event") + 1] === "pull_request"));
+  }
+});
+
+test("the CLI stops when a fork PR workflow waits for approval", fakeGhOptions, () => {
+  for (const cliArgs of [[], ["--required"]]) {
+    const result = runWithFakeGh(
+      {
+        selected: [check("CI", "pass")],
+        rollups: [{ statusCheckRollup: [checkRun("Commitlint", "COMPLETED", "SUCCESS")] }],
+        prRuns: [[prWorkflow({ status: "completed", conclusion: "action_required" })]],
+      },
+      cliArgs,
+    );
+
+    assert.equal(result.status, 5, result.stdout + result.stderr);
+    assert.match(result.stdout, /waits for maintainer approval/u);
+    assert.match(result.stdout, new RegExp(`${RUN_URL}/300`, "u"));
+    assert.equal(rollupReads(result.calls).length, 1);
   }
 });
 
