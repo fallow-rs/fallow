@@ -369,8 +369,10 @@ The slowest `CI` jobs have parts that run in parallel:
   and the platform Clippy pass. `Windows drift harness` runs the drift harness
   on Windows. The two Windows jobs have the same trigger.
 - `Miri` runs `cargo miri test` for `fallow-types`, `fallow-graph` and
-  `fallow-extract` as three parallel processes in one step. The Miri
-  interpreter uses one core, so the job takes as long as the slowest crate.
+  `fallow-extract` as parallel processes in one step. The Miri interpreter
+  uses one core, so the job takes as long as the slowest process.
+  `fallow-graph` runs as three shards with test name filters. The last shard
+  skips every filter of the other two, so each test runs exactly once.
   Do not use `cargo miri nextest run`: it starts a new Miri process for each
   test, and each start costs seconds. A test that only checks safe logic at
   scale gets `#[cfg_attr(miri, ignore = "too slow under Miri: ...")]`. Miri
