@@ -239,6 +239,135 @@ fn supports_framework_contracts_with_supplied_value_controls() {
 const OPTIONAL_CARD: &str =
     "export function Card({flag=false}:{flag?:boolean}) {return <p>{flag ? 'yes' : 'no'}</p>}";
 
+#[test]
+fn method_signature_props_keep_the_contract_closed() {
+    let deps = serde_json::json!({"react":"*"});
+    let caller = "import {Card} from './Card';export const app=<Card title='x' onClose={()=>{}}/>;";
+    for card in [
+        "export function Card({title,onClose,flag}:{title:string;onClose():void;flag?:boolean}){return <p onClick={onClose}>{flag?title:''}</p>}",
+        "interface Props{title:string;onClose():void;flag?:boolean}export function Card({title,onClose,flag}:Props){return <p onClick={onClose}>{flag?title:''}</p>}",
+        "type Props={title:string;onClose():void;flag?:boolean};export function Card({title,onClose,flag}:Props){return <p onClick={onClose}>{flag?title:''}</p>}",
+        "type Props={title:string;onClose():void;onClose(reason:string):void;flag?:boolean};export function Card({title,onClose,flag}:Props){return <p onClick={()=>onClose()}>{flag?title:''}</p>}",
+    ] {
+        assert_flagged(&analyze_project(
+            deps.clone(),
+            "src/main.tsx",
+            &[("src/main.tsx", caller), ("src/Card.tsx", card)],
+        ));
+    }
+    let optional_method = "export function Card({flag}:{flag?():void}){return <p onClick={flag}/>}";
+    assert_flagged(&analyze_project(
+        deps.clone(),
+        "src/main.tsx",
+        &[
+            (
+                "src/main.tsx",
+                "import {Card} from './Card';export const app=<Card/>;",
+            ),
+            ("src/Card.tsx", optional_method),
+        ],
+    ));
+    let supplied = analyze_project(
+        deps,
+        "src/main.tsx",
+        &[
+            (
+                "src/main.tsx",
+                "import {Card} from './Card';export const app=<Card flag={()=>{}}/>;",
+            ),
+            ("src/Card.tsx", optional_method),
+        ],
+    );
+    assert!(
+        supplied.absent_component_props.is_empty(),
+        "a supplied optional method is not absent: {:?}",
+        supplied.absent_component_props
+    );
+}
+
+#[test]
+fn unrelated_dom_query_in_caller_does_not_hide_react_props() {
+    let deps = serde_json::json!({"react":"*"});
+    for helper in [
+        "document.getElementById('header')?.getBoundingClientRect().bottom",
+        "document.querySelector('.header')?.getBoundingClientRect().bottom",
+        "document.querySelectorAll('.row').length",
+        "document.createElement('div').tagName",
+        "document.body.querySelector('.header')",
+        "document.body.setAttribute('data-x','1')",
+        "document.body.innerHTML",
+    ] {
+        let caller = format!(
+            "import {{Card}} from './Card';const headerBottom=()=>{helper};export const app=<><Card/>{{headerBottom()}}</>;"
+        );
+        assert_flagged(&analyze_project(
+            deps.clone(),
+            "src/main.tsx",
+            &[("src/main.tsx", &caller), ("src/Card.tsx", OPTIONAL_CARD)],
+        ));
+    }
+    // A DOM query can still set a property on a custom element, so Lit abstains.
+    let lit = "import {LitElement,html} from 'lit';import {customElement,property} from 'lit/decorators.js';@customElement('x-card')export class Card extends LitElement{@property({type:Boolean})flag?:boolean;render(){return html`<p>${this.flag}</p>`;}}";
+    let view =
+        "import {html} from 'lit';import './Card';export const view=html`<x-card></x-card>`;";
+    let lit_deps = serde_json::json!({"lit":"*"});
+    assert_flagged(&analyze_project(
+        lit_deps.clone(),
+        "src/main.ts",
+        &[("src/main.ts", view), ("src/Card.ts", lit)],
+    ));
+    let queried = format!("{view}document.getElementById('card').flag=true;");
+    let result = analyze_project(
+        lit_deps,
+        "src/main.ts",
+        &[("src/main.ts", &queried), ("src/Card.ts", lit)],
+    );
+    assert!(
+        result.absent_component_props.is_empty(),
+        "a DOM query keeps Lit elements uncertain: {:?}",
+        result.absent_component_props
+    );
+}
+
+#[test]
+fn dom_query_keeps_imported_svelte_custom_element_uncertain() {
+    let deps = serde_json::json!({"svelte":"*"});
+    let card = "<svelte:options customElement=\"x-card\" />\n<script>export let flag = false; export let title = '';</script>\n<p>{title}{flag}</p>";
+    let app = "<script>import Card from './Card.svelte';</script><Card title=\"x\" />";
+    let main = "import App from './App.svelte';import './Card.svelte';export const app=App;";
+    assert!(
+        analyze_project(
+            deps.clone(),
+            "src/main.ts",
+            &[
+                ("src/main.ts", main),
+                ("src/App.svelte", app),
+                ("src/Card.svelte", card),
+            ],
+        )
+        .absent_component_props
+        .iter()
+        .any(|finding| finding.prop.prop_name == "flag"),
+        "the never-passed Svelte prop is absent without a DOM query"
+    );
+    let queried =
+        format!("{main}const el=document.getElementById('card');if(el)(el as any).flag=true;");
+    let result = analyze_project(
+        deps,
+        "src/main.ts",
+        &[
+            ("src/main.ts", &queried),
+            ("src/App.svelte", app),
+            ("src/Card.svelte", card),
+        ],
+    );
+    assert!(
+        result.absent_component_props.is_empty(),
+        "a DOM query can set props on a Svelte custom element: {:?}",
+        result.absent_component_props
+    );
+}
+
 fn assert_flagged(results: &fallow_core::results::AnalysisResults) {
     assert!(
         results.absent_component_props.iter().any(
