@@ -329,6 +329,45 @@ fn unrelated_dom_query_in_caller_does_not_hide_react_props() {
     );
 }
 
+#[test]
+fn dom_query_keeps_imported_svelte_custom_element_uncertain() {
+    let deps = serde_json::json!({"svelte":"*"});
+    let card = "<svelte:options customElement=\"x-card\" />\n<script>export let flag = false; export let title = '';</script>\n<p>{title}{flag}</p>";
+    let app = "<script>import Card from './Card.svelte';</script><Card title=\"x\" />";
+    let main = "import App from './App.svelte';import './Card.svelte';export const app=App;";
+    assert!(
+        analyze_project(
+            deps.clone(),
+            "src/main.ts",
+            &[
+                ("src/main.ts", main),
+                ("src/App.svelte", app),
+                ("src/Card.svelte", card),
+            ],
+        )
+        .absent_component_props
+        .iter()
+        .any(|finding| finding.prop.prop_name == "flag"),
+        "the never-passed Svelte prop is absent without a DOM query"
+    );
+    let queried =
+        format!("{main}const el=document.getElementById('card');if(el)(el as any).flag=true;");
+    let result = analyze_project(
+        deps,
+        "src/main.ts",
+        &[
+            ("src/main.ts", &queried),
+            ("src/App.svelte", app),
+            ("src/Card.svelte", card),
+        ],
+    );
+    assert!(
+        result.absent_component_props.is_empty(),
+        "a DOM query can set props on a Svelte custom element: {:?}",
+        result.absent_component_props
+    );
+}
+
 fn assert_flagged(results: &fallow_core::results::AnalysisResults) {
     assert!(
         results.absent_component_props.iter().any(

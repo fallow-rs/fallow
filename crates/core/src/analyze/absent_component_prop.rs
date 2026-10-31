@@ -379,6 +379,18 @@ impl<'a> ContractIndex<'a> {
         }
     }
 
+    fn block_imported_svelte_surfaces(&self, file: FileId, blocked: &mut FxHashSet<ComponentId>) {
+        let mut surfaces = FxHashSet::default();
+        self.block_imported_surfaces(file, &mut surfaces);
+        blocked.extend(surfaces.into_iter().filter(|id| {
+            self.declarations.get(id).is_some_and(|props| {
+                props
+                    .iter()
+                    .any(|prop| prop.framework == ComponentFramework::Svelte)
+            })
+        }));
+    }
+
     fn block_reference(
         &self,
         file: FileId,
@@ -502,15 +514,18 @@ pub(super) fn find_absent_component_props(input: &AbsentPropInput<'_>) -> Vec<Ab
             index.block_framework(*framework, &mut blocked);
         }
         // A DOM query, `innerHTML`, or an unsafe Lit directive marks only Lit as
-        // incomplete. Such a call can reach custom elements, and the Lit block
-        // covers them. It cannot supply props to an imported component of
-        // another framework, so only other gaps block the imported surfaces.
+        // incomplete. Such a call can reach custom elements. The Lit block
+        // covers Lit elements. A Svelte component can compile to a custom
+        // element through `<svelte:options>`, so imported Svelte surfaces stay
+        // blocked. Such a call cannot supply props to other imported components.
         if facts
             .incomplete_frameworks
             .iter()
             .any(|framework| *framework != ComponentFramework::Lit)
         {
             index.block_imported_surfaces(module.file_id, &mut blocked);
+        } else if !facts.incomplete_frameworks.is_empty() {
+            index.block_imported_svelte_surfaces(module.file_id, &mut blocked);
         }
         if !facts.incomplete_frameworks.is_empty() {
             index.block_framework(ComponentFramework::Lit, &mut blocked);
