@@ -173,6 +173,57 @@ fn nextjs_special_file_exports_are_not_flagged() {
     }
 }
 
+/// Next.js re-exports every named export of a metadata image route into the
+/// generated route handler, so a `generateStaticParams` next to the image
+/// default export is read by the framework when the route sits under a dynamic
+/// segment. Only the unrelated helper stays reportable.
+#[test]
+fn nextjs_metadata_image_route_generate_static_params_is_not_flagged() {
+    let root = fixture_path("nextjs-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&e.export.path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                e.export.export_name.clone(),
+            )
+        })
+        .collect();
+
+    for file in [
+        "src/app/blog/[slug]/opengraph-image.tsx",
+        "src/app/blog/[slug]/twitter-image.tsx",
+        "src/app/blog/[slug]/icon.tsx",
+        "src/app/blog/[slug]/apple-icon.tsx",
+    ] {
+        for export in ["default", "size", "contentType", "generateStaticParams"] {
+            assert!(
+                !unused_exports
+                    .iter()
+                    .any(|(unused_file, unused_export)| unused_file == file
+                        && unused_export == export),
+                "{file}:{export} should be treated as framework-used, found: {unused_exports:?}"
+            );
+        }
+        assert!(
+            unused_exports
+                .iter()
+                .any(|(unused_file, unused_export)| unused_file == file
+                    && unused_export == "unusedImageHelper"),
+            "{file}:unusedImageHelper should still be reported, found: {unused_exports:?}"
+        );
+    }
+}
+
 #[test]
 fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
     let root = fixture_path("nextjs-config-deps");
