@@ -86,9 +86,11 @@ const INSTRUMENTATION_EXPORTS: &[&str] = &["register", "onRequestError"];
 const INSTRUMENTATION_CLIENT_EXPORTS: &[&str] = &["onRouterTransitionStart"];
 const MDX_COMPONENT_EXPORTS: &[&str] = &["useMDXComponents"];
 
-// Exports Next.js reads from every metadata route: `generateStaticParams`
-// prerenders the route under a dynamic segment, such as
-// `app/blog/[slug]/opengraph-image.tsx`, and the rest is route segment config.
+// Exports Next.js re-exports from every metadata route into the generated route
+// handler. `generateStaticParams` prerenders a route under a dynamic segment,
+// such as `app/blog/[slug]/opengraph-image.tsx`. Next.js matches `robots` and
+// `manifest` only at the app root, so there the export has no effect, but
+// crediting it is still safe. The rest is route segment config.
 macro_rules! metadata_route_exports {
     ($($export:literal),* $(,)?) => {
         &[
