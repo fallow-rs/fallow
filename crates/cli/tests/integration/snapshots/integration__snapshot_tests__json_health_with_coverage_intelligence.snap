@@ -1,10 +1,11 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
+assertion_line: 3247
 expression: redact_version(&json_str)
 ---
 {
   "kind": "health",
-  "schema_version": 12,
+  "schema_version": 13,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "findings": [

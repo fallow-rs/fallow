@@ -621,6 +621,8 @@ fn partial_cloud_capture_preserves_calls_and_withholds_cold_claims() {
         body["data"][marker] = "positive_only".into();
         body["data"]["summary"]["functions_hit"] = 1.into();
         body["data"]["summary"]["functions_tracked"] = 2.into();
+        body["data"]["summary"]["functions_unhit"] = 1.into();
+        body["data"]["summary"]["functions_untracked"] = 3.into();
         body["data"]["summary"]["coverage_percent"] = 50.into();
         let mut called = body["data"]["functions"][0].clone();
         called["function_name"] = "indirectlyCovered".into();
@@ -641,7 +643,16 @@ fn partial_cloud_capture_preserves_calls_and_withholds_cold_claims() {
         let report = &parse_json(&output)["runtime_coverage"];
         assert_eq!(report["actionable"], false);
         assert_eq!(report["verdict"], "unknown");
-        assert_eq!(report["summary"]["coverage_percent"].as_f64(), Some(50.0));
+        // The cloud totals count unhit functions, which a positive-only
+        // capture cannot observe: the CLI withholds them and moves the unhit
+        // count to untracked, like the function rows.
+        let summary = &report["summary"];
+        assert!(summary["coverage_percent"].is_null(), "{summary}");
+        assert!(summary["functions_tracked"].is_null(), "{summary}");
+        assert!(summary["functions_unhit"].is_null(), "{summary}");
+        assert_eq!(summary["functions_hit"], 1);
+        assert_eq!(summary["functions_untracked"], 4);
+        assert_eq!(summary["capture_policy"], "positive_only");
         assert!(
             report["warnings"]
                 .as_array()

@@ -126,7 +126,7 @@ kind: "mutation-inspect"
 /**
  * Schema projection for the audit envelope's exact version.
  */
-export type AuditSchemaVersion = 13
+export type AuditSchemaVersion = 14
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -1065,6 +1065,10 @@ export type RuntimeCoverageSignal = ("license-expired-grace" | "cold-code-detect
  */
 export type RuntimeCoverageDataSource = ("local" | "cloud")
 /**
+ * Capture policy of the runtime evidence behind a report.
+ */
+export type RuntimeCoverageCapturePolicy = "positive_only"
+/**
  * Protocol-level per-function runtime coverage verdict derived from the
  * decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`
  * array omits `active` entries even though the underlying enum still includes
@@ -1387,7 +1391,7 @@ export type CoverageSetupWaitOutcome = ("complete" | "timeout" | "error")
 /**
  * Schema-version discriminator for [`CoverageAnalyzeOutput`].
  */
-export type CoverageAnalyzeSchemaVersion = ("1" | "2")
+export type CoverageAnalyzeSchemaVersion = ("1" | "2" | "3")
 /**
  * Discovery outcome for a [`LogicalGroup`].
  */
@@ -1395,7 +1399,7 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
  * Exact schema version for [`HealthOutput`].
  */
-export type HealthSchemaVersion = 12
+export type HealthSchemaVersion = 13
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -1536,7 +1540,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 14
+export type CombinedSchemaVersion = 15
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -1581,7 +1585,7 @@ export type VendorFlagState = ("on" | "off" | "rolled_out" | "archived" | "exper
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 13
+export type ReviewBriefSchemaVersion = 14
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -9751,17 +9755,19 @@ data_source: RuntimeCoverageDataSource
 last_received_at?: (string | null)
 /**
  * Number of functions the sidecar could observe in the V8 or Istanbul
- * dump.
+ * dump. Null for a positive-only capture, which cannot observe a
+ * function that did not run.
  */
-functions_tracked: number
+functions_tracked?: (number | null)
 /**
  * Tracked functions that received at least one invocation.
  */
 functions_hit: number
 /**
- * Tracked functions that were never invoked.
+ * Tracked functions that were never invoked. Null for a positive-only
+ * capture.
  */
-functions_unhit: number
+functions_unhit?: (number | null)
 /**
  * Functions the sidecar could not track (lazy-parsed, worker thread,
  * dynamic code, unresolved source map).
@@ -9769,8 +9775,9 @@ functions_unhit: number
 functions_untracked: number
 /**
  * Ratio of functions_hit / functions_tracked, expressed as a percent.
+ * Null for a positive-only capture.
  */
-coverage_percent: number
+coverage_percent?: (number | null)
 /**
  * Total number of observed invocations across all functions. Denominator
  * for low-traffic classification.
@@ -9793,6 +9800,12 @@ deployments_seen: number
  * agent pipelines can surface the same signal.
  */
 capture_quality?: (RuntimeCoverageCaptureQuality | null)
+/**
+ * Capture policy of the runtime evidence. Absent for a full capture.
+ * `positive_only` means the tracked and unhit totals and the coverage
+ * percent are null.
+ */
+capture_policy?: (RuntimeCoverageCapturePolicy | null)
 }
 /**
  * Quality-of-capture signals emitted by the sidecar so the CLI can explain

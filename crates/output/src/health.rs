@@ -11,9 +11,10 @@ use crate::{GroupByMode, attach_telemetry_meta, strip_root_prefix};
 
 /// Current schema version for the standalone health JSON envelope.
 ///
-/// Version 12 adds `resolve_hidden_coupling` to the required
-/// `targets[].category` enum.
-pub const HEALTH_SCHEMA_VERSION: u32 = 12;
+/// Version 13 makes the runtime coverage summary fields
+/// `functions_tracked`, `functions_unhit` and `coverage_percent` are nullable
+/// (null for a positive-only capture), and `capture_policy` is new.
+pub const HEALTH_SCHEMA_VERSION: u32 = 13;
 
 /// Exact schema version for [`HealthOutput`].
 #[cfg(feature = "schema")]

@@ -174,11 +174,12 @@ fn print_health_final_status(
         };
         parts.push(format!("maintainability {avg:.1} ({label})"));
     }
-    if let Some(ref production) = report.runtime_coverage {
-        parts.push(format!(
-            "{} unhit in production",
-            production.summary.functions_unhit
-        ));
+    if let Some(unhit) = report
+        .runtime_coverage
+        .as_ref()
+        .and_then(|production| production.summary.functions_unhit)
+    {
+        parts.push(format!("{unhit} unhit in production"));
     }
     let text = format!(
         "{} ({:.2}s)",
@@ -3006,10 +3007,9 @@ fn print_health_summary_coverage(report: &fallow_output::HealthReport) {
         );
     }
     if let Some(ref production) = report.runtime_coverage {
-        outln!(
-            "  {:>6}  Unhit in production",
-            production.summary.functions_unhit,
-        );
+        if let Some(unhit) = production.summary.functions_unhit {
+            outln!("  {:>6}  Unhit in production", unhit);
+        }
         outln!(
             "  {:>6}  Untracked by V8 (lazy-parsed / worker / dynamic)",
             production.summary.functions_untracked,

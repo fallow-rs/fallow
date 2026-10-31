@@ -3054,15 +3054,15 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         summary: RuntimeCoverageSummary {
             data_source: RuntimeCoverageDataSource::Local,
             last_received_at: None,
-            functions_tracked: 6,
+            functions_tracked: Some(6),
             functions_hit: 3,
-            functions_unhit: 2,
+            functions_unhit: Some(2),
             functions_untracked: 1,
-            coverage_percent: 50.0,
+            coverage_percent: Some(50.0),
             trace_count: 2_847_291,
             period_days: 30,
             deployments_seen: 14,
-            capture_quality: None,
+            ..Default::default()
         },
         findings: vec![
             RuntimeCoverageFinding {

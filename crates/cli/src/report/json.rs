@@ -1358,12 +1358,11 @@ mod tests {
                 signals: Vec::new(),
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
-                    last_received_at: None,
-                    functions_tracked: 3,
+                    functions_tracked: Some(3),
                     functions_hit: 1,
-                    functions_unhit: 1,
+                    functions_unhit: Some(1),
                     functions_untracked: 1,
-                    coverage_percent: 33.3,
+                    coverage_percent: Some(33.3),
                     trace_count: 2_847_291,
                     period_days: 30,
                     deployments_seen: 14,
@@ -1373,6 +1372,7 @@ mod tests {
                         lazy_parse_warning: true,
                         untracked_ratio_percent: 42.5,
                     }),
+                    ..Default::default()
                 },
                 findings: vec![RuntimeCoverageFinding {
                     id: "fallow:prod:deadbeef".to_owned(),

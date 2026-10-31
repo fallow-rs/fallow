@@ -2250,24 +2250,33 @@
           "description": "Timestamp of the newest runtime payload included in the report. Null for\nlocal single-capture artifacts that do not carry cloud receipt metadata."
         },
         "functions_tracked": {
-          "type": "integer",
-          "description": "Number of functions the sidecar could observe in the V8 or Istanbul\ndump."
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of functions the sidecar could observe in the V8 or Istanbul\ndump. Null for a positive-only capture, which cannot observe a\nfunction that did not run."
         },
         "functions_hit": {
           "type": "integer",
           "description": "Tracked functions that received at least one invocation."
         },
         "functions_unhit": {
-          "type": "integer",
-          "description": "Tracked functions that were never invoked."
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Tracked functions that were never invoked. Null for a positive-only\ncapture."
         },
         "functions_untracked": {
           "type": "integer",
           "description": "Functions the sidecar could not track (lazy-parsed, worker thread,\ndynamic code, unresolved source map)."
         },
         "coverage_percent": {
-          "type": "number",
-          "description": "Ratio of functions_hit / functions_tracked, expressed as a percent."
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Ratio of functions_hit / functions_tracked, expressed as a percent.\nNull for a positive-only capture."
         },
         "trace_count": {
           "type": "integer",
@@ -2291,15 +2300,23 @@
             }
           ],
           "description": "Capture-quality telemetry. `None` for protocol-0.2 sidecars; protocol-0.3+\nsidecars always populate it. Fuels the human-output short-window warning\nand the quantified trial CTA, and is passed through to JSON consumers so\nagent pipelines can surface the same signal."
+        },
+        "capture_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeCoverageCapturePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Capture policy of the runtime evidence. Absent for a full capture.\n`positive_only` means the tracked and unhit totals and the coverage\npercent are null."
         }
       },
       "required": [
         "data_source",
-        "functions_tracked",
         "functions_hit",
-        "functions_unhit",
         "functions_untracked",
-        "coverage_percent",
         "trace_count",
         "period_days",
         "deployments_seen"
@@ -12865,6 +12882,11 @@
           "type": "string",
           "const": "2",
           "description": "Expands the required semantic omission reason-code enum."
+        },
+        {
+          "type": "string",
+          "const": "3",
+          "description": "Makes the runtime summary totals `functions_tracked`, `functions_unhit`\nand `coverage_percent` nullable (null for a positive-only capture) and\nadds `summary.capture_policy`."
         }
       ],
       "description": "Schema-version discriminator for [`CoverageAnalyzeOutput`]."
@@ -20397,7 +20419,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 13,
+      "const": 14,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -25753,12 +25775,12 @@
     },
     "HealthSchemaVersion": {
       "type": "integer",
-      "const": 12,
+      "const": 13,
       "description": "Exact schema version for [`HealthOutput`]."
     },
     "AuditSchemaVersion": {
       "type": "integer",
-      "const": 13,
+      "const": 14,
       "description": "Schema projection for the audit envelope's exact version."
     },
     "CheckSchemaVersion": {
@@ -25768,7 +25790,7 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 14,
+      "const": 15,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
@@ -35609,6 +35631,16 @@
         "note"
       ],
       "description": "One local function without a deployed function."
+    },
+    "RuntimeCoverageCapturePolicy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "positive_only",
+          "description": "The capture records only functions that ran. A function without a call\nis unknown, never \"never called\", so the tracked and unhit totals and\nthe coverage percent are null."
+        }
+      ],
+      "description": "Capture policy of the runtime evidence behind a report."
     }
   }
 }

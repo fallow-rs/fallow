@@ -20,8 +20,11 @@
 
 #[path = "github_summary_component_health.rs"]
 mod component_health;
+#[path = "github_summary_runtime_footer.rs"]
+mod runtime_footer;
 
 use component_health::{component_shape_sections, prop_drilling_section};
+use runtime_footer::health_runtime_footer;
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -1943,32 +1946,6 @@ fn render_health_with_runtime(env: &Value, complex: usize, elapsed: &str) -> Str
     }
     out.push_str(&health_runtime_footer(env, complex, prod, hot, &runtime));
     out
-}
-
-fn health_runtime_footer(
-    env: &Value,
-    complex: usize,
-    prod: usize,
-    hot: usize,
-    runtime: &Value,
-) -> String {
-    if complex > 0 {
-        return health_thresholds_footer(env);
-    }
-    if prod > 0 {
-        let summary = runtime.get("summary").cloned().unwrap_or(Value::Null);
-        return format!(
-            "\n\n**{}** tracked functions, **{}** hit, **{}** unhit, **{}** untracked",
-            num(&summary, "functions_tracked"),
-            num(&summary, "functions_hit"),
-            num(&summary, "functions_unhit"),
-            num(&summary, "functions_untracked"),
-        );
-    }
-    format!(
-        "\n\nObserved **{hot}** hot path{} in runtime coverage.",
-        if hot == 1 { "" } else { "s" },
-    )
 }
 
 /// Port of `summary-health.jq`.
