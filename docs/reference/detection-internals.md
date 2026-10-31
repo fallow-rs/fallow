@@ -952,13 +952,17 @@ packages that a script runs, that a plugin config names, or that a plugin
 credits as tooling with evidence of use. Plugin tooling without evidence and
 catalogue tooling do not start a closure. The dependency trace reads the same
 seeds through `TraceProvenance::peer_seeds`, so `peer_of` names the same
-hosts. A duplicate-export group drops an aliased-import adapter: a module that
-imports `X` under another local name from a group member and declares its own
-`X` derives its export from that member, as a re-export chain member does.
-An adapter is dropped only when its adapter links reach a member that is not
-an adapter. Two modules that import `X` from each other under aliases both
-stay. The check does not read the body of the local `X`, so an aliased import
-that only avoids a name clash also marks the module as an adapter.
+hosts. A duplicate-export group drops a star re-export overlay: a module that
+imports `X` under another local name from a group member, declares
+`export * from` that same module, and declares its own `X`. The overlay
+re-exports the full surface of the member and replaces one binding, as a
+re-export chain member does. The star edge must have a declaration span, so a
+star edge that the graph layer synthesizes does not count. An overlay is
+dropped only when its overlay links reach a member that is not an overlay.
+Two modules that overlay each other both stay. A module that imports `X` under
+an alias and declares its own `X` without the star re-export is a wrapper.
+Importers see two `X` exports with different behavior, so the group keeps the
+wrapper.
 Dependency ignores suppress findings without fabricating resolution edges. Raw-specifier
 unresolved-import ignores are not filesystem globs. A relative import whose
 target is missing and ignored by a repository ignore file is build output, not

@@ -1,4 +1,4 @@
-//! Aliased-import adapters in duplicate-export groups.
+//! Star re-export overlays in duplicate-export groups.
 
 use fallow_types::extract::ImportedName;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -8,28 +8,30 @@ use crate::graph::{EffectiveExportResolution, ModuleGraph};
 
 use super::ExportEntry;
 
-/// The group files that are aliased-import adapters of another group member.
+/// The group files that are overlays of another group member.
 ///
-/// An adapter imports `export_name` under another local name from a module
-/// whose export resolves to another group member, and declares its own
-/// `export_name`. An example is
-/// `import { configureAuth as core } from "../ci/auth"` followed by
-/// `export function configureAuth(env) { return core(env.url); }`. The
-/// adapter keeps the name on purpose and derives its export from the origin,
-/// as a re-export chain member does. Thus it is not an independent origin.
-/// Only a static named import counts. A re-export or a dynamic import pattern
-/// has an empty import span. When a third module exports the same name
-/// independently, the finding stays between the origin and that module.
+/// An overlay imports `export_name` under another local name from a module
+/// whose export resolves to another group member, declares its own
+/// `export_name`, and also declares `export * from` that same module. An
+/// example is `import { Package as NativePackage } from "../native.js"`,
+/// `export * from "../native.js"` and
+/// `export class Package extends NativePackage {}`. The overlay re-exports the
+/// full surface of the origin and replaces one binding, as a re-export chain
+/// member does. Thus it is not an independent origin. Only a static named
+/// import counts. A re-export or a dynamic import pattern has an empty import
+/// span. When a third module exports the same name independently, the finding
+/// stays between the origin and that module.
 ///
-/// A file is an adapter only when its adapter links reach a group member that
-/// is not an adapter itself. Two modules that import the name from each other
-/// under aliases form a cycle without an origin. Both stay in the group, so
-/// the finding is not lost.
+/// A module that imports the name under an alias and declares its own export,
+/// but does not star re-export the origin module, is a wrapper. Importers see
+/// two exports with different behavior, so a wrapper stays in the group
+/// (issue #4024).
 ///
-/// The check is syntactic. It does not read the body of the local export. A
-/// module that aliases the import only to avoid a name clash, and holds an
-/// unrelated implementation, is also treated as an adapter.
-pub(super) fn aliased_import_adapters(
+/// A file is an overlay only when its overlay links reach a group member that
+/// is not an overlay itself. Two modules that import the name from each other
+/// form a cycle without an origin. Both stay in the group, so the finding is
+/// not lost.
+pub(super) fn star_re_export_overlays(
     entries: &[ExportEntry],
     export_name: &str,
     graph: &ModuleGraph,
@@ -70,7 +72,7 @@ pub(super) fn aliased_import_adapters(
 }
 
 /// The other group members whose `export_name` the module of `entry` imports
-/// under another local name.
+/// under another local name from a module that it also star re-exports.
 fn wrapped_group_origins<'a>(
     entry: &'a ExportEntry,
     export_name: &'a str,
@@ -79,12 +81,13 @@ fn wrapped_group_origins<'a>(
 ) -> impl Iterator<Item = FileId> + 'a {
     graph
         .outgoing_edge_symbols(entry.file_id)
-        .filter(move |(_, symbols)| {
-            symbols.iter().any(|symbol| {
-                matches!(&symbol.imported_name, ImportedName::Named(imported) if imported == export_name)
-                    && symbol.local_name != export_name
-                    && !symbol.import_span.is_empty()
-            })
+        .filter(move |(target, symbols)| {
+            star_re_exports(graph, entry.module_idx, *target)
+                && symbols.iter().any(|symbol| {
+                    matches!(&symbol.imported_name, ImportedName::Named(imported) if imported == export_name)
+                        && symbol.local_name != export_name
+                        && !symbol.import_span.is_empty()
+                })
         })
         .flat_map(move |(target, _)| {
             entry.namespaces().iter().filter_map(move |&namespace| {
@@ -99,4 +102,19 @@ fn wrapped_group_origins<'a>(
                 }
             })
         })
+}
+
+/// Whether the module at `module_idx` declares `export * from` the module
+/// `target`. A namespace re-export (`export * as ns from`) does not re-export
+/// the full surface and does not count. A star edge that the graph layer
+/// synthesizes has an empty span and does not count.
+fn star_re_exports(graph: &ModuleGraph, module_idx: usize, target: FileId) -> bool {
+    graph.modules.get(module_idx).is_some_and(|module| {
+        module.re_exports.iter().any(|edge| {
+            edge.source_file == target
+                && edge.imported_name == "*"
+                && edge.exported_name == "*"
+                && !edge.span.is_empty()
+        })
+    })
 }
