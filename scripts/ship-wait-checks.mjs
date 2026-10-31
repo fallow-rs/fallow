@@ -14,6 +14,10 @@
 // commit of origin/main when that commit contains the given commit. With
 // --pr, a failed check that also fails on main gets its own exit code, so a
 // ship step can wait for the fix on main instead of a fix on the branch.
+// GitHub does not start the workflows of a pull request from a fork until a
+// maintainer approves them. Such a run is complete with the conclusion
+// action_required and has no checks, so with --pr the wait stops at once
+// instead of a pass on the checks of the other workflows.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -72,6 +76,9 @@ const SETTLE_MS = 10 * MINUTE;
 // right after a push the only check can be a skip, before ci.yml registers
 // its jobs.
 const PASS_BUCKET = "pass";
+// A pull-request workflow run that waits for maintainer approval.
+const APPROVAL_BUCKET = "approval";
+const APPROVAL_CONCLUSION = "action_required";
 // GitHub creates all push runs of a commit together, and a new run is pending.
 // So a complete set of runs contains all push runs. The short settle time catches a
 // run that a completed run starts, for example through workflow_run.
@@ -139,6 +146,10 @@ With --pr, path filters can start fewer checks than --min-checks. When the
 checks stay complete and unchanged for ${SETTLE_MS / MINUTE} minutes, the wait ends below the
 count.
 
+With --pr, the wait stops when a workflow run waits for maintainer approval,
+which GitHub requires for some pull requests from a fork. No wait ends this
+state: read the code of the pull request, approve the runs, and wait again.
+
 With --pr, a set of checks without a passed check is not complete. Some
 workflows skip at once on each pull request, before the CI workflow starts
 its jobs. Such a set never passes. When it stays unchanged for ${SETTLE_MS / MINUTE} minutes,
@@ -154,7 +165,7 @@ cancelled, or when --follow-main reaches the maximum count of moves, 2 for
 invalid input, failed reads for the full --error-window, a timeout, a failed read
 of ${FOLLOW_REF}, or an ${FOLLOW_REF} that does not contain the given commit,
 3 when the pull request conflicts with its base branch, 4 when each failed
-check also fails on ${FOLLOW_BRANCH}.
+check also fails on ${FOLLOW_BRANCH}, 5 when a workflow run waits for maintainer approval.
 
 With --pr, the script compares each failed check with the newest completed
 run of the same check name on the newest ${MAIN_COMMIT_LIMIT} commits of ${FOLLOW_BRANCH}. A check that
@@ -212,6 +223,9 @@ const countedStatus = (checks, unchangedMs, { requirePass, stableMs }) => {
  * `unchangedMs` is the time since the check set last changed.
  */
 const completedStatus = (checks, unchangedMs, options) => {
+  if (hasBucket(checks, APPROVAL_BUCKET)) {
+    return hasFailure(checks) ? "fail" : "approval";
+  }
   if (hasBucket(checks, "pending")) {
     return null;
   }
@@ -240,8 +254,11 @@ const completedStatus = (checks, unchangedMs, options) => {
  * can only end `settled` through `settleMs`. With `stableMs`, a complete set
  * passes only after it stays unchanged for that time. A failed check fails
  * the wait at once.
+ * A check in the `approval` bucket ends the wait at once with the status
+ * `approval`, because only a maintainer can start that run. A failed check
+ * still wins.
  * Returns `{ status, checks }` where `status` is `pass`, `settled`, `fail`,
- * `conflict`, `timeout` or `error`. After a failed read of the checks, the
+ * `approval`, `conflict`, `timeout` or `error`. After a failed read of the checks, the
  * delay to the next read doubles from `intervalMs` up to `READ_RETRY_MAX_MS`.
  * The status is `error` (with `readErrors` and `errorMs`) when the planned
  * delays of the failed reads reach `errorWindowMs`, or when the deadline
@@ -873,7 +890,7 @@ const readPrWorkflows = ({ head, repo }) => {
     "--limit",
     String(RUN_LIST_LIMIT),
     "--json",
-    "databaseId,workflowDatabaseId,workflowName,status,url,headSha,event",
+    "databaseId,workflowDatabaseId,workflowName,status,conclusion,url,headSha,event",
   ];
   if (repo !== null) args.push("--repo", repo);
   const read = parseGhApi(spawnSync("gh", args, { encoding: "utf8" }));
@@ -921,11 +938,23 @@ const requiredWorkflowSelector = ({ checks, registered, readRun, head }) => {
   };
 };
 
-/** Keep unregistered jobs pending without adding completed passes to the check count. */
+/**
+ * Keep unregistered jobs pending without adding completed passes to the check
+ * count. A run that waits for approval registers no checks, so it counts in
+ * every mode.
+ */
 const pendingWorkflowChecks = (runs, { names, ...context }) => {
   const selectRequired = requiredWorkflowSelector(context);
   const checks = [];
   for (const run of runs) {
+    if (run.status === "completed" && run.conclusion === APPROVAL_CONCLUSION) {
+      checks.push({
+        name: `${run.workflowName} workflow (${run.databaseId})`,
+        bucket: APPROVAL_BUCKET,
+        link: run.url,
+      });
+      continue;
+    }
     if (run.status === "completed") continue;
     if (names !== null) {
       const selected = selectRequired(run);
@@ -1269,6 +1298,13 @@ export const compareWithMain = (result, { readMainCommits, readMainChecks }) => 
   return { ...result, checks, status: shared ? "shared-with-main" : "fail" };
 };
 
+/** The headline for runs that wait for maintainer approval. */
+const approvalHeadline = (label, checks, summary) => {
+  const count = checks.filter(({ bucket }) => bucket === APPROVAL_BUCKET).length;
+  const runs = count === 1 ? "1 workflow run waits" : `${count} workflow runs wait`;
+  return `${label}: ${runs} for maintainer approval, so GitHub does not start the jobs (${summary}). Read the code of the pull request, approve each run with gh api -X POST repos/<owner>/<repo>/actions/runs/<run id>/approve, and wait again.`;
+};
+
 const HEAD_WARNING =
   "Warning: --pr without --head. Right after a push, GitHub can still report the checks of the old head. Give --head <full sha> of the pushed tip.";
 
@@ -1283,6 +1319,7 @@ const EXIT_CODES = {
   diverged: 2,
   conflict: 3,
   "shared-with-main": 4,
+  approval: 5,
 };
 
 /**
@@ -1329,9 +1366,12 @@ export const reportChecks = (
     "head-error": `${label}: read of ${FOLLOW_REF} failed: ${error}`,
     diverged: `${label}: ${FOLLOW_REF} at ${shortSha(head)} does not contain commit ${shortSha(origin)}, so the wait stops.`,
     conflict: `${label}: the pull request conflicts with its base branch, so GitHub starts no pull_request workflows (${summary}). Update the branch, push, and wait again.`,
+    approval: approvalHeadline(label, checks, summary),
   }[status];
   log(headline);
-  for (const check of checks.filter(({ bucket }) => FAILED_BUCKETS.has(bucket))) {
+  for (const check of checks.filter(
+    ({ bucket }) => FAILED_BUCKETS.has(bucket) || bucket === APPROVAL_BUCKET,
+  )) {
     const also =
       check.main === undefined ? "" : ` (also on ${FOLLOW_BRANCH} ${shortSha(check.main)})`;
     log(`  ${check.bucket.toUpperCase()}${also}: ${check.name} ${check.link ?? ""}`.trimEnd());

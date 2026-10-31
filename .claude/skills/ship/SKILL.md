@@ -192,6 +192,14 @@ Use these scripts for each pull request, one at a time:
    conflicts with its base. The script then stops with exit code 3.
    Update the branch, push, and wait again.
 
+   GitHub does not start the workflows of some pull requests from a fork
+   until a maintainer approves them. Pinned auto-merge then never merges,
+   and the few checks that ran can look complete. The script stops with
+   exit code 5 and lists each run. Read all of the code of the pull request
+   first, because the approved runs execute it. Then approve each listed
+   run with `gh api -X POST repos/<owner>/<repo>/actions/runs/<run id>/approve`,
+   and wait again. Each new push of the fork needs a new approval.
+
    The script compares each failed check with the same check name on the
    newest completed run of `main`. A check that also fails on `main` gets
    the line `FAIL (also on main <sha>)`. When all failed checks also fail
