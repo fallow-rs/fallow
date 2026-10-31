@@ -38,7 +38,6 @@
 use std::path::Path;
 
 use super::pnpm_catalog::{parse_key, strip_inline_comment};
-use crate::yaml::YamlNode;
 
 /// Where an override entry was declared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -112,11 +111,7 @@ pub fn parse_pnpm_workspace_overrides(source: &str) -> Result<PnpmOverrideData, 
         .iter()
         .filter_map(|(k, v)| {
             let raw_key = k.as_str()?.to_string();
-            let raw_value = if v.is_null() {
-                None
-            } else {
-                Some(yaml_value_to_string(v))
-            };
+            let raw_value = v.scalar_text().map(str::to_string);
             let line = line_index.line_for(&raw_key)?;
             let parsed_key = parse_override_key(&raw_key);
             Some(PnpmOverrideEntry {
@@ -453,12 +448,6 @@ fn build_package_json_line_index(source: &str) -> YamlLineIndex {
     }
 }
 
-fn yaml_value_to_string(value: YamlNode<'_>) -> String {
-    value
-        .scalar_text()
-        .map_or_else(|| value.to_yaml_string(), str::to_string)
-}
-
 /// Source-name string for diagnostics.
 #[must_use]
 pub fn override_source_label(source: OverrideSource, path: &Path) -> String {
@@ -550,6 +539,29 @@ mod tests {
         assert!(!is_valid_override_value(""));
         assert!(!is_valid_override_value("   "));
         assert!(!is_valid_override_value("^1\n^2"));
+    }
+
+    /// pnpm reads an override value as a string. A collection is a
+    /// misconfiguration, as in npm `overrides` and bun `resolutions`. Writing
+    /// a deep collection back as text ran out of memory in OSS-Fuzz issue
+    /// 579182045.
+    #[test]
+    fn collection_values_have_no_raw_value() {
+        let yaml = "overrides:\n  one:\n    a: 1\n  two:\n    a: 1\n    b: 2\n  list:\n    - x\n";
+        let data = parse_pnpm_workspace_overrides(yaml).expect("valid yaml");
+        assert_eq!(data.entries.len(), 3);
+        assert!(data.entries.iter().all(|entry| entry.raw_value.is_none()));
+
+        use std::fmt::Write as _;
+
+        const DEPTH: usize = 2_000;
+        let mut yaml = String::from("overrides:\n  deep:\n");
+        for level in 0..DEPTH {
+            let indent = " ".repeat(level + 4);
+            write!(yaml, "{indent}? x\n{indent}:\n").expect("writing to a String cannot fail");
+        }
+        let data = parse_pnpm_workspace_overrides(&yaml).expect("valid yaml");
+        assert_eq!(data.entries[0].raw_value, None);
     }
 
     #[test]
