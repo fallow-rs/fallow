@@ -7796,7 +7796,8 @@
         "key_params": [
           "target",
           "production",
-          "include_churn"
+          "include_churn",
+          "cloud"
         ],
         "license": "free",
         "license_note": null,
