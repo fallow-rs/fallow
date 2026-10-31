@@ -94,8 +94,8 @@ fn is_installed_package(specifier: &str, config_path: &Path) -> bool {
 /// `tsconfig.json`.
 const MAX_TSCONFIG_WALK_DEPTH: usize = 12;
 
-/// Maximum number of tsconfig files to read in one `extends` chain.
-const MAX_TSCONFIG_CHAIN_LENGTH: usize = 4;
+/// Maximum number of tsconfig files to read for one `extends` tree.
+const MAX_TSCONFIG_CHAIN_LENGTH: usize = 8;
 
 /// The tsconfig options that decide where a non-relative specifier resolves.
 #[derive(Default)]
@@ -165,16 +165,19 @@ fn referenced_tsconfigs(tsconfig: &Path) -> Vec<PathBuf> {
 }
 
 /// Read `paths` and `baseUrl` from a tsconfig and its relative `extends`
-/// chain. The value in the nearest tsconfig of the chain wins, as in tsc.
+/// entries. The value in the nearest tsconfig wins, as in tsc. In an
+/// `extends` array, a later entry overrides an earlier entry.
 fn read_tsconfig_module_options(tsconfig: &Path) -> TsconfigModuleOptions {
     let mut options = TsconfigModuleOptions::default();
-    let mut current = Some(tsconfig.to_path_buf());
+    // The stack gives the tsc precedence order: the tsconfig itself, then the
+    // last `extends` entry and its bases, then the earlier entries.
+    let mut stack = vec![tsconfig.to_path_buf()];
     for _ in 0..MAX_TSCONFIG_CHAIN_LENGTH {
-        let Some(path) = current.take() else {
+        let Some(path) = stack.pop() else {
             break;
         };
         let Some(json) = read_jsonc(&path) else {
-            break;
+            continue;
         };
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let compiler_options = json.get("compilerOptions");
@@ -192,13 +195,25 @@ fn read_tsconfig_module_options(tsconfig: &Path) -> TsconfigModuleOptions {
         {
             options.base_url = Some(dir.join(base_url));
         }
-        current = json
-            .get("extends")
-            .and_then(serde_json::Value::as_str)
-            .filter(|extends| extends.starts_with('.'))
-            .map(|extends| relative_extends_path(&dir, extends));
+        stack.extend(
+            extends_values(&json)
+                .filter(|extends| extends.starts_with('.'))
+                .map(|extends| relative_extends_path(&dir, extends)),
+        );
     }
     options
+}
+
+/// The `extends` values of a tsconfig: one string, or an array of strings.
+fn extends_values(json: &serde_json::Value) -> impl Iterator<Item = &str> {
+    let extends = json.get("extends");
+    let single = extends.and_then(serde_json::Value::as_str);
+    let array = extends
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str);
+    single.into_iter().chain(array)
 }
 
 /// Read a JSONC file, such as a tsconfig.
@@ -337,6 +352,34 @@ mod tests {
             }"#,
         );
         assert_eq!(credits("~/clock", dir.path()).len(), 1);
+    }
+
+    #[test]
+    fn tsconfig_paths_from_array_extends_credit_replacement_exports() {
+        let dir = project(r#"{ "extends": ["./tsconfig.other.json", "./tsconfig.base.json"] }"#);
+        write(
+            &dir.path().join("tsconfig.other.json"),
+            r#"{ "compilerOptions": {} }"#,
+        );
+        write(
+            &dir.path().join("tsconfig.base.json"),
+            r#"{ "compilerOptions": { "paths": { "src/*": ["./src/*"] } } }"#,
+        );
+        assert_eq!(credits("src/clock", dir.path()).len(), 1);
+    }
+
+    #[test]
+    fn later_array_extends_entry_overrides_earlier_entry() {
+        let dir = project(r#"{ "extends": ["./tsconfig.first.json", "./tsconfig.last.json"] }"#);
+        write(
+            &dir.path().join("tsconfig.first.json"),
+            r#"{ "compilerOptions": { "paths": { "~/*": ["./src/*"] } } }"#,
+        );
+        write(
+            &dir.path().join("tsconfig.last.json"),
+            r#"{ "compilerOptions": { "paths": { "~/*": ["./test/stubs/*"] } } }"#,
+        );
+        assert!(credits("~/clock", dir.path()).is_empty());
     }
 
     #[test]
