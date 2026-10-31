@@ -590,10 +590,8 @@ jobs:
         # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
-      # Partition 2 runs this step, and partition 1 runs the other extra steps,
-      # so the two partitions take about the same time.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
-        if: matrix.partition == 2
+        if: matrix.partition == 1
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
@@ -837,10 +835,8 @@ jobs:
       # here on Windows before it merges.
       - name: Build fallow-mcp for the drift harness
         run: cargo build -p fallow-mcp
-      # The drift tests spend most of their time on subprocesses and git, not
-      # on CPU, so twice as many test threads as cores shortens the step.
       - name: Test drift harness on Windows
-        run: cargo test -p fallow-cli --test drift -- --include-ignored --test-threads 8
+        run: cargo test -p fallow-cli --test drift -- --include-ignored
 
   windows-type-aware:
     name: Windows type-aware npm and transport

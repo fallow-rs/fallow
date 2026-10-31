@@ -445,7 +445,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsDriftJob, /^[ \t]+run: cargo build -p fallow-mcp$/m);
   assert.match(
     windowsDriftJob,
-    /^[ \t]+run: cargo test -p fallow-cli --test drift -- --include-ignored --test-threads 8$/m,
+    /^[ \t]+run: cargo test -p fallow-cli --test drift -- --include-ignored$/m,
   );
   assert.doesNotMatch(windowsRustJob, /--test drift|cargo build -p fallow-mcp/);
   // Path rendering lives across both crates (`Display`, `join`, `components`),
