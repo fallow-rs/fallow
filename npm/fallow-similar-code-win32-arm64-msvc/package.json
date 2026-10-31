@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-similar-code-win32-arm64-msvc",
-  "version": "3.38.0",
+  "version": "3.38.1",
   "description": "Fallow similar-code sidecar binary for Windows ARM64",
   "license": "MIT",
   "repository": {

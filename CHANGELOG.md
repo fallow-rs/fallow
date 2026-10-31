@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.38.1] - 2026-10-31
+
+### Changed
+
+- **`fallow audit` scans the temp dir for old base-snapshot caches at most once per hour.** Before, each audit checked every `fallow-audit-base-cache-*` entry in the temp dir. Entries of deleted repos stay until they age out, so on a long-lived CI runner or a developer machine there can be tens of thousands of them. With 59,000 such entries, one audit of a small project took about 2.5 s instead of 0.3 s. Now the first audit in each hour scans the temp dir, and the other audits sweep only the cache of their own root. Old entries of other repos are reclaimed at most one hour later. `fallow audit-cache prune` still scans every entry on each run, and its output does not change.
+
+### Fixed
+
+- **The audit cache sweep now removes the `.lock` file of a cache that it reclaims (Unix).** Before, the sweep removed the cache directory and its `.sha` and `.last-used` files, but kept the `.lock` file for ever. These files grew without limit: one host had more than 15,000 of them, and every full sweep and every `fallow audit-cache prune` read each one. Now the sweep unlinks the `.lock` file while it holds the lock, and a lock acquirer that finds its file unlinked opens the path again. `fallow audit-cache prune --format json` reports a bare lock file that it removes with the new reason `orphaned-lock`. Windows keeps the `.lock` file and reports `lock-only` as before.
+
+- **The VS Code extension is on the VS Code Marketplace and Open VSX again.** The 3.38.0 release did not publish it, so the marketplaces still offered 3.37.0. This release publishes 3.38.1.
+- **The output schema names `fallow dead-code --impact-closure` for `affected_not_shown`.** The description of the field in the audit brief, in `docs/output-schema.json` and in the output contract types named `fallow check --impact-closure`, a command that does not exist.
+
+### Security
+
+- **The VS Code extension bundles minimatch 11.0.3.** The language client requested minimatch 10, which has a denial of service through glob pattern amplification (GHSA-g3hv-75wg-m249). The extension only matches globs that the fallow language server sends.
+
 ## [3.38.0] - 2026-10-30
 
 ### Added
@@ -16402,7 +16419,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.38.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.38.1...HEAD
+[3.38.1]: https://github.com/fallow-rs/fallow/compare/v3.38.0...v3.38.1
 [3.38.0]: https://github.com/fallow-rs/fallow/compare/v3.37.0...v3.38.0
 [3.37.0]: https://github.com/fallow-rs/fallow/compare/v3.36.0...v3.37.0
 [3.36.0]: https://github.com/fallow-rs/fallow/compare/v3.35.0...v3.36.0

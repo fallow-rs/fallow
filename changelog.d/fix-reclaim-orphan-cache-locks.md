@@ -1,3 +1,0 @@
-### Fixed
-
-- **The audit cache sweep now removes the `.lock` file of a cache that it reclaims (Unix).** Before, the sweep removed the cache directory and its `.sha` and `.last-used` files, but kept the `.lock` file for ever. These files grew without limit: one host had more than 15,000 of them, and every full sweep and every `fallow audit-cache prune` read each one. Now the sweep unlinks the `.lock` file while it holds the lock, and a lock acquirer that finds its file unlinked opens the path again. `fallow audit-cache prune --format json` reports a bare lock file that it removes with the new reason `orphaned-lock`. Windows keeps the `.lock` file and reports `lock-only` as before.

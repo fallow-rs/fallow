@@ -1,3 +1,0 @@
-### Changed
-
-- **`fallow audit` scans the temp dir for old base-snapshot caches at most once per hour.** Before, each audit checked every `fallow-audit-base-cache-*` entry in the temp dir. Entries of deleted repos stay until they age out, so on a long-lived CI runner or a developer machine there can be tens of thousands of them. With 59,000 such entries, one audit of a small project took about 2.5 s instead of 0.3 s. Now the first audit in each hour scans the temp dir, and the other audits sweep only the cache of their own root. Old entries of other repos are reclaimed at most one hour later. `fallow audit-cache prune` still scans every entry on each run, and its output does not change.
