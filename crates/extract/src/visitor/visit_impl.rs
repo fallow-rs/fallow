@@ -732,55 +732,6 @@ impl ModuleInfoExtractor {
             })
     }
 
-    fn preseed_class_array_fields(&mut self, class: &Class<'_>) {
-        for element in &class.body.body {
-            if let ClassElement::PropertyDefinition(prop) = element {
-                if prop.r#static {
-                    continue;
-                }
-                let name = prop.key.static_name().map_or_else(
-                    || match &prop.key {
-                        PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
-                        _ => None,
-                    },
-                    |name| Some(name.text().into_owned()),
-                );
-                if let Some(name) = name
-                    && let Some(annotation) = prop.type_annotation.as_deref()
-                    && let Some(element_type) =
-                        array_element_type_from_type(&annotation.type_annotation)
-                {
-                    self.iterable_element_types
-                        .insert(self.this_member_key(&name), element_type);
-                }
-                continue;
-            }
-            let ClassElement::MethodDefinition(method) = element else {
-                continue;
-            };
-            if method.kind != MethodDefinitionKind::Constructor {
-                continue;
-            }
-            for param in &method.value.params.items {
-                if param.accessibility.is_none() && !param.readonly {
-                    continue;
-                }
-                let BindingPattern::BindingIdentifier(id) = &param.pattern else {
-                    continue;
-                };
-                let Some(annotation) = param.type_annotation.as_deref() else {
-                    continue;
-                };
-                if let Some(element_type) =
-                    array_element_type_from_type(&annotation.type_annotation)
-                {
-                    self.iterable_element_types
-                        .insert(self.this_member_key(id.name.as_str()), element_type);
-                }
-            }
-        }
-    }
-
     fn array_type_origin(ty: &TSType<'_>) -> Option<Span> {
         match ty {
             TSType::TSArrayType(array) => {
@@ -2677,6 +2628,7 @@ impl<'a> ModuleInfoExtractor {
         init: &Expression<'a>,
     ) {
         self.record_declarator_member_destructuring(declarator, init);
+        self.record_this_method_result_alias(declarator, init);
 
         // `a ?? new A()`, `f ? new A() : null` and similar inits hold the
         // class instance in one operand. Bind through that operand.
@@ -5348,8 +5300,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.class_scope_counter += 1;
         let class_scope_id = self.class_scope_counter;
         self.class_scope_stack.push(class_scope_id);
-        // Iteration consumers can precede their fields or constructor in source order.
-        self.preseed_class_array_fields(class);
+        // Iteration consumers and `this` method results can precede their
+        // fields, constructor or method in source order.
+        self.preseed_class_bindings(class);
         let direct_scope_roots = class
             .id
             .as_ref()

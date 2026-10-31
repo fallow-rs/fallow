@@ -551,15 +551,66 @@ impl ModuleInfoExtractor {
         collector.refs
     }
 
-    /// Prepare the visit of a method body. Record the `this` return binding,
-    /// then set the method span and reset the independent `this` depth.
-    /// Return the previous span and depth, which the caller restores after the
-    /// walk.
+    /// Record the class bindings that code can read before the declaration in
+    /// source order: the element type of each typed array field or parameter
+    /// property, and the `this` return binding of each method.
+    pub(super) fn preseed_class_bindings(&mut self, class: &Class<'_>) {
+        for element in &class.body.body {
+            if let ClassElement::PropertyDefinition(prop) = element {
+                if prop.r#static {
+                    continue;
+                }
+                let name = prop.key.static_name().map_or_else(
+                    || match &prop.key {
+                        PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
+                        _ => None,
+                    },
+                    |name| Some(name.text().into_owned()),
+                );
+                if let Some(name) = name
+                    && let Some(annotation) = prop.type_annotation.as_deref()
+                    && let Some(element_type) =
+                        array_element_type_from_type(&annotation.type_annotation)
+                {
+                    self.iterable_element_types
+                        .insert(self.this_member_key(&name), element_type);
+                }
+                continue;
+            }
+            let ClassElement::MethodDefinition(method) = element else {
+                continue;
+            };
+            self.record_this_return_binding(method);
+            if method.kind != MethodDefinitionKind::Constructor {
+                continue;
+            }
+            for param in &method.value.params.items {
+                if param.accessibility.is_none() && !param.readonly {
+                    continue;
+                }
+                let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                    continue;
+                };
+                let Some(annotation) = param.type_annotation.as_deref() else {
+                    continue;
+                };
+                if let Some(element_type) =
+                    array_element_type_from_type(&annotation.type_annotation)
+                {
+                    self.iterable_element_types
+                        .insert(self.this_member_key(id.name.as_str()), element_type);
+                }
+            }
+        }
+    }
+
+    /// Prepare the visit of a method body. Set the method span and reset the
+    /// independent `this` depth. Return the previous span and depth, which the
+    /// caller restores after the walk.
     pub(super) fn enter_method_definition(
         &mut self,
         method: &MethodDefinition<'_>,
     ) -> (Option<Span>, usize) {
-        self.record_this_return_binding(method);
         let previous_span = self.class_method_function_span.replace(method.value.span);
         let previous_depth = std::mem::replace(&mut self.independent_this_depth, 0);
         (previous_span, previous_depth)
@@ -573,8 +624,10 @@ impl ModuleInfoExtractor {
     /// private or a `#`-private member also gives a binding. A static member
     /// gives no binding. A return type that names a type parameter of the
     /// method gives no binding, because that name has no meaning outside the
-    /// method.
-    fn record_this_return_binding(&mut self, method: &MethodDefinition<'_>) {
+    /// method. The class visit calls this for each method before it walks the
+    /// class body. Thus a local such as `const old = this.current()` resolves
+    /// also when the method comes after the call site (issue #4033).
+    pub(super) fn record_this_return_binding(&mut self, method: &MethodDefinition<'_>) {
         let call_suffix = match method.kind {
             MethodDefinitionKind::Method => "()",
             MethodDefinitionKind::Get => "",
@@ -606,6 +659,36 @@ impl ModuleInfoExtractor {
         }
         let key = self.this_member_key(&format!("{name}{call_suffix}"));
         self.record_typed_binding(&key, type_annotation);
+    }
+
+    /// Bind a local to the declared return type of a method of the enclosing
+    /// class: `const old = this.current();` binds `old` to `Tool` when the
+    /// class declares `current(): Tool | undefined`. A later
+    /// `old?.deactivate?.()` then credits `Tool.deactivate`, as the direct
+    /// `this.current()?.deactivate?.()` does (issue #4033).
+    ///
+    /// Only a call with no arguments directly on `this` gives a binding. A
+    /// cast (`as`), a call with arguments, and a call in a function with its
+    /// own `this` give no binding.
+    pub(super) fn record_this_method_result_alias(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        if self.class_scope_stack.is_empty() || self.independent_this_depth > 0 {
+            return;
+        }
+        let Some(name) = this_method_call_name(init) else {
+            return;
+        };
+        let key = self.this_member_key(&format!("{name}()"));
+        if let Some(BindingTarget::Class(type_name)) = self.binding_target_names.get(&key) {
+            let type_name = type_name.clone();
+            self.insert_class_binding_target(id.name.to_string(), type_name);
+        }
     }
 
     pub(super) fn record_typed_binding(
@@ -853,4 +936,40 @@ impl<'a> Visit<'a> for ReturnedValueCollector<'_, '_, '_> {
     fn visit_arrow_function_expression(&mut self, _arrow: &ArrowFunctionExpression<'a>) {}
 
     fn visit_class(&mut self, _class: &Class<'a>) {}
+}
+
+/// The method name of a call with no arguments on `this`: `current` for
+/// `this.current()` or `this.current?.()`, `#current` for `this.#current()`.
+/// Parentheses and a non-null assertion around the call are transparent. Any
+/// other expression, a cast included, gives `None`.
+fn this_method_call_name(init: &Expression<'_>) -> Option<String> {
+    let mut expr = init;
+    let call = loop {
+        match expr {
+            Expression::ParenthesizedExpression(wrapper) => expr = &wrapper.expression,
+            Expression::TSNonNullExpression(wrapper) => expr = &wrapper.expression,
+            Expression::CallExpression(call) => break call,
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::CallExpression(call) => break call,
+                _ => return None,
+            },
+            _ => return None,
+        }
+    };
+    if !call.arguments.is_empty() {
+        return None;
+    }
+    match &call.callee {
+        Expression::StaticMemberExpression(member)
+            if matches!(member.object, Expression::ThisExpression(_)) =>
+        {
+            Some(member.property.name.to_string())
+        }
+        Expression::PrivateFieldExpression(member)
+            if matches!(member.object, Expression::ThisExpression(_)) =>
+        {
+            Some(format!("#{}", member.field.name))
+        }
+        _ => None,
+    }
 }

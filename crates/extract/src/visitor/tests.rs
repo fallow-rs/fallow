@@ -9950,6 +9950,59 @@ fn this_member_return_type_credits_member_access() {
 }
 
 #[test]
+fn local_holding_this_method_result_credits_return_type_member() {
+    // Issue #4033: `const old = this.current(); old?.deactivate?.();` credits
+    // `Tool.deactivate`, as the direct `this.current()?.deactivate?.()` does.
+    // The method can come after the call site. A cast, a call with arguments,
+    // a call in a plain `function` and a method-generic return give no credit.
+    let info = parse(
+        r"
+        import type { Tool } from './tool';
+        import type { Brush } from './brush';
+        import type { Other } from './other';
+
+        export class Editor {
+            press(): void {
+                const old = this.current();
+                old?.deactivate?.();
+                const pen = this.#pen()!;
+                pen.stroke();
+                const cast = this.current() as Other;
+                cast.castOnly();
+                const withArgs = this.find(1);
+                withArgs.argsOnly();
+                const generic = this.pick<Tool>();
+                generic.genericOnly();
+                const run = function (this: unknown) {
+                    const inner = this.current();
+                    inner.innerOnly();
+                };
+            }
+            private current(): Tool | undefined { return undefined; }
+            #pen(): Brush | undefined { return undefined; }
+            private find(id: number): Tool { return undefined as Tool; }
+            pick<Tool>(): Tool { return undefined as Tool; }
+        }
+        ",
+    );
+
+    let has = |object: &str, member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+    assert!(has("Tool", "deactivate"), "{:?}", info.member_accesses);
+    assert!(has("Brush", "stroke"), "{:?}", info.member_accesses);
+    for member in ["castOnly", "argsOnly", "genericOnly", "innerOnly"] {
+        assert!(
+            !has("Tool", member) && !has("Other", member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn non_angular_inject_property_does_not_record_instance_binding() {
     let info = parse(
         r"

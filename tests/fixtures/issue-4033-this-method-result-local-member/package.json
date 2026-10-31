@@ -1,0 +1,6 @@
+{
+  "name": "issue-4033-this-method-result-local-member",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
