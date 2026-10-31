@@ -466,8 +466,24 @@ const moduleSetupMs = (testModule, entries) => {
   return Math.max(0, total - tests);
 };
 
+/**
+ * The failure fields of a failed test: its failure kind, and its first error
+ * when it has one. A dry-run entry and a run entry carry the same fields.
+ */
+const failureFields = (testCase, directories) => {
+  const fields = { failure_kind: failureKind(testCase) };
+  const message = testErrorText(testCase.result().errors?.[0], directories);
+  return message === null ? fields : { ...fields, message };
+};
+
+/** The dry-run report entry of one test, with the failure fields of a failed test. */
+const dryRunReport = (testCase, base, directories) => {
+  const report = { ...base, status: testStatus(testCase) ?? "skip" };
+  return report.status === "fail" ? { ...report, ...failureFields(testCase, directories) } : report;
+};
+
 /** Reads each test of one dry-run module with its hits, its loaded paths and its report entry. */
-const readDryRunTests = (testModule, file, prefix) => {
+const readDryRunTests = (testModule, file, prefix, directories) => {
   const testCases = [...testModule.children.allTests()];
   const names = uniqueNames(testCases.map((testCase) => testCase.fullName));
   return testCases.map((testCase, index) => {
@@ -478,24 +494,27 @@ const readDryRunTests = (testModule, file, prefix) => {
       hits: metaList(meta, "fallowHits"),
       staticHits: metaList(meta, "fallowStaticHits"),
       loaded: metaList(meta, "fallowLoaded"),
-      report: {
-        test_id: `${prefix}${file}${TEST_ID_SEPARATOR}${names[index]}`,
-        file,
-        name: names[index],
-        line: testLine(testCase),
-        duration_ms: testDuration(testCase),
-        status: testStatus(testCase) ?? "skip",
-      },
+      report: dryRunReport(
+        testCase,
+        {
+          test_id: `${prefix}${file}${TEST_ID_SEPARATOR}${names[index]}`,
+          file,
+          name: names[index],
+          line: testLine(testCase),
+          duration_ms: testDuration(testCase),
+        },
+        directories,
+      ),
     };
   });
 };
 
 /** The entry of a failed test, with its first error when it has one. */
-const failedTestEntry = (testCase, testId, directories) => {
-  const entry = { test_id: testId, status: "fail", failure_kind: failureKind(testCase) };
-  const message = testErrorText(testCase.result().errors?.[0], directories);
-  return message === null ? entry : { ...entry, message };
-};
+const failedTestEntry = (testCase, testId, directories) => ({
+  test_id: testId,
+  status: "fail",
+  ...failureFields(testCase, directories),
+});
 
 /** Gives the report entry of one test of a run, or no entry when it did not run. */
 const runTestEntry = (testCase, testId, directories) => {
@@ -583,7 +602,12 @@ export const createAdapter = async (init) => {
 
   /** Adds the tests of one dry-run module to the test index and the result. */
   const recordDryRunModule = (testModule, file, summary) => {
-    const entries = readDryRunTests(testModule, file, testIdPrefix(testModule.project));
+    const entries = readDryRunTests(
+      testModule,
+      file,
+      testIdPrefix(testModule.project),
+      directories,
+    );
     for (const entry of entries) {
       for (const source of entry.loaded) loaded.add(source);
       testIndex.set(entry.report.test_id, {

@@ -140,6 +140,14 @@ pub struct DryTest {
     #[serde(default)]
     pub duration_ms: Option<f64>,
     pub status: TestStatus,
+    /// How a failed test failed: `assertion`, `error` or `timeout`. An older
+    /// companion leaves it out.
+    #[serde(default)]
+    pub failure_kind: Option<String>,
+    /// The first error of a failed test, in the shape of
+    /// [`RunTest::message`]. An older companion leaves it out.
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -379,6 +387,28 @@ mod tests {
         assert_eq!(
             result.tests[0].message, None,
             "an older companion sends no message"
+        );
+    }
+
+    #[test]
+    fn a_dry_run_result_keeps_the_error_of_a_failed_test_and_accepts_an_older_companion() {
+        let line = r#"{"v":1,"id":2,"type":"dry_run_result","tests":[{"test_id":"t::a","file":"t","status":"fail","failure_kind":"assertion","message":"AssertionError: expected 1 to be 2\n    at t:3:5"},{"test_id":"t::b","file":"t","status":"fail"}]}"#;
+        let Response::DryRun(result) = decode_response(line, 1, 2, "dry_run_result").unwrap()
+        else {
+            panic!("expected a dry run result");
+        };
+        assert_eq!(result.tests[0].failure_kind.as_deref(), Some("assertion"));
+        assert_eq!(
+            result.tests[0].message.as_deref(),
+            Some("AssertionError: expected 1 to be 2\n    at t:3:5")
+        );
+        assert_eq!(
+            (
+                result.tests[1].failure_kind.as_deref(),
+                result.tests[1].message.as_deref()
+            ),
+            (None, None),
+            "an older companion sends no failure fields"
         );
     }
 

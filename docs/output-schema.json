@@ -33839,7 +33839,7 @@
             "string",
             "null"
           ],
-          "description": "The error message, for an error outside a test, or the reason for a\ntest that did not pass in the dry run of a restarted companion."
+          "description": "The error message. For an error outside a test, the error. For a test\nthat failed in the first dry run, the first error of the test. For a\ntest that failed in a control run or in the dry run of a restarted\ncompanion, the reason, then `: ` and the first error of the test. A\ntest error has its name and message on the first line and the stack\nframes of the project after it. Absent for a test of the first dry\nrun when the companion sent no error."
         },
         "mutant_ids": {
           "type": "array",

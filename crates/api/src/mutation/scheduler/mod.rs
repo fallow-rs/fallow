@@ -34,7 +34,8 @@ use stored::{FirstRuns, job_key, journal_first_run, journal_retry, record_stored
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
-    ControlVerdict, FailedTest, control_fault, first_line, sorted_tests,
+    ControlVerdict, FailedTest, bounded_test_error, control_fault, first_line,
+    note_control_failures, note_restarted_baseline_failure, sorted_tests,
 };
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
@@ -155,11 +156,6 @@ pub struct BaselineFailure {
     /// the self-check.
     pub mutant_ids: Vec<String>,
 }
-
-/// The message of a covering test that did not pass in the dry run of a
-/// restarted companion.
-const RESTARTED_DRY_RUN_FAILURE: &str =
-    "the test did not pass in the dry run of a restarted companion";
 
 /// An error that did not stop the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -562,6 +558,11 @@ impl<'a> Worker<'a> {
             };
             match link.request(&request, self.dry_run_timeout) {
                 Ok(Response::DryRun(result)) => {
+                    for test in &result.tests {
+                        if let (TestStatus::Fail, Some(error)) = (test.status, &test.message) {
+                            self.memo.note_restarted_dry_run_error(&test.test_id, error);
+                        }
+                    }
                     self.known_tests = result
                         .tests
                         .into_iter()
@@ -1068,7 +1069,7 @@ fn read_dry_run(
             TestStatus::Fail => baseline.push(BaselineFailure {
                 file: Some(test.file.clone()),
                 test_id: Some(test.test_id.clone()),
-                message: None,
+                message: test.message.as_deref().and_then(bounded_test_error),
                 mutant_ids: Vec::new(),
             }),
             TestStatus::Pass if !excluded_files.contains(&test.file) => {
@@ -1448,7 +1449,13 @@ fn run_phase(
     Ok((phase.attempts.into_inner().unwrap_or_default(), workers))
 }
 
-fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt: Attempt) {
+fn record(
+    outcome: &mut ScheduleOutcome,
+    facts: &DryRunFacts,
+    memo: &ControlMemo,
+    job: Job,
+    attempt: Attempt,
+) {
     if let Some(issue) = attempt.issue {
         outcome.issues.push(issue);
     }
@@ -1457,7 +1464,7 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
     let partial_survivor =
         attempt.status == MutantStatus::Survived && !attempt.dropped_tests.is_empty();
     for test in attempt.dropped_tests {
-        note_restarted_baseline_failure(outcome, facts, test, &job.id);
+        note_restarted_baseline_failure(outcome, facts, memo, test, &job.id);
     }
     // `job.tests` is in measured fastest-first order. The report must not
     // depend on durations, so it lists the covering tests by id. A survivor
@@ -1509,30 +1516,6 @@ fn retry_status(first: MutantStatus, job: &Job, retry: &Attempt) -> MutantStatus
     } else {
         retried_status(first, retry.status)
     }
-}
-
-/// Records `test` as a baseline failure of a restarted companion that
-/// affected `mutant_id`. The mutant ran with its other covering tests.
-fn note_restarted_baseline_failure(
-    outcome: &mut ScheduleOutcome,
-    facts: &DryRunFacts,
-    test: String,
-    mutant_id: &str,
-) {
-    if let Some(failure) = outcome
-        .baseline_failures
-        .iter_mut()
-        .find(|failure| failure.test_id.as_deref() == Some(test.as_str()))
-    {
-        failure.mutant_ids.push(mutant_id.to_owned());
-        return;
-    }
-    outcome.baseline_failures.push(BaselineFailure {
-        file: facts.passing.get(&test).map(|(file, _)| file.clone()),
-        test_id: Some(test),
-        message: Some(RESTARTED_DRY_RUN_FAILURE.to_owned()),
-        mutant_ids: vec![mutant_id.to_owned()],
-    });
 }
 
 /// The hint for a setup watchdog fault of a restarted companion. The run
@@ -1720,6 +1703,7 @@ const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatu
 fn record_first_runs(
     outcome: &mut ScheduleOutcome,
     facts: &DryRunFacts,
+    memo: &ControlMemo,
     attempts: Vec<(Job, Attempt)>,
 ) -> (Vec<Job>, FxHashMap<String, MutantAttempt>) {
     let mut suspects = Vec::new();
@@ -1734,7 +1718,7 @@ fn record_first_runs(
             first_runs.insert(job.id.clone(), attempt_record(&attempt));
             suspects.push(suspect);
         }
-        record(outcome, facts, job, attempt);
+        record(outcome, facts, memo, job, attempt);
     }
     (suspects, first_runs)
 }
@@ -1801,6 +1785,7 @@ fn retry_suspects(
         record(
             outcome,
             facts,
+            runner.memo,
             job,
             Attempt {
                 status,
@@ -1852,26 +1837,6 @@ fn drop_failed_tests(facts: &mut DryRunFacts, failed: &[FailedTest]) {
     }
     facts.covering.retain(|_, tests| !tests.is_empty());
     facts.baseline.sort();
-}
-
-/// Adds each test that failed in a control run during the mutant runs as a
-/// baseline failure. [`record`] then adds the mutants that ran without it.
-fn note_control_failures(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, memo: &ControlMemo) {
-    for (test, message) in memo.failed() {
-        if outcome
-            .baseline_failures
-            .iter()
-            .any(|failure| failure.test_id.as_deref() == Some(test.as_str()))
-        {
-            continue;
-        }
-        outcome.baseline_failures.push(BaselineFailure {
-            file: facts.passing.get(&test).map(|(file, _)| file.clone()),
-            test_id: Some(test),
-            message: Some(message),
-            mutant_ids: Vec::new(),
-        });
-    }
 }
 
 /// The issue tracker that the self-check error names.
@@ -2114,7 +2079,7 @@ pub fn run_schedule_with_progress(
     outcome.workers = workers;
     outcome.timings.mutants = mutants_started.elapsed();
     note_control_failures(&mut outcome, &facts, &memo);
-    let (suspects, first_runs) = record_first_runs(&mut outcome, &facts, attempts);
+    let (suspects, first_runs) = record_first_runs(&mut outcome, &facts, &memo, attempts);
     if !suspects.is_empty() {
         let retry_started = Instant::now();
         retry_suspects(runner, &facts, suspects, first_runs, &mut outcome)?;

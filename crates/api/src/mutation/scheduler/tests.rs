@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use super::super::protocol::{DryTest, Reloaded, RemoteError, RunTest, UnhandledError};
+use super::control::split_control_run_failure;
 use super::*;
 
 type Script = dyn Fn(usize, &Request) -> Result<Response, LinkFault> + Send + Sync;
@@ -162,6 +163,8 @@ fn test(id: &str, duration: f64, status: TestStatus) -> DryTest {
         file: "test/a.test.ts".to_owned(),
         duration_ms: Some(duration),
         status,
+        failure_kind: None,
+        message: None,
     }
 }
 
@@ -993,6 +996,8 @@ fn baseline_failures_never_decide_a_mutant() {
                     file: "test/b.test.ts".to_owned(),
                     duration_ms: Some(1.0),
                     status: TestStatus::Pass,
+                    failure_kind: None,
+                    message: None,
                 },
             ],
             hits: BTreeMap::from([
@@ -1125,6 +1130,8 @@ fn a_module_level_mutant_with_static_and_test_hits_runs_static_importer_tests() 
                 file: "test/b.test.ts".to_owned(),
                 duration_ms: Some(5.0),
                 status: TestStatus::Pass,
+                failure_kind: None,
+                message: None,
             });
             dry.hits.insert(dry_test.clone(), vec!["m0".to_owned()]);
             dry.static_hits = vec!["m0".to_owned()];
@@ -1636,6 +1643,117 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
                 "the test did not pass in the dry run of a restarted companion".to_owned()
             ),
             mutant_ids: vec!["m2".to_owned(), "m3".to_owned()],
+        }]
+    );
+}
+
+/// A failed dry-run test with the error that the companion sent.
+fn failed_test(id: &str, error: &str) -> DryTest {
+    DryTest {
+        failure_kind: Some("assertion".to_owned()),
+        message: Some(error.to_owned()),
+        ..test(id, 3.0, TestStatus::Fail)
+    }
+}
+
+/// The baseline failure of a covering test that fails in the dry run of a
+/// respawned companion keeps the error of the test after the fixed reason,
+/// the same shape as a control-run failure. The first error of a test stays
+/// when a later companion gives another error.
+#[test]
+fn a_respawned_dry_run_failure_keeps_the_error_of_the_test() {
+    let dry = |index: usize| DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            match index {
+                0 => test("t2", 3.0, TestStatus::Pass),
+                1 => failed_test(
+                    "t2",
+                    "AssertionError: RESTARTED: expected '2' to be '1'\n    at test/a.test.ts:13:49",
+                ),
+                _ => failed_test("t2", "AssertionError: a later error"),
+            },
+        ],
+        hits: BTreeMap::from([
+            (tid("t1"), vec!["m1".to_owned(), "m2".to_owned()]),
+            (tid("t2"), vec!["m2".to_owned(), "m3".to_owned()]),
+        ]),
+        static_hits: Vec::new(),
+        file_hits: None,
+        unhandled_errors: Vec::new(),
+        unloaded_paths: Vec::new(),
+        file_setup_ms: BTreeMap::new(),
+    };
+    let spawner = FakeSpawner::new(script(dry, |_, run| {
+        match run.mutant_id.as_deref().unwrap_or_default() {
+            "m1" => Err(LinkFault::Timeout),
+            _ => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        }
+    }));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m3"), MutantStatus::RuntimeError);
+    assert_eq!(
+        outcome.baseline_failures,
+        vec![BaselineFailure {
+            file: Some("test/a.test.ts".to_owned()),
+            test_id: Some(tid("t2")),
+            message: Some(
+                "the test did not pass in the dry run of a restarted companion: AssertionError: RESTARTED: expected '2' to be '1'\n    at test/a.test.ts:13:49"
+                    .to_owned()
+            ),
+            mutant_ids: vec!["m2".to_owned(), "m3".to_owned()],
+        }]
+    );
+    let message = outcome.baseline_failures[0].message.as_deref().unwrap();
+    assert_eq!(
+        split_control_run_failure(message),
+        Some((
+            "the test did not pass in the dry run of a restarted companion",
+            "AssertionError: RESTARTED: expected '2' to be '1'\n    at test/a.test.ts:13:49"
+        )),
+        "the human footer splits the reason from the test error"
+    );
+}
+
+/// A test that fails in the first dry run keeps the error that the
+/// companion sent, so the report shows why it fails.
+#[test]
+fn a_first_dry_run_failure_keeps_the_error_of_the_test() {
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            tests: vec![
+                failed_test(
+                    "t1",
+                    "AssertionError: expected 1 to be 2\n    at test/a.test.ts:3:5",
+                ),
+                test("t2", 3.0, TestStatus::Pass),
+            ],
+            hits: BTreeMap::from([
+                (tid("t1"), vec!["m1".to_owned()]),
+                (tid("t2"), vec!["m2".to_owned()]),
+            ]),
+            static_hits: Vec::new(),
+            file_hits: None,
+            unhandled_errors: Vec::new(),
+            unloaded_paths: Vec::new(),
+            file_setup_ms: BTreeMap::new(),
+        },
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(1)).expect("run");
+
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Killed);
+    assert_eq!(
+        outcome.baseline_failures,
+        vec![BaselineFailure {
+            file: Some("test/a.test.ts".to_owned()),
+            test_id: Some(tid("t1")),
+            message: Some(
+                "AssertionError: expected 1 to be 2\n    at test/a.test.ts:3:5".to_owned()
+            ),
+            mutant_ids: Vec::new(),
         }]
     );
 }
@@ -2646,6 +2764,8 @@ fn two_file_dry() -> DryRunResult {
                 file: "test/b.test.ts".to_owned(),
                 duration_ms: Some(3.0),
                 status: TestStatus::Pass,
+                failure_kind: None,
+                message: None,
             },
         ],
         hits: BTreeMap::from([(tid("t1"), vec!["m1".to_owned()])]),
