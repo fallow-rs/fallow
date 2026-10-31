@@ -2396,7 +2396,9 @@ test("Miri runs the three crates in parallel with the same test selection", () =
   const toolchain = 'cargo +"$MIRI_TOOLCHAIN" miri test';
   for (const command of [
     `${toolchain} -p fallow-types --lib --tests -- --skip proptests`,
-    `${toolchain} -p fallow-graph --lib --tests -- --skip proptests`,
+    `${toolchain} -p fallow-graph --lib --tests -- "\${graph_shard_1[@]}" --skip proptests`,
+    `${toolchain} -p fallow-graph --lib --tests -- "\${graph_shard_2[@]}" --skip proptests`,
+    `${toolchain} -p fallow-graph --lib --tests -- "\${graph_shard_3[@]}" --skip proptests`,
     `${toolchain} -p fallow-extract --lib --tests css:: -- --skip sfc_css::`,
     `${toolchain} -p fallow-extract --lib --tests css_classes::`,
     `${toolchain} -p fallow-extract --lib --tests css_metrics::`,
@@ -2408,6 +2410,30 @@ test("Miri runs the three crates in parallel with the same test selection", () =
   for (const crate of ["fallow-types", "fallow-graph", "fallow-extract"]) {
     assert.ok(miri.includes(`${toolchain} -p ${crate} --lib --tests --no-run`));
   }
+  // Shard 3 skips every filter of shards 1 and 2, so each fallow-graph test
+  // runs in exactly one shard and a new module cannot fall out of the run.
+  assert.ok(
+    miri.includes(
+      'for filter in "${graph_shard_1[@]}" "${graph_shard_2[@]}"; do graph_shard_3+=(--skip "$filter"); done',
+    ),
+    "the last fallow-graph shard must skip exactly the filters of the other shards",
+  );
+  assert.match(miri, /^ {10}graph_shard_3=\(\)$/m);
+  // A filter matches a substring, so a filter inside another filter runs the
+  // same tests in shards 1 and 2.
+  const filters = ["graph_shard_1", "graph_shard_2"].flatMap((name) =>
+    miri.match(new RegExp(`^ {10}${name}=\\(([^)]+)\\)$`, "m"))[1].split(" "),
+  );
+  for (const filter of filters) {
+    const others = filters.filter((other) => other !== filter && other.includes(filter));
+    assert.deepEqual(others, [], `fallow-graph shard filter ${filter} overlaps ${others}`);
+  }
+  assert.ok(
+    miri.includes(
+      "crates=(fallow-types fallow-graph-1 fallow-graph-2 fallow-graph-3 fallow-extract)",
+    ),
+    "Miri must start every unit",
+  );
   const extract = miri.slice(
     miri.indexOf("fallow-extract)"),
     miri.indexOf(";;", miri.indexOf("fallow-extract)")),
