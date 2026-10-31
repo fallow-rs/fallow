@@ -91,6 +91,7 @@ jobs:
             # trigger the gate:
             #   - crates/types/src/                       (analysis and base payload types)
             #   - crates/output/src/                      (health, action, and envelope wire shapes)
+            #   - crates/report-protocol/src/             (error document and gate outcome wire shapes)
             #   - crates/api/src/                         (programmatic and attribution wrappers)
             #   - crates/cli/src/bin/schema_emit.rs       (derived definition registry and schema assembly)
             #   - crates/config/src/config/              (FallowConfig + RulesConfig + presets, source of schema.json)

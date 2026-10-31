@@ -18,6 +18,8 @@ Use this file for a fast architectural map before editing or reviewing.
   security orchestration, and typed results.
 - `crates/output/`: typed output contracts, envelopes, schemas, and integration
   helpers.
+- `crates/report-protocol/`: language-neutral report contract (error document,
+  gate outcomes, exit codes). It depends on no workspace crate.
 - `crates/api/`: workspace programmatic facade and typed run entry points.
 - `crates/cli/`: CLI commands, fixes, terminal output, and format dispatch.
 - `crates/lsp/`: diagnostics, code actions, code lens, and hover.

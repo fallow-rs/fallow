@@ -16,6 +16,7 @@ The core crates are:
 | Crate | Role |
 | --- | --- |
 | `fallow-types` | Shared typed contracts, issue metadata, suppressions, and envelope data. |
+| `fallow-report-protocol` | Language-neutral report contract: the JSON error document, gate outcome types, exit codes, and the wire version. It depends on no workspace crate and on no JavaScript type. |
 | `fallow-config` | Config loading and typed configuration. |
 | `fallow-process` | Shared child-process lifecycle and process-tree termination. |
 | `fallow-mutation` | Pure mutant site discovery, mutant ids, and mutation-switching instrumentation. It depends only on Oxc crates. |
@@ -36,6 +37,8 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
 - Foundation and analysis crates must not depend on protocol adapters.
 - `fallow-process` is an independent infrastructure foundation. It must not
   depend on another workspace crate.
+- `fallow-report-protocol` depends on no workspace crate and no JS type. Other
+  fallow tools use it, so a JavaScript-specific type must not move into it.
 - `fallow-core` is a backend implementation crate, not a supported embedder
   surface. `fallow-engine` owns the adapter boundary and is the only product
   crate that may depend on it directly.
