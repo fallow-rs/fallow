@@ -808,15 +808,20 @@ fn cli_exit_body(
         let complete_required =
             type_aware_complete_required || type_aware_output_requires_complete(stdout);
         if complete_required && type_aware_evidence_is_incomplete(stdout) {
-            if stdout.is_empty() {
-                return Err(serde_json::json!({
+            if stdout.is_empty() || serde_json::from_str::<serde_json::Value>(stdout).is_err() {
+                // A plain-text format (`inspect --format compact`) has no
+                // envelope, so the typed body carries the text as `output`.
+                let mut body = serde_json::json!({
                     "error": true,
                     "message": "type-aware completeness was required, but the semantic query was incomplete",
                     "exit_code": 1,
                     "code": "FALLOW_TYPE_AWARE_INCOMPLETE",
                     "context": "analysis.typeAware",
-                })
-                .to_string());
+                });
+                if !stdout.is_empty() {
+                    body["output"] = serde_json::Value::from(stdout);
+                }
+                return Err(body.to_string());
             }
             return Err(stdout.to_string());
         }
@@ -845,6 +850,16 @@ fn type_aware_complete_required(args: &[String]) -> bool {
     args.windows(2)
         .any(|pair| pair == ["--type-aware-require", "complete"])
         || is_semantic_dead_code_trace(args)
+        || is_compact_inspect(args)
+}
+
+/// `inspect` exits 1 only when type-aware evidence was required complete and
+/// is not (`run_inspect` in the CLI). The JSON envelope shows the requirement,
+/// but the compact text does not, and the requirement can come from the
+/// config. So exit 1 of a compact inspect run is the requirement.
+fn is_compact_inspect(args: &[String]) -> bool {
+    args.first().is_some_and(|command| command == "inspect")
+        && args.windows(2).any(|pair| pair == ["--format", "compact"])
 }
 
 /// `dead-code --trace` and `dead-code --symbol-impact` exit 1 only when
@@ -1175,6 +1190,41 @@ mod completeness_tests {
         let result = cli_exit_result(1, &output, "", false);
 
         assert_eq!(result.is_error, Some(false));
+    }
+
+    #[test]
+    fn compact_inspect_exit_one_is_a_typed_completeness_error() {
+        let args: Vec<String> = [
+            "inspect", "--format", "compact", "--quiet", "--file", "a.ts",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        assert!(type_aware_complete_required(&args));
+
+        let text = "fallow a.ts\nfinding unused-export a.ts:1 `a` is never imported";
+        let result = cli_exit_result(1, text, "", type_aware_complete_required(&args));
+
+        assert_eq!(result.is_error, Some(true));
+        let Some(ContentBlock::Text(body)) = result.content.first() else {
+            panic!("text content");
+        };
+        let body: serde_json::Value = serde_json::from_str(&body.text).unwrap();
+        assert_eq!(body["code"], "FALLOW_TYPE_AWARE_INCOMPLETE");
+        assert_eq!(body["exit_code"], 1);
+        assert_eq!(body["output"], text);
+
+        let ok = cli_exit_result(0, text, "", type_aware_complete_required(&args));
+        assert_eq!(ok.is_error, Some(false));
+    }
+
+    #[test]
+    fn json_inspect_exit_one_is_not_required_from_the_arguments() {
+        let args: Vec<String> = ["inspect", "--format", "json", "--quiet", "--file", "a.ts"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(!type_aware_complete_required(&args));
     }
 
     #[test]

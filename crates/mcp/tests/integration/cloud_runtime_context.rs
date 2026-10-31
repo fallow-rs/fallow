@@ -282,7 +282,7 @@ fn the_scoped_cloud_tools_refuse_without_a_key() {
 }
 
 /// The JSON body of a `tools/call` result, parsed out of its text content.
-fn tool_payload(result: &serde_json::Value) -> serde_json::Value {
+pub fn tool_payload(result: &serde_json::Value) -> serde_json::Value {
     let text = result["content"][0]["text"]
         .as_str()
         .unwrap_or_else(|| panic!("text content: {result}"));
@@ -291,7 +291,7 @@ fn tool_payload(result: &serde_json::Value) -> serde_json::Value {
 
 /// A single-request HTTP server standing in for Fallow Cloud. Returns its base
 /// URL, the captured request, and the thread to join once the call is done.
-fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHandle<()>) {
+pub fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub cloud");
     let addr = listener.local_addr().expect("stub cloud address");
     let request = Arc::new(Mutex::new(String::new()));
@@ -353,7 +353,7 @@ fn workspace_root() -> PathBuf {
 
 /// The built `fallow-mcp` binary as a child process, spoken to over the stdio
 /// transport's newline-delimited JSON-RPC.
-struct McpServer {
+pub struct McpServer {
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
@@ -364,7 +364,7 @@ impl McpServer {
     /// Start a server that reaches `api_endpoint` as Fallow Cloud and holds an
     /// API key, or, with `None`, one with neither, which is the shape the
     /// refusal path needs.
-    fn start(api_endpoint: Option<&str>) -> Self {
+    pub fn start(api_endpoint: Option<&str>) -> Self {
         let mut command = Self::command();
         match api_endpoint {
             Some(endpoint) => {
@@ -458,7 +458,7 @@ impl McpServer {
         self.response(id)["result"]["tools"].clone()
     }
 
-    fn call_tool(&mut self, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+    pub fn call_tool(&mut self, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
         let id = self.request(&serde_json::json!({
             "method": "tools/call",
             "params": { "name": name, "arguments": arguments }

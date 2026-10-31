@@ -535,6 +535,9 @@ async fn e2e_inspect_target_file_returns_evidence_bundle() {
             type_aware_require: None,
             symbol_chain: None,
             include_churn: None,
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         },
     )
@@ -581,6 +584,9 @@ async fn e2e_inspect_target_symbol_returns_symbol_and_file_evidence() {
             type_aware_require: None,
             symbol_chain: None,
             include_churn: None,
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         },
     )

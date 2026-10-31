@@ -200,6 +200,29 @@ const IMPACT_CLOSURE_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
     detail: r"Each coordination gap carries `search_visibility`, `reason`, and `search_as` for the consumed symbols. When a consumer uses more than one symbol, the worst level wins: `missed`, then `renamed`, then `found`. `search_symbol` names the entry of `consumed_symbols` that the three fields describe, `default` for a default export. The levels and reasons are the same as for `trace_export`: read fallow://tools/trace_export for their meaning.",
 }];
 
+const INSPECT_TARGET_SECTIONS: &[ToolGuideSection] = &[
+    ToolGuideSection {
+        topic: "cloud",
+        summary: "What cloud=true adds, where the key comes from, and the section statuses.",
+        detail: r"Set `cloud: true` on a file target to add `evidence.cloud`, the same section as `fallow inspect --file <path> --cloud`. The tool refuses `cloud: true` with a symbol target, and `repo` without `cloud: true`. The call sends the repository and the file path to Fallow Cloud. The key never travels in a tool call: the CLI that the tool runs reads `FALLOW_API_KEY` in the MCP server environment, else the key that `fallow cloud login` stored on the machine. `repo` (`owner/repo`) wins over `FALLOW_REPO` in the server environment, which wins over the `origin` git remote.
+
+The section `status` is one of these values:
+
+- `ok`: `functions[]` pairs each local function with its deployed function (`match` is `stable_id` or `name_ordinal`) and carries state, calls, error groups, CPU milliseconds per hour and never-run branch ranges. `unpaired_local[]` lists local functions without a pair in this read. Each entry has a `note`. A function without a pair can still have production data when the cloud withheld never_called rows or cut its answer to fit a size limit; `message` then says so.
+- `no_key`: no key, or the cloud refused the key. Run `fallow cloud login`, or set `FALLOW_API_KEY` and restart the server.
+- `plan_required`: the organization of the key has no plan that includes production data.
+- `unavailable`: the cloud did not answer, or the repository is unknown or cannot be resolved. The read has one attempt and a 2 second limit.
+- `untracked`: the cloud has no production data for this file.
+
+A status other than `ok` does not fail the call: `isError` stays false, and the cloud status does not change the other evidence sections. Read the `status` of each section on its own. A `null` count means not measured, never zero.",
+    },
+    ToolGuideSection {
+        topic: "format",
+        summary: "When to ask for the compact text instead of the JSON bundle.",
+        detail: r#"`format: "compact"` returns the plain text of `fallow inspect --format compact`: about 1 KB, one line per item, no JSON. The lines are a `fallow <path>` header, `finding <kind> <path:line> <text>`, `prod <name:line> <text>` for the functions with production data, `cloud <status>: <text>` for a status other than `ok`, and `truncated <n> more` when the byte cap cuts lines. The text leaves out the trace, the impact closure, scopes, warnings and identities. Use it to put a short summary into the context, and use the default `json` when the next step reads fields. When the run requires complete type-aware evidence and does not get it, the call fails with `code: "FALLOW_TYPE_AWARE_INCOMPLETE"` and the text in `output`."#,
+    },
+];
+
 const AUDIT_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
         topic: "diff_risk",
@@ -293,6 +316,10 @@ pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
         tool: "impact_closure",
         sections: IMPACT_CLOSURE_SECTIONS,
+    },
+    ToolGuide {
+        tool: "inspect_target",
+        sections: INSPECT_TARGET_SECTIONS,
     },
 ];
 

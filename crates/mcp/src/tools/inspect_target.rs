@@ -1,7 +1,7 @@
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
-use crate::params::{InspectTarget, InspectTargetParams};
+use crate::params::{InspectFormatParam, InspectTarget, InspectTargetParams};
 
 use super::{
     push_global, push_remote_extends, push_scope, require_non_empty, run_tool_with_limit,
@@ -24,13 +24,16 @@ pub async fn inspect_target(
 }
 
 fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, String> {
+    let format = params.format.unwrap_or(InspectFormatParam::Json);
     let mut args = vec![
         "inspect".to_string(),
         "--format".to_string(),
-        "json".to_string(),
+        format.as_cli().to_string(),
         "--quiet".to_string(),
-        "--explain".to_string(),
     ];
+    if format == InspectFormatParam::Json {
+        args.push("--explain".to_string());
+    }
     push_global(
         &mut args,
         params.root.as_deref(),
@@ -71,8 +74,36 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
             }
         }
     }
+    push_cloud(&mut args, params)?;
 
     Ok(args)
+}
+
+/// Forward the OPT-IN cloud section. The CLI refuses `--cloud` with
+/// `--symbol` and `--repo` without `--cloud`, so the tool refuses the same
+/// calls before it starts a process.
+fn push_cloud(args: &mut Vec<String>, params: &InspectTargetParams) -> Result<(), String> {
+    let cloud = params.cloud == Some(true);
+    if let Some(repo) = params.repo.as_deref() {
+        if !cloud {
+            return Err("repo needs cloud: true".to_string());
+        }
+        require_non_empty("repo", repo)?;
+    }
+    if !cloud {
+        return Ok(());
+    }
+    if matches!(params.target, InspectTarget::Symbol { .. }) {
+        return Err(
+            "cloud: true needs a file target; production data is per file, not per symbol"
+                .to_string(),
+        );
+    }
+    args.push("--cloud".to_string());
+    if let Some(repo) = params.repo.as_deref() {
+        args.extend(["--repo".to_string(), repo.to_string()]);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -97,6 +128,9 @@ mod tests {
             },
             symbol_chain: None,
             include_churn: None,
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         };
 
@@ -127,6 +161,9 @@ mod tests {
             },
             symbol_chain: Some(true),
             include_churn: None,
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         };
 
@@ -157,6 +194,9 @@ mod tests {
             },
             symbol_chain: None,
             include_churn: None,
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         };
 
@@ -182,6 +222,9 @@ mod tests {
             },
             symbol_chain: Some(true),
             include_churn: None,
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         };
 
@@ -208,11 +251,117 @@ mod tests {
             },
             symbol_chain: None,
             include_churn: Some(true),
+            cloud: None,
+            repo: None,
+            format: None,
             max_output_bytes: None,
         };
 
         let args = build_inspect_args(&params).unwrap();
 
         assert!(args.contains(&"--churn".to_string()));
+    }
+
+    fn file_params() -> InspectTargetParams {
+        serde_json::from_value(serde_json::json!({
+            "target": { "type": "file", "file": "src/api.ts" }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn cloud_default_off_omits_cloud_flags() {
+        let args = build_inspect_args(&file_params()).unwrap();
+
+        assert!(!args.contains(&"--cloud".to_string()));
+        assert!(!args.contains(&"--repo".to_string()));
+        assert!(args.windows(2).any(|pair| pair == ["--format", "json"]));
+        assert!(args.contains(&"--explain".to_string()));
+    }
+
+    #[test]
+    fn cloud_opt_in_forwards_cloud_and_repo_for_a_file_target() {
+        let mut params = file_params();
+        params.cloud = Some(true);
+        params.repo = Some("acme/app".to_string());
+
+        let args = build_inspect_args(&params).unwrap();
+
+        assert!(args.contains(&"--cloud".to_string()));
+        assert!(args.windows(2).any(|pair| pair == ["--repo", "acme/app"]));
+    }
+
+    #[test]
+    fn cloud_with_a_symbol_target_is_refused() {
+        let mut params: InspectTargetParams = serde_json::from_value(serde_json::json!({
+            "target": { "type": "symbol", "file": "src/api.ts", "export_name": "loadUser" },
+            "cloud": true
+        }))
+        .unwrap();
+
+        let error = build_inspect_args(&params).unwrap_err();
+        assert!(error.contains("file target"), "{error}");
+
+        params.cloud = Some(false);
+        assert!(build_inspect_args(&params).is_ok());
+    }
+
+    #[test]
+    fn repo_without_cloud_is_refused() {
+        let mut params = file_params();
+        params.repo = Some("acme/app".to_string());
+
+        let error = build_inspect_args(&params).unwrap_err();
+        assert_eq!(error, "repo needs cloud: true");
+    }
+
+    #[test]
+    fn empty_repo_is_refused() {
+        let mut params = file_params();
+        params.cloud = Some(true);
+        params.repo = Some("  ".to_string());
+
+        let error = build_inspect_args(&params).unwrap_err();
+        assert_eq!(error, "repo must not be empty");
+    }
+
+    #[test]
+    fn compact_format_forwards_compact_without_explain() {
+        let mut params = file_params();
+        params.format = Some(InspectFormatParam::Compact);
+
+        let args = build_inspect_args(&params).unwrap();
+
+        assert!(args.windows(2).any(|pair| pair == ["--format", "compact"]));
+        assert!(!args.contains(&"--explain".to_string()));
+    }
+
+    /// The config can require complete type-aware evidence, and the compact
+    /// text cannot show it, so exit 1 of every compact call is an error.
+    #[test]
+    fn compact_symbol_call_reads_exit_one_as_the_completeness_error() {
+        let mut params: InspectTargetParams = serde_json::from_value(serde_json::json!({
+            "target": { "type": "symbol", "file": "src/api.ts", "export_name": "loadUser" },
+            "format": "compact"
+        }))
+        .unwrap();
+        let args = build_inspect_args(&params).unwrap();
+        assert!(super::super::type_aware_complete_required(&args));
+
+        params.format = None;
+        let args = build_inspect_args(&params).unwrap();
+        assert!(
+            !super::super::type_aware_complete_required(&args),
+            "the JSON envelope shows the requirement itself"
+        );
+    }
+
+    #[test]
+    fn unknown_format_is_rejected_by_the_schema() {
+        let result: Result<InspectTargetParams, _> = serde_json::from_value(serde_json::json!({
+            "target": { "type": "file", "file": "src/api.ts" },
+            "format": "sarif"
+        }));
+        assert!(result.is_err());
     }
 }

@@ -836,9 +836,47 @@ pub struct InspectTargetParams {
     /// never a focus-map / ranking input.
     pub symbol_chain: Option<bool>,
 
+    /// OPT-IN (default off): attach the Fallow Cloud `cloud` evidence section
+    /// for a FILE target: production data per local function. The CLI reads
+    /// the key: `FALLOW_API_KEY` in the server environment, else the key that
+    /// `fallow cloud login` stored. The section `status` is `ok`, `no_key`,
+    /// `plan_required`, `unavailable` or `untracked`. A status other than `ok`
+    /// does not fail the call. Refused for a symbol target.
+    pub cloud: Option<bool>,
+
+    /// Fallow Cloud repository for `cloud`, as `owner/repo`. Needs
+    /// `cloud: true`. Precedence: this value, then `FALLOW_REPO` in the server
+    /// environment, then the `origin` git remote.
+    pub repo: Option<String>,
+
+    /// Response format: `json` (default) returns the evidence bundle.
+    /// `compact` returns the plain text of `fallow inspect --format compact`:
+    /// about 1 KB, one line per item, and no JSON.
+    pub format: Option<InspectFormatParam>,
+
     /// Byte cap for this call's response. Lowers the 16 MiB default; over it
     /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
+}
+
+/// Response format of the `inspect_target` tool.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InspectFormatParam {
+    /// The JSON evidence bundle.
+    Json,
+    /// The plain text of `fallow inspect --format compact`.
+    Compact,
+}
+
+impl InspectFormatParam {
+    /// The value of the CLI `--format` flag.
+    pub const fn as_cli(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Compact => "compact",
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]

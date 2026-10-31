@@ -1498,7 +1498,7 @@ Every finding also carries an agent-actionable `candidate { source_kind, sink, b
 
 ## `inspect`: Target Evidence Bundle
 
-Compose one evidence bundle before editing a file or exported symbol. This is the CLI equivalent of the MCP `inspect_target` tool.
+Compose one evidence bundle before editing a file or exported symbol. This is the CLI equivalent of the MCP `inspect_target` tool. The MCP tool takes `cloud: true` for `--cloud`, `repo` for `--repo`, and `format: "compact"` for `--format compact`.
 
 ### Usage
 
