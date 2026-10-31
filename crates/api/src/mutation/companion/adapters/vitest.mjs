@@ -208,15 +208,25 @@ const resolveConfigPath = (init) => {
   return configPath;
 };
 
+/**
+ * Starts Vitest as the Vitest CLI does from the project root. The process
+ * goes to the project root first, and the options do not set `root`. A
+ * `root` option is a CLI override: it replaces the `root` and `test.root` of
+ * the config, so a config with its own root lists no test files. Without the
+ * option, Vitest finds the config from the working directory, resolves a
+ * relative config root against it, and uses it as the root when the config
+ * sets none. The protocol paths stay relative to `init.root`, because the
+ * adapter maps each path from its absolute module id.
+ */
 const createVitestInstance = async ({ createVitest, version, init, plugin }) => {
   const configPath = resolveConfigPath(init);
+  process.chdir(init.root);
   try {
     // Vitest 4 crashes on an empty reporter list, so one empty reporter
     // object keeps the console quiet on both majors.
     return await createVitest(
       "test",
       {
-        root: init.root,
         config: configPath,
         watch: false,
         reporters: [{}],

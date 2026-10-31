@@ -871,6 +871,11 @@ fallow mutation src/math.ts --runner-config vitest.integration.config.mjs
 - Only the Vitest adapter reads a config file. With the `node-test` or
   `bun-test` runner, a selected config exits with code 2.
 - Without a selection, Vitest finds its config the usual way.
+- The companion starts Vitest from the project root, as `vitest run` does
+  there. The `root` and `test.root` of the config stay in effect. A relative
+  root resolves against the project root. Test files, test ids and report
+  paths stay relative to the project root, also when the Vitest root is a
+  subdirectory.
 - The selected config sets the test files that Vitest lists. A static test
   file of the plan that the selected config does not include stays visible as
   a `test-files-not-discovered` error, and the run is `partial`.

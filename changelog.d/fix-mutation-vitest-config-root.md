@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow mutation` keeps the `root` of the selected Vitest config.** Before, the companion gave the project root to Vitest as an override, and the override replaced the `root` of the config. A config with `root: "./dashboard/"` and `include: ["src/math.test.ts"]` then listed no test files, so the run stopped with `test-files-not-discovered` while `vitest run --config` passed. Now the companion starts Vitest from the project root without the override, as the Vitest CLI does. A relative config root resolves against the project root. Test files, test ids and report paths stay relative to the project root. A config without `root` behaves as before. ([#4039](https://github.com/fallow-rs/fallow/issues/4039))
