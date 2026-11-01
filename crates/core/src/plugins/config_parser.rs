@@ -22,6 +22,8 @@ pub(crate) use multi_config::{
     extract_each_config_entries, extract_each_config_path_aliases,
     extract_each_config_require_strings, extract_each_config_shallow_strings, find_config_objects,
 };
+#[path = "config_parser_alias_constant.rs"]
+mod alias_constant;
 #[path = "config_parser_alias_entry.rs"]
 mod alias_entry;
 #[path = "config_parser_vite_plugin_call.rs"]
@@ -559,7 +561,10 @@ pub(crate) fn extract_config_array_nested_aliases_kinded(
             if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
                 && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
             {
-                results.extend(expression_to_alias_pairs_kinded(alias_expr));
+                results.extend(alias_constant::expression_to_alias_pairs_kinded(
+                    alias_expr,
+                    PathScope::Program(program),
+                ));
             }
         }
         (!results.is_empty()).then_some(results)
@@ -581,7 +586,10 @@ pub(crate) fn extract_default_export_array_aliases_kinded(
             if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
                 && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
             {
-                results.extend(expression_to_alias_pairs_kinded(alias_expr));
+                results.extend(alias_constant::expression_to_alias_pairs_kinded(
+                    alias_expr,
+                    PathScope::Program(program),
+                ));
             }
         }
         (!results.is_empty()).then_some(results)
@@ -2220,39 +2228,6 @@ fn join_path_segments(segments: &[String]) -> String {
     joined.to_string_lossy().replace('\\', "/")
 }
 
-/// Convert an alias object or `{ find, replacement }` array to alias tuples.
-///
-/// Each tuple carries a `replacement_is_bare_string_literal` flag. See
-/// [`extract_config_aliases_kinded`].
-fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, bool)> {
-    match expr {
-        Expression::ObjectExpression(obj) => obj
-            .properties
-            .iter()
-            .filter_map(|prop| {
-                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
-                    return None;
-                };
-                let find = property_key_to_string(&prop.key)?;
-                let (replacement, is_bare) =
-                    alias_replacement_kinded(&prop.value, PathScope::Bare)?;
-                Some((find, replacement, is_bare))
-            })
-            .collect(),
-        Expression::ArrayExpression(arr) => arr
-            .elements
-            .iter()
-            .filter_map(|element| {
-                let Expression::ObjectExpression(obj) = element.as_expression()? else {
-                    return None;
-                };
-                alias_entry::object_alias_pair(obj, PathScope::Bare)
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 /// Extract an alias replacement string plus whether it was written as a plain
 /// bare string literal. A bare string literal (not starting with `./`/`../`/`/`)
 /// signals a potential package-to-package alias; a path expression
@@ -2282,6 +2257,7 @@ fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(
             .iter()
             .find_map(ArrayExpressionElement::as_expression)
             .and_then(|element| alias_replacement_kinded(element, scope)),
+        Expression::Identifier(id) => alias_constant::constant_replacement(id.name.as_str(), scope),
         _ => alias_entry::path_value(expr, scope).map(|value| (value, false)),
     }
 }
