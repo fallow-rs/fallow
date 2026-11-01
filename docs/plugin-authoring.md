@@ -72,6 +72,8 @@ Supports prefix matching with a trailing `/`:
 }
 ```
 
+A plugin with neither `enablers` nor `detection` never activates. Config load prints a warning on stderr. The findings and the exit code do not change.
+
 ### `detection`
 
 Rich activation logic with boolean combinators. Takes priority over `enablers` when set.

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::{Mutex, OnceLock};
 
+use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
@@ -178,7 +180,8 @@ pub struct ExternalPluginDef {
 
     /// Package names that activate this plugin when found in package.json.
     /// Supports exact matches and prefix patterns (ending with `/`).
-    /// Only used when `detection` is not set.
+    /// Only used when `detection` is not set. A plugin with neither `detection`
+    /// nor `enablers` never activates, and config load warns.
     #[serde(default)]
     pub enablers: Vec<String>,
 
@@ -558,6 +561,18 @@ fn default_external_entry_point_role() -> EntryPointRole {
 }
 
 impl ExternalPluginDef {
+    /// The reason for a plugin with no activation condition. Config load and
+    /// `fallow plugin-check` both use it, so one state has one phrase.
+    pub const NEVER_ACTIVATES_REASON: &str =
+        "no detection or enablers declared, so the plugin can never activate";
+
+    /// Whether the plugin declares something that can activate it. An empty
+    /// `enablers` list counts as no condition.
+    #[must_use]
+    pub fn has_activation_condition(&self) -> bool {
+        self.detection.is_some() || !self.enablers.is_empty()
+    }
+
     /// Generate JSON Schema for the external plugin format.
     #[must_use]
     pub fn json_schema() -> serde_json::Value {
@@ -885,6 +900,42 @@ fn diagnose_configured_plugin_file(
             kind,
             path: path.to_path_buf(),
         });
+    }
+}
+
+/// Merge the discovered plugins with the inline `framework` entries, and warn
+/// about each plugin that can never activate.
+pub fn resolve_external_plugins(
+    root: &Path,
+    config_plugin_paths: &[String],
+    framework: Vec<ExternalPluginDef>,
+) -> Vec<ExternalPluginDef> {
+    let mut plugins = discover_external_plugins(root, config_plugin_paths);
+    plugins.extend(framework);
+    warn_on_plugins_that_never_activate(&plugins);
+    plugins
+}
+
+/// Warn once per process for each plugin name with no activation condition.
+/// Bare `fallow`, watch and the LSP resolve the config more than once.
+fn warn_on_plugins_that_never_activate(plugins: &[ExternalPluginDef]) {
+    static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+
+    for plugin in plugins {
+        if plugin.has_activation_condition() {
+            continue;
+        }
+        if let Ok(mut set) = warned.lock()
+            && !set.insert(plugin.name.clone())
+        {
+            continue;
+        }
+        tracing::warn!(
+            "plugin '{}': {}. Add one of them, then run `fallow plugin-check`.",
+            plugin.name,
+            ExternalPluginDef::NEVER_ACTIVATES_REASON,
+        );
     }
 }
 

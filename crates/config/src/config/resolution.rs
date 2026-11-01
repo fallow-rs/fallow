@@ -19,7 +19,7 @@ use super::resolve::ResolveConfig;
 use super::rules::{PartialRulesConfig, RulesConfig, Severity};
 use super::similar_code::SimilarCodeConfig;
 use super::used_class_members::UsedClassMemberRule;
-use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
+use crate::external_plugin::{ExternalPluginDef, resolve_external_plugins};
 
 use super::{
     BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreDependencyMatcher,
@@ -803,8 +803,7 @@ fn resolve_plugin_settings(
     framework: Vec<ExternalPluginDef>,
     rule_packs: &[String],
 ) -> ResolvedPluginSettings {
-    let mut external_plugins = discover_external_plugins(root, configured_plugins);
-    external_plugins.extend(framework);
+    let external_plugins = resolve_external_plugins(root, configured_plugins, framework);
 
     let configured_rule_packs = rule_packs;
     let rule_packs =

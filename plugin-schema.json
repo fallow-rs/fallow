@@ -21,7 +21,7 @@
       "default": null
     },
     "enablers": {
-      "description": "Package names that activate this plugin when found in package.json.\nSupports exact matches and prefix patterns (ending with `/`).\nOnly used when `detection` is not set.",
+      "description": "Package names that activate this plugin when found in package.json.\nSupports exact matches and prefix patterns (ending with `/`).\nOnly used when `detection` is not set. A plugin with neither `detection`\nnor `enablers` never activates, and config load warns.",
       "type": "array",
       "items": {
         "type": "string"

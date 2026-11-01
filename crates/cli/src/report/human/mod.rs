@@ -193,6 +193,10 @@ fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static
             "Dependencies only used for type imports; consider moving to devDependencies",
             "https://fallow.tools/docs/explanations/dead-code/#type-only-dependencies",
         )),
+        t if t.starts_with("Dev dependencies used in production") => Some((
+            "A runtime entry point imports these devDependencies; for a tool script, use a support entry",
+            "https://fallow.tools/docs/explanations/dead-code/#dev-dependencies-in-production",
+        )),
         _ => None,
     }
 }
@@ -819,6 +823,7 @@ mod tests {
         "Unused dependency overrides",
         "Misconfigured dependency overrides",
         "Type-only dependencies",
+        "Dev dependencies used in production (consider moving to dependencies)",
         "Invalid client exports",
         "Mixed client/server barrels",
         "Misplaced directives",
