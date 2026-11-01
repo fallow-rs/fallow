@@ -993,6 +993,13 @@ pub(crate) struct ModuleInfoExtractor {
     loop_string_bindings: Vec<FxHashMap<String, Vec<String>>>,
     loop_object_property_values: Vec<FxHashMap<String, FxHashMap<String, Vec<String>>>>,
     package_resolution_function_args: FxHashMap<String, usize>,
+    /// Other local names of `createRequire` from `node:module`.
+    create_require_aliases: FxHashSet<String>,
+    /// Module-level bindings of `createRequire(<this file>)`.
+    module_require_aliases: FxHashSet<String>,
+    /// Per `nested_declaration_stack` frame: the bindings of
+    /// `createRequire(<this file>)` declared there.
+    scoped_require_aliases: Vec<FxHashSet<String>>,
     nested_declaration_stack: Vec<FxHashSet<String>>,
     /// Per `nested_declaration_stack` frame: the names declared there that
     /// provably hold no class instance, such as `const service = { m() {} }` or
@@ -4158,24 +4165,6 @@ pub(crate) fn extend_whole_object_uses(info: &mut ModuleInfo, extra: Vec<String>
         }
     }
     info.whole_object_uses = uses.into();
-}
-
-fn try_extract_require<'a, 'b>(
-    init: &'b Expression<'a>,
-) -> Option<(&'b CallExpression<'a>, std::borrow::Cow<'b, str>)> {
-    let Expression::CallExpression(call) = init else {
-        return None;
-    };
-    let Expression::Identifier(callee) = &call.callee else {
-        return None;
-    };
-    if callee.name != "require" {
-        return None;
-    }
-    let Some(Argument::StringLiteral(lit)) = call.arguments.first() else {
-        return None;
-    };
-    Some((call, lit.value.text()))
 }
 
 /// Collect every statically-resolvable module specifier from a dynamic

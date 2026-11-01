@@ -13,8 +13,8 @@ use crate::{
     AngularComponentFieldArrayTypeFact, AngularThisSpreadFact, ComputedEnumKeyUseFact,
     DefaultImportWholeObjectUseFact, DynamicCustomElementRenderFact, DynamicImportInfo,
     DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
-    ModuleLoadMechanism, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
-    RequiredTypeMemberFact, SemanticFact, VisibilityTag,
+    ModuleLoadMechanism, PlaywrightFixtureUseFact, ReExportInfo, RequiredTypeMemberFact,
+    SemanticFact, VisibilityTag,
     js_text::{JsText, static_name_text},
 };
 use fallow_types::extract::{
@@ -44,7 +44,7 @@ use super::{
     ROUTE_LOADER_DATA_OBJECT, SideEffectRegistrationTarget, collect_static_import_specifiers,
     extract_import_expression, extract_promise_all_elements, is_unawaited_import,
     ssr_load_module_call, ssr_load_module_source, try_extract_arrow_wrapped_import,
-    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
+    try_extract_import_then_callback, try_extract_property_callback_import,
 };
 
 #[path = "visit_impl_callback_properties.rs"]
@@ -67,6 +67,8 @@ mod visit_helpers;
 mod visit_jsx_runtime;
 #[path = "visit_impl_member_destructuring.rs"]
 mod visit_member_destructuring;
+#[path = "visit_impl_module_require.rs"]
+mod visit_module_require;
 #[path = "visit_impl_node_runtime.rs"]
 mod visit_node_runtime;
 #[path = "visit_impl_object_bindings.rs"]
@@ -1093,23 +1095,6 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn record_bare_require_call(&mut self, expr: &CallExpression<'_>) {
-        if let Expression::Identifier(ident) = &expr.callee
-            && ident.name == "require"
-            && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
-            && !self.handled_require_spans.contains(&expr.span)
-        {
-            self.require_calls.push(RequireCallInfo {
-                source: lit.value.text().into_owned(),
-                span: expr.span,
-                source_span: lit.span,
-                destructured_names: Vec::new(),
-                local_name: None,
-                is_type_only: false,
-            });
-        }
-    }
-
     fn record_whole_object_call_use(&mut self, expr: &CallExpression<'_>) {
         if let Expression::StaticMemberExpression(member) = &expr.callee
             && let Expression::Identifier(obj) = &member.object
@@ -1570,6 +1555,8 @@ impl ModuleInfoExtractor {
                 &function.params,
                 body,
                 &self.package_resolution_function_args,
+                &self.create_require_aliases,
+                &self.module_require_aliases,
             )
         {
             self.package_resolution_function_args
@@ -1695,9 +1682,7 @@ impl ModuleInfoExtractor {
                             .map(|id| id.name.to_string()),
                     );
                 }
-                for declarator in nested_scope_declarators(var) {
-                    self.record_nested_declaration_names(declarator.id.get_binding_identifiers());
-                }
+                self.record_nested_scope_declarators(var);
                 self.record_non_instance_declarators(var);
             }
             Declaration::ClassDeclaration(class) => {
@@ -2945,7 +2930,7 @@ impl<'a> ModuleInfoExtractor {
             self.record_object_binding_targets(id.name.as_str(), obj);
         }
 
-        if let Some((call, source)) = try_extract_require(init) {
+        if let Some((call, source)) = self.try_extract_require(init) {
             self.record_dompurify_require_binding(declarator, &source);
             self.record_child_process_require_binding(declarator, &source);
             self.handle_require_declaration(declarator, call, &source);
@@ -3646,6 +3631,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 || visit_factory_properties::program_has_captured_callback(program);
         self.prepare_factory_property_imports(program);
         self.record_program_namespace_import_locals(program);
+        self.record_program_module_require_names(program);
         self.record_program_spy_api_locals(program);
         self.record_program_type_aliases(program);
         self.record_program_prologue(program);
@@ -3796,6 +3782,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
+            self.scoped_require_aliases.push(FxHashSet::default());
             self.scoped_non_instance_bindings.push(FxHashSet::default());
             self.scoped_namespace_binding_names
                 .push(FxHashSet::default());
@@ -3821,6 +3808,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_require_aliases.pop();
             self.scoped_non_instance_bindings.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();

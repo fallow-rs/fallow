@@ -370,11 +370,22 @@ error by suppressing a downstream detector.
   path reference, because the consumer of the path can run the file, and
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
-- A `require` from `createRequire(import.meta.url)` or
-  `createRequire(__filename)` in any scope is the module `require`, so its
-  `require.resolve` calls count. A nested `require` with another base, a
-  parameter or another declaration shadows the module `require`
-  (`is_module_create_require_binding`).
+- `createRequire(<this file>)` gives a `require` function of this file. The
+  base is `import.meta.url`, `import.meta.filename`, `__filename` or
+  `fileURLToPath(import.meta.url)` (`is_this_file_create_require_call`). The
+  callee can be `<x>.createRequire` or another import name, such as
+  `createRequire as cr`.
+  Load and `.resolve` calls count on the inline call and on a binding of the
+  call with any name. A `.resolve` call on the inline form ignores a shadow of
+  the name `require`.
+- A nested `require` binding of that call is the module `require`, so the scope
+  does not record a shadow. A nested `require` with another base, a parameter
+  or another declaration shadows the module `require` for `.resolve` calls. A
+  nested binding with another name stays a declaration of its scope, and
+  `scoped_require_aliases` marks it for that scope only.
+- A call with another base resolves from another directory. It credits nothing,
+  except that a module-level `const require = createRequire(otherBase)` keeps
+  the plain `require` path.
 
 ## Value references and test reach
 

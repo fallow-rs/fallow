@@ -13,67 +13,21 @@ use crate::js_text::JsText;
 use fallow_types::extract::ImportLoadKind;
 
 use super::super::ModuleInfoExtractor;
+use super::visit_module_require::{REQUIRE, is_this_file_create_require_call};
 use super::{
     StaticPackageLoopBindings, for_of_binding_name, object_values_or_entries_argument_name,
 };
 
-/// The name of the CommonJS `require` function.
-const REQUIRE: &str = "require";
-
-/// Whether `expr` is `require.resolve`, by syntax only. The caller checks
-/// that no local binding shadows `require`.
-fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
+/// The object of a `<object>.resolve` callee.
+fn resolve_callee_object<'b, 'a>(expr: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
     let Expression::StaticMemberExpression(member) = expr else {
-        return false;
+        return None;
     };
-    let Expression::Identifier(object) = &member.object else {
-        return false;
-    };
-    object.name == REQUIRE && member.property.name == "resolve"
+    (member.property.name == "resolve").then_some(&member.object)
 }
 
-/// Whether `declarator` is `require = createRequire(import.meta.url)` or
-/// `require = createRequire(__filename)`, also through a member such as
-/// `module.createRequire`.
-///
-/// This `require` resolves from the file itself, the same as the module
-/// `require`, so a nested scope that declares it does not shadow the module
-/// `require`. Another base, such as `createRequire(join(dir, 'x.json'))`,
-/// resolves from another directory and stays a shadow.
-fn is_module_create_require_binding(declarator: &VariableDeclarator<'_>) -> bool {
-    let BindingPattern::BindingIdentifier(id) = &declarator.id else {
-        return false;
-    };
-    let Some(Expression::CallExpression(call)) = &declarator.init else {
-        return false;
-    };
-    let callee_is_create_require = match &call.callee {
-        Expression::Identifier(callee) => callee.name == "createRequire",
-        Expression::StaticMemberExpression(member) => member.property.name == "createRequire",
-        _ => false,
-    };
-    let [argument] = call.arguments.as_slice() else {
-        return false;
-    };
-    let base_is_this_file = match argument {
-        Argument::StaticMemberExpression(member) => {
-            matches!(member.object, Expression::ImportMeta(_)) && member.property.name == "url"
-        }
-        Argument::Identifier(base) => base.name == "__filename",
-        _ => false,
-    };
-    id.name == REQUIRE && callee_is_create_require && base_is_this_file
-}
-
-/// The declarators of `var` that a nested scope records as bindings. The
-/// `require` bindings that `is_module_create_require_binding` accepts are not
-/// in this list.
-pub(super) fn nested_scope_declarators<'b, 'a>(
-    var: &'b VariableDeclaration<'a>,
-) -> impl Iterator<Item = &'b VariableDeclarator<'a>> {
-    var.declarations
-        .iter()
-        .filter(|declarator| !is_module_create_require_binding(declarator))
+fn is_require_identifier(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::Identifier(object) if object.name == REQUIRE)
 }
 
 /// Whether `expr` is `import.meta.resolve`. Code cannot rebind `import.meta`,
@@ -337,11 +291,16 @@ impl ModuleInfoExtractor {
     /// as `function f(require) { require.resolve('./x') }`, is some other
     /// function, so its calls reference nothing. A module-level
     /// `const require = createRequire(...)` stays the module `require`: it
-    /// resolves relative to the same file. In a nested scope, only the
-    /// bindings that `is_module_create_require_binding` accepts stay the
-    /// module `require`; the scope does not record them as a shadow.
+    /// resolves relative to the same file. In a nested scope, only a binding
+    /// of `createRequire(<this file>)` stays the module `require`; the scope
+    /// does not record it as a shadow. The inline call and a binding with
+    /// another name are the same function, and a shadow of the name `require`
+    /// does not affect them.
     fn is_module_require_resolve(&self, callee: &Expression<'_>) -> bool {
-        is_require_resolve_callee(callee) && !self.nested_scope_shadows(REQUIRE)
+        resolve_callee_object(callee).is_some_and(|object| {
+            (is_require_identifier(object) && !self.nested_scope_shadows(REQUIRE))
+                || self.is_this_file_require(object)
+        })
     }
 
     pub(super) fn record_static_package_values(&mut self, name: &str, init: &Expression<'_>) {
@@ -619,6 +578,8 @@ pub(super) fn package_resolution_arg_index(
     params: &FormalParameters<'_>,
     body: &FunctionBody<'_>,
     known_helpers: &FxHashMap<String, usize>,
+    create_require_aliases: &FxHashSet<String>,
+    module_require_aliases: &FxHashSet<String>,
 ) -> Option<usize> {
     let param_names: Vec<String> = params
         .items
@@ -636,7 +597,10 @@ pub(super) fn package_resolution_arg_index(
         params: &param_set,
         known_helpers,
         matched: FxHashSet::default(),
-        require_shadow_depth: 0,
+        create_require_aliases,
+        module_require_aliases,
+        local_require_aliases: FxHashSet::default(),
+        enclosing_params: param_binding_names(params),
     };
     collector.visit_function_body(body);
 
@@ -645,45 +609,91 @@ pub(super) fn package_resolution_arg_index(
         .position(|name| collector.matched.contains(name))
 }
 
-/// Whether a parameter list binds the name `require`, also through a
-/// destructuring pattern.
+/// The names that a parameter list binds, also through a destructuring pattern.
+fn param_binding_names(params: &FormalParameters<'_>) -> Vec<String> {
+    params
+        .items
+        .iter()
+        .flat_map(|param| param.pattern.get_binding_identifiers())
+        .map(|id| id.name.to_string())
+        .collect()
+}
+
 fn params_bind_require(params: &FormalParameters<'_>) -> bool {
-    params.items.iter().any(|param| {
-        param
-            .pattern
-            .get_binding_identifiers()
-            .iter()
-            .any(|id| id.name == REQUIRE)
-    })
+    param_binding_names(params)
+        .iter()
+        .any(|name| name == REQUIRE)
 }
 
 struct PackageResolutionParamCollector<'p> {
     params: &'p FxHashSet<String>,
     known_helpers: &'p FxHashMap<String, usize>,
     matched: FxHashSet<String>,
-    /// How many enclosing nested functions bind a `require` parameter. Inside
-    /// such a function, `require.resolve` is not the module `require`.
-    require_shadow_depth: usize,
+    create_require_aliases: &'p FxHashSet<String>,
+    module_require_aliases: &'p FxHashSet<String>,
+    local_require_aliases: FxHashSet<String>,
+    /// The parameters of the helper and of the enclosing nested functions. A
+    /// parameter is not a `require` function of the file, whatever its name.
+    enclosing_params: Vec<String>,
+}
+
+impl PackageResolutionParamCollector<'_> {
+    fn is_enclosing_param(&self, name: &str) -> bool {
+        self.enclosing_params.iter().any(|param| param == name)
+    }
+
+    fn is_this_file_create_require_call(&self, expr: &Expression<'_>) -> bool {
+        is_this_file_create_require_call(expr, |name| {
+            self.create_require_aliases.contains(name) && !self.is_enclosing_param(name)
+        })
+    }
+
+    fn is_module_require_resolve(&self, callee: &Expression<'_>) -> bool {
+        let Some(object) = resolve_callee_object(callee) else {
+            return false;
+        };
+        match object.get_inner_expression() {
+            Expression::Identifier(id) => {
+                let name = id.name.as_str();
+                !self.is_enclosing_param(name)
+                    && (name == REQUIRE
+                        || self.local_require_aliases.contains(name)
+                        || self.module_require_aliases.contains(name))
+            }
+            inner => self.is_this_file_create_require_call(inner),
+        }
+    }
 }
 
 impl<'a> Visit<'a> for PackageResolutionParamCollector<'_> {
     fn visit_function(&mut self, func: &Function<'a>, flags: oxc_semantic::ScopeFlags) {
-        let shadows = params_bind_require(&func.params);
-        self.require_shadow_depth += usize::from(shadows);
+        let outer_len = self.enclosing_params.len();
+        self.enclosing_params
+            .extend(param_binding_names(&func.params));
         walk::walk_function(self, func, flags);
-        self.require_shadow_depth -= usize::from(shadows);
+        self.enclosing_params.truncate(outer_len);
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
-        let shadows = params_bind_require(&expr.params);
-        self.require_shadow_depth += usize::from(shadows);
+        let outer_len = self.enclosing_params.len();
+        self.enclosing_params
+            .extend(param_binding_names(&expr.params));
         walk::walk_arrow_function_expression(self, expr);
-        self.require_shadow_depth -= usize::from(shadows);
+        self.enclosing_params.truncate(outer_len);
+    }
+
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(init) = &declarator.init
+            && self.is_this_file_create_require_call(init)
+        {
+            self.local_require_aliases.insert(id.name.to_string());
+        }
+        walk::walk_variable_declarator(self, declarator);
     }
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        if self.require_shadow_depth == 0
-            && is_require_resolve_callee(&call.callee)
+        if self.is_module_require_resolve(&call.callee)
             && let Some(arg) = call.arguments.first()
             && let Some(param) = package_resolution_param_from_argument(arg, self.params)
         {

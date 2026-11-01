@@ -665,6 +665,7 @@ impl ModuleInfoExtractor {
             .map(|name| (name.clone(), None))
             .collect::<FxHashMap<_, _>>();
         self.nested_declaration_stack.push(scope);
+        self.scoped_require_aliases.push(FxHashSet::default());
         self.scoped_non_instance_bindings.push(non_instance_scope);
         self.scoped_namespace_binding_names
             .push(FxHashSet::default());
@@ -683,6 +684,7 @@ impl ModuleInfoExtractor {
     pub(super) fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_require_aliases.pop();
             self.scoped_non_instance_bindings.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
