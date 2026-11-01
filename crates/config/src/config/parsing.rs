@@ -6139,7 +6139,7 @@ thresholdOverrides = [
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn find_and_load_rejects_finding_ignore_set_that_exceeds_matcher_limits() {
+    fn find_and_load_rejects_finding_ignore_pattern_that_is_too_long() {
         let dir = test_dir("find-oversized-finding-ignore-set");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         let alternatives = (0..50_000)
@@ -6157,10 +6157,7 @@ thresholdOverrides = [
 
         let error = FallowConfig::find_and_load(dir.path()).unwrap_err();
         assert!(error.contains("ignoreFindings"), "error: {error}");
-        assert!(
-            error.contains("cannot be compiled together"),
-            "error: {error}"
-        );
+        assert!(error.contains("longer than 512 bytes"), "error: {error}");
     }
 
     // ------------------------------------------------------------------

@@ -599,6 +599,10 @@ line states exit code 0.
   with the number of wildcards in the file. `CodeOwners::parse` rejects a
   pattern with more than `MAX_RULE_WILDCARDS` wildcards and a file with more
   than `MAX_FILE_WILDCARDS`. Large public CODEOWNERS files use fewer than 400.
+  The `GlobSet` also builds an Aho-Corasick DFA over literal prefixes, and
+  that build time grows with the square of the pattern length.
+  `CodeOwners::parse` rejects a pattern longer than `MAX_RULE_BYTES`. Config
+  globs have the same limit, `MAX_GLOB_BYTES` in `glob_validation.rs`.
 
 - A stderr warning that repeats a `workspace_diagnostics[]` entry, or that
   describes the analysis inputs, uses the tracing target

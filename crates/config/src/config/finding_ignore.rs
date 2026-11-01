@@ -220,6 +220,16 @@ mod tests {
     }
 
     #[test]
+    fn validate_compilation_rejects_a_set_that_exceeds_matcher_limits() {
+        let alternatives = (0..50_000)
+            .map(|index| format!("name{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let patterns = [format!("**/{{{alternatives}}}.ts")];
+        assert!(FindingIgnoreMatcher::validate_compilation(&patterns).is_err());
+    }
+
+    #[test]
     fn empty_matcher_ignores_nothing() {
         let matcher = matcher(&[]);
 
