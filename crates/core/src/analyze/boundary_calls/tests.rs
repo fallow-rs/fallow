@@ -113,6 +113,14 @@ fn callee(path: &str, span_start: u32) -> CalleeUse {
     CalleeUse {
         callee_path: path.to_string(),
         span_start,
+        is_new: false,
+    }
+}
+
+fn new_callee(path: &str, span_start: u32) -> CalleeUse {
+    CalleeUse {
+        is_new: true,
+        ..callee(path, span_start)
     }
 }
 
@@ -151,6 +159,29 @@ fn zoned_file_with_matching_written_path_fires_with_line_col() {
     assert_eq!(v.zone, "domain");
     assert_eq!(v.callee, "console.log");
     assert_eq!(v.pattern, "console.*");
+}
+
+#[test]
+fn new_form_reports_new_prefix_and_keeps_the_pattern_text() {
+    let root = PathBuf::from("/tmp/boundary-calls-test");
+    let config = make_config(root.clone(), vec![forbid("domain", "Date")]);
+    let graph = build_graph(&root, &["src/domain/rules.ts", "src/ui/App.tsx"]);
+    let modules = vec![module(
+        0,
+        vec![new_callee("Date", 0), callee("Date", 10)],
+        Vec::new(),
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_boundary_call_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+
+    let found: Vec<(&str, &str)> = violations
+        .iter()
+        .map(|v| (v.callee.as_str(), v.pattern.as_str()))
+        .collect();
+    assert_eq!(found, vec![("new Date", "Date"), ("Date", "Date")]);
 }
 
 #[test]

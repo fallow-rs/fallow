@@ -106,11 +106,14 @@ pub struct RulePackRule {
     pub id: String,
     /// Which check this rule performs.
     pub kind: RulePackRuleKind,
-    /// Callee patterns to ban (`banned-call` only). Matching is segment-aware
-    /// and import-resolved, identical to `boundaries.calls.forbidden`:
-    /// `child_process.*` covers `import { exec } from "node:child_process"`,
-    /// the bare specifier, and namespace/default imports; `fetch` matches only
-    /// the global `fetch`; a leading `*.member` matches any object.
+    /// Callee patterns to ban (`banned-call` only). A pattern matches a call
+    /// (`Date()`) and a constructor call (`new Date()`). Matching is
+    /// segment-aware and import-resolved, identical to
+    /// `boundaries.calls.forbidden`: `child_process.*` covers
+    /// `import { exec } from "node:child_process"`, the bare specifier, and
+    /// namespace/default imports; a leading `*.member` matches any object. A
+    /// bare pattern matches the written name, so it also matches a local
+    /// function or class with that name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub callees: Vec<String>,
     /// Import specifiers to ban (`banned-import` only). Matched segment-aware
@@ -123,7 +126,8 @@ pub struct RulePackRule {
     pub specifiers: Vec<String>,
     /// Effect classes to ban (`banned-effect` only). Effects are derived from
     /// `security_matchers.toml` catalogue rows and matched against captured
-    /// call sites after import-resolution canonicalization.
+    /// call sites after import-resolution canonicalization. `banned-effect`
+    /// reads call expressions only. It does not read `new` expressions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectKind>,
     /// Export names to ban (`banned-export` only). `"default"` matches the

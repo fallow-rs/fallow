@@ -309,7 +309,7 @@ fn walk_callees_recursive(
 }
 
 /// Build the unresolved-callee list from a module's call sites: every
-/// `callee_uses` path whose leading identifier is bound to no import is
+/// `callee_uses` call path (not a `new` expression) whose leading identifier is bound to no import is
 /// surfaced (best-effort classification). A dotted path is `MemberOrDynamic`; a
 /// bare identifier with no import binding is `LocalOrGlobal`.
 fn collect_unresolved_callees(info: &ModuleInfo) -> Vec<UnresolvedCallee> {
@@ -318,7 +318,7 @@ fn collect_unresolved_callees(info: &ModuleInfo) -> Vec<UnresolvedCallee> {
 
     let mut out = Vec::new();
     let mut seen: FxHashSet<&str> = FxHashSet::default();
-    for callee in &info.callee_uses {
+    for callee in info.callee_uses.iter().filter(|callee| !callee.is_new) {
         let path = callee.callee_path.as_str();
         let leading = path.split('.').next().unwrap_or(path);
         // A callee whose leading identifier is an imported binding resolves to a
@@ -435,10 +435,12 @@ mod tests {
                 fallow_types::extract::CalleeUse {
                     callee_path: "localHelper".to_string(),
                     span_start: 0,
+                    is_new: false,
                 },
                 fallow_types::extract::CalleeUse {
                     callee_path: "obj.method".to_string(),
                     span_start: 10,
+                    is_new: false,
                 },
             ],
             ..ModuleInfo::empty(FileId(1))
@@ -449,6 +451,28 @@ mod tests {
         assert_eq!(unresolved[0].reason, UnresolvedReason::LocalOrGlobal);
         assert_eq!(unresolved[1].callee, "obj.method");
         assert_eq!(unresolved[1].reason, UnresolvedReason::MemberOrDynamic);
+    }
+
+    #[test]
+    fn new_expressions_are_not_listed_as_unresolved() {
+        let info = ModuleInfo {
+            callee_uses: vec![
+                fallow_types::extract::CalleeUse {
+                    callee_path: "Foo".to_string(),
+                    span_start: 0,
+                    is_new: true,
+                },
+                fallow_types::extract::CalleeUse {
+                    callee_path: "localHelper".to_string(),
+                    span_start: 10,
+                    is_new: false,
+                },
+            ],
+            ..ModuleInfo::empty(FileId(1))
+        };
+        let unresolved = collect_unresolved_callees(&info);
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0].callee, "localHelper");
     }
 
     #[test]
@@ -468,10 +492,12 @@ mod tests {
                 fallow_types::extract::CalleeUse {
                     callee_path: "dep".to_string(),
                     span_start: 0,
+                    is_new: false,
                 },
                 fallow_types::extract::CalleeUse {
                     callee_path: "ghost".to_string(),
                     span_start: 5,
+                    is_new: false,
                 },
             ],
             ..ModuleInfo::empty(FileId(1))

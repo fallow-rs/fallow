@@ -211,7 +211,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Architecture",
         name: "Boundary Call Violation",
         short: "Zoned file calls a callee its zone forbids",
-        full: "A file classified into a boundary zone calls a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong.",
+        full: "A file classified into a boundary zone calls or constructs a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path of calls and new expressions, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong.",
         docs_path: "explanations/dead-code#boundary-violations",
     },
     RuleDef {
@@ -219,7 +219,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Policy",
         name: "Policy Violation",
         short: "Usage violates a configured rule-pack policy",
-        full: "A call, import, export, catalogue-derived effect, or graph-resolved GDP proof producer violates a configured rule pack (the rulePacks config key). Packs are pure declarative data. Call and effect rules use written plus import-resolved canonical callees; import rules match the raw specifier. GDP rules trace @gdp-ts/core proof producers through unambiguous re-exports and restrict which files may create proof factories, optionally by exact static proof kind. This is syntactic ownership analysis, not a runtime authorization guarantee. Follow the rule's message, move a producer into an allowed file, scope the rule with files/exclude globs, or adjust its severity.",
+        full: "A call, import, export, catalogue-derived effect, or graph-resolved GDP proof producer violates a configured rule pack (the rulePacks config key). Packs are pure declarative data. Call rules match calls and new expressions, on written plus import-resolved canonical callees. Effect rules match calls only. Import rules match the raw specifier. GDP rules trace @gdp-ts/core proof producers through unambiguous re-exports and restrict which files may create proof factories, optionally by exact static proof kind. This is syntactic ownership analysis, not a runtime authorization guarantee. Follow the rule's message, move a producer into an allowed file, scope the rule with files/exclude globs, or adjust its severity.",
         docs_path: "explanations/dead-code#policy-violations",
     },
     RuleDef {
