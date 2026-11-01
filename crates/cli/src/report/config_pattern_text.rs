@@ -13,8 +13,37 @@
 //!
 //! A live run and `fallow report --from` use the same place for one format,
 //! so a re-render of a saved envelope states what the live run stated.
+//!
+//! A config value is untrusted: a pull request can change the config, and
+//! `fallow report --from` reads the values from a saved file. Each config value
+//! goes through [`single_line`] for a stderr note and through [`markdown_value`]
+//! for a Markdown section. These helpers do not change a normal glob.
 
 use fallow_config::{OutputFormat, WorkspaceDiagnostic};
+use fallow_output::markdown_code_span;
+
+/// Replace each run of control characters and line separators with one space,
+/// so a config value stays on its line and cannot send a terminal escape code.
+fn single_line(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut in_run = false;
+    for ch in value.chars() {
+        let separator = ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}');
+        if !separator {
+            out.push(ch);
+        } else if !in_run {
+            out.push(' ');
+        }
+        in_run = separator;
+    }
+    out
+}
+
+/// A config value as one Markdown code span on one line. A backtick in the
+/// value cannot close the span, and a line break cannot start a new block.
+fn markdown_value(value: &str) -> String {
+    markdown_code_span(&single_line(value))
+}
 
 /// Whether `format` carries the entries in the document on stdout. A format
 /// that does not gets a stderr note from [`print_stderr_notes`].
@@ -51,12 +80,12 @@ pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFor
 /// rule that had no effect.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
-    let patterns_of = |kind: &str| -> Vec<&str> {
+    let patterns_of = |kind: &str| -> Vec<String> {
         diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.kind.id() == kind)
             .filter_map(|diagnostic| diagnostic.kind.unmatched_config_pattern())
-            .map(|(_, pattern)| pattern)
+            .map(|(_, pattern)| single_line(pattern))
             .collect()
     };
     let notes = [
@@ -94,9 +123,14 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
     let override_notes = diagnostics.iter().filter_map(|diagnostic| {
         let (rule, files, _) = diagnostic.kind.ineffective_override()?;
         let hint = diagnostic.kind.ineffective_override_hint()?;
+        let rule = single_line(rule);
+        let globs = files
+            .iter()
+            .map(|glob| single_line(glob))
+            .collect::<Vec<_>>()
+            .join(", ");
         Some(format!(
-            "Note: override rule had no effect: {rule} for [{}] ({hint}).",
-            files.join(", ")
+            "Note: override rule had no effect: {rule} for [{globs}] ({hint})."
         ))
     });
     notes
@@ -132,7 +166,8 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
             .filter(|diagnostic| diagnostic.kind.is_redundant_config_entry() == redundant)
             .filter_map(|diagnostic| {
                 let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
-                Some(format!("- `{setting}`: `{pattern}` {outcome}"))
+                let pattern = markdown_value(pattern);
+                Some(format!("- `{setting}`: {pattern} {outcome}"))
             })
             .collect()
     };
@@ -158,12 +193,13 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
         .filter_map(|diagnostic| {
             let (rule, files, _) = diagnostic.kind.ineffective_override()?;
             let hint = diagnostic.kind.ineffective_override_hint()?;
+            let rule = markdown_value(rule);
             let globs = files
                 .iter()
-                .map(|glob| format!("`{glob}`"))
+                .map(|glob| markdown_value(glob))
                 .collect::<Vec<_>>()
                 .join(", ");
-            Some(format!("- `{rule}` for {globs}: {hint}"))
+            Some(format!("- {rule} for {globs}: {hint}"))
         })
         .collect();
     if !overrides.is_empty() {
@@ -413,6 +449,68 @@ mod tests {
         assert_eq!(read.len(), 1, "an equal entry is read once");
         assert_eq!(read[0].kind, entry.kind);
         assert_eq!(read[0].message, entry.message);
+    }
+
+    const HOSTILE: &str = "src/a`b\n\n# injected\r\n<img src=x>\u{1b}[31m\t**";
+
+    #[test]
+    fn markdown_keeps_a_hostile_value_inside_one_code_span() {
+        let section = markdown_section(&[
+            glob(HOSTILE),
+            diagnostic(WorkspaceDiagnosticKind::EntryPatternRedundant {
+                pattern: HOSTILE.to_owned(),
+            }),
+            override_entry(HOSTILE, &[HOSTILE, "lib/**"], "project-level"),
+        ])
+        .expect("three entries");
+        let span = "``src/a`b # injected <img src=x> [31m **``";
+        for line in [
+            format!("- `ignoreDependencies`: {span} matched nothing in this run"),
+            format!("- `entry`: {span} had no effect in this run"),
+            format!("- {span} for {span}, `lib/**`: project-level rule; set the top-level rule"),
+        ] {
+            assert!(
+                section.lines().any(|candidate| candidate == line),
+                "{line} is not a line of {section}"
+            );
+        }
+        assert!(
+            !section.lines().any(|line| line.starts_with("# injected")),
+            "{section}"
+        );
+        assert!(!section.contains('\u{1b}'), "{section}");
+    }
+
+    #[test]
+    fn stderr_notes_hold_no_control_character_of_a_value() {
+        let notes = stderr_notes(&[
+            glob(HOSTILE),
+            glob("@b/*"),
+            override_entry(HOSTILE, &[HOSTILE, "lib/**"], "project-level"),
+        ]);
+        let value = "src/a`b # injected <img src=x> [31m **";
+        assert_eq!(
+            notes,
+            vec![
+                format!(
+                    "Note: ignoreDependencies globs matched no declared dependency this run: \
+                     {value}, @b/* (globs match package names such as @scope/*; check for typos)."
+                ),
+                format!(
+                    "Note: override rule had no effect: {value} for [{value}, lib/**] \
+                     (project-level rule; set the top-level rule)."
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_separator_in_a_value_does_not_reach_the_output() {
+        let value = "a\u{2028}b\u{2029}c\u{85}d";
+        let section = markdown_section(&[glob(value)]).expect("one entry");
+        assert!(section.contains("`a b c d`"), "{section}");
+        let notes = stderr_notes(&[glob(value)]);
+        assert!(notes[0].contains(": a b c d ("), "{notes:?}");
     }
 
     #[test]

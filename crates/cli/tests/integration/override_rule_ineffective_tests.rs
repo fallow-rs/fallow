@@ -893,3 +893,100 @@ fn the_entry_reaches_every_format_of_report_from() {
         }
     }
 }
+
+/// The rendered Markdown of one format, from the review body or from stdout.
+fn rendered_markdown(output: &CommandOutput, format: &str) -> String {
+    if format.starts_with("review-") {
+        let envelope = parse_json(output);
+        return envelope["body"].as_str().unwrap_or_default().to_owned();
+    }
+    output.stdout.clone()
+}
+
+#[test]
+fn a_hostile_config_value_stays_in_one_code_span_in_every_markdown_format() {
+    let dir = parity_project();
+    let root = dir.path();
+    let hostile = "gen`x\n\n# injected\n<img src=x>/**";
+    set_config(root, &json!({ "overrides": [override_off(RULE, hostile)] }));
+    let root = root.to_string_lossy().into_owned();
+    let expected = format!("- `{RULE}` for ``gen`x # injected <img src=x>/**``: ");
+
+    let saved = run_fallow_raw(&command_args("dead-code", &root, "json"));
+    assert!(saved.stdout.contains("# injected"), "{}", saved.stdout);
+    let mut envelope = parse_json(&saved);
+    let saved_path = dir.path().join("saved.json");
+    std::fs::write(&saved_path, &saved.stdout).expect("write saved envelope");
+    let saved_path = saved_path.to_string_lossy().into_owned();
+
+    for format in [
+        "markdown",
+        "github-summary",
+        "pr-comment-github",
+        "pr-comment-gitlab",
+        "review-github",
+        "review-gitlab",
+    ] {
+        let replayed = run_fallow_raw(&[
+            "report",
+            "--from",
+            &saved_path,
+            "--root",
+            &root,
+            "--format",
+            format,
+        ]);
+        let live = run_fallow_raw(&command_args("dead-code", &root, format));
+        for (label, output) in [("report --from", replayed), ("live", live)] {
+            let body = rendered_markdown(&output, format);
+            assert!(body.contains(&expected), "{label} {format}: {body}");
+            assert!(
+                !body.lines().any(|line| line.starts_with("# injected")),
+                "{label} {format}: {body}"
+            );
+        }
+    }
+
+    envelope["workspace_diagnostics"]
+        .as_array_mut()
+        .expect("diagnostics")
+        .iter_mut()
+        .filter(|entry| entry["kind"] == "override-rule-ineffective")
+        .for_each(|entry| entry["rule"] = json!("x\u{1b}[31m\n# injected"));
+    let edited_path = dir.path().join("edited.json");
+    std::fs::write(&edited_path, envelope.to_string()).expect("write edited envelope");
+    let edited_path = edited_path.to_string_lossy().into_owned();
+
+    let body = run_fallow_raw(&[
+        "report",
+        "--from",
+        &edited_path,
+        "--root",
+        &root,
+        "--format",
+        "pr-comment-github",
+    ]);
+    assert!(
+        body.stdout.contains("- `x [31m # injected` for "),
+        "{}",
+        body.stdout
+    );
+
+    let note = run_fallow_raw(&[
+        "report",
+        "--from",
+        &edited_path,
+        "--root",
+        &root,
+        "--format",
+        "github-annotations",
+    ]);
+    assert!(
+        note.stderr.contains(
+            "Note: override rule had no effect: x [31m # injected for [gen`x # injected <img src=x>/**] ("
+        ),
+        "{}",
+        note.stderr
+    );
+    assert!(!note.stderr.contains('\u{1b}'), "{}", note.stderr);
+}
