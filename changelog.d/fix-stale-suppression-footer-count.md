@@ -1,0 +1,4 @@
+### Fixed
+
+- **The suppression footer no longer prints `0 stale suppressions`.** The `fallow` and `fallow dead-code` human footer printed that zero when `stale-suppressions` was `off` and when an issue-type filter excluded the check. The run had not checked, so the zero read as "checked, none found". The footer now names a stale count only when the count is above zero. A run with the rule on and no stale suppression therefore also omits the segment. JSON output does not change. Thanks @Smrtnyk for the report. (Closes [#4063](https://github.com/fallow-rs/fallow/issues/4063))
+- **The status line now names private type leaks and deprecated exports in use.** A run with only these findings printed `⚠  (0.02s)`, with an empty label. The status line now prints, for example, `⚠ 1 private type leak (0.02s)`. The group headers of `--group-by` also name these findings.

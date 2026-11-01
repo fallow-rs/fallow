@@ -4738,3 +4738,150 @@ fn an_ignore_pattern_that_excludes_a_workspace_manifest_has_an_effect() {
         "the glob that hides a workspace without source files still has an effect: {json}"
     );
 }
+
+/// One used export with a suppression that has no effect (a stale comment),
+/// one export with a suppression that has an effect, and one unused export.
+fn stale_suppression_project(stale_rule: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from './lib.ts';\n\nconsole.log(used());\n",
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "// fallow-ignore-next-line unused-export\n\
+         export function used(): number {\n  return 1;\n}\n\n\
+         // fallow-ignore-next-line unused-export\n\
+         export const keptOnPurpose = 2;\n\n\
+         export const unused = 3;\n",
+    )
+    .expect("write lib");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(r#"{{"rules":{{"stale-suppressions":"{stale_rule}"}}}}"#),
+    )
+    .expect("write config");
+    dir
+}
+
+#[test]
+fn suppression_footer_omits_the_stale_count_when_the_rule_is_off() {
+    let dir = stale_suppression_project("off");
+    let output = run_fallow_in_root("dead-code", dir.path(), &[]);
+    assert!(
+        output.stderr.contains("1 issue \u{b7} 1 suppressed\n"),
+        "the footer must end after the suppressed count: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("stale"),
+        "a run that did not check must not state a stale count: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn suppression_footer_omits_the_stale_count_when_a_filter_excludes_it() {
+    let dir = stale_suppression_project("warn");
+    let output = run_fallow_in_root("dead-code", dir.path(), &["--unused-exports"]);
+    assert!(
+        output.stderr.contains("1 issue \u{b7} 1 suppressed\n"),
+        "the footer must end after the suppressed count: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("stale"),
+        "a run that filtered the check out must not state a stale count: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn suppression_footer_keeps_the_stale_count_when_one_is_reported() {
+    let dir = stale_suppression_project("error");
+    let output = run_fallow_in_root("dead-code", dir.path(), &[]);
+    assert!(
+        output
+            .stderr
+            .contains("2 issues \u{b7} 1 suppressed \u{b7} 1 stale suppression\n"),
+        "the footer must keep the reported count: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn bare_run_suppression_footer_omits_the_stale_count_when_the_rule_is_off() {
+    let dir = stale_suppression_project("off");
+    let root = dir.path().to_str().expect("utf-8 temp path");
+    let output = run_fallow_raw(&["--root", root]);
+    assert!(
+        output.stderr.contains("1 suppressed\n"),
+        "the footer must end after the suppressed count: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("stale"),
+        "a run that did not check must not state a stale count: {}",
+        output.stderr
+    );
+}
+
+/// A project with one private type leak and one used `@deprecated` export.
+fn unlabeled_status_line_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { old } from './dep.ts';\nimport { leak } from './leak.ts';\n\n\
+         console.log(old(), leak());\n",
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join("src/dep.ts"),
+        "/** @deprecated use other */\nexport const old = (): number => 1;\n",
+    )
+    .expect("write dep");
+    std::fs::write(
+        root.join("src/leak.ts"),
+        "type Hidden = { a: number };\n\
+         export function leak(): Hidden {\n  return { a: 1 };\n}\n",
+    )
+    .expect("write leak");
+    dir
+}
+
+#[test]
+fn status_line_names_private_type_leaks() {
+    let dir = unlabeled_status_line_project();
+    let output = run_fallow_in_root("dead-code", dir.path(), &["--private-type-leaks"]);
+    assert!(
+        output.stderr.contains(" 1 private type leak ("),
+        "the status line must name the finding: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn status_line_names_deprecated_exports_in_use() {
+    let dir = unlabeled_status_line_project();
+    let output = run_fallow_in_root("dead-code", dir.path(), &["--deprecated-exports-in-use"]);
+    assert!(
+        output.stderr.contains(" 1 deprecated export in use ("),
+        "the status line must name the finding: {}",
+        output.stderr
+    );
+}
