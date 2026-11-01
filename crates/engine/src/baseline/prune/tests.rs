@@ -27,7 +27,92 @@ fn prune_dead_code(
         results,
         Path::new(ROOT),
         &SemanticAnalysisIdentity::syntactic(),
+        fallow_output::BaselineMode::default(),
     )
+}
+
+const PRODUCTION: fallow_output::BaselineMode = fallow_output::BaselineMode {
+    production: true,
+    include_entry_exports: false,
+};
+
+fn content_saved_in_production(results: &crate::results::AnalysisResults) -> String {
+    serde_json::to_string_pretty(
+        &BaselineData::from_results(results, Path::new(ROOT)).with_scope_reasons(
+            fallow_output::BaselineScopeReasons::empty()
+                .with(fallow_output::ScopeReason::Production),
+        ),
+    )
+    .unwrap()
+}
+
+#[test]
+fn dead_code_prune_refuses_a_file_saved_in_another_mode() {
+    let results = make_results();
+    let saved = content_saved_in_production(&results);
+    let refusal = prune_dead_code(&saved, &results).unwrap_err();
+    assert_eq!(refusal.code(), "scope-mismatch");
+    assert_eq!(
+        refusal.reason(),
+        "the file was saved with --production and this run does not use it, so a prune would \
+         remove valid entries"
+    );
+
+    let plain = dead_code_content(&results);
+    let refusal = prune_dead_code_baseline(
+        &plain,
+        &results,
+        Path::new(ROOT),
+        &SemanticAnalysisIdentity::syntactic(),
+        PRODUCTION,
+    )
+    .unwrap_err();
+    assert_eq!(
+        refusal.reason(),
+        "the file does not record production mode and this run uses it, so a prune would remove \
+         valid entries"
+    );
+}
+
+#[test]
+fn dead_code_prune_accepts_a_file_saved_in_the_same_mode() {
+    let results = make_results();
+    let saved = content_saved_in_production(&results);
+    let pruned = prune_dead_code_baseline(
+        &saved,
+        &results,
+        Path::new(ROOT),
+        &SemanticAnalysisIdentity::syntactic(),
+        PRODUCTION,
+    )
+    .unwrap();
+    assert!(pruned.removed.is_empty());
+}
+
+#[test]
+fn dead_code_prune_does_not_refuse_a_file_with_no_entries() {
+    let results = crate::results::AnalysisResults::default();
+    let saved = content_saved_in_production(&results);
+    assert!(prune_dead_code(&saved, &results).is_ok());
+}
+
+#[test]
+fn dead_code_prune_keeps_the_saved_scope_in_the_rewritten_file() {
+    let results = make_results();
+    let saved = content_saved_in_production(&results);
+    let fixed = crate::results::AnalysisResults::default();
+    let pruned = prune_dead_code_baseline(
+        &saved,
+        &fixed,
+        Path::new(ROOT),
+        &SemanticAnalysisIdentity::syntactic(),
+        PRODUCTION,
+    )
+    .unwrap();
+    assert_eq!(
+        super::super::saved_scope_reasons(&pruned.content.unwrap()),
+        vec!["production".to_owned()]
+    );
 }
 
 #[test]
@@ -205,7 +290,7 @@ fn dupes_prune_removes_whole_rows() {
     groups.remove(1);
     let current = make_duplication_report(groups);
 
-    let pruned = prune_dupes_baseline(&content, &current).unwrap();
+    let pruned = prune_dupes_baseline(&content, &current, false).unwrap();
     assert_eq!(pruned.removed.len(), 1);
     assert_eq!((pruned.entries_before, pruned.entries_after), (3, 2));
     let rewritten: DuplicationBaselineData =
@@ -236,7 +321,7 @@ fn dupes_prune_leaves_a_fresh_save_unchanged() {
         Path::new(ROOT),
     ))
     .unwrap();
-    let pruned = prune_dupes_baseline(&content, &report).unwrap();
+    let pruned = prune_dupes_baseline(&content, &report, false).unwrap();
     assert!(pruned.removed.is_empty());
     assert_eq!(pruned.content, None);
 }
@@ -246,7 +331,7 @@ fn dupes_prune_refuses_shared_clone_keys() {
     let content =
         r#"{"kind":"dupes","normalized_clone_fingerprints":["dup:c77b3abb6f87acd9-r1:2"]}"#;
     assert_eq!(
-        prune_dupes_baseline(content, &make_duplication_report(Vec::new())),
+        prune_dupes_baseline(content, &make_duplication_report(Vec::new()), false),
         Err(BaselinePruneRefusal::SharedCloneKeys)
     );
 }
@@ -275,7 +360,7 @@ fn health_prune_keeps_the_slots_that_cover_current_findings() {
     let content = health_content(&HealthBaselineData::from_findings(&saved, &[], &[], root));
     let current = vec![finding("b", FindingSeverity::High)];
 
-    let pruned = prune_health_baseline(&content, &current, root).unwrap();
+    let pruned = prune_health_baseline(&content, &current, root, false).unwrap();
     assert_eq!((pruned.entries_before, pruned.entries_after), (2, 1));
     assert_eq!(pruned.removed.len(), 1);
     assert_eq!(
@@ -303,7 +388,7 @@ fn health_prune_keeps_a_higher_slot_that_covers_a_lower_finding() {
     let content = health_content(&HealthBaselineData::from_findings(&saved, &[], &[], root));
     let current = vec![finding("a", FindingSeverity::Moderate)];
 
-    let pruned = prune_health_baseline(&content, &current, root).unwrap();
+    let pruned = prune_health_baseline(&content, &current, root, false).unwrap();
     assert!(pruned.removed.is_empty(), "{:?}", pruned.removed);
 }
 
@@ -313,7 +398,7 @@ fn health_prune_removes_a_bucket_whose_findings_are_gone() {
     let saved = [finding("a", FindingSeverity::High)];
     let content = health_content(&HealthBaselineData::from_findings(&saved, &[], &[], root));
 
-    let pruned = prune_health_baseline(&content, &[], root).unwrap();
+    let pruned = prune_health_baseline(&content, &[], root, false).unwrap();
     assert_eq!(pruned.entries_after, 0);
     let rewritten: HealthBaselineData =
         serde_json::from_str(&pruned.content.expect("the bucket was removed")).unwrap();
@@ -337,7 +422,7 @@ fn health_prune_keeps_the_saved_key_of_a_moved_identity_bucket() {
     let mut moved = saved;
     moved.path = root.join("src/new.ts");
 
-    let pruned = prune_health_baseline(&content, &[moved], root).unwrap();
+    let pruned = prune_health_baseline(&content, &[moved], root, false).unwrap();
     let identity_removed: Vec<_> = pruned
         .removed
         .iter()
@@ -350,7 +435,7 @@ fn health_prune_keeps_the_saved_key_of_a_moved_identity_bucket() {
 fn health_prune_refuses_legacy_keys() {
     let content = r#"{"findings":["src/a.ts:f:1"]}"#;
     assert_eq!(
-        prune_health_baseline(content, &[], Path::new(ROOT)),
+        prune_health_baseline(content, &[], Path::new(ROOT), false),
         Err(BaselinePruneRefusal::LegacyKeys)
     );
 }
@@ -389,7 +474,7 @@ fn health_prune_keeps_an_emptied_identity_key_that_blocks_a_second_move_candidat
         located(root, "src/a.ts", ExceededThreshold::Cyclomatic),
     ];
 
-    let pruned = prune_health_baseline(&content, &current, root).unwrap();
+    let pruned = prune_health_baseline(&content, &current, root, false).unwrap();
     let rewritten: HealthBaselineData =
         serde_json::from_str(&pruned.content.expect("the crap slot was removed")).unwrap();
     let hidden = |baseline: &HealthBaselineData| -> Vec<String> {

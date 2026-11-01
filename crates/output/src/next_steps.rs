@@ -8,7 +8,7 @@ use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
 use std::path::Path;
 
-use crate::{BaselineScopeReasons, HealthReport, ScopeReason};
+use crate::{BaselineMode, BaselineScopeReasons, HealthReport, ScopeReason};
 
 const MAX_NEXT_STEPS: usize = 3;
 const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
@@ -22,8 +22,9 @@ const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hoo
 /// names the one run that CAN judge it. It stays read-only, like every other
 /// entry: it re-reads the baseline and reports, it never re-saves.
 ///
-/// Offered only when dropping every channel in `scope_reasons` widens the run,
-/// because the step's command carries `--baseline` and nothing else.
+/// Offered only when dropping every channel in `scope_reasons` that the file
+/// does not record widens the run, because the step's command carries
+/// `--baseline` and the mode of the file, and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BaselineRecheckInput<'a> {
     /// The command whose baseline this is, as `fallow <command>` spells it.
@@ -40,6 +41,9 @@ pub struct BaselineRecheckInput<'a> {
     /// cannot drift from the published `scope_reasons`. A channel the printed
     /// command cannot drop suppresses the step entirely.
     pub scope_reasons: BaselineScopeReasons,
+    /// The mode the file records. The printed command carries it, so the
+    /// repeated run compares in the mode of the file.
+    pub saved_mode: BaselineMode,
 }
 
 /// Local impact digest counters used to render the `impact-report` next step.
@@ -478,18 +482,26 @@ fn next_step(id: &str, command: String, reason: &str) -> NextStep {
 /// re-check.
 ///
 /// Silent as well when any channel that narrowed the run survives the printed
-/// command. The command is rebuilt from scratch and carries nothing but
-/// `--baseline`, so it drops only narrowing that came from a flag. Production
-/// mode and workspace scoping also resolve from the project config and the
-/// environment, where the same command would come back just as narrow and
-/// re-emit this step without end. An entry that cannot judge the baseline is
-/// worse than no entry: `next_steps` is a contract an agent follows.
+/// command. The command is rebuilt from scratch and carries `--baseline` plus
+/// the mode the file records, so it drops only narrowing that came from a flag.
+/// A mode that only the run used, and workspace scoping, also resolve from the
+/// project config and the environment, where the same command would come back
+/// just as narrow and re-emit this step without end. An entry that cannot judge
+/// the baseline is worse than no entry: `next_steps` is a contract an agent
+/// follows.
 fn recheck_baseline(input: Option<BaselineRecheckInput<'_>>) -> Option<NextStep> {
     let input = input?;
-    if input.scope_reasons.is_empty()
-        || input.baseline_entries == 0
-        || !input.scope_reasons.all_removable_by_rerun()
-    {
+    if input.scope_reasons.is_empty() || input.baseline_entries == 0 {
+        return None;
+    }
+    let mut narrowing = input.scope_reasons;
+    if input.saved_mode.production {
+        narrowing = narrowing.without(ScopeReason::Production);
+    }
+    if input.saved_mode.include_entry_exports {
+        narrowing = narrowing.without(ScopeReason::IncludeEntryExports);
+    }
+    if !narrowing.all_removable_by_rerun() {
         return None;
     }
     // The package map comes from the config, so the repeated command turns it
@@ -502,13 +514,22 @@ fn recheck_baseline(input: Option<BaselineRecheckInput<'_>>) -> Option<NextStep>
     Some(next_step(
         "recheck-baseline",
         format!(
-            "fallow {} --baseline {}{package_map}",
-            input.command, input.path
+            "fallow {} --baseline {}{}{package_map}",
+            input.command,
+            input.path,
+            input.saved_mode.flags()
         ),
-        &format!(
-            "this run was narrowed to part of the project ({}), which cannot judge a whole-project baseline",
-            input.scope_reasons.join()
-        ),
+        &if narrowing.is_empty() {
+            format!(
+                "the baseline was saved with {} and this run was not",
+                BaselineMode::from_reasons(input.scope_reasons).flags_prose()
+            )
+        } else {
+            format!(
+                "this run was narrowed to part of the project ({}), which cannot judge this baseline",
+                input.scope_reasons.join()
+            )
+        },
     ))
 }
 
@@ -1174,7 +1195,92 @@ mod tests {
             scope_reasons: BaselineScopeReasons::empty()
                 .with(ScopeReason::ChangedSince)
                 .with(ScopeReason::Scope),
+            saved_mode: BaselineMode::default(),
         }
+    }
+
+    /// A same-mode run with a diff has the reason `diff` only. Without the flag,
+    /// the repeated run would come back in another mode and stay inert.
+    #[test]
+    fn the_recheck_keeps_the_mode_of_the_file() {
+        let results = AnalysisResults::default();
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            baseline_recheck: Some(BaselineRecheckInput {
+                scope_reasons: BaselineScopeReasons::empty().with(ScopeReason::Diff),
+                saved_mode: BaselineMode {
+                    production: true,
+                    include_entry_exports: true,
+                },
+                ..narrowed_baseline("dead-code")
+            }),
+            ..dead_code_input(&results)
+        });
+        assert_eq!(
+            steps[0].command,
+            "fallow dead-code --baseline .fallow-baseline.json --production \
+             --include-entry-exports"
+        );
+        assert_eq!(
+            steps[0].reason,
+            "this run was narrowed to part of the project (diff), which cannot judge this baseline"
+        );
+    }
+
+    /// The flag that the file records is the remedy of a run that does not use it.
+    #[test]
+    fn the_recheck_adds_a_mode_that_only_the_file_used() {
+        let results = AnalysisResults::default();
+        for (reason, mode, flag) in [
+            (
+                ScopeReason::Production,
+                BaselineMode {
+                    production: true,
+                    include_entry_exports: false,
+                },
+                "--production",
+            ),
+            (
+                ScopeReason::IncludeEntryExports,
+                BaselineMode {
+                    production: false,
+                    include_entry_exports: true,
+                },
+                "--include-entry-exports",
+            ),
+        ] {
+            let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+                baseline_recheck: Some(BaselineRecheckInput {
+                    scope_reasons: BaselineScopeReasons::empty().with(reason),
+                    saved_mode: mode,
+                    ..narrowed_baseline("dead-code")
+                }),
+                ..dead_code_input(&results)
+            });
+            assert_eq!(
+                steps[0].command,
+                format!("fallow dead-code --baseline .fallow-baseline.json {flag}")
+            );
+            assert_eq!(
+                steps[0].reason,
+                format!("the baseline was saved with {flag} and this run was not")
+            );
+        }
+    }
+
+    /// A mode that only the run used can come from the config, so the printed
+    /// command can come back just as inert.
+    #[test]
+    fn a_mode_that_only_the_run_used_offers_no_recheck() {
+        let results = AnalysisResults::default();
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            baseline_recheck: Some(BaselineRecheckInput {
+                scope_reasons: BaselineScopeReasons::empty().with(ScopeReason::Production),
+                saved_mode: BaselineMode::default(),
+                ..narrowed_baseline("dead-code")
+            }),
+            ..dead_code_input(&results)
+        });
+        assert!(steps.iter().all(|step| step.id != "recheck-baseline"));
     }
 
     /// The package map comes from the config, so a repeat without flags would

@@ -114,7 +114,7 @@ A row's `outstanding[]` names every dimension on which the matched unit still pr
 
 Each entry carries `status` (`pass`, `warn`, `fail`, or `skipped`) and `enforced` (whether a `fail` from it makes the CLI exit non-zero). It also carries `observed` and `threshold` where the gate compared a number. A gate failed the run only when `status` is `fail` and `enforced` is true. A passed gate can still be enforced. Read both `status` and `enforced`.
 
-A baselined run also carries `baseline_staleness`. Read `gate_trips` for the `--fail-on-stale-baseline` rule. Check `change_scoped` before dividing `matched_entries` by `baseline_entries`. Read `scope_reasons` for the channels that narrowed the run.
+A baselined run also carries `baseline_staleness`. Read `gate_trips` for the `--fail-on-stale-baseline` rule. Check `change_scoped` before dividing `matched_entries` by `baseline_entries`. Read `scope_reasons` for the channels that stop the run from judging the file.
 
 The MCP server converts the CLI's exit 1 into a successful result so the findings reach you. Read `gate_outcomes` and `baseline_staleness` for the verdict. Every entry that reported `fail` or `warn`, and a baseline that matched less than it was saved with, is also restated as a plain sentence in the result's root `warnings` array.",
     },

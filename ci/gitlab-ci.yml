@@ -884,7 +884,9 @@ variables:
 
       # Production mode and workspace scoping are the user's own choice about
       # what to analyze, so they are never removed and a run narrowed by them
-      # stands down instead.
+      # stands down instead. The binary reports production only when the run and
+      # the file differ, so a production run stays eligible when the file was
+      # saved in production mode. The re-read keeps --production.
       #
       # Driven by the run's own scope_reasons when the binary reports them, so
       # scoping smuggled through FALLOW_ARGS is visible here instead of sending

@@ -110,8 +110,8 @@ pub fn regression_outcome(
 /// two can never drift. `enforced` is the opt-in flag: the verdict is published
 /// either way, and only the flag decides whether it fails the run.
 ///
-/// A narrowed run cannot judge a whole-project baseline and stands down, with one
-/// exception: telling a file this command never wrote from one of its own needs
+/// A run whose scope differs from the file cannot judge it and stands down, with
+/// one exception: telling a file this command never wrote from one of its own needs
 /// no whole-project run, so an unrecognised baseline is judged at any scope. That
 /// keeps this status equal to `gate_trips`, which is the identity the object
 /// exists for.

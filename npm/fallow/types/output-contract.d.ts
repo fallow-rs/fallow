@@ -473,7 +473,8 @@ export type EffectLayerKind = ("top_level" | "static_member")
  */
 export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
 /**
- * One channel that narrowed a run to part of the project.
+ * One channel that narrows a run, or that differs between a run and a saved
+ * baseline.
  *
  * Serialized as kebab-case inside `scope_reasons` and published as an OPEN
  * set, the same tolerate-unknown contract `gate_outcomes` keys carry: a name
@@ -7136,12 +7137,13 @@ matched: number
  * `stale: false` with `gate_trips: true`; that is the contract, not a defect.
  *
  * `change_scoped` is the member a consumer must read before dividing
- * `matched_entries` by `baseline_entries`. A run narrowed to part of the
- * project compares a whole-project baseline against a slice of it and can
- * report `matched_entries: 0` while the baseline is perfectly healthy, so both
- * `stale` and `gate_trips` are false there by construction. The remedy for a
- * tripped gate is always the same: re-save the baseline from a whole-project
- * run with `--save-baseline`.
+ * `matched_entries` by `baseline_entries`. A run whose scope differs from the
+ * file compares the file against another set of findings and can report
+ * `matched_entries: 0` while the baseline is perfectly healthy, so both `stale`
+ * and `gate_trips` are false there by construction. The remedy for a tripped
+ * gate is always the same: remove the stale entries with
+ * `fallow baselines prune`, or re-save the baseline in the same mode with
+ * `--save-baseline`.
  */
 export interface BaselineStaleness {
 /**
@@ -7181,13 +7183,15 @@ current_findings: number
  */
 remaining_findings?: (number | null)
 /**
- * True when this run analyzed only part of the project, so a whole-project
- * baseline matches less of it for reasons that are not rot. The channels
- * differ per command and include a diff, a base ref, `--changed-since`,
- * `--workspace`, `--changed-workspaces`, `--scope`, `--file`, an
- * issue-type filter, and production mode. Both `stale` and `gate_trips`
- * are false whenever this is true. `scope_reasons` names the channels
- * that fired.
+ * True when this run cannot judge the loaded baseline, because its scope
+ * differs from the scope the file records. `scope_reasons` names each
+ * channel that differs, so on `dead-code` production can appear when only
+ * the file used production mode. On `dupes` and `health` this is true when
+ * the run analyzed only part of the project, and production mode always
+ * counts. The channels differ per command and include a diff, a base ref,
+ * `--changed-since`, `--workspace`, `--changed-workspaces`, `--scope`,
+ * `--file`, an issue-type filter, and production mode. Both `stale` and
+ * `gate_trips` are false whenever this is true.
  */
 change_scoped: boolean
 /**
@@ -7261,9 +7265,13 @@ saved_by?: string
  */
 format?: string
 /**
- * Which channels narrowed this run, present and non-empty exactly when
- * `change_scoped` is true. Both members are derived from one function, so
- * the boolean and the array cannot disagree.
+ * Which channels stop this run from judging the file, present and
+ * non-empty exactly when `change_scoped` is true. Both members are derived
+ * from one function, so the boolean and the array cannot disagree.
+ *
+ * On `dead-code`, `production` and `include-entry-exports` appear only when
+ * the run and the file differ on that channel, and `issue-type-filter`
+ * appears only when the file holds a category that the run does not report.
  *
  * Read it to decide whether the narrowing is removable: a run narrowed
  * only by `diff`, `changed-since`, `changed-files`, `scope`, `file` or

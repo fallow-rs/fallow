@@ -182,6 +182,7 @@ fn recheck_input_unless_diff_survives(
         path: &loaded.path,
         baseline_entries: loaded.baseline_entries,
         scope_reasons: loaded.scope_reasons,
+        saved_mode: loaded.saved_mode,
     })
 }
 
@@ -359,6 +360,7 @@ mod tests {
             path: "baseline.json".to_string(),
             baseline_entries: 3,
             scope_reasons: fallow_output::BaselineScopeReasons::empty().with(reason),
+            saved_mode: fallow_output::BaselineMode::default(),
         }
     }
 

@@ -4,7 +4,8 @@
 //! One whole-project run feeds all three formats. The prune rules live in
 //! `fallow_engine::baseline` and keep exactly the entries that `--baseline`
 //! matches, so a pruned file hides the same findings and has no stale entry.
-//! Prune never adds an entry, so it needs no growth gate.
+//! Prune never adds an entry, so it needs no growth gate. A file saved in another
+//! mode than the run is refused, because the run cannot see its findings.
 
 #![expect(
     clippy::print_stderr,
@@ -16,6 +17,7 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 use fallow_engine::baseline::{BaselineKind, BaselinePrune, BaselinePruneRefusal, PrunedEntry};
+use fallow_output::BaselineMode;
 
 use crate::combined::{CombinedOptions, CombinedResults, collect_combined_results};
 use fallow_engine::shell_quote::shell_quote;
@@ -44,6 +46,48 @@ impl BaselineTargets {
     }
 }
 
+/// The files to prune: each flag wins over the config key of that kind.
+pub fn prune_targets(
+    root: &Path,
+    audit: &fallow_config::AuditConfig,
+    [dead_code, health, dupes]: [&Option<PathBuf>; 3],
+) -> BaselineTargets {
+    BaselineTargets {
+        dead_code: crate::resolve_audit_baseline_path(
+            root,
+            dead_code.as_deref(),
+            audit.dead_code_baseline.as_deref(),
+        ),
+        health: crate::resolve_audit_baseline_path(
+            root,
+            health.as_deref(),
+            audit.health_baseline.as_deref(),
+        ),
+        dupes: crate::resolve_audit_baseline_path(
+            root,
+            dupes.as_deref(),
+            audit.dupes_baseline.as_deref(),
+        ),
+    }
+}
+
+/// The first flag or environment variable that would narrow the prune run.
+pub fn narrowing_flag(cli: &crate::cli_args::Cli) -> Option<&'static str> {
+    [
+        (cli.changed_since.is_some(), "--changed-since"),
+        (cli.workspace.is_some(), "--workspace"),
+        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
+        (cli.diff_file.is_some(), "--diff-file"),
+        (cli.diff_stdin, "--diff-stdin"),
+        (
+            std::env::var_os("FALLOW_DIFF_FILE").is_some_and(|value| !value.is_empty()),
+            "FALLOW_DIFF_FILE",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(present, flag)| present.then_some(flag))
+}
+
 pub struct BaselinesPruneOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
@@ -56,6 +100,9 @@ pub struct BaselinesPruneOptions<'a> {
     pub check: bool,
     pub targets: BaselineTargets,
     pub production: crate::cli_production::ProductionModes,
+    /// The mode flags this command received, so the run uses them and a printed
+    /// prune command repeats them. A mode from the config needs no flag.
+    pub mode_flags: BaselineMode,
     pub coverage: Option<&'a Path>,
     pub coverage_root: Option<&'a Path>,
     pub regression_opts: crate::regression::RegressionOpts<'a>,
@@ -92,6 +139,28 @@ struct FileOutcome {
     content: Option<String>,
     reason: Option<String>,
     reason_code: Option<&'static str>,
+    /// The mismatch of a `scope-mismatch` refusal, which has its own remedy.
+    mismatch: Option<ScopeMismatch>,
+}
+
+/// How the mode of a refused file differs from the run.
+#[derive(Clone, Copy)]
+struct ScopeMismatch {
+    saved_only: BaselineMode,
+    run_only: BaselineMode,
+    run: BaselineMode,
+}
+
+impl ScopeMismatch {
+    /// The mode of the file, which a prune must use to judge it.
+    const fn saved(self) -> BaselineMode {
+        self.run.minus(self.run_only).union(self.saved_only)
+    }
+
+    /// The mode the file must record before this run can prune it.
+    const fn resave(self) -> BaselineMode {
+        self.run.union(self.saved_only)
+    }
 }
 
 /// Why one file could not be pruned.
@@ -112,10 +181,16 @@ pub fn run_baselines_prune(opts: &BaselinesPruneOptions<'_>) -> ExitCode {
         .iter()
         .map(|(kind, path)| {
             let pruned = match std::fs::read_to_string(path) {
-                Ok(content) => prune_one(kind, &content, &results, opts.root),
+                Ok(content) => prune_one(kind, &content, &results, opts),
                 Err(error) => Err(PruneFailure::Unreadable(error.to_string())),
             };
-            outcome_for(kind, path.to_path_buf(), pruned, opts.check)
+            outcome_for(
+                kind,
+                path.to_path_buf(),
+                pruned,
+                opts.check,
+                run_mode(kind, &results, opts),
+            )
         })
         .collect();
     if !opts.check {
@@ -127,7 +202,7 @@ pub fn run_baselines_prune(opts: &BaselinesPruneOptions<'_>) -> ExitCode {
     let exit = exit_code(&outcomes, opts.check);
     if matches!(opts.output, OutputFormat::Json) {
         let code = report::emit_report_json(
-            &prune_json(&outcomes, opts.check, opts.root),
+            &prune_json(&outcomes, opts.check, opts.root, opts.mode_flags),
             "baselines prune",
             opts.json_style,
         );
@@ -137,13 +212,14 @@ pub fn run_baselines_prune(opts: &BaselinesPruneOptions<'_>) -> ExitCode {
             exit
         };
     }
-    print_human(&outcomes, opts.check, opts.root, opts.quiet);
+    print_human(&outcomes, opts);
     exit
 }
 
 /// A quiet whole-project run of the analyses that the targets need. The
-/// production modes come from config, and `workspaces.changedSince` stays
-/// off, so the run sees every finding that a saved baseline can hold.
+/// production modes come from the flag or the config, and
+/// `workspaces.changedSince` stays off, so the run sees every finding that a
+/// baseline saved in this mode can hold.
 fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<'a> {
     CombinedOptions {
         root: opts.root,
@@ -191,7 +267,7 @@ fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<
         save_snapshot: None,
         coverage: opts.coverage,
         coverage_root: opts.coverage_root,
-        include_entry_exports: false,
+        include_entry_exports: opts.mode_flags.include_entry_exports,
         show_cascade: false,
         fail_on_parse_error: false,
         scope: None,
@@ -211,8 +287,9 @@ fn prune_one(
     kind: BaselineKind,
     content: &str,
     results: &CombinedResults,
-    root: &Path,
+    opts: &BaselinesPruneOptions<'_>,
 ) -> Result<BaselinePrune, PruneFailure> {
+    let root = opts.root;
     let pruned = match kind {
         BaselineKind::DeadCode => {
             let Some(check) = results.check.as_ref() else {
@@ -230,6 +307,10 @@ fn prune_one(
                 &check.results,
                 root,
                 &identity,
+                BaselineMode {
+                    production: check.config.production,
+                    include_entry_exports: check.config.include_entry_exports,
+                },
             )
         }
         BaselineKind::Dupes => {
@@ -238,7 +319,11 @@ fn prune_one(
                     "the duplication analysis did not run",
                 ));
             };
-            fallow_engine::baseline::prune_dupes_baseline(content, &dupes.report)
+            fallow_engine::baseline::prune_dupes_baseline(
+                content,
+                &dupes.report,
+                opts.production.dupes,
+            )
         }
         BaselineKind::Health => {
             let Some(health) = results.health.as_ref() else {
@@ -252,10 +337,43 @@ fn prune_one(
                 .iter()
                 .map(|finding| finding.violation.clone())
                 .collect();
-            fallow_engine::baseline::prune_health_baseline(content, &findings, root)
+            fallow_engine::baseline::prune_health_baseline(
+                content,
+                &findings,
+                root,
+                opts.production.health,
+            )
         }
     };
     pruned.map_err(PruneFailure::Refused)
+}
+
+/// The mode this run analyzed one baseline kind in.
+fn run_mode(
+    kind: BaselineKind,
+    results: &CombinedResults,
+    opts: &BaselinesPruneOptions<'_>,
+) -> BaselineMode {
+    match kind {
+        BaselineKind::DeadCode => results.check.as_ref().map_or_else(
+            || BaselineMode {
+                production: opts.production.dead_code,
+                include_entry_exports: opts.mode_flags.include_entry_exports,
+            },
+            |check| BaselineMode {
+                production: check.config.production,
+                include_entry_exports: check.config.include_entry_exports,
+            },
+        ),
+        BaselineKind::Health => BaselineMode {
+            production: opts.production.health,
+            include_entry_exports: false,
+        },
+        BaselineKind::Dupes => BaselineMode {
+            production: opts.production.dupes,
+            include_entry_exports: false,
+        },
+    }
 }
 
 fn outcome_for(
@@ -263,6 +381,7 @@ fn outcome_for(
     path: PathBuf,
     pruned: Result<BaselinePrune, PruneFailure>,
     check: bool,
+    run: BaselineMode,
 ) -> FileOutcome {
     match pruned {
         Ok(pruned) => {
@@ -283,9 +402,21 @@ fn outcome_for(
                 content: pruned.content,
                 reason: None,
                 reason_code: None,
+                mismatch: None,
             }
         }
         Err(failure) => {
+            let mismatch = match &failure {
+                PruneFailure::Refused(BaselinePruneRefusal::ScopeMismatch {
+                    saved_only,
+                    run_only,
+                }) => Some(ScopeMismatch {
+                    saved_only: *saved_only,
+                    run_only: *run_only,
+                    run,
+                }),
+                _ => None,
+            };
             let (status, reason, reason_code) = match failure {
                 PruneFailure::Refused(refusal) => {
                     (Status::Refused, refusal.reason(), Some(refusal.code()))
@@ -307,6 +438,7 @@ fn outcome_for(
                 content: None,
                 reason: Some(reason),
                 reason_code,
+                mismatch,
             }
         }
     }
@@ -382,15 +514,62 @@ fn display_path(path: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn save_command(outcome: &FileOutcome, root: &Path) -> String {
+/// The command that saves this file again. It keeps the mode of the run, so
+/// the new file records the mode that this prune compared in.
+fn save_command(outcome: &FileOutcome, root: &Path, mode: BaselineMode) -> String {
     format!(
-        "fallow {} --save-baseline {}",
+        "fallow {}{} --save-baseline {}",
+        outcome.kind.as_str(),
+        mode.flags(),
+        shell_quote(&display_path(&outcome.path, root))
+    )
+}
+
+/// The command that prunes one refused file in the mode that the file records.
+fn prune_in_saved_mode(outcome: &FileOutcome, root: &Path, saved: BaselineMode) -> String {
+    format!(
+        "fallow baselines prune{} --{}-baseline {}",
+        saved.flags(),
         outcome.kind.as_str(),
         shell_quote(&display_path(&outcome.path, root))
     )
 }
 
-fn prune_json(outcomes: &[FileOutcome], check: bool, root: &Path) -> serde_json::Value {
+/// The remedy of a `scope-mismatch` refusal. The run can prune the file when it
+/// adds the mode that the file records. A file without the record of a mode that
+/// the run uses must first be saved again, and a person must review that save,
+/// because it can record findings that the file did not hold.
+fn mismatch_remedy(outcome: &FileOutcome, root: &Path, mismatch: ScopeMismatch) -> MismatchRemedy {
+    if mismatch.run_only.is_empty() {
+        MismatchRemedy::Prune(prune_in_saved_mode(outcome, root, mismatch.saved()))
+    } else {
+        MismatchRemedy::Save(save_command(outcome, root, mismatch.resave()))
+    }
+}
+
+enum MismatchRemedy {
+    Prune(String),
+    Save(String),
+}
+
+fn resave_description(mode: BaselineMode) -> String {
+    match (mode.production, mode.include_entry_exports) {
+        (true, false) => {
+            "Save this baseline again in production mode, after a review of its findings".to_owned()
+        }
+        _ => format!(
+            "Save this baseline again with{}, after a review of its findings",
+            mode.flags()
+        ),
+    }
+}
+
+fn prune_json(
+    outcomes: &[FileOutcome],
+    check: bool,
+    root: &Path,
+    mode_flags: BaselineMode,
+) -> serde_json::Value {
     let files: Vec<serde_json::Value> = outcomes
         .iter()
         .map(|outcome| {
@@ -423,11 +602,16 @@ fn prune_json(outcomes: &[FileOutcome], check: bool, root: &Path) -> serde_json:
         "schema_version": 1,
         "check": check,
         "files": files,
-        "actions": prune_actions(outcomes, check, root),
+        "actions": prune_actions(outcomes, check, root, mode_flags),
     })
 }
 
-fn prune_actions(outcomes: &[FileOutcome], check: bool, root: &Path) -> Vec<serde_json::Value> {
+fn prune_actions(
+    outcomes: &[FileOutcome],
+    check: bool,
+    root: &Path,
+    mode_flags: BaselineMode,
+) -> Vec<serde_json::Value> {
     let mut actions = Vec::new();
     let written: Vec<String> = outcomes
         .iter()
@@ -459,19 +643,39 @@ fn prune_actions(outcomes: &[FileOutcome], check: bool, root: &Path) -> Vec<serd
             "type": "prune-baselines",
             "auto_fixable": true,
             "description": "Remove the baseline entries that match no current finding",
-            "command": "fallow baselines prune",
+            "command": format!("fallow baselines prune{}", mode_flags.flags()),
         }));
     }
     for outcome in outcomes
         .iter()
         .filter(|outcome| outcome.status == Status::Refused)
     {
+        if let Some(mismatch) = outcome.mismatch {
+            let path = display_path(&outcome.path, root);
+            actions.push(match mismatch_remedy(outcome, root, mismatch) {
+                MismatchRemedy::Prune(command) => serde_json::json!({
+                    "type": "prune-baselines",
+                    "auto_fixable": false,
+                    "description": "Prune this baseline in the mode that it was saved in",
+                    "path": path,
+                    "command": command,
+                }),
+                MismatchRemedy::Save(command) => serde_json::json!({
+                    "type": "resave-baseline",
+                    "auto_fixable": false,
+                    "description": resave_description(mismatch.resave()),
+                    "path": path,
+                    "command": command,
+                }),
+            });
+            continue;
+        }
         actions.push(serde_json::json!({
             "type": "resave-baseline",
             "auto_fixable": false,
             "description": "Save this baseline again with the current key form, after a review of its findings",
             "path": display_path(&outcome.path, root),
-            "command": save_command(outcome, root),
+            "command": save_command(outcome, root, mode_flags),
         }));
     }
     actions
@@ -479,7 +683,8 @@ fn prune_actions(outcomes: &[FileOutcome], check: bool, root: &Path) -> Vec<serd
 
 /// Print the report. `--quiet` keeps only the skipped and failed files, so a
 /// run that exits 2 always says why.
-fn print_human(outcomes: &[FileOutcome], check: bool, root: &Path, quiet: bool) {
+fn print_human(outcomes: &[FileOutcome], opts: &BaselinesPruneOptions<'_>) {
+    let (check, root, quiet) = (opts.check, opts.root, opts.quiet);
     for outcome in outcomes {
         if quiet && !matches!(outcome.status, Status::Refused | Status::Error) {
             continue;
@@ -507,15 +712,28 @@ fn print_human(outcomes: &[FileOutcome], check: bool, root: &Path, quiet: bool) 
                 );
                 print_removed(&outcome.removed);
             }
-            Status::Refused => eprintln!(
-                "Skipped the {kind} baseline {path}: {}. Save it again with: {}",
-                outcome.reason.as_deref().unwrap_or_default(),
-                save_command(outcome, root)
-            ),
+            Status::Refused => {
+                let remedy = match outcome.mismatch {
+                    Some(mismatch) => match mismatch_remedy(outcome, root, mismatch) {
+                        MismatchRemedy::Prune(command) => format!("Run: {command}"),
+                        MismatchRemedy::Save(command) => {
+                            format!("Review the findings, then save it again with: {command}")
+                        }
+                    },
+                    None => format!(
+                        "Save it again with: {}",
+                        save_command(outcome, root, opts.mode_flags)
+                    ),
+                };
+                eprintln!(
+                    "Skipped the {kind} baseline {path}: {}. {remedy}",
+                    outcome.reason.as_deref().unwrap_or_default(),
+                );
+            }
             Status::Error => eprintln!(
                 "Error: {kind} baseline {path}: {}. To save it: {}",
                 outcome.reason.as_deref().unwrap_or_default(),
-                save_command(outcome, root)
+                save_command(outcome, root, opts.mode_flags)
             ),
         }
     }
@@ -525,7 +743,10 @@ fn print_human(outcomes: &[FileOutcome], check: bool, root: &Path, quiet: bool) 
             .iter()
             .any(|outcome| outcome.status == Status::WouldPrune)
     {
-        eprintln!("Run `fallow baselines prune` to remove these entries.");
+        eprintln!(
+            "Run `fallow baselines prune{}` to remove these entries.",
+            opts.mode_flags.flags()
+        );
     }
 }
 

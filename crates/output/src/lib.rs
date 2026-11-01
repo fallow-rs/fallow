@@ -139,7 +139,7 @@ pub use audit_worsened::{
     describe_worsened_metrics, format_metric_value,
 };
 pub use baseline_staleness::{
-    BaselineScopeReasons, BaselineStaleness, BaselineStalenessAdvisory, ScopeReason,
+    BaselineMode, BaselineScopeReasons, BaselineStaleness, BaselineStalenessAdvisory, ScopeReason,
 };
 #[cfg(feature = "schema")]
 pub use check::ArchitectureSchemaVersion;

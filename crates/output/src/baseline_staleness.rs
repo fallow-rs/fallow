@@ -14,7 +14,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// One channel that narrowed a run to part of the project.
+/// One channel that narrows a run, or that differs between a run and a saved
+/// baseline.
 ///
 /// Serialized as kebab-case inside `scope_reasons` and published as an OPEN
 /// set, the same tolerate-unknown contract `gate_outcomes` keys carry: a name
@@ -175,6 +176,12 @@ impl BaselineScopeReasons {
         self.0 == 0
     }
 
+    /// This set without `reason`.
+    #[must_use]
+    pub const fn without(self, reason: ScopeReason) -> Self {
+        Self(self.0 & !reason.bit())
+    }
+
     /// Whether `reason` narrowed the run.
     #[must_use]
     pub const fn contains(self, reason: ScopeReason) -> bool {
@@ -224,6 +231,100 @@ impl<'de> Deserialize<'de> for BaselineScopeReasons {
     }
 }
 
+/// The two channels that a saved reason describes completely.
+///
+/// A saved `production` or `include-entry-exports` says all there is to know
+/// about that channel, so a run and a file can compare on it. A saved `diff` or
+/// `workspace` names the channel and not its value, so those stay out of this
+/// type. Dead-code files can record both channels. Health and duplication files
+/// can record production only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BaselineMode {
+    /// The run or the file used production mode.
+    pub production: bool,
+    /// The run or the file used `--include-entry-exports`.
+    pub include_entry_exports: bool,
+}
+
+impl BaselineMode {
+    /// The mode that a set of reasons names.
+    #[must_use]
+    pub const fn from_reasons(reasons: BaselineScopeReasons) -> Self {
+        Self {
+            production: reasons.contains(ScopeReason::Production),
+            include_entry_exports: reasons.contains(ScopeReason::IncludeEntryExports),
+        }
+    }
+
+    /// The mode that the `scope_reasons` of a saved file names.
+    #[must_use]
+    pub fn from_saved_names(names: &[String]) -> Self {
+        let has = |reason: ScopeReason| names.iter().any(|name| name == reason.as_str());
+        Self {
+            production: has(ScopeReason::Production),
+            include_entry_exports: has(ScopeReason::IncludeEntryExports),
+        }
+    }
+
+    /// True when neither channel is on.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        !self.production && !self.include_entry_exports
+    }
+
+    /// The channels that are on in this mode and off in `other`.
+    #[must_use]
+    pub const fn minus(self, other: Self) -> Self {
+        Self {
+            production: self.production && !other.production,
+            include_entry_exports: self.include_entry_exports && !other.include_entry_exports,
+        }
+    }
+
+    /// The channels that are on in this mode or in `other`.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            production: self.production || other.production,
+            include_entry_exports: self.include_entry_exports || other.include_entry_exports,
+        }
+    }
+
+    /// The flags that select this mode, each with a leading space, for a
+    /// printed command. Empty when neither channel is on.
+    #[must_use]
+    pub const fn flags(self) -> &'static str {
+        match (self.production, self.include_entry_exports) {
+            (false, false) => "",
+            (true, false) => " --production",
+            (false, true) => " --include-entry-exports",
+            (true, true) => " --production --include-entry-exports",
+        }
+    }
+
+    /// The flags as prose, for example `--production`.
+    #[must_use]
+    pub const fn flags_prose(self) -> &'static str {
+        match (self.production, self.include_entry_exports) {
+            (false, false) => "",
+            (true, false) => "--production",
+            (false, true) => "--include-entry-exports",
+            (true, true) => "--production and --include-entry-exports",
+        }
+    }
+
+    /// The channels as prose, for a file that does not record them.
+    #[must_use]
+    pub const fn unrecorded_prose(self) -> &'static str {
+        match (self.production, self.include_entry_exports) {
+            (false, false) => "",
+            (true, false) => "production mode",
+            (false, true) => "--include-entry-exports",
+            (true, true) => "production mode and --include-entry-exports",
+        }
+    }
+}
+
 /// Which advisory a loaded baseline earned on this run.
 ///
 /// Mirrors `fallow_engine::baseline::BaselineStalenessWarning` so a consumer can
@@ -257,12 +358,13 @@ pub enum BaselineStalenessAdvisory {
 /// `stale: false` with `gate_trips: true`; that is the contract, not a defect.
 ///
 /// `change_scoped` is the member a consumer must read before dividing
-/// `matched_entries` by `baseline_entries`. A run narrowed to part of the
-/// project compares a whole-project baseline against a slice of it and can
-/// report `matched_entries: 0` while the baseline is perfectly healthy, so both
-/// `stale` and `gate_trips` are false there by construction. The remedy for a
-/// tripped gate is always the same: re-save the baseline from a whole-project
-/// run with `--save-baseline`.
+/// `matched_entries` by `baseline_entries`. A run whose scope differs from the
+/// file compares the file against another set of findings and can report
+/// `matched_entries: 0` while the baseline is perfectly healthy, so both `stale`
+/// and `gate_trips` are false there by construction. The remedy for a tripped
+/// gate is always the same: remove the stale entries with
+/// `fallow baselines prune`, or re-save the baseline in the same mode with
+/// `--save-baseline`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BaselineStaleness {
@@ -293,13 +395,15 @@ pub struct BaselineStaleness {
     /// version before this member does not carry it either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining_findings: Option<usize>,
-    /// True when this run analyzed only part of the project, so a whole-project
-    /// baseline matches less of it for reasons that are not rot. The channels
-    /// differ per command and include a diff, a base ref, `--changed-since`,
-    /// `--workspace`, `--changed-workspaces`, `--scope`, `--file`, an
-    /// issue-type filter, and production mode. Both `stale` and `gate_trips`
-    /// are false whenever this is true. `scope_reasons` names the channels
-    /// that fired.
+    /// True when this run cannot judge the loaded baseline, because its scope
+    /// differs from the scope the file records. `scope_reasons` names each
+    /// channel that differs, so on `dead-code` production can appear when only
+    /// the file used production mode. On `dupes` and `health` this is true when
+    /// the run analyzed only part of the project, and production mode always
+    /// counts. The channels differ per command and include a diff, a base ref,
+    /// `--changed-since`, `--workspace`, `--changed-workspaces`, `--scope`,
+    /// `--file`, an issue-type filter, and production mode. Both `stale` and
+    /// `gate_trips` are false whenever this is true.
     pub change_scoped: bool,
     /// True exactly when the advisory stderr warning fired: not change-scoped,
     /// at least one current finding before baseline filtering, and either
@@ -375,9 +479,13 @@ pub struct BaselineStaleness {
     )]
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub format: Option<crate::static_str::StaticStr>,
-    /// Which channels narrowed this run, present and non-empty exactly when
-    /// `change_scoped` is true. Both members are derived from one function, so
-    /// the boolean and the array cannot disagree.
+    /// Which channels stop this run from judging the file, present and
+    /// non-empty exactly when `change_scoped` is true. Both members are derived
+    /// from one function, so the boolean and the array cannot disagree.
+    ///
+    /// On `dead-code`, `production` and `include-entry-exports` appear only when
+    /// the run and the file differ on that channel, and `issue-type-filter`
+    /// appears only when the file holds a category that the run does not report.
     ///
     /// Read it to decide whether the narrowing is removable: a run narrowed
     /// only by `diff`, `changed-since`, `changed-files`, `scope`, `file` or

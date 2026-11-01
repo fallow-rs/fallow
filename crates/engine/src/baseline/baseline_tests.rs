@@ -58,7 +58,14 @@ fn prop_baselines_match_repeated_occurrences_and_advisory_staleness() {
         )
         .is_empty()
     );
-    let pruned = prune_dead_code_baseline(&doubled_baseline, &original, root, &identity).unwrap();
+    let pruned = prune_dead_code_baseline(
+        &doubled_baseline,
+        &original,
+        root,
+        &identity,
+        fallow_output::BaselineMode::default(),
+    )
+    .unwrap();
     assert_eq!((pruned.entries_before, pruned.entries_after), (2, 1));
     let mut old: serde_json::Value = serde_json::from_str(&saved).unwrap();
     old.as_object_mut().unwrap().remove("prop_drilling_chains");
@@ -774,6 +781,7 @@ fn duplication_baseline_roundtrip() {
 #[test]
 fn the_declared_keys_are_every_key_each_format_writes() {
     let duplication = DuplicationBaselineData {
+        scope_reasons: Vec::new(),
         kind: Some(BaselineKind::Dupes),
         clone_groups: vec!["src/a.ts:1-10".to_owned()],
         clone_fingerprints: vec!["abc".to_owned()],
@@ -790,6 +798,7 @@ fn the_declared_keys_are_every_key_each_format_writes() {
     ))
     .collect();
     let health = HealthBaselineData {
+        scope_reasons: Vec::new(),
         kind: Some(BaselineKind::Health),
         findings: vec!["src/a.ts:run:1".to_owned()],
         finding_counts: counts.clone(),
@@ -1186,6 +1195,7 @@ fn filter_new_clone_groups_matches_legacy_raw_fingerprint_key() {
     );
     let legacy_key = legacy_clone_group_fingerprint_key(&group);
     let baseline = DuplicationBaselineData {
+        scope_reasons: Vec::new(),
         kind: None,
         clone_groups: Vec::new(),
         clone_fingerprints: vec![legacy_key.clone()],
@@ -1431,6 +1441,7 @@ fn health_baseline_reports_full_category_when_count_increases() {
 fn health_baseline_legacy_findings_still_load() {
     let root = PathBuf::from("/project");
     let baseline = HealthBaselineData {
+        scope_reasons: Vec::new(),
         kind: None,
         findings: vec!["src/utils.ts:parseExpression:42".to_owned()],
         finding_counts: BTreeMap::new(),
@@ -1910,6 +1921,7 @@ fn health_count_baseline_does_not_follow_file_moves() {
 #[test]
 fn health_identity_data_is_absent_for_legacy_and_empty_baselines() {
     let legacy = HealthBaselineData {
+        scope_reasons: Vec::new(),
         findings: vec!["src/utils.ts:parseExpression:42".to_string()],
         ..HealthBaselineData::default()
     };
@@ -1922,6 +1934,7 @@ fn health_baseline_empty_keeps_all() {
     let root = PathBuf::from("/project");
     let findings = vec![make_health_finding(&root, "parseExpression", 42)];
     let baseline = HealthBaselineData {
+        scope_reasons: Vec::new(),
         kind: None,
         findings: vec![],
         finding_counts: BTreeMap::new(),
@@ -2678,6 +2691,7 @@ fn runtime_finding(
 #[test]
 fn legacy_prod_baseline_still_suppresses_finding() {
     let baseline = HealthBaselineData {
+        scope_reasons: Vec::new(),
         runtime_coverage_findings: vec!["fallow:prod:deadbeef".to_owned()],
         ..HealthBaselineData::default()
     };
@@ -2719,6 +2733,7 @@ fn source_hash_baseline_survives_line_move() {
 #[test]
 fn unbaselined_finding_is_reported() {
     let baseline = HealthBaselineData {
+        scope_reasons: Vec::new(),
         runtime_coverage_findings: vec!["fallow:fn:00000001".to_owned()],
         ..HealthBaselineData::default()
     };

@@ -119,12 +119,14 @@ mod install_state;
 
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
 mod prune;
+mod saved_scope;
 
 pub use install_state::{install_state_diagnostic, saved_node_modules_state};
 pub use prune::{
     BaselinePrune, BaselinePruneRefusal, PrunedEntry, prune_dead_code_baseline,
     prune_dupes_baseline, prune_health_baseline,
 };
+pub use saved_scope::{saved_finding_categories, saved_scope_reasons};
 
 /// The sorted canonical keys of `items`, one for each occurrence.
 fn canonical_keys<T: IdentifiedFinding>(items: &[T], paths: &IdentityPaths<'_>) -> Vec<String> {
@@ -185,8 +187,9 @@ pub struct BaselineStaleness {
     /// there was nothing to compare, either because the project is clean or the
     /// scope was empty, so staleness cannot be judged.
     pub current_findings: usize,
-    /// True when this run analyzed only part of the project, so a
-    /// whole-project baseline matches less of it for reasons that are not rot.
+    /// True when this run cannot judge the loaded baseline, because its scope
+    /// differs from the scope of the file. The baseline then matches less for
+    /// reasons that are not rot.
     pub change_scoped: bool,
 }
 
@@ -367,16 +370,18 @@ pub enum BaselineKind {
 
 impl BaselineKind {
     /// The command that removes only the stale entries of the baseline at
-    /// `path`.
+    /// `path`, in the mode that the file records. A prune in another mode
+    /// refuses the file.
     #[must_use]
-    pub fn prune_command(self, path: &Path) -> String {
+    pub fn prune_command(self, path: &Path, mode: fallow_output::BaselineMode) -> String {
         // The prune flags resolve a relative path against the project root,
         // while `--baseline` resolves it against the working directory. An
         // absolute path names the same file in both.
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let quoted = crate::shell_quote::shell_quote(&absolute.display().to_string());
         format!(
-            "fallow baselines prune --{}-baseline {quoted}",
+            "fallow baselines prune{} --{}-baseline {quoted}",
+            mode.flags(),
             self.as_str()
         )
     }
@@ -466,24 +471,6 @@ pub fn refuse_baseline_kind_overwrite(save_path: &Path, saving: BaselineKind) ->
         save_path.display(),
         saving.as_str(),
     ))
-}
-
-/// The `scope_reasons` a dead-code baseline file recorded when it was saved.
-/// Empty for a whole-project save, a legacy file, or a file that is not JSON.
-#[must_use]
-pub fn saved_scope_reasons(json: &str) -> Vec<String> {
-    serde_json::from_str::<serde_json::Value>(json)
-        .ok()
-        .and_then(|value| {
-            value.get("scope_reasons")?.as_array().map(|reasons| {
-                reasons
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            })
-        })
-        .unwrap_or_default()
 }
 
 /// Which command a saved baseline file belongs to, read as `expected`'s format.
@@ -776,16 +763,6 @@ impl BaselineData {
             };
         }
         with_baseline_fields!(build)
-    }
-
-    /// Record the channels that narrowed the saving run.
-    #[must_use]
-    pub fn with_scope_reasons(mut self, reasons: fallow_output::BaselineScopeReasons) -> Self {
-        self.scope_reasons = reasons
-            .iter()
-            .map(|reason| reason.as_str().to_owned())
-            .collect();
-        self
     }
 
     /// Build a baseline in the legacy key forms that fallow wrote before
@@ -2439,6 +2416,10 @@ pub struct DuplicationBaselineData {
     /// is written but never read back through this struct.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     kind: Option<BaselineKind>,
+    /// `production` when the saving run used production mode, absent otherwise.
+    /// Only `fallow baselines prune` reads it, through [`saved_scope_reasons`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    scope_reasons: Vec<String>,
     /// Legacy clone group keys: sorted list of `file:start-end` per group.
     #[serde(default)]
     pub clone_groups: Vec<String>,
@@ -2464,6 +2445,7 @@ impl DuplicationBaselineData {
             crate::duplicates::CloneFingerprintSet::from_groups(&report.clone_groups);
         Self {
             kind: Some(BaselineKind::Dupes),
+            scope_reasons: Vec::new(),
             clone_groups: report
                 .clone_groups
                 .iter()
@@ -2632,6 +2614,10 @@ pub struct HealthBaselineData {
     /// is written but never read back through this struct.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub(crate) kind: Option<BaselineKind>,
+    /// `production` when the saving run used production mode, absent otherwise.
+    /// Only `fallow baselines prune` reads it, through [`saved_scope_reasons`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) scope_reasons: Vec<String>,
     /// Legacy health baseline keys: `relative_path:function_name:line`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) findings: Vec<String>,
@@ -2752,6 +2738,7 @@ impl HealthBaselineData {
     ) -> Self {
         Self {
             kind: Some(BaselineKind::Health),
+            scope_reasons: Vec::new(),
             findings: Vec::new(),
             finding_counts: health_finding_counts(findings, root, HealthBaselineMode::Count),
             identity_finding_counts: HealthFindingCountMap::new(),

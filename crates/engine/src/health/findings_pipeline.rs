@@ -503,6 +503,7 @@ pub(super) fn save_health_baseline_if_requested(
             quiet: opts.quiet,
             mode: opts.baseline_mode,
             mode_explicit: opts.baseline_mode_explicit,
+            production: config.production,
         })?;
     }
     Ok(())
