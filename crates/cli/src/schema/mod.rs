@@ -489,17 +489,22 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
             m.note = Some(
-                "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+                "--unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency",
             );
         }
         "type-only-dependency" => {
             m.note = Some(
-                "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
+                "Only reported in --production mode; --misplaced-deps controls it together with test-only-dependency and dev-dependency-in-production",
             );
         }
         "test-only-dependency" => {
             m.note = Some(
-                "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
+                "Not reported in --production mode (test files are excluded there); --misplaced-deps controls it together with type-only-dependency and dev-dependency-in-production",
+            );
+        }
+        "dev-dependency-in-production" => {
+            m.note = Some(
+                "Reported with and without --production; --misplaced-deps controls it together with type-only-dependency and test-only-dependency",
             );
         }
         "unlisted-dependency" => {}

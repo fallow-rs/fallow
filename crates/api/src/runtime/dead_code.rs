@@ -986,6 +986,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
     filters.unused_files
         || filters.unused_exports
         || filters.unused_deps
+        || filters.misplaced_deps
         || filters.unused_types
         || filters.private_type_leaks
         || filters.deprecated_exports_in_use
@@ -1039,7 +1040,14 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
         results.deprecated_exports_in_use.clear();
     }
     if !filters.unused_deps {
-        clear_dead_code_dependency_findings(results);
+        results.unused_dependencies.clear();
+        results.unused_dev_dependencies.clear();
+        results.unused_optional_dependencies.clear();
+    }
+    if !filters.misplaced_deps {
+        results.type_only_dependencies.clear();
+        results.test_only_dependencies.clear();
+        results.dev_dependencies_in_production.clear();
     }
     if !filters.unused_enum_members {
         results.unused_enum_members.clear();
@@ -1053,15 +1061,6 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
     if !filters.unlisted_deps {
         results.unlisted_dependencies.clear();
     }
-}
-
-fn clear_dead_code_dependency_findings(results: &mut AnalysisResults) {
-    results.unused_dependencies.clear();
-    results.unused_dev_dependencies.clear();
-    results.unused_optional_dependencies.clear();
-    results.type_only_dependencies.clear();
-    results.test_only_dependencies.clear();
-    results.dev_dependencies_in_production.clear();
 }
 
 fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {

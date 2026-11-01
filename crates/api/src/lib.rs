@@ -451,8 +451,11 @@ pub struct DeadCodeFilters {
     pub unused_files: bool,
     /// Exported symbols never imported elsewhere.
     pub unused_exports: bool,
-    /// Declared dependencies never imported.
+    /// Declared dependencies, dev dependencies and optional dependencies never imported.
     pub unused_deps: bool,
+    /// Used dependencies that may belong in another `package.json` section:
+    /// type-only, test-only, and dev dependencies used in production.
+    pub misplaced_deps: bool,
     /// Exported types never referenced.
     pub unused_types: bool,
     /// Exported APIs that expose non-exported types.
@@ -523,16 +526,17 @@ pub struct DeadCodeFilters {
 
 impl DeadCodeFilters {
     /// Whether the report keeps dependency findings: no filter is active, or
-    /// `unused_deps` or `unlisted_deps` is one of the active filters. The CLI
-    /// applies the same rule to its `--unused-deps` and `--unlisted-deps`.
+    /// `unused_deps`, `misplaced_deps` or `unlisted_deps` is one of the active
+    /// filters. The CLI applies the same rule to the matching flags.
     pub(crate) fn reports_dependency_findings(&self) -> bool {
-        !self.any_active() || self.unused_deps || self.unlisted_deps
+        !self.any_active() || self.unused_deps || self.misplaced_deps || self.unlisted_deps
     }
 
     fn any_active(&self) -> bool {
         self.unused_files
             || self.unused_exports
             || self.unused_deps
+            || self.misplaced_deps
             || self.unused_types
             || self.private_type_leaks
             || self.deprecated_exports_in_use
@@ -592,6 +596,7 @@ impl DeadCodeFilters {
             "--private-type-leaks" => self.private_type_leaks = true,
             "--deprecated-exports-in-use" => self.deprecated_exports_in_use = true,
             "--unused-deps" => self.unused_deps = true,
+            "--misplaced-deps" => self.misplaced_deps = true,
             "--unused-enum-members" => self.unused_enum_members = true,
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-store-members" => self.unused_store_members = true,

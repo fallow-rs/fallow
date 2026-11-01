@@ -53,6 +53,7 @@ mod coverage_cloud_reads_tests;
 mod coverage_setup_cloud_tests;
 mod coverage_upload_binding_tests;
 mod deep_nesting_tests;
+mod dependency_filter_tests;
 mod deprecated_export_tests;
 mod doctor_tests;
 mod dupes_tests;

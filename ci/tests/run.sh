@@ -2734,6 +2734,15 @@ fi
 run_generated_gitlab_fixture "$ARCH_WORK" \
   MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
   FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_ISSUE_TYPES="unused-deps, misplaced-deps" > /dev/null 2>&1 || true
+assert_contains "$(grep '^fallow dead-code ' "$FALLOW_TEST_LOG")" "--unused-deps --misplaced-deps" \
+  "gitlab dead-code: FALLOW_ISSUE_TYPES forwards unused-deps and misplaced-deps"
+
+: > "$FALLOW_TEST_LOG"
+run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
   FALLOW_COMMAND=architecture \
   FALLOW_ISSUE_TYPES="cycles, policy" > /dev/null 2>&1 || true
 assert_contains "$(grep '^fallow architecture ' "$FALLOW_TEST_LOG")" "--cycles --policy" \

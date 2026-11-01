@@ -47,7 +47,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 | Command | Purpose | Key Flags |
 |---|---|---|
 | `fallow` | Run full codebase analysis: cleanup + duplication + health (default) | `--only`, `--skip`, `--production`, `--production-dead-code`, `--production-health`, `--production-dupes`, `--ci`, `--fail-on-issues`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--score`, `--trend`, `--save-snapshot`, `--include-entry-exports` |
-| `dead-code` | Dead code analysis (`check` is an alias) | `--unused-exports`, `--changed-since`, `--changed-workspaces`, `--production`, `--file`, `--include-entry-exports`, `--stale-suppressions`, `--ci`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
+| `dead-code` | Dead code analysis (`check` is an alias) | `--unused-exports`, `--misplaced-deps`, `--changed-since`, `--changed-workspaces`, `--production`, `--file`, `--include-entry-exports`, `--stale-suppressions`, `--ci`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
 | `architecture` | Check import cycles, boundaries and policy rules after editing | `--cycles`, `--boundaries`, `--policy`, `--file`, `--finding-id`, `path` |
 | `watch` | Watch for changes and re-run analysis | `--no-clear` |
 | `type-aware` | Inspect the optional TypeScript semantic companion |  |
@@ -129,7 +129,8 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 |---|---|
 | `--unused-files` | Unused files |
 | `--unused-exports` | Unused exports |
-| `--unused-deps` | Unused dependencies, devDependencies, optionalDependencies, type-only production deps, and test-only production deps |
+| `--unused-deps` | Unused dependencies, devDependencies and optionalDependencies |
+| `--misplaced-deps` | Dependencies that may belong in another `package.json` section: test-only, dev dependencies used in production, and type-only (type-only needs `--production`) |
 | `--unused-types` | Unused types |
 | `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#configuration-file-format). |
 | `--deprecated-exports-in-use` | Export marked @deprecated is still referenced |

@@ -33,7 +33,10 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   noPackageBaselines?: boolean;
   unusedFiles?: boolean;
   unusedExports?: boolean;
+  /** Only report unused dependencies, devDependencies and optionalDependencies. */
   unusedDeps?: boolean;
+  /** Only report dependencies that may belong in another package.json section: test-only, dev dependencies used in production, and type-only (type-only needs `production`). */
+  misplacedDeps?: boolean;
   unusedTypes?: boolean;
   privateTypeLeaks?: boolean;
   deprecatedExportsInUse?: boolean;

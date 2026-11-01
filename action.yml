@@ -257,7 +257,7 @@ inputs:
     required: false
   # Check-specific inputs
   issue-types:
-    description: 'Comma-separated issue types to report (dead-code and architecture commands). Valid for dead-code: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps. Valid for architecture: cycles, boundaries, policy.'
+    description: 'Comma-separated issue types to report (dead-code and architecture commands). Valid for dead-code: unused-files, unused-exports, unused-types, unused-deps, misplaced-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps. Valid for architecture: cycles, boundaries, policy.'
     required: false
   include-entry-exports:
     description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis (not applied to architecture); also configurable persistently via includeEntryExports in your fallow config.'

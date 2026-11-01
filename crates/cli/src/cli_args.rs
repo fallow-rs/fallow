@@ -717,9 +717,13 @@ pub enum Command {
         #[arg(long)]
         unused_exports: bool,
 
-        /// Only report unused dependencies
+        /// Only report unused dependencies, devDependencies and optionalDependencies
         #[arg(long)]
         unused_deps: bool,
+
+        /// Only report dependencies that may belong in another package.json section: test-only, dev dependencies used in production, and type-only (type-only needs --production)
+        #[arg(long)]
+        misplaced_deps: bool,
 
         /// Only report unused type exports
         #[arg(long)]
@@ -3077,45 +3081,9 @@ pub use health_args::*;
 #[path = "cli_args_cloud.rs"]
 mod cloud_args;
 pub use cloud_args::*;
-
-/// CLI mirror of [`fallow_config::AuditGate`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum AuditGateArg {
-    /// Only findings introduced by the current changeset affect the verdict.
-    NewOnly,
-    /// All findings in changed files affect the verdict.
-    All,
-}
-
-/// CLI value of `--worsened`, mirroring `fallow_config::AuditWorsened`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum AuditWorsenedArg {
-    /// A worsened finding makes the verdict at least warn.
-    Warn,
-    /// A worsened finding counts like an introduced finding.
-    Error,
-    /// Only growth of an exceeded metric is worsened (warn).
-    Off,
-}
-
-impl From<AuditWorsenedArg> for fallow_config::AuditWorsened {
-    fn from(value: AuditWorsenedArg) -> Self {
-        match value {
-            AuditWorsenedArg::Warn => Self::Warn,
-            AuditWorsenedArg::Error => Self::Error,
-            AuditWorsenedArg::Off => Self::Off,
-        }
-    }
-}
-
-impl From<AuditGateArg> for fallow_config::AuditGate {
-    fn from(value: AuditGateArg) -> Self {
-        match value {
-            AuditGateArg::NewOnly => Self::NewOnly,
-            AuditGateArg::All => Self::All,
-        }
-    }
-}
+#[path = "cli_args_audit.rs"]
+mod audit_args;
+pub use audit_args::*;
 
 /// Parse `--min-occurrences` and reject values below 2. A single occurrence
 /// is not a duplicate; silently clamping would diverge from the config-file

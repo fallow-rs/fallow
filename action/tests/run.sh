@@ -4136,6 +4136,11 @@ else
   fail "stale gate: fail-on-issues false does not disable the stale-baseline gate" "exit ${STALE_EXIT}"
 fi
 
+# The dependency issue types reach the command line as their own flags.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_ISSUE_TYPES="unused-deps, misplaced-deps"
+assert_contains "$STALE_ANALYSIS_LOG" "--unused-deps --misplaced-deps" \
+  "issue-types forwards unused-deps and misplaced-deps"
+
 # 5. A pull-request run is narrowed, so the gate re-runs the comparison unscoped
 # and the second argv carries no narrowing and no writing flag.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
