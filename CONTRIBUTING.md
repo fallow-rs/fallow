@@ -170,6 +170,7 @@ The workspace follows the ownership boundaries in
 | `crates/core/` | Internal detector backend used by `fallow-engine` for private detector phases. Product adapters use the workspace facade instead. |
 | `crates/mutation/` | Mutant site discovery and mutation-switching instrumentation used by the mutation engine. |
 | `crates/engine/` | Analysis sessions, discovery, parsing, graph construction, and typed analysis orchestration. |
+| `crates/report-protocol/` | Language-neutral report contract: the error envelope, gate outcomes, and exit codes. |
 | `crates/output/` | Shared output contracts, action builders, summaries, SARIF builders, and reusable formatter pieces. |
 | `crates/api/` | Workspace Rust facade and programmatic workflow adapters. Its crate API is not an external semver contract. |
 | `crates/cli/` | CLI protocol adapter, command dispatch, terminal interaction, and protocol-specific serialization. |
@@ -286,7 +287,7 @@ The schema covers two layers, with different ownership rules:
 
 ### Layer 1: types derived from Rust
 
-Rust-owned schema types live across `crates/types/src/` (analysis and base payloads), `crates/output/src/` (health, action, utility, and envelope wire shapes), `crates/api/src/` (programmatic and attribution wrappers), and `crates/config/src/` (configuration inputs). The types, output, and API crates gate their `JsonSchema` derives behind a `schema` feature; config derives `JsonSchema` unconditionally because it also owns the configuration schema. The authoritative output-contract inventory is `derived_definition_names()` plus the corresponding registrations and imports in `crates/cli/src/bin/schema_emit.rs`.
+Rust-owned schema types live across `crates/types/src/` (analysis and base payloads), `crates/output/src/` (health, action, utility, and envelope wire shapes), `crates/report-protocol/src/` (the error envelope and gate outcomes), `crates/api/src/` (programmatic and attribution wrappers), and `crates/config/src/` (configuration inputs). The types, output, and API crates gate their `JsonSchema` derives behind a `schema` feature; config derives `JsonSchema` unconditionally because it also owns the configuration schema. The authoritative output-contract inventory is `derived_definition_names()` plus the corresponding registrations and imports in `crates/cli/src/bin/schema_emit.rs`.
 
 The CLI's `schema-emit` feature enables the feature-gated derives through `fallow-cli/schema` and includes config's always-available schema types, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
 

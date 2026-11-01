@@ -21,13 +21,14 @@ fallow-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rustc-hash = { workspace = true }
+fallow-report-protocol = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 
 [features]
-schema = ["dep:schemars", "fallow-types/schema"]
+schema = ["dep:schemars", "fallow-types/schema", "fallow-report-protocol/schema"]
 
 [lints]
 workspace = true

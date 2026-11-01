@@ -1504,6 +1504,7 @@ name = "fallow-output"
 version = "3.38.1"
 dependencies = [
  "fallow-config",
+ "fallow-report-protocol",
  "fallow-types",
  "rustc-hash",
  "schemars",
@@ -1521,6 +1522,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "fallow-report-protocol"
+version = "3.38.1"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

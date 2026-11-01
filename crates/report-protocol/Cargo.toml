@@ -1,0 +1,29 @@
+[package]
+name = "fallow-report-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Language-neutral report contract shared by the fallow CLIs"
+readme = "README.md"
+
+[lib]
+doctest = false
+
+[dependencies]
+serde = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[features]
+schema = ["dep:schemars"]
+
+[lints]
+workspace = true

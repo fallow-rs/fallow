@@ -38,7 +38,6 @@ mod diff;
 mod doctor;
 mod dupes;
 mod entry_weight;
-mod error_envelope;
 mod feature_flags;
 mod finding_id_query;
 mod fix;
@@ -195,7 +194,8 @@ pub use entry_weight::{
     DominatingImportOutput, EagerPackageOutput, EntryWeightDelta, EntryWeightListing,
     EntryWeightOutput, EntryWeightRegression, EntryWeightUnit,
 };
-pub use error_envelope::ErrorOutput;
+pub use fallow_report_protocol::ErrorOutput;
+pub use fallow_report_protocol::exit_code;
 pub use fallow_types::envelope;
 pub use fallow_types::output;
 pub use fallow_types::output_dead_code;

@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 const PROTOCOL_CRATES = new Set(["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-node"]);
 const FOUNDATION_CRATES = new Set([
+  "fallow-report-protocol",
   "fallow-types",
   "fallow-config",
   "fallow-extract",
@@ -27,6 +28,11 @@ const boundaryRules = [
     rule: "process-must-remain-independent",
     matches: ({ from }) => from === "fallow-process",
     message: ({ to }) => `fallow-process must not depend on workspace crate ${to}`,
+  },
+  {
+    rule: "report-protocol-must-remain-independent",
+    matches: ({ from }) => from === "fallow-report-protocol",
+    message: ({ to }) => `fallow-report-protocol must not depend on workspace crate ${to}`,
   },
   {
     rule: "mutation-must-remain-independent",

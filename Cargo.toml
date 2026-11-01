@@ -23,6 +23,7 @@ fallow-graph = { version = "3.38.1", path = "crates/graph" }
 fallow-mutation = { version = "3.38.1", path = "crates/mutation" }
 fallow-output = { version = "3.38.1", path = "crates/output" }
 fallow-process = { version = "3.38.1", path = "crates/process" }
+fallow-report-protocol = { version = "3.38.1", path = "crates/report-protocol" }
 fallow-security = { version = "3.38.1", path = "crates/security" }
 fallow-types = { version = "3.38.1", path = "crates/types" }
 

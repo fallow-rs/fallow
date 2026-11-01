@@ -3,6 +3,11 @@
 //!
 //! Keep command-specific producers and the machine-readable capability
 //! manifest on these constants so agents never receive a stale copied ladder.
+//!
+//! The codes 0, 1 and 2 belong to the shared report contract in
+//! `fallow-report-protocol`. The gate table below reads them from that crate.
+
+use fallow_output::exit_code::{EXIT_GATE_FAILED, EXIT_OK};
 
 pub const RESOURCE_UNAVAILABLE_EXIT_CODE: u8 = 3;
 pub const RUNTIME_COVERAGE_SIDECAR_EXIT_CODE: u8 = 4;
@@ -14,9 +19,6 @@ pub const COVERAGE_UPLOAD_VALIDATION_EXIT_CODE: u8 = 10;
 pub const COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE: u8 = 11;
 pub const COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE: u8 = 12;
 pub const COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE: u8 = 13;
-
-/// The exit code of a gate that failed the run.
-const GATE_FAILURE_EXIT_CODE: u8 = 1;
 
 /// The exit code that one gate verdict gives the process.
 ///
@@ -33,9 +35,9 @@ pub const fn gate_exit_code(
     match status {
         fallow_output::GateStatus::Fail => match gate {
             fallow_output::GateName::Security => SECURITY_GATE_EXIT_CODE,
-            _ => GATE_FAILURE_EXIT_CODE,
+            _ => EXIT_GATE_FAILED,
         },
-        _ => 0,
+        _ => EXIT_OK,
     }
 }
 
@@ -49,7 +51,7 @@ pub const fn gate_failed_exit_code(gate: fallow_output::GateName, failed: bool) 
 /// gates that failed, or 0.
 #[must_use]
 pub fn run_exit_code(codes: impl IntoIterator<Item = u8>) -> std::process::ExitCode {
-    std::process::ExitCode::from(codes.into_iter().max().unwrap_or(0))
+    std::process::ExitCode::from(codes.into_iter().max().unwrap_or(EXIT_OK))
 }
 
 #[cfg(test)]
@@ -81,6 +83,19 @@ mod tests {
             gate_exit_code(GateName::StaleBaseline, GateStatus::Skipped),
             0
         );
+    }
+
+    #[test]
+    fn the_gate_table_uses_the_report_contract_codes() {
+        assert_eq!(
+            gate_exit_code(GateName::ErrorSeverityFindings, GateStatus::Fail),
+            EXIT_GATE_FAILED
+        );
+        assert_eq!(
+            gate_exit_code(GateName::ErrorSeverityFindings, GateStatus::Pass),
+            EXIT_OK
+        );
+        assert_eq!(run_exit_code([]), std::process::ExitCode::from(EXIT_OK));
     }
 
     #[test]
