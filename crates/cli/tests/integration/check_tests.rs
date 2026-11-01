@@ -4875,6 +4875,60 @@ fn status_line_names_private_type_leaks() {
     );
 }
 
+/// A pnpm project with one unused catalog entry, one empty catalog group and
+/// one override of an undeclared package.
+fn workspace_findings_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - \".\"\ncatalog:\n  unused-thing: ^1.0.0\ncatalogs:\n  empty: {}\n\
+         overrides:\n  not-declared: 1.0.0\n",
+    )
+    .expect("write pnpm-workspace.yaml");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write index");
+    dir
+}
+
+#[test]
+fn status_line_names_workspace_findings() {
+    let dir = workspace_findings_project();
+    for (flag, label) in [
+        ("--unused-catalog-entries", " 1 unused catalog entry ("),
+        ("--empty-catalog-groups", " 1 empty catalog group ("),
+        (
+            "--unused-dependency-overrides",
+            " 1 unused dependency override (",
+        ),
+    ] {
+        let output = run_fallow_in_root("dead-code", dir.path(), &[flag]);
+        assert!(
+            output.stderr.contains(label),
+            "the status line must name the finding for {flag}: {}",
+            output.stderr
+        );
+    }
+
+    let output = run_fallow_in_root("dead-code", dir.path(), &[]);
+    for label in [
+        "1 unused catalog entry",
+        "1 empty catalog group",
+        "1 unused dependency override",
+    ] {
+        assert!(
+            output.stderr.contains(label),
+            "the status line of a mixed run must name {label}: {}",
+            output.stderr
+        );
+    }
+}
+
 #[test]
 fn status_line_names_deprecated_exports_in_use() {
     let dir = unlabeled_status_line_project();

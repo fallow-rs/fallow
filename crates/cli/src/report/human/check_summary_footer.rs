@@ -120,6 +120,30 @@ fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResu
         results.test_only_dependencies.len(),
         "test-only dependencies",
     );
+    push_summary_catalog_and_override_parts(parts, results);
+}
+
+fn push_summary_catalog_and_override_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
+    push_summary_part(
+        parts,
+        results.unused_catalog_entries.len(),
+        "unused catalog entries",
+    );
+    push_summary_part(
+        parts,
+        results.empty_catalog_groups.len(),
+        "empty catalog groups",
+    );
+    push_summary_part(
+        parts,
+        results.unresolved_catalog_references.len(),
+        "unresolved catalog references",
+    );
+    push_summary_part(
+        parts,
+        results.unused_dependency_overrides.len(),
+        "unused dependency overrides",
+    );
     push_summary_part(
         parts,
         results.misconfigured_dependency_overrides.len(),
@@ -226,10 +250,56 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
         results.unused_load_data_keys.len(),
         "unused load data keys",
     );
+    push_summary_framework_correctness_parts(parts, results);
+    push_summary_component_health_parts(parts, results);
     push_summary_part(
         parts,
         results.stale_suppressions.len(),
         "stale suppressions",
+    );
+}
+
+fn push_summary_framework_correctness_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
+    push_summary_part(
+        parts,
+        results.invalid_client_exports.len(),
+        "invalid client exports",
+    );
+    push_summary_part(
+        parts,
+        results.mixed_client_server_barrels.len(),
+        "mixed client/server barrels",
+    );
+    push_summary_part(
+        parts,
+        results.misplaced_directives.len(),
+        "misplaced directives",
+    );
+    push_summary_part(parts, results.route_collisions.len(), "route collisions");
+    push_summary_part(
+        parts,
+        results.dynamic_segment_name_conflicts.len(),
+        "dynamic segment conflicts",
+    );
+}
+
+/// Appends the component health parts that count toward `total_issues`.
+/// Advisory entries stay out: the `--group-by` header names them as signals.
+fn push_summary_component_health_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
+    push_summary_part(
+        parts,
+        results.enforced_prop_drilling_count(),
+        "prop drilling chains",
+    );
+    push_summary_part(
+        parts,
+        results.enforced_thin_wrapper_count(),
+        "thin wrappers",
+    );
+    push_summary_part(
+        parts,
+        results.enforced_duplicate_prop_shape_count(),
+        "duplicate prop shapes",
     );
 }
 
@@ -248,3 +318,7 @@ pub(super) fn build_summary_footer(
     push_summary_framework_parts(&mut parts, results);
     parts.join(" \u{00b7} ")
 }
+
+#[cfg(test)]
+#[path = "check_summary_footer_tests.rs"]
+mod tests;
