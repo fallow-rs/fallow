@@ -68,6 +68,9 @@ pub struct GuardPolicyRule {
     pub kind: String,
     /// Matcher patterns for the rule, such as callees, import specifiers, or effects.
     pub patterns: Vec<String>,
+    /// Imported names that a `banned-import` rule still allows from its patterns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_names: Vec<String>,
     /// Producer locations permitted by a gdp-ts proof rule.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_files: Vec<String>,
@@ -116,6 +119,7 @@ mod tests {
                     rule_id: "pure-domain".to_string(),
                     kind: "banned-effect".to_string(),
                     patterns: vec!["network".to_string()],
+                    allowed_names: vec![],
                     allowed_files: vec![],
                     proof_kinds: vec![],
                     message: Some("Inject effects via ports.".to_string()),

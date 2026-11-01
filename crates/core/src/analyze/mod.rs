@@ -588,7 +588,7 @@ fn run_policy_detector(input: DeadCodeDetectorInput<'_>) -> Vec<PolicyViolationF
         line_offsets_by_file: input.line_offsets_by_file,
     })
     .into_iter()
-    .map(PolicyViolationFinding::with_actions)
+    .map(|violation| policy::policy_finding(violation, input.config))
     .collect()
 }
 

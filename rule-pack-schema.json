@@ -37,7 +37,7 @@
   ],
   "$defs": {
     "RulePackRule": {
-      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules; `exports` applies only to `banned-export`\nrules. `allowedFiles` and `proofKinds` apply only to `gdp-proof-producer`\nrules. `zones` can scope any rule kind to files classified into one of the\nnamed boundary zones. Setting a field on the wrong kind is a load error\n(fail loud, never silently ignore policy).",
+      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers`,\n`allowNames` and `ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules; `exports` applies only to `banned-export`\nrules. `allowedFiles` and `proofKinds` apply only to `gdp-proof-producer`\nrules. `zones` can scope any rule kind to files classified into one of the\nnamed boundary zones. Setting a field on the wrong kind is a load error\n(fail loud, never silently ignore policy).",
       "type": "object",
       "properties": {
         "id": {
@@ -57,6 +57,13 @@
         },
         "specifiers": {
           "description": "Import specifiers to ban (`banned-import` only). Matched segment-aware\nagainst the RAW specifier: `moment` covers `moment` and\n`moment/locale/nl` but not `moment-timezone`. A trailing `/*` form,\nsuch as `@org/ui/*`, matches subpaths only (`@org/ui/internal`) and\nnot the package root (`@org/ui`). Aliased or rewritten specifiers\n(e.g. `npm:moment`) are not matched.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowNames": {
+          "description": "Imported names that a matched specifier may still bind (`banned-import`\nonly). Each entry is an exact imported name, with no globs. `\"default\"`\nallows a default import. The rule compares the source-side name, so\n`import { Mesh as Vector3 }` binds `Mesh`. The list applies to every\n`specifiers` entry and to its subpaths.\n\nA namespace import, a star re-export and a side-effect import always\nreport, because they cannot be proven to stay in the list. `allowNames`\ndoes not cover `require()`, `import()` or `import x = require()`, because\n`banned-import` does not read them.\n\nA nonempty list changes `matched` to `<specifier>: <binding>`, so it\nchanges the baseline keys of the rule. Empty or absent keeps the raw\nspecifier. For a deny list, use `banned-call` with `three.Mesh`.\n`banned-call` reports calls and `new` expressions. It does not report the\nimport, a re-export, `extends Mesh` or a value reference.",
           "type": "array",
           "items": {
             "type": "string"
