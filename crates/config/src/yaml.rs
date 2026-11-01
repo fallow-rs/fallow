@@ -119,12 +119,6 @@ impl<'a> YamlNode<'a> {
     pub fn get(self, key: &str) -> Option<YamlNode<'a>> {
         self.as_mapping().and_then(|mapping| mapping.get(key))
     }
-
-    /// The node written as YAML text, for values that have no scalar text.
-    #[must_use]
-    pub fn to_yaml_string(self) -> String {
-        deser_yaml::to_string(self.0).unwrap_or_default()
-    }
 }
 
 /// A borrowed YAML mapping, in source order.
@@ -244,18 +238,10 @@ mod tests {
     }
 
     #[test]
-    fn writes_collections_as_yaml() {
-        let document = parse("a:\n  - x\n  - y\n").unwrap();
-        let text = document.root().get("a").unwrap().to_yaml_string();
-        assert!(text.contains("- x"), "{text}");
-    }
-
-    #[test]
-    fn deep_nesting_parses_writes_and_drops_without_recursion() {
+    fn deep_nesting_parses_and_drops_without_recursion() {
         const DEPTH: usize = 1_000_000;
         let source = format!("a: {}{}\n", "[".repeat(DEPTH), "]".repeat(DEPTH));
         let document = parse(&source).unwrap();
-        let text = document.root().get("a").unwrap().to_yaml_string();
-        assert!(text.starts_with('['), "{}", &text[..text.len().min(20)]);
+        assert!(document.root().get("a").unwrap().as_sequence().is_some());
     }
 }
