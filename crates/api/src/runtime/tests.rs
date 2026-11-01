@@ -1162,6 +1162,56 @@ fn run_dead_code_honors_graph_preserving_finding_exclusions() {
     );
 }
 
+/// The programmatic route reads the rules after its filters started a
+/// detector, like the CLI. A static entry would be false in the flag run.
+#[test]
+fn programmatic_dead_code_reports_ineffective_overrides_like_the_cli() {
+    let project = finding_exclusion_project(&["src/hidden.ts"]);
+    let root = project.path();
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"overrides":[{"files":["src/**"],"rules":{
+            "private-type-leaks":"error","unused-dependencies":"off"}}]}"#,
+    )
+    .expect("write config");
+    let entries = |filters: DeadCodeFilters| -> Vec<(String, String)> {
+        let json = dead_code_json(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters,
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+        json["workspace_diagnostics"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry["kind"] == "override-rule-ineffective")
+            .map(|entry| {
+                (
+                    entry["rule"].as_str().unwrap_or_default().to_owned(),
+                    entry["reason"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect()
+    };
+
+    assert_eq!(
+        entries(DeadCodeFilters::default()),
+        vec![
+            ("unused-dependencies".to_owned(), "project-level".to_owned()),
+            ("private-type-leaks".to_owned(), "base-rule-off".to_owned()),
+        ]
+    );
+    assert!(
+        entries(DeadCodeFilters {
+            private_type_leaks: true,
+            ..DeadCodeFilters::default()
+        })
+        .is_empty(),
+        "the filter starts the detector and removes the dependency row"
+    );
+}
+
 #[test]
 fn programmatic_dead_code_reports_unmatched_config_patterns_like_the_cli() {
     let project = finding_exclusion_project(&["src/hidden.ts", "src/hiden.ts"]);

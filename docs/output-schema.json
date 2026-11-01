@@ -13674,6 +13674,37 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "override-rule-ineffective"
+            },
+            "rule": {
+              "type": "string",
+              "description": "The canonical rule name, also when the config uses an alias."
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The `overrides[].files` globs, as written in the config."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why the rule has no effect, as a kebab-case token."
+            }
+          },
+          "required": [
+            "kind",
+            "rule",
+            "files",
+            "reason"
+          ],
+          "description": "An `overrides` rule cannot change the result (issue #4065). `reason` is\n`project-level` (fallow reads only the top-level severity of the rule)\nor `base-rule-off` (the top-level rule is off after CLI flags, so its\ndetector does not run). The token set is open. `path` is the root. Not\ndegraded, and no finding or exit code changes."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "baseline-install-state-mismatch"
             },
             "baseline_node_modules": {

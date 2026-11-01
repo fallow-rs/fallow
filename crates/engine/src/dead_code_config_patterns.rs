@@ -16,7 +16,8 @@ use fallow_config::{
 /// - each `entry` pattern that matched only files that are entry points
 ///   anyway;
 /// - each `ignorePatterns` glob that excluded no file the run would otherwise
-///   analyze.
+///   analyze;
+/// - each `overrides` rule that cannot change a result of this config.
 ///
 /// The `ignoreDependencies` entries need `reports_dependencies`. A surface
 /// passes `reports_dependencies = false` when its run does not report
@@ -24,6 +25,11 @@ use fallow_config::{
 /// a file scope), because a dependency entry is then not relevant to what the
 /// run shows. A `--production` run checks fewer files and dependency
 /// sections, so it reports no redundant entry (issue #3824).
+///
+/// An `overrides` rule reports also in a `--production` run, because its cause
+/// does not depend on the files of the run. The `reports_dependencies` gate
+/// removes the dependency rules (issue #4065). Read `config` after CLI flags
+/// changed its rules, because a flag can start a detector.
 ///
 /// The CLI, the programmatic API and the MCP typed path all build their
 /// envelope from this one function, and the human note reads the same
@@ -56,6 +62,10 @@ pub fn config_pattern_diagnostics(
         (Vec::new(), Vec::new())
     };
     let finding_patterns = config.ignore_findings.unmatched_patterns();
+    let ineffective_overrides = config
+        .ineffective_override_rules()
+        .into_iter()
+        .filter(|entry| reports_dependencies || !entry.dependency_rule);
     let kinds = finding_patterns
         .into_iter()
         .map(
@@ -81,6 +91,13 @@ pub fn config_pattern_diagnostics(
         .chain(redundant_ignores.into_iter().map(|pattern| {
             WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant {
                 pattern: pattern.to_owned(),
+            }
+        }))
+        .chain(ineffective_overrides.map(|entry| {
+            WorkspaceDiagnosticKind::OverrideRuleIneffective {
+                rule: entry.rule.to_owned(),
+                files: entry.files,
+                reason: entry.reason.to_owned(),
             }
         }));
     kinds
