@@ -22,6 +22,8 @@
 //! read each positional argument as a glob and do not search a directory, so
 //! `node --test test/` reports an error there.
 
+use rustc_hash::FxHashSet;
+
 use super::borp;
 
 /// The source extensions of the `node --test` defaults. The TypeScript
@@ -31,6 +33,11 @@ const NODE_EXTENSIONS: &str = "{js,mjs,cjs,ts,mts,cts}";
 /// The file name patterns that `node --test` runs in every directory:
 /// <https://nodejs.org/api/test.html#running-tests-from-the-command-line>.
 const NODE_TEST_FILE_NAMES: &[&str] = &["*.test", "*-test", "*_test", "test-*", "test"];
+
+/// The directory arguments of one test command that get default patterns.
+/// Each directory adds several patterns, and real test commands name a few
+/// directories. Later directories add no pattern.
+pub(super) const MAX_TEST_DIRECTORIES: usize = 64;
 
 /// The directory in which `node --test` runs every source file.
 const NODE_TEST_DIRECTORY: &str = "test";
@@ -119,7 +126,7 @@ pub(super) fn test_file_args(binary: &str, args: &[&str], file_args: &[String]) 
     if !runs_tests(binary, args) {
         return Vec::new();
     }
-    let flag_values: Vec<&str> = args
+    let flag_values: FxHashSet<&str> = args
         .windows(2)
         .filter(|pair| NODE_VALUE_FLAGS.contains(&pair[0]))
         .filter(|pair| !NODE_TEST_PROCESS_FLAGS.contains(&pair[0]))
@@ -169,11 +176,19 @@ pub(super) fn with_default_test_patterns(
         }
         return file_args;
     }
-    let directories: Vec<&str> = positionals
+    let mut directories: Vec<&str> = Vec::new();
+    for token in positionals
         .into_iter()
         .filter(|token| runner != TestRunner::Bun || !is_bun_name_filter(token))
         .filter(|token| is_directory_arg(token))
-        .collect();
+    {
+        if directories.len() == MAX_TEST_DIRECTORIES {
+            break;
+        }
+        if !directories.contains(&token) {
+            directories.push(token);
+        }
+    }
     file_args.retain(|file| !directories.contains(&file.as_str()));
     for directory in directories {
         file_args.extend(runner.patterns_in(directory_prefix(directory)));
@@ -437,6 +452,47 @@ mod tests {
         let found = patterns("--test");
         assert_eq!(found.len(), NODE_TEST_FILE_NAMES.len() + 1);
         assert!(found.contains(&"**/test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+    }
+
+    /// Each directory argument becomes several patterns. OSS-Fuzz issue
+    /// 579712535 ran out of memory on a command with 88,000 arguments.
+    #[test]
+    fn directory_patterns_are_bounded() {
+        let repeated = format!("--test {}", "d ".repeat(50_000));
+        assert_eq!(patterns(&repeated), patterns("--test d"));
+
+        let distinct = (0..50_000)
+            .map(|i| format!("d{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let found = patterns(&format!("--test {distinct}"));
+        assert!(
+            found.len() <= MAX_TEST_DIRECTORIES * (NODE_TEST_FILE_NAMES.len() + 2),
+            "{} patterns",
+            found.len()
+        );
+        assert!(found.iter().any(|pattern| pattern.starts_with("d0/")));
+    }
+
+    /// The check of each file against the flag values must not cost files
+    /// times flags.
+    #[test]
+    fn many_flag_values_and_files_stay_linear() {
+        const PAIRS: usize = 60_000;
+        let mut tokens: Vec<String> = vec!["--test".to_string()];
+        for i in 0..PAIRS {
+            tokens.push("--test-reporter".to_string());
+            tokens.push(format!("r{i}.js"));
+        }
+        let args: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let files: Vec<String> = (0..PAIRS)
+            .map(|i| format!("t{i}.test.js"))
+            .chain(std::iter::once("r0.js".to_string()))
+            .collect();
+        let start = std::time::Instant::now();
+        let found = test_file_args("node", &args, &files);
+        assert_eq!(found.len(), PAIRS);
+        assert!(start.elapsed() < std::time::Duration::from_secs(10));
     }
 
     #[test]
