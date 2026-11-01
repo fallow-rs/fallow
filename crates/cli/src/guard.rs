@@ -175,13 +175,19 @@ fn list_or_none(items: &[String]) -> String {
 
 fn emit_policy_rule(rule: &GuardPolicyRule) {
     let patterns = list_or_none(&rule.patterns);
+    let allowed_names = if rule.allowed_names.is_empty() {
+        String::new()
+    } else {
+        format!(" (allowed names: {})", rule.allowed_names.join(", "))
+    };
     outln!(
-        "    {}  {}/{}  {}: {}",
+        "    {}  {}/{}  {}: {}{}",
         rule.severity,
         rule.pack,
         rule.rule_id,
         rule.kind,
-        patterns
+        patterns,
+        allowed_names
     );
     if let Some(message) = &rule.message {
         outln!("           {message}");

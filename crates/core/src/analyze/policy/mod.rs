@@ -4,7 +4,9 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
 use fallow_config::{EffectKind, ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
-use fallow_types::extract::ModuleInfo;
+use fallow_types::extract::{ImportedName, ModuleInfo};
+use fallow_types::output::IssueAction;
+use fallow_types::output_dead_code::PolicyViolationFinding;
 use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
 
 use crate::discover::FileId;
@@ -122,7 +124,9 @@ pub(super) struct PolicyAnalysisInput<'a> {
 /// and per call or `new` form, first occurrence wins). Banned-effect matching
 /// reads calls only. Banned-import matching is segment-aware on the RAW
 /// specifier over imports and re-exports; `require()` calls and dynamic
-/// `import()` are documented false negatives in v1.
+/// `import()` are documented false negatives in v1. A rule with `allowNames`
+/// reports each site that does not bind a listed name, with the binding in
+/// `matched`.
 ///
 /// Multi-rule matching is intentionally asymmetric: for `banned-call` the
 /// first applicable rule in config order wins per callee (mirroring the
@@ -408,6 +412,7 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
             .map(|import| {
                 (
                     import.source.as_str(),
+                    import_binding(&import.imported_name),
                     import.is_type_only,
                     import.span.start,
                 )
@@ -415,17 +420,19 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
             .chain(input.module.re_exports.iter().map(|re_export| {
                 (
                     re_export.source.as_str(),
+                    re_export_binding(&re_export.imported_name),
                     re_export.is_type_only,
                     re_export.span.start,
                 )
             }));
-        for (source, is_type_only, span_start) in sites {
+        for (source, binding, is_type_only, span_start) in sites {
             push_banned_import_if_matched(
                 &ctx,
                 rule,
                 severity,
                 &BannedImportSite {
                     source,
+                    binding,
                     is_type_only,
                     span_start,
                 },
@@ -438,8 +445,82 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
 /// A single import / re-export specifier site evaluated by `banned-import`.
 struct BannedImportSite<'a> {
     source: &'a str,
+    binding: ImportBinding<'a>,
     is_type_only: bool,
     span_start: u32,
+}
+
+/// What one import or re-export site binds, as `allowNames` sees it.
+#[derive(Clone, Copy)]
+enum ImportBinding<'a> {
+    /// A source-side name. A default import is the name `default`.
+    Name(&'a str),
+    /// A namespace import or a star re-export.
+    Star,
+    /// An import that binds nothing.
+    SideEffect,
+}
+
+const fn import_binding(imported_name: &ImportedName) -> ImportBinding<'_> {
+    match imported_name {
+        ImportedName::Named(name) => ImportBinding::Name(name.as_str()),
+        ImportedName::Default => ImportBinding::Name("default"),
+        ImportedName::Namespace => ImportBinding::Star,
+        ImportedName::SideEffect => ImportBinding::SideEffect,
+    }
+}
+
+fn re_export_binding(imported_name: &str) -> ImportBinding<'_> {
+    if imported_name == "*" {
+        ImportBinding::Star
+    } else {
+        ImportBinding::Name(imported_name)
+    }
+}
+
+/// The `matched` value of a site whose specifier matches `rule`, or `None` when
+/// `allowNames` allows the site. Only a name can be in the list: a star or
+/// side-effect form reports even when a list holds the text `*`.
+fn banned_import_matched(rule: &RulePackRule, site: &BannedImportSite<'_>) -> Option<String> {
+    if rule.allow_names.is_empty() {
+        return Some(site.source.to_owned());
+    }
+    let binding = match site.binding {
+        ImportBinding::Name(name) if rule.allow_names.iter().any(|allowed| allowed == name) => {
+            return None;
+        }
+        ImportBinding::Name(name) => name,
+        ImportBinding::Star => "*",
+        ImportBinding::SideEffect => "side-effect",
+    };
+    Some(format!("{}: {binding}", site.source))
+}
+
+/// Wrap a raw violation with its actions. A finding of a rule with `allowNames`
+/// gets a note that explains the list.
+pub(super) fn policy_finding(
+    violation: PolicyViolation,
+    config: &ResolvedConfig,
+) -> PolicyViolationFinding {
+    let has_allow_names = config
+        .rule_packs
+        .iter()
+        .filter(|pack| pack.name == violation.pack)
+        .flat_map(|pack| &pack.rules)
+        .any(|rule| rule.id == violation.rule_id && !rule.allow_names.is_empty());
+    let note = has_allow_names.then(|| {
+        format!(
+            "Rule `{}/{}` allows only listed names from this specifier. A namespace import, a star re-export and a side-effect import always report, because fallow cannot prove that they stay in the list. Import a listed name by name.",
+            violation.pack, violation.rule_id,
+        )
+    });
+    let mut finding = PolicyViolationFinding::with_actions(violation);
+    if let Some(note) = note
+        && let Some(IssueAction::Fix(fix)) = finding.actions.first_mut()
+    {
+        fix.note = Some(note);
+    }
+    finding
 }
 
 /// Per-module emission context shared across every `banned-import` site check.
@@ -469,6 +550,9 @@ fn push_banned_import_if_matched(
     {
         return;
     }
+    let Some(matched) = banned_import_matched(rule.rule, site) else {
+        return;
+    };
     let (line, col) =
         byte_offset_to_line_col(ctx.line_offsets_by_file, ctx.node.file_id, site.span_start);
     if ctx
@@ -484,7 +568,7 @@ fn push_banned_import_if_matched(
         pack: rule.pack.to_owned(),
         rule_id: rule.rule.id.clone(),
         kind: PolicyRuleKind::BannedImport,
-        matched: site.source.to_owned(),
+        matched,
         severity,
         message: rule.rule.message.clone(),
     });

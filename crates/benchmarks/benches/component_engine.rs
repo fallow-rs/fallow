@@ -176,6 +176,7 @@ fn create_guard_fixture() -> GuardFixture {
             kind: RulePackRuleKind::BannedEffect,
             callees: Vec::new(),
             specifiers: Vec::new(),
+            allow_names: Vec::new(),
             effects: vec![EffectKind::Network],
             exports: Vec::new(),
             allowed_files: Vec::new(),

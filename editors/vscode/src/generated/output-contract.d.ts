@@ -5476,11 +5476,11 @@ pack: string
 rule_id: string
 kind: PolicyRuleKind
 /**
- * What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or
- * `new Date` for a `new` expression), the raw import specifier for `banned-import` (e.g.
- * `moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the
- * exported name for `banned-export`. For `gdp-proof-producer`, the canonical
- * factory with its JSON-quoted literal label or `...` for a dynamic label.
+ * What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or `new Date` for a `new` expression), `<effect>: <callee>` for `banned-effect`,
+ * or the exported name for `banned-export`. For `gdp-proof-producer`, the canonical factory with its JSON-quoted literal label or `...` for a dynamic label.
+ * For `banned-import`: the raw import specifier (e.g. `moment/locale/nl`), or `<specifier>: <binding>` when the rule sets `allowNames`.
+ * `<binding>` is the source-side imported name, `default`, `*` for a namespace or star form,
+ * or `side-effect`.
  */
 matched: string
 severity: PolicyViolationSeverity

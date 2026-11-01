@@ -881,7 +881,7 @@ fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "fallow/policy-violation" => RuleGuide {
             example: "src/app.ts imports moment while a rule pack bans the moment specifier with the message 'Use date-fns.'",
-            how_to_fix: "Follow the rule's message to replace banned usage or remove a banned export. For a GDP proof producer, move proof factory creation into an allowed file, or correct the rule's allowedFiles and optional proofKinds if the ownership policy was wrong. To waive one rule, use `// fallow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
+            how_to_fix: "Follow the rule's message to replace banned usage or remove a banned export. For a GDP proof producer, move proof factory creation into an allowed file, or correct the rule's allowedFiles and optional proofKinds if the ownership policy was wrong. For a banned-import rule with allowNames, import a listed name by name. To waive one rule, use `// fallow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",

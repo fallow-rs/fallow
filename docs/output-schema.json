@@ -16592,7 +16592,7 @@
         },
         "matched": {
           "type": "string",
-          "description": "What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or\n`new Date` for a `new` expression), the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the\nexported name for `banned-export`. For `gdp-proof-producer`, the canonical\nfactory with its JSON-quoted literal label or `...` for a dynamic label."
+          "description": "What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or `new Date` for a `new` expression), `<effect>: <callee>` for `banned-effect`,\nor the exported name for `banned-export`. For `gdp-proof-producer`, the canonical factory with its JSON-quoted literal label or `...` for a dynamic label.\nFor `banned-import`: the raw import specifier (e.g. `moment/locale/nl`), or `<specifier>: <binding>` when the rule sets `allowNames`.\n`<binding>` is the source-side imported name, `default`, `*` for a namespace or star form,\nor `side-effect`."
         },
         "severity": {
           "description": "Effective severity for this finding (per-rule `severity`, else the\n`rules.\"policy-violation\"` master).",

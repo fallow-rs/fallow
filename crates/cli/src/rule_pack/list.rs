@@ -50,6 +50,9 @@ fn emit_json(config: &ResolvedConfig, json_style: crate::json_style::JsonStyle) 
                             "exclude": rule.exclude,
                             "message": rule.message,
                         });
+                        if !rule.allow_names.is_empty() {
+                            output["allowNames"] = json!(rule.allow_names);
+                        }
                         if rule.kind == RulePackRuleKind::GdpProofProducer {
                             output["allowedFiles"] = json!(rule.allowed_files);
                             output["proofKinds"] = json!(rule.proof_kinds);
@@ -93,12 +96,18 @@ fn emit_human(config: &ResolvedConfig) -> ExitCode {
             } else {
                 patterns.join(", ")
             };
+            let allowed_names = if rule.allow_names.is_empty() {
+                String::new()
+            } else {
+                format!(" (allowed names: {})", rule.allow_names.join(", "))
+            };
             println!(
-                "  - {} [{}] {}: {}",
+                "  - {} [{}] {}: {}{}",
                 rule.id,
                 severity,
                 rule_kind(rule.kind),
-                pattern_text
+                pattern_text,
+                allowed_names
             );
             if let Some(message) = &rule.message {
                 println!("    {message}");

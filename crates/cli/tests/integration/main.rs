@@ -32,6 +32,7 @@ mod audit_tests;
 mod audit_unprovable_base_tests;
 mod audit_worsened_tests;
 mod banned_call_new_tests;
+mod banned_import_allow_names_tests;
 mod baseline_growth_tests;
 mod baseline_install_state_tests;
 mod baseline_scope_comparison_tests;
