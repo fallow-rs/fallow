@@ -195,6 +195,7 @@ pub use entry_weight::{
     EntryWeightOutput, EntryWeightRegression, EntryWeightUnit,
 };
 pub use fallow_report_protocol::ErrorOutput;
+pub use fallow_report_protocol::exit_code;
 pub use fallow_types::envelope;
 pub use fallow_types::output;
 pub use fallow_types::output_dead_code;

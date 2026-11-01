@@ -30,4 +30,7 @@ pub use gate::{GateFile, GateFileReason, GateOutcome, GateStatus};
 ///
 /// A change that removes a member or changes the type of a member increments
 /// this value. An additive optional member does not change it.
+///
+/// No fallow report writes this value yet. It is for tools that consume this
+/// crate.
 pub const REPORT_PROTOCOL_VERSION: u32 = 1;
