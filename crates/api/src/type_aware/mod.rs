@@ -31,6 +31,9 @@ pub use transport::{
     discover_companion, shutdown_type_aware_sidecars, status, terminate_active_type_aware_sidecars,
 };
 
+/// Backend family that the companion uses when no selection is set.
+pub const DEFAULT_BACKEND_FAMILY: &str = manifest::BACKEND_FAMILY;
+
 /// Refine a programmatic dead-code result through the shared semantic client.
 ///
 /// The shared client always produces a conservative typed result. This

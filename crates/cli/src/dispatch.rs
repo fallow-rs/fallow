@@ -34,6 +34,8 @@ use crate::{
 
 #[path = "dispatch_inspect.rs"]
 mod inspect_dispatch;
+#[path = "dispatch_type_aware.rs"]
+mod type_aware_status;
 
 fn dispatch_mutation_command(
     dispatch: &DispatchContext<'_>,
@@ -349,12 +351,7 @@ fn dispatch_type_aware_command(
                             "{}",
                             report::human_status_line(
                                 report::HumanStatus::Ok,
-                                format_args!(
-                                    "Type-aware companion: available ({}, protocol {}, TypeScript {})",
-                                    status.package_version.as_deref().unwrap_or("unknown"),
-                                    status.protocol_version,
-                                    status.backend_version.as_deref().unwrap_or("unknown"),
-                                )
+                                type_aware_status::available_message(&status),
                             )
                         );
                     } else {

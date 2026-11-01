@@ -467,7 +467,7 @@ fn add_type_aware_abstention_metric_definitions(meta: &mut fallow_types::envelop
             "type_aware.abstention_reasons.svelte_virtual_module_exports".to_owned(),
             type_aware_metric(
                 "Svelte Virtual-module Export Abstention Count",
-                "Candidates retained because TypeScript-Go could not resolve named Svelte virtual-module exports.",
+                "Candidates retained because the type checker could not resolve named Svelte virtual-module exports.",
                 "[0, type_aware.unresolved_count]",
                 "zero means no candidate depended on unavailable Svelte virtual-module exports",
             ),
