@@ -25,7 +25,10 @@ node = "22"
 
 # CI installs these tools without a version, so this file pins a release.
 "github:Boshen/cargo-shear" = "1.14.0"
-"aqua:rustsec/rustsec/cargo-audit" = "0.22.2"
+# The aqua registry gives the x86_64 binary on Apple Silicon, and macOS
+# without Rosetta cannot run it ("Bad CPU type"). The github backend selects
+# the aarch64 release asset.
+"github:rustsec/rustsec" = { version = "0.22.2", version_prefix = "cargo-audit/v" }
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9.146"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
