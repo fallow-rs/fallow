@@ -17,13 +17,17 @@
 // GitHub does not start the workflows of a pull request from a fork until a
 // maintainer approves them. Such a run is complete with the conclusion
 // action_required and has no checks, so with --pr the wait stops at once
-// instead of a pass on the checks of the other workflows.
+// instead of a pass on the checks of the other workflows. When a change touches
+// the released skills, the wait prints the companion sync step: after a pass
+// with --pr, and on any result with --commit.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { setTimeout as sleepMs } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+
+import { RELEASED_SKILLS_ROOT } from "./released-skills.mjs";
 
 const GH_PENDING_EXIT = 8;
 const GH_FAILED_CHECK_EXIT = 1;
@@ -104,6 +108,10 @@ the commit. Path filters decide which workflows a push starts, so the count
 changes from commit to commit. The wait ends when all runs are complete and
 no run started or changed for ${COMMIT_SETTLE_MS / MINUTE} minutes. A read without runs never ends
 the wait.
+
+When the change touches ${RELEASED_SKILLS_ROOT.join("/")}/, the script prints the step for
+scripts/sync-skills-companion.mjs: after a pass with --pr, and on any result
+with --commit. A failed read of the changed files only prints a warning.
 
 Options:
   --pr <number>           The pull request.
@@ -1387,6 +1395,69 @@ export const reportChecks = (
   return EXIT_CODES[status];
 };
 
+const SKILLS_PATH_PREFIX = `${RELEASED_SKILLS_ROOT.join("/")}/`;
+const SKILLS_SYNC_COMMAND = "node scripts/sync-skills-companion.mjs --pin";
+const SKILLS_PUBLISH_STEP = "and publish its commit with the commands that it prints.";
+const SKILLS_CONTRACT_NOTE =
+  'The "Public skills contract" job fails on main until the sync lands. On a pull request the job checks the base commit, so a green pull request does not prove the sync.';
+const CHANGED_PATHS = ".filename, .previous_filename // empty";
+
+/**
+ * Read changed paths from a paginated REST endpoint. `gh pr view --json files`
+ * stops at 100 files. A rename counts for its old path too, because the old
+ * file stays in the companion until the sync.
+ */
+const ghChangedPathsReader = (repo, resource, items) => () => {
+  const { error, status, stdout, stderr } = spawnSync(
+    "gh",
+    [
+      "api",
+      `repos/${repo ?? "{owner}/{repo}"}/${resource}`,
+      "--paginate",
+      "--jq",
+      `${items} | ${CHANGED_PATHS}`,
+    ],
+    { encoding: "utf8" },
+  );
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (status !== 0) {
+    return { ok: false, error: stderr.trim() || `gh exited with ${status}` };
+  }
+  return { ok: true, paths: stdout.split("\n").filter(Boolean) };
+};
+
+/**
+ * Print the companion sync step when the change touches the released skills.
+ * A failed read only warns, so it never changes the exit code of the wait.
+ */
+const reportSkillsSync = (read, { label, step }, log = console.log, warn = console.error) => {
+  if (!read.ok) {
+    warn(`${label}: read of the changed files failed: ${read.error}`);
+    warn(`When the change touches ${SKILLS_PATH_PREFIX}: ${step}`);
+    return;
+  }
+  if (read.paths.some((path) => path.startsWith(SKILLS_PATH_PREFIX))) {
+    log(`${label}: the change touches ${SKILLS_PATH_PREFIX}. ${step}`);
+    log(SKILLS_CONTRACT_NOTE);
+  }
+};
+
+const reportPrSkillsSync = ({ pr, repo, label }) =>
+  reportSkillsSync(ghChangedPathsReader(repo, `pulls/${pr}/files`, ".[]")(), {
+    label,
+    step: `After the merge, run ${SKILLS_SYNC_COMMAND} <merge commit> ${SKILLS_PUBLISH_STEP}`,
+  });
+
+// The merged commit needs the step on any result: the missing sync is itself
+// a reason for a failed contract job on main.
+const reportCommitSkillsSync = ({ commit, repo }) =>
+  reportSkillsSync(ghChangedPathsReader(repo, `commits/${commit}`, ".files[]")(), {
+    label: commitLabel(commit),
+    step: `Run ${SKILLS_SYNC_COMMAND} ${commit} ${SKILLS_PUBLISH_STEP}`,
+  });
+
 const main = async () => {
   let options;
   try {
@@ -1412,18 +1483,22 @@ const main = async () => {
       readHead: gitHeadReader(runGit),
       isAncestor: gitAncestorChecker(runGit),
     });
-    return reportChecks(compareWithMain(result, ghMainReaders(options)), {
+    const code = reportChecks(compareWithMain(result, ghMainReaders(options)), {
       ...options,
       label: commitLabel(result.commit),
       settleMs: COMMIT_SETTLE_MS,
     });
+    reportCommitSkillsSync(options);
+    return code;
   }
   if (options.commit !== null) {
     const result = await waitForCommitRuns({ ...options, readChecks: ghRunsReader(options) });
-    return reportChecks(compareWithMain(result, ghMainReaders(options)), {
+    const code = reportChecks(compareWithMain(result, ghMainReaders(options)), {
       ...options,
       settleMs: COMMIT_SETTLE_MS,
     });
+    reportCommitSkillsSync(options);
+    return code;
   }
   if (options.head === undefined) {
     console.error(HEAD_WARNING);
@@ -1433,7 +1508,11 @@ const main = async () => {
     readChecks: ghChecksReader(options),
     readMergeable: ghMergeableReader(options),
   });
-  return reportChecks(compareWithMain(result, ghMainReaders(options)), options);
+  const code = reportChecks(compareWithMain(result, ghMainReaders(options)), options);
+  if (code === 0) {
+    reportPrSkillsSync(options);
+  }
+  return code;
 };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
