@@ -660,12 +660,15 @@ const checkRun = (name, status, conclusion) => ({
 const withMinChecks = (args) =>
   args.includes("--min-checks") ? args : ["--min-checks", "1", ...args];
 
-const runWithFakeGh = ({ selected, rollups, runs = workflowRuns(), prRuns = [[]] }, args = []) => {
+const runWithFakeGh = (
+  { selected, rollups, runs = workflowRuns(), prRuns = [[]], files = [], target = ["--pr", "7"] },
+  args = [],
+) => {
   const root = mkdtempSync(join(tmpdir(), "ship-wait-checks-"));
   try {
     writeFileSync(
       join(root, "responses.json"),
-      JSON.stringify({ selected, rollups, runs, prRuns }),
+      JSON.stringify({ selected, rollups, runs, prRuns, files }),
     );
     writeFileSync(
       join(root, "gh"),
@@ -693,6 +696,9 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns(), prRuns = [[]]
         "  const reply = responses.prRuns[Math.min(index, responses.prRuns.length - 1)];",
         "  if (reply?.error) { process.stderr.write(reply.error); process.exit(1); }",
         "  process.stdout.write(JSON.stringify(reply));",
+        '} else if (args[0] === "api" && args.includes("--paginate") && args[args.indexOf("--jq") + 1].includes(".filename")) {',
+        '  if (typeof responses.files === "string") { process.stderr.write(responses.files); process.exit(1); }',
+        '  process.stdout.write(responses.files.map((path) => `${path}\\n`).join(""));',
         '} else if (args[0] === "api") {',
         "  const reply = responses.runs[args[1]];",
         '  if (!reply || reply.error) { process.stderr.write(reply?.error ?? "missing workflow run"); process.exit(1); }',
@@ -710,8 +716,7 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns(), prRuns = [[]]
       process.execPath,
       [
         SCRIPT,
-        "--pr",
-        "7",
+        ...target,
         "--interval",
         "1",
         "--timeout",
@@ -731,6 +736,10 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns(), prRuns = [[]]
   }
 };
 
+const isFilesRead = (args) =>
+  args[0] === "api" &&
+  args.includes("--jq") &&
+  args[args.indexOf("--jq") + 1].includes(".filename");
 const rollupReads = (calls) =>
   calls.filter((args) => args.some((arg) => arg.includes("statusCheckRollup")));
 const fakeGhOptions = { skip: process.platform === "win32" };
@@ -768,6 +777,102 @@ test("the CLI waits for a queued PR workflow before its checks exist", fakeGhOpt
     assert.ok(reads.every((args) => args[args.indexOf("--commit") + 1] === "a".repeat(40)));
     assert.ok(reads.every((args) => args[args.indexOf("--event") + 1] === "pull_request"));
   }
+});
+
+const SKILLS_SYNC_COMMAND = "node scripts/sync-skills-companion.mjs --pin";
+const SKILLS_FILE = "npm/fallow/skills/fallow/SKILL.md";
+
+const runPassingPr = (fields, args) =>
+  runWithFakeGh(
+    {
+      selected: [check("CI", "pass")],
+      rollups: [{ statusCheckRollup: [checkRun("CI", "COMPLETED", "SUCCESS")] }],
+      ...fields,
+    },
+    args,
+  );
+
+const COMMIT_SHA = "b".repeat(40);
+const runCommit = (conclusion, files) =>
+  runWithFakeGh({
+    selected: [],
+    rollups: [{ statusCheckRollup: [] }],
+    prRuns: [
+      [
+        {
+          databaseId: 1,
+          name: "CI",
+          displayTitle: "CI",
+          workflowName: "CI",
+          status: "completed",
+          conclusion,
+          url: `${RUN_URL}/1`,
+        },
+      ],
+    ],
+    runs: {},
+    files,
+    target: ["--commit", COMMIT_SHA],
+  });
+
+test("a passing PR that changes the released skills names the sync step", fakeGhOptions, () => {
+  const result = runPassingPr({ files: ["src/a.ts", SKILLS_FILE] });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(result.stdout.includes(`${SKILLS_SYNC_COMMAND} <merge commit>`), result.stdout);
+  assert.match(result.stdout, /Public skills contract/u);
+  const read = result.calls.find(isFilesRead);
+  assert.ok(read.includes("--paginate"), "a large pull request has more than one page of files");
+  assert.match(read.at(-1), /previous_filename/u, "a rename out of the tree also needs the sync");
+});
+
+test("--repo selects the repository of the changed files", fakeGhOptions, () => {
+  const result = runPassingPr({}, ["--repo", "acme/widgets"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.calls.find(isFilesRead)[1], "repos/acme/widgets/pulls/7/files");
+});
+
+test("a merged commit that changes the skills names its own pin", fakeGhOptions, () => {
+  const result = runCommit("success", [SKILLS_FILE]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(result.stdout.includes(`${SKILLS_SYNC_COMMAND} ${COMMIT_SHA}`), result.stdout);
+});
+
+test("a failed merged commit still names the sync step", fakeGhOptions, () => {
+  const result = runCommit("failure", [SKILLS_FILE]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.ok(result.stdout.includes(`${SKILLS_SYNC_COMMAND} ${COMMIT_SHA}`), result.stdout);
+});
+
+test("a merged commit with other paths prints no sync step", fakeGhOptions, () => {
+  const result = runCommit("success", ["src/a.ts"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(!result.stdout.includes(SKILLS_SYNC_COMMAND), result.stdout);
+});
+
+test("a passing PR with other paths prints no sync step", fakeGhOptions, () => {
+  const result = runPassingPr({
+    files: ["src/a.ts", "npm/fallow/skills-notes.md", "docs/npm/fallow/skills/a.md"],
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(!(result.stdout + result.stderr).includes(SKILLS_SYNC_COMMAND), result.stdout);
+});
+
+test("a failed PR wait prints no sync step and reads no files", fakeGhOptions, () => {
+  const result = runWithFakeGh({
+    selected: [check("CI", "fail")],
+    rollups: [{ statusCheckRollup: [checkRun("CI", "COMPLETED", "FAILURE")] }],
+    files: [SKILLS_FILE],
+  });
+  assert.notEqual(result.status, 0);
+  assert.ok(!result.stdout.includes(SKILLS_SYNC_COMMAND), result.stdout);
+  assert.ok(!result.calls.some(isFilesRead));
+});
+
+test("a failed read of the PR files warns and keeps the passing exit code", fakeGhOptions, () => {
+  const result = runPassingPr({ files: "GraphQL: rate limit" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /rate limit/u);
+  assert.ok(result.stderr.includes(SKILLS_SYNC_COMMAND), result.stderr);
 });
 
 test("the CLI stops when a fork PR workflow waits for approval", fakeGhOptions, () => {
@@ -1177,7 +1282,7 @@ test(
       ["--required"],
     );
     assert.equal(optional.status, 0, optional.stdout + optional.stderr);
-    assert.ok(optional.calls.every((args) => args[0] !== "api"));
+    assert.ok(optional.calls.every((args) => args[0] !== "api" || isFilesRead(args)));
   },
 );
 
@@ -1357,7 +1462,7 @@ test("queued attempts without a real start cannot be hidden by older passes", fa
       "unknown start must retain the pending attempt",
     );
     assert.equal(
-      result.calls.filter((args) => args[0] === "api").length,
+      result.calls.filter((args) => args[0] === "api" && !isFilesRead(args)).length,
       2,
       "immutable creation metadata is cached between polls",
     );
@@ -1819,7 +1924,7 @@ test("a check that fails only on main does not fail the pull request", fakeGhOpt
 
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(
-    result.calls.filter((args) => args[0] === "api").length,
+    result.calls.filter((args) => args[0] === "api" && !isFilesRead(args)).length,
     0,
     "a passing pull request does not read main",
   );

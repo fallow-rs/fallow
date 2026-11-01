@@ -437,8 +437,10 @@ jobs:
         with:
           cache-key: release-drift-full
 
+      # One invocation for both packages builds each crate once. See the
+      # Build fallow-mcp step of the drift job in ci.yml.
       - name: Build fallow-mcp
-        run: cargo build -p fallow-mcp
+        run: cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift
 
       # A random seed explores new projects on each run. A failure prints the
       # seed and the case count, which reproduce it locally.

@@ -442,7 +442,10 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     windowsRustJob.match(/^    if: (.+)$/m)?.[1],
   );
   assert.match(windowsDriftJob, /runs-on: windows-latest/);
-  assert.match(windowsDriftJob, /^[ \t]+run: cargo build -p fallow-mcp$/m);
+  assert.match(
+    windowsDriftJob,
+    /^[ \t]+run: cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift$/m,
+  );
   assert.match(
     windowsDriftJob,
     /^[ \t]+run: cargo test -p fallow-cli --test drift -- --include-ignored$/m,
@@ -2377,6 +2380,26 @@ test("every workflow that runs tests turns off git automatic maintenance", () =>
 
 // A job-level or step-level `GIT_CONFIG_COUNT` replaces the top-level one, and
 // the jobs below it then run without the maintenance setting.
+test("the drift harness builds fallow-mcp and its test target in one invocation", () => {
+  // `fallow-cli` turns on more dependency features than `fallow-mcp`. A
+  // separate `cargo build -p fallow-mcp` resolves a smaller feature set, and
+  // the test step then compiles a second copy of most of the tree.
+  const single = "cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift";
+  let drift = 0;
+  for (const name of readdirSync(".github/workflows").filter((file) => /\.ya?ml$/.test(file))) {
+    const source = readWorkflow(join(".github/workflows", name));
+    assert.doesNotMatch(
+      source,
+      /cargo build -p fallow-mcp\s*$/m,
+      `${name} builds fallow-mcp alone`,
+    );
+    const runs = source.match(/cargo test -p fallow-cli --test drift/g)?.length ?? 0;
+    drift += runs;
+    assert.equal(source.split(single).length - 1, runs, `${name} must build each drift run once`);
+  }
+  assert.ok(drift >= 3, "the drift, Windows drift and release drift jobs run the harness");
+});
+
 test("only the top-level env of a workflow sets GIT_CONFIG variables", () => {
   for (const name of readdirSync(".github/workflows").filter((file) => /\.ya?ml$/.test(file))) {
     const source = readWorkflow(join(".github/workflows", name));
