@@ -46,6 +46,13 @@ const MAX_RULE_WILDCARDS: usize = 32;
 /// files stay below 400 wildcards.
 const MAX_FILE_WILDCARDS: usize = 4096;
 
+/// Bytes allowed in one CODEOWNERS pattern.
+///
+/// The `GlobSet` matches literal prefixes with an Aho-Corasick DFA, and its
+/// build time grows with the square of the pattern length. Real CODEOWNERS
+/// patterns are far shorter.
+const MAX_RULE_BYTES: usize = 512;
+
 /// Target regex-source bytes times glob count in one matcher batch.
 ///
 /// Regex fallback caches multiply automaton states by capture slots for every
@@ -344,6 +351,12 @@ impl CodeOwnersParser {
         owner_count: u32,
         negate: bool,
     ) -> Result<(), String> {
+        if pattern.len() > MAX_RULE_BYTES {
+            let start: String = pattern.chars().take(40).collect();
+            return Err(format!(
+                "CODEOWNERS pattern '{start}...' is longer than {MAX_RULE_BYTES} bytes"
+            ));
+        }
         let wildcards = pattern
             .bytes()
             .filter(|b| matches!(b, b'*' | b'?' | b'[' | b'{'))
@@ -709,7 +722,7 @@ mod tests {
         for index in 0..256 {
             writeln!(content, "file{index}?").expect("writing to a String cannot fail");
         }
-        let literal = "a".repeat(65_536);
+        let literal = "a".repeat(MAX_RULE_BYTES - 2);
         writeln!(
             content,
             "[Long] @long\n{literal}*\"\n[Overrides] @override\n!file0x\nfile1x"
@@ -743,6 +756,22 @@ mod tests {
             start.elapsed() < std::time::Duration::from_secs(25),
             "ownership lookup exceeded its resource regression budget"
         );
+    }
+
+    /// The matcher build time grows with the square of the pattern length.
+    /// OSS-Fuzz issue 579300911 had a 96 KB pattern.
+    #[test]
+    fn parse_rejects_rule_that_is_too_long() {
+        let content = format!(
+            "/{}/ @owner\n/x/{}/ @owner\n",
+            "0".repeat(512),
+            "0".repeat(4_096)
+        );
+        let err = CodeOwners::parse(&content).err().unwrap_or_default();
+        assert!(err.contains("longer than 512 bytes"), "{err}");
+
+        let content = format!("/{}/ @owner\n", "0".repeat(509));
+        assert!(CodeOwners::parse(&content).is_ok());
     }
 
     #[test]

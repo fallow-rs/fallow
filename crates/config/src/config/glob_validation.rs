@@ -25,6 +25,13 @@ use globset::{Glob, GlobBuilder};
 
 use super::finding_ignore::FindingIgnoreMatcher;
 
+/// Bytes allowed in one user glob.
+///
+/// A glob set matches literal prefixes with an Aho-Corasick DFA, and its
+/// build time grows with the square of the pattern length. Real config globs
+/// are far shorter.
+pub const MAX_GLOB_BYTES: usize = 512;
+
 /// Validation failure for user-supplied glob configuration.
 #[derive(Debug)]
 pub enum GlobValidationError {
@@ -73,6 +80,13 @@ pub enum GlobValidationError {
         field: &'static str,
         /// The offending key as written in the config.
         pattern: String,
+    },
+    /// Pattern is longer than [`MAX_GLOB_BYTES`].
+    TooLong {
+        /// Config field the pattern came from, named in the error.
+        field: &'static str,
+        /// The first characters of the pattern, as written in the config.
+        start: String,
     },
     /// Individually valid patterns cannot be compiled into one matcher.
     PatternSetCompilation {
@@ -131,6 +145,10 @@ impl fmt::Display for GlobValidationError {
                  project root with '/' separators, as `fallow list --workspaces` prints it \
                  (e.g. 'packages/web')"
             ),
+            Self::TooLong { field, start } => write!(
+                f,
+                "{field}: '{start}...' is longer than {MAX_GLOB_BYTES} bytes; shorten the pattern"
+            ),
             Self::PatternSetCompilation { field, source } => write!(
                 f,
                 "{field}: glob patterns cannot be compiled together: {source}; simplify the pattern set"
@@ -149,7 +167,8 @@ impl std::error::Error for GlobValidationError {
             | Self::TraversalSegment { .. }
             | Self::EmptyNegation { .. }
             | Self::UnliftableNegation { .. }
-            | Self::InexactWorkspaceRoot { .. } => None,
+            | Self::InexactWorkspaceRoot { .. }
+            | Self::TooLong { .. } => None,
         }
     }
 }
@@ -249,7 +268,9 @@ pub fn compile_path_glob(pattern: &str) -> Result<Glob, globset::Error> {
 ///   Windows drive letter
 /// - `TraversalSegment` if any path segment of the pattern is `..`
 /// - `InvalidSyntax` if [`compile_path_glob`] rejects the pattern
+/// - `TooLong` if the pattern is longer than [`MAX_GLOB_BYTES`]
 pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, GlobValidationError> {
+    check_glob_length(pattern, field)?;
     if is_absolute_pattern(pattern) {
         return Err(GlobValidationError::AbsolutePath {
             field,
@@ -269,6 +290,16 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
     })
 }
 
+fn check_glob_length(pattern: &str, field: &'static str) -> Result<(), GlobValidationError> {
+    if pattern.len() > MAX_GLOB_BYTES {
+        return Err(GlobValidationError::TooLong {
+            field,
+            start: pattern.chars().take(40).collect(),
+        });
+    }
+    Ok(())
+}
+
 /// Validate a glob pattern that matches a raw import specifier, not a
 /// filesystem path.
 ///
@@ -278,11 +309,13 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
 ///
 /// # Errors
 ///
-/// Returns `InvalidSyntax` if `globset::Glob::new` rejects the pattern.
+/// Returns `TooLong` if the pattern is longer than [`MAX_GLOB_BYTES`], and
+/// `InvalidSyntax` if `globset::Glob::new` rejects the pattern.
 pub fn compile_user_specifier_glob(
     pattern: &str,
     field: &'static str,
 ) -> Result<Glob, GlobValidationError> {
+    check_glob_length(pattern, field)?;
     Glob::new(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
         field,
         pattern: pattern.to_owned(),
@@ -656,6 +689,36 @@ mod tests {
         );
 
         assert!(errors.is_empty());
+    }
+
+    /// The glob set build time grows with the square of the pattern length.
+    /// OSS-Fuzz issue 578568203 had a 36 KB `ignoreFindings` pattern.
+    #[test]
+    fn globs_longer_than_the_limit_are_rejected() {
+        let long = format!("{}/**", "0".repeat(4_096));
+        let patterns = [long.clone(), format!("!x/{long}")];
+        let mut errors = Vec::new();
+        validate_user_finding_ignore_globs(&patterns, "ignoreFindings", &mut errors);
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.to_string().contains("longer than 512 bytes")),
+            "{}",
+            errors[0].to_string().chars().take(200).collect::<String>()
+        );
+
+        let fits = format!("{}/**", "0".repeat(MAX_GLOB_BYTES - 3));
+        assert!(compile_user_glob(&fits, "entry").is_ok());
+    }
+
+    /// `ignoreDependencies` globs also go into one glob set.
+    #[test]
+    fn specifier_globs_longer_than_the_limit_are_rejected() {
+        let long = format!("{}*", "0".repeat(4_096));
+        let error = compile_user_specifier_glob(&long, "ignoreDependencies").unwrap_err();
+        assert!(error.to_string().contains("longer than 512 bytes"));
+        assert!(compile_user_specifier_glob("@scope/*", "ignoreDependencies").is_ok());
     }
 
     #[test]
