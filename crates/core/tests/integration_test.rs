@@ -242,6 +242,8 @@ mod capability_e_route_exports;
 mod computed_enum_key_members;
 #[path = "integration_test/config_file_loading.rs"]
 mod config_file_loading;
+#[path = "integration_test/create_require_inline.rs"]
+mod create_require_inline;
 #[path = "integration_test/css_modules_unused.rs"]
 mod css_modules_unused;
 #[path = "integration_test/dev_dep_in_prod.rs"]

@@ -3,6 +3,7 @@ mod callee_uses;
 mod cjs;
 mod classes;
 mod complexity;
+mod create_require_inline;
 mod declaration_scope;
 mod dynamic_imports;
 mod exports;
