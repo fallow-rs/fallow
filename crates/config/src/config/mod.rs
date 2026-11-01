@@ -337,7 +337,7 @@ pub struct FallowConfig {
     #[schemars(schema_with = "extends_schema")]
     pub extends: Vec<String>,
 
-    /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. A single `*` stays within one path segment; use `**` to match across directories.
+    /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. For a script that does not run in production, use a `framework[]` entry with `entryPointRole: "support"` and leave its glob out of `entry`: a file that also matches `entry` stays a runtime root. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub entry: Vec<String>,
 
@@ -349,7 +349,7 @@ pub struct FallowConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_findings: Vec<String>,
 
-    /// Declares inline external framework plugins as data (array of plugin objects), each with `name` plus optional `enablers` (package names that activate it) or richer `detection` (dependency/file-existence/`all`/`any` checks, taking priority over `enablers`), `entryPoints` (+ `entryPointRole` runtime/support/test), `configPatterns`, `alwaysUsed`, `toolingDependencies`, `usedExports` (`{ pattern, exports }`), and `usedClassMembers`. Set it to keep a custom or in-house framework's entry points, config files, and conventions reachable without a Rust plugin; these definitions are appended to plugins discovered via `plugins`, `.fallow/plugins/`, and root `fallow-plugin-*` files (first occurrence of a name wins), and cannot do AST-based config parsing.
+    /// Declares inline external framework plugins as data (array of plugin objects), each with `name` plus optional `enablers` (package names that activate it) or richer `detection` (dependency/file-existence/`all`/`any` checks, taking priority over `enablers`); an entry with neither never activates, and config load warns. Each entry can also have `entryPoints` (+ `entryPointRole` runtime/support/test), `configPatterns`, `alwaysUsed`, `toolingDependencies`, `usedExports` (`{ pattern, exports }`), and `usedClassMembers`. Set it to keep a custom or in-house framework's entry points, config files, and conventions reachable without a Rust plugin; these definitions are appended to plugins discovered via `plugins`, `.fallow/plugins/`, and root `fallow-plugin-*` files (first occurrence of a name wins), and cannot do AST-based config parsing.
     #[serde(default)]
     pub framework: Vec<ExternalPluginDef>,
 

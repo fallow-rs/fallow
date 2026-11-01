@@ -235,19 +235,19 @@ fn expand_braces(pattern: &str) -> Vec<String> {
 
 /// A human-readable description of why an inactive plugin did not activate.
 fn activation_requirement(ext: &ExternalPluginDef) -> String {
+    if !ext.has_activation_condition() {
+        return ExternalPluginDef::NEVER_ACTIVATES_REASON.to_string();
+    }
     if let Some(detection) = &ext.detection {
-        format!(
+        return format!(
             "detection not met: requires {}",
             describe_detection(detection)
-        )
-    } else if !ext.enablers.is_empty() {
-        format!(
-            "no enabler present; requires one of these dependencies: {}",
-            ext.enablers.join(", ")
-        )
-    } else {
-        "no detection or enablers declared, so the plugin can never activate".to_string()
+        );
     }
+    format!(
+        "no enabler present; requires one of these dependencies: {}",
+        ext.enablers.join(", ")
+    )
 }
 
 fn describe_detection(detection: &PluginDetection) -> String {

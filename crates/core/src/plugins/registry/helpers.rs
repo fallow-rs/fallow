@@ -236,20 +236,20 @@ pub fn is_external_plugin_active(
     root: &Path,
     discovered_files: &[PathBuf],
 ) -> bool {
+    if !ext.has_activation_condition() {
+        return false;
+    }
     if let Some(detection) = &ext.detection {
         let all_dep_refs: Vec<&str> = all_deps.iter().map(String::as_str).collect();
-        check_plugin_detection(detection, &all_dep_refs, root, discovered_files)
-    } else if !ext.enablers.is_empty() {
-        ext.enablers.iter().any(|enabler| {
-            if enabler.ends_with('/') {
-                all_deps.iter().any(|d| d.starts_with(enabler))
-            } else {
-                all_deps.iter().any(|d| d == enabler)
-            }
-        })
-    } else {
-        false
+        return check_plugin_detection(detection, &all_dep_refs, root, discovered_files);
     }
+    ext.enablers.iter().any(|enabler| {
+        if enabler.ends_with('/') {
+            all_deps.iter().any(|d| d.starts_with(enabler))
+        } else {
+            all_deps.iter().any(|d| d == enabler)
+        }
+    })
 }
 
 /// Process external plugin definitions, checking activation and aggregating patterns.
