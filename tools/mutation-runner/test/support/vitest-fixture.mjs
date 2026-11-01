@@ -1,5 +1,6 @@
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -152,6 +153,14 @@ export const createFixtureProject = ({
   components = false,
   commonjs = false,
 } = {}) => {
+  const installed = join(PACKAGE_ROOT, "node_modules", packageName);
+  // Without this check the symlink below dangles, and each test then fails
+  // with a runner-not-found error that does not name the missing install.
+  if (fixture === "vitest-basic" && !existsSync(join(installed, "package.json"))) {
+    throw new Error(
+      `${packageName} is not installed at ${installed}. Run: npm ci --prefix tools/mutation-runner`,
+    );
+  }
   const workspace = mkdtempSync(join(tmpdir(), `fallow-mutation-${fixture}-`));
   const root = join(workspace, "project");
   const runDir = join(workspace, "run");
@@ -161,11 +170,7 @@ export const createFixtureProject = ({
   });
   if (fixture === "vitest-basic") {
     mkdirSync(join(root, "node_modules"));
-    symlinkSync(
-      join(PACKAGE_ROOT, "node_modules", packageName),
-      join(root, "node_modules", "vitest"),
-      "dir",
-    );
+    symlinkSync(installed, join(root, "node_modules", "vitest"), "dir");
   }
   const { runFiles, pathMap } = fixtureFiles({ components, commonjs });
   for (const [path, text] of Object.entries(runFiles)) write(runDir, path, text);
