@@ -478,9 +478,14 @@ of `fallow-mcp` is newer than the binary, the harness fails with the same
 build command.
 
 ```bash
-cargo build -p fallow-mcp
+cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift
 cargo test -p fallow-cli --test drift -- --include-ignored
 ```
+
+Build both packages in one invocation. `fallow-cli` and its test target turn
+on more dependency features than `fallow-mcp` does. A separate
+`cargo build -p fallow-mcp` resolves a smaller feature set, so the test step
+compiles a second copy of most of the dependency tree.
 
 The invariant tests are marked `#[ignore]`, because a workspace-wide
 `cargo test` does not build `fallow-mcp`. The `drift` CI job and the
@@ -491,7 +496,8 @@ release validation job run them with `--include-ignored`.
 A failure message gives the seed, the case count, the shrunk project with its
 files, and the difference between the two key sets.
 
-1. Build the binaries: `cargo build -p fallow-mcp`. A local run needs this
+1. Build the binaries:
+   `cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift`. A local run needs this
    step again after each change outside `crates/cli`.
 2. Run the failing test with the same seed and case count:
 
