@@ -20,7 +20,7 @@ Set `comment-layout: gate-only` to use the native Check Run for the full result 
 
 A run that loads the `baseline` input reports how much of that baseline still matches. For stale entries, the action emits a `::warning::` and repeats it in the job summary. The warning remains visible with `--quiet`.
 
-A run scoped to changed files cannot judge a whole-project baseline. Entries outside the analyzed files would appear unmatched. On a pull request, the action re-reads the baseline over the whole project before reporting its staleness, even when the stale-baseline gate is off.
+A run scoped to changed files cannot judge a whole-project baseline. Entries outside the analyzed files would appear unmatched. On a pull request, the action re-reads the baseline over the whole project before reporting its staleness, even when the stale-baseline gate is off. The re-read keeps `production: true`, so a dead-code baseline saved with `--production` is judged in that mode.
 
 The re-read removes narrowing and writing flags. It writes no baseline, snapshot, or SARIF, and its findings do not feed comments, annotations, or summaries. The step log reports the re-read and its wall time.
 

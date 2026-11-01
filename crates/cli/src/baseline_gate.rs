@@ -10,7 +10,7 @@
 //! Every outcome of the flag says so on stderr. A gate a repository opted into
 //! that then stays quiet is worse than no gate at all: the build goes green and
 //! nobody learns the baseline was never judged. So the runs that cannot or will
-//! not apply the gate, a run narrowed to part of the project and
+//! not apply the gate, a run whose scope differs from the file and
 //! `health --report-only`, name the reason they are standing down instead of
 //! returning silently.
 //!
@@ -28,6 +28,7 @@
 )]
 
 use fallow_engine::baseline::{BaselineKind, BaselineStaleness, stale_baseline_gate_trips};
+use fallow_output::{BaselineMode, BaselineScopeReasons, ScopeReason};
 use std::path::{Path, PathBuf};
 
 /// A loaded baseline's staleness together with the file it was read from, so
@@ -36,10 +37,16 @@ use std::path::{Path, PathBuf};
 pub struct LoadedBaselineStaleness {
     pub staleness: BaselineStaleness,
     pub path: PathBuf,
-    /// Which channels narrowed the run, from the same predicate that produced
-    /// `staleness.change_scoped`. Carried here rather than on the engine
-    /// struct so the analysis keeps the one boolean it needs.
+    /// Which channels stop this run from judging the file, from the same
+    /// predicate that produced `staleness.change_scoped`. Carried here rather
+    /// than on the engine struct so the analysis keeps the one boolean it needs.
     pub scope_reasons: fallow_output::BaselineScopeReasons,
+    /// The mode the dead-code file records, for the note and the prune remedy.
+    /// Always empty for `dupes`: no gate reads the mode of that file.
+    pub saved_mode: BaselineMode,
+    /// The categories of a dead-code file that an issue-type filter of this run
+    /// does not report. Empty when no filter stops the comparison.
+    pub uncovered_categories: Vec<String>,
     /// True when the file carried no key this command's baseline format
     /// writes, so it is another command's baseline rather than an empty one of
     /// this command's.
@@ -61,6 +68,30 @@ pub struct LoadedBaselineStaleness {
     /// baseline was saved in another install state than this run. Always
     /// `None` for `dupes` and `health`.
     pub install_state: Option<fallow_types::workspace::WorkspaceDiagnostic>,
+}
+
+/// Which channels narrowed the duplication comparison below the whole project.
+///
+/// Deliberately narrower than the dead-code equivalent. `dupes` saves and
+/// compares the baseline BEFORE `filter_dupes_report` runs, so `--workspace`,
+/// `--changed-workspaces`, `--diff-file` and the positional `[PATH]` scope
+/// narrow only the rendered report: the comparison, and a re-save, still cover
+/// the whole project and their staleness reading is honest. Only the two
+/// channels that narrow the analysis itself count here: a resolved changed-file
+/// set, which selects the focused analysis, and production mode, which drops
+/// test, story and dev files at discovery.
+///
+/// The changed-file set is reported as `changed-files`, because the flag is gone
+/// by this point. `change_scoped` derives from the returned set.
+pub fn duplication_comparison_scope_reasons(
+    config: &fallow_config::ResolvedConfig,
+    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> fallow_output::BaselineScopeReasons {
+    use fallow_output::ScopeReason;
+
+    fallow_output::BaselineScopeReasons::empty()
+        .insert_if(effective_changed_files.is_some(), ScopeReason::ChangedFiles)
+        .insert_if(config.production, ScopeReason::Production)
 }
 
 /// The `baseline_staleness.format` value of a legacy dead-code baseline.
@@ -113,6 +144,9 @@ pub fn gate_failed(
         saved_by: loaded.saved_by.map(BaselineKind::as_str),
         path: &loaded.path,
         expected,
+        scope_reasons: loaded.scope_reasons,
+        saved_mode: loaded.saved_mode,
+        uncovered_categories: &loaded.uncovered_categories,
     })
 }
 
@@ -141,6 +175,9 @@ pub fn gate_failed_from_envelope(
         saved_by: staleness.saved_by,
         path,
         expected,
+        scope_reasons: staleness.scope_reasons,
+        saved_mode: BaselineMode::default(),
+        uncovered_categories: &[],
     })
 }
 
@@ -285,6 +322,64 @@ struct GateReport<'a> {
     saved_by: Option<&'a str>,
     path: &'a Path,
     expected: BaselineKind,
+    scope_reasons: BaselineScopeReasons,
+    saved_mode: BaselineMode,
+    uncovered_categories: &'a [String],
+}
+
+/// The note for a run that cannot judge the file. Each form states a fact this
+/// run knows and gives a remedy that changes the state: a file with no
+/// production record reads the same whether it was saved whole-project or
+/// before the file recorded its scope, so no form calls it whole-project.
+fn stand_down_note(report: &GateReport<'_>) -> String {
+    let path = report.path.display();
+    let reasons = report.scope_reasons;
+    if report.expected != BaselineKind::DeadCode && reasons.contains(ScopeReason::Production) {
+        let scope = if reasons.without(ScopeReason::Production).is_empty() {
+            "Run"
+        } else {
+            "Run over the whole project,"
+        };
+        return format!(
+            "fallow does not gate a {} baseline in production mode ({path}). {scope} without \
+             --production to gate on it.",
+            report.expected.as_str(),
+        );
+    }
+    let mut channels = reasons.iter();
+    let only = channels.next().filter(|_| channels.next().is_none());
+    match only {
+        Some(ScopeReason::Production) if report.saved_mode.production => format!(
+            "the baseline {path} was saved with --production and this run does not use it. Add \
+             --production to gate on it."
+        ),
+        Some(ScopeReason::Production) => format!(
+            "the baseline {path} does not record production mode and this run uses it. Save it \
+             again with --production, or run without --production, to gate on it."
+        ),
+        Some(ScopeReason::IncludeEntryExports) if report.saved_mode.include_entry_exports => {
+            format!(
+                "the baseline {path} was saved with --include-entry-exports and this run does not \
+                 use it. Add --include-entry-exports to gate on it."
+            )
+        }
+        Some(ScopeReason::IncludeEntryExports) => format!(
+            "the baseline {path} does not record --include-entry-exports and this run uses it. \
+             Save it again with --include-entry-exports, or run without \
+             --include-entry-exports, to gate on it."
+        ),
+        Some(ScopeReason::IssueTypeFilter) if !report.uncovered_categories.is_empty() => format!(
+            "the baseline {path} holds {}, which this run does not report. Re-run without the \
+             issue-type filter to gate on it.",
+            report.uncovered_categories.join(", "),
+        ),
+        _ => format!(
+            "this analysis covered only part of the project ({}), which cannot judge the baseline \
+             {path}. Re-run over the whole project, in the same mode, to gate on it (with \
+             --no-package-baselines when workspaces.changedSince is configured).",
+            reasons.join(),
+        ),
+    }
 }
 
 /// Print the gate's verdict for one loaded baseline and report whether it
@@ -307,6 +402,8 @@ fn report_gate(report: &GateReport<'_>) -> bool {
         saved_by,
         path,
         expected,
+        saved_mode,
+        ..
     } = *report;
     let noun = entry_noun(expected);
     // A file this command cannot read as its own suppresses nothing, which the
@@ -336,18 +433,15 @@ fn report_gate(report: &GateReport<'_>) -> bool {
         return true;
     }
     if !stale_baseline_gate_trips(entries, matched, change_scoped) {
-        // A run narrowed to part of the project is the one case where the flag
+        // A run whose scope differs from the file is the one case where the flag
         // was asked for and still cannot answer. Saying so is the difference
         // between a gate that passed and a gate that never ran: `--production`
         // and `--changed-since` are ordinary CI shapes, and a job that believes
         // it gates would otherwise stay green forever.
         if change_scoped && entries > 0 {
             eprintln!(
-                "Note: --fail-on-stale-baseline did not run: this analysis covered only part of \
-                 the project, which cannot judge the whole-project baseline {}. Re-run over the \
-                 whole project to gate on it (with --no-package-baselines when \
-                 workspaces.changedSince is configured).",
-                path.display(),
+                "Note: --fail-on-stale-baseline did not run: {}",
+                stand_down_note(report)
             );
         }
         return false;
@@ -357,7 +451,7 @@ fn report_gate(report: &GateReport<'_>) -> bool {
         "Baseline gate failed: {stale} of {entries} entries in {} matched no current {noun}. \
          Remove only the stale entries with: {}, or re-save with: --save-baseline {}",
         path.display(),
-        expected.prune_command(path),
+        expected.prune_command(path, saved_mode),
         path.display(),
     );
     true

@@ -1063,7 +1063,9 @@ read_all_staleness_fields "$RESULTS_FILE"
 # True when every channel that narrowed the run is one this script added, so
 # removing them can produce a run that CAN judge the baseline. Production mode
 # and workspace scoping are the user's own choice about what to analyze, are
-# never removed, and make the re-read pointless.
+# never removed, and make the re-read pointless. The binary reports production
+# only when the run and the file differ, so a production run stays eligible when
+# the file was saved in production mode. The re-read keeps --production.
 #
 # Driven by the run's own scope_reasons when the binary reports them, so
 # scoping smuggled through the 'args' input is visible here instead of sending

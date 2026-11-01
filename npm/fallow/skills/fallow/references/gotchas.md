@@ -215,7 +215,7 @@ fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-cod
 fallow dead-code --format json --quiet --baseline fallow-baselines/dead-code.json --fail-on-issues
 ```
 
-Commit the baseline file to your repo. When a fix removes a finding, its entry stays in the file until you prune it. `fallow baselines prune` removes the entries that match no current finding and never adds an entry, so it is safe to run after each fix. It reads the paths in `audit.deadCodeBaseline`, `audit.healthBaseline` and `audit.dupesBaseline`.
+Commit the baseline file to your repo. When a fix removes a finding, its entry stays in the file until you prune it. `fallow baselines prune` removes the entries that match no current finding and never adds an entry, so it is safe to run after each fix. It reads the paths in `audit.deadCodeBaseline`, `audit.healthBaseline` and `audit.dupesBaseline`. A prune runs in one mode and refuses a file saved in another mode, because the run cannot see the findings of that file. For a file saved with `--production` or `--include-entry-exports`, pass the same flag to the prune. The refusal exits 2 and prints the command to use. Do not save the file again to clear a refusal without a review of its findings.
 
 ---
 

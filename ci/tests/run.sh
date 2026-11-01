@@ -279,6 +279,11 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
       *) found="$found package-baselines" ;;
     esac
   fi
+  # A production baseline under a production run: the real binary drops the
+  # reason when the run and the file use the same mode.
+  if [ "${MOCK_SAVED_PRODUCTION:-}" = "1" ]; then
+    found=$(printf '%s' "$found" | sed 's/ production//g')
+  fi
   if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
     found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
   fi
@@ -577,6 +582,27 @@ if [ "$cmd_status" -eq 1 ]; then
 else
   fail "stale gate: the merge-request re-run can fail the pipeline" "exit $cmd_status"
 fi
+
+# A production baseline under a production run with a base ref has the reason
+# changed-since only. The re-read keeps --production, or it comes back in another
+# mode and stays inert.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_SAVED_PRODUCTION=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_PRODUCTION=true \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+GATE_ARGV=$(sed -n '2p' "$STALE_LOG")
+assert_contains "$GATE_ARGV" "--production" \
+  "stale gate: the re-read of a same-mode production run keeps --production"
+assert_not_contains "$GATE_ARGV" "--changed-since" \
+  "stale gate: the re-read of a same-mode production run drops the base ref"
+assert_contains "$OUT" "ERROR: Fallow baseline gate failed" \
+  "stale gate: the re-read of a same-mode production run judges the file"
 
 # The advisory is not gated behind the variable: a merge-request pipeline
 # re-reads the baseline unscoped so the warning reaches a job that asked for no

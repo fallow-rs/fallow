@@ -646,7 +646,8 @@ fn serialize_duplication_baseline(
     config: &ResolvedConfig,
     output: OutputFormat,
 ) -> Result<String, ExitCode> {
-    let baseline_data = DuplicationBaselineData::from_report(report, &config.root);
+    let baseline_data = DuplicationBaselineData::from_report(report, &config.root)
+        .with_production(config.production);
     serde_json::to_string_pretty(&baseline_data).map_err(|e| {
         emit_error(
             &format!("failed to serialize duplication baseline: {e}"),
@@ -673,7 +674,8 @@ fn apply_duplication_baseline(
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
     let matched = before.saturating_sub(report.clone_groups.len());
-    let scope_reasons = duplication_comparison_scope_reasons(config, effective_changed_files);
+    let scope_reasons =
+        crate::baseline_gate::duplication_comparison_scope_reasons(config, effective_changed_files);
     let staleness = fallow_engine::baseline::BaselineStaleness {
         entries: baseline_entries,
         matched,
@@ -699,12 +701,15 @@ fn apply_duplication_baseline(
     );
 
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        saved_mode: fallow_output::BaselineMode::default(),
         command: "dupes",
         path: path.display().to_string(),
         baseline_entries,
         scope_reasons,
     });
     Ok(Some(crate::baseline_gate::LoadedBaselineStaleness {
+        saved_mode: fallow_output::BaselineMode::default(),
+        uncovered_categories: Vec::new(),
         staleness,
         path: path.to_path_buf(),
         scope_reasons,
@@ -713,30 +718,6 @@ fn apply_duplication_baseline(
         legacy_keys,
         install_state: None,
     }))
-}
-
-/// Which channels narrowed the duplication comparison below the whole project.
-///
-/// Deliberately narrower than the dead-code equivalent. `dupes` saves and
-/// compares the baseline BEFORE `filter_dupes_report` runs, so `--workspace`,
-/// `--changed-workspaces`, `--diff-file` and the positional `[PATH]` scope
-/// narrow only the rendered report: the comparison, and a re-save, still cover
-/// the whole project and their staleness reading is honest. Only the two
-/// channels that narrow the analysis itself count here: a resolved changed-file
-/// set, which selects the focused analysis, and production mode, which drops
-/// test, story and dev files at discovery.
-///
-/// The changed-file set is reported as `changed-files`, because the flag is gone
-/// by this point. `change_scoped` derives from the returned set.
-fn duplication_comparison_scope_reasons(
-    config: &ResolvedConfig,
-    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> fallow_output::BaselineScopeReasons {
-    use fallow_output::ScopeReason;
-
-    fallow_output::BaselineScopeReasons::empty()
-        .insert_if(effective_changed_files.is_some(), ScopeReason::ChangedFiles)
-        .insert_if(config.production, ScopeReason::Production)
 }
 
 /// The loaded baseline, the command that saved it when the file names one other
@@ -803,7 +784,8 @@ fn warn_on_duplication_baseline_staleness(
              of {baseline_entries} entries matched no current clone group, so \
              the gate protects less than what was saved. Remove only the stale \
              entries with: {}, or re-save with: --save-baseline {}",
-            fallow_engine::baseline::BaselineKind::Dupes.prune_command(path),
+            fallow_engine::baseline::BaselineKind::Dupes
+                .prune_command(path, fallow_output::BaselineMode::default()),
             path.display(),
         ),
     }

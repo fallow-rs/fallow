@@ -45,8 +45,10 @@ pub struct LoadedBaselineRecheck {
     pub path: String,
     /// Entries the baseline carried.
     pub baseline_entries: usize,
-    /// The channels that narrowed the run this baseline was compared against.
+    /// The channels that stop the run from judging this baseline.
     pub scope_reasons: fallow_output::BaselineScopeReasons,
+    /// The mode the file records.
+    pub saved_mode: fallow_output::BaselineMode,
 }
 
 pub fn set_loaded_baseline(loaded: LoadedBaselineRecheck) {
@@ -112,6 +114,7 @@ mod tests {
             path: "fallow-baseline.json".to_owned(),
             baseline_entries: 1,
             scope_reasons: fallow_output::BaselineScopeReasons::default(),
+            saved_mode: fallow_output::BaselineMode::default(),
         });
 
         reset_run_state();

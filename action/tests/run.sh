@@ -3962,6 +3962,11 @@ done
 if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
   found="$found diff"
 fi
+# A production baseline under a production run: the real binary drops the reason
+# when the run and the file use the same mode.
+if [ "${MOCK_SAVED_PRODUCTION:-}" = "1" ]; then
+  found=$(printf '%s' "$found" | sed 's/ production//g')
+fi
 if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
   found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
 fi
@@ -4258,6 +4263,20 @@ assert_contains "$STALE_STDOUT" "only part of the project (production mode or wo
   "stale gate: a binary without the member falls back to the input-based reason"
 assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_scope_reasons=" \
   "stale gate: the output is published empty rather than omitted"
+
+# 7g. A production baseline under a production run with a base ref has the reason
+# changed-since only, so the job pays for the re-read. The re-read keeps
+# --production, or it comes back in another mode and stays inert.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true" \
+  INPUT_FAIL_ON_STALE_BASELINE="true" MOCK_SAVED_PRODUCTION="1"
+STALE_REREAD=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep '^analysis ' | sed -n '2p')
+assert_contains "$STALE_REREAD" "--production" \
+  "stale gate: the re-read of a same-mode production run keeps --production"
+assert_not_contains "$STALE_REREAD" "--changed-since" \
+  "stale gate: the re-read of a same-mode production run drops the base ref"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
+  "stale gate: the re-read of a same-mode production run judges the file"
 
 # 8. The re-run exits 1 on findings, which is not an error here.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \

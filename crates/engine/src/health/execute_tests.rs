@@ -1422,6 +1422,7 @@ fn fx_evidence(
 fn runtime_coverage_top_applies_after_baseline_filtering() {
     let root = Path::new("/project");
     let baseline = HealthBaselineData {
+        scope_reasons: Vec::new(),
         kind: None,
         findings: vec![],
         finding_counts: std::collections::BTreeMap::new(),
@@ -1544,6 +1545,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
 fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_remain() {
     let root = Path::new("/project");
     let baseline = HealthBaselineData {
+        scope_reasons: Vec::new(),
         kind: None,
         findings: vec![],
         finding_counts: std::collections::BTreeMap::new(),

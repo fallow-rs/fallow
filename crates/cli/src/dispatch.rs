@@ -1501,10 +1501,10 @@ fn dispatch_baselines_command(
     let cli = dispatch.cli;
     let root = dispatch.root;
     let output = dispatch.output;
-    if let Some(flag) = baselines_prune_narrowing_flag(cli) {
+    if let Some(flag) = baselines::narrowing_flag(cli) {
         return emit_error(
             &format!(
-                "`fallow baselines prune` always analyzes the whole project, so it does not accept `{flag}`. A narrowed run would remove valid entries."
+                "`fallow baselines prune` runs one analysis over the whole project, in production mode with --production or config, so it does not accept `{flag}`. A narrowed run would remove valid entries."
             ),
             2,
             output,
@@ -1534,23 +1534,11 @@ fn dispatch_baselines_command(
         Ok(config) => config,
         Err(code) => return code,
     };
-    let targets = baselines::BaselineTargets {
-        dead_code: resolve_audit_baseline_path(
-            root,
-            dead_code_baseline.as_deref(),
-            config.audit.dead_code_baseline.as_deref(),
-        ),
-        health: resolve_audit_baseline_path(
-            root,
-            health_baseline.as_deref(),
-            config.audit.health_baseline.as_deref(),
-        ),
-        dupes: resolve_audit_baseline_path(
-            root,
-            dupes_baseline.as_deref(),
-            config.audit.dupes_baseline.as_deref(),
-        ),
-    };
+    let targets = baselines::prune_targets(
+        root,
+        &config.audit,
+        [dead_code_baseline, health_baseline, dupes_baseline],
+    );
     if targets.dead_code.is_none() && targets.health.is_none() && targets.dupes.is_none() {
         return emit_error(
             "no baseline to prune. Set `audit.deadCodeBaseline`, `audit.healthBaseline` or `audit.dupesBaseline` in the config, or pass --dead-code-baseline, --health-baseline or --dupes-baseline",
@@ -1583,28 +1571,14 @@ fn dispatch_baselines_command(
         check: *check,
         targets,
         production,
+        mode_flags: fallow_output::BaselineMode {
+            production: cli.production,
+            include_entry_exports: cli.include_entry_exports,
+        },
         coverage: coverage_inputs.coverage.as_deref(),
         coverage_root: coverage_inputs.coverage_root.as_deref(),
         regression_opts: dispatch.regression_opts(true),
     })
-}
-
-/// The first flag or environment variable that would narrow the prune run.
-fn baselines_prune_narrowing_flag(cli: &Cli) -> Option<&'static str> {
-    [
-        (cli.changed_since.is_some(), "--changed-since"),
-        (cli.workspace.is_some(), "--workspace"),
-        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
-        (cli.diff_file.is_some(), "--diff-file"),
-        (cli.diff_stdin, "--diff-stdin"),
-        (
-            std::env::var_os("FALLOW_DIFF_FILE").is_some_and(|value| !value.is_empty()),
-            "FALLOW_DIFF_FILE",
-        ),
-        (cli.production, "--production"),
-    ]
-    .into_iter()
-    .find_map(|(present, flag)| present.then_some(flag))
 }
 
 fn dispatch_flags_command(

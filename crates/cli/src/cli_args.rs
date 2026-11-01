@@ -441,8 +441,8 @@ pub struct Cli {
     /// which is published with or without this flag; the flag decides only
     /// whether that entry is `enforced`, and the exit code plus one stderr
     /// line. Inert when no baseline is loaded, on runs narrowed to part of
-    /// the project (including production mode), which cannot judge a
-    /// whole-project baseline, and under `health --report-only`, which never
+    /// the project, which cannot judge a baseline saved with another scope,
+    /// on `health` and `dupes` in production mode, and under `health --report-only`, which never
     /// fails a run; such a run prints why it stood down instead of passing
     /// quietly. `fallow audit` always analyzes only changed files, so the gate
     /// never fires there.
@@ -2318,16 +2318,15 @@ pub enum BaselinesCli {
     /// Remove the baseline entries that match no current finding.
     ///
     /// Reads the files that `audit.deadCodeBaseline`, `audit.healthBaseline`
-    /// and `audit.dupesBaseline` name, runs one whole-project analysis, and
-    /// removes each entry that `--baseline` would no longer match. Prune never
-    /// adds an entry: a new finding stays outside the baseline, and the normal
-    /// gates report it. To record new findings on purpose, use
-    /// `fallow <dead-code|health|dupes> --save-baseline`.
+    /// and `audit.dupesBaseline` name, runs one analysis over the whole project,
+    /// in production mode with --production or config, and removes each entry
+    /// that `--baseline` would no longer match. Prune never adds an entry. To
+    /// record new findings on purpose, use `fallow <kind> --save-baseline`.
     ///
     /// Exit codes: 0 when the files are pruned or have nothing to prune, 1 with
     /// `--check` when an entry can be pruned, and 2 when a file cannot be read
-    /// or pruned. A file with an older key form is skipped with the command
-    /// that saves it again.
+    /// or pruned. A file with an older key form or another mode (`--production`,
+    /// `--include-entry-exports`) is skipped with the command to use.
     Prune {
         /// Report the entries that a prune would remove, and write nothing.
         #[arg(long)]

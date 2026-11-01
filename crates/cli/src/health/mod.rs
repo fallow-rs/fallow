@@ -812,6 +812,7 @@ fn report_loaded_baseline(result: &mut HealthResult, baseline_path: Option<&std:
         return;
     };
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        saved_mode: fallow_output::BaselineMode::default(),
         command: "health",
         path: path.display().to_string(),
         baseline_entries: staleness.baseline_entries,

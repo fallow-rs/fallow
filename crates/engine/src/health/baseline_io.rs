@@ -20,6 +20,7 @@ pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) quiet: bool,
     pub(super) mode: HealthBaselineMode,
     pub(super) mode_explicit: bool,
+    pub(super) production: bool,
 }
 
 /// Refuse a save aimed at a baseline another command wrote, which this save
@@ -86,6 +87,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         quiet,
         mode,
         mode_explicit,
+        production,
     } = *input;
     check_kind_overwrite(save_path)?;
     check_identity_overwrite(save_path, mode, mode_explicit)?;
@@ -94,7 +96,8 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         runtime_coverage_findings,
         targets,
         config_root,
-    );
+    )
+    .with_production(production);
     let baseline = match mode {
         HealthBaselineMode::Count => baseline,
         HealthBaselineMode::Identity => baseline.with_identity(findings, config_root),
@@ -243,7 +246,8 @@ fn warn_on_staleness(counts: &StalenessCounts, baseline_path: &std::path::Path) 
              {baseline_entries} entries matched no current finding, so the \
              gate protects less than what was saved. Remove only the stale \
              entries with: {}, or re-save with: --save-baseline {}",
-            crate::baseline::BaselineKind::Health.prune_command(baseline_path),
+            crate::baseline::BaselineKind::Health
+                .prune_command(baseline_path, fallow_output::BaselineMode::default()),
             baseline_path.display(),
         ),
     }

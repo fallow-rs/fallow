@@ -33,6 +33,7 @@ mod audit_unprovable_base_tests;
 mod audit_worsened_tests;
 mod baseline_growth_tests;
 mod baseline_install_state_tests;
+mod baseline_scope_comparison_tests;
 mod baselines_prune_tests;
 mod cascade_tests;
 mod caveat_surface_tests;

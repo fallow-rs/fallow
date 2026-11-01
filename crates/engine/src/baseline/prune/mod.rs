@@ -9,6 +9,7 @@
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
+use fallow_output::BaselineMode;
 use fallow_types::identity::IdentityPaths;
 
 use super::{
@@ -72,6 +73,16 @@ pub enum BaselinePruneRefusal {
     /// The file has fields that this version does not know, probably from a
     /// newer version. A rewrite would drop them.
     UnknownFields(Vec<String>),
+    /// The file and the run differ in a mode that decides which findings exist.
+    /// A prune would remove entries that are valid in the mode of the file.
+    ScopeMismatch {
+        /// The channels the file records and this run does not use.
+        saved_only: BaselineMode,
+        /// The channels this run uses and the file does not record. A file
+        /// saved before the file recorded its scope reads the same as a file
+        /// saved without the channel.
+        run_only: BaselineMode,
+    },
 }
 
 impl BaselinePruneRefusal {
@@ -86,6 +97,7 @@ impl BaselinePruneRefusal {
             Self::IncompatibleIdentity(_) => "incompatible-identity",
             Self::SharedCloneKeys => "shared-clone-keys",
             Self::UnknownFields(_) => "unknown-fields",
+            Self::ScopeMismatch { .. } => "scope-mismatch",
         }
     }
 
@@ -118,8 +130,50 @@ impl BaselinePruneRefusal {
                 "the file has fields that this version does not know ({}); a newer fallow version probably saved it",
                 fields.join(", ")
             ),
+            Self::ScopeMismatch {
+                saved_only,
+                run_only,
+            } => {
+                let mut facts = Vec::new();
+                if !saved_only.is_empty() {
+                    facts.push(format!(
+                        "the file was saved with {} and this run does not use it",
+                        saved_only.flags_prose()
+                    ));
+                }
+                if !run_only.is_empty() {
+                    facts.push(format!(
+                        "the file does not record {} and this run uses it",
+                        run_only.unrecorded_prose()
+                    ));
+                }
+                format!(
+                    "{}, so a prune would remove valid entries",
+                    facts.join(", and ")
+                )
+            }
         }
     }
+}
+
+/// Refuse a file with entries when the file and the run differ in a mode. A file
+/// with no entries has nothing to lose.
+fn check_saved_mode(
+    content: &str,
+    entries: usize,
+    run: BaselineMode,
+) -> Result<(), BaselinePruneRefusal> {
+    if entries == 0 {
+        return Ok(());
+    }
+    let saved = BaselineMode::from_saved_names(&super::saved_scope_reasons(content));
+    if saved == run {
+        return Ok(());
+    }
+    Err(BaselinePruneRefusal::ScopeMismatch {
+        saved_only: saved.minus(run),
+        run_only: run.minus(saved),
+    })
 }
 
 fn parse_own_kind(
@@ -217,12 +271,14 @@ fn retain_matched(
 /// # Errors
 ///
 /// Returns [`BaselinePruneRefusal`] when the file is not a canonical dead-code
-/// baseline of the same analysis identity.
+/// baseline of the same analysis identity, or when `mode` differs from the mode
+/// the file records.
 pub fn prune_dead_code_baseline(
     content: &str,
     results: &crate::results::AnalysisResults,
     root: &Path,
     identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    mode: BaselineMode,
 ) -> Result<BaselinePrune, BaselinePruneRefusal> {
     let mut baseline: BaselineData =
         parse_value(&parse_own_kind(content, BaselineKind::DeadCode)?)?;
@@ -239,6 +295,7 @@ pub fn prune_dead_code_baseline(
     }
 
     let entries_before = baseline.total_entries();
+    check_saved_mode(content, entries_before, mode)?;
     let paths = IdentityPaths::new(root);
     // A finding that the cascade filter hid still exists, so its entry stays.
     let hidden = results.cascade.hidden.to_results();
@@ -282,10 +339,12 @@ pub fn prune_dead_code_baseline(
 /// # Errors
 ///
 /// Returns [`BaselinePruneRefusal`] when the file is not a duplication baseline
-/// with normalized keys, or when it holds the shared clone keys of issue #3290.
+/// with normalized keys, when it holds the shared clone keys of issue #3290, or
+/// when `production` differs from the mode the file records.
 pub fn prune_dupes_baseline(
     content: &str,
     report: &DuplicationReport,
+    production: bool,
 ) -> Result<BaselinePrune, BaselinePruneRefusal> {
     let mut baseline: DuplicationBaselineData =
         parse_value(&parse_own_kind(content, BaselineKind::Dupes)?)?;
@@ -304,6 +363,14 @@ pub fn prune_dupes_baseline(
         }
         return Err(BaselinePruneRefusal::LegacyKeys);
     }
+    check_saved_mode(
+        content,
+        entries_before,
+        BaselineMode {
+            production,
+            include_entry_exports: false,
+        },
+    )?;
 
     let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
     let current: Vec<String> = report
@@ -384,6 +451,7 @@ pub fn prune_health_baseline(
     content: &str,
     findings: &[fallow_output::ComplexityViolation],
     root: &Path,
+    production: bool,
 ) -> Result<BaselinePrune, BaselinePruneRefusal> {
     let mut baseline: HealthBaselineData =
         parse_value(&parse_own_kind(content, BaselineKind::Health)?)?;
@@ -391,6 +459,14 @@ pub fn prune_health_baseline(
         return Err(BaselinePruneRefusal::LegacyKeys);
     }
     let entries_before = baseline.finding_entry_count();
+    check_saved_mode(
+        content,
+        entries_before,
+        BaselineMode {
+            production,
+            include_entry_exports: false,
+        },
+    )?;
 
     let mut removed = Vec::new();
     let current_counts = health_finding_counts(findings, root, HealthBaselineMode::Count);

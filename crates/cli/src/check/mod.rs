@@ -6,7 +6,7 @@ use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::AnalysisResults;
 
-use crate::baseline::{BaselineData, BaselineStaleness, BaselineStalenessWarning};
+use crate::baseline::BaselineData;
 use crate::baseline_gate::LoadedBaselineStaleness;
 use crate::error::emit_error;
 use crate::exit_codes::gate_failed_exit_code;
@@ -1461,6 +1461,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             output: opts.output,
             analysis_identity: &analysis_identity,
             scope_reasons: baseline_scope_reasons(opts, &config, &change_scope),
+            filters: opts.filters,
         },
     )?;
 
@@ -2179,12 +2180,17 @@ struct BaselineIo<'a> {
     output: OutputFormat,
     analysis_identity: &'a fallow_types::semantic::SemanticAnalysisIdentity,
     /// Which channels narrowed this run, so a whole-project baseline matches
-    /// less of it for reasons that are not rot. Empty means whole-project.
+    /// less of it for reasons that are not rot. Empty means whole-project. A
+    /// save records this set.
     scope_reasons: fallow_output::BaselineScopeReasons,
+    /// The issue-type filters of this run, to compare with a loaded file.
+    filters: &'a IssueFilters,
 }
 
 /// Which channels narrowed the run before the baseline comparison, so the
-/// current results cover less than the baseline ever described.
+/// current results cover less than a whole-project baseline ever described. A
+/// save records this set, and [`baseline_notes::compare_with_saved_baseline`]
+/// turns it into the set that stops this run from judging a loaded file.
 ///
 /// Mirrors the health side's `baseline_scope_reasons` and adds the
 /// dead-code-only filter channel, because `--unused-*` flags drop whole
@@ -2198,10 +2204,8 @@ struct BaselineIo<'a> {
 /// counts for the same reason: it changes which exports the run judges, from
 /// the flag or from the config.
 ///
-/// This is the only predicate on this command: `change_scoped` is derived from
-/// the returned set, so the boolean and the published array cannot disagree.
-/// It is also the command that can name every channel, because it reads the
-/// flags rather than a set already resolved from them.
+/// This command can name every channel, because it reads the flags rather than
+/// a set already resolved from them.
 fn baseline_scope_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
@@ -2335,6 +2339,8 @@ fn load_and_compare_baseline(
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
     baseline_notes::warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
+    let comparison =
+        baseline_notes::compare_with_saved_baseline(&content, io.scope_reasons, io.filters);
     let install_state =
         baseline_notes::warn_about_another_install_state(&content, baseline_path, io);
     let outcome = apply_dead_code_baseline(
@@ -2342,7 +2348,7 @@ fn load_and_compare_baseline(
         &content,
         io.root,
         io.analysis_identity,
-        !io.scope_reasons.is_empty(),
+        !comparison.reasons.is_empty(),
     )
     .map_err(|err| match err {
         DeadCodeBaselineError::Parse(message) => emit_error(
@@ -2390,74 +2396,30 @@ fn load_and_compare_baseline(
             );
         }
         if !unrecognised_format {
-            warn_on_baseline_staleness(staleness, baseline_path);
+            baseline_notes::warn_on_staleness(staleness, baseline_path, comparison.saved_mode);
         }
     }
     if unrecognised_format {
-        // The file suppresses nothing, so every finding stays in the report and
-        // the counts say the baseline carried no entry (issue #2738).
-        if io.bare_run {
-            crate::baseline_gate::note_unrecognised_bare_run_baseline(
-                Some(baseline_path),
-                true,
-                saved_by,
-            );
-        } else {
-            crate::baseline_gate::note_unrecognised_baseline(
-                Some(baseline_path),
-                true,
-                saved_by,
-                fallow_engine::baseline::BaselineKind::DeadCode,
-                io.load_flag,
-            );
-        }
+        baseline_notes::note_unrecognised_file(baseline_path, saved_by, io);
     }
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: io.command,
         path: baseline_path.display().to_string(),
         baseline_entries: staleness.entries,
-        scope_reasons: io.scope_reasons,
+        scope_reasons: comparison.reasons,
+        saved_mode: comparison.saved_mode,
     });
     Ok(LoadedBaselineStaleness {
         staleness,
         path: baseline_path.to_path_buf(),
-        scope_reasons: io.scope_reasons,
+        scope_reasons: comparison.reasons,
+        saved_mode: comparison.saved_mode,
+        uncovered_categories: comparison.uncovered_categories,
         unrecognised_format,
         saved_by,
         legacy_keys,
         install_state,
     })
-}
-
-/// Warn when a loaded baseline no longer describes the current project: either
-/// nothing in it matched, or a large enough share of it matched nothing.
-///
-/// Every guard lives in the shared decision, so `dead-code`, `dupes` and
-/// `health` are silent in the same situations: a run narrowed to part of the
-/// project (re-saving from one would drop every entry the run never looked at)
-/// and a run that produced no findings at all (where a cleaned project and a
-/// rotted baseline are indistinguishable from here).
-fn warn_on_baseline_staleness(staleness: BaselineStaleness, baseline_path: &std::path::Path) {
-    let baseline_entries = staleness.entries;
-    let stale_entries = staleness.stale_entries();
-    match staleness.warning() {
-        BaselineStalenessWarning::None => {}
-        BaselineStalenessWarning::ZeroOverlap => eprintln!(
-            "Warning: baseline has {baseline_entries} entries but matched \
-             0 current issues. Your paths may have changed, or the baseline \
-             was saved on a different machine. Re-save with: \
-             --save-baseline {}",
-            baseline_path.display(),
-        ),
-        BaselineStalenessWarning::Partial => eprintln!(
-            "Warning: baseline is partially stale: {stale_entries} of \
-             {baseline_entries} entries matched no current issue, so the \
-             gate protects less than what was saved. Remove only the stale \
-             entries with: {}, or re-save with: --save-baseline {}",
-            fallow_engine::baseline::BaselineKind::DeadCode.prune_command(baseline_path),
-            baseline_path.display(),
-        ),
-    }
 }
 
 #[cfg(test)]
@@ -2863,6 +2825,7 @@ mod tests {
                 output: OutputFormat::Json,
                 analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
                 scope_reasons: fallow_output::BaselineScopeReasons::empty(),
+                filters: &IssueFilters::default(),
             },
         )
         .expect("baseline save succeeds");
