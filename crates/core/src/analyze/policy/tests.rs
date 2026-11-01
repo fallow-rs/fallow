@@ -224,6 +224,14 @@ fn callee(path: &str, span_start: u32) -> CalleeUse {
     CalleeUse {
         callee_path: path.to_string(),
         span_start,
+        is_new: false,
+    }
+}
+
+fn new_callee(path: &str, span_start: u32) -> CalleeUse {
+    CalleeUse {
+        is_new: true,
+        ..callee(path, span_start)
     }
 }
 
@@ -342,6 +350,61 @@ fn banned_call_matches_import_resolved_canonical_path() {
         find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0].matched, "execSync");
+}
+
+#[test]
+fn banned_call_matches_new_form_and_reports_new_prefix() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_call("no-clock", &["Date"])])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let modules = vec![module(
+        0,
+        vec![new_callee("Date", 0), callee("Date", 10)],
+        Vec::new(),
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    let matched: Vec<&str> = violations.iter().map(|v| v.matched.as_str()).collect();
+    assert_eq!(matched, vec!["new Date", "Date"]);
+}
+
+#[test]
+fn banned_effect_ignores_new_form() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-process",
+            &[EffectKind::Process],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    // The call form of `RegExp` is the positive control for this rule.
+    let modules = vec![module(
+        0,
+        vec![
+            new_callee("RegExp", 0),
+            new_callee("Array", 10),
+            new_callee("Function", 20),
+            callee("RegExp", 30),
+        ],
+        Vec::new(),
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    let matched: Vec<&str> = violations.iter().map(|v| v.matched.as_str()).collect();
+    assert_eq!(matched, vec!["process: RegExp"]);
 }
 
 #[test]

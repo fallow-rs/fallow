@@ -119,3 +119,65 @@ fn zero_arg_and_fully_literal_calls_are_captured() {
             .any(|u| u.callee_path == "console.table")
     );
 }
+
+fn forms(source: &str) -> Vec<(String, bool, u32)> {
+    parse_source(source)
+        .callee_uses
+        .iter()
+        .map(|u| (u.callee_path.clone(), u.is_new, u.span_start))
+        .collect()
+}
+
+#[test]
+fn captures_new_expression_as_new_form() {
+    assert_eq!(forms("new Date();"), vec![("Date".to_owned(), true, 0)]);
+}
+
+#[test]
+fn captures_new_without_parentheses_and_parenthesized_callee() {
+    assert_eq!(forms("new Mesh;"), vec![("Mesh".to_owned(), true, 0)]);
+    assert_eq!(
+        forms("new (T.Mesh)();"),
+        vec![("T.Mesh".to_owned(), true, 0)]
+    );
+}
+
+#[test]
+fn captures_new_static_member_chain() {
+    assert_eq!(
+        forms("new T.Group.Inner();"),
+        vec![("T.Group.Inner".to_owned(), true, 0)]
+    );
+}
+
+#[test]
+fn dedupes_per_form_with_first_span_of_each_form() {
+    // new Date() at 0, Date() at 11, new Date() at 18, Date() at 29.
+    let source = "new Date();Date();new Date();Date();";
+    assert_eq!(
+        forms(source),
+        vec![("Date".to_owned(), true, 0), ("Date".to_owned(), false, 11)]
+    );
+}
+
+#[test]
+fn nested_new_and_call_on_one_line_give_two_entries() {
+    assert_eq!(
+        forms("new Date(Date());"),
+        vec![("Date".to_owned(), true, 0), ("Date".to_owned(), false, 9)]
+    );
+}
+
+#[test]
+fn skips_dynamic_new_callee() {
+    // `make()` is a call, so it stays. The two `new` callees do not flatten.
+    assert_eq!(
+        forms("const m = 'x';\nnew ns[m]();\nnew (make())();"),
+        vec![("make".to_owned(), false, 33)]
+    );
+}
+
+#[test]
+fn call_form_entry_is_not_marked_new() {
+    assert_eq!(forms("Date();"), vec![("Date".to_owned(), false, 0)]);
+}

@@ -2156,7 +2156,7 @@
           "type": "string"
         },
         "callee": {
-          "description": "Forbidden callee pattern(s). Matching is segment-aware, not substring:\n`child_process.*` matches `child_process.exec` (and named imports from\n`child_process` / `node:child_process`), `fetch` matches only `fetch`,\nand a leading `*.` suffix-matches any object (`*.innerHTML`).",
+          "description": "Forbidden callee pattern(s). A pattern matches `Date()` and `new Date()`. Matching is\nsegment-aware, not substring: `child_process.*` matches `child_process.exec` (and named\nimports from `child_process` / `node:child_process`), `fetch` matches only `fetch`,\nand a leading `*.` suffix-matches any object (`*.innerHTML`).",
           "$ref": "#/$defs/ForbiddenCallee"
         }
       },

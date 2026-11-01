@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use fallow_config::ResolvedConfig;
-use fallow_types::extract::{ImportedName, ModuleInfo};
+use fallow_types::extract::{CalleeUse, ImportedName, ModuleInfo};
 use fallow_types::results::BoundaryCallViolation;
 
 use crate::discover::FileId;
@@ -14,9 +14,9 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 /// Detect calls from zoned files to callees forbidden for that zone via
 /// `boundaries.calls.forbidden`.
 ///
-/// Each callee use is matched against the zone's patterns twice: on the
-/// written path (`cp.exec`, `console.log`) and on an import-resolved canonical
-/// path (`child_process.exec` for `import { exec } from "node:child_process"`
+/// A callee use is a call or a `new` expression. Each one is matched against
+/// the zone's patterns twice: on the written path (`cp.exec`, `console.log`)
+/// and on an import-resolved canonical path (`child_process.exec` for `import { exec } from "node:child_process"`
 /// or a namespace/default import of the package). Canonicalization only uses
 /// real import provenance from bare specifiers; relative sources are skipped
 /// because zone-to-zone calls are the import rules' job. Unzoned files are
@@ -138,7 +138,7 @@ fn boundary_call_violations_for_module(
             line,
             col,
             zone: zone.to_owned(),
-            callee: callee_use.callee_path.clone(),
+            callee: display_callee(callee_use),
             pattern: pattern.raw().to_owned(),
         });
     }
@@ -154,6 +154,18 @@ fn warn_empty_boundary_call_zones(zone_file_counts: &FxHashMap<&str, usize>) {
                  by a zone's patterns"
             );
         }
+    }
+}
+
+/// The subject string of a finding: the written path, with the prefix `new `
+/// for a `new` expression. Patterns match `callee_path`, never this string.
+/// The two forms need separate strings: finding identity excludes the line, so
+/// a shared string would make the ids of the two findings depend on line order.
+pub(super) fn display_callee(callee_use: &CalleeUse) -> String {
+    if callee_use.is_new {
+        format!("new {}", callee_use.callee_path)
+    } else {
+        callee_use.callee_path.clone()
     }
 }
 

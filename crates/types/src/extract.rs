@@ -3416,16 +3416,15 @@ pub struct ClassThisWholeObjectUseFact {
     pub object: String,
 }
 
-/// A statically flattenable callee path invoked in a module (e.g. `execSync`,
-/// `child_process.exec`, `console.log`). One entry per unique `callee_path`
-/// per module; the span anchors the first occurrence. Consumed by the
-/// `boundaries.calls.forbidden` detector.
+/// A flattenable callee path of a call or `new` site; one per `(callee_path, is_new)` per module.
 #[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct CalleeUse {
-    /// The dotted or bare callee path as written at the call site.
+    /// The dotted or bare callee path as written at the site (e.g. `cp.exec`).
     pub callee_path: String,
-    /// Start byte offset of the first call site using this path.
+    /// Start byte offset of the first site with this path and form.
     pub span_start: u32,
+    /// True for a `new` expression. `banned-effect` and the trace read only false entries.
+    pub is_new: bool,
 }
 
 /// A direct call whose root identifier resolves to a runtime ESM import.

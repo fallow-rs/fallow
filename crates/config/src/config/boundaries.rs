@@ -365,9 +365,9 @@ impl BoundaryCallsConfig {
 pub struct ForbiddenCallRule {
     /// Zone whose files may not make matching calls.
     pub from: String,
-    /// Forbidden callee pattern(s). Matching is segment-aware, not substring:
-    /// `child_process.*` matches `child_process.exec` (and named imports from
-    /// `child_process` / `node:child_process`), `fetch` matches only `fetch`,
+    /// Forbidden callee pattern(s). A pattern matches `Date()` and `new Date()`. Matching is
+    /// segment-aware, not substring: `child_process.*` matches `child_process.exec` (and named
+    /// imports from `child_process` / `node:child_process`), `fetch` matches only `fetch`,
     /// and a leading `*.` suffix-matches any object (`*.innerHTML`).
     pub callee: ForbiddenCallee,
 }

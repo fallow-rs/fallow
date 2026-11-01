@@ -12,7 +12,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
-use super::boundary_calls::canonical_callee_path;
+use super::boundary_calls::{canonical_callee_path, display_callee};
 use super::security::{CalleePattern, catalogue_matchers};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -118,8 +118,9 @@ pub(super) struct PolicyAnalysisInput<'a> {
 /// callee path and an import-resolved canonical path are both tried, so
 /// `child_process.*` covers named, namespace, and default imports from
 /// `child_process` / `node:child_process`. One finding is reported per unique
-/// callee path per file (the `callee_uses` capture dedups per path, first
-/// occurrence wins). Banned-import matching is segment-aware on the RAW
+/// callee path per form per file (the `callee_uses` capture dedups per path
+/// and per call or `new` form, first occurrence wins). Banned-effect matching
+/// reads calls only. Banned-import matching is segment-aware on the RAW
 /// specifier over imports and re-exports; `require()` calls and dynamic
 /// `import()` are documented false negatives in v1.
 ///
@@ -540,7 +541,7 @@ fn collect_banned_exports(input: &mut PolicyCollectionInput<'_>) {
 }
 
 fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {
-    for callee_use in &input.module.callee_uses {
+    for callee_use in input.module.callee_uses.iter().filter(|use_| !use_.is_new) {
         let matched = input.in_scope.iter().find_map(|(_, rule)| {
             if rule.rule.kind != RulePackRuleKind::BannedEffect {
                 return None;
@@ -579,7 +580,7 @@ fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {
     }
 }
 
-/// Emit one finding per unique callee path matched by the first applicable
+/// Emit one finding per unique callee path per form matched by the first applicable
 /// `banned-call` rule (config order), mirroring the boundary forbidden-call
 /// first-pattern-wins behavior.
 fn collect_banned_calls(input: &mut PolicyCollectionInput<'_>) {
@@ -615,7 +616,7 @@ fn collect_banned_calls(input: &mut PolicyCollectionInput<'_>) {
             pack: rule.pack.to_owned(),
             rule_id: rule.rule.id.clone(),
             kind: PolicyRuleKind::BannedCall,
-            matched: callee_use.callee_path.clone(),
+            matched: display_callee(callee_use),
             severity,
             message: rule.rule.message.clone(),
         });

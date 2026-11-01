@@ -4588,7 +4588,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_angular_bootstrap_call(expr);
         self.record_angular_dynamic_providers(expr);
 
-        self.record_callee_use(expr);
+        self.record_callee_use(&expr.callee, expr.span.start, false);
         self.record_imported_call_site(expr);
 
         walk::walk_call_expression(self, expr);
@@ -4714,6 +4714,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_new_expression(&mut self, expr: &oxc_ast::ast::NewExpression<'a>) {
         self.record_queue_worker_constructor_param_sources(expr);
+        self.record_callee_use(&expr.callee, expr.span.start, true);
 
         if let Some(source) = new_url_import_source(expr) {
             // A speculative reference credits its target when it resolves, and
@@ -6195,20 +6196,19 @@ impl ModuleInfoExtractor {
         None
     }
 
-    /// Record the statically flattenable callee path of a call site, deduped
-    /// per unique path (first occurrence wins). Capture is unconditional
-    /// because extraction is config-blind; the `boundaries.calls.forbidden`
-    /// detector consumes these at analyze time. Computed members, dynamic
-    /// dispatch, and optional-chaining callees flatten to `None` and stay
-    /// uncaptured (documented false negatives).
-    fn record_callee_use(&mut self, expr: &CallExpression<'_>) {
-        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+    /// Record the statically flattenable callee path of a call or `new` site, deduped per path
+    /// and form (first occurrence wins). Capture is unconditional because extraction is
+    /// config-blind. Computed members, dynamic dispatch, and optional-chaining callees flatten
+    /// to `None` and stay uncaptured (documented false negatives).
+    fn record_callee_use(&mut self, callee: &Expression<'_>, span_start: u32, is_new: bool) {
+        let Some(callee_path) = flatten_callee_path(callee) else {
             return;
         };
-        if self.seen_callee_paths.insert(callee_path.clone()) {
+        if self.seen_callee_paths.insert((callee_path.clone(), is_new)) {
             self.callee_uses.push(CalleeUse {
                 callee_path,
-                span_start: expr.span.start,
+                span_start,
+                is_new,
             });
         }
     }

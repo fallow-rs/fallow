@@ -49,7 +49,7 @@
           "$ref": "#/$defs/RulePackRuleKind"
         },
         "callees": {
-          "description": "Callee patterns to ban (`banned-call` only). Matching is segment-aware\nand import-resolved, identical to `boundaries.calls.forbidden`:\n`child_process.*` covers `import { exec } from \"node:child_process\"`,\nthe bare specifier, and namespace/default imports; `fetch` matches only\nthe global `fetch`; a leading `*.member` matches any object.",
+          "description": "Callee patterns to ban (`banned-call` only). A pattern matches a call\n(`Date()`) and a constructor call (`new Date()`). Matching is\nsegment-aware and import-resolved, identical to\n`boundaries.calls.forbidden`: `child_process.*` covers\n`import { exec } from \"node:child_process\"`, the bare specifier, and\nnamespace/default imports; a leading `*.member` matches any object. A\nbare pattern matches the written name, so it also matches a local\nfunction or class with that name.",
           "type": "array",
           "items": {
             "type": "string"
@@ -63,7 +63,7 @@
           }
         },
         "effects": {
-          "description": "Effect classes to ban (`banned-effect` only). Effects are derived from\n`security_matchers.toml` catalogue rows and matched against captured\ncall sites after import-resolution canonicalization.",
+          "description": "Effect classes to ban (`banned-effect` only). Effects are derived from\n`security_matchers.toml` catalogue rows and matched against captured\ncall sites after import-resolution canonicalization. `banned-effect`\nreads call expressions only. It does not read `new` expressions.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/EffectKind"

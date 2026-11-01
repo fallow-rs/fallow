@@ -1080,8 +1080,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// Dedup guard for `callee_uses`. Working state only: not persisted and
     /// not merged across SFC script blocks (each block dedups independently;
     /// the detector matches per unique path, so cross-block duplicates only
-    /// cost one extra entry).
-    seen_callee_paths: FxHashSet<String>,
+    /// cost one extra entry). The second element is the `is_new` form.
+    seen_callee_paths: FxHashSet<(String, bool)>,
     /// `"use client"` / `"use server"` directive strings written as expression
     /// statements in `program.body` (misplaced, NOT in the leading
     /// prologue), so the RSC bundler silently ignores them. Captured by

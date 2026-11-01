@@ -5414,7 +5414,7 @@ col: number
  */
 zone: string
 /**
- * The callee path as written at the call site (e.g. `cp.exec`).
+ * The callee path as written (e.g. `cp.exec`), with the prefix `new ` for a `new` expression.
  */
 callee: string
 /**
@@ -5476,8 +5476,8 @@ pack: string
 rule_id: string
 kind: PolicyRuleKind
 /**
- * What matched: the written callee path for `banned-call` (e.g.
- * `cp.exec`), the raw import specifier for `banned-import` (e.g.
+ * What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or
+ * `new Date` for a `new` expression), the raw import specifier for `banned-import` (e.g.
  * `moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the
  * exported name for `banned-export`. For `gdp-proof-producer`, the canonical
  * factory with its JSON-quoted literal label or `...` for a dynamic label.

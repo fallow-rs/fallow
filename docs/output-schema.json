@@ -16509,7 +16509,7 @@
         },
         "callee": {
           "type": "string",
-          "description": "The callee path as written at the call site (e.g. `cp.exec`)."
+          "description": "The callee path as written (e.g. `cp.exec`), with the prefix `new ` for a `new` expression."
         },
         "pattern": {
           "type": "string",
@@ -16592,7 +16592,7 @@
         },
         "matched": {
           "type": "string",
-          "description": "What matched: the written callee path for `banned-call` (e.g.\n`cp.exec`), the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the\nexported name for `banned-export`. For `gdp-proof-producer`, the canonical\nfactory with its JSON-quoted literal label or `...` for a dynamic label."
+          "description": "What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or\n`new Date` for a `new` expression), the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the\nexported name for `banned-export`. For `gdp-proof-producer`, the canonical\nfactory with its JSON-quoted literal label or `...` for a dynamic label."
         },
         "severity": {
           "description": "Effective severity for this finding (per-rule `severity`, else the\n`rules.\"policy-violation\"` master).",
@@ -16649,7 +16649,7 @@
         {
           "type": "string",
           "const": "banned-call",
-          "description": "A call site matched a `banned-call` rule's callee patterns."
+          "description": "A call or `new` expression matched a `banned-call` rule's callee patterns."
         },
         {
           "type": "string",

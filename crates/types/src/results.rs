@@ -4066,7 +4066,7 @@ pub struct BoundaryCallViolation {
     pub col: u32,
     /// The zone the calling file is classified into.
     pub zone: String,
-    /// The callee path as written at the call site (e.g. `cp.exec`).
+    /// The callee path as written (e.g. `cp.exec`), with the prefix `new ` for a `new` expression.
     pub callee: String,
     /// The configured pattern that matched (e.g. `child_process.*`), so
     /// consumers can see both the written path and the rule that fired.
@@ -4078,7 +4078,7 @@ pub struct BoundaryCallViolation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum PolicyRuleKind {
-    /// A call site matched a `banned-call` rule's callee patterns.
+    /// A call or `new` expression matched a `banned-call` rule's callee patterns.
     BannedCall,
     /// An import or re-export specifier matched a `banned-import` rule.
     BannedImport,
@@ -4128,8 +4128,8 @@ pub struct PolicyViolation {
     pub rule_id: String,
     /// Which rule kind matched.
     pub kind: PolicyRuleKind,
-    /// What matched: the written callee path for `banned-call` (e.g.
-    /// `cp.exec`), the raw import specifier for `banned-import` (e.g.
+    /// What matched: the written callee path for `banned-call` (e.g. `cp.exec`, or
+    /// `new Date` for a `new` expression), the raw import specifier for `banned-import` (e.g.
     /// `moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the
     /// exported name for `banned-export`. For `gdp-proof-producer`, the canonical
     /// factory with its JSON-quoted literal label or `...` for a dynamic label.
