@@ -1,6 +1,7 @@
 //! Config entries that had no effect, as diagnostics on the config file: the
-//! patterns that matched nothing (`ignoreFindings`, `ignoreDependencies`) and
-//! the redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`).
+//! patterns that matched nothing (`ignoreFindings`, `ignoreDependencies`), the
+//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`) and the
+//! `overrides` rules that cannot change a result.
 //!
 //! The CLI reports these patterns in `workspace_diagnostics[]`. The editor
 //! marks the entry in the config file that declares it. A pattern whose entry
@@ -9,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{FallowConfig, WorkspaceDiagnostic};
+use fallow_config::{ConfigEntrySpan, FallowConfig, WorkspaceDiagnostic};
 use ls_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range, Uri,
 };
@@ -45,8 +46,14 @@ pub fn collect(
     diagnostics
         .into_iter()
         .filter_map(|diagnostic| {
-            let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
-            let location = config_path.and_then(|path| locate(path, setting, pattern));
+            let span = if let Some((setting, pattern)) = diagnostic.kind.unmatched_config_pattern()
+            {
+                config_path.and_then(|path| FallowConfig::locate_list_entry(path, setting, pattern))
+            } else {
+                let (rule, files, _) = diagnostic.kind.ineffective_override()?;
+                config_path.and_then(|path| FallowConfig::locate_override_rule(path, rule, files))
+            };
+            let location = span.and_then(pattern_location);
             Some(UnmatchedConfigPattern {
                 code: diagnostic.kind.id(),
                 message: diagnostic.message,
@@ -57,8 +64,7 @@ pub fn collect(
         .collect()
 }
 
-fn locate(config_path: &Path, setting: &str, pattern: &str) -> Option<PatternLocation> {
-    let span = FallowConfig::locate_list_entry(config_path, setting, pattern)?;
+fn pattern_location(span: ConfigEntrySpan) -> Option<PatternLocation> {
     let content = std::fs::read_to_string(&span.path).ok()?;
     Some(PatternLocation {
         range: Range {

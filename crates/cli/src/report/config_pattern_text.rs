@@ -1,6 +1,7 @@
 //! The text of the config entries that had no effect outside JSON and SARIF:
-//! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`) and the
-//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`).
+//! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`), the
+//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`) and the
+//! `overrides` rules that cannot change a result.
 //!
 //! Every output reads the same `workspace_diagnostics[]` entries, and each
 //! format carries them in exactly one place:
@@ -46,7 +47,8 @@ pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFor
 /// One note line per config setting with unmatched patterns, in the order
 /// `ignoreFindings`, `ignoreDependencies`, then one note line per config
 /// setting with redundant entries, in the order `entry`,
-/// `ignoreDependencies`, `ignorePatterns`.
+/// `ignoreDependencies`, `ignorePatterns`, then one note line per `overrides`
+/// rule that had no effect.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
     let patterns_of = |kind: &str| -> Vec<&str> {
@@ -89,6 +91,14 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             "remove from the config; a glob for build output has an effect only after a build",
         ),
     ];
+    let override_notes = diagnostics.iter().filter_map(|diagnostic| {
+        let (rule, files, _) = diagnostic.kind.ineffective_override()?;
+        let hint = diagnostic.kind.ineffective_override_hint()?;
+        Some(format!(
+            "Note: override rule had no effect: {rule} for [{}] ({hint}).",
+            files.join(", ")
+        ))
+    });
     notes
         .into_iter()
         .filter_map(|(kind, (singular, plural), outcome, hint)| {
@@ -106,11 +116,13 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
                 patterns.join(", ")
             ))
         })
+        .chain(override_notes)
         .collect()
 }
 
-/// The Markdown sections that list the unmatched patterns and the redundant
-/// entries, or `None` when there are none. The text starts with a blank line,
+/// The Markdown sections that list the unmatched patterns, the redundant
+/// entries and the `overrides` rules with no effect, or `None` when there are
+/// none. The text starts with a blank line,
 /// so a caller appends it directly after the findings.
 #[must_use]
 pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
@@ -141,10 +153,30 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
             redundant.join("\n")
         ));
     }
+    let overrides: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (rule, files, _) = diagnostic.kind.ineffective_override()?;
+            let hint = diagnostic.kind.ineffective_override_hint()?;
+            let globs = files
+                .iter()
+                .map(|glob| format!("`{glob}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!("- `{rule}` for {globs}: {hint}"))
+        })
+        .collect();
+    if !overrides.is_empty() {
+        sections.push(format!(
+            "\n## Override rules with no effect\n\nFallow ignored these `overrides` rules. Each \
+             line names the mechanism that works.\n\n{}",
+            overrides.join("\n")
+        ));
+    }
     (!sections.is_empty()).then(|| sections.join("\n"))
 }
 
-/// The unmatched config pattern entries of a saved JSON envelope.
+/// The config entries with no effect of a saved JSON envelope.
 ///
 /// The dead-code and combined envelopes keep the dead-code diagnostics in the
 /// top-level `workspace_diagnostics[]`, the audit envelope keeps them in
@@ -163,7 +195,10 @@ pub fn envelope_diagnostics(envelope: &serde_json::Value) -> Vec<WorkspaceDiagno
             .filter_map(|entry| {
                 <WorkspaceDiagnostic as serde::Deserialize>::deserialize(entry).ok()
             })
-            .filter(|diagnostic| diagnostic.kind.unmatched_config_pattern().is_some());
+            .filter(|diagnostic| {
+                diagnostic.kind.unmatched_config_pattern().is_some()
+                    || diagnostic.kind.ineffective_override().is_some()
+            });
         for diagnostic in entries {
             if !diagnostics
                 .iter()
@@ -311,6 +346,73 @@ mod tests {
         );
         assert!(!section.contains("node_modules"), "{section}");
         assert!(markdown_section(&diagnostics[1..]).is_none());
+    }
+
+    fn override_entry(rule: &str, files: &[&str], reason: &str) -> WorkspaceDiagnostic {
+        diagnostic(WorkspaceDiagnosticKind::OverrideRuleIneffective {
+            rule: rule.to_owned(),
+            files: files.iter().map(|file| (*file).to_owned()).collect(),
+            reason: reason.to_owned(),
+        })
+    }
+
+    #[test]
+    fn override_rules_get_one_note_per_entry_after_the_other_notes() {
+        let notes = stderr_notes(&[
+            override_entry("duplicate-exports", &["src/**", "lib/**"], "project-level"),
+            override_entry("unused-files", &["gen/**"], "base-rule-off"),
+            glob("@typo/*"),
+        ]);
+        assert_eq!(
+            notes,
+            vec![
+                "Note: ignoreDependencies glob matched no declared dependency this run: @typo/* \
+                 (globs match package names such as @scope/*; check for typos)."
+                    .to_owned(),
+                "Note: override rule had no effect: duplicate-exports for [src/**, lib/**] \
+                 (project-level rule; add the file and export names to ignoreExports)."
+                    .to_owned(),
+                "Note: override rule had no effect: unused-files for [gen/**] (the top-level \
+                 rule is off, so the detector does not run; set the top-level rule on, then use \
+                 an override to set off for the other files)."
+                    .to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn markdown_lists_override_rules_in_their_own_section() {
+        let section = markdown_section(&[override_entry(
+            "re-export-cycle",
+            &["src/**", "lib/**"],
+            "project-level",
+        )])
+        .expect("one override rule");
+        assert!(
+            section.starts_with("\n## Override rules with no effect\n"),
+            "{section}"
+        );
+        assert!(
+            section.contains(
+                "- `re-export-cycle` for `src/**`, `lib/**`: project-level rule; add `// \
+                 fallow-ignore-file re-export-cycle` to one file in the cycle, or set the \
+                 top-level rule"
+            ),
+            "{section}"
+        );
+        assert!(!section.contains("Redundant"), "{section}");
+        assert!(!section.contains("Unmatched"), "{section}");
+    }
+
+    #[test]
+    fn envelope_diagnostics_read_override_rules() {
+        let entry = override_entry("duplicate-exports", &["src/**"], "project-level");
+        let entries = serde_json::to_value([&entry, &entry]).expect("serialize diagnostics");
+        let envelope = serde_json::json!({ "workspace_diagnostics": entries });
+        let read = envelope_diagnostics(&envelope);
+        assert_eq!(read.len(), 1, "an equal entry is read once");
+        assert_eq!(read[0].kind, entry.kind);
+        assert_eq!(read[0].message, entry.message);
     }
 
     #[test]

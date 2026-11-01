@@ -1,11 +1,8 @@
-use std::collections::{BTreeMap, hash_map::DefaultHasher};
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 use globset::{Glob, GlobMatcher};
-use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,37 +26,6 @@ use super::{
     IgnoreExportsUsedInFileConfig, IgnorePatternSet, ProductionConfig, SecurityConfig,
     TypeAwareConfig,
 };
-
-/// Process-local dedup state for inter-file rule warnings.
-static INTER_FILE_WARN_SEEN: OnceLock<Mutex<FxHashSet<u64>>> = OnceLock::new();
-
-/// Stable hash of `(rule_name, sorted glob list)`.
-fn inter_file_warn_key(rule_name: &str, files: &[String]) -> u64 {
-    let mut sorted: Vec<&str> = files.iter().map(String::as_str).collect();
-    sorted.sort_unstable();
-    let mut hasher = DefaultHasher::new();
-    rule_name.hash(&mut hasher);
-    for s in &sorted {
-        s.hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-/// Returns `true` if this warning has not yet fired in the current process.
-fn record_inter_file_warn_seen(rule_name: &str, files: &[String]) -> bool {
-    let seen = INTER_FILE_WARN_SEEN.get_or_init(|| Mutex::new(FxHashSet::default()));
-    let key = inter_file_warn_key(rule_name, files);
-    seen.lock().map_or(true, |mut set| set.insert(key))
-}
-
-#[cfg(test)]
-fn reset_inter_file_warn_dedup_for_test() {
-    if let Some(seen) = INTER_FILE_WARN_SEEN.get()
-        && let Ok(mut set) = seen.lock()
-    {
-        set.clear();
-    }
-}
 
 /// Rule for ignoring specific exports.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -171,7 +137,7 @@ impl CompiledIgnoreDependencyOverrideRule {
 pub struct ConfigOverride {
     /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories.
     pub files: Vec<String>,
-    /// Partial per-rule severity map applied only to files matching this entry's `files` globs; each rule key takes `error`, `warn`, or `off`, and omitted rules keep their top-level severity. Set to change how specific rules (e.g. unused-exports, unused-files) behave for the scoped paths. Inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override; fallow warns during analysis and names the right mechanism instead (top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for circular-dependencies and re-export-cycle).
+    /// Partial per-rule severity map applied only to files matching this entry's `files` globs; each rule key takes `error`, `warn`, or `off`, and omitted rules keep their top-level severity. Set to change how specific rules (e.g. unused-exports, unused-files) behave for the scoped paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. For most other rules, an override cannot start a detector for a rule that is off at top level.
     #[serde(default)]
     pub rules: PartialRulesConfig,
 }
@@ -179,6 +145,8 @@ pub struct ConfigOverride {
 /// Resolved override with pre-compiled glob matchers.
 #[derive(Debug, Clone)]
 pub struct ResolvedOverride {
+    /// The `files` globs as written in the config, for diagnostics.
+    pub files: Vec<String>,
     /// Pre-compiled matchers for the entry's `files` globs; the override
     /// applies to a file when any matcher matches.
     pub matchers: Vec<globset::GlobMatcher>,
@@ -714,42 +682,6 @@ pub(super) fn expand_boundary_preset(
     }
 }
 
-/// Inter-file rules that a per-file override cannot change.
-///
-/// `circular-dependency` is not in this list: a cycle takes the highest
-/// severity of its files, and a cycle whose files all resolve to `off` is
-/// dropped, so a per-file override does change the result.
-fn ineffective_inter_file_override_rules(rules: &PartialRulesConfig) -> Vec<&'static str> {
-    let mut names = Vec::new();
-    if rules.duplicate_exports.is_some() {
-        names.push("duplicate-exports");
-    }
-    if rules.re_export_cycle.is_some() {
-        names.push("re-export-cycle");
-    }
-    names
-}
-
-fn warn_inter_file_overrides(rules: &PartialRulesConfig, files: &[String]) {
-    let ineffective = ineffective_inter_file_override_rules(rules);
-    if ineffective.contains(&"duplicate-exports")
-        && record_inter_file_warn_seen("duplicate-exports", files)
-    {
-        let files = files.join(", ");
-        tracing::warn!(
-            "overrides.rules.duplicate-exports has no effect for files matching [{files}]: duplicate-exports is an inter-file rule. Use top-level `ignoreExports` to exclude these files from duplicate-export grouping."
-        );
-    }
-    if ineffective.contains(&"re-export-cycle")
-        && record_inter_file_warn_seen("re-export-cycle", files)
-    {
-        let files = files.join(", ");
-        tracing::warn!(
-            "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// fallow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
-        );
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "override glob patterns are validated before config resolution"
@@ -758,7 +690,6 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
     overrides
         .into_iter()
         .filter_map(|override_entry| {
-            warn_inter_file_overrides(&override_entry.rules, &override_entry.files);
             let matchers: Vec<globset::GlobMatcher> = override_entry
                 .files
                 .iter()
@@ -772,6 +703,7 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
                 None
             } else {
                 Some(ResolvedOverride {
+                    files: override_entry.files,
                     matchers,
                     rules: override_entry.rules,
                 })
@@ -1560,7 +1492,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_keeps_inter_file_rule_override_after_warning() {
+    fn resolve_keeps_a_project_level_rule_in_its_override_entry() {
         let config = FallowConfig {
             schema: None,
             minimum_version: None,
@@ -1625,139 +1557,10 @@ mod tests {
         assert_eq!(
             resolved.overrides.len(),
             1,
-            "inter-file rule warning must not drop the override; co-located non-inter-file rules still apply"
+            "a project-level rule must not drop the override; co-located file-scoped rules still apply"
         );
         let rules = resolved.resolve_rules_for_path(Path::new("/project/ui/dialog.ts"));
         assert_eq!(rules.unused_files, Severity::Warn);
-    }
-
-    #[test]
-    fn circular_dependency_override_is_not_reported_as_ineffective() {
-        let rules = PartialRulesConfig {
-            circular_dependencies: Some(Severity::Off),
-            duplicate_exports: Some(Severity::Off),
-            re_export_cycle: Some(Severity::Off),
-            ..PartialRulesConfig::default()
-        };
-        assert_eq!(
-            ineffective_inter_file_override_rules(&rules),
-            vec!["duplicate-exports", "re-export-cycle"]
-        );
-
-        let only_circular = PartialRulesConfig {
-            circular_dependencies: Some(Severity::Off),
-            ..PartialRulesConfig::default()
-        };
-        assert!(ineffective_inter_file_override_rules(&only_circular).is_empty());
-    }
-
-    #[test]
-    fn inter_file_warn_dedup_returns_true_only_on_first_key_match() {
-        reset_inter_file_warn_dedup_for_test();
-        let files_a = vec!["__test_dedup_a/*".to_string()];
-        let files_b = vec!["__test_dedup_b/*".to_string()];
-
-        assert!(record_inter_file_warn_seen("duplicate-exports", &files_a));
-        assert!(!record_inter_file_warn_seen("duplicate-exports", &files_a));
-        assert!(!record_inter_file_warn_seen("duplicate-exports", &files_a));
-
-        assert!(record_inter_file_warn_seen("circular-dependency", &files_a));
-        assert!(!record_inter_file_warn_seen(
-            "circular-dependency",
-            &files_a
-        ));
-
-        assert!(record_inter_file_warn_seen("duplicate-exports", &files_b));
-
-        let files_reordered = vec![
-            "__test_dedup_b/*".to_string(),
-            "__test_dedup_a/*".to_string(),
-        ];
-        let files_natural = vec![
-            "__test_dedup_a/*".to_string(),
-            "__test_dedup_b/*".to_string(),
-        ];
-        reset_inter_file_warn_dedup_for_test();
-        assert!(record_inter_file_warn_seen(
-            "duplicate-exports",
-            &files_natural
-        ));
-        assert!(!record_inter_file_warn_seen(
-            "duplicate-exports",
-            &files_reordered
-        ));
-    }
-
-    #[test]
-    fn resolve_called_n_times_dedupes_inter_file_warning_to_one() {
-        reset_inter_file_warn_dedup_for_test();
-        let files = vec!["__test_resolve_dedup/**".to_string()];
-        let build_config = || FallowConfig {
-            schema: None,
-            minimum_version: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            ignore_findings: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_command_entries: vec![],
-            ignore_unresolved_imports: vec![],
-            ignore_exports: vec![],
-            ignore_catalog_references: vec![],
-            ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
-            used_class_members: vec![],
-            ignore_decorators: vec![],
-            unused_component_props: crate::UnusedComponentPropsConfig::default(),
-            circular_dependencies: crate::CircularDependenciesConfig::default(),
-            duplicates: DuplicatesConfig::default(),
-            similar_code: SimilarCodeConfig::default(),
-            mutation: MutationConfig::default(),
-            health: HealthConfig::default(),
-            rules: RulesConfig::default(),
-            boundaries: BoundaryConfig::default(),
-            production: false.into(),
-            plugins: vec![],
-            overrides: vec![ConfigOverride {
-                files: files.clone(),
-                rules: PartialRulesConfig {
-                    duplicate_exports: Some(Severity::Off),
-                    ..Default::default()
-                },
-            }],
-            regression: None,
-            type_aware: crate::TypeAwareConfig::default(),
-            audit: crate::config::AuditConfig::default(),
-            codeowners: None,
-            public_packages: vec![],
-            flags: FlagsConfig::default(),
-            security: SecurityConfig::default(),
-            fix: crate::config::FixConfig::default(),
-            resolve: ResolveConfig::default(),
-            sealed: false,
-            include_entry_exports: false,
-            show_cascade: false,
-            auto_imports: false,
-            fail_on_parse_error: false,
-            cache: CacheConfig::default(),
-            ..Default::default()
-        };
-        for _ in 0..10 {
-            let _ = build_config().resolve(
-                PathBuf::from("/project"),
-                OutputFormat::Human,
-                1,
-                true,
-                true,
-                None,
-            );
-        }
-        assert!(
-            !record_inter_file_warn_seen("duplicate-exports", &files),
-            "warn key for duplicate-exports + __test_resolve_dedup/** should be marked after the first resolve"
-        );
     }
 
     /// Helper to build a FallowConfig with minimal boilerplate.

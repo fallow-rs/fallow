@@ -849,6 +849,20 @@ kind: "ignore-patterns-entry-redundant"
  */
 pattern: string
 } | {
+kind: "override-rule-ineffective"
+/**
+ * The canonical rule name, also when the config uses an alias.
+ */
+rule: string
+/**
+ * The `overrides[].files` globs, as written in the config.
+ */
+files: string[]
+/**
+ * Why the rule has no effect, as a kebab-case token.
+ */
+reason: string
+} | {
 kind: "baseline-install-state-mismatch"
 baseline_node_modules: NodeModulesState
 run_node_modules: NodeModulesState

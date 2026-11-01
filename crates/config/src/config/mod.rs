@@ -12,6 +12,7 @@ mod ignore_patterns;
 mod legacy_glob;
 mod markup_extensions;
 mod mutation;
+mod override_effect;
 mod parsing;
 mod resolution;
 mod resolve;
@@ -54,6 +55,7 @@ pub use markup_extensions::{
     DEFAULT_MARKUP_EXTENSIONS, resolve_markup_extensions, template_markup_extension,
 };
 pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
+pub use override_effect::{IneffectiveOverrideRule, project_level_override_rules};
 pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
 pub use resolution::{
     AnalysisSnapshot, CACHE_DIR_ENV, CACHE_MAX_SIZE_ENV, CompiledIgnoreCatalogReferenceRule,
@@ -486,7 +488,7 @@ pub struct FallowConfig {
     )]
     pub markup_extensions: Vec<String>,
 
-    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten rules for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict); inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override (fallow warns during analysis and points to the right mechanism: top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for the others). A single `*` stays within one path segment; use `**` to match across directories.
+    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten a rule for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict). For most rules, an override cannot start a detector for a rule that is off at top level, so set the top-level rule on and use an override to set `off` for the other paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 

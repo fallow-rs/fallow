@@ -163,6 +163,11 @@ macro_rules! project_level {
                 }
             }
         )+
+
+        /// The rule fields of this list, for the test that compares it with
+        /// the `override-rule-ineffective` table of `fallow-config`.
+        #[cfg(test)]
+        const PROJECT_LEVEL_RULE_FIELDS: &[&str] = &[$(stringify!($rule)),+];
     };
 }
 
@@ -863,6 +868,50 @@ mod tests {
             results.circular_dependencies[1].effective_severity,
             Some(EffectiveSeverity::Warn)
         );
+    }
+
+    /// A new `project_level!` row needs a row in the config table, or its
+    /// override stays silent. A config row without a `project_level!` row
+    /// makes fallow report an override that works. Each row also needs its own
+    /// next step in the note.
+    #[test]
+    fn project_level_list_matches_the_override_rule_table() {
+        let parse = |key: &str| -> fallow_config::PartialRulesConfig {
+            serde_json::from_value(json!({ key: "off" })).expect("rule key")
+        };
+        let mut from_findings: Vec<String> = PROJECT_LEVEL_RULE_FIELDS
+            .iter()
+            .map(|field| field.replace('_', "-"))
+            .collect();
+        for rule in &from_findings {
+            assert_eq!(
+                fallow_config::project_level_override_rules(&parse(rule)),
+                vec![rule.as_str()],
+                "`project_level!` lists {rule}"
+            );
+        }
+        let mut from_table: Vec<String> = fallow_config::KNOWN_RULE_NAMES
+            .iter()
+            .flat_map(|key| fallow_config::project_level_override_rules(&parse(key)))
+            .map(str::to_owned)
+            .collect();
+        from_table.sort_unstable();
+        from_table.dedup();
+        from_findings.sort_unstable();
+        assert_eq!(from_table, from_findings);
+
+        for rule in from_table {
+            let kind = fallow_config::WorkspaceDiagnosticKind::OverrideRuleIneffective {
+                rule: rule.clone(),
+                files: vec!["**".to_owned()],
+                reason: "project-level".to_owned(),
+            };
+            assert_ne!(
+                kind.ineffective_override_hint(),
+                Some("project-level rule; set the top-level rule"),
+                "{rule} needs its own next step"
+            );
+        }
     }
 
     #[test]

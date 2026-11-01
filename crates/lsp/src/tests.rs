@@ -1687,6 +1687,47 @@ fn unmatched_config_patterns_are_diagnostics_on_the_config_entry() {
     );
 }
 
+#[test]
+fn an_ineffective_override_rule_is_a_diagnostic_on_the_written_key() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let config = "{\n  \"overrides\": [\n    { \"files\": [\"tools/**\"], \"rules\": { \"dev-dependency-in-production\": \"off\" } }\n  ]\n}\n";
+    write_unmatched_pattern_project(root, (".fallowrc.json", config));
+
+    let (messages, map) = unmatched_patterns_of(root);
+
+    let config_path = dunce::canonicalize(root.join(".fallowrc.json")).expect("canonical");
+    let uri = Uri::from_file_path(&config_path).expect("config uri");
+    let diagnostics = map.get(&uri).expect("diagnostics on the config file");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code
+                == Some(NumberOrString::String(
+                    "override-rule-ineffective".to_string(),
+                ))
+        })
+        .unwrap_or_else(|| panic!("no entry: {diagnostics:?}"));
+    assert_eq!(
+        text_at(config, diagnostic.range),
+        "\"dev-dependency-in-production\""
+    );
+    assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::INFORMATION));
+    assert!(
+        diagnostic
+            .message
+            .starts_with("overrides.rules.dev-dependencies-in-production has no effect"),
+        "{}",
+        diagnostic.message
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|(_, message)| message.contains("overrides.rules")),
+        "a located entry is not logged: {messages:?}"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn unlocated_config_patterns_are_logged_once_per_changed_set() {
     let (service, _) = LspService::build(FallowLspServer::new).finish();

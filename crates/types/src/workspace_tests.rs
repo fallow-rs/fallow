@@ -942,6 +942,62 @@ fn format_size_mb_one_decimal() {
 }
 
 #[test]
+fn override_rule_ineffective_is_an_advisory_root_note() {
+    let root = Path::new("/project");
+    let kind = WorkspaceDiagnosticKind::OverrideRuleIneffective {
+        rule: "re-export-cycle".to_owned(),
+        files: vec!["src/**".to_owned(), "lib/**".to_owned()],
+        reason: "project-level".to_owned(),
+    };
+    let diag = WorkspaceDiagnostic::new(root, root.to_path_buf(), kind.clone());
+    assert!(!diag.degrades_analysis);
+    assert!(!kind.warns_on_stderr());
+    assert!(!kind.is_redundant_config_entry());
+    assert_eq!(kind.unmatched_config_pattern(), None);
+    assert_eq!(
+        kind.ineffective_override(),
+        Some((
+            "re-export-cycle",
+            ["src/**".to_owned(), "lib/**".to_owned()].as_slice(),
+            "project-level"
+        ))
+    );
+    assert_eq!(
+        diag.message,
+        "overrides.rules.re-export-cycle has no effect for files matching [src/**, lib/**]: \
+         re-export-cycle is a project-level rule, so fallow reads only the top-level severity. \
+         Add `// fallow-ignore-file re-export-cycle` to one file in the cycle, or set \
+         `rules.re-export-cycle`."
+    );
+    let json = serde_json::to_value(&diag).expect("serialize");
+    assert_eq!(json["kind"], "override-rule-ineffective");
+    assert_eq!(json["rule"], "re-export-cycle");
+    assert_eq!(json["files"][1], "lib/**");
+    assert_eq!(json["reason"], "project-level");
+}
+
+#[test]
+fn override_rule_ineffective_base_off_message_names_the_scoped_remedy() {
+    let root = Path::new("/project");
+    let diag = WorkspaceDiagnostic::new(
+        root,
+        root.to_path_buf(),
+        WorkspaceDiagnosticKind::OverrideRuleIneffective {
+            rule: "unused-files".to_owned(),
+            files: vec!["gen/**".to_owned()],
+            reason: "base-rule-off".to_owned(),
+        },
+    );
+    assert_eq!(
+        diag.message,
+        "overrides.rules.unused-files has no effect for files matching [gen/**]: the top-level \
+         rule is off, by default or by config, so the detector does not run. Set \
+         `rules.unused-files` to `warn` or `error`. Then add an override that sets `off` for the \
+         other files."
+    );
+}
+
+#[test]
 fn unmatched_config_pattern_kinds_are_advisory_root_notes() {
     let root = Path::new("/project");
     for (kind, id, setting, pattern) in [

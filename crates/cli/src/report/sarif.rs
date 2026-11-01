@@ -156,14 +156,14 @@ fn annotate_type_aware_sarif_value(sarif: &mut serde_json::Value, type_aware: &s
 
 /// Add the config entries that had no effect (unmatched `ignoreDependencies`
 /// and `ignoreFindings` patterns, redundant `entry`, `ignoreDependencies` and
-/// `ignorePatterns` entries) to the first run as SARIF configuration
-/// notifications.
+/// `ignorePatterns` entries, and `overrides` rules with no effect) to the first
+/// run as SARIF configuration notifications.
 ///
 /// SARIF keeps findings in `results` and facts about the tool configuration in
 /// `invocations[].toolConfigurationNotifications`. An unmatched pattern is a
 /// fact about the configuration, not a finding, so it goes there. The entries
-/// carry the same `kind`, `pattern` and message as `workspace_diagnostics[]`
-/// in the JSON output.
+/// carry the same `kind`, payload and message as `workspace_diagnostics[]` in
+/// the JSON output.
 pub fn annotate_config_pattern_sarif(
     sarif: &mut serde_json::Value,
     diagnostics: &[fallow_config::WorkspaceDiagnostic],
@@ -171,12 +171,23 @@ pub fn annotate_config_pattern_sarif(
     let notifications = diagnostics
         .iter()
         .filter_map(|diagnostic| {
-            let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
+            let properties =
+                if let Some((setting, pattern)) = diagnostic.kind.unmatched_config_pattern() {
+                    serde_json::json!({ "setting": setting, "pattern": pattern })
+                } else {
+                    let (rule, files, reason) = diagnostic.kind.ineffective_override()?;
+                    serde_json::json!({
+                        "setting": "overrides",
+                        "rule": rule,
+                        "files": files,
+                        "reason": reason,
+                    })
+                };
             Some(serde_json::json!({
                 "level": "note",
                 "descriptor": { "id": diagnostic.kind.id() },
                 "message": { "text": diagnostic.message },
-                "properties": { "setting": setting, "pattern": pattern }
+                "properties": properties
             }))
         })
         .collect::<Vec<_>>();
