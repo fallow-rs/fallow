@@ -226,10 +226,10 @@ pub use sarif_output::{
 };
 pub use security_output::SecurityGateMode;
 pub use type_aware::{
-    SemanticCouplingOutcome, SemanticDeadCodeOutcome, SemanticInspectOutcome, TypeAwareError,
-    TypeAwareFileChanges, TypeAwareOutcome, TypeAwareSession, TypeAwareStatus,
-    discard_unverified_semantic_candidates, inspect_symbol as inspect_type_aware_symbol,
-    merge_type_aware_meta,
+    DEFAULT_BACKEND_FAMILY as DEFAULT_TYPE_AWARE_BACKEND_FAMILY, SemanticCouplingOutcome,
+    SemanticDeadCodeOutcome, SemanticInspectOutcome, TypeAwareError, TypeAwareFileChanges,
+    TypeAwareOutcome, TypeAwareSession, TypeAwareStatus, discard_unverified_semantic_candidates,
+    inspect_symbol as inspect_type_aware_symbol, merge_type_aware_meta,
     refine_configured_dead_code_results as refine_type_aware_results_with_config,
     shutdown_type_aware_sidecars, status as type_aware_status,
     symbol_impact as run_type_aware_symbol_impact, symbol_impact as type_aware_symbol_impact,
