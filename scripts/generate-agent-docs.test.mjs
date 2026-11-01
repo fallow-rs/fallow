@@ -91,7 +91,10 @@ const SCHEMA = {
       flags: [
         boolFlag("--unused-files", "Only report unused files"),
         boolFlag("--unused-exports", "Only report unused exports"),
-        boolFlag("--unused-deps", "Only report unused dependencies"),
+        boolFlag(
+          "--unused-deps",
+          "Only report unused dependencies, devDependencies and optionalDependencies",
+        ),
         boolFlag("--type-aware", "Type-aware semantic refinement"),
         stringFlag("--type-aware-project", "TypeScript project selection"),
         stringFlag("--type-aware-require", "Type-aware completeness policy"),

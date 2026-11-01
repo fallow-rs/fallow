@@ -19,9 +19,9 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `unused-dependency` | `--unused-deps` | yes | - | Packages in `dependencies` never imported. In monorepos, internal workspace package names (e.g., `@repo/ui`) declared in another workspace's `package.json` but never imported are reported here too. `--unused-deps` also covers the dev/optional/type-only/test-only sibling rows below. |
 | `unused-dev-dependency` | `--unused-deps` | yes | - | Packages in `devDependencies` never imported by test files, config files, or scripts |
 | `unused-optional-dependency` | `--unused-deps` | yes | - | Packages in `optionalDependencies` never imported (often platform-specific; verify before removing) |
-| `type-only-dependency` | `--unused-deps` | - | - | Production dependency only used via type-only imports; Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds |
-| `test-only-dependency` | `--unused-deps` | - | - | Production deps only imported from test files (should be devDependencies) |
-| `dev-dependency-in-production` | `--unused-deps` | - | - | devDependency imported by production code with a runtime import |
+| `type-only-dependency` | `--misplaced-deps` | - | - | Production dependency only used via type-only imports; Only reported in --production mode; --misplaced-deps controls it together with test-only-dependency and dev-dependency-in-production |
+| `test-only-dependency` | `--misplaced-deps` | - | - | Production deps only imported from test files (should be devDependencies); Not reported in --production mode (test files are excluded there); --misplaced-deps controls it together with type-only-dependency and dev-dependency-in-production |
+| `dev-dependency-in-production` | `--misplaced-deps` | - | - | devDependency imported by production code with a runtime import; Reported with and without --production; --misplaced-deps controls it together with type-only-dependency and test-only-dependency |
 | `unused-enum-member` | `--unused-enum-members` | yes | `// fallow-ignore-next-line unused-enum-member` | Enum values never referenced |
 | `unused-class-member` | `--unused-class-members` | - | `// fallow-ignore-next-line unused-class-member` | Methods and properties |
 | `unused-store-member` | `--unused-store-members` | - | `// fallow-ignore-next-line unused-store-member` | Pinia store state/getter/action (needs `pinia` dep) |

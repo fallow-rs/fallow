@@ -573,6 +573,41 @@ writeFileSync(
 }
 
 {
+  const depsRoot = mkdtempSync(join(tmpdir(), "fallow-node-deps-"));
+  mkdirSync(join(depsRoot, "src"));
+  writeFileSync(
+    join(depsRoot, "package.json"),
+    JSON.stringify({
+      name: "deps-fixture",
+      private: true,
+      type: "module",
+      main: "src/index.ts",
+      dependencies: { "unused-prod": "1.0.0" },
+      devDependencies: { "left-pad": "1.3.0" },
+    }) + "\n",
+  );
+  writeFileSync(
+    join(depsRoot, "src/index.ts"),
+    "import leftPad from 'left-pad';\nexport const label = leftPad('x', 4);\nconsole.log(label);\n",
+  );
+  const select = async (filters) => {
+    const report = await detectDeadCode({ root: depsRoot, noCache: true, ...filters });
+    return {
+      unused: report.unused_dependencies.map((item) => item.package_name),
+      misplaced: report.dev_dependencies_in_production.map((item) => item.package_name),
+    };
+  };
+  assert.deepEqual(await select({ unusedDeps: true }), { unused: ["unused-prod"], misplaced: [] });
+  assert.deepEqual(await select({ misplacedDeps: true }), { unused: [], misplaced: ["left-pad"] });
+  assert.deepEqual(await select({ unusedDeps: true, misplacedDeps: true }), {
+    unused: ["unused-prod"],
+    misplaced: ["left-pad"],
+  });
+  rmSync(depsRoot, { recursive: true, force: true });
+  console.log("  [PASS] detectDeadCode dependency filters");
+}
+
+{
   const repo = mkdtempSync(join(tmpdir(), "fallow-node-nested-diff-"));
   const nestedRoot = join(repo, "packages", "web");
   try {

@@ -108,7 +108,7 @@ Full command catalogue, one row per command: **[references/cli-reference.md](ref
 
 ## Issue Types
 
-Dead-code filter flags select issue categories (`--unused-exports`, `--unused-types`, `--unused-deps`, `--unused-files`, and so on). Some flags select related types together; `--unused-deps` covers several dependency types. Passing one or more narrows `fallow dead-code` to those categories. Passing none applies no issue-type filter.
+Dead-code filter flags select issue categories (`--unused-exports`, `--unused-types`, `--unused-deps`, `--unused-files`, and so on). Some flags select related types together. `--unused-deps` selects only unused dependencies. `--misplaced-deps` selects test-only, type-only and dev-in-production dependencies. Pass both for the full dependency set. Passing one or more narrows `fallow dead-code` to those categories. Passing none applies no issue-type filter.
 
 `fallow architecture` reports the architecture findings: circular dependencies, re-export cycles, package cycles, boundary violations and rule-pack policy violations. Use `--cycles`, `--boundaries` or `--policy` to select one kind. The JSON output has `kind: "architecture"` and its own `schema_version`, with the same arrays and finding ids as `dead-code`. `fallow dead-code` still reports these findings until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. Run `fallow guard <files>` before an edit and `fallow architecture` after it. In bare `fallow`, `--only architecture` reports only these findings and `--skip architecture` removes them.
 

@@ -635,7 +635,12 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
 }
 
 fn dead_code_registry_rule(normalized: &str) -> Option<&'static RuleDef> {
-    let meta = fallow_types::issue_meta::issue_meta_for_contract_token(normalized)?;
+    // Several rows can share one filter flag. The row that holds the selector
+    // owns its explanation, whatever the order of the rows.
+    let meta = fallow_types::issue_meta::ISSUE_KIND_META
+        .iter()
+        .find(|meta| meta.mcp_issue_type == Some(normalized))
+        .or_else(|| fallow_types::issue_meta::issue_meta_for_contract_token(normalized))?;
     CHECK_RULES
         .iter()
         .find(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))

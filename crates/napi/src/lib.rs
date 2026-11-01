@@ -40,6 +40,7 @@ pub struct DeadCodeOptions {
     pub unused_files: Option<bool>,
     pub unused_exports: Option<bool>,
     pub unused_deps: Option<bool>,
+    pub misplaced_deps: Option<bool>,
     pub unused_types: Option<bool>,
     pub private_type_leaks: Option<bool>,
     pub deprecated_exports_in_use: Option<bool>,
@@ -420,6 +421,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 unused_files: value.unused_files.unwrap_or(false),
                 unused_exports: value.unused_exports.unwrap_or(false),
                 unused_deps: value.unused_deps.unwrap_or(false),
+                misplaced_deps: value.misplaced_deps.unwrap_or(false),
                 unused_types: value.unused_types.unwrap_or(false),
                 private_type_leaks: value.private_type_leaks.unwrap_or(false),
                 deprecated_exports_in_use: value.deprecated_exports_in_use.unwrap_or(false),
@@ -960,6 +962,7 @@ mod tests {
         assert!(filters.unused_files);
         assert!(filters.unused_exports);
         assert!(filters.unused_deps);
+        assert!(filters.misplaced_deps);
         assert!(filters.unused_types);
         assert!(filters.private_type_leaks);
         assert!(filters.deprecated_exports_in_use);
@@ -1019,6 +1022,7 @@ mod tests {
             unused_files: Some(true),
             unused_exports: Some(true),
             unused_deps: Some(true),
+            misplaced_deps: Some(true),
             unused_types: Some(true),
             private_type_leaks: Some(true),
             deprecated_exports_in_use: Some(true),

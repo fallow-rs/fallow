@@ -138,7 +138,7 @@
       "section": "commands",
       "row": "dead-code",
       "column": "Key Flags",
-      "seed": "`--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--private-type-leaks`, `--deprecated-exports-in-use`, `--unused-enum-members`, `--unused-class-members`"
+      "seed": "`--unused-files`, `--unused-exports`, `--unused-deps`, `--misplaced-deps`, `--unused-types`, `--private-type-leaks`, `--deprecated-exports-in-use`, `--unused-enum-members`"
     },
     {
       "section": "commands",
@@ -832,6 +832,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--misplaced-deps",
+      "column": "Issue Type",
+      "seed": "Production dependency only used via type-only imports; Production dependency only imported by test files; devDependency imported by production code with a runtime import"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--package-cycles",
       "column": "Issue Type",
       "seed": "Two or more workspace packages import each other in a loop"
@@ -942,7 +948,7 @@
       "section": "flags:dead-code-filters",
       "row": "--unused-deps",
       "column": "Issue Type",
-      "seed": "Dependency listed but never imported; Dev dependency listed but never imported; Optional dependency listed but never imported; Production dependency only used via type-only imports; Production dependency only imported by test files; devDependency imported by production code with a runtime import"
+      "seed": "Dependency listed but never imported; Dev dependency listed but never imported; Optional dependency listed but never imported"
     },
     {
       "section": "flags:dead-code-filters",
@@ -2208,7 +2214,7 @@
       "section": "issue-types",
       "row": "dev-dependency-in-production",
       "column": "Description",
-      "seed": "devDependency imported by production code with a runtime import"
+      "seed": "devDependency imported by production code with a runtime import; Reported with and without --production; --misplaced-deps controls it together with type-only-dependency and test-only-dependency"
     },
     {
       "section": "issue-types",
@@ -2382,7 +2388,7 @@
       "section": "issue-types",
       "row": "test-only-dependency",
       "column": "Description",
-      "seed": "Production dependency only imported by test files; Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds"
+      "seed": "Production dependency only imported by test files; Not reported in --production mode (test files are excluded there); --misplaced-deps controls it together with type-only-dependency and dev-dependency-in-production"
     },
     {
       "section": "issue-types",
@@ -2394,7 +2400,7 @@
       "section": "issue-types",
       "row": "type-only-dependency",
       "column": "Description",
-      "seed": "Production dependency only used via type-only imports; Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds"
+      "seed": "Production dependency only used via type-only imports; Only reported in --production mode; --misplaced-deps controls it together with test-only-dependency and dev-dependency-in-production"
     },
     {
       "section": "issue-types",
@@ -2484,7 +2490,7 @@
       "section": "issue-types",
       "row": "unused-dependency",
       "column": "Description",
-      "seed": "Dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+      "seed": "Dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency"
     },
     {
       "section": "issue-types",
@@ -2496,7 +2502,7 @@
       "section": "issue-types",
       "row": "unused-dev-dependency",
       "column": "Description",
-      "seed": "Dev dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+      "seed": "Dev dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency"
     },
     {
       "section": "issue-types",
@@ -2532,7 +2538,7 @@
       "section": "issue-types",
       "row": "unused-optional-dependency",
       "column": "Description",
-      "seed": "Optional dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+      "seed": "Optional dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency"
     },
     {
       "section": "issue-types",

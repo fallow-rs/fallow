@@ -248,6 +248,20 @@ fn analyze_args_all_issue_types_accepted() {
 }
 
 #[test]
+fn analyze_args_map_the_dependency_selectors_to_their_flags() {
+    let params = AnalyzeParams {
+        issue_types: Some(vec![
+            "unused-deps".to_string(),
+            "misplaced-deps".to_string(),
+        ]),
+        ..Default::default()
+    };
+    let args = build_analyze_args(&params).unwrap();
+    assert!(args.contains(&"--unused-deps".to_string()));
+    assert!(args.contains(&"--misplaced-deps".to_string()));
+}
+
+#[test]
 fn analyze_args_mixed_valid_and_invalid_issue_types_fails_on_first_invalid() {
     let params = AnalyzeParams {
         issue_types: Some(vec![

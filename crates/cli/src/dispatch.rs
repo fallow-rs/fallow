@@ -551,7 +551,7 @@ pub fn architecture_issue_filters(cycles: bool, boundaries: bool, policy: bool) 
         ("--boundary-violations", boundaries || all),
         ("--policy-violations", policy || all),
     ] {
-        enable_check_filter(&mut filters, flag, active);
+        filters.enable_when_active(flag, active);
     }
     filters
 }
@@ -571,6 +571,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         unused_files,
         unused_exports,
         unused_deps,
+        misplaced_deps,
         unused_types,
         private_type_leaks,
         deprecated_exports_in_use,
@@ -596,6 +597,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         ("--unused-files", *unused_files),
         ("--unused-exports", *unused_exports),
         ("--unused-deps", *unused_deps),
+        ("--misplaced-deps", *misplaced_deps),
         ("--unused-types", *unused_types),
         ("--private-type-leaks", *private_type_leaks),
         ("--deprecated-exports-in-use", *deprecated_exports_in_use),
@@ -611,7 +613,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         ("--policy-violations", *policy_violations),
         ("--stale-suppressions", *stale_suppressions),
     ] {
-        enable_check_filter(&mut filters, flag, active);
+        filters.enable_when_active(flag, active);
     }
     filters
 }
@@ -676,18 +678,9 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
             *misconfigured_dependency_overrides,
         ),
     ] {
-        enable_check_filter(&mut filters, flag, active);
+        filters.enable_when_active(flag, active);
     }
     filters
-}
-
-fn enable_check_filter(filters: &mut IssueFilters, flag: &str, active: bool) {
-    if active {
-        assert!(
-            filters.enable_cli_filter_flag(flag),
-            "check command uses unregistered dead-code filter flag {flag}"
-        );
-    }
 }
 
 /// The call-chain flags of `fallow trace FILE:SYMBOL`.

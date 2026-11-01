@@ -683,7 +683,17 @@
           "name": "--unused-deps",
           "type": "bool",
           "required": false,
-          "description": "Only report unused dependencies",
+          "description": "Only report unused dependencies, devDependencies and optionalDependencies",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--misplaced-deps",
+          "type": "bool",
+          "required": false,
+          "description": "Only report dependencies that may belong in another package.json section: test-only, dev dependencies used in production, and type-only (type-only needs --production)",
           "possible_values": [
             "true",
             "false"
@@ -3016,7 +3026,7 @@
       "default_severity": "error",
       "opt_in": false,
       "frameworks": [],
-      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies"
@@ -3056,7 +3066,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-devdependencies"
@@ -3096,7 +3106,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, and unused-optional-dependency",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-optionaldependencies"
@@ -3112,7 +3122,7 @@
       "registry_index": 15,
       "aliases": [],
       "lsp": true,
-      "filter_flag": "--unused-deps",
+      "filter_flag": "--misplaced-deps",
       "result_key": "type_only_dependencies",
       "summary_label": "Type-only dependencies",
       "summary_docs_anchor": "type-only-dependencies",
@@ -3133,7 +3143,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
+      "note": "Only reported in --production mode; --misplaced-deps controls it together with test-only-dependency and dev-dependency-in-production",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#type-only-dependencies"
@@ -3149,7 +3159,7 @@
       "registry_index": 16,
       "aliases": [],
       "lsp": true,
-      "filter_flag": "--unused-deps",
+      "filter_flag": "--misplaced-deps",
       "result_key": "test_only_dependencies",
       "summary_label": "Test-only dependencies",
       "summary_docs_anchor": "test-only-dependencies",
@@ -3170,7 +3180,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
+      "note": "Not reported in --production mode (test files are excluded there); --misplaced-deps controls it together with type-only-dependency and dev-dependency-in-production",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#test-only-dependencies"
@@ -3186,7 +3196,7 @@
       "registry_index": 17,
       "aliases": [],
       "lsp": true,
-      "filter_flag": "--unused-deps",
+      "filter_flag": "--misplaced-deps",
       "result_key": "dev_dependencies_in_production",
       "summary_label": "Dev dependencies used in production",
       "summary_docs_anchor": "dev-dependencies-in-production",
@@ -3207,7 +3217,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": null,
+      "note": "Reported with and without --production; --misplaced-deps controls it together with type-only-dependency and test-only-dependency",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#dev-dependencies-in-production"
