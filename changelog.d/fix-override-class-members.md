@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow dead-code` credits more `override` members of a class with a package base call.** A class such as `class LookupError extends Schema.TaggedError<LookupError>()("LookupError", { ...sharedFields })` with `override get message()` no longer reports `message` as an unused class member. The same applies when the call takes a module-scope `const` with an object literal initializer, for example `Schema.TaggedError<LookupError>()("LookupError", lookupFields)`. Before, an object spread or a named field set in the call arguments blocked the credit that an inline object literal already got. A mixin call that takes a project class, also through a `const` alias, still gives no credit.

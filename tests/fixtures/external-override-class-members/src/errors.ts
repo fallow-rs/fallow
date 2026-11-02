@@ -7,6 +7,30 @@ export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", { code:
   unusedHelper(): void {}
 }
 
+const sharedFields = { code: Schema.Number };
+
+export class SpreadNotFound extends Schema.TaggedError<SpreadNotFound>()("SpreadNotFound", {
+  ...sharedFields,
+  detail: Schema.String,
+}) {
+  override get message(): string {
+    return "spread not found";
+  }
+  spreadHelper(): void {}
+}
+
+const namedFields = { code: Schema.Number } as const;
+
+export class NamedFieldsNotFound extends Schema.TaggedError<NamedFieldsNotFound>()(
+  "NamedFieldsNotFound",
+  namedFields,
+) {
+  override get message(): string {
+    return "named fields not found";
+  }
+  namedFieldsHelper(): void {}
+}
+
 export class Failure extends Data.TaggedError("Failure")<{ readonly code: number }> {
   override toString(): string {
     return "failure";

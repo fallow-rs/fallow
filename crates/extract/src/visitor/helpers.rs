@@ -5,16 +5,20 @@ use oxc_ast::ast::{
     TSTypeAnnotation, TSTypeName, TSTypeParameterInstantiation,
 };
 use oxc_span::{GetSpan, Span};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[path = "helpers_heritage_names.rs"]
 mod heritage_names;
+#[path = "helpers_heritage_root.rs"]
+mod heritage_root;
 #[path = "helpers_return_bindings.rs"]
 mod return_bindings;
 use crate::js_text::JsText;
 use crate::{MemberInfo, MemberKind};
 use fallow_types::extract::{AngularInputMember, AngularOutputMember};
 use heritage_names::{extract_static_expression_name, extract_type_name};
+use heritage_root::heritage_root_name;
+pub(super) use heritage_root::is_object_literal_initializer;
 use return_bindings::{collect_getter_binding, collect_method_return_binding};
 
 pub struct AngularComponentMetadata {
@@ -935,12 +939,22 @@ pub(super) fn has_angular_plural_query_decorator(
     })
 }
 
-pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<MemberInfo> {
+/// Extract the public members of `class`.
+///
+/// `plain_object_names` holds the module-scope `const` bindings whose
+/// initializer is an object literal, or `None` outside module scope, where a
+/// nested binding can shadow them. A heritage call can take such a binding
+/// as data.
+pub fn extract_class_members(
+    class: &Class<'_>,
+    is_angular_class: bool,
+    plain_object_names: Option<&FxHashSet<String>>,
+) -> Vec<MemberInfo> {
     let class_name = class.id.as_ref().map(|id| id.name.as_str());
     let heritage_root = class
         .heritage
         .as_ref()
-        .and_then(|heritage| heritage_root_name(&heritage.expression));
+        .and_then(|heritage| heritage_root_name(&heritage.expression, plain_object_names));
     let override_base = |is_override: bool| heritage_root.clone().filter(|_| is_override);
     let mut members = Vec::new();
     for element in &class.body.body {
@@ -961,59 +975,6 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
         }
     }
     members
-}
-
-/// Whether a heritage call argument is data and not a class to mix in.
-///
-/// Literals and object literals without a spread are data. An object
-/// property can name a schema (`{ user: User }` in an Effect error), so object
-/// values are not checked. An array counts only when no element is a bare
-/// identifier, member expression or spread, because `Mixin([LocalBase])`
-/// lists classes.
-fn is_heritage_data_argument(arg: &Argument<'_>) -> bool {
-    match arg {
-        Argument::StringLiteral(_)
-        | Argument::NumericLiteral(_)
-        | Argument::BooleanLiteral(_)
-        | Argument::NullLiteral(_)
-        | Argument::TemplateLiteral(_) => true,
-        Argument::ObjectExpression(object) => object
-            .properties
-            .iter()
-            .all(|property| matches!(property, ObjectPropertyKind::ObjectProperty(_))),
-        Argument::ArrayExpression(array) => array.elements.iter().all(|element| {
-            !matches!(
-                element,
-                ArrayExpressionElement::Identifier(_)
-                    | ArrayExpressionElement::StaticMemberExpression(_)
-                    | ArrayExpressionElement::SpreadElement(_)
-            )
-        }),
-        _ => false,
-    }
-}
-
-/// Root identifier of a class `extends` expression.
-///
-/// `Base` for `extends Base`, `ns` for `extends ns.Base`, `Schema` for
-/// `extends Schema.TaggedError<E>()("E", {...})`. A call returns `None` unless
-/// every argument is a literal, an object literal or an array literal: a
-/// mixin such as `Mixin(LocalBase)` can take a project class that declares
-/// the overridden member.
-fn heritage_root_name(expr: &Expression<'_>) -> Option<String> {
-    match expr {
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
-        Expression::StaticMemberExpression(member) => heritage_root_name(&member.object),
-        Expression::CallExpression(call) => {
-            if !call.arguments.iter().all(is_heritage_data_argument) {
-                return None;
-            }
-            heritage_root_name(&call.callee)
-        }
-        Expression::TSInstantiationExpression(inst) => heritage_root_name(&inst.expression),
-        Expression::ParenthesizedExpression(paren) => heritage_root_name(&paren.expression),
-        _ => None,
-    }
 }
 
 /// Build a `MemberInfo` for a non-constructor, non-private/protected method.

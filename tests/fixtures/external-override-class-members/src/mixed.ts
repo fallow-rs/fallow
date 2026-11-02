@@ -13,3 +13,9 @@ export class MixedMember extends Mixin(Bases.LocalBase) {
 export class MixedArray extends Mixin([LocalBase]) {
   override run(): void {}
 }
+
+const AliasedBase = LocalBase;
+
+export class MixedAlias extends Mixin(AliasedBase) {
+  override run(): void {}
+}
