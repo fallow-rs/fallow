@@ -1040,9 +1040,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector.
     security_sinks: Vec<SinkSite>,
-    /// Count of sink-shaped nodes whose callee could not be flattened to a
-    /// static path (dynamic dispatch, computed members, aliased bindings).
+    /// Count of sink-shaped nodes whose callee is a security blind spot.
     security_sinks_skipped: u32,
+    sink_aliases: visit_impl::SinkAliasState,
     /// Span-level diagnostics for skipped security sink callees.
     security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
     /// Local bindings tied to the member-access path they were sourced from

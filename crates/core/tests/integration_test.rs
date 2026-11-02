@@ -294,6 +294,8 @@ mod security_dangerous_html;
 mod security_dead_code_cross_link;
 #[path = "integration_test/security_declarative_validation.rs"]
 mod security_declarative_validation;
+#[path = "integration_test/security_evasion_shapes.rs"]
+mod security_evasion_shapes;
 #[path = "integration_test/security_framework_entry_sources.rs"]
 mod security_framework_entry_sources;
 #[path = "integration_test/security_framework_sinks.rs"]

@@ -95,6 +95,8 @@ pub mod path_util;
 pub mod pipeline_spans;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
+/// Security sink names shared by the extractor and the sink catalogue.
+pub mod security_sinks;
 /// Shared TypeScript semantic identity, provenance, API surface, impact, and
 /// public-signature coupling contracts.
 pub mod semantic;

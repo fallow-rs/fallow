@@ -176,6 +176,7 @@ impl<'a> SvelteTemplateUsageScanner<'a> {
         let Some((tag, next_index)) = scan_html_tag(self.markup, index) else {
             return self.markup.len();
         };
+        collect_srcdoc_sink(tag, index, next_index, &mut self.usage);
         apply_markup_tag(
             tag,
             self.imported_bindings,
@@ -701,6 +702,63 @@ fn apply_expression_tag(
         bound_targets,
         &current_locals(scopes),
     );
+}
+
+/// Record an iframe `srcdoc` binding (`srcdoc={html}`, `{srcdoc}`, or an
+/// interpolated `srcdoc="<p>{html}</p>"`) as a `template.srcdoc` sink. A
+/// static `srcdoc="..."` value has no expression and is not captured.
+fn collect_srcdoc_sink(tag: &str, tag_start: usize, tag_end: usize, usage: &mut TemplateUsage) {
+    let trimmed = tag.trim();
+    if trimmed.starts_with("</")
+        || trimmed.starts_with("<!")
+        || trimmed.starts_with("<?")
+        || !trimmed
+            .as_bytes()
+            .windows("srcdoc".len())
+            .any(|window| window.eq_ignore_ascii_case(b"srcdoc"))
+    {
+        return;
+    }
+    let parsed = parse_tag_attrs(trimmed, true);
+    let snippet = parsed.attrs.iter().find_map(|attr| {
+        if shorthand_attribute_expression(&attr.name)
+            .is_some_and(|name| name.eq_ignore_ascii_case("srcdoc"))
+        {
+            return Some(attr.name[1..attr.name.len() - 1].trim().to_string());
+        }
+        if !attr.name.eq_ignore_ascii_case("srcdoc") {
+            return None;
+        }
+        svelte_attr_value_expression(attr.value.as_deref()?)
+    });
+    if let Some(snippet) = snippet
+        && let Some(sink) =
+            crate::template_usage::template_srcdoc_sink(&snippet, tag_start, tag_end)
+    {
+        usage.security_sinks.push(sink);
+    }
+}
+
+/// The JS expression behind a Svelte attribute value: the inner expression of
+/// a single `{expr}`, or a template literal for text with `{expr}` parts.
+/// Static text yields `None`.
+fn svelte_attr_value_expression(value: &str) -> Option<String> {
+    if !value.contains('{') {
+        return None;
+    }
+    if value.starts_with('{')
+        && let Some((expr, end)) = scan_curly_section(value, 0, 1, 1)
+        && end == value.len()
+    {
+        return Some(expr.to_string());
+    }
+    Some(format!(
+        "`{}`",
+        value
+            .replace('\\', "\\\\")
+            .replace('`', "\\`")
+            .replace('{', "${")
+    ))
 }
 
 fn apply_markup_tag(
@@ -1248,6 +1306,25 @@ mod tests {
         let usage = collect_template_usage("{@html sanitize(content)}", &imported(&["sanitize"]));
 
         assert!(usage.used_bindings.contains("sanitize"));
+    }
+
+    #[test]
+    fn srcdoc_bindings_are_captured_and_static_srcdoc_is_not() {
+        let sink_paths = |source: &str| -> Vec<String> {
+            collect_template_usage(source, &imported(&[]))
+                .security_sinks
+                .into_iter()
+                .map(|sink| sink.callee_path)
+                .collect()
+        };
+        for source in [
+            "<iframe srcdoc={html}></iframe>",
+            "<iframe {srcdoc}></iframe>",
+            "<iframe srcdoc=\"<p>{html}</p>\"></iframe>",
+        ] {
+            assert_eq!(sink_paths(source), vec!["template.srcdoc"], "{source}");
+        }
+        assert!(sink_paths("<iframe srcdoc=\"<p>static</p>\"></iframe>").is_empty());
     }
 
     #[test]

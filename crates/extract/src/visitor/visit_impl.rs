@@ -132,6 +132,8 @@ use visit_package_resolution::*;
 use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
+pub(super) use visit_security_sinks::SinkAliasState;
+use visit_security_sinks::flatten_callee_path;
 pub(super) use visit_source_paths::join_member_path;
 use visit_source_paths::{
     binding_source_path_candidates, flatten_member_path, push_unique_string, source_path_candidates,
@@ -1060,6 +1062,7 @@ impl ModuleInfoExtractor {
             }
 
             self.record_static_sink_literal_binding(decl, declarator, init);
+            self.record_sink_alias_bindings(id.name.as_str(), init);
             let sources = self.node_module_register_sources_from_expression(init);
             if !sources.is_empty() {
                 self.record_node_module_register_url_binding(id.name.to_string(), sources);
@@ -5390,6 +5393,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_jsx_attribute(self, attr);
     }
 
+    fn visit_jsx_spread_attribute(&mut self, spread: &oxc_ast::ast::JSXSpreadAttribute<'a>) {
+        self.capture_jsx_spread_sink(spread);
+        walk::walk_jsx_spread_attribute(self, spread);
+    }
+
     fn visit_jsx_fragment(&mut self, fragment: &oxc_ast::ast::JSXFragment<'a>) {
         self.has_jsx = true;
         walk::walk_jsx_fragment(self, fragment);
@@ -5780,28 +5788,6 @@ fn unwrap_parens<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
         expr = &paren.expression;
     }
     expr
-}
-
-/// Flatten an `Identifier` or `StaticMemberExpression` callee to a dotted path.
-///
-/// Deliberately narrower than `static_member_object_name`: it accepts ONLY bare
-/// identifiers and static member chains (no call/new forms), so the catalogue
-/// matcher sees a clean dotted callee path. Returns `None` for dynamic dispatch,
-/// computed members, or aliased call forms (those count as blind spots).
-fn flatten_callee_path(mut expr: &Expression<'_>) -> Option<String> {
-    let mut properties = Vec::new();
-    let root = loop {
-        crate::cost::walk_step();
-        match unwrap_parens(expr) {
-            Expression::Identifier(ident) => break ident.name.as_str(),
-            Expression::StaticMemberExpression(member) => {
-                properties.push(member.property.name.as_str());
-                expr = &member.object;
-            }
-            _ => return None,
-        }
-    };
-    Some(visit_source_paths::join_member_path(root, &properties))
 }
 
 /// Root reference of a static callee without optional or computed members.

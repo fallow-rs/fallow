@@ -260,6 +260,21 @@ pub fn collect_unresolved_refs_and_accesses(
 }
 
 pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> Option<SinkSite> {
+    template_dom_sink("innerHTML", snippet, span_start, span_end)
+}
+
+/// A template binding of an iframe `srcdoc` (`:srcdoc`, `[srcdoc]`,
+/// `srcdoc={x}`), captured as the `template.srcdoc` member-assign shape.
+pub fn template_srcdoc_sink(snippet: &str, span_start: usize, span_end: usize) -> Option<SinkSite> {
+    template_dom_sink("srcdoc", snippet, span_start, span_end)
+}
+
+fn template_dom_sink(
+    property: &str,
+    snippet: &str,
+    span_start: usize,
+    span_end: usize,
+) -> Option<SinkSite> {
     let snippet = snippet.trim();
     if snippet.is_empty() {
         return None;
@@ -282,7 +297,7 @@ pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> 
 
     Some(SinkSite {
         sink_shape: SinkShape::MemberAssign,
-        callee_path: "template.innerHTML".to_string(),
+        callee_path: format!("template.{property}"),
         arg_index: 0,
         arg_is_non_literal: true,
         arg_kind,
