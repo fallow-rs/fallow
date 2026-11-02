@@ -6,13 +6,17 @@
 //! builder exposes each value of an enum that `registerEnumType` receives.
 //! Project code does not name these members, so without this recognizer they
 //! are reported as unused.
+//!
+//! A runtime probe for a static member name (`"name" in value`,
+//! `Reflect.has(value, "name")`) is recorded as a member name probe.
 
 #[allow(clippy::wildcard_imports, reason = "many call AST types used")]
 use oxc_ast::ast::*;
 
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{ImportedName, MemberNameProbeFact, SemanticFact};
 
 use super::super::ModuleInfoExtractor;
+use super::visit_security_classifiers::static_string_literal_value;
 
 /// Member callees whose first value argument is an ORM entity class. These
 /// names are specific to ORM code, so they need no import evidence. A project
@@ -63,6 +67,7 @@ const REGISTER_ENUM_TYPE: &str = "registerEnumType";
 impl ModuleInfoExtractor {
     /// Record the entity or enum that a reflective library call reads whole.
     pub(super) fn record_reflective_whole_object_use(&mut self, expr: &CallExpression<'_>) {
+        self.record_reflect_has_member_probe(expr);
         if let Some(name) = self.reflective_call_target(expr) {
             self.record_whole_object_identifier_use(name.as_str());
         }
@@ -110,6 +115,46 @@ impl ModuleInfoExtractor {
             return first_identifier_argument(expr);
         }
         None
+    }
+
+    /// Record the member name of a `"name" in value` probe. A probe for a
+    /// static name is a runtime check for a member with that name, so a class
+    /// can supply the member only for the probe to read it.
+    pub(super) fn record_in_operator_member_probe(&mut self, expr: &BinaryExpression<'_>) {
+        if expr.operator == BinaryOperator::In
+            && let Some(name) = static_string_literal_value(&expr.left)
+        {
+            self.semantic_facts
+                .push(SemanticFact::MemberNameProbe(MemberNameProbeFact { name }));
+        }
+    }
+
+    /// Record the member name of a `Reflect.has(value, "name")` probe, which
+    /// has the semantics of the `in` operator. `Object.hasOwn` and
+    /// `hasOwnProperty` do not see a getter or a method on the class
+    /// prototype, so they are not probes for class members.
+    fn record_reflect_has_member_probe(&mut self, expr: &CallExpression<'_>) {
+        let Expression::StaticMemberExpression(member) = &expr.callee else {
+            return;
+        };
+        if member.property.name != "has" {
+            return;
+        }
+        let Expression::Identifier(object) = &member.object else {
+            return;
+        };
+        if object.name != "Reflect" || self.nested_scope_shadows("Reflect") {
+            return;
+        }
+        if let Some(name) = expr
+            .arguments
+            .get(1)
+            .and_then(Argument::as_expression)
+            .and_then(static_string_literal_value)
+        {
+            self.semantic_facts
+                .push(SemanticFact::MemberNameProbe(MemberNameProbeFact { name }));
+        }
     }
 
     /// Whether the file imports from an ORM package before the current call.

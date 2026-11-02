@@ -365,6 +365,8 @@ mod workspace_internal_deps;
 mod ci_bun_file_runner;
 #[path = "integration_test/ci_working_directory.rs"]
 mod ci_working_directory;
+#[path = "integration_test/in_operator_member_probe.rs"]
+mod in_operator_member_probe;
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
 #[path = "integration_test/issue_1441_factory_return_member.rs"]

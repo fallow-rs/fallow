@@ -126,6 +126,16 @@ error by suppressing a downstream detector.
   a separate typed property fact that the member pass joins through named and
   re-exported imports; ordinary dotted member accesses are not treated as
   namespace constructors.
+- A member name probe (`"name" in value` or `Reflect.has(value, "name")` with
+  a static name) is a `MemberNameProbe` fact. The member pass credits class
+  members with that name only in the probe module and in its direct import
+  neighbors (the modules that it imports and the modules that import it). A
+  type-only import is not a neighbor link. A probe in an unreachable module
+  gives no credit. Probes often check common
+  names such as `message` or `type`, so a project-wide credit by name would
+  hide unused members in unrelated classes. A plain `value.name` read on an
+  untyped value gives no credit. `Object.hasOwn` and `hasOwnProperty` are not
+  probes, because they do not see a getter or a method on a class prototype.
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the

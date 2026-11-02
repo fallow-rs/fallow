@@ -846,3 +846,43 @@ fn long_text_member_tag_records_a_bounded_receiver_output() {
         );
     }
 }
+
+fn member_name_probes(info: &fallow_types::extract::ModuleInfo) -> Vec<&str> {
+    info.semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::MemberNameProbe(probe) => Some(probe.name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn in_operator_string_literal_records_member_name_probe() {
+    let info = parse_source(
+        "export const detailOf = (cause: unknown) =>\n  typeof cause === 'object' && cause !== null && 'displayDetail' in cause\n    ? cause.displayDetail : undefined;",
+    );
+    assert_eq!(member_name_probes(&info), vec!["displayDetail"]);
+}
+
+#[test]
+fn reflect_has_string_literal_records_member_name_probe() {
+    let info = parse_source("export const hasHint = (x: object) => Reflect.has(x, `retryHint`);");
+    assert_eq!(member_name_probes(&info), vec!["retryHint"]);
+}
+
+#[test]
+fn shadowed_reflect_has_records_no_member_name_probe() {
+    let info = parse_source(
+        "export const check = (x: object) => {\n  const Reflect = { has: (_a: object, _b: string) => true };\n  return Reflect.has(x, 'retryHint');\n};",
+    );
+    assert!(member_name_probes(&info).is_empty());
+}
+
+#[test]
+fn dynamic_probe_keys_record_no_member_name_probe() {
+    let info = parse_source(
+        "export const probe = (key: string, x: object, y: object) =>\n  key in x || Reflect.has(y, key) || Object.hasOwn(x, 'own') || `a${key}` in y;",
+    );
+    assert!(member_name_probes(&info).is_empty());
+}
