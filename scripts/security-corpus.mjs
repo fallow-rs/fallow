@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Security corpus harness: measures `fallow security` against the public
-// security-rules research data of the Ultracite project. See
+// classified data of a public security-rules sink study. See
 // docs/security-corpus.md for the method and the run instructions.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,14 +14,13 @@ import { runCliMain } from "./cli-main.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The Ultracite commit whose research data this harness reads. */
-export const ULTRACITE_SLUG = "haydenbleasel/ultracite";
-export const ULTRACITE_SHA = "929481461f0dd435b7cb19fb2a3737987c15d8d6";
-const ULTRACITE_DATA_DIR = "research/corpus/results/security-rules";
-const ULTRACITE_REPOS_FILE = "research/corpus/scripts/repos.json";
+/** The environment variable that names the dataset repository as `owner/repo@sha`. */
+export const DATASET_ENV = "FALLOW_SECURITY_CORPUS_DATASET";
+const DATASET_DATA_DIR = "research/corpus/results/security-rules";
+const DATASET_REPOS_FILE = "research/corpus/scripts/repos.json";
 
 /**
- * The commits that the Ultracite sink census measured. The research repo
+ * The commits that the sink census of the dataset measured. The dataset repo
  * pins them in `research/corpus/scripts/clone.sh`; the harness keeps a copy
  * here because it reads that script as data and never runs it.
  */
@@ -45,7 +44,7 @@ const SPAWN_MAX_BUFFER = 1024 * 1024 * 1024;
 const LICENSE_HEADER_LINES = 40;
 const EXAMPLES_PER_CATEGORY = 8;
 
-// The same source-file and exclusion rules as the Ultracite census
+// The same source-file and exclusion rules as the census of the dataset
 // (research/corpus/scripts/collect-files.cjs), so both sides count the same files.
 const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const EXCLUDED_DIR_NAMES = new Set([
@@ -86,7 +85,7 @@ const LICENSE_RE =
 const createDefaultOptions = () => ({
   phase: "all",
   cacheDir: join(tmpdir(), "fallow-security-corpus"),
-  ultraciteDir: null,
+  datasetDir: null,
   fallowBin: null,
   outDir: DEFAULT_OUT_DIR,
   limit: null,
@@ -131,7 +130,7 @@ const optionSetters = new Map([
     },
   ],
   ["--cache-dir", (options, value) => ({ ...options, cacheDir: value })],
-  ["--ultracite-dir", (options, value) => ({ ...options, ultraciteDir: value })],
+  ["--dataset-dir", (options, value) => ({ ...options, datasetDir: value })],
   ["--fallow-bin", (options, value) => ({ ...options, fallowBin: value })],
   ["--out-dir", (options, value) => ({ ...options, outDir: value })],
   ["--limit", (options, value) => ({ ...options, limit: intAtLeast("--limit", value, 1) })],
@@ -169,7 +168,7 @@ export const parseArgs = (argv) => {
   return options;
 };
 
-/** Splits an Ultracite `owner/repo@sha` fix reference. */
+/** Splits a dataset `owner/repo@sha` fix reference. */
 export const parseFixCommit = (value) => {
   const match = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{7,40})$/.exec(value);
   return match ? { slug: match[1], sha: match[2] } : null;
@@ -189,7 +188,7 @@ const isSourcePath = (path) => {
 
 const isUnder = (path, dir) => path === dir || path.startsWith(`${dir.replace(/\/$/, "")}/`);
 
-/** Reports whether a repo-relative path is a file that the Ultracite census measured. */
+/** Reports whether a repo-relative path is a file that the census of the dataset measured. */
 export const isCensusPath = (path, repo) =>
   isSourcePath(path) &&
   repo.include.some((dir) => isUnder(path, dir)) &&
@@ -477,18 +476,33 @@ export const cachedFallow = (rawPath, rerun, produce, key = null) => {
 const fileSha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
 // ---------------------------------------------------------------------------
-// Ultracite data
+// Dataset
 
-const loadUltracite = (options) => {
-  let dir = options.ultraciteDir;
-  if (!dir) {
-    dir = join(options.cacheDir, "ultracite");
-    ensureRepo(dir, ULTRACITE_SLUG);
-    fetchCommit(dir, ULTRACITE_SHA, 1);
-    checkoutSparse(dir, ULTRACITE_SHA, [ULTRACITE_DATA_DIR, dirname(ULTRACITE_REPOS_FILE)]);
+/**
+ * Reads the dataset repository from an `owner/repo@sha` value. The sha must be a
+ * full commit id, so a run always reads the same data.
+ */
+export const parseDatasetSpec = (value) => {
+  const match = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{40})$/.exec(value ?? "");
+  if (!match) {
+    throw new Error(
+      `Set ${DATASET_ENV} to owner/repo@<40-character sha>, or pass --dataset-dir <dir>`,
+    );
   }
-  const data = (name) => JSON.parse(readFileSync(join(dir, ULTRACITE_DATA_DIR, name), "utf8"));
-  const repos = JSON.parse(readFileSync(join(dir, ULTRACITE_REPOS_FILE), "utf8")).repos;
+  return { slug: match[1], sha: match[2] };
+};
+
+const loadDataset = (options) => {
+  let dir = options.datasetDir;
+  if (!dir) {
+    const { slug, sha } = parseDatasetSpec(process.env[DATASET_ENV]);
+    dir = join(options.cacheDir, "dataset");
+    ensureRepo(dir, slug);
+    fetchCommit(dir, sha, 1);
+    checkoutSparse(dir, sha, [DATASET_DATA_DIR, dirname(DATASET_REPOS_FILE)]);
+  }
+  const data = (name) => JSON.parse(readFileSync(join(dir, DATASET_DATA_DIR, name), "utf8"));
+  const repos = JSON.parse(readFileSync(join(dir, DATASET_REPOS_FILE), "utf8")).repos;
   return {
     dir,
     repos: repos.filter((repo) => MEASURED_COMMITS[repo.name]),
@@ -513,7 +527,7 @@ const hasThirdPartyLicense = (absPath, ownCopyright) => {
   return !(ownCopyright && new RegExp(ownCopyright).test(head));
 };
 
-const runPrecisionRepo = (repo, ultracite, options, fallowBin) => {
+const runPrecisionRepo = (repo, dataset, options, fallowBin) => {
   const sha = MEASURED_COMMITS[repo.name];
   const dir = join(options.cacheDir, "precision", repo.name);
   ensureRepo(dir, repo.github);
@@ -530,11 +544,11 @@ const runPrecisionRepo = (repo, ultracite, options, fallowBin) => {
   if (!scan.ok) {
     return { repo: repo.name, sha, error: scan.error };
   }
-  const sites = ultracite.sample.sites.filter((site) => site.repo === repo.name);
+  const sites = dataset.sample.sites.filter((site) => site.repo === repo.name);
   const match = matchPrecision({
     repo,
     sites,
-    labels: ultracite.classifications.labels,
+    labels: dataset.classifications.labels,
     findings: scan.findings,
     slack: 1,
     isExcludedFile: (path) => hasThirdPartyLicense(join(dir, path), repo.ownCopyright),
@@ -726,17 +740,17 @@ const dropReason = (base, options, selectedCount) => {
 };
 
 /** Splits the advisories with a fix commit into the selected set and the dropped set. */
-export const selectAdvisories = (ultracite, options) => {
+export const selectAdvisories = (dataset, options) => {
   const dropped = [];
   const selected = [];
-  const withFix = ultracite.advisories.advisories
+  const withFix = dataset.advisories.advisories
     .map((advisory) => ({
       advisory,
       commits: (advisory.fixCommits ?? []).map(parseFixCommit).filter(Boolean),
     }))
     .filter(({ commits }) => commits.length > 0);
   for (const { advisory, commits } of withFix) {
-    const label = ultracite.advisoryLabels[advisory.ghsa] ?? {};
+    const label = dataset.advisoryLabels[advisory.ghsa] ?? {};
     const base = {
       ghsa: advisory.ghsa,
       project: advisory.project,
@@ -752,7 +766,7 @@ export const selectAdvisories = (ultracite, options) => {
   return {
     selected,
     dropped,
-    withoutFix: ultracite.advisories.advisories.length - withFix.length,
+    withoutFix: dataset.advisories.advisories.length - withFix.length,
   };
 };
 
@@ -795,8 +809,8 @@ export const aggregateAdvisory = (advisory, commitResults) => {
   };
 };
 
-const runRecall = (ultracite, options, fallowBin) => {
-  const { selected, dropped, withoutFix } = selectAdvisories(ultracite, options);
+const runRecall = (dataset, options, fallowBin) => {
+  const { selected, dropped, withoutFix } = selectAdvisories(dataset, options);
   const commitResults = new Map();
   const unique = [...new Map(selected.flatMap((a) => a.commits).map((c) => [c.sha, c])).values()];
   unique.forEach((commit, index) => {
@@ -890,7 +904,7 @@ const renderPrecision = (precision) => {
   out.push("### Sinks by kind", "");
   out.push(
     table(
-      ["Ultracite sink kind", "Sinks", "Matched by fallow"],
+      ["Dataset sink kind", "Sinks", "Matched by fallow"],
       countBy(sinks, (sink) => sink.kind).map(([kind, total]) => [
         kind,
         total,
@@ -919,7 +933,7 @@ const renderPrecision = (precision) => {
     "",
   );
   const other = ok.flatMap((entry) => entry.otherSites);
-  out.push("### Other Ultracite site groups", "");
+  out.push("### Other dataset site groups", "");
   out.push(
     table(
       ["Group", "Category", "Sites", "Matched by fallow"],
@@ -936,7 +950,7 @@ const renderPrecision = (precision) => {
   const extras = ok.flatMap((entry) =>
     entry.extras.map((finding) => ({ ...finding, repo: entry.repo })),
   );
-  out.push("### Fallow candidates outside the Ultracite sink list", "");
+  out.push("### Fallow candidates outside the dataset sink list", "");
   out.push(
     table(
       ["Category", "Candidates", "Repos", "Examples"],
@@ -991,7 +1005,7 @@ const renderRecall = (recall) => {
         "Advisory",
         "Project",
         "Class",
-        "Ultracite lint label",
+        "Dataset lint label",
         "Candidates on changed lines",
         "Still present after fix",
       ],
@@ -1081,13 +1095,13 @@ export const runSecurityCorpus = (options) => {
   }
   mkdirSync(options.outDir, { recursive: true });
   options = { ...options, fallowHash: fileSha256(fallowBin) };
-  const ultracite = loadUltracite(options);
+  const dataset = loadDataset(options);
   const meta = {
     generated: new Date().toISOString(),
     fallow: run(fallowBin, ["--version"]).stdout.trim(),
     fallowSha256: options.fallowHash,
     fallowCommit: git(REPO_ROOT, ["rev-parse", "HEAD"]).stdout.trim(),
-    ultracite: `${ULTRACITE_SLUG}@${ULTRACITE_SHA}`,
+    dataset: options.datasetDir ?? process.env[DATASET_ENV],
     commits: MEASURED_COMMITS,
     slack: options.slack,
     maxScopeFiles: options.maxScopeFiles,
@@ -1095,17 +1109,17 @@ export const runSecurityCorpus = (options) => {
     classes: options.classes ? [...options.classes] : null,
     repos: options.repos ? [...options.repos] : null,
   };
-  const repos = ultracite.repos.filter((repo) => !options.repos || options.repos.has(repo.name));
+  const repos = dataset.repos.filter((repo) => !options.repos || options.repos.has(repo.name));
   const precision =
     options.phase === "recall"
       ? null
       : repos.map((repo) => {
           console.error(`[precision] ${repo.name}`);
           return guardPrecisionRepo(repo, (entry) =>
-            runPrecisionRepo(entry, ultracite, options, fallowBin),
+            runPrecisionRepo(entry, dataset, options, fallowBin),
           );
         });
-  const recall = options.phase === "precision" ? null : runRecall(ultracite, options, fallowBin);
+  const recall = options.phase === "precision" ? null : runRecall(dataset, options, fallowBin);
   writeFileSync(
     join(options.outDir, "results.json"),
     `${JSON.stringify({ meta, precision, recall }, null, 2)}\n`,

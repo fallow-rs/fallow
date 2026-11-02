@@ -1,10 +1,10 @@
 # Security corpus
 
 `scripts/security-corpus.mjs` measures `fallow security` against public data.
-The data comes from the security-rules study of the Ultracite project
-(`haydenbleasel/ultracite`, folder `research/corpus/results/security-rules`).
-The harness pins one Ultracite commit and the eight project commits that the
-study measured.
+The data comes from a public security-rules study. The study classified the
+injection sinks of eight open-source projects and the published advisories of
+those projects. The harness reads the study data from its repository at a
+pinned commit, and it pins the eight project commits that the study measured.
 
 The harness has two phases:
 
@@ -23,7 +23,12 @@ The harness has two phases:
 
 ## How to run
 
-Prerequisites: `git`, Node.js, network access to GitHub, and a release build.
+Prerequisites: `git`, Node.js, network access to GitHub, a release build, and
+the location of the study data. Set `FALLOW_SECURITY_CORPUS_DATASET` to
+`owner/repo@<full sha>` of the study repository, or pass `--dataset-dir` with
+an existing checkout. The harness reads the files under
+`research/corpus/results/security-rules` and
+`research/corpus/scripts/repos.json` of that checkout.
 
 ```bash
 cargo build --release -p fallow-cli
@@ -37,9 +42,9 @@ Useful flags:
 | --- | --- |
 | `--phase precision\|recall\|all` | Selects the phases. The default is `all`. |
 | `--cache-dir <dir>` | Sets the clone cache. The default is `<os tmpdir>/fallow-security-corpus`. |
-| `--ultracite-dir <dir>` | Reads the study data from an existing checkout and does not clone. |
+| `--dataset-dir <dir>` | Reads the study data from an existing checkout and does not clone. |
 | `--out-dir <dir>` | Sets the output directory. The default is `.plans/security-corpus`. |
-| `--repos zod,hono` | Selects projects (Ultracite names). |
+| `--repos zod,hono` | Selects projects (names from the study data). |
 | `--class xss,ssrf` | Selects advisory classes for the recall phase. |
 | `--limit <n>` | Keeps the first `n` advisories in the recall phase. |
 | `--slack <n>` | Sets the line slack of a recall line hit. The default is 3. |
@@ -80,7 +85,7 @@ they change with each fallow release.
   insertion maps to the old lines around the insertion point. New files and
   test files do not count.
 - **Untrusted input.** The harness reads the study data as JSON. It never runs a
-  script, a build or a package install from Ultracite or from the projects.
+  script, a build or a package install from the study repository or from the projects.
 
 ## Privacy
 
