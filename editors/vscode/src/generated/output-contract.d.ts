@@ -12166,6 +12166,12 @@ related?: DiffRiskLocation[]
  * Suppression actions.
  */
 actions: DiffRiskAction[]
+/**
+ * The parsed `fallow-ignore` comment. Present only on an
+ * `added-suppression` finding whose evidence is `fallow-ignore` and
+ * whose comment Fallow can parse.
+ */
+suppression?: (DiffRiskSuppression | null)
 }
 /**
  * A location that relates to a diff-risk finding, such as an unchanged clone
@@ -12198,6 +12204,26 @@ description: string
  * The suppression comment to insert. Absent on `suppress-in-config`.
  */
 comment?: (string | null)
+}
+/**
+ * The parsed content of an added `fallow-ignore` comment.
+ */
+export interface DiffRiskSuppression {
+/**
+ * The suppressed kinds in kebab-case, in source order. Empty for a
+ * blanket comment that suppresses every kind.
+ */
+kinds: string[]
+/**
+ * The human-authored reason after `--`, or `null` when absent.
+ */
+reason?: (string | null)
+/**
+ * `true` when the comment names `security-sink` or
+ * `security-client-server-leak` and has no reason. An advisory signal
+ * only: it does not change the severity of the finding.
+ */
+security_without_reason: boolean
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

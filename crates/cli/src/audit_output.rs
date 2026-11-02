@@ -1675,6 +1675,7 @@ mod tests {
             introduced: true,
             related: Vec::new(),
             actions: Vec::new(),
+            suppression: None,
         };
         let one = fallow_output::DiffRiskReport {
             findings: vec![finding.clone()],
@@ -1943,6 +1944,7 @@ mod tests {
                     introduced: true,
                     related: Vec::new(),
                     actions: Vec::new(),
+                    suppression: None,
                 },
                 fallow_output::DiffRiskFinding {
                     rule: fallow_output::DiffRiskRule::AddedSuppression,
@@ -1955,6 +1957,7 @@ mod tests {
                     introduced: true,
                     related: Vec::new(),
                     actions: Vec::new(),
+                    suppression: None,
                 },
             ],
         };

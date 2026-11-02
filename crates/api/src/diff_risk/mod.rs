@@ -26,7 +26,7 @@ use fallow_engine::changed_files::RenamedFile;
 use fallow_engine::module_graph::relative_key_path;
 use fallow_output::{
     DiffRiskAction, DiffRiskActionType, DiffRiskFinding, DiffRiskLocation, DiffRiskReport,
-    DiffRiskRule, DiffRiskSeverity, WeakenedTestsKind,
+    DiffRiskRule, DiffRiskSeverity, DiffRiskSuppression, WeakenedTestsKind,
 };
 use fallow_types::duplicates::CloneGroup;
 use fallow_types::suppress::{IssueKind, Suppression, SuppressionTarget};
@@ -831,6 +831,48 @@ fn is_suppressed(suppressions: &[Suppression], rule: DiffRiskRule, line: Option<
     })
 }
 
+const SECURITY_WITHOUT_REASON_MESSAGE: &str = "The change adds a `fallow-ignore` comment that hides a security finding and gives no `-- <reason>`";
+
+/// The parsed `fallow-ignore` comment of an `added-suppression` finding, or
+/// `None` for another rule, another suppression token, or a comment that the
+/// suppression parser does not read (for example a trailing comment).
+///
+/// Only a comment that names a security kind sets `security_without_reason`.
+/// A blanket comment also hides security findings, but it does not set the
+/// flag, so projects without security analysis get no extra signal.
+fn added_fallow_ignore(list: &[Suppression], finding: &RawFinding) -> Option<DiffRiskSuppression> {
+    if finding.rule != DiffRiskRule::AddedSuppression
+        || finding.evidence != text::FALLOW_IGNORE_TOKEN
+    {
+        return None;
+    }
+    let line = finding.line?;
+    let mut on_line = list
+        .iter()
+        .filter(|suppression| suppression.comment_line == line)
+        .peekable();
+    on_line.peek()?;
+    let mut kinds = Vec::new();
+    let mut reason = None;
+    let mut names_security = false;
+    for suppression in on_line {
+        reason = reason.or_else(|| suppression.reason.clone());
+        names_security |= matches!(
+            suppression.issue_kind_target(),
+            Some(IssueKind::SecuritySink | IssueKind::SecurityClientServerLeak)
+        );
+        if let Some(token) = suppression.target_token() {
+            kinds.push(token);
+        }
+    }
+    let security_without_reason = names_security && reason.is_none();
+    Some(DiffRiskSuppression {
+        kinds,
+        reason,
+        security_without_reason,
+    })
+}
+
 fn finalize(
     input: &DiffRiskInput<'_>,
     files: &[FileTexts],
@@ -858,10 +900,8 @@ fn finalize(
                 Severity::Warn => DiffRiskSeverity::Warn,
                 Severity::Error => DiffRiskSeverity::Error,
             };
-            if suppressions
-                .get(finding.path.as_str())
-                .is_some_and(|list| is_suppressed(list, finding.rule, finding.line))
-            {
+            let head_list = suppressions.get(finding.path.as_str());
+            if head_list.is_some_and(|list| is_suppressed(list, finding.rule, finding.line)) {
                 return None;
             }
             let exists = head_exists
@@ -869,17 +909,27 @@ fn finalize(
                 .copied()
                 .unwrap_or(true);
             let actions = suppression_actions(finding.rule, &finding.path, finding.line, exists);
+            let suppression = head_list.and_then(|list| added_fallow_ignore(list, &finding));
+            let message = if suppression
+                .as_ref()
+                .is_some_and(|detail| detail.security_without_reason)
+            {
+                SECURITY_WITHOUT_REASON_MESSAGE.to_owned()
+            } else {
+                finding.message
+            };
             Some(DiffRiskFinding {
                 rule: finding.rule,
                 kind: finding.kind,
                 path: finding.path,
                 line: finding.line,
-                message: finding.message,
+                message,
                 evidence: finding.evidence,
                 severity,
                 introduced: true,
                 related: finding.related,
                 actions,
+                suppression,
             })
         })
         .collect();
@@ -1331,6 +1381,39 @@ mod tests {
     fn file_suppression_hides_a_file_level_finding() {
         let list = suppressions("// fallow-ignore-file weakened-tests\n");
         assert!(is_suppressed(&list, DiffRiskRule::WeakenedTests, None));
+    }
+
+    fn added(evidence: &str, line: u32) -> RawFinding {
+        RawFinding {
+            rule: DiffRiskRule::AddedSuppression,
+            kind: None,
+            path: "src/a.ts".to_owned(),
+            line: Some(line),
+            message: String::new(),
+            evidence: evidence.to_owned(),
+            related: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn added_fallow_ignore_reads_kinds_and_reason() {
+        let list = suppressions(
+            "// fallow-ignore-next-line unused-export, security-sink\nexport const a = 1;\n// fallow-ignore-file\n// fallow-ignore-next-line security-client-server-leak -- reviewed\nconst b = 1;\n",
+        );
+        let mixed = added_fallow_ignore(&list, &added("fallow-ignore", 1)).expect("parsed");
+        assert_eq!(mixed.kinds, vec!["unused-export", "security-sink"]);
+        assert!(mixed.security_without_reason);
+
+        let blanket = added_fallow_ignore(&list, &added("fallow-ignore", 3)).expect("parsed");
+        assert!(blanket.kinds.is_empty());
+        assert!(!blanket.security_without_reason);
+
+        let reasoned = added_fallow_ignore(&list, &added("fallow-ignore", 4)).expect("parsed");
+        assert_eq!(reasoned.reason.as_deref(), Some("reviewed"));
+        assert!(!reasoned.security_without_reason);
+
+        assert!(added_fallow_ignore(&list, &added("eslint-disable", 1)).is_none());
+        assert!(added_fallow_ignore(&list, &added("fallow-ignore", 2)).is_none());
     }
 
     #[test]

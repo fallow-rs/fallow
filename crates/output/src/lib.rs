@@ -114,7 +114,7 @@ pub use audit_decision_surface::{
 };
 pub use audit_diff_risk::{
     DiffRiskAction, DiffRiskActionType, DiffRiskFinding, DiffRiskLocation, DiffRiskReport,
-    DiffRiskRule, DiffRiskSeverity, WeakenedTestsKind,
+    DiffRiskRule, DiffRiskSeverity, DiffRiskSuppression, WeakenedTestsKind,
 };
 pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 pub use audit_ownership::{OWNER_GROUP_CAP, OwnerGroupFact, OwnershipFacts, OwnershipSliceFact};

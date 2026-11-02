@@ -12,7 +12,7 @@
 //! scan of source files (`fallow_engine::sink_substitution`) are local to the
 //! brief.
 
-use fallow_output::{DiffRiskReport, DiffRiskRule, WeakenedTestsKind};
+use fallow_output::{DiffRiskFinding, DiffRiskReport, DiffRiskRule, WeakenedTestsKind};
 pub use fallow_output::{WeakeningKind, WeakeningSignal};
 
 /// Project the findings of a diff-risk report onto weakening signals.
@@ -41,7 +41,7 @@ pub fn signals_from_diff_risk(report: &DiffRiskReport) -> Vec<WeakeningSignal> {
                 }
                 (DiffRiskRule::AddedSuppression, _) => (
                     WeakeningKind::SuppressionAdded,
-                    format!("{} added", finding.evidence),
+                    added_suppression_evidence(finding),
                 ),
                 (
                     DiffRiskRule::TestOnlyBranch
@@ -57,6 +57,30 @@ pub fn signals_from_diff_risk(report: &DiffRiskReport) -> Vec<WeakeningSignal> {
             })
         })
         .collect()
+}
+
+/// The evidence of a `suppression-added` signal. A `fallow-ignore` comment
+/// that hides a security kind without a `-- <reason>` names that kind, so a
+/// reviewer sees the unexplained security suppression first.
+fn added_suppression_evidence(finding: &DiffRiskFinding) -> String {
+    let Some(detail) = finding
+        .suppression
+        .as_ref()
+        .filter(|detail| detail.security_without_reason)
+    else {
+        return format!("{} added", finding.evidence);
+    };
+    let security_kinds: Vec<&str> = detail
+        .kinds
+        .iter()
+        .map(String::as_str)
+        .filter(|kind| kind.starts_with("security-"))
+        .collect();
+    format!(
+        "{} added ({}, no reason)",
+        finding.evidence,
+        security_kinds.join(", ")
+    )
 }
 
 /// Detect removed security CI steps: a line that invokes a security scanner
@@ -96,7 +120,7 @@ pub fn is_ci_file(rel_path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{DiffRiskFinding, DiffRiskSeverity};
+    use fallow_output::DiffRiskSeverity;
 
     fn finding(
         rule: DiffRiskRule,
@@ -115,6 +139,7 @@ mod tests {
             introduced: true,
             related: Vec::new(),
             actions: Vec::new(),
+            suppression: None,
         }
     }
 
