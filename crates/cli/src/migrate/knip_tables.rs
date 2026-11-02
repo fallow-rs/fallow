@@ -49,16 +49,6 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
         Some("use --workspace flag to scope output to a single package"),
     ),
     (
-        "ignoreIssues",
-        "No global issue ignoring in fallow",
-        Some("use inline suppression comments: // fallow-ignore-file [issue-type]"),
-    ),
-    (
-        "includeEntryExports",
-        "Entry export inclusion is not configurable in fallow",
-        None,
-    ),
-    (
         "tags",
         "Tag-based filtering is not supported in fallow",
         None,
@@ -110,7 +100,9 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
     "ignore",
     "ignoreDependencies",
     "ignoreExportsUsedInFile",
+    "ignoreIssues",
     "include",
+    "includeEntryExports",
     "rules",
     "workspaces",
 ];

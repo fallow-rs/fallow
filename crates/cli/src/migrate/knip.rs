@@ -2,9 +2,9 @@ use serde_json::Value;
 
 use super::knip_fields::{
     migrate_exclude, migrate_ignore, migrate_ignore_deps, migrate_ignore_exports_used_in_file,
-    migrate_include, migrate_rules, migrate_simple_field, warn_unhandled_root_keys,
-    warn_unmappable_fields,
+    migrate_include, migrate_rules, warn_unhandled_root_keys, warn_unmappable_fields,
 };
+use super::knip_scoped::{KnipScope, migrate_entry, migrate_ignore_issues, migrate_workspaces};
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
 use super::{MigrationWarning, string_or_array};
@@ -26,14 +26,17 @@ pub(super) fn migrate_knip(
         return;
     };
 
-    migrate_simple_field(obj, "entry", "entry", config);
+    let root = KnipScope::root();
+    if let Some(value) = obj.get("entry") {
+        migrate_entry(value, &root, config, warnings);
+    }
 
     if let Some(value) = obj.get("ignore") {
-        migrate_ignore(value, config, warnings);
+        migrate_ignore(value, &root, config, warnings);
     }
 
     if let Some(ignore_deps_val) = obj.get("ignoreDependencies") {
-        migrate_ignore_deps(ignore_deps_val, config, warnings);
+        migrate_ignore_deps(ignore_deps_val, "ignoreDependencies", config, warnings);
     }
 
     if let Some(value) = obj.get("ignoreExportsUsedInFile") {
@@ -58,60 +61,45 @@ pub(super) fn migrate_knip(
         }
     }
 
+    // `ignoreIssues` reads the migrated `rules`, so it runs after them.
+    if let Some(value) = obj.get("ignoreIssues") {
+        migrate_ignore_issues(value, &root, config, warnings);
+    }
+
+    let include_entry_exports = migrate_include_entry_exports(obj, config, warnings);
+
     warn_unmappable_fields(obj, warnings);
 
     warn_unhandled_root_keys(obj, warnings);
 
     if let Some(workspaces) = obj.get("workspaces") {
-        warn_workspace_configs(workspaces, warnings);
+        migrate_workspaces(workspaces, include_entry_exports, config, warnings);
     }
 }
 
-fn warn_workspace_configs(workspaces: &Value, warnings: &mut Vec<MigrationWarning>) {
-    let Some(workspaces) = workspaces.as_object() else {
-        warnings.push(MigrationWarning {
-            source: "knip",
-            field: "workspaces".to_string(),
-            message: "expected an object; workspace config not migrated".to_string(),
-            suggestion: None,
-        });
-        return;
+/// Migrate the root `includeEntryExports` flag and return its effective value.
+fn migrate_include_entry_exports(
+    obj: &JsonMap,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    let Some(value) = obj.get("includeEntryExports") else {
+        return false;
     };
-
-    for (workspace_pattern, config) in workspaces {
-        let field = format!("workspaces.{workspace_pattern}");
-        let Some(config) = config.as_object() else {
+    match value.as_bool() {
+        Some(true) => {
+            config.insert("includeEntryExports".to_string(), Value::Bool(true));
+            true
+        }
+        Some(false) => false,
+        None => {
             warnings.push(MigrationWarning {
                 source: "knip",
-                field,
-                message: "expected an object; workspace config not migrated".to_string(),
+                field: "includeEntryExports".to_string(),
+                message: "expected a boolean; not migrated".to_string(),
                 suggestion: None,
             });
-            continue;
-        };
-
-        if config.contains_key("ignore") {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: format!("{field}.ignore"),
-                message: "workspace-relative ignore patterns are not migrated".to_string(),
-                suggestion: Some(
-                    "translate them to project-root-relative ignoreFindings patterns manually; workspace glob keys may match multiple package roots"
-                        .to_string(),
-                ),
-            });
-        }
-
-        if config.keys().any(|key| key != "ignore") {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field,
-                message: "per-workspace configuration has no direct fallow equivalent".to_string(),
-                suggestion: Some(
-                    "fallow auto-discovers workspace packages; use --workspace to scope output"
-                        .to_string(),
-                ),
-            });
+            false
         }
     }
 }
@@ -374,19 +362,332 @@ mod tests {
         assert!(config.is_empty());
     }
 
+    fn warning_fields(warnings: &[MigrationWarning]) -> Vec<&str> {
+        warnings
+            .iter()
+            .map(|warning| warning.field.as_str())
+            .collect()
+    }
+
     #[test]
-    fn migrate_knip_workspace_config_warns_at_exact_member() {
-        let knip: serde_json::Value =
-            serde_json::from_str(r#"{"workspaces": {"packages/*": {"entry": ["src/index.ts"]}}}"#)
-                .unwrap();
+    fn migrate_knip_workspace_entry_is_rebased_on_the_workspace_path() {
+        let knip = serde_json::json!({
+            "entry": ["src/root.ts"],
+            "workspaces": {
+                ".": {"entry": [".github/scripts/report.cjs"]},
+                "apps/server": {"entry": ["src/bin.ts!", "./scripts/*.ts!"]},
+                "packages/*": {"entry": "test/fixtures/*.ts"},
+                "./infra/cache/": {"entry": ["alchemy.run.ts!"]}
+            }
+        });
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "workspaces.packages/*");
-        assert!(warnings[0].message.contains("no direct fallow equivalent"));
-        assert!(warnings[0].suggestion.is_some());
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!([
+                "src/root.ts",
+                ".github/scripts/report.cjs",
+                "apps/server/src/bin.ts",
+                "apps/server/scripts/*.ts",
+                "packages/*/test/fixtures/*.ts",
+                "infra/cache/alchemy.run.ts"
+            ])
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_entry_drops_the_production_marker() {
+        let knip = serde_json::json!({"entry": ["src/main.ts!", "src/cli.ts!"]});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["src/main.ts", "src/cli.ts"])
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_negated_entry_warns_instead_of_writing_a_dead_glob() {
+        let knip = serde_json::json!({
+            "entry": ["src/**/*.ts", "!src/**/*.test.ts"],
+            "workspaces": {"apps/web": {"entry": ["!src/legacy.ts"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["src/**/*.ts"])
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            ["entry", "workspaces.apps/web.entry"]
+        );
+        assert!(warnings[0].message.contains("!src/**/*.test.ts"));
+    }
+
+    #[test]
+    fn migrate_knip_workspace_ignore_becomes_rebased_ignore_findings() {
+        let knip = serde_json::json!({
+            "ignore": ["dist/**"],
+            "workspaces": {
+                "scripts": {"ignore": ["npm-launcher/**", "!npm-launcher/keep.ts"]},
+                "packages/*": {"ignore": "src/generated/**"}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreFindings").unwrap(),
+            &serde_json::json!([
+                "dist/**",
+                "scripts/npm-launcher/**",
+                "!scripts/npm-launcher/keep.ts",
+                "packages/*/src/generated/**"
+            ])
+        );
+        assert!(!config.contains_key("ignorePatterns"));
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_workspace_ignore_dependencies_merge_into_the_global_list() {
+        let knip = serde_json::json!({
+            "ignoreDependencies": ["lodash"],
+            "workspaces": {
+                "apps/server": {"ignoreDependencies": ["ffi-rs", "lodash", "/^@org/"]},
+                "apps/web": {"ignoreDependencies": ["^(a|b)$"]}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &serde_json::json!(["lodash", "ffi-rs", "@org*"])
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            [
+                "workspaces.apps/server.ignoreDependencies",
+                "workspaces.apps/web.ignoreDependencies"
+            ]
+        );
+        assert!(warnings[0].message.contains("every workspace"));
+        assert!(warnings[1].message.contains("^(a|b)$"));
+    }
+
+    #[test]
+    fn migrate_knip_ignore_issues_map_to_overrides_and_ignore_exports() {
+        let knip = serde_json::json!({
+            "rules": {"types": "off"},
+            "workspaces": {
+                "apps/server": {
+                    "ignoreIssues": {"**/*.graphql.ts": ["exports", "types", "namespaceMembers"]}
+                },
+                "apps/web": {
+                    "ignoreIssues": {"src/components/ui/*.tsx": ["exports", "duplicates"]}
+                },
+                "packages/*": {
+                    "ignoreIssues": {"src/_generated/**": ["files", "classMembers", "dependencies"]}
+                }
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("overrides").unwrap(),
+            &serde_json::json!([
+                {
+                    "files": ["apps/server/**/*.graphql.ts"],
+                    "rules": {"unused-exports": "off", "unused-types": "off"}
+                },
+                {
+                    "files": ["packages/*/src/_generated/**"],
+                    "rules": {"unused-files": "off", "unused-class-members": "off"}
+                }
+            ])
+        );
+        assert_eq!(
+            config.get("ignoreExports").unwrap(),
+            &serde_json::json!([
+                {"file": "apps/web/src/components/ui/*.tsx", "exports": ["*"]}
+            ])
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            [
+                "workspaces.apps/server.ignoreIssues.**/*.graphql.ts.namespaceMembers",
+                "workspaces.packages/*.ignoreIssues.src/_generated/**.dependencies"
+            ]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_ignore_issues_duplicates_without_exports_warns() {
+        let knip = serde_json::json!({
+            "ignoreIssues": {"src/ui/*.tsx": ["duplicates"]}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("ignoreExports"));
+        assert!(!config.contains_key("overrides"));
+        assert_eq!(
+            warning_fields(&warnings),
+            ["ignoreIssues.src/ui/*.tsx.duplicates"]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_include_entry_exports_is_global_only() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "packages/*": {"includeEntryExports": true},
+                "apps/web": {"includeEntryExports": false}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("includeEntryExports"));
+        assert_eq!(
+            warning_fields(&warnings),
+            ["workspaces.packages/*.includeEntryExports"]
+        );
+        assert!(warnings[0].message.contains("global"));
+
+        let knip = serde_json::json!({"includeEntryExports": true});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+        assert_eq!(
+            config.get("includeEntryExports").unwrap(),
+            &serde_json::json!(true)
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_workspace_unmapped_fields_warn_at_the_exact_field() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                ".": {
+                    "project": ["*.ts"],
+                    "vitest": {"entry": [".github/**/*.test.cjs"]},
+                    "ignoreBinaries": ["eas"],
+                    "unknownKey": true
+                }
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(config.is_empty(), "{config:?}");
+        assert_eq!(
+            warning_fields(&warnings),
+            [
+                "workspaces[\".\"].project",
+                "workspaces[\".\"].vitest",
+                "workspaces[\".\"].ignoreBinaries",
+                "workspaces[\".\"].unknownKey"
+            ]
+        );
+        assert!(warnings[1].message.contains("auto-detected"));
+    }
+
+    #[test]
+    fn migrate_knip_mixed_production_entries_warn_once_per_section() {
+        let knip = serde_json::json!({
+            "entry": ["src/prod.ts!", "src/dev.ts", "src/other.ts"],
+            "workspaces": {
+                "apps/server": {"entry": ["src/bin.ts!", "scripts/*.ts"]},
+                "apps/web": {"entry": ["src/main.ts!"]},
+                "apps/docs": {"entry": ["scripts/build.ts"]}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            warning_fields(&warnings),
+            ["entry", "workspaces.apps/server.entry"]
+        );
+        assert!(
+            warnings[0]
+                .message
+                .contains("unmarked entries now also count in production mode"),
+            "{}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn migrate_knip_workspace_keys_and_patterns_are_normalized() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "apps\\win": {"entry": ["src\\main.ts", "/src/abs.ts"]},
+                "/apps/rooted": {"entry": ["index.ts"]},
+                "!apps/neg": {"entry": ["n.ts"]},
+                "packages/**": {"entry": ["**/*.ts"], "ignore": ["!**/keep.ts"]}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!([
+                "apps/win/src/main.ts",
+                "apps/win/src/abs.ts",
+                "apps/rooted/index.ts",
+                "packages/**/*.ts"
+            ])
+        );
+        assert_eq!(
+            config.get("ignoreFindings").unwrap(),
+            &serde_json::json!(["!packages/**/keep.ts"])
+        );
+        assert_eq!(warning_fields(&warnings), ["workspaces.!apps/neg"]);
+    }
+
+    #[test]
+    fn migrate_knip_workspace_traversal_patterns_are_not_written() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "apps/web": {"entry": ["../shared/index.ts", "src/main.ts"]},
+                "../outside": {"entry": ["index.ts"]}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["apps/web/src/main.ts"])
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            ["workspaces.apps/web.entry", "workspaces.../outside"]
+        );
     }
 
     #[test]
@@ -400,49 +701,6 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "workspaces");
         assert!(warnings[0].message.contains("expected an object"));
-    }
-
-    #[test]
-    fn migrate_knip_workspace_ignore_has_targeted_warning_only() {
-        let knip = serde_json::json!({
-            "workspaces": {"packages/*": {"ignore": ["src/generated/**"]}}
-        });
-        let mut config = empty_config();
-        let mut warnings = Vec::new();
-        migrate_knip(&knip, &mut config, &mut warnings);
-
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "workspaces.packages/*.ignore");
-        assert!(warnings[0].message.contains("workspace-relative"));
-        assert!(
-            warnings[0].suggestion.as_deref().is_some_and(
-                |suggestion| suggestion.contains("project-root-relative ignoreFindings")
-            )
-        );
-    }
-
-    #[test]
-    fn migrate_knip_workspace_ignore_and_other_config_warn_separately() {
-        let knip = serde_json::json!({
-            "workspaces": {
-                "packages/*": {
-                    "ignore": ["src/generated/**"],
-                    "entry": ["src/index.ts"]
-                }
-            }
-        });
-        let mut config = empty_config();
-        let mut warnings = Vec::new();
-        migrate_knip(&knip, &mut config, &mut warnings);
-
-        let fields: Vec<&str> = warnings
-            .iter()
-            .map(|warning| warning.field.as_str())
-            .collect();
-        assert_eq!(
-            fields,
-            ["workspaces.packages/*.ignore", "workspaces.packages/*"]
-        );
     }
 
     #[test]
@@ -762,7 +1020,7 @@ mod tests {
 
         assert_eq!(
             config.get("entry").unwrap(),
-            &serde_json::json!(["src/index.ts", "src/worker.ts"])
+            &serde_json::json!(["src/index.ts", "src/worker.ts", "packages/*/index.ts"])
         );
         assert_eq!(
             config.get("ignoreFindings").unwrap(),
@@ -782,7 +1040,11 @@ mod tests {
         assert!(warning_fields.contains(&"ignoreDependencies"));
         assert!(warning_fields.contains(&"project"));
         assert!(warning_fields.contains(&"eslint"));
-        assert!(warning_fields.contains(&"workspaces.packages/*"));
+        assert!(
+            !warning_fields
+                .iter()
+                .any(|field| field.starts_with("workspaces"))
+        );
     }
 
     #[test]
