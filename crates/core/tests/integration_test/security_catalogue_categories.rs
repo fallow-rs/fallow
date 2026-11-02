@@ -713,14 +713,32 @@ fn path_traversal_join_without_request_input_does_not_fire() {
 }
 
 #[test]
-fn path_traversal_join_in_a_module_without_its_own_input_does_not_fire() {
-    // The gate is per module: an importer that reads `req.url` does not arm
-    // the `path.join` of the helper it calls. This trades a false negative
-    // for quiet build and config code that a dev server imports.
+fn path_traversal_join_in_a_helper_of_a_request_handler_fires() {
+    // A handler passes `req.url` to a helper in another file. The helper does
+    // not read request input itself, but its direct importer does.
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_candidate(&results, "src/imported-by-handler.ts", "path-traversal", 22);
+}
+
+#[test]
+fn path_traversal_join_two_imports_from_a_request_handler_does_not_fire() {
+    // Only a direct importer arms the gate. A dev server that imports a build
+    // pipeline must not arm every path join in that pipeline.
     let results = analyze_with_security_sink("security-path-traversal");
     assert!(
-        !anchored_on(&results, "src/imported-by-handler.ts"),
-        "a helper that does not read request input itself must not be flagged"
+        !anchored_on(&results, "src/pipeline-output.ts"),
+        "build code two imports away from request input must not be flagged"
+    );
+}
+
+#[test]
+fn path_traversal_join_also_imported_by_build_code_does_not_fire() {
+    // A module that build code also imports is not armed by the request
+    // handler that imports it: a dev server imports its config this way.
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert!(
+        !anchored_on(&results, "src/shared-join.ts"),
+        "a module with an importer that reads no request input must not be flagged"
     );
 }
 

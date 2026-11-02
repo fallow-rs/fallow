@@ -1331,7 +1331,7 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | `dynamic-module-load` | 95 | dynamic `require(...)` |
 | `sql-injection` | 89 | string concat or interpolated template into `.query()` / `.execute()`, and `sql.raw(...)`. Parameterized `` sql`${x}` `` and the object form `.execute({ sql, args })` are NOT flagged |
 | `ssrf` | 918 | `fetch` / `got` / `ky` / `needle` / `request` / `axios` / `superagent` / `undici` / `http(s).request` |
-| `path-traversal` | 22 | `path.join` / `path.resolve` with untrusted input in the argument or the same module / `node:fs` path methods / route `sendFile` |
+| `path-traversal` | 22 | `path.join` / `path.resolve` with untrusted input in the argument, the same module or every direct importer / `node:fs` path methods / route `sendFile` |
 | `header-injection` | 113 | response `setHeader` / `writeHead` with a value that traces to untrusted input |
 | `open-redirect` | 601 | `res.redirect` / `location.href` / `location.assign` / `window.open` |
 | `postmessage-wildcard-origin` | 346 | `postMessage(..., "*")` |

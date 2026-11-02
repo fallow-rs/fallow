@@ -558,6 +558,8 @@ pub fn find_tainted_sinks(
 
     let run = TaintedSinkRun {
         active: &active,
+        graph,
+        modules_by_id: &modules_by_id,
         suppressions,
         line_offsets_by_file,
         declared_deps,
@@ -591,6 +593,8 @@ pub fn find_tainted_sinks(
 /// Shared immutable inputs threaded through the per-module tainted-sink scan.
 struct TaintedSinkRun<'a> {
     active: &'a [&'static Matcher],
+    graph: &'a ModuleGraph,
+    modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     declared_deps: &'a FxHashSet<String>,
@@ -632,15 +636,24 @@ fn matcher_accepts_source_kind(matcher: &Matcher, id: &str) -> bool {
             || !catalogue().is_secret_source(id))
 }
 
-/// The source kinds of the untrusted input that one module reads. Computed on
-/// first use, because only a `requires_module_source` row without an argument
-/// source needs them.
+/// The source kinds of the untrusted input that one module and each of its
+/// direct importers read. Computed on first use, because only a
+/// `requires_module_source` row without an argument source needs them.
 struct ModuleSourceKinds<'m> {
     module: &'m ModuleInfo,
     kinds: std::cell::OnceCell<FxHashSet<&'static str>>,
+    importer_kinds: std::cell::OnceCell<Vec<FxHashSet<&'static str>>>,
 }
 
-impl ModuleSourceKinds<'_> {
+impl<'m> ModuleSourceKinds<'m> {
+    const fn new(module: &'m ModuleInfo) -> Self {
+        Self {
+            module,
+            kinds: std::cell::OnceCell::new(),
+            importer_kinds: std::cell::OnceCell::new(),
+        }
+    }
+
     fn get(&self, run: &TaintedSinkRun<'_>) -> &FxHashSet<&'static str> {
         self.kinds.get_or_init(|| {
             module_input_source_kinds(
@@ -650,22 +663,69 @@ impl ModuleSourceKinds<'_> {
             )
         })
     }
+
+    /// The input kinds of each direct runtime importer of the module, one set
+    /// per importer. A test, story or tooling-config importer is left out.
+    fn importers(&self, run: &TaintedSinkRun<'_>) -> &[FxHashSet<&'static str>] {
+        self.importer_kinds.get_or_init(|| {
+            let target = self.module.file_id;
+            let mut kinds = Vec::new();
+            let Some(importers) = run.graph.reverse_deps.get(target.0 as usize) else {
+                return kinds;
+            };
+            for &importer in importers {
+                let Some(node) = run.graph.modules.get(importer.0 as usize) else {
+                    continue;
+                };
+                let Some(module) = run.modules_by_id.get(&importer) else {
+                    continue;
+                };
+                let rel_path = node
+                    .path
+                    .strip_prefix(run.context.root)
+                    .unwrap_or(&node.path);
+                let runtime_edge = run
+                    .graph
+                    .outgoing_edge_summaries(importer)
+                    .any(|edge| edge.target == target && !edge.all_type_only);
+                if is_low_value_anchor(rel_path) || !runtime_edge {
+                    continue;
+                }
+                kinds.push(module_input_source_kinds(
+                    module,
+                    run.declared_deps,
+                    run.context.request_receivers,
+                ));
+            }
+            kinds
+        })
+    }
 }
 
 /// Whether a `requires_module_source` row may fire: the argument traces to a
-/// source, or the sink module itself reads input of a kind the row accepts.
+/// source, the sink module reads input of a kind the row accepts, or every
+/// direct runtime importer does.
+///
+/// A request handler often passes its input to a helper in another file, so
+/// a helper that only handlers import is armed. A module that other code also
+/// imports is not: a dev server imports its config and build pipeline, and
+/// one request read there must not arm every path join in them. Only one
+/// import hop counts for the same reason.
 fn module_source_satisfied(
     run: &TaintedSinkRun<'_>,
     matcher: &Matcher,
     source: Option<TaintedSinkSource<'_>>,
     module_kinds: &ModuleSourceKinds<'_>,
 ) -> bool {
-    !matcher.requires_module_source
-        || source.is_some()
-        || module_kinds
-            .get(run)
+    let accepts = |kinds: &FxHashSet<&'static str>| {
+        kinds
             .iter()
             .any(|kind| matcher_accepts_source_kind(matcher, kind))
+    };
+    !matcher.requires_module_source || source.is_some() || accepts(module_kinds.get(run)) || {
+        let importers = module_kinds.importers(run);
+        !importers.is_empty() && importers.iter().all(accepts)
+    }
 }
 
 fn match_tainted_sink<'a>(
@@ -721,10 +781,7 @@ fn collect_module_tainted_sinks(
     // source-backed argument over a source-free one.
     let mut variadic_calls: FxHashMap<(u32, *const Matcher), usize> = FxHashMap::default();
 
-    let module_kinds = ModuleSourceKinds {
-        module,
-        kinds: std::cell::OnceCell::new(),
-    };
+    let module_kinds = ModuleSourceKinds::new(module);
 
     for sink in &module.security_sinks {
         let Some((matcher, source)) = match_tainted_sink(run, &module_kinds, sink, &tainted_locals)

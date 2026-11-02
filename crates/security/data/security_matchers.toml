@@ -505,7 +505,10 @@ evidence_template = "A non-public env secret reaches the body/options of {callee
 # ── CWE-22: Path traversal ──────────────────────────────────────────────────
 # Build, CLI and config code joins paths from options all the time. The
 # `path.join` / `path.resolve` row therefore needs untrusted input in the
-# argument or in the same module (a static-file middleware reads `req.url`).
+# argument, in the same module (a static-file middleware reads `req.url`), or
+# in every direct importer (a handler passes its input to a helper). A module
+# that build code also imports, and a module two imports away, stay quiet,
+# because a dev server imports its config and its whole build pipeline.
 # CLI arguments do not count: the user who runs a CLI owns its file system.
 # The direct file-system rows below stay ungated.
 [[matcher]]
@@ -1334,7 +1337,8 @@ title = "HTTP request input"
 # Fetch `Request`: `req.url`, `req.originalUrl`, `request.headers`. A static
 # file or dev-server middleware reads the path from `req.url`. Gated to the
 # two request receiver names, because `ctx.url` / `event.headers` have other
-# meanings in other frameworks.
+# meanings in other frameworks. A module that reads one of these also arms the
+# `path.join` gate above, also when `request` is an outgoing Fetch `Request`.
 path_patterns = ["*.url", "*.originalUrl", "*.headers"]
 receiver_allowlist = ["req", "request"]
 

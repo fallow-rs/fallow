@@ -143,8 +143,8 @@ struct RawMatcher {
     #[serde(default)]
     requires_source_kinds: Vec<String>,
     /// Optional precision gate, looser than `requires_source`: the sink must
-    /// either trace to a source in its argument, or sit in a module that itself
-    /// reads untrusted input.
+    /// either trace to a source in its argument, or sit in a module that reads
+    /// untrusted input or whose direct importers all read untrusted input.
     #[serde(default)]
     requires_module_source: bool,
     /// Optional source kinds that neither back this row nor satisfy
@@ -351,7 +351,8 @@ pub struct Matcher {
     /// any matched source.
     pub requires_source_kinds: Vec<String>,
     /// Whether this matcher fires only when the sink argument traces to an
-    /// untrusted source, or the sink module itself reads untrusted input.
+    /// untrusted source, or the sink module or every direct importer reads
+    /// untrusted input.
     pub requires_module_source: bool,
     /// Source kinds that neither back this row nor satisfy
     /// `requires_module_source`.
