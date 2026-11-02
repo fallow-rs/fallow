@@ -47,16 +47,50 @@ struct PushSinkArgInput<'site, 'ast> {
     span: Span,
 }
 
+/// What a local binding holds, when that value changes the meaning of a sink.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SinkBinding {
+    /// A code-executing global (`const e = eval`), valued by the global name.
+    CodeExec(String),
+    /// A Node.js built-in module (`const vm = require("vm")`), valued by the
+    /// `node:` path that the catalogue matches (`node:vm`).
+    NodeModule(String),
+    /// A member of a Node.js built-in module (`import { runInNewContext }
+    /// from "vm"`), valued by the `node:` member path
+    /// (`node:vm.runInNewContext`).
+    NodeModuleMember(String),
+    /// A `<script>` element (`document.createElement("script")`).
+    ScriptElement,
+}
+
+/// Node.js built-in modules whose named and CommonJS bindings resolve to a
+/// `node:<module>.<member>` callee path. The `node:` root is not a valid
+/// identifier, so the path proves the import provenance on its own.
+const NODE_BINDING_MODULES: &[&str] = &["vm"];
+
+/// Properties of a `<script>` element whose value the browser loads or runs
+/// as code.
+const SCRIPT_ELEMENT_CODE_PROPERTIES: &[&str] = &["src", "text", "textContent", "innerText"];
+
+/// Callee root that names a proven `<script>` element in a sink path.
+const SCRIPT_ELEMENT_ROOT: &str = "HTMLScriptElement";
+
+/// Methods that parse their argument as markup. A call of one of these
+/// methods on an object that the static path cannot flatten
+/// (`document.createRange().createContextualFragment(x)`) still resolves
+/// through [`ModuleInfoExtractor::sink_object_path`].
+const OBJECT_ROOTED_HTML_METHODS: &[&str] = &["createContextualFragment", "insertAdjacentHTML"];
+
 /// Per-module local bindings that re-expose a sink under another name.
 #[derive(Default)]
 pub(in crate::visitor) struct SinkAliasState {
-    /// Module-scope locals bound to a code-executing global (`const e = eval`),
-    /// keyed by the local name, valued by the global name.
-    code_exec_aliases: FxHashMap<String, String>,
-    /// Per `nested_declaration_stack` frame: the aliases of a code-executing
-    /// global that the frame declares. A name that a nearer frame declares
-    /// without such a value hides an outer alias.
-    scoped_code_exec_aliases: Vec<FxHashMap<String, String>>,
+    /// Module-scope bindings that change the meaning of a sink, keyed by the
+    /// local name.
+    bindings: FxHashMap<String, SinkBinding>,
+    /// Per `nested_declaration_stack` frame: the sink bindings that the frame
+    /// declares. A name that a nearer frame declares without such a value
+    /// hides an outer binding.
+    scoped_bindings: Vec<FxHashMap<String, SinkBinding>>,
     /// Names that an enclosing `catch` clause binds. The visitor does not
     /// record a catch parameter in `nested_declaration_stack`, so these names
     /// hide every alias.
@@ -107,6 +141,47 @@ fn normalize_global_code_exec_path(path: String) -> String {
         return rest.to_string();
     }
     path
+}
+
+fn set_sink_binding(
+    bindings: &mut FxHashMap<String, SinkBinding>,
+    name: &str,
+    binding: Option<SinkBinding>,
+) {
+    match binding {
+        Some(binding) => {
+            bindings.insert(name.to_string(), binding);
+        }
+        None => {
+            bindings.remove(name);
+        }
+    }
+}
+
+/// The `node:` path of an import source when the module is in
+/// [`NODE_BINDING_MODULES`] (`vm` and `node:vm` both give `node:vm`).
+fn node_binding_module(source: &str) -> Option<String> {
+    let module = source.strip_prefix("node:").unwrap_or(source);
+    NODE_BINDING_MODULES
+        .contains(&module)
+        .then(|| format!("node:{module}"))
+}
+
+/// Whether `expr` is `<object>.createElement("script")`.
+fn is_create_script_element_call(expr: &Expression<'_>) -> bool {
+    let Expression::CallExpression(call) = unwrap_static_expr(expr) else {
+        return false;
+    };
+    let Expression::StaticMemberExpression(member) = unwrap_parens(&call.callee) else {
+        return false;
+    };
+    member.property.name == "createElement"
+        && call
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(static_string_literal_value)
+            .is_some_and(|tag| tag.eq_ignore_ascii_case("script"))
 }
 
 /// Whether an unresolved computed assignment key builds a property name from
@@ -801,7 +876,7 @@ impl ModuleInfoExtractor {
     }
 
     fn capture_call_sink(&mut self, expr: &CallExpression<'_>) {
-        let Some(callee_path) = self.security_callee_path(&expr.callee) else {
+        let Some(callee_path) = self.call_sink_callee_path(&expr.callee) else {
             self.record_unresolved_call_sink(expr);
             return;
         };
@@ -812,6 +887,12 @@ impl ModuleInfoExtractor {
             SinkShape::Call
         };
         self.capture_call_sink_args(expr, &callee_path, sink_shape);
+        self.capture_function_body_after_spread(
+            &callee_path,
+            sink_shape,
+            &expr.arguments,
+            expr.span,
+        );
         self.capture_set_attribute_srcdoc_sink(expr, &callee_path);
         if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
         {
@@ -910,6 +991,47 @@ impl ModuleInfoExtractor {
                 span: expr.span,
             });
         }
+        self.capture_function_body_after_spread(
+            &callee_path,
+            SinkShape::NewExpression,
+            &expr.arguments,
+            expr.span,
+        );
+    }
+
+    /// The Function constructor takes its code as the last argument. When a
+    /// spread fills the parameter list (`new Function(...names, body)`), the
+    /// body has no fixed index, so it is captured as argument 0. A spread body
+    /// is captured through its argument.
+    fn capture_function_body_after_spread(
+        &mut self,
+        callee_path: &str,
+        sink_shape: SinkShape,
+        arguments: &[Argument<'_>],
+        span: Span,
+    ) {
+        if callee_path != "Function" {
+            return;
+        }
+        let (Some(Argument::SpreadElement(_)), Some(body)) = (arguments.first(), arguments.last())
+        else {
+            return;
+        };
+        let arg_expr = match body {
+            Argument::SpreadElement(spread) => &spread.argument,
+            body => match body.as_expression() {
+                Some(expr) => expr,
+                None => return,
+            },
+        };
+        self.push_security_sink_arg(PushSinkArgInput {
+            callee_path,
+            sink_shape,
+            arg_index: 0,
+            arg_expr,
+            url_arg_literal: None,
+            span,
+        });
     }
 
     pub(super) fn capture_math_random_context_sink(
@@ -982,9 +1104,11 @@ impl ModuleInfoExtractor {
     /// the blind-spot counter.
     pub(super) fn capture_member_assign_sink(&mut self, expr: &AssignmentExpression<'_>) {
         let callee_path = match &expr.left {
-            AssignmentTarget::StaticMemberExpression(member) => {
-                self.member_assign_callee_path(&member.object, member.property.name.as_str())
-            }
+            AssignmentTarget::StaticMemberExpression(member) => self
+                .script_element_assign_path(&member.object, member.property.name.as_str())
+                .or_else(|| {
+                    self.member_assign_callee_path(&member.object, member.property.name.as_str())
+                }),
             AssignmentTarget::ComputedMemberExpression(member) => {
                 self.computed_member_assign_callee_path(member, &expr.right)
             }
@@ -1005,18 +1129,49 @@ impl ModuleInfoExtractor {
         self.record_member_assign_sink(expr, callee_path, arg_literal, arg_is_non_literal);
     }
 
+    /// `HTMLScriptElement.<property>` when `object` is a local bound to a new
+    /// `<script>` element and the property loads or holds its code. Other
+    /// elements keep their member path, so `span.textContent = x` and
+    /// `img.src = x` match no row.
+    fn script_element_assign_path(
+        &self,
+        object: &Expression<'_>,
+        property: &str,
+    ) -> Option<String> {
+        if !SCRIPT_ELEMENT_CODE_PROPERTIES.contains(&property) {
+            return None;
+        }
+        let Expression::Identifier(ident) = unwrap_static_expr(object) else {
+            return None;
+        };
+        matches!(
+            self.sink_binding(ident.name.as_str()),
+            Some(SinkBinding::ScriptElement)
+        )
+        .then(|| format!("{SCRIPT_ELEMENT_ROOT}.{property}"))
+    }
+
     fn member_assign_callee_path(
         &mut self,
         object: &Expression<'_>,
         property: &str,
     ) -> Option<String> {
-        let Some(object_path) = self.static_callee_path(object) else {
+        let object_path = self
+            .static_callee_path(object)
+            .or_else(|| self.sink_object_path(object));
+        let Some(object_path) = object_path else {
             self.record_skipped_security_callee(
                 object,
                 SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
             );
             return None;
         };
+        // `this.__proto__ = new.target.prototype` is the `setPrototypeOf`
+        // fallback of an `Error` subclass. It sets the prototype of the new
+        // instance and cannot reach a shared prototype.
+        if object_path == "this" && property == "__proto__" {
+            return None;
+        }
         Some(format!("{object_path}.{property}"))
     }
 
@@ -1049,19 +1204,30 @@ impl ModuleInfoExtractor {
     ///
     /// On top of [`Self::static_callee_path`], this maps a global-object prefix
     /// on a code-executing global (`window.eval`) and a local alias of one
-    /// (`const e = eval; e(code)`) to the bare global.
+    /// (`const e = eval; e(code)`) to the bare global. A binding of a Node.js
+    /// built-in module in [`NODE_BINDING_MODULES`] resolves to its `node:`
+    /// path (`runInNewContext(code)` after `import { runInNewContext } from
+    /// "vm"` becomes `node:vm.runInNewContext`).
     fn security_callee_path(&self, expr: &Expression<'_>) -> Option<String> {
         let path = normalize_global_code_exec_path(self.static_callee_path(expr)?);
-        if path.contains('.') {
-            return Some(path);
-        }
-        Some(self.code_exec_alias_target(&path).unwrap_or(path))
+        let (root, rest) = match path.split_once('.') {
+            Some((root, rest)) => (root, Some(rest)),
+            None => (path.as_str(), None),
+        };
+        let resolved = match (self.sink_binding(root), rest) {
+            (Some(SinkBinding::CodeExec(target) | SinkBinding::NodeModuleMember(target)), None) => {
+                Some(target.clone())
+            }
+            (Some(SinkBinding::NodeModule(module)), Some(rest)) => Some(format!("{module}.{rest}")),
+            _ => None,
+        };
+        Some(resolved.unwrap_or(path))
     }
 
-    /// The code-executing global that the innermost binding of `name` holds.
-    /// A parameter, a catch parameter or a nested declaration of the same name
-    /// without such a value hides an outer alias.
-    fn code_exec_alias_target(&self, name: &str) -> Option<String> {
+    /// The sink binding that the innermost binding of `name` holds. A
+    /// parameter, a catch parameter or a nested declaration of the same name
+    /// without such a value hides an outer binding.
+    fn sink_binding(&self, name: &str) -> Option<&SinkBinding> {
         if self
             .sink_aliases
             .catch_param_names
@@ -1070,29 +1236,27 @@ impl ModuleInfoExtractor {
         {
             return None;
         }
-        let aliases = match self
+        let bindings = match self
             .nested_declaration_stack
             .iter()
             .rposition(|scope| scope.contains(name))
         {
-            Some(index) => self.sink_aliases.scoped_code_exec_aliases.get(index)?,
-            None => &self.sink_aliases.code_exec_aliases,
+            Some(index) => self.sink_aliases.scoped_bindings.get(index)?,
+            None => &self.sink_aliases.bindings,
         };
-        aliases.get(name).cloned()
+        bindings.get(name)
     }
 
     /// Open the alias frames that match a new `nested_declaration_stack`
     /// frame: the `require` aliases and the code-exec aliases.
     pub(super) fn push_scoped_alias_frames(&mut self) {
         self.scoped_require_aliases.push(FxHashSet::default());
-        self.sink_aliases
-            .scoped_code_exec_aliases
-            .push(FxHashMap::default());
+        self.sink_aliases.scoped_bindings.push(FxHashMap::default());
     }
 
     pub(super) fn pop_scoped_alias_frames(&mut self) {
         self.scoped_require_aliases.pop();
-        self.sink_aliases.scoped_code_exec_aliases.pop();
+        self.sink_aliases.scoped_bindings.pop();
     }
 
     /// Open the scope of a `catch` clause that binds `names`.
@@ -1143,6 +1307,85 @@ impl ModuleInfoExtractor {
         Some(join_member_path(root, &properties))
     }
 
+    /// Flatten the object of a member sink to a dotted path when
+    /// [`Self::static_callee_path`] cannot: a `this` root, TypeScript
+    /// wrappers (`el!`, `el as T`), optional chains (`a?.b`) and calls, which
+    /// keep a `()` suffix (`document.createRange()`). Only member-assign
+    /// objects and [`OBJECT_ROOTED_HTML_METHODS`] use this path, so call
+    /// rows with broad patterns do not see these roots.
+    fn sink_object_path(&self, expr: &Expression<'_>) -> Option<String> {
+        let mut segments: Vec<String> = Vec::new();
+        let mut calls = 0_usize;
+        let mut expr = expr;
+        loop {
+            crate::cost::walk_step();
+            let (segment, next): (Cow<'_, str>, Option<&Expression<'_>>) =
+                match unwrap_static_expr(expr) {
+                    Expression::Identifier(ident) => (Cow::Borrowed(ident.name.as_str()), None),
+                    Expression::ThisExpression(_) => (Cow::Borrowed("this"), None),
+                    Expression::StaticMemberExpression(member) => (
+                        Cow::Borrowed(member.property.name.as_str()),
+                        Some(&member.object),
+                    ),
+                    Expression::ComputedMemberExpression(member) => (
+                        Cow::Owned(self.static_property_key(&member.expression)?),
+                        Some(&member.object),
+                    ),
+                    Expression::CallExpression(call) => {
+                        calls += 1;
+                        expr = &call.callee;
+                        continue;
+                    }
+                    Expression::ChainExpression(chain) => match &chain.expression {
+                        ChainElement::StaticMemberExpression(member) => (
+                            Cow::Borrowed(member.property.name.as_str()),
+                            Some(&member.object),
+                        ),
+                        ChainElement::ComputedMemberExpression(member) => (
+                            Cow::Owned(self.static_property_key(&member.expression)?),
+                            Some(&member.object),
+                        ),
+                        ChainElement::CallExpression(call) => {
+                            calls += 1;
+                            expr = &call.callee;
+                            continue;
+                        }
+                        ChainElement::TSNonNullExpression(non_null) => {
+                            expr = &non_null.expression;
+                            continue;
+                        }
+                        ChainElement::PrivateFieldExpression(_) => return None,
+                    },
+                    _ => return None,
+                };
+            let mut segment = segment.into_owned();
+            for _ in 0..calls {
+                segment.push_str("()");
+            }
+            calls = 0;
+            segments.push(segment);
+            match next {
+                Some(object) => expr = object,
+                None => break,
+            }
+        }
+        segments.reverse();
+        Some(segments.join("."))
+    }
+
+    /// The callee path of a call sink. A method in
+    /// [`OBJECT_ROOTED_HTML_METHODS`] also resolves on an object that only
+    /// [`Self::sink_object_path`] can flatten.
+    fn call_sink_callee_path(&self, callee: &Expression<'_>) -> Option<String> {
+        self.security_callee_path(callee).or_else(|| {
+            let method = super::visit_helpers::terminal_static_member_name(callee)?;
+            if !OBJECT_ROOTED_HTML_METHODS.contains(&method) {
+                return None;
+            }
+            self.sink_object_path(callee)
+        })
+    }
+
     /// A computed property key that folds to a constant identifier-like string.
     /// Keys with a `.` are rejected, because they would split into two path
     /// segments.
@@ -1175,25 +1418,81 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_sink_alias_bindings(&mut self, name: &str, init: &Expression<'_>) {
-        self.record_code_exec_alias(name, init);
+        let binding = self.sink_binding_of_value(name, init);
+        if let Some(bindings) = self.declaration_sink_bindings(name) {
+            set_sink_binding(bindings, name, binding);
+        }
         self.record_jsx_spread_object(name, init);
     }
 
-    /// Record or clear a local alias of a code-executing global
-    /// (`const e = eval`) in the frame that declares the name. A later binding
-    /// of the same name with another value clears the alias. Inside a
-    /// namespace the visitor keeps no frames, so no alias is recorded there.
-    fn record_code_exec_alias(&mut self, name: &str, init: &Expression<'_>) {
+    /// Record the members of a Node.js built-in module that an object pattern
+    /// takes from it (`const { runInThisContext: run } = require("vm")`).
+    pub(super) fn record_sink_pattern_bindings(
+        &mut self,
+        pattern: &ObjectPattern<'_>,
+        init: &Expression<'_>,
+    ) {
+        let module = self.node_binding_module_of_require(init);
+        for property in &pattern.properties {
+            let BindingPattern::BindingIdentifier(local) = &property.value else {
+                continue;
+            };
+            let name = local.name.as_str();
+            let binding = module.as_ref().and_then(|module| {
+                property
+                    .key
+                    .static_name()
+                    .map(|key| SinkBinding::NodeModuleMember(format!("{module}.{}", key.text())))
+            });
+            if let Some(bindings) = self.declaration_sink_bindings(name) {
+                set_sink_binding(bindings, name, binding);
+            }
+        }
+    }
+
+    /// Record a named ES import of a Node.js built-in module
+    /// (`import { runInContext as run } from "node:vm"`).
+    pub(super) fn record_import_sink_binding(&mut self, source: &str, imported: &str, local: &str) {
+        if let Some(module) = node_binding_module(source) {
+            self.sink_aliases.bindings.insert(
+                local.to_string(),
+                SinkBinding::NodeModuleMember(format!("{module}.{imported}")),
+            );
+        }
+    }
+
+    /// Update the sink binding of `name` after a plain assignment
+    /// (`script = document.createElement("script")`). The binding lives in the
+    /// frame that declares the name, or at module scope for an undeclared
+    /// name.
+    pub(super) fn record_sink_assignment_binding(&mut self, name: &str, value: &Expression<'_>) {
         if self.namespace_depth > 0 {
             return;
         }
-        let target = match unwrap_parens(init) {
-            Expression::Identifier(_)
-            | Expression::StaticMemberExpression(_)
-            | Expression::ComputedMemberExpression(_)
-            | Expression::SequenceExpression(_) => self.security_callee_path(init),
-            _ => None,
+        let binding = self.sink_binding_of_value(name, value);
+        let frame = self
+            .nested_declaration_stack
+            .iter()
+            .rposition(|scope| scope.contains(name));
+        let bindings = match frame {
+            Some(index) => match self.sink_aliases.scoped_bindings.get_mut(index) {
+                Some(bindings) => bindings,
+                None => return,
+            },
+            None => &mut self.sink_aliases.bindings,
         };
+        set_sink_binding(bindings, name, binding);
+    }
+
+    /// The binding map of the frame that declares `name`. Inside a namespace
+    /// the visitor keeps no frames, so no binding is recorded there.
+    fn declaration_sink_bindings(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut FxHashMap<String, SinkBinding>> {
+        if self.namespace_depth > 0 {
+            return None;
+        }
         let frame = if self.is_module_scope() {
             None
         } else {
@@ -1202,21 +1501,50 @@ impl ModuleInfoExtractor {
                 .rposition(|scope| scope.contains(name))
                 .or_else(|| self.nested_declaration_stack.len().checked_sub(1))
         };
-        let aliases = match frame {
-            Some(index) => match self.sink_aliases.scoped_code_exec_aliases.get_mut(index) {
-                Some(aliases) => aliases,
-                None => return,
-            },
-            None => &mut self.sink_aliases.code_exec_aliases,
-        };
-        match target {
-            Some(target) if CODE_EXEC_GLOBALS.contains(&target.as_str()) && target != name => {
-                aliases.insert(name.to_string(), target);
-            }
-            _ => {
-                aliases.remove(name);
-            }
+        match frame {
+            Some(index) => self.sink_aliases.scoped_bindings.get_mut(index),
+            None => Some(&mut self.sink_aliases.bindings),
         }
+    }
+
+    /// The sink binding that a value gives to `name`: an alias of a
+    /// code-executing global or of a Node.js module binding, a `require()` of
+    /// a module in [`NODE_BINDING_MODULES`], or a new `<script>` element.
+    fn sink_binding_of_value(&self, name: &str, value: &Expression<'_>) -> Option<SinkBinding> {
+        if is_create_script_element_call(value) {
+            return Some(SinkBinding::ScriptElement);
+        }
+        if let Some(module) = self.node_binding_module_of_require(value) {
+            return Some(SinkBinding::NodeModule(module));
+        }
+        let target = match unwrap_parens(value) {
+            Expression::Identifier(_)
+            | Expression::StaticMemberExpression(_)
+            | Expression::ComputedMemberExpression(_)
+            | Expression::SequenceExpression(_) => self.security_callee_path(value)?,
+            _ => return None,
+        };
+        if target == name {
+            return None;
+        }
+        if CODE_EXEC_GLOBALS.contains(&target.as_str()) {
+            return Some(SinkBinding::CodeExec(target));
+        }
+        if target.starts_with("node:") {
+            return Some(if target.contains('.') {
+                SinkBinding::NodeModuleMember(target)
+            } else {
+                SinkBinding::NodeModule(target)
+            });
+        }
+        None
+    }
+
+    /// The `node:` path of `require("<module>")` for a module in
+    /// [`NODE_BINDING_MODULES`].
+    fn node_binding_module_of_require(&self, value: &Expression<'_>) -> Option<String> {
+        let (_, source) = self.try_extract_require(unwrap_static_expr(value))?;
+        node_binding_module(&source)
     }
 
     /// `el.setAttribute("srcdoc", html)` sets the same document as

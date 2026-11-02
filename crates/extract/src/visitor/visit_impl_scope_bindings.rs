@@ -705,6 +705,67 @@ impl ModuleInfoExtractor {
         self.path_relative_binding_stack.push(path_relative_scope);
     }
 
+    /// Open the nested scope frames of a block. Outside a namespace only.
+    pub(super) fn push_nested_scope_frames(&mut self) {
+        self.nested_declaration_stack.push(FxHashSet::default());
+        self.push_scoped_alias_frames();
+        self.scoped_non_instance_bindings.push(FxHashSet::default());
+        self.scoped_namespace_binding_names
+            .push(FxHashSet::default());
+        self.scoped_array_binding_element_types
+            .push(FxHashMap::default());
+        self.sanitizer_binding_stack.push(FxHashMap::default());
+        self.literal_allowlist_binding_stack
+            .push(FxHashMap::default());
+        self.risky_regex_binding_stack.push(FxHashMap::default());
+        self.path_sink_binding_stack.push(FxHashMap::default());
+        self.path_relative_binding_stack.push(FxHashMap::default());
+    }
+
+    /// Close the frames that [`Self::push_nested_scope_frames`] opened.
+    pub(super) fn pop_nested_scope_frames(&mut self) {
+        self.nested_declaration_stack.pop();
+        self.pop_scoped_alias_frames();
+        self.scoped_non_instance_bindings.pop();
+        self.scoped_namespace_binding_names.pop();
+        self.scoped_array_binding_element_types.pop();
+        self.sanitizer_binding_stack.pop();
+        self.literal_allowlist_binding_stack.pop();
+        self.risky_regex_binding_stack.pop();
+        self.path_sink_binding_stack.pop();
+        self.path_relative_binding_stack.pop();
+    }
+
+    /// Record the declaration in a loop head (`for (const s of list)`). A
+    /// lexical declaration opens its own frame, which the loop scope owns, so
+    /// the loop variable hides an outer binding of the same name. A `var`
+    /// joins the current frame. Returns whether a frame was opened; pass it to
+    /// [`Self::pop_loop_head_scope`].
+    pub(super) fn push_loop_head_scope(
+        &mut self,
+        declaration: Option<&VariableDeclaration<'_>>,
+    ) -> bool {
+        let Some(declaration) = declaration else {
+            return false;
+        };
+        if self.namespace_depth > 0 {
+            return false;
+        }
+        let lexical = declaration.kind.is_lexical();
+        if lexical {
+            self.push_nested_scope_frames();
+        }
+        self.record_nested_scope_declarators(declaration);
+        self.record_non_instance_declarators(declaration);
+        lexical
+    }
+
+    pub(super) fn pop_loop_head_scope(&mut self, pushed: bool) {
+        if pushed {
+            self.pop_nested_scope_frames();
+        }
+    }
+
     pub(super) fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
@@ -788,4 +849,14 @@ impl ModuleInfoExtractor {
 
 fn static_enum_member_key(enum_name: &str, member_name: &str) -> String {
     format!("{enum_name}.{member_name}")
+}
+
+/// The declaration in the head of a `for...of` or `for...in` loop, if any.
+pub(super) fn loop_head_declaration<'s, 'a>(
+    left: &'s ForStatementLeft<'a>,
+) -> Option<&'s VariableDeclaration<'a>> {
+    match left {
+        ForStatementLeft::VariableDeclaration(declaration) => Some(declaration),
+        _ => None,
+    }
 }

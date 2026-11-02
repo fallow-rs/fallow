@@ -129,6 +129,7 @@ use visit_factory_returns::{
 use visit_helpers::*;
 use visit_object_helpers::*;
 use visit_package_resolution::*;
+use visit_scope_bindings::loop_head_declaration;
 use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
@@ -1924,6 +1925,9 @@ impl ModuleInfoExtractor {
         self.record_source_returning_helper_from_variable_declarator(decl, declarator, init);
         self.record_sanitizer_helper_from_variable_declarator(decl, declarator, init);
         self.record_initialized_declarator_bindings(decl, declarator, init);
+        if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
+            self.record_sink_pattern_bindings(pattern, init);
+        }
         if let BindingPattern::BindingIdentifier(id) = &declarator.id {
             self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
             self.capture_hardcoded_secret_literal_sink(id.name.as_str(), init, declarator.span);
@@ -2259,6 +2263,9 @@ impl<'a> ModuleInfoExtractor {
         {
             self.node_url_file_url_to_path_bindings
                 .insert(s.local.name.to_string());
+        }
+        if !is_type_only && !s.import_kind.is_type() {
+            self.record_import_sink_binding(source, &s.imported.name(), s.local.name.as_str());
         }
         if matches!(source, "vue" | "@vue/reactivity") {
             self.module_direct_object_binding_targets
@@ -3784,19 +3791,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.push_direct_object_binding_scope(FxHashSet::default());
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
-            self.nested_declaration_stack.push(FxHashSet::default());
-            self.push_scoped_alias_frames();
-            self.scoped_non_instance_bindings.push(FxHashSet::default());
-            self.scoped_namespace_binding_names
-                .push(FxHashSet::default());
-            self.scoped_array_binding_element_types
-                .push(FxHashMap::default());
-            self.sanitizer_binding_stack.push(FxHashMap::default());
-            self.literal_allowlist_binding_stack
-                .push(FxHashMap::default());
-            self.risky_regex_binding_stack.push(FxHashMap::default());
-            self.path_sink_binding_stack.push(FxHashMap::default());
-            self.path_relative_binding_stack.push(FxHashMap::default());
+            self.push_nested_scope_frames();
             self.preseed_nested_declarations(&stmt.body);
         }
         self.preseed_direct_object_binding_targets(&stmt.body);
@@ -3810,16 +3805,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.pop_function_type_alias_scope();
         }
         if self.namespace_depth == 0 {
-            self.nested_declaration_stack.pop();
-            self.pop_scoped_alias_frames();
-            self.scoped_non_instance_bindings.pop();
-            self.scoped_namespace_binding_names.pop();
-            self.scoped_array_binding_element_types.pop();
-            self.sanitizer_binding_stack.pop();
-            self.literal_allowlist_binding_stack.pop();
-            self.risky_regex_binding_stack.pop();
-            self.path_sink_binding_stack.pop();
-            self.path_relative_binding_stack.pop();
+            self.pop_nested_scope_frames();
         }
         self.pop_direct_object_binding_scope();
         self.block_depth -= 1;
@@ -4611,7 +4597,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             );
         }
         self.push_direct_object_binding_scope(roots);
-        if let Some(ForStatementInit::VariableDeclaration(declaration)) = &stmt.init {
+        let init_declaration = match &stmt.init {
+            Some(ForStatementInit::VariableDeclaration(declaration)) => Some(&**declaration),
+            _ => None,
+        };
+        let loop_scope = self.push_loop_head_scope(init_declaration);
+        if let Some(declaration) = init_declaration {
             self.preseed_direct_object_binding_declaration(declaration);
         }
         if let Some(init) = &stmt.init {
@@ -4641,6 +4632,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.visit_statement(&stmt.body);
         }
         self.pop_optional_binding_scope(values);
+        self.pop_loop_head_scope(loop_scope);
         self.pop_direct_object_binding_scope();
     }
 
@@ -4665,6 +4657,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             );
         }
         self.push_direct_object_binding_scope(roots);
+        let loop_scope = self.push_loop_head_scope(loop_head_declaration(&stmt.left));
         self.visit_for_statement_left(&stmt.left);
         self.visit_expression(&stmt.right);
         let values = self.push_conditional_binding_scope(&[]);
@@ -4676,6 +4669,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_for_of_member_destructuring(stmt);
         self.visit_statement(&stmt.body);
         self.pop_optional_binding_scope(values);
+        self.pop_loop_head_scope(loop_scope);
         self.pop_direct_object_binding_scope();
 
         if has_static_bindings {
@@ -4855,6 +4849,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             && let AssignmentTarget::AssignmentTargetIdentifier(ident) = &expr.left
         {
             self.handle_dynamic_import_assignment(ident, &expr.right);
+            self.record_sink_assignment_binding(ident.name.as_str(), &expr.right);
         }
         walk::walk_assignment_expression(self, expr);
         if self.invalidate_projected_assignment(&expr.left) {
@@ -5181,12 +5176,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             );
         }
         self.push_direct_object_binding_scope(roots);
+        let loop_scope = self.push_loop_head_scope(loop_head_declaration(&stmt.left));
         let values = self.push_conditional_binding_scope(&[]);
         if let Some(target) = stmt.left.as_assignment_target() {
             self.invalidate_assignment_target_proof(target);
         }
         self.visit_statement(&stmt.body);
         self.pop_optional_binding_scope(values);
+        self.pop_loop_head_scope(loop_scope);
         self.pop_direct_object_binding_scope();
     }
 
@@ -5799,23 +5796,6 @@ fn imported_callee_root<'a>(expression: &'a Expression<'a>) -> Option<&'a Identi
         }
         _ => None,
     }
-}
-
-fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
-    match unwrap_parens(expr) {
-        Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
-        _ => None,
-    }
-}
-
-fn callee_method_name<'a>(
-    callee: &'a Expression<'_>,
-    callee_path: Option<&'a str>,
-) -> Option<&'a str> {
-    if let Some(callee_path) = callee_path {
-        return callee_path.rsplit_once('.').map(|(_, method)| method);
-    }
-    terminal_static_member_name(callee)
 }
 
 /// Collect bare identifier references from a declarator initializer for the

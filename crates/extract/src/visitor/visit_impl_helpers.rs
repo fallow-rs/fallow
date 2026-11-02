@@ -12,7 +12,9 @@ use crate::js_text::JsText;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
-use super::{assignment_target_identifier_name, static_member_object_name, unwrap_static_expr};
+use super::{
+    assignment_target_identifier_name, static_member_object_name, unwrap_parens, unwrap_static_expr,
+};
 
 pub(super) const PINO_PACKAGE: &str = "pino";
 pub(super) const PINO_FACTORY_EXPORT: &str = "pino";
@@ -1867,4 +1869,21 @@ mod tests {
         append_unique_paths(&mut target, vec!["y".to_string(), "z".to_string()]);
         assert_eq!(target, vec!["x", "y", "z"]);
     }
+}
+
+pub(super) fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
+    match unwrap_parens(expr) {
+        Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
+        _ => None,
+    }
+}
+
+pub(super) fn callee_method_name<'a>(
+    callee: &'a Expression<'_>,
+    callee_path: Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(callee_path) = callee_path {
+        return callee_path.rsplit_once('.').map(|(_, method)| method);
+    }
+    terminal_static_member_name(callee)
 }

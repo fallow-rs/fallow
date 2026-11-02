@@ -1125,8 +1125,30 @@ fn security_unresolved_callee_records_dynamic_dispatch() {
 }
 
 #[test]
+fn security_member_assignment_object_keeps_call_and_this_roots() {
+    let info = parse(
+        "getElement().innerHTML = a;\nthis.shadowRoot!.innerHTML = b;\n(el as HTMLElement).outerHTML = c;",
+    );
+
+    assert_eq!(info.security_sinks_skipped, 0);
+    let paths: Vec<&str> = info
+        .security_sinks
+        .iter()
+        .map(|sink| sink.callee_path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "getElement().innerHTML",
+            "this.shadowRoot.innerHTML",
+            "el.outerHTML"
+        ]
+    );
+}
+
+#[test]
 fn security_unresolved_callee_records_member_assignment_object() {
-    let info = parse("getElement().innerHTML = req.body.name;");
+    let info = parse("(primary || fallback).innerHTML = req.body.name;");
 
     assert_eq!(info.security_sinks_skipped, 1);
     let diagnostic = info
