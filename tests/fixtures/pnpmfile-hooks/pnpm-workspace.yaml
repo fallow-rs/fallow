@@ -1,0 +1,4 @@
+packages:
+  - .
+pnpmfile:
+  - tools/workspace-hooks.mjs

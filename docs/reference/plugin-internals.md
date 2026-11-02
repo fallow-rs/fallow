@@ -560,6 +560,40 @@ entry points, `vp test -c <file>` sends the file to the Vitest plugin, and
 declared script. `vp exec`, `vp dlx` and `vpx` run their child command, as a
 command wrapper does.
 
+## GraphQL config files
+
+The `graphql-config` plugin reads `graphql.config.*`, `.graphqlrc`,
+`.graphqlrc.*`, and the `graphql` key in `package.json`. GraphQL tools read
+the files that the `schema` and `documents` globs name, so the plugin pushes
+these globs to `always_used_files`. It reads the top level and each
+`projects.<name>` entry. Each glob is relative to the directory of the config
+file. Only a glob whose extensions are all GraphQL extensions (`graphql`,
+`gql`, `graphqls`) gets credit. An import reaches a source file, and a credit
+for a broad glob such as `src/**/*.tsx` hides real unused files. A URL and a
+negated glob get no credit. The plugin does not apply a negated glob to the
+other globs, so a file that a negation excludes stays used. A workspace run
+reads a package config with the package directory as its root. A glob that
+climbs out of the package, such as `../../shared/*.graphql`, becomes a
+parent-relative entry pattern.
+
+A tool that reads the config often depends on `graphql-config` only
+transitively. So the plugin also activates from a config file anywhere below
+the root, through the candidate index of the discovery walk, and from a
+`graphql` object in `package.json`. Production mode has no candidate index,
+so the plugin probes only the root for a config file. The `graphql-codegen`
+plugin reads `graphql.config.*` too. Both results add up.
+
+## pnpm hook files
+
+The registry calls `is_enabled_with_deps` and `is_enabled_with_files`, not
+`Plugin::is_enabled`. A plugin that activates from a file must probe for the
+file in one of these methods. The pnpm plugin probes the root for
+`pnpm-workspace.yaml`, `pnpm-lock.yaml`, `.pnpmfile.cjs`, and `.pnpmfile.mjs`,
+and also activates from a `packageManager` field that names pnpm. pnpm loads
+the pnpmfile next to the lockfile. The `pnpmfile` setting in
+`pnpm-workspace.yaml` (one path or a list) or in `.npmrc` moves it. The plugin
+reads both settings and marks the files as used.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:

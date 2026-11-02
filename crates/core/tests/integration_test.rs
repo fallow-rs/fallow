@@ -115,6 +115,8 @@ mod frameworks;
 mod github_action_manifest_entries;
 #[path = "integration_test/graph_cache_transparency.rs"]
 mod graph_cache_transparency;
+#[path = "integration_test/graphql_config_plugin.rs"]
+mod graphql_config_plugin;
 #[path = "integration_test/graphql_imports.rs"]
 mod graphql_imports;
 #[path = "integration_test/hono_html_tagged_template.rs"]
@@ -266,6 +268,8 @@ mod pnpm_package_json_overrides_version;
 mod pnpm_workspace_layout_diagnostics;
 #[path = "integration_test/pnpm_workspace_overrides_precedence.rs"]
 mod pnpm_workspace_overrides_precedence;
+#[path = "integration_test/pnpmfile_hooks.rs"]
+mod pnpmfile_hooks;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]
