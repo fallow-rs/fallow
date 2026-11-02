@@ -5144,6 +5144,22 @@ run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INP
 assert_not_contains "$GATE_STDOUT" "matched nothing in this run" \
   "unmatched patterns: no warning without an unmatched entry"
 
+# #4067: a requested check whose rule is off reaches the job log in one warning,
+# because this step runs fallow with `--quiet --format json`. Audit keeps the
+# entries under `dead_code`.
+REQUESTED_OFF='"workspace_diagnostics":[{"path":".","kind":"requested-rule-off","rule":"unused-dependencies","flag":"--unused-deps","message":"m"},{"path":".","kind":"requested-rule-off","rule":"unused-dev-dependencies","flag":"--unused-deps","message":"m"},{"path":".","kind":"boundaries-not-configured","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$REQUESTED_OFF")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow did not run these requested checks because their rules are off in config: unused-dependencies (--unused-deps), unused-dev-dependencies (--unused-deps). Set each rule to error or warn to run the check." \
+  "requested rule off: one warning names each rule and flag"
+assert_contains "$GATE_OUTPUTS" "analysis_degraded=false" "requested rule off: the run is not degraded"
+AUDIT_REQUESTED_OFF='"dead_code":{"workspace_diagnostics":[{"path":".","kind":"requested-rule-off","rule":"unused-exports","flag":"--unused-exports","message":"m"}]}'
+run_gate_analyze "$(gate_envelope '' "$AUDIT_REQUESTED_OFF")" INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "rules are off in config: unused-exports (--unused-exports)." \
+  "requested rule off: the audit envelope is read under dead_code"
+run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "did not run these requested checks" \
+  "requested rule off: no warning without an entry"
+
 # #2689: the health pipeline's own degraded inputs reach the same aggregated
 # warning through the same selector, with no change to this script's jq.
 HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":".","kind":"shallow-clone","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'

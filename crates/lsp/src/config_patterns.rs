@@ -134,6 +134,22 @@ pub fn unlocated_log_lines(patterns: &[UnmatchedConfigPattern]) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// An editor issue-type setting is not an explicit flag, and this kind has
+    /// no entry in the config file to point at.
+    #[test]
+    fn a_requested_rule_that_is_off_is_not_an_editor_diagnostic() {
+        let root = Path::new("/project");
+        let entry = WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            fallow_config::WorkspaceDiagnosticKind::RequestedRuleOff {
+                rule: "unused-dependencies".to_owned(),
+                flag: "--unused-deps".to_owned(),
+            },
+        );
+        assert!(collect(root, None, vec![entry]).is_empty());
+    }
+
     #[test]
     fn position_counts_utf16_units_on_the_line() {
         let content = "{\n  \"a\": \"\u{1F389}\", \"b\": [\"x\"]\n}";

@@ -287,7 +287,7 @@ pub fn run_architecture(
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let session = load_dead_code_session(&dead_code, &resolved)?;
         resolve_package_map_before_analysis(&resolved, &session)?;
-        run_dead_code_with_changed_files(
+        let mut output = run_dead_code_with_changed_files(
             &dead_code,
             &resolved,
             &session,
@@ -297,8 +297,15 @@ pub fn run_architecture(
                 envelope: CheckEnvelope::Architecture,
             },
             |_| {},
-        )
-        .map(Into::into)
+        )?;
+        output.output.workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+            std::mem::take(&mut output.output.workspace_diagnostics),
+            fallow_engine::requested_rule_off::requested_rule_off_diagnostics(
+                session.config(),
+                &options.requested_flags(),
+            ),
+        );
+        Ok(output.into())
     })
 }
 
@@ -743,12 +750,26 @@ fn build_dead_code_programmatic_output(
     // dependency issue types. The CLI applies the same rule.
     let reports_dependencies =
         options.filters.reports_dependency_findings() && options.files.is_empty();
+    // The filters of an architecture run hold no request: no selector sets
+    // every filter. `run_architecture` adds the entries of its own selectors.
+    let requested_flags = match envelope {
+        CheckEnvelope::DeadCode => options.filters.requested_flags(),
+        CheckEnvelope::Architecture => Vec::new(),
+    };
     let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
         session.current_workspace_diagnostics(),
         fallow_engine::dead_code::config_pattern_diagnostics(
             session.config(),
             reports_dependencies,
-        ),
+        )
+        .into_iter()
+        .chain(
+            fallow_engine::requested_rule_off::requested_rule_off_diagnostics(
+                session.config(),
+                &requested_flags,
+            ),
+        )
+        .collect(),
     );
     let mut output = build_check_output(CheckOutputInput {
         schema_version: envelope.schema_version(),

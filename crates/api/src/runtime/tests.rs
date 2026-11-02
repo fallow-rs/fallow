@@ -2048,3 +2048,195 @@ fn architecture_selectors_map_onto_the_dead_code_filters() {
     assert!(cycles.circular_deps && cycles.re_export_cycles && cycles.package_cycles);
     assert!(!cycles.boundary_violations && !cycles.policy_violations);
 }
+
+fn requested_rule_off_project(config: &str) -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("project");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"fixture","private":true,"type":"module","main":"src/a.js",
+            "dependencies":{"left-pad":"1.3.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/a.js"),
+        "import { b } from './b.js';\nexport const a = b;\n",
+    )
+    .expect("write a");
+    std::fs::write(
+        root.join("src/b.js"),
+        "import { a } from './a.js';\nexport const b = a;\n",
+    )
+    .expect("write b");
+    std::fs::write(root.join(".fallowrc.json"), config).expect("write config");
+    project
+}
+
+fn requested_rule_off_entries(json: &serde_json::Value) -> Vec<(String, String)> {
+    json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["kind"] == "requested-rule-off")
+        .map(|entry| {
+            (
+                entry["rule"].as_str().unwrap_or_default().to_owned(),
+                entry["flag"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn requested(rule: &str, flag: &str) -> Vec<(String, String)> {
+    vec![(rule.to_owned(), flag.to_owned())]
+}
+
+/// The typed route reports the selector that the CLI reports for the same
+/// request. The CLI tests hold the same expected values.
+#[test]
+fn programmatic_dead_code_reports_a_requested_rule_that_is_off_like_the_cli() {
+    let project = requested_rule_off_project(
+        r#"{"rules":{"unused-dependencies":"off","stale-suppressions":"off",
+            "private-type-leaks":"off","require-suppression-reason":"error"}}"#,
+    );
+    let root = project.path();
+    let entries = |filters: DeadCodeFilters, production: bool| {
+        requested_rule_off_entries(
+            &dead_code_json(&DeadCodeOptions {
+                analysis: AnalysisOptions {
+                    production,
+                    production_override: production.then_some(true),
+                    ..analysis_at(root)
+                },
+                filters,
+                ..DeadCodeOptions::default()
+            })
+            .expect("dead-code succeeds"),
+        )
+    };
+    assert!(entries(DeadCodeFilters::default(), false).is_empty());
+    assert_eq!(
+        entries(
+            DeadCodeFilters {
+                unused_deps: true,
+                ..DeadCodeFilters::default()
+            },
+            false,
+        ),
+        requested("unused-dependencies", "--unused-deps")
+    );
+    assert_eq!(
+        entries(
+            DeadCodeFilters {
+                unused_deps: true,
+                ..DeadCodeFilters::default()
+            },
+            true,
+        ),
+        requested("unused-dependencies", "--unused-deps"),
+        "production mode stays silent about the two rules it forces off"
+    );
+    assert_eq!(
+        entries(
+            DeadCodeFilters {
+                stale_suppressions: true,
+                ..DeadCodeFilters::default()
+            },
+            false,
+        ),
+        requested("stale-suppressions", "--stale-suppressions")
+    );
+    assert!(
+        entries(
+            DeadCodeFilters {
+                private_type_leaks: true,
+                ..DeadCodeFilters::default()
+            },
+            false,
+        )
+        .is_empty(),
+        "the filter turns the rule on"
+    );
+}
+
+#[test]
+fn every_registered_filter_flag_maps_to_itself_on_the_typed_route() {
+    for flag in fallow_types::issue_meta::DEAD_CODE_FILTER_FLAGS
+        .iter()
+        .copied()
+    {
+        let selector = fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS
+            .iter()
+            .find_map(|&(name, mapped)| (mapped == flag).then_some(name))
+            .unwrap_or_else(|| panic!("{flag} has no registry selector"));
+        let mut filters = DeadCodeFilters::default();
+        assert!(filters.enable_registry_selector(selector), "{selector}");
+        assert_eq!(filters.requested_flags(), vec![flag]);
+    }
+    assert!(DeadCodeFilters::default().requested_flags().is_empty());
+}
+
+#[test]
+fn programmatic_family_runners_keep_a_requested_rule_that_is_off() {
+    let project = requested_rule_off_project(
+        r#"{"rules":{"circular-dependencies":"off","boundary-violation":"off"}}"#,
+    );
+    let root = project.path();
+    let circular = serialize_circular_dependencies_programmatic_json(
+        run_circular_dependencies(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                circular_deps: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("circular run"),
+    )
+    .expect("circular json");
+    assert_eq!(
+        requested_rule_off_entries(&circular),
+        requested("circular-dependencies", "--circular-deps")
+    );
+    let boundary = serialize_boundary_violations_programmatic_json(
+        run_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                boundary_violations: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary run"),
+    )
+    .expect("boundary json");
+    assert_eq!(
+        requested_rule_off_entries(&boundary),
+        requested("boundary-violation", "--boundary-violations")
+    );
+}
+
+#[test]
+fn programmatic_architecture_reads_the_selectors_not_the_filters() {
+    let project = requested_rule_off_project(r#"{"rules":{"circular-dependencies":"off"}}"#);
+    let root = project.path();
+    let entries = |cycles: bool| {
+        requested_rule_off_entries(
+            &crate::runtime_json::serialize_architecture_programmatic_json(
+                run_architecture(&crate::ArchitectureOptions {
+                    analysis: analysis_at(root),
+                    cycles,
+                    ..crate::ArchitectureOptions::default()
+                })
+                .expect("architecture run"),
+            )
+            .expect("architecture json"),
+        )
+    };
+    assert!(entries(false).is_empty(), "no selector asks for nothing");
+    assert_eq!(
+        entries(true),
+        requested("circular-dependencies", "--cycles")
+    );
+}

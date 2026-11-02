@@ -102,6 +102,16 @@ impl WorkspaceDiagnosticKind {
         })
     }
 
+    /// The rule and the selector of a `requested-rule-off` entry. `None` for
+    /// every other kind.
+    #[must_use]
+    pub fn requested_rule_off(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::RequestedRuleOff { rule, flag } => Some((rule.as_str(), flag.as_str())),
+            _ => None,
+        }
+    }
+
     /// Whether this is a config entry that matched something but changed
     /// nothing, as opposed to one that matched nothing (issue #3824).
     #[must_use]
@@ -147,6 +157,10 @@ pub(super) fn config_entry_message(kind: &WorkspaceDiagnosticKind) -> String {
             files,
             reason,
         } => ineffective_override_message(rule, files, reason),
+        WorkspaceDiagnosticKind::RequestedRuleOff { rule, flag } => format!(
+            "{rule} is off in config, so {flag} did not check it. Set the rule to \"error\" or \
+             \"warn\" to run this check."
+        ),
         _ => String::new(),
     }
 }

@@ -1,7 +1,8 @@
 //! The text of the config entries that had no effect outside JSON and SARIF:
 //! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`), the
-//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`) and the
-//! `overrides` rules that cannot change a result.
+//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
+//! `overrides` rules that cannot change a result, and the requested checks that
+//! did not run because their rule is off.
 //!
 //! Every output reads the same `workspace_diagnostics[]` entries, and each
 //! format carries them in exactly one place:
@@ -77,7 +78,7 @@ pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFor
 /// `ignoreFindings`, `ignoreDependencies`, then one note line per config
 /// setting with redundant entries, in the order `entry`,
 /// `ignoreDependencies`, `ignorePatterns`, then one note line per `overrides`
-/// rule that had no effect.
+/// rule that had no effect, then one note line per requested rule that is off.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
     let patterns_of = |kind: &str| -> Vec<String> {
@@ -133,6 +134,15 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             "Note: override rule had no effect: {rule} for [{globs}] ({hint})."
         ))
     });
+    let requested_notes = diagnostics.iter().filter_map(|diagnostic| {
+        let (rule, flag) = diagnostic.kind.requested_rule_off()?;
+        Some(format!(
+            "Note: {} is off in config, so {} did not check it. Set the rule to \"error\" or \
+             \"warn\" to run this check.",
+            single_line(rule),
+            single_line(flag),
+        ))
+    });
     notes
         .into_iter()
         .filter_map(|(kind, (singular, plural), outcome, hint)| {
@@ -151,13 +161,14 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             ))
         })
         .chain(override_notes)
+        .chain(requested_notes)
         .collect()
 }
 
 /// The Markdown sections that list the unmatched patterns, the redundant
-/// entries and the `overrides` rules with no effect, or `None` when there are
-/// none. The text starts with a blank line,
-/// so a caller appends it directly after the findings.
+/// entries, the requested checks that did not run and the `overrides` rules
+/// with no effect, or `None` when there are none. The text starts with a blank
+/// line, so a caller appends it directly after the findings.
 #[must_use]
 pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
     let lines = |redundant: bool, outcome: &str| -> Vec<String> {
@@ -186,6 +197,24 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
             "\n## Redundant config entries\n\nThese entries matched, but fallow does the same \
              without them. Remove the entry from the config.\n\n{}",
             redundant.join("\n")
+        ));
+    }
+    let requested: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (rule, flag) = diagnostic.kind.requested_rule_off()?;
+            Some(format!(
+                "- {} is off in config, so {} did not check it.",
+                markdown_value(rule),
+                markdown_value(flag),
+            ))
+        })
+        .collect();
+    if !requested.is_empty() {
+        sections.push(format!(
+            "\n## Requested checks that did not run\n\n{}\n\nSet each rule to \"error\" or \
+             \"warn\" to run the check.",
+            requested.join("\n")
         ));
     }
     let overrides: Vec<String> = diagnostics
@@ -234,6 +263,7 @@ pub fn envelope_diagnostics(envelope: &serde_json::Value) -> Vec<WorkspaceDiagno
             .filter(|diagnostic| {
                 diagnostic.kind.unmatched_config_pattern().is_some()
                     || diagnostic.kind.ineffective_override().is_some()
+                    || diagnostic.kind.requested_rule_off().is_some()
             });
         for diagnostic in entries {
             if !diagnostics
@@ -451,6 +481,60 @@ mod tests {
         assert_eq!(read[0].message, entry.message);
     }
 
+    fn requested(rule: &str, flag: &str) -> WorkspaceDiagnostic {
+        diagnostic(WorkspaceDiagnosticKind::RequestedRuleOff {
+            rule: rule.to_owned(),
+            flag: flag.to_owned(),
+        })
+    }
+
+    #[test]
+    fn requested_rules_get_one_note_per_entry_after_the_other_notes() {
+        let notes = stderr_notes(&[
+            requested("unused-dependencies", "--unused-deps"),
+            override_entry("unused-files", &["gen/**"], "base-rule-off"),
+        ]);
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(notes[0].starts_with("Note: override rule"), "{notes:?}");
+        assert_eq!(
+            notes[1],
+            "Note: unused-dependencies is off in config, so --unused-deps did not check it. Set \
+             the rule to \"error\" or \"warn\" to run this check."
+        );
+    }
+
+    #[test]
+    fn markdown_lists_requested_rules_after_the_redundant_entries() {
+        let mut diagnostics = redundant_entries();
+        diagnostics.push(requested("unused-dependencies", "--unused-deps"));
+        let section = markdown_section(&diagnostics).expect("two sections");
+        let redundant = section
+            .find("## Redundant config entries")
+            .expect("redundant section");
+        let wanted = section
+            .find(
+                "## Requested checks that did not run\n\n- `unused-dependencies` is off in \
+                 config, so `--unused-deps` did not check it.\n\nSet each rule to \"error\" or \
+                 \"warn\" to run the check.",
+            )
+            .expect("requested section");
+        assert!(redundant < wanted, "{section}");
+    }
+
+    #[test]
+    fn a_hostile_saved_value_of_a_requested_rule_stays_on_its_line() {
+        let entry = requested(HOSTILE, HOSTILE);
+        let section = markdown_section(std::slice::from_ref(&entry)).expect("one entry");
+        assert!(
+            !section.lines().any(|line| line.starts_with("# injected")),
+            "{section}"
+        );
+        assert!(!section.contains('\u{1b}'), "{section}");
+        let notes = stderr_notes(&[entry]);
+        assert_eq!(notes.len(), 1);
+        assert!(!notes[0].contains(['\n', '\u{1b}']), "{notes:?}");
+    }
+
     const HOSTILE: &str = "src/a`b\n\n# injected\r\n<img src=x>\u{1b}[31m\t**";
 
     #[test]
@@ -539,6 +623,12 @@ mod tests {
 
     #[test]
     fn envelope_diagnostics_read_every_envelope_shape_once() {
+        let requested_entry = requested("unused-dependencies", "--unused-deps");
+        let saved = serde_json::json!({
+            "workspace_diagnostics": [serde_json::to_value(&requested_entry).expect("entry")]
+        });
+        assert_eq!(envelope_diagnostics(&saved)[0].kind, requested_entry.kind);
+
         let entries = serde_json::to_value([
             glob("@typo/*"),
             finding_pattern("src/legcy/**"),

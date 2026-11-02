@@ -1720,6 +1720,18 @@ variables:
         ANALYSIS_DEGRADED=true
         echo "WARNING: Fallow ran with degraded inputs: ${DEGRADED_SUMMARY}. Some findings or scores were computed over less than the whole project, or from an input that did not load."
       fi
+      # ── Requested checks whose rule is off ───────────────────────────
+      #
+      # This job runs fallow with --quiet --format json, so the stderr note
+      # never reaches the pipeline. The kind does not degrade the analysis, so
+      # the block above skips it. One aggregated line.
+      REQUESTED_RULES_OFF=$(jq -r '
+        [ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "requested-rule-off") | "\(.rule) (\(.flag))" ]
+        | join(", ")
+      ' fallow-results.json || true)
+      if [ -n "$REQUESTED_RULES_OFF" ]; then
+        echo "WARNING: Fallow did not run these requested checks because their rules are off in config: ${REQUESTED_RULES_OFF}. Set each rule to error or warn to run the check."
+      fi
       # ── Requests the run could not apply ─────────────────────────────
       #
       # The CLI also writes this to stderr, and this job runs it with

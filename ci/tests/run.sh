@@ -2550,6 +2550,24 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
 assert_not_contains "$OUT" "matched nothing in this run" \
   "gitlab unmatched patterns: no line without an unmatched entry"
 
+# #4067: a requested check whose rule is off reaches the job log in one line,
+# because this job runs fallow with --quiet --format json.
+REQUESTED_OFF='"workspace_diagnostics":[{"path":".","kind":"requested-rule-off","rule":"unused-dependencies","flag":"--unused-deps","message":"m"},{"path":".","kind":"requested-rule-off","rule":"unused-dev-dependencies","flag":"--unused-deps","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$REQUESTED_OFF")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "WARNING: Fallow did not run these requested checks because their rules are off in config: unused-dependencies (--unused-deps), unused-dev-dependencies (--unused-deps). Set each rule to error or warn to run the check." \
+  "gitlab requested rule off: one line names each rule and flag"
+ENVELOPE=$(gitlab_gate_envelope '' "$DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "did not run these requested checks" \
+  "gitlab requested rule off: no line without an entry"
+
 # #2689: the health pipeline's own degraded inputs reach the same aggregated
 # line through the same selector, with no change to this template's jq.
 HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'

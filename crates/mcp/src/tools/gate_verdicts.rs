@@ -170,6 +170,7 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     let baseline_reported = !warnings.is_empty();
     warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
+    warnings.extend(requested_rule_off_warning(root));
     warnings.extend(unapplied_request_warning(root));
     warnings.extend(empty_scope_request_warning(root));
     warnings
@@ -522,6 +523,35 @@ fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
     ))
 }
 
+/// One sentence for every requested check whose rule is off, never one per
+/// rule. An agent that reads a zero count and an empty `warnings` array
+/// concludes that the check passed, but the check did not run. The kind is not
+/// `degrades_analysis`, so the degraded sentence does not cover it.
+fn requested_rule_off_warning(root: &Map<String, Value>) -> Option<String> {
+    let rules = DIAGNOSTIC_SITES
+        .iter()
+        .filter_map(|path| fallow_types::envelope_sites::lookup(root, path)?.as_array())
+        .map(|diagnostics| {
+            diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic.get("kind").and_then(Value::as_str) == Some("requested-rule-off")
+                })
+                .filter_map(|diagnostic| {
+                    let rule = diagnostic.get("rule")?.as_str()?;
+                    let flag = diagnostic.get("flag")?.as_str()?;
+                    Some(format!("{rule} ({flag})"))
+                })
+                .collect::<Vec<_>>()
+        })
+        .find(|rules| !rules.is_empty())?;
+    Some(format!(
+        "Requested checks did not run because their rules are off in config: {}. A zero count \
+         for these rules measures nothing.",
+        rules.join(", ")
+    ))
+}
+
 /// One sentence for every request the run could not apply, never one per
 /// request.
 ///
@@ -665,6 +695,39 @@ mod tests {
             .iter()
             .map(|entry| entry.as_str().expect("warning is a string").to_string())
             .collect()
+    }
+
+    #[test]
+    fn a_requested_rule_that_is_off_is_one_sentence() {
+        let entry = |rule: &str, flag: &str| serde_json::json!({ "kind": "requested-rule-off", "rule": rule, "flag": flag });
+        let entries = serde_json::json!([
+            { "kind": "boundaries-not-configured" },
+            entry("unused-dependencies", "--unused-deps"),
+            entry("unused-dev-dependencies", "--unused-deps"),
+        ]);
+        let expected = vec![
+            "Requested checks did not run because their rules are off in config: \
+             unused-dependencies (--unused-deps), unused-dev-dependencies (--unused-deps). A \
+             zero count for these rules measures nothing."
+                .to_owned(),
+        ];
+        assert_eq!(
+            warnings_of(&serde_json::json!({ "workspace_diagnostics": entries })),
+            expected
+        );
+        assert_eq!(
+            warnings_of(&serde_json::json!({ "dead_code": { "workspace_diagnostics": entries } })),
+            expected,
+            "the audit envelope keeps the entries under dead_code"
+        );
+    }
+
+    #[test]
+    fn a_kind_with_no_requested_rule_adds_no_sentence() {
+        let warnings = warnings_of(&serde_json::json!({
+            "workspace_diagnostics": [{ "kind": "boundaries-not-configured" }],
+        }));
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     fn staleness(advisory: &str, entries: u64, matched: u64, gate_trips: bool) -> Value {

@@ -661,6 +661,18 @@ pub enum WorkspaceDiagnosticKind {
         /// Why the rule has no effect, as a kebab-case token.
         reason: String,
     },
+    /// An explicit issue-type selection asked for a rule that the config sets
+    /// to `off`, so that check did not run (issue #4067). One entry per rule.
+    /// The opt-in flags that turn their rule on and a run with no selection
+    /// never report it. `path` is the root. Not degraded: the run measured
+    /// what the config asked for, and no finding or exit code changes.
+    RequestedRuleOff {
+        /// The canonical rule name in `rules`.
+        rule: String,
+        /// The canonical CLI selector of the request, such as `--unused-deps`.
+        /// A typed API or MCP request reports the same selector.
+        flag: String,
+    },
     /// The dead-code baseline was saved in a different install state than
     /// this run: one of the two runs had `node_modules` and the other did not.
     /// Findings that need installed packages (dependency, unlisted,
@@ -727,6 +739,7 @@ impl WorkspaceDiagnosticKind {
             Self::IgnoreDependenciesEntryRedundant { .. } => "ignore-dependencies-entry-redundant",
             Self::IgnorePatternsEntryRedundant { .. } => "ignore-patterns-entry-redundant",
             Self::OverrideRuleIneffective { .. } => "override-rule-ineffective",
+            Self::RequestedRuleOff { .. } => "requested-rule-off",
             Self::BaselineInstallStateMismatch { .. } => "baseline-install-state-mismatch",
         }
     }
@@ -772,6 +785,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
             | Self::OverrideRuleIneffective { .. }
+            | Self::RequestedRuleOff { .. }
             | Self::NestedProjectRoot => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
@@ -945,6 +959,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
             | Self::OverrideRuleIneffective { .. }
+            | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1011,6 +1026,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
             | Self::OverrideRuleIneffective { .. }
+            | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1079,6 +1095,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
             | Self::OverrideRuleIneffective { .. }
+            | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1148,6 +1165,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
             | Self::OverrideRuleIneffective { .. }
+            | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
         }
     }
@@ -1812,7 +1830,8 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         | WorkspaceDiagnosticKind::EntryPatternRedundant { .. }
         | WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant { .. }
         | WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant { .. }
-        | WorkspaceDiagnosticKind::OverrideRuleIneffective { .. } => {
+        | WorkspaceDiagnosticKind::OverrideRuleIneffective { .. }
+        | WorkspaceDiagnosticKind::RequestedRuleOff { .. } => {
             config_entry::config_entry_message(kind)
         }
         WorkspaceDiagnosticKind::FlagAgeUnavailable { cause } => {

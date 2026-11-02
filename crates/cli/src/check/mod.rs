@@ -23,6 +23,7 @@ mod baseline_notes;
 )]
 pub(crate) mod filtering;
 mod output;
+pub mod requested_rules;
 pub mod rules;
 
 pub use filtering::resolve_workspace_scope;
@@ -428,7 +429,7 @@ pub enum CheckSurface {
     #[default]
     DeadCode,
     /// `fallow architecture`: cycles, boundaries and rule-pack policy rules.
-    Architecture,
+    Architecture(requested_rules::ArchitectureSelectors),
 }
 
 impl CheckSurface {
@@ -437,7 +438,7 @@ impl CheckSurface {
     pub const fn command(self) -> &'static str {
         match self {
             Self::DeadCode => "dead-code",
-            Self::Architecture => "architecture",
+            Self::Architecture(_) => "architecture",
         }
     }
 }
@@ -1175,12 +1176,9 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         script_used_packages,
         trace_provenance,
     } = data;
-    // A `--file` run drops dependency findings, so it reports none, like a
-    // filter without the dependency issue types.
-    let reports_dependencies = opts.filters.reports_dependency_findings() && opts.file.is_empty();
     let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
         workspace_diagnostics,
-        baseline_notes::run_notes(&config, reports_dependencies, baseline_staleness.as_ref()),
+        baseline_notes::run_notes(&config, opts, baseline_staleness.as_ref()),
     );
 
     if let Some(sarif_path) = opts.sarif_file {
@@ -2125,7 +2123,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             exit_reason: true,
             architecture_layout: match opts.surface {
                 CheckSurface::DeadCode => report::ArchitectureLayout::Embedded,
-                CheckSurface::Architecture => report::ArchitectureLayout::Only,
+                CheckSurface::Architecture(_) => report::ArchitectureLayout::Only,
             },
         },
     );
