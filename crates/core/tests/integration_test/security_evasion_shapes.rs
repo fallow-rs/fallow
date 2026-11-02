@@ -162,6 +162,10 @@ const CASES: &[(&str, Expected)] = &[
         "src/script-shadowed.ts",
         Expected::Candidate("code-injection"),
     ),
+    (
+        "src/script-loop-shadowed.ts",
+        Expected::Candidate("code-injection"),
+    ),
 ];
 
 fn analyze() -> AnalysisResults {
@@ -272,6 +276,18 @@ fn script_element_binding_stops_at_a_shadowing_binding() {
     assert_eq!(
         tainted_sink_lines(&results, "src/script-shadowed.ts"),
         vec![10]
+    );
+}
+
+/// A loop-head declaration (`for...of`, `for...in`, `for (let ...)`) hides a
+/// module script element of the same name. A script element declared in a
+/// loop head is still a candidate.
+#[test]
+fn script_element_binding_stops_at_a_loop_head_binding() {
+    let results = analyze();
+    assert_eq!(
+        tainted_sink_lines(&results, "src/script-loop-shadowed.ts"),
+        vec![19, 24]
     );
 }
 

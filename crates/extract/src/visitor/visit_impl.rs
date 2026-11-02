@@ -129,6 +129,7 @@ use visit_factory_returns::{
 use visit_helpers::*;
 use visit_object_helpers::*;
 use visit_package_resolution::*;
+use visit_scope_bindings::loop_head_declaration;
 use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
@@ -3790,19 +3791,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.push_direct_object_binding_scope(FxHashSet::default());
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
-            self.nested_declaration_stack.push(FxHashSet::default());
-            self.push_scoped_alias_frames();
-            self.scoped_non_instance_bindings.push(FxHashSet::default());
-            self.scoped_namespace_binding_names
-                .push(FxHashSet::default());
-            self.scoped_array_binding_element_types
-                .push(FxHashMap::default());
-            self.sanitizer_binding_stack.push(FxHashMap::default());
-            self.literal_allowlist_binding_stack
-                .push(FxHashMap::default());
-            self.risky_regex_binding_stack.push(FxHashMap::default());
-            self.path_sink_binding_stack.push(FxHashMap::default());
-            self.path_relative_binding_stack.push(FxHashMap::default());
+            self.push_nested_scope_frames();
             self.preseed_nested_declarations(&stmt.body);
         }
         self.preseed_direct_object_binding_targets(&stmt.body);
@@ -3816,16 +3805,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.pop_function_type_alias_scope();
         }
         if self.namespace_depth == 0 {
-            self.nested_declaration_stack.pop();
-            self.pop_scoped_alias_frames();
-            self.scoped_non_instance_bindings.pop();
-            self.scoped_namespace_binding_names.pop();
-            self.scoped_array_binding_element_types.pop();
-            self.sanitizer_binding_stack.pop();
-            self.literal_allowlist_binding_stack.pop();
-            self.risky_regex_binding_stack.pop();
-            self.path_sink_binding_stack.pop();
-            self.path_relative_binding_stack.pop();
+            self.pop_nested_scope_frames();
         }
         self.pop_direct_object_binding_scope();
         self.block_depth -= 1;
@@ -4617,7 +4597,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             );
         }
         self.push_direct_object_binding_scope(roots);
-        if let Some(ForStatementInit::VariableDeclaration(declaration)) = &stmt.init {
+        let init_declaration = match &stmt.init {
+            Some(ForStatementInit::VariableDeclaration(declaration)) => Some(&**declaration),
+            _ => None,
+        };
+        let loop_scope = self.push_loop_head_scope(init_declaration);
+        if let Some(declaration) = init_declaration {
             self.preseed_direct_object_binding_declaration(declaration);
         }
         if let Some(init) = &stmt.init {
@@ -4647,6 +4632,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.visit_statement(&stmt.body);
         }
         self.pop_optional_binding_scope(values);
+        self.pop_loop_head_scope(loop_scope);
         self.pop_direct_object_binding_scope();
     }
 
@@ -4671,6 +4657,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             );
         }
         self.push_direct_object_binding_scope(roots);
+        let loop_scope = self.push_loop_head_scope(loop_head_declaration(&stmt.left));
         self.visit_for_statement_left(&stmt.left);
         self.visit_expression(&stmt.right);
         let values = self.push_conditional_binding_scope(&[]);
@@ -4682,6 +4669,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_for_of_member_destructuring(stmt);
         self.visit_statement(&stmt.body);
         self.pop_optional_binding_scope(values);
+        self.pop_loop_head_scope(loop_scope);
         self.pop_direct_object_binding_scope();
 
         if has_static_bindings {
@@ -5188,12 +5176,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             );
         }
         self.push_direct_object_binding_scope(roots);
+        let loop_scope = self.push_loop_head_scope(loop_head_declaration(&stmt.left));
         let values = self.push_conditional_binding_scope(&[]);
         if let Some(target) = stmt.left.as_assignment_target() {
             self.invalidate_assignment_target_proof(target);
         }
         self.visit_statement(&stmt.body);
         self.pop_optional_binding_scope(values);
+        self.pop_loop_head_scope(loop_scope);
         self.pop_direct_object_binding_scope();
     }
 
