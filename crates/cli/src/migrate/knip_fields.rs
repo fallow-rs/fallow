@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 
 use super::knip_regex::{knip_regex_source, regex_to_exact_glob};
+use super::knip_scoped::{KnipScope, append_unique};
 use super::knip_tables::{
     KNIP_MIGRATED_FIELDS, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS,
     KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
@@ -21,7 +22,11 @@ const MIGRATION_DOCS_URL: &str = "https://fallow.tools/docs/migration/from-knip/
 /// completely-unknown ladder. The diagnostic vocabulary mirrors the table
 /// name `KNIP_UNMAPPABLE_ISSUE_TYPES`: knip refers to these as issue types,
 /// not rule keys, so we use the same word in both branches.
-fn warn_unmapped_rule_key(context: &str, key: &str, warnings: &mut Vec<MigrationWarning>) {
+pub(super) fn warn_unmapped_rule_key(
+    context: &str,
+    key: &str,
+    warnings: &mut Vec<MigrationWarning>,
+) {
     if KNIP_UNMAPPABLE_ISSUE_TYPES.contains(&key) {
         warnings.push(MigrationWarning {
             source: "knip",
@@ -41,32 +46,17 @@ fn warn_unmapped_rule_key(context: &str, key: &str, warnings: &mut Vec<Migration
     }
 }
 
-/// Migrate a string-or-array field from knip to a fallow config field.
-pub(super) fn migrate_simple_field(
-    obj: &JsonMap,
-    src_key: &str,
-    dst_key: &str,
-    config: &mut JsonMap,
-) {
-    if let Some(val) = obj.get(src_key) {
-        let entries = string_or_array(val);
-        if !entries.is_empty() {
-            config.insert(
-                dst_key.to_string(),
-                Value::Array(entries.into_iter().map(Value::String).collect()),
-            );
-        }
-    }
-}
-
-/// Migrate Knip's report-only `ignore` patterns without silently dropping
-/// malformed array entries.
+/// Migrate Knip's report-only `ignore` patterns to `ignoreFindings` without
+/// silently dropping malformed array entries. A negated pattern keeps its `!`
+/// in front of the rebased path.
 pub(super) fn migrate_ignore(
     value: &Value,
+    scope: &KnipScope,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) {
-    let patterns = match value {
+    let field = scope.field("ignore");
+    let patterns: Vec<String> = match value {
         Value::String(pattern) => vec![pattern.clone()],
         Value::Array(values) => values
             .iter()
@@ -77,7 +67,7 @@ pub(super) fn migrate_ignore(
                 } else {
                     warnings.push(MigrationWarning {
                         source: "knip",
-                        field: format!("ignore[{index}]"),
+                        field: format!("{field}[{index}]"),
                         message: "expected a string; value not migrated".to_string(),
                         suggestion: None,
                     });
@@ -88,20 +78,31 @@ pub(super) fn migrate_ignore(
         _ => {
             warnings.push(MigrationWarning {
                 source: "knip",
-                field: "ignore".to_string(),
+                field,
                 message: "expected a string or array of strings; not migrated".to_string(),
                 suggestion: None,
             });
-            Vec::new()
+            return;
         }
     };
 
-    if !patterns.is_empty() {
-        config.insert(
-            "ignoreFindings".to_string(),
-            Value::Array(patterns.into_iter().map(Value::String).collect()),
-        );
+    let mut migrated = Vec::new();
+    for pattern in patterns {
+        let (negation, body) = match pattern.strip_prefix('!') {
+            Some(body) => ("!", body),
+            None => ("", pattern.as_str()),
+        };
+        match scope.rebase(body) {
+            Some(rebased) => migrated.push(format!("{negation}{rebased}")),
+            None => warnings.push(MigrationWarning {
+                source: "knip",
+                field: field.clone(),
+                message: format!("pattern `{pattern}` leaves the workspace; not migrated"),
+                suggestion: Some("add a project-root-relative pattern by hand".to_string()),
+            }),
+        }
     }
+    append_unique(config, "ignoreFindings", migrated);
 }
 
 /// Migrate knip `rules` to fallow `rules`, warning about unmappable rule names.
@@ -190,14 +191,17 @@ pub(super) fn migrate_include(
 
 /// Migrate knip `ignoreDependencies`. A regex entry becomes a glob when a glob
 /// matches exactly the same package names; every other regex is skipped with
-/// a warning.
+/// a warning. The entries are appended to the global list. Returns whether
+/// at least one entry was migrated.
 pub(super) fn migrate_ignore_deps(
     ignore_deps_val: &Value,
+    field: &str,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
-) {
+) -> bool {
+    let deps = string_or_array(ignore_deps_val);
     let mut migrated = Vec::new();
-    for dep in string_or_array(ignore_deps_val) {
+    for dep in deps {
         let Some(source) = knip_regex_source(&dep) else {
             migrated.push(dep);
             continue;
@@ -208,19 +212,16 @@ pub(super) fn migrate_ignore_deps(
         }
         warnings.push(MigrationWarning {
             source: "knip",
-            field: "ignoreDependencies".to_string(),
+            field: field.to_string(),
             message: format!("regex pattern `{dep}` skipped (no glob matches the same packages)"),
             suggestion: Some(
                 "rewrite it as a glob such as `@scope/*`, or add each dependency name".to_string(),
             ),
         });
     }
-    if !migrated.is_empty() {
-        config.insert(
-            "ignoreDependencies".to_string(),
-            Value::Array(migrated.into_iter().map(Value::String).collect()),
-        );
-    }
+    let any = !migrated.is_empty();
+    append_unique(config, "ignoreDependencies", migrated);
+    any
 }
 
 /// Migrate knip `ignoreExportsUsedInFile` to fallow.
@@ -333,52 +334,11 @@ mod tests {
     }
 
     #[test]
-    fn simple_field_present_array() {
-        let obj: JsonMap =
-            serde_json::from_str(r#"{"entry": ["src/index.ts", "src/main.ts"]}"#).unwrap();
-        let mut config = empty_config();
-        migrate_simple_field(&obj, "entry", "entry", &mut config);
-
-        assert_eq!(
-            config.get("entry").unwrap(),
-            &json!(["src/index.ts", "src/main.ts"])
-        );
-    }
-
-    #[test]
-    fn simple_field_present_string() {
-        let obj: JsonMap = serde_json::from_str(r#"{"entry": "src/index.ts"}"#).unwrap();
-        let mut config = empty_config();
-        migrate_simple_field(&obj, "entry", "entry", &mut config);
-
-        assert_eq!(config.get("entry").unwrap(), &json!(["src/index.ts"]));
-    }
-
-    #[test]
-    fn simple_field_absent() {
-        let obj: JsonMap = serde_json::from_str(r#"{"other": "value"}"#).unwrap();
-        let mut config = empty_config();
-        migrate_simple_field(&obj, "entry", "entry", &mut config);
-
-        assert!(!config.contains_key("entry"));
-    }
-
-    #[test]
-    fn simple_field_renames_key() {
-        let obj: JsonMap = serde_json::from_str(r#"{"source": ["value"]}"#).unwrap();
-        let mut config = empty_config();
-        migrate_simple_field(&obj, "source", "target", &mut config);
-
-        assert!(!config.contains_key("source"));
-        assert_eq!(config.get("target").unwrap(), &json!(["value"]));
-    }
-
-    #[test]
     fn ignore_preserves_patterns_exactly() {
         let value = json!(["src/**", "!src/keep.ts"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore(&value, &mut config, &mut warnings);
+        migrate_ignore(&value, &KnipScope::root(), &mut config, &mut warnings);
 
         assert_eq!(
             config.get("ignoreFindings").unwrap(),
@@ -392,7 +352,7 @@ mod tests {
         let value = json!(["src/**", false, null, "!src/keep.ts"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore(&value, &mut config, &mut warnings);
+        migrate_ignore(&value, &KnipScope::root(), &mut config, &mut warnings);
 
         assert_eq!(
             config.get("ignoreFindings").unwrap(),
@@ -409,29 +369,11 @@ mod tests {
     fn ignore_invalid_root_warns_without_output() {
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore(&json!(42), &mut config, &mut warnings);
+        migrate_ignore(&json!(42), &KnipScope::root(), &mut config, &mut warnings);
 
         assert!(!config.contains_key("ignoreFindings"));
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "ignore");
-    }
-
-    #[test]
-    fn simple_field_non_string_non_array_skipped() {
-        let obj: JsonMap = serde_json::from_str(r#"{"entry": 42}"#).unwrap();
-        let mut config = empty_config();
-        migrate_simple_field(&obj, "entry", "entry", &mut config);
-
-        assert!(!config.contains_key("entry"));
-    }
-
-    #[test]
-    fn simple_field_empty_array_skipped() {
-        let obj: JsonMap = serde_json::from_str(r#"{"entry": []}"#).unwrap();
-        let mut config = empty_config();
-        migrate_simple_field(&obj, "entry", "entry", &mut config);
-
-        assert!(!config.contains_key("entry"));
     }
 
     #[test]
@@ -611,7 +553,7 @@ mod tests {
         let val = json!(["lodash", "react"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore_deps(&val, &mut config, &mut warnings);
+        migrate_ignore_deps(&val, "ignoreDependencies", &mut config, &mut warnings);
 
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
@@ -625,7 +567,7 @@ mod tests {
         let val = json!(["/^@scope/", "@acme/.+", "lodash"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore_deps(&val, &mut config, &mut warnings);
+        migrate_ignore_deps(&val, "ignoreDependencies", &mut config, &mut warnings);
 
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
@@ -639,7 +581,7 @@ mod tests {
         let val = json!(["^(react|vue)$", "lodash"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore_deps(&val, &mut config, &mut warnings);
+        migrate_ignore_deps(&val, "ignoreDependencies", &mut config, &mut warnings);
 
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
@@ -654,7 +596,7 @@ mod tests {
         let val = json!(["^@a/[0-9]+$", "/^@b/i"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore_deps(&val, &mut config, &mut warnings);
+        migrate_ignore_deps(&val, "ignoreDependencies", &mut config, &mut warnings);
 
         assert!(!config.contains_key("ignoreDependencies"));
         assert_eq!(warnings.len(), 2);
@@ -665,7 +607,7 @@ mod tests {
         let val = json!("lodash");
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore_deps(&val, &mut config, &mut warnings);
+        migrate_ignore_deps(&val, "ignoreDependencies", &mut config, &mut warnings);
 
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
@@ -678,7 +620,7 @@ mod tests {
         let val = json!(42);
         let mut config = empty_config();
         let mut warnings = Vec::new();
-        migrate_ignore_deps(&val, &mut config, &mut warnings);
+        migrate_ignore_deps(&val, "ignoreDependencies", &mut config, &mut warnings);
 
         assert!(!config.contains_key("ignoreDependencies"));
         assert!(warnings.is_empty());

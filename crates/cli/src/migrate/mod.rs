@@ -3,6 +3,7 @@ mod jsonc;
 mod knip;
 mod knip_fields;
 mod knip_regex;
+mod knip_scoped;
 mod knip_tables;
 mod stylelint;
 #[cfg(test)]

@@ -1,0 +1,382 @@
+//! Knip settings that name file paths, for the root and for each workspace.
+//!
+//! Fallow config paths are project-root-relative. A knip workspace section is
+//! relative to its workspace key, so the migration puts the key in front of
+//! each pattern. A glob key such as `packages/*` becomes the `packages/*/`
+//! prefix, which matches the same package roots.
+
+use serde_json::{Map, Value};
+
+use super::knip_fields::{migrate_ignore, migrate_ignore_deps, warn_unmapped_rule_key};
+use super::knip_tables::{
+    KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNSUPPORTED_PLUGIN_KEYS,
+};
+use super::{MigrationWarning, string_or_array};
+
+type JsonMap = Map<String, Value>;
+
+/// Knip issue types that fallow reports per project, so a file glob in
+/// `overrides` cannot scope them.
+const PROJECT_LEVEL_ISSUE_TYPES: &[&str] = &["dependencies", "devDependencies", "unlisted"];
+
+/// The suffix that marks a knip entry pattern as a production entry.
+const PRODUCTION_MARKER: char = '!';
+
+/// One knip config section: the root, or one entry of `workspaces`.
+pub(super) struct KnipScope {
+    /// Warning field prefix: empty for the root, `workspaces.<key>.` otherwise.
+    field_prefix: String,
+    /// Project-root-relative path prefix with a trailing `/`, empty for the root.
+    path_prefix: String,
+}
+
+impl KnipScope {
+    pub(super) fn root() -> Self {
+        Self {
+            field_prefix: String::new(),
+            path_prefix: String::new(),
+        }
+    }
+
+    /// The scope of one workspace key, or `None` when the key leaves the
+    /// project root.
+    fn workspace(key: &str) -> Option<Self> {
+        let path = key.trim().trim_start_matches("./").trim_end_matches('/');
+        if has_parent_segment(path) {
+            return None;
+        }
+        let path_prefix = if path.is_empty() || path == "." {
+            String::new()
+        } else {
+            format!("{path}/")
+        };
+        Some(Self {
+            field_prefix: format!("workspaces.{key}."),
+            path_prefix,
+        })
+    }
+
+    /// The warning field name of `name` in this scope.
+    pub(super) fn field(&self, name: &str) -> String {
+        format!("{}{name}", self.field_prefix)
+    }
+
+    /// Rewrite a scope-relative glob as a project-root-relative glob, or
+    /// return `None` when the glob leaves the scope with a `..` segment.
+    pub(super) fn rebase(&self, pattern: &str) -> Option<String> {
+        let pattern = pattern.trim_start_matches("./");
+        if has_parent_segment(pattern) {
+            return None;
+        }
+        Some(format!("{}{pattern}", self.path_prefix))
+    }
+}
+
+fn has_parent_segment(path: &str) -> bool {
+    path.split(['/', '\\']).any(|segment| segment == "..")
+}
+
+fn traversal_warning(field: String, pattern: &str) -> MigrationWarning {
+    MigrationWarning {
+        source: "knip",
+        field,
+        message: format!("pattern `{pattern}` leaves the workspace; not migrated"),
+        suggestion: Some("add a project-root-relative pattern by hand".to_string()),
+    }
+}
+
+/// Append each value to the string array at `key`, and skip values that the
+/// array already holds.
+pub(super) fn append_unique(config: &mut JsonMap, key: &str, values: Vec<String>) {
+    if values.is_empty() {
+        return;
+    }
+    let slot = config
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(array) = slot.as_array_mut() else {
+        return;
+    };
+    for value in values {
+        if !array
+            .iter()
+            .any(|existing| existing.as_str() == Some(&value))
+        {
+            array.push(Value::String(value));
+        }
+    }
+}
+
+fn append_value(config: &mut JsonMap, key: &str, value: Value) {
+    if let Some(array) = config
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+    {
+        array.push(value);
+    }
+}
+
+/// Migrate knip `entry` patterns to fallow `entry`.
+///
+/// Fallow `entry` files are runtime roots in every mode, so the knip
+/// production marker (a trailing `!`) is dropped. Fallow `entry` has no
+/// exclusion form, so a negated pattern is reported and not written: as a
+/// literal glob it would match no file.
+pub(super) fn migrate_entry(
+    value: &Value,
+    scope: &KnipScope,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let mut migrated = Vec::new();
+    for pattern in string_or_array(value) {
+        if pattern.starts_with('!') {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: scope.field("entry"),
+                message: format!(
+                    "negated entry pattern `{pattern}` not migrated; fallow `entry` cannot exclude files"
+                ),
+                suggestion: Some(
+                    "narrow the positive entry patterns so that they do not match these files"
+                        .to_string(),
+                ),
+            });
+            continue;
+        }
+        let body = pattern.strip_suffix(PRODUCTION_MARKER).unwrap_or(&pattern);
+        match scope.rebase(body) {
+            Some(rebased) => migrated.push(rebased),
+            None => warnings.push(traversal_warning(scope.field("entry"), &pattern)),
+        }
+    }
+    append_unique(config, "entry", migrated);
+}
+
+/// Migrate knip `ignoreIssues` (file glob to issue types) to fallow.
+///
+/// File-level issue types become an `overrides` entry that turns the rules
+/// off for the glob. `duplicates` becomes an `ignoreExports` entry with
+/// `exports: ["*"]` only when the same glob also ignores `exports` and unused
+/// types are ignored there too, because that rule also exempts the exports
+/// from `unused-exports` and `unused-types`.
+pub(super) fn migrate_ignore_issues(
+    value: &Value,
+    scope: &KnipScope,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let Some(issues) = value.as_object() else {
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: scope.field("ignoreIssues"),
+            message: "expected an object of file globs to issue types; not migrated".to_string(),
+            suggestion: None,
+        });
+        return;
+    };
+    let types_off = config
+        .get("rules")
+        .and_then(|rules| rules.get("unused-types"))
+        .and_then(Value::as_str)
+        == Some("off");
+
+    for (glob, kinds) in issues {
+        let field = scope.field(&format!("ignoreIssues.{glob}"));
+        let Some(file) = scope.rebase(glob).filter(|_| !glob.starts_with('!')) else {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field,
+                message: format!("file glob `{glob}` not migrated"),
+                suggestion: Some(
+                    "use a positive glob inside the workspace for overrides[].files".to_string(),
+                ),
+            });
+            continue;
+        };
+        let kinds = string_or_array(kinds);
+        let has = |kind: &str| kinds.iter().any(|k| k == kind);
+        let exempt_all_exports = has("duplicates") && has("exports") && (has("types") || types_off);
+
+        let mut rules = Map::new();
+        for kind in &kinds {
+            match kind.as_str() {
+                "exports" | "types" | "duplicates" if exempt_all_exports => {}
+                "duplicates" => warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: format!("{field}.duplicates"),
+                    message: "issue type `duplicates` has no file-scoped fallow equivalent"
+                        .to_string(),
+                    suggestion: Some(format!(
+                        "an ignoreExports entry for `{file}` with exports [\"*\"] also hides unused exports and unused types there; add it by hand if that is correct"
+                    )),
+                }),
+                kind if PROJECT_LEVEL_ISSUE_TYPES.contains(&kind) => {
+                    warnings.push(MigrationWarning {
+                        source: "knip",
+                        field: format!("{field}.{kind}"),
+                        message: format!(
+                            "issue type `{kind}` is reported per project in fallow; a file glob cannot scope it"
+                        ),
+                        suggestion: Some(
+                            "add the package names to ignoreDependencies".to_string(),
+                        ),
+                    });
+                }
+                kind => match KNIP_RULE_MAP.iter().find(|(name, _)| *name == kind) {
+                    Some((_, rule)) => {
+                        rules.insert((*rule).to_string(), Value::String("off".to_string()));
+                    }
+                    None => warn_unmapped_rule_key(&field, kind, warnings),
+                },
+            }
+        }
+
+        if exempt_all_exports {
+            append_value(
+                config,
+                "ignoreExports",
+                serde_json::json!({"file": file, "exports": ["*"]}),
+            );
+        }
+        if !rules.is_empty() {
+            append_value(
+                config,
+                "overrides",
+                serde_json::json!({"files": [file], "rules": rules}),
+            );
+        }
+    }
+}
+
+/// Migrate the knip `workspaces` map.
+///
+/// `root_include_entry_exports` is the effective root value of
+/// `includeEntryExports`. A workspace that sets another value gets a warning,
+/// because fallow has only the global setting.
+pub(super) fn migrate_workspaces(
+    workspaces: &Value,
+    root_include_entry_exports: bool,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let Some(workspaces) = workspaces.as_object() else {
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: "workspaces".to_string(),
+            message: "expected an object; workspace config not migrated".to_string(),
+            suggestion: None,
+        });
+        return;
+    };
+
+    for (key, section) in workspaces {
+        let Some(section) = section.as_object() else {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: format!("workspaces.{key}"),
+                message: "expected an object; workspace config not migrated".to_string(),
+                suggestion: None,
+            });
+            continue;
+        };
+        let Some(scope) = KnipScope::workspace(key) else {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: format!("workspaces.{key}"),
+                message: "workspace path leaves the project root; workspace config not migrated"
+                    .to_string(),
+                suggestion: None,
+            });
+            continue;
+        };
+        for (name, value) in section {
+            migrate_workspace_field(
+                name,
+                value,
+                &scope,
+                root_include_entry_exports,
+                config,
+                warnings,
+            );
+        }
+    }
+}
+
+fn migrate_workspace_field(
+    name: &str,
+    value: &Value,
+    scope: &KnipScope,
+    root_include_entry_exports: bool,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    match name {
+        "entry" => migrate_entry(value, scope, config, warnings),
+        "ignore" => migrate_ignore(value, scope, config, warnings),
+        "ignoreIssues" => migrate_ignore_issues(value, scope, config, warnings),
+        "ignoreDependencies" => {
+            if migrate_ignore_deps(value, &scope.field(name), config, warnings) {
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: scope.field(name),
+                    message: "merged into the global ignoreDependencies list; fallow has no per-workspace list, so the entries apply to every workspace".to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+        "includeEntryExports" => {
+            if value.as_bool() != Some(root_include_entry_exports) {
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: scope.field(name),
+                    message: "per-workspace includeEntryExports not migrated; fallow has only the global includeEntryExports setting".to_string(),
+                    suggestion: Some(
+                        "set includeEntryExports at the top level to apply it to every workspace"
+                            .to_string(),
+                    ),
+                });
+            }
+        }
+        _ => warn_unmapped_workspace_field(name, scope, warnings),
+    }
+}
+
+fn warn_unmapped_workspace_field(
+    name: &str,
+    scope: &KnipScope,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let field = scope.field(name);
+    let (message, suggestion) = if let Some((_, message, suggestion)) = KNIP_UNMAPPABLE_FIELDS
+        .iter()
+        .find(|(unmappable, _, _)| *unmappable == name)
+    {
+        ((*message).to_string(), suggestion.map(str::to_string))
+    } else if KNIP_PLUGIN_KEYS.contains(&name) {
+        (
+            format!("plugin config `{name}` is auto-detected by fallow's built-in plugins"),
+            Some(
+                "remove this section, or add an entry pattern if a plugin misses a file"
+                    .to_string(),
+            ),
+        )
+    } else if KNIP_UNSUPPORTED_PLUGIN_KEYS.contains(&name) {
+        (
+            format!("plugin config `{name}` has no fallow plugin equivalent"),
+            None,
+        )
+    } else {
+        (
+            format!("unknown knip workspace key `{name}`; not migrated"),
+            None,
+        )
+    };
+    warnings.push(MigrationWarning {
+        source: "knip",
+        field,
+        message,
+        suggestion,
+    });
+}

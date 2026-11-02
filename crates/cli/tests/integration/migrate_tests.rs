@@ -411,23 +411,89 @@ fn migrate_without_knip_omits_ignore_scope_note() {
     cleanup(&dir);
 }
 
-#[test]
-fn migrate_knip_workspace_ignore_warns_instead_of_guessing_a_root() {
+/// Monorepo fixture whose per-workspace knip settings decide the findings.
+fn workspace_settings_fixture(suffix: &str) -> std::path::PathBuf {
     let dir = migrate_temp_dir(
-        "workspace-ignore-warning",
+        suffix,
         "knip.json",
-        r#"{"workspaces":{"packages/*":{"ignore":["src/generated/**"]}}}"#,
+        r#"{
+            "workspaces": {
+                "apps/server": {"entry": ["src/bin.ts!"]},
+                "packages/*": {"ignore": ["src/generated/**"]}
+            }
+        }"#,
     );
-    let output = run_fallow_raw(&["migrate", "--dry-run", "--root", dir.to_str().unwrap()]);
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "migrate-workspaces", "private": true, "workspaces": ["apps/*", "packages/*"]}"#,
+    )
+    .unwrap();
+    let files = [
+        ("apps/server/package.json", r#"{"name": "server"}"#),
+        (
+            "apps/server/src/bin.ts",
+            "import { start } from './start';\nstart();\n",
+        ),
+        (
+            "apps/server/src/start.ts",
+            "export const start = () => 1;\n",
+        ),
+        ("apps/server/src/orphan.ts", "export const orphan = 1;\n"),
+        (
+            "packages/lib/package.json",
+            r#"{"name": "lib", "main": "src/index.ts"}"#,
+        ),
+        ("packages/lib/src/index.ts", "export const lib = 1;\n"),
+        (
+            "packages/lib/src/generated/api.ts",
+            "export const api = 1;\n",
+        ),
+    ];
+    for (rel, content) in files {
+        let path = dir.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, content).unwrap();
+    }
+    dir
+}
 
-    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
-    assert!(output.stdout.contains("$schema"));
-    assert!(!output.stdout.contains("ignoreFindings"));
-    assert!(output.stderr.contains("workspaces.packages/*.ignore"));
+#[test]
+fn migrate_knip_workspace_settings_keep_their_effect_after_migration() {
+    let dir = workspace_settings_fixture("workspace-settings");
+
+    let migrate = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(migrate.code, 0, "stderr: {}", migrate.stderr);
+    let migrated = fs::read_to_string(dir.join(".fallowrc.json")).unwrap();
     assert!(
-        output
-            .stderr
-            .contains("project-root-relative ignoreFindings")
+        migrated.contains("\"apps/server/src/bin.ts\""),
+        "{migrated}"
+    );
+    assert!(
+        migrated.contains("\"packages/*/src/generated/**\""),
+        "{migrated}"
+    );
+
+    let check = run_fallow_raw(&[
+        "dead-code",
+        "--format",
+        "json",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+        "--no-cache",
+    ]);
+    let findings = parse_json(&check);
+    let unused_files: Vec<String> = findings["unused_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|finding| finding["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    assert_eq!(
+        unused_files,
+        ["apps/server/src/orphan.ts"],
+        "the migrated workspace entry and ignore must keep their effect"
     );
 
     cleanup(&dir);
