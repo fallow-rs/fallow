@@ -9,7 +9,9 @@
 
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
+use rustc_hash::FxHashSet;
 
+use super::multi_config::MAX_MULTI_CONFIGS;
 use super::{
     MAX_CONFIG_WRAPPER_DEPTH, extract_object_from_arrow_function, extract_object_from_function,
     find_config_object, find_variable_init, get_nested_expression, is_module_exports_target,
@@ -72,13 +74,17 @@ pub fn read_last_match<'a, T>(
 /// variable. For any other export, this is the one object that
 /// `find_config_object` finds.
 pub fn find_merged_config_objects<'a>(program: &'a Program<'a>) -> Vec<&'a ObjectExpression<'a>> {
-    let mut objects = Vec::new();
-    // A cap of 3 levels covers the real shapes, such as
-    // `defineConfig(mergeConfig(base, defineConfig({..})))`, and it stops a
-    // variable that refers to itself.
-    if let Some(call) = find_exported_merge_call(program) {
-        collect_merge_arguments(program, call, MAX_CONFIG_WRAPPER_DEPTH, &mut objects);
-    }
+    let mut objects = find_exported_merge_call(program).map_or_else(Vec::new, |call| {
+        let mut collector = MergeCollector {
+            program,
+            objects: Vec::new(),
+            expanded: FxHashSet::default(),
+        };
+        // A cap of 3 levels covers the real shapes, such as
+        // `defineConfig(mergeConfig(base, defineConfig({..})))`.
+        collector.arguments(call, MAX_CONFIG_WRAPPER_DEPTH);
+        collector.objects
+    });
     if objects.is_empty() {
         objects.extend(find_config_object(program));
     }
@@ -132,61 +138,78 @@ fn find_merge_call<'a>(
     }
 }
 
-/// Push the object of each argument of `call` in source order.
-fn collect_merge_arguments<'a>(
+/// Collects the objects of a `mergeConfig` call. Arguments can repeat a
+/// variable that holds another merge, so the output can grow much faster
+/// than the source. Two limits keep the work linear: each variable expands
+/// once, and the collector stops at `MAX_MULTI_CONFIGS` objects.
+struct MergeCollector<'a> {
     program: &'a Program<'a>,
-    call: &'a CallExpression<'a>,
-    depth: u8,
-    objects: &mut Vec<&'a ObjectExpression<'a>>,
-) {
-    for arg in call.arguments.iter().filter_map(Argument::as_expression) {
-        collect_merge_argument(program, arg, depth, objects);
-    }
+    objects: Vec<&'a ObjectExpression<'a>>,
+    expanded: FxHashSet<&'a str>,
 }
 
-/// Push the objects that one `mergeConfig` argument stands for. A nested
-/// `mergeConfig(...)` gives each of its own arguments, also inside
-/// `defineConfig(...)` or a local variable. The options object of any other
-/// call, such as a plugin call, is not a config.
-///
-/// Each wrapper, nested merge or variable costs one level of `depth`.
-fn collect_merge_argument<'a>(
-    program: &'a Program<'a>,
-    expr: &'a Expression<'a>,
-    depth: u8,
-    objects: &mut Vec<&'a ObjectExpression<'a>>,
-) {
-    if depth == 0 {
-        return;
+impl<'a> MergeCollector<'a> {
+    fn is_full(&self) -> bool {
+        self.objects.len() >= MAX_MULTI_CONFIGS
     }
-    match expr {
-        Expression::ObjectExpression(obj) => objects.push(obj),
-        Expression::ParenthesizedExpression(paren) => {
-            collect_merge_argument(program, &paren.expression, depth, objects);
+
+    fn push(&mut self, object: Option<&'a ObjectExpression<'a>>) {
+        if !self.is_full() {
+            self.objects.extend(object);
         }
-        Expression::TSSatisfiesExpression(ts_sat) => {
-            collect_merge_argument(program, &ts_sat.expression, depth, objects);
-        }
-        Expression::TSAsExpression(ts_as) => {
-            collect_merge_argument(program, &ts_as.expression, depth, objects);
-        }
-        Expression::ArrowFunctionExpression(arrow) => {
-            objects.extend(extract_object_from_arrow_function(arrow));
-        }
-        Expression::FunctionExpression(func) => objects.extend(extract_object_from_function(func)),
-        Expression::CallExpression(call) if is_merge_config_callee(&call.callee) => {
-            collect_merge_arguments(program, call, depth - 1, objects);
-        }
-        Expression::CallExpression(call) if is_define_config_callee(&call.callee) => {
-            if let Some(config) = call.arguments.first().and_then(Argument::as_expression) {
-                collect_merge_argument(program, config, depth - 1, objects);
+    }
+
+    /// Push the objects of each argument of `call` in source order.
+    fn arguments(&mut self, call: &'a CallExpression<'a>, depth: u8) {
+        for arg in call.arguments.iter().filter_map(Argument::as_expression) {
+            if self.is_full() {
+                tracing::debug!(
+                    read = MAX_MULTI_CONFIGS,
+                    "mergeConfig gives more configs than the limit, later configs are not read"
+                );
+                return;
             }
+            self.argument(arg, depth);
         }
-        _ => {
-            if let Some(init) =
-                unwrap_to_identifier_name(expr).and_then(|name| find_variable_init(program, name))
-            {
-                collect_merge_argument(program, init, depth - 1, objects);
+    }
+
+    /// Push the objects that one `mergeConfig` argument stands for. A nested
+    /// `mergeConfig(...)` gives each of its own arguments, also inside
+    /// `defineConfig(...)` or a local variable. The options object of any
+    /// other call, such as a plugin call, is not a config.
+    ///
+    /// Each wrapper, nested merge or variable costs one level of `depth`.
+    fn argument(&mut self, expr: &'a Expression<'a>, depth: u8) {
+        if depth == 0 {
+            return;
+        }
+        match expr {
+            Expression::ObjectExpression(obj) => self.push(Some(obj)),
+            Expression::ParenthesizedExpression(paren) => self.argument(&paren.expression, depth),
+            Expression::TSSatisfiesExpression(ts_sat) => self.argument(&ts_sat.expression, depth),
+            Expression::TSAsExpression(ts_as) => self.argument(&ts_as.expression, depth),
+            Expression::ArrowFunctionExpression(arrow) => {
+                self.push(extract_object_from_arrow_function(arrow));
+            }
+            Expression::FunctionExpression(func) => self.push(extract_object_from_function(func)),
+            Expression::CallExpression(call) if is_merge_config_callee(&call.callee) => {
+                self.arguments(call, depth - 1);
+            }
+            Expression::CallExpression(call) if is_define_config_callee(&call.callee) => {
+                if let Some(config) = call.arguments.first().and_then(Argument::as_expression) {
+                    self.argument(config, depth - 1);
+                }
+            }
+            _ => {
+                let Some(name) = unwrap_to_identifier_name(expr) else {
+                    return;
+                };
+                if !self.expanded.insert(name) {
+                    return;
+                }
+                if let Some(init) = find_variable_init(self.program, name) {
+                    self.argument(init, depth - 1);
+                }
             }
         }
     }
@@ -214,7 +237,17 @@ fn callee_name<'a>(callee: &'a Expression<'_>) -> Option<&'a str> {
 mod tests {
     use std::path::PathBuf;
 
-    use super::super::{extract_config_string, extract_config_string_or_array};
+    use super::super::{
+        extract_config_string, extract_config_string_or_array, extract_from_source,
+    };
+    use super::find_merged_config_objects;
+
+    fn merged_object_count(source: &str) -> usize {
+        extract_from_source(source, &ts_path(), |program| {
+            Some(find_merged_config_objects(program).len())
+        })
+        .unwrap_or_default()
+    }
 
     fn ts_path() -> PathBuf {
         PathBuf::from("config.ts")
@@ -365,5 +398,32 @@ mod tests {
             extract_config_string(source, &ts_path(), &["test", "environment"]),
             None
         );
+    }
+
+    /// A variable that holds a merge and repeats in the export expands once,
+    /// so the output does not grow with the square of the source.
+    #[test]
+    fn merge_config_repeated_merge_variable_expands_once() {
+        let repeats = vec!["shared"; 300].join(", ");
+        let source = format!(
+            "const shared = mergeConfig(\n\
+               {{ test: {{ setupFiles: [\"./a.ts\"] }} }},\n\
+               {{ test: {{ setupFiles: [\"./b.ts\"] }} }},\n\
+               {{ test: {{ setupFiles: [\"./c.ts\"] }} }},\n\
+             );\n\
+             export default mergeConfig({repeats});\n"
+        );
+        assert_eq!(merged_object_count(&source), 3);
+        assert_eq!(
+            extract_config_string_or_array(&source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./a.ts", "./b.ts", "./c.ts"]
+        );
+    }
+
+    #[test]
+    fn merge_config_object_count_is_capped() {
+        let objects = vec!["{ test: {} }"; 100].join(", ");
+        let source = format!("export default mergeConfig({objects});");
+        assert_eq!(merged_object_count(&source), 64);
     }
 }

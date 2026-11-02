@@ -23,7 +23,7 @@ use super::{
 /// The maximum number of configs read from one exported array, in source order.
 /// A build can export one config per locale or per target. The work for each
 /// config is linear in its size, and the inline budget bounds the copies.
-const MAX_MULTI_CONFIGS: usize = 64;
+pub(super) const MAX_MULTI_CONFIGS: usize = 64;
 
 /// The config objects of a program: the objects that `find_merged_config_objects`
 /// finds, or else each object element of an exported config array. Elements
