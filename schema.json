@@ -296,6 +296,10 @@
       "description": "Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ \"ignoreLazyImports\": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL, a webpack worker loader request such as `worker-loader!./work.js`) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.",
       "$ref": "#/$defs/CircularDependenciesConfig"
     },
+    "effect": {
+      "description": "Options for projects that use the Effect library, currently only `schemaExportsAsTypes`. Set `{ \"schemaExportsAsTypes\": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand(\"Id\"))`) as an unused type under the `unused-types` rule, not as an unused export, so `\"unused-types\": \"off\"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. Default `false` leaves every report unchanged.",
+      "$ref": "#/$defs/EffectConfig"
+    },
     "boundaries": {
       "description": "Configures architecture boundary enforcement: which source directories belong to which named zone and which zones may import which others, reported as boundary-violation, boundary-coverage-violation, and boundary-call-violation findings (severity via rules.boundary-violation, default error). Set to enforce a layered/module architecture; the object holds `preset` (one of layered, hexagonal, feature-sliced, bulletproof, whose default zones/rules are merged in with the user-declared zones/rules taking precedence), `zones` (each with `name`, `patterns`, `autoDiscover`, optional `root`), `rules` (each with `from`, `allow`, `allowTypeOnly` target-zone lists), `coverage` (`requireAllFiles` plus `allowUnmatched` globs for files matching no zone), and `calls` (a `forbidden` list of `{from, callee}` banned-call rules per zone).",
       "$ref": "#/$defs/BoundaryConfig",
@@ -1984,6 +1988,17 @@
       "properties": {
         "ignoreLazyImports": {
           "description": "Skip import edges that load their target on demand or on another\nthread when fallow looks for cycles. A literal `import()` inside a\nfunction, a template `import()`, a lazy `import.meta.glob`, a worker\nURL and a webpack worker loader request (`worker-loader!./work.js`)\nare lazy edges. A top-level `await import()`, `require()` and an\neager `import.meta.glob` load before the module finishes, so they stay.\nAn edge that also carries a static import stays. Default `false`.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EffectConfig": {
+      "description": "Options for projects that use the Effect library.\n\nThe default changes nothing: each Effect export is reported like any\nother export.",
+      "type": "object",
+      "properties": {
+        "schemaExportsAsTypes": {
+          "description": "Report an unused exported Effect schema as an unused type, under the\n`unused-types` rule, and not as an unused export. An Effect schema\ndefines a runtime value and a type (`typeof User.Type`), so a team\nthat keeps exported types as contracts can keep schemas too. With\n`\"unused-types\": \"off\"`, fallow does not report them. A schema is a\nclass that extends a `Schema` class factory (`Schema.Class`,\n`Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,\n`Schema.Error`, `Schema.ErrorClass`, `Schema.Opaque`), or a const whose\nvalue is a `Schema` constructor, member or pipe chain\n(`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand(\"Id\"))`).\n`Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.\nDefault `false`.",
           "type": "boolean"
         }
       },

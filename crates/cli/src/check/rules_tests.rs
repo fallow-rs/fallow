@@ -1434,6 +1434,7 @@ fn config_with_override_for_rule(
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
+        effect: fallow_config::EffectConfig::default(),
         duplicates: fallow_config::DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
         mutation: fallow_config::MutationConfig::default(),

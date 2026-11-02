@@ -23,6 +23,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
+        effect: fallow_config::EffectConfig::default(),
         duplicates: fallow_config::DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
         mutation: fallow_config::MutationConfig::default(),

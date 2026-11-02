@@ -208,6 +208,37 @@ impl CircularDependenciesConfig {
     }
 }
 
+/// Options for projects that use the Effect library.
+///
+/// The default changes nothing: each Effect export is reported like any
+/// other export.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct EffectConfig {
+    /// Report an unused exported Effect schema as an unused type, under the
+    /// `unused-types` rule, and not as an unused export. An Effect schema
+    /// defines a runtime value and a type (`typeof User.Type`), so a team
+    /// that keeps exported types as contracts can keep schemas too. With
+    /// `"unused-types": "off"`, fallow does not report them. A schema is a
+    /// class that extends a `Schema` class factory (`Schema.Class`,
+    /// `Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,
+    /// `Schema.Error`, `Schema.ErrorClass`, `Schema.Opaque`), or a const whose
+    /// value is a `Schema` constructor, member or pipe chain
+    /// (`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand("Id"))`).
+    /// `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.
+    /// Default `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub schema_exports_as_types: bool,
+}
+
+impl EffectConfig {
+    /// True when no option is set, so serialization can omit the section.
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        !self.schema_exports_as_types
+    }
+}
+
 /// The `fix` config section: settings for `fallow fix` apply behavior.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -439,6 +470,10 @@ pub struct FallowConfig {
     )]
     /// Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ "ignoreLazyImports": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL, a webpack worker loader request such as `worker-loader!./work.js`) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.
     pub circular_dependencies: CircularDependenciesConfig,
+
+    #[serde(default, skip_serializing_if = "EffectConfig::is_default")]
+    /// Options for projects that use the Effect library, currently only `schemaExportsAsTypes`. Set `{ "schemaExportsAsTypes": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand("Id"))`) as an unused type under the `unused-types` rule, not as an unused export, so `"unused-types": "off"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. Default `false` leaves every report unchanged.
+    pub effect: EffectConfig,
 
     /// Configures architecture boundary enforcement: which source directories belong to which named zone and which zones may import which others, reported as boundary-violation, boundary-coverage-violation, and boundary-call-violation findings (severity via rules.boundary-violation, default error). Set to enforce a layered/module architecture; the object holds `preset` (one of layered, hexagonal, feature-sliced, bulletproof, whose default zones/rules are merged in with the user-declared zones/rules taking precedence), `zones` (each with `name`, `patterns`, `autoDiscover`, optional `root`), `rules` (each with `from`, `allow`, `allowTypeOnly` target-zone lists), `coverage` (`requireAllFiles` plus `allowUnmatched` globs for files matching no zone), and `calls` (a `forbidden` list of `{from, callee}` banned-call rules per zone).
     #[serde(default)]
@@ -1350,6 +1385,28 @@ usedClassMembers = [
 
         assert!(config.ignore_exports_used_in_file.suppresses(false));
         assert!(config.ignore_exports_used_in_file.suppresses(true));
+    }
+
+    #[test]
+    fn deserialize_effect_schema_exports_as_types() {
+        let default: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(!default.effect.schema_exports_as_types);
+        assert!(
+            !serde_json::to_string(&default)
+                .unwrap()
+                .contains("\"effect\""),
+            "the default section is not serialized"
+        );
+
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"effect":{"schemaExportsAsTypes":true}}"#).unwrap();
+        assert!(config.effect.schema_exports_as_types);
+
+        let toml: FallowConfig = toml::from_str("[effect]\nschemaExportsAsTypes = true\n").unwrap();
+        assert!(toml.effect.schema_exports_as_types);
+
+        let typo = serde_json::from_str::<FallowConfig>(r#"{"effect":{"schemaExports":true}}"#);
+        assert!(typo.is_err(), "an unknown effect key fails the load");
     }
 
     #[test]

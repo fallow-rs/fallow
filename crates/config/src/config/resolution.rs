@@ -257,6 +257,8 @@ pub struct ResolvedConfig {
     pub unused_component_props_ignore: Option<regex::Regex>,
     /// Options for the `circular-dependencies` rule, passed through unchanged.
     pub circular_dependencies: super::CircularDependenciesConfig,
+    /// Effect library options, passed through unchanged.
+    pub effect: super::EffectConfig,
     /// Clone-detection settings, passed through unchanged.
     pub duplicates: DuplicatesConfig,
     /// Explicit similar-code candidate settings, passed through unchanged.
@@ -985,6 +987,7 @@ impl FallowConfig {
             ignore_decorators: self.ignore_decorators,
             unused_component_props_ignore,
             circular_dependencies: self.circular_dependencies,
+            effect: self.effect,
             duplicates: self.duplicates,
             similar_code: self.similar_code,
             mutation: self.mutation,
@@ -1301,7 +1304,6 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props: crate::UnusedComponentPropsConfig::default(),
-            circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
             mutation: MutationConfig::default(),
@@ -1361,7 +1363,6 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props: crate::UnusedComponentPropsConfig::default(),
-            circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
             mutation: MutationConfig::default(),
@@ -1432,7 +1433,6 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props: crate::UnusedComponentPropsConfig::default(),
-            circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
             mutation: MutationConfig::default(),
@@ -1511,7 +1511,6 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props: crate::UnusedComponentPropsConfig::default(),
-            circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
             mutation: MutationConfig::default(),
@@ -1583,7 +1582,6 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props: crate::UnusedComponentPropsConfig::default(),
-            circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
             mutation: MutationConfig::default(),

@@ -731,11 +731,11 @@ fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "fallow/unused-export" => RuleGuide {
             example: "export const formatPrice = ... exists in src/money.ts, but no module imports formatPrice.",
-            how_to_fix: "Remove the export or make it file-local. If it is public API, import it from an entry point or add an intentional suppression with context.",
+            how_to_fix: "Remove the export or make it file-local. If it is public API, import it from an entry point or add an intentional suppression with context. To treat exported Effect schemas as type contracts, set effect.schemaExportsAsTypes: fallow then reports them as unused types.",
         },
         "fallow/unused-type" => RuleGuide {
             example: "export interface LegacyProps is exported, but no module imports the type.",
-            how_to_fix: "Remove the type export, inline it, or keep it behind an explicit API entry point when consumers rely on it.",
+            how_to_fix: "Remove the type export, inline it, or keep it behind an explicit API entry point when consumers rely on it. With effect.schemaExportsAsTypes, this rule also reports unused Effect schema exports.",
         },
         "fallow/private-type-leak" => RuleGuide {
             example: "export function makeUser(): InternalUser exposes InternalUser even though InternalUser is not exported.",

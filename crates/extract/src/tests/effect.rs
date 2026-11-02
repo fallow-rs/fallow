@@ -186,3 +186,161 @@ fn caught_tag_anchor_points_at_the_tag_text() {
         assert_eq!(&source[start..start + caught.tag.len()], caught.tag);
     }
 }
+
+fn schema_exports(source: &str) -> Vec<String> {
+    super::parse_ts(source)
+        .effect_facts
+        .map(|facts| facts.schema_exports)
+        .unwrap_or_default()
+}
+
+#[test]
+fn records_schema_class_exports_for_every_class_constructor() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+export class V3Class extends Schema.Class<V3Class>("V3Class")({ id: Schema.String }) {
+  get label() { return this.id }
+}
+export class V3Tagged extends Schema.TaggedClass<V3Tagged>()("V3Tagged", {}) {}
+export class V3Error extends Schema.TaggedError<V3Error>()("V3Error", {}) {}
+export class V3Request extends Schema.TaggedRequest<V3Request>()("V3Request", {
+  failure: Schema.Never,
+  success: Schema.Void,
+  payload: {},
+}) {}
+export class V4Error extends Schema.Error<V4Error>("V4Error")({}) {}
+export class V4ErrorClass extends Schema.ErrorClass<V4ErrorClass>("V4ErrorClass")({}) {}
+export class V4TaggedErrorClass extends Schema.TaggedErrorClass<V4TaggedErrorClass>()("V4TaggedErrorClass", {}) {}
+export class V4Opaque extends Schema.Opaque<V4Opaque>()(Schema.Struct({ a: Schema.String })) {}
+export class Extended extends V3Class.extend<Extended>("Extended")({ more: Schema.Number }) {}
+class Plain {}
+export class NotSchema extends Plain {}
+"#,
+    );
+    assert_eq!(
+        names,
+        vec![
+            "Extended",
+            "V3Class",
+            "V3Error",
+            "V3Request",
+            "V3Tagged",
+            "V4Error",
+            "V4ErrorClass",
+            "V4Opaque",
+            "V4TaggedErrorClass",
+        ]
+    );
+}
+
+#[test]
+fn records_schema_const_exports_and_pipe_forms() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+export const User = Schema.Struct({ id: Schema.String })
+export const UserId = Schema.String.pipe(Schema.brand("UserId"))
+export const Name = Schema.String
+export const Annotated = Schema.Struct({}).annotations({ title: "A" })
+export const Tree = Schema.suspend(() => Name)
+export const Admin = User.pipe(Schema.extend(Schema.Struct({ admin: Schema.Boolean })))
+const Hidden = Schema.Number
+export { Hidden as Renamed }
+const DefaultSchema = Schema.Literal("a")
+export default DefaultSchema
+"#,
+    );
+    assert_eq!(
+        names,
+        vec![
+            "Admin",
+            "Annotated",
+            "Name",
+            "Renamed",
+            "Tree",
+            "User",
+            "UserId",
+            "default",
+        ]
+    );
+}
+
+#[test]
+fn ignores_values_that_a_schema_function_returns() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+const User = Schema.Struct({ id: Schema.String })
+export const decodeUser = Schema.decodeUnknownSync(User)
+export const isUser = Schema.is(User)
+export const sample = User.make({ id: "1" })
+export const fields = User.fields
+export const positive = Schema.isGreaterThan(0)
+export const plain = 1
+export const SchemaAlias = Schema
+"#,
+    );
+    assert!(names.is_empty(), "no export is a schema: {names:?}");
+}
+
+#[test]
+fn accepts_every_effect_schema_import_form() {
+    let named_alias =
+        schema_exports("import { Schema as S } from \"effect\"\nexport const A = S.Struct({})\n");
+    assert_eq!(named_alias, vec!["A"]);
+    let v4_namespace = schema_exports(
+        "import * as Schema from \"effect/Schema\"\nexport const B = Schema.String\n",
+    );
+    assert_eq!(v4_namespace, vec!["B"]);
+    let legacy_named = schema_exports(
+        "import { Schema } from \"@effect/schema\"\nexport const C = Schema.String\n",
+    );
+    assert_eq!(legacy_named, vec!["C"]);
+    let legacy_namespace = schema_exports(
+        "import * as S from \"@effect/schema/Schema\"\nexport class D extends S.Class<D>(\"D\")({}) {}\n",
+    );
+    assert_eq!(legacy_namespace, vec!["D"]);
+}
+
+#[test]
+fn schema_name_that_does_not_bind_to_effect_is_no_schema() {
+    let local_object = schema_exports(
+        r#"
+import { Effect } from "effect"
+const Schema = { Struct: (fields: object) => fields, String: "string" }
+export const NotEffect = Schema.Struct({})
+export const NotEffectMember = Schema.String
+export const run = Effect.void
+"#,
+    );
+    assert!(local_object.is_empty(), "{local_object:?}");
+    let other_package = schema_exports(
+        "import { Effect } from \"effect\"\nimport { Schema } from \"other-schema\"\nexport const Other = Schema.Struct({})\nexport const run = Effect.void\n",
+    );
+    assert!(other_package.is_empty(), "{other_package:?}");
+    let shadowed = schema_exports(
+        "import { Schema } from \"effect\"\nexport const make = (Schema: any) => Schema.Struct({})\nexport const Real = Schema.String\n",
+    );
+    assert_eq!(
+        shadowed,
+        vec!["Real"],
+        "a parameter named Schema is no import"
+    );
+}
+
+#[test]
+fn records_default_exported_schema_classes() {
+    let anonymous = schema_exports(
+        "import { Schema } from \"effect\"\nexport default class extends Schema.Class<any>(\"A\")({}) {}\n",
+    );
+    assert_eq!(anonymous, vec!["default"]);
+    let named = schema_exports(
+        "import { Schema } from \"effect\"\nexport default class Named extends Schema.TaggedClass<Named>()(\"Named\", {}) {}\n",
+    );
+    assert_eq!(named, vec!["default"]);
+    let plain = schema_exports(
+        "import { Effect } from \"effect\"\nexport default class extends Error {}\nexport const run = Effect.void\n",
+    );
+    assert!(plain.is_empty(), "{plain:?}");
+}

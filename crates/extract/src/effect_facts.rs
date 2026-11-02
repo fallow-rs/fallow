@@ -29,6 +29,7 @@ use fallow_types::extract::{
     ImportInfo, ImportedName,
 };
 
+use crate::effect_schema::SchemaShapes;
 use crate::js_text::JsText;
 
 /// `Layer` functions that return an `Effect` or a runtime, not a layer.
@@ -123,13 +124,26 @@ struct Collector<'s, 'a> {
     root_keys: FxHashSet<String>,
     caught_tags: Vec<EffectCaughtTag>,
     literal_tags: FxHashSet<String>,
+    schema: SchemaShapes<'s, 'a>,
+    /// `(local binding, export name)` for each export that names a binding.
+    export_bindings: Vec<(String, String)>,
+    /// `export default class extends Schema.Class(...)` without a class name.
+    anonymous_default_schema: bool,
 }
 
 impl<'s, 'a> Collector<'s, 'a> {
     fn new(semantic: &'s Semantic<'a>, imports: &'s [ImportInfo], exports: &[ExportInfo]) -> Self {
         let mut exported_locals = FxHashSet::default();
         let mut default_locals = FxHashSet::default();
+        let mut export_bindings = Vec::new();
         for export in exports {
+            let local = export.local_name.as_deref().or(match &export.name {
+                ExportName::Named(name) => Some(name.as_str()),
+                ExportName::Default => None,
+            });
+            if let Some(local) = local {
+                export_bindings.push((local.to_string(), export.name.to_string()));
+            }
             if let (ExportName::Default, Some(local)) = (&export.name, &export.local_name) {
                 default_locals.insert(local.clone());
             }
@@ -169,6 +183,9 @@ impl<'s, 'a> Collector<'s, 'a> {
             root_keys: FxHashSet::default(),
             caught_tags: Vec::new(),
             literal_tags: FxHashSet::default(),
+            schema: SchemaShapes::new(semantic, imports),
+            export_bindings,
+            anonymous_default_schema: false,
         }
     }
 
@@ -177,6 +194,17 @@ impl<'s, 'a> Collector<'s, 'a> {
         layer_root_keys.sort_unstable();
         let mut literal_tags: Vec<String> = self.literal_tags.into_iter().collect();
         literal_tags.sort_unstable();
+        let mut schema_exports: Vec<String> = self
+            .export_bindings
+            .into_iter()
+            .filter(|(local, _)| self.schema.is_schema_name(local))
+            .map(|(_, exported)| exported)
+            .collect();
+        if self.anonymous_default_schema {
+            schema_exports.push("default".to_string());
+        }
+        schema_exports.sort_unstable();
+        schema_exports.dedup();
         let facts = EffectFacts {
             tagged_errors: self.errors.into_iter().map(|error| error.error).collect(),
             caught_tags: self.caught_tags,
@@ -197,12 +225,14 @@ impl<'s, 'a> Collector<'s, 'a> {
                 })
                 .collect(),
             layer_root_keys,
+            schema_exports,
         };
         let empty = facts.tagged_errors.is_empty()
             && facts.caught_tags.is_empty()
             && facts.literal_tags.is_empty()
             && facts.layers.is_empty()
-            && facts.layer_root_keys.is_empty();
+            && facts.layer_root_keys.is_empty()
+            && facts.schema_exports.is_empty();
         (!empty).then(|| Box::new(facts))
     }
 
@@ -270,8 +300,14 @@ impl<'s, 'a> Collector<'s, 'a> {
                 // public value) but is never a tagged error candidate: an
                 // importer binds it under any local name.
                 if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &export.declaration {
+                    let is_schema = self.schema.is_schema_class(class);
                     if let Some(id) = &class.id {
                         self.default_locals.insert(id.name.to_string());
+                        if is_schema {
+                            self.schema.record(id.symbol_id(), &id.name);
+                        }
+                    } else {
+                        self.anonymous_default_schema |= is_schema;
                     }
                     self.record_class_layers(class, true, known);
                 }
@@ -292,6 +328,9 @@ impl<'s, 'a> Collector<'s, 'a> {
             else {
                 continue;
             };
+            if self.schema.is_schema_expression(init) {
+                self.schema.record(id.symbol_id(), &id.name);
+            }
             if !self.is_layer_expression(init, known) {
                 continue;
             }
@@ -315,6 +354,9 @@ impl<'s, 'a> Collector<'s, 'a> {
         let Some(id) = &class.id else {
             return;
         };
+        if self.schema.is_schema_class(class) {
+            self.schema.record(id.symbol_id(), &id.name);
+        }
         let Some(tag) = class
             .heritage
             .as_ref()
