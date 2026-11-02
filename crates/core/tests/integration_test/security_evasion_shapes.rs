@@ -78,6 +78,10 @@ const CASES: &[(&str, Expected)] = &[
     ("src/timer-callback.ts", Expected::Nothing),
     ("src/eval-alias.ts", Expected::Candidate("code-injection")),
     (
+        "src/eval-alias-shadowed.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
         "src/iframe-srcdoc-assign.ts",
         Expected::Candidate("dangerous-html"),
     ),
@@ -169,4 +173,22 @@ fn srcdoc_candidates_carry_srcdoc_evidence() {
         "evidence should name the srcdoc document sink: {}",
         finding.evidence
     );
+}
+
+/// A module alias of `eval` reaches only the calls that resolve to it. A
+/// parameter, a local or a catch parameter of the same name hides the alias,
+/// and a local in one function does not hide it in a later function.
+#[test]
+fn eval_alias_stops_at_a_shadowing_binding() {
+    let results = analyze();
+    let mut lines: Vec<u32> = results
+        .security_findings
+        .iter()
+        .filter(|finding| matches!(finding.kind, SecurityFindingKind::TaintedSink))
+        .filter(|finding| normalized(&finding.path).ends_with("src/eval-alias-shadowed.ts"))
+        .map(|finding| finding.line)
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    assert_eq!(lines, vec![2, 6]);
 }

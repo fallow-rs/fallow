@@ -3785,7 +3785,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
-            self.scoped_require_aliases.push(FxHashSet::default());
+            self.push_scoped_alias_frames();
             self.scoped_non_instance_bindings.push(FxHashSet::default());
             self.scoped_namespace_binding_names
                 .push(FxHashSet::default());
@@ -3811,7 +3811,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
-            self.scoped_require_aliases.pop();
+            self.pop_scoped_alias_frames();
             self.scoped_non_instance_bindings.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
@@ -3865,16 +3865,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_catch_clause(&mut self, clause: &CatchClause<'a>) {
-        let roots = clause
+        let roots: FxHashSet<String> = clause
             .param
             .as_ref()
             .into_iter()
             .flat_map(|param| param.pattern.get_binding_identifiers())
             .map(|id| id.name.to_string())
             .collect();
-        self.push_direct_object_binding_scope(roots);
+        self.push_catch_clause_scope(roots);
         walk::walk_catch_clause(self, clause);
-        self.pop_direct_object_binding_scope();
+        self.pop_catch_clause_scope();
     }
 
     fn visit_declaration(&mut self, decl: &Declaration<'a>) {

@@ -1,7 +1,7 @@
 #[allow(clippy::wildcard_imports, reason = "many sink helper AST types used")]
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 
 use fallow_types::extract::{
@@ -50,9 +50,17 @@ struct PushSinkArgInput<'site, 'ast> {
 /// Per-module local bindings that re-expose a sink under another name.
 #[derive(Default)]
 pub(in crate::visitor) struct SinkAliasState {
-    /// Locals bound to a code-executing global (`const e = eval`), keyed by the
-    /// local name, valued by the global name.
+    /// Module-scope locals bound to a code-executing global (`const e = eval`),
+    /// keyed by the local name, valued by the global name.
     code_exec_aliases: FxHashMap<String, String>,
+    /// Per `nested_declaration_stack` frame: the aliases of a code-executing
+    /// global that the frame declares. A name that a nearer frame declares
+    /// without such a value hides an outer alias.
+    scoped_code_exec_aliases: Vec<FxHashMap<String, String>>,
+    /// Names that an enclosing `catch` clause binds. The visitor does not
+    /// record a catch parameter in `nested_declaration_stack`, so these names
+    /// hide every alias.
+    catch_param_names: Vec<FxHashSet<String>>,
     /// JSX sink props of locals bound to an object literal, keyed by the local
     /// name. A JSX spread of the local (`<div {...props} />`) emits them.
     jsx_spread_object_sinks: FxHashMap<String, Vec<SinkSite>>,
@@ -1047,13 +1055,55 @@ impl ModuleInfoExtractor {
         if path.contains('.') {
             return Some(path);
         }
-        Some(
-            self.sink_aliases
-                .code_exec_aliases
-                .get(&path)
-                .cloned()
-                .unwrap_or(path),
-        )
+        Some(self.code_exec_alias_target(&path).unwrap_or(path))
+    }
+
+    /// The code-executing global that the innermost binding of `name` holds.
+    /// A parameter, a catch parameter or a nested declaration of the same name
+    /// without such a value hides an outer alias.
+    fn code_exec_alias_target(&self, name: &str) -> Option<String> {
+        if self
+            .sink_aliases
+            .catch_param_names
+            .iter()
+            .any(|names| names.contains(name))
+        {
+            return None;
+        }
+        let aliases = match self
+            .nested_declaration_stack
+            .iter()
+            .rposition(|scope| scope.contains(name))
+        {
+            Some(index) => self.sink_aliases.scoped_code_exec_aliases.get(index)?,
+            None => &self.sink_aliases.code_exec_aliases,
+        };
+        aliases.get(name).cloned()
+    }
+
+    /// Open the alias frames that match a new `nested_declaration_stack`
+    /// frame: the `require` aliases and the code-exec aliases.
+    pub(super) fn push_scoped_alias_frames(&mut self) {
+        self.scoped_require_aliases.push(FxHashSet::default());
+        self.sink_aliases
+            .scoped_code_exec_aliases
+            .push(FxHashMap::default());
+    }
+
+    pub(super) fn pop_scoped_alias_frames(&mut self) {
+        self.scoped_require_aliases.pop();
+        self.sink_aliases.scoped_code_exec_aliases.pop();
+    }
+
+    /// Open the scope of a `catch` clause that binds `names`.
+    pub(super) fn push_catch_clause_scope(&mut self, names: FxHashSet<String>) {
+        self.sink_aliases.catch_param_names.push(names.clone());
+        self.push_direct_object_binding_scope(names);
+    }
+
+    pub(super) fn pop_catch_clause_scope(&mut self) {
+        self.pop_direct_object_binding_scope();
+        self.sink_aliases.catch_param_names.pop();
     }
 
     /// Flatten a callee or assignment object to a dotted path.
@@ -1130,9 +1180,13 @@ impl ModuleInfoExtractor {
     }
 
     /// Record or clear a local alias of a code-executing global
-    /// (`const e = eval`). A later binding of the same name with another value
-    /// clears the alias.
+    /// (`const e = eval`) in the frame that declares the name. A later binding
+    /// of the same name with another value clears the alias. Inside a
+    /// namespace the visitor keeps no frames, so no alias is recorded there.
     fn record_code_exec_alias(&mut self, name: &str, init: &Expression<'_>) {
+        if self.namespace_depth > 0 {
+            return;
+        }
         let target = match unwrap_parens(init) {
             Expression::Identifier(_)
             | Expression::StaticMemberExpression(_)
@@ -1140,14 +1194,27 @@ impl ModuleInfoExtractor {
             | Expression::SequenceExpression(_) => self.security_callee_path(init),
             _ => None,
         };
+        let frame = if self.is_module_scope() {
+            None
+        } else {
+            self.nested_declaration_stack
+                .iter()
+                .rposition(|scope| scope.contains(name))
+                .or_else(|| self.nested_declaration_stack.len().checked_sub(1))
+        };
+        let aliases = match frame {
+            Some(index) => match self.sink_aliases.scoped_code_exec_aliases.get_mut(index) {
+                Some(aliases) => aliases,
+                None => return,
+            },
+            None => &mut self.sink_aliases.code_exec_aliases,
+        };
         match target {
             Some(target) if CODE_EXEC_GLOBALS.contains(&target.as_str()) && target != name => {
-                self.sink_aliases
-                    .code_exec_aliases
-                    .insert(name.to_string(), target);
+                aliases.insert(name.to_string(), target);
             }
             _ => {
-                self.sink_aliases.code_exec_aliases.remove(name);
+                aliases.remove(name);
             }
         }
     }
