@@ -53,6 +53,7 @@ fn option_off_reports_schemas_as_unused_exports() {
             "UnusedPayload",
             "UnusedUser",
             "decodeUsed",
+            "default",
             "unusedHelper",
         ]
     );
@@ -76,6 +77,7 @@ fn option_on_reports_schemas_as_unused_types() {
             "UnusedId",
             "UnusedPayload",
             "UnusedUser",
+            "default",
         ],
         "a schema and its same-name type alias give one finding, because they share a finding id"
     );

@@ -222,9 +222,10 @@ pub struct EffectConfig {
     /// `"unused-types": "off"`, fallow does not report them. A schema is a
     /// class that extends a `Schema` class factory (`Schema.Class`,
     /// `Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,
-    /// `Schema.Error`, `Schema.ErrorClass`, `Schema.Opaque`), or a const whose
+    /// `Schema.Error`, `Schema.Opaque`), or a const whose
     /// value is a `Schema` constructor, member or pipe chain
     /// (`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand("Id"))`).
+    /// Each `pipe` argument must be a `Schema` transform.
     /// `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.
     /// Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

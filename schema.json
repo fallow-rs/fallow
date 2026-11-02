@@ -1998,7 +1998,7 @@
       "type": "object",
       "properties": {
         "schemaExportsAsTypes": {
-          "description": "Report an unused exported Effect schema as an unused type, under the\n`unused-types` rule, and not as an unused export. An Effect schema\ndefines a runtime value and a type (`typeof User.Type`), so a team\nthat keeps exported types as contracts can keep schemas too. With\n`\"unused-types\": \"off\"`, fallow does not report them. A schema is a\nclass that extends a `Schema` class factory (`Schema.Class`,\n`Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,\n`Schema.Error`, `Schema.ErrorClass`, `Schema.Opaque`), or a const whose\nvalue is a `Schema` constructor, member or pipe chain\n(`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand(\"Id\"))`).\n`Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.\nDefault `false`.",
+          "description": "Report an unused exported Effect schema as an unused type, under the\n`unused-types` rule, and not as an unused export. An Effect schema\ndefines a runtime value and a type (`typeof User.Type`), so a team\nthat keeps exported types as contracts can keep schemas too. With\n`\"unused-types\": \"off\"`, fallow does not report them. A schema is a\nclass that extends a `Schema` class factory (`Schema.Class`,\n`Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,\n`Schema.Error`, `Schema.Opaque`), or a const whose\nvalue is a `Schema` constructor, member or pipe chain\n(`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand(\"Id\"))`).\nEach `pipe` argument must be a `Schema` transform.\n`Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.\nDefault `false`.",
           "type": "boolean"
         }
       },

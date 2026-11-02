@@ -210,8 +210,6 @@ export class V3Request extends Schema.TaggedRequest<V3Request>()("V3Request", {
   payload: {},
 }) {}
 export class V4Error extends Schema.Error<V4Error>("V4Error")({}) {}
-export class V4ErrorClass extends Schema.ErrorClass<V4ErrorClass>("V4ErrorClass")({}) {}
-export class V4TaggedErrorClass extends Schema.TaggedErrorClass<V4TaggedErrorClass>()("V4TaggedErrorClass", {}) {}
 export class V4Opaque extends Schema.Opaque<V4Opaque>()(Schema.Struct({ a: Schema.String })) {}
 export class Extended extends V3Class.extend<Extended>("Extended")({ more: Schema.Number }) {}
 class Plain {}
@@ -227,9 +225,7 @@ export class NotSchema extends Plain {}
             "V3Request",
             "V3Tagged",
             "V4Error",
-            "V4ErrorClass",
             "V4Opaque",
-            "V4TaggedErrorClass",
         ]
     );
 }
@@ -343,4 +339,55 @@ fn records_default_exported_schema_classes() {
         "import { Effect } from \"effect\"\nexport default class extends Error {}\nexport const run = Effect.void\n",
     );
     assert!(plain.is_empty(), "{plain:?}");
+}
+
+#[test]
+fn pipe_arguments_must_be_schema_transforms() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+const User = Schema.Struct({ id: Schema.String })
+export const DecodeSync = Schema.Struct({}).pipe(Schema.decodeUnknownSync)
+export const DecodeEffect = Schema.Struct({}).pipe(Schema.decodeUnknown)
+export const Arrow = Schema.Struct({}).pipe((s) => Schema.decodeUnknownSync(s))
+export const ClassFactory = Schema.Struct({}).pipe(Schema.Class<any>("x"))
+export const LocalDecode = User.pipe(Schema.decodeUnknownSync)
+export const MixedArguments = Schema.String.pipe(Schema.minLength(1), Schema.decodeUnknownSync)
+export const Branded = Schema.String.pipe(Schema.minLength(1), Schema.brand("Name"))
+export const Nullable = Schema.String.pipe(Schema.NullOr)
+export const Checked = Schema.String.pipe(Schema.check(Schema.isMinLength(1)))
+export const Decoded = Schema.String.pipe(Schema.decodeTo(Schema.Number))
+export const Admin = User.pipe(Schema.extend(Schema.Struct({ admin: Schema.Boolean })))
+"#,
+    );
+    assert_eq!(
+        names,
+        vec!["Admin", "Branded", "Checked", "Decoded", "Nullable"],
+        "a pipe is a schema only when every argument is a schema transform"
+    );
+}
+
+#[test]
+fn type_only_schema_names_are_no_constructor() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+export const SchemaInterface = Schema.Schema
+export const TopInterface = Schema.Top
+export const Real = Schema.String
+"#,
+    );
+    assert_eq!(names, vec!["Real"]);
+}
+
+#[test]
+fn records_a_default_exported_schema_expression() {
+    let schema = schema_exports(
+        "import { Schema } from \"effect\"\nexport default Schema.Struct({ id: Schema.String })\n",
+    );
+    assert_eq!(schema, vec!["default"]);
+    let decoder = schema_exports(
+        "import { Schema } from \"effect\"\nconst User = Schema.Struct({})\nexport default Schema.decodeUnknownSync(User)\n",
+    );
+    assert!(decoder.is_empty(), "{decoder:?}");
 }

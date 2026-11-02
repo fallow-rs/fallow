@@ -25,3 +25,5 @@ export const SuppressedSchema = Schema.Struct({});
 
 export const PairedSchema = Schema.Struct({ id: Schema.String });
 export type PairedSchema = typeof PairedSchema.Type;
+
+export default Schema.Struct({ tag: Schema.String });

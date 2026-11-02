@@ -127,7 +127,8 @@ struct Collector<'s, 'a> {
     schema: SchemaShapes<'s, 'a>,
     /// `(local binding, export name)` for each export that names a binding.
     export_bindings: Vec<(String, String)>,
-    /// `export default class extends Schema.Class(...)` without a class name.
+    /// A default export without a binding: `export default Schema.Struct(...)`
+    /// or `export default class extends Schema.Class(...)`.
     anonymous_default_schema: bool,
 }
 
@@ -310,6 +311,8 @@ impl<'s, 'a> Collector<'s, 'a> {
                         self.anonymous_default_schema |= is_schema;
                     }
                     self.record_class_layers(class, true, known);
+                } else if let Some(expression) = export.declaration.as_expression() {
+                    self.anonymous_default_schema |= self.schema.is_schema_expression(expression);
                 }
             }
             _ => {}
