@@ -190,6 +190,10 @@
         "section": "verification"
       },
       {
+        "path": "docs/security-corpus.md",
+        "section": "verification"
+      },
+      {
         "path": "docs/similar-code-analysis.md",
         "section": "architecture"
       },

@@ -79,6 +79,8 @@ for contributors and maintainers of the open-source codebase.
   research.
 - [Security agent verification](security-agent-verification.md): verification
   of syntactic security candidates.
+- [Security corpus](security-corpus.md): precision and advisory recall of
+  `fallow security` on public projects.
 - [Fallow compliance](fallow-compliance.md): compliance workflow.
 - [Environment variables](environment-variables.md): supported environment
   controls.
