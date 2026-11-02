@@ -29,6 +29,7 @@ mod factory;
 mod fluent_chain;
 mod heritage;
 mod instance;
+mod member_probe;
 mod playwright;
 mod typed_property;
 
@@ -37,6 +38,7 @@ use factory::*;
 use fluent_chain::*;
 use heritage::*;
 use instance::*;
+use member_probe::propagate_member_name_probe_accesses;
 use playwright::*;
 use typed_property::*;
 
@@ -1253,6 +1255,7 @@ fn propagate_common_member_accesses(
         accessed_members,
     );
     propagate_type_alias_surface_accesses(input.resolved_modules, indexes, accessed_members);
+    propagate_member_name_probe_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_playwright_fixture_accesses(
         input.graph,
         input.resolved_modules,

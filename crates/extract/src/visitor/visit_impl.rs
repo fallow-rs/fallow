@@ -4704,6 +4704,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_binary_expression(&mut self, expr: &BinaryExpression<'a>) {
+        self.record_in_operator_member_probe(expr);
         if expr.operator == oxc_ast::ast::BinaryOperator::Addition {
             if is_string_coercion_sibling(&expr.right) {
                 self.record_string_coercion_to_string(&expr.left);
@@ -5461,7 +5462,6 @@ fn split_angular_selectors(raw: &str) -> Vec<String> {
 /// `.then` already credits the named import elsewhere; this is the
 /// entry-point-abstain capture for the Angular `unrendered-component` rule).
 fn then_callback_member_class(value: &Expression<'_>) -> Option<String> {
-    // Unwrap the outer `() => <body>` arrow.
     let body = arrow_expression_body(value)?;
     // The body must be a `<expr>.then(<callback>)` call.
     let Expression::CallExpression(call) = body else {
