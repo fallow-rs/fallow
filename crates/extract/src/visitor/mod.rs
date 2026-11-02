@@ -685,6 +685,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// imported function is not a whole-object handover, so call-callee spans
     /// for this broader name set are excluded during that snippet's walk.
     template_object_locals: FxHashSet<String>,
+    /// Module-scope `const` names bound to an object literal.
+    module_plain_object_consts: FxHashSet<String>,
     /// Spans of references to those locals that a more precise pass already
     /// resolved to a member, so `visit_identifier_reference` leaves them alone:
     /// the object of a static or string-computed access, the root of a JSX
@@ -2147,10 +2149,6 @@ impl ModuleInfoExtractor {
                     type_name,
                 },
             ));
-    }
-
-    fn record_local_declaration_name(&mut self, name: &str) {
-        self.local_declaration_names.insert(name.to_string());
     }
 
     /// The named or default import that a top-level `local_name` binds, unless

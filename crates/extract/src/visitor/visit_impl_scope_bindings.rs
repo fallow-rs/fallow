@@ -126,6 +126,30 @@ impl ModuleInfoExtractor {
         self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0
     }
 
+    /// Module-scope object literal `const` names for a class heritage check,
+    /// or `None` in a nested scope, where a local binding can shadow them. A
+    /// heritage call that takes one of them takes data, not a class to mix in.
+    pub(in crate::visitor) fn heritage_objects(&self) -> Option<&FxHashSet<String>> {
+        self.is_module_scope()
+            .then_some(&self.module_plain_object_consts)
+    }
+
+    /// Record a module-scope `const` binding and its initializer.
+    pub(in crate::visitor) fn record_module_const_values(
+        &mut self,
+        name: &str,
+        init: &Expression<'_>,
+    ) {
+        self.record_static_package_values(name, init);
+        if super::super::helpers::is_object_literal_initializer(init) {
+            self.module_plain_object_consts.insert(name.to_string());
+        }
+    }
+
+    pub(in crate::visitor) fn record_local_declaration_name(&mut self, name: &str) {
+        self.local_declaration_names.insert(name.to_string());
+    }
+
     pub(in crate::visitor) fn is_module_or_function_runtime_scope(&self) -> bool {
         self.namespace_depth == 0
     }

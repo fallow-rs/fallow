@@ -1058,7 +1058,7 @@ impl ModuleInfoExtractor {
     ) {
         if let BindingPattern::BindingIdentifier(id) = &declarator.id {
             if decl.kind == VariableDeclarationKind::Const && self.is_module_scope() {
-                self.record_static_package_values(id.name.as_str(), init);
+                self.record_module_const_values(id.name.as_str(), init);
             }
 
             self.record_static_sink_literal_binding(decl, declarator, init);
@@ -1448,7 +1448,7 @@ impl ModuleInfoExtractor {
                         self.is_named_import_from(local_name, source, imported_name)
                     },
                 );
-            let members = extract_class_members(class, is_angular);
+            let members = extract_class_members(class, is_angular, self.heritage_objects());
             self.record_factory_property_class(id);
             if self.capture_subclass_provenance {
                 self.record_binding_declaration(id.name.as_str(), id.span);
@@ -4213,7 +4213,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     },
                 );
                 (
-                    extract_class_members(class, is_angular),
+                    extract_class_members(class, is_angular, self.heritage_objects()),
                     extract_super_class_name(class),
                     extract_implemented_interface_names(class),
                     bindings,

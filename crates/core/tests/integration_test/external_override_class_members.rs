@@ -22,6 +22,10 @@ fn external_override_members_are_credited() {
         "PortContainer.onStop",
         "ChildContainer.onStop",
         "NotFound.message",
+        // An object spread in the call arguments is still data.
+        "SpreadNotFound.message",
+        // A module `const` with an object literal initializer is data too.
+        "NamedFieldsNotFound.message",
         "Failure.toString",
         "PlainFailure.message",
         "LooseFailure.toString",
@@ -38,11 +42,14 @@ fn external_override_members_are_credited() {
         "PortContainer.ownHelper",
         "ChildContainer.childHelper",
         "NotFound.unusedHelper",
+        "SpreadNotFound.spreadHelper",
+        "NamedFieldsNotFound.namedFieldsHelper",
         "PlainFailure.unusedHelper",
         "LocalChild.run",
         "Mixed.run",
         "MixedMember.run",
         "MixedArray.run",
+        "MixedAlias.run",
         // The base of `ProjectLeaf` is a project class that does not declare
         // `onStop`. Only a direct external base gives the credit.
         "ProjectLeaf.onStop",
