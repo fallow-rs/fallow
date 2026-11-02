@@ -282,6 +282,8 @@ mod prop_drilling;
 mod re_export_chains;
 #[path = "integration_test/react_component_intel.rs"]
 mod react_component_intel;
+#[path = "integration_test/react_native_platform_self_import.rs"]
+mod react_native_platform_self_import;
 #[path = "integration_test/render_fan_in.rs"]
 mod render_fan_in;
 #[path = "integration_test/require_resolve_relative.rs"]

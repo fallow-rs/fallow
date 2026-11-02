@@ -1,0 +1,8 @@
+{
+  "name": "react-native-platform-self-import",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "react-native": "0.80.0"
+  }
+}

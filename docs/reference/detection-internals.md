@@ -934,7 +934,13 @@ Style resolution is distinct from JavaScript resolution. Preserve scoped npm
 specifier identity, SCSS partial and directory-index lookup, configured include
 paths and installed-package fallback. The `from_style` fact on SFC imports is
 part of that routing contract. React Native platform variants must remain
-reachable alongside standard source extensions.
+reachable alongside standard source extensions. When a platform extension
+makes a specifier resolve to the importing file, for example `./Button` in
+`Button.ios.tsx`, the resolver tries the specifier again without platform
+extensions, the same as TypeScript without `moduleSuffixes`. A base file wins.
+Without a base file, the first result stays. The family edges that
+`crates/graph/src/resolve/react_native.rs` adds never point to the importing
+file.
 
 ## Framework and analysis regression boundaries
 
