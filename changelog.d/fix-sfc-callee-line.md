@@ -1,0 +1,3 @@
+### Fixed
+
+- **Findings in `.vue`, `.svelte`, `.astro` and `.mdx` files now report the line of the call.** `banned-call`, `banned-effect`, `boundaries.calls.forbidden`, `unprovided-inject` and `misplaced-directive` findings used the offset in the script block as the offset in the file, so the line and the column were wrong. A `fallow-ignore-next-line` comment above the call did not apply, and a comment on another line could hide the finding. The source node of a taint trace had the same error, and a `next/dynamic` import with `ssr: false` in these files did not count as client-only for `client-server-leak`. Policy baseline keys do not change. Line-based fingerprints in CodeClimate output can change for these findings.
