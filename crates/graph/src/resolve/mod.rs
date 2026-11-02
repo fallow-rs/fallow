@@ -18,6 +18,7 @@
 mod auto_imports;
 mod dynamic_imports;
 pub(crate) mod fallbacks;
+mod file_attempt;
 pub(crate) mod inline_loaders;
 mod jsx_runtime;
 mod memo;

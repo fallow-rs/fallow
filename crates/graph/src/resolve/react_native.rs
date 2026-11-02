@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use oxc_resolver::ResolveOptions;
 use rustc_hash::FxHashMap;
 
 use super::types::{RN_PLATFORM_PREFIXES, ResolveResult, ResolvedImport, ResolvedModule};
@@ -162,6 +163,7 @@ fn retarget(result: &ResolveResult, sibling: FileId) -> Option<ResolveResult> {
 /// Expand `imports` with sibling edges for every platform-extension family
 /// member, appending the extra edges to `extra`.
 fn expand_family_imports(
+    importer: FileId,
     imports: &[ResolvedImport],
     families: &PlatformFamilies,
     extra: &mut Vec<ResolvedImport>,
@@ -177,7 +179,7 @@ fn expand_family_imports(
             continue;
         };
         for sibling in siblings {
-            if *sibling == target {
+            if *sibling == target || *sibling == importer {
                 continue;
             }
             if let Some(retargeted) = retarget(&import.target, *sibling) {
@@ -199,7 +201,8 @@ fn expand_family_imports(
 /// runtime. The resolver picks a single winner per platform-extension order;
 /// this pass appends edges to the remaining family members so none are
 /// reported as unused files and their matching exports stay credited. Imports
-/// that explicitly name a platform variant keep their single edge.
+/// that explicitly name a platform variant keep their single edge. A family
+/// member never gets an edge to itself.
 pub(super) fn synthesize_platform_family_edges(
     resolved: &mut [ResolvedModule],
     files: &[DiscoveredFile],
@@ -215,8 +218,18 @@ pub(super) fn synthesize_platform_family_edges(
 
     for module in resolved.iter_mut() {
         let mut extra = Vec::new();
-        expand_family_imports(&module.resolved_imports, &families, &mut extra);
-        expand_family_imports(&module.resolved_dynamic_imports, &families, &mut extra);
+        expand_family_imports(
+            module.file_id,
+            &module.resolved_imports,
+            &families,
+            &mut extra,
+        );
+        expand_family_imports(
+            module.file_id,
+            &module.resolved_dynamic_imports,
+            &families,
+            &mut extra,
+        );
 
         for re_export in &module.re_exports {
             if specifier_names_platform_variant(&re_export.info.source) {
@@ -229,7 +242,7 @@ pub(super) fn synthesize_platform_family_edges(
                 continue;
             };
             for sibling in siblings {
-                if *sibling == target {
+                if *sibling == target || *sibling == module.file_id {
                     continue;
                 }
                 // Re-export propagation keeps its single resolved source; a
@@ -252,6 +265,36 @@ pub(super) fn synthesize_platform_family_edges(
 
         module.resolved_imports.extend(extra);
     }
+}
+
+/// Whether `resolved` can be the importing file itself only because of a
+/// Metro platform extension.
+///
+/// The check is syntactic: `resolved` carries a platform segment, the
+/// specifier does not name one, and both paths have the same file name.
+/// The caller confirms that the two paths are the same file.
+pub(super) fn may_be_platform_self_resolution(
+    from_file: &Path,
+    specifier: &str,
+    resolved: &Path,
+) -> bool {
+    resolved.file_name() == from_file.file_name()
+        && platform_family_key(resolved).is_some_and(|key| key.is_platform_variant)
+        && !specifier_names_platform_variant(specifier)
+}
+
+/// Remove the Metro platform extensions from `options`.
+///
+/// The result resolves a specifier the same way as TypeScript without
+/// `moduleSuffixes`: `./UserMenu` resolves to `UserMenu.tsx`, not to
+/// `UserMenu.ios.tsx`.
+pub(super) fn without_platform_extensions(mut options: ResolveOptions) -> ResolveOptions {
+    options.extensions.retain(|extension| {
+        !RN_PLATFORM_PREFIXES
+            .iter()
+            .any(|platform| extension.starts_with(platform))
+    });
+    options
 }
 
 /// Build the resolver extension list, optionally prepending React Native platform
@@ -510,6 +553,74 @@ mod tests {
             families.siblings(FileId(4)),
             None,
             "same stem in a different directory is not part of the family"
+        );
+    }
+
+    #[test]
+    fn test_family_edges_skip_the_importing_member() {
+        let files = vec![
+            discovered(0, "src/Badge.tsx"),
+            discovered(1, "src/Badge.ios.tsx"),
+            discovered(2, "src/Badge.android.tsx"),
+        ];
+        let ios_import = ResolvedImport {
+            info: ImportInfo {
+                source: "./Badge".to_string(),
+                imported_name: ImportedName::Named("BadgeProps".to_string()),
+                local_name: "BadgeProps".to_string(),
+                is_type_only: true,
+                is_type_only_star: false,
+                from_style: false,
+                span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(0)),
+        };
+        let android_re_export = super::super::types::ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: "./Badge".to_string(),
+                imported_name: "BadgeProps".to_string(),
+                exported_name: "BadgeProps".to_string(),
+                is_type_only: true,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(0)),
+        };
+        let mut resolved = vec![
+            ResolvedModule {
+                file_id: FileId(1),
+                path: std::path::PathBuf::from("src/Badge.ios.tsx"),
+                resolved_imports: vec![ios_import],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: std::path::PathBuf::from("src/Badge.android.tsx"),
+                re_exports: vec![android_re_export],
+                ..ResolvedModule::default()
+            },
+        ];
+
+        synthesize_platform_family_edges(&mut resolved, &files, &["expo".to_string()]);
+
+        let targets = |module: &ResolvedModule| -> Vec<Option<FileId>> {
+            module
+                .resolved_imports
+                .iter()
+                .map(|import| import.target.internal_file_id())
+                .collect()
+        };
+        assert_eq!(
+            targets(&resolved[0]),
+            vec![Some(FileId(0)), Some(FileId(2))],
+            "an import must not give the importing member an edge to itself"
+        );
+        assert_eq!(
+            targets(&resolved[1]),
+            vec![Some(FileId(1))],
+            "a re-export must not give the importing member an edge to itself"
         );
     }
 

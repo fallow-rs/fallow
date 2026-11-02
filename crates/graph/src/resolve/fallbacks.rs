@@ -1249,10 +1249,10 @@ fn resolve_workspace_self_reference(
     };
 
     let root_file = ws_root.join("__fallow_ws_self_resolve__");
-    let super::specifier::ResolveFileAttempt::Resolved {
+    let super::file_attempt::ResolveFileAttempt::Resolved {
         resolution: resolved,
         ..
-    } = super::specifier::resolve_file_with_tsconfig_fallback(
+    } = super::file_attempt::resolve_file_with_tsconfig_fallback(
         ctx,
         &root_file,
         &rel_spec,
