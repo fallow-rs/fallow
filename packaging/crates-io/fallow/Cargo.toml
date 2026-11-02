@@ -1,0 +1,29 @@
+[package]
+name = "fallow"
+version = "3.38.1"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+repository = "https://github.com/fallow-rs/fallow"
+homepage = "https://fallow.tools/docs/"
+documentation = "https://fallow.tools/docs/"
+keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
+categories = ["command-line-utilities", "development-tools"]
+description = "Codebase intelligence for TypeScript and JavaScript. Installs the fallow command of fallow-cli"
+readme = "README.md"
+
+[[bin]]
+name = "fallow"
+path = "src/main.rs"
+
+# A caret requirement: `cargo install fallow` without `--locked` resolves the
+# newest 3.x fallow-cli, so this crate needs a new release only for a new major.
+[dependencies]
+fallow-cli = "3.38.1"
+
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { version = "0.1.52", default-features = false }
+
+# This crate is not a workspace member. A second `fallow` binary in the
+# workspace would collide with the binary of fallow-cli in `target/`.
+[workspace]

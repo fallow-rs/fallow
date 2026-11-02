@@ -28,6 +28,8 @@ Use this file for a fast architectural map before editing or reviewing.
 - `crates/napi/`: Node.js bindings over the workspace programmatic facade.
 - `crates/multicall/`: packaged binary entry that dispatches CLI, LSP, and MCP
   modes.
+- `packaging/crates-io/fallow/`: the `fallow` crate on crates.io. It is outside
+  the workspace, and its binary calls `fallow_cli::run`.
 - `crates/license/`: offline license verification and feature entitlements.
 - `crates/security/`: data-driven security source and sink catalogue.
 - `crates/mutation/`: pure mutant site discovery, mutant ids, and
