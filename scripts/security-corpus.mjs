@@ -2,6 +2,7 @@
 // Security corpus harness: measures `fallow security` against the public
 // security-rules research data of the Ultracite project. See
 // docs/security-corpus.md for the method and the run instructions.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -105,10 +106,10 @@ const readValue = (argv, index, name) => {
   return value;
 };
 
-const positiveInt = (name, value) => {
+const intAtLeast = (name, value, min) => {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${name} requires a non-negative integer, got ${value}`);
+  if (!Number.isInteger(parsed) || parsed < min) {
+    throw new Error(`${name} requires an integer of at least ${min}, got ${value}`);
   }
   return parsed;
 };
@@ -133,17 +134,17 @@ const optionSetters = new Map([
   ["--ultracite-dir", (options, value) => ({ ...options, ultraciteDir: value })],
   ["--fallow-bin", (options, value) => ({ ...options, fallowBin: value })],
   ["--out-dir", (options, value) => ({ ...options, outDir: value })],
-  ["--limit", (options, value) => ({ ...options, limit: positiveInt("--limit", value) })],
+  ["--limit", (options, value) => ({ ...options, limit: intAtLeast("--limit", value, 1) })],
   ["--class", (options, value) => ({ ...options, classes: new Set(csv(value)) })],
   ["--repos", (options, value) => ({ ...options, repos: new Set(csv(value)) })],
-  ["--slack", (options, value) => ({ ...options, slack: positiveInt("--slack", value) })],
+  ["--slack", (options, value) => ({ ...options, slack: intAtLeast("--slack", value, 0) })],
   [
     "--max-scope-files",
-    (options, value) => ({ ...options, maxScopeFiles: positiveInt("--max-scope-files", value) }),
+    (options, value) => ({ ...options, maxScopeFiles: intAtLeast("--max-scope-files", value, 1) }),
   ],
   [
     "--timeout-secs",
-    (options, value) => ({ ...options, timeoutSecs: positiveInt("--timeout-secs", value) }),
+    (options, value) => ({ ...options, timeoutSecs: intAtLeast("--timeout-secs", value, 1) }),
   ],
 ]);
 
@@ -201,6 +202,29 @@ const oldSideSourcePath = (line) => {
   return path.startsWith("a/") && isSourcePath(path.slice(2)) ? path.slice(2) : null;
 };
 
+const HUNK_FULL_RE = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
+
+const hunkLineCounts = (line) => {
+  const match = HUNK_FULL_RE.exec(line);
+  return {
+    old: match[1] === undefined ? 1 : Number(match[1]),
+    new: match[2] === undefined ? 1 : Number(match[2]),
+  };
+};
+
+const consumeHunkLine = (remaining, line) => {
+  if (line.startsWith("-")) {
+    return { ...remaining, old: remaining.old - 1 };
+  }
+  if (line.startsWith("+")) {
+    return { ...remaining, new: remaining.new - 1 };
+  }
+  if (line.startsWith(" ")) {
+    return { old: remaining.old - 1, new: remaining.new - 1 };
+  }
+  return remaining;
+};
+
 const hunkOldRange = (hunk) => {
   const start = Number(hunk[1]);
   const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
@@ -215,14 +239,24 @@ const hunkOldRange = (hunk) => {
 export const changedRangesFromDiff = (diff) => {
   const ranges = new Map();
   let current = null;
+  let remaining = { old: 0, new: 0 };
   for (const line of diff.split("\n")) {
+    if (remaining.old > 0 || remaining.new > 0) {
+      remaining = consumeHunkLine(remaining, line);
+      continue;
+    }
     if (line.startsWith("diff --git ")) {
       current = null;
-    } else if (line.startsWith("--- ")) {
+      continue;
+    }
+    if (line.startsWith("--- ")) {
       current = oldSideSourcePath(line);
-    } else if (current !== null) {
-      const hunk = HUNK_RE.exec(line);
-      if (hunk) {
+      continue;
+    }
+    const hunk = HUNK_RE.exec(line);
+    if (hunk) {
+      remaining = hunkLineCounts(line);
+      if (current !== null) {
         ranges.set(current, [...(ranges.get(current) ?? []), hunkOldRange(hunk)]);
       }
     }
@@ -410,22 +444,37 @@ const runFallow = (fallowBin, cwd, timeoutSecs) => {
   };
 };
 
+const readCache = (rawPath, key) => {
+  if (!existsSync(rawPath)) {
+    return null;
+  }
+  const cached = JSON.parse(readFileSync(rawPath, "utf8"));
+  if (!cached.ok || JSON.stringify(cached.cacheKey ?? null) !== JSON.stringify(key)) {
+    return null;
+  }
+  return { ...cached, findings: cached.findings.map(compactFinding) };
+};
+
 /**
- * Returns the cached scan at `rawPath`, or runs `produce` and caches its
- * result. A failed scan is not cached, so the next run tries it again.
+ * Returns the cached scan at `rawPath` when its cache key equals `key`, or
+ * runs `produce` and caches its result with the key. The key holds the fallow
+ * binary hash, the commit and the scopes, so a rebuild or a scope change
+ * scans again. A failed scan is not cached, so the next run tries it again.
  */
-export const cachedFallow = (rawPath, rerun, produce) => {
-  if (!rerun && existsSync(rawPath)) {
-    const cached = JSON.parse(readFileSync(rawPath, "utf8"));
-    return cached.ok ? { ...cached, findings: cached.findings.map(compactFinding) } : cached;
+export const cachedFallow = (rawPath, rerun, produce, key = null) => {
+  const cached = rerun ? null : readCache(rawPath, key);
+  if (cached) {
+    return cached;
   }
   const result = produce();
   if (result.ok) {
     mkdirSync(dirname(rawPath), { recursive: true });
-    writeFileSync(rawPath, `${JSON.stringify(result)}\n`);
+    writeFileSync(rawPath, `${JSON.stringify({ ...result, cacheKey: key })}\n`);
   }
   return result;
 };
+
+const fileSha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
 // ---------------------------------------------------------------------------
 // Ultracite data
@@ -475,6 +524,7 @@ const runPrecisionRepo = (repo, ultracite, options, fallowBin) => {
     join(options.outDir, "raw", `precision-${repo.name}.json`),
     options.rerun,
     () => runFallow(fallowBin, dir, options.timeoutSecs),
+    { fallow: options.fallowHash, commit: sha, scopes: repo.include },
   );
   const elapsedMs = Date.now() - started;
   if (!scan.ok) {
@@ -497,6 +547,19 @@ const runPrecisionRepo = (repo, ultracite, options, fallowBin) => {
     unresolvedCalleeSites: scan.unresolvedCalleeSites,
     ...match,
   };
+};
+
+/** Runs one precision repo and turns a thrown error into an error entry, so the run continues. */
+export const guardPrecisionRepo = (repo, runRepo) => {
+  try {
+    return runRepo(repo);
+  } catch (error) {
+    return {
+      repo: repo.name,
+      sha: MEASURED_COMMITS[repo.name] ?? "unknown",
+      error: String(error.message ?? error),
+    };
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -554,6 +617,34 @@ const collapseScopes = (scopes) => {
 
 const findingKey = (finding) => `${finding.category}\u0000${finding.path}\u0000${finding.evidence}`;
 
+/**
+ * Returns the finding ids of the line hits that the fix scan still reports.
+ * Returns null when the fix scan failed, because persistence is then unknown.
+ */
+export const persistingLineHits = (lineHits, fixScan) => {
+  if (!fixScan.ok) {
+    return null;
+  }
+  const after = new Set(fixScan.findings.map(findingKey));
+  return lineHits.filter((finding) => after.has(findingKey(finding))).map((f) => f.finding_id);
+};
+
+const scanFixCommit = (dir, commit, scopes, options, fallowBin) => {
+  try {
+    return cachedFallow(
+      join(options.outDir, "raw", `fix-${commit.sha}.json`),
+      options.rerun,
+      () => {
+        checkoutSparse(dir, commit.sha, scopes);
+        return runFallow(fallowBin, dir, options.timeoutSecs);
+      },
+      { fallow: options.fallowHash, commit: commit.sha, scopes },
+    );
+  } catch (error) {
+    return { ok: false, error: String(error.message ?? error) };
+  }
+};
+
 const runRecallCommit = (commit, options, fallowBin) => {
   const dir = historyDir(options, commit.slug);
   ensureRepo(dir, commit.slug);
@@ -598,26 +689,16 @@ const runRecallCommit = (commit, options, fallowBin) => {
       checkoutSparse(dir, parent, scopes);
       return runFallow(fallowBin, dir, options.timeoutSecs);
     },
+    { fallow: options.fallowHash, commit: parent, scopes },
   );
   if (!scan.ok) {
     return { status: "fallow-error", parent, scopes, error: scan.error };
   }
   const hits = recallHits(scan.findings, ranges, options.slack);
-  let persisting = [];
-  if (hits.lineHits.length > 0) {
-    const fixScan = cachedFallow(
-      join(options.outDir, "raw", `fix-${commit.sha}.json`),
-      options.rerun,
-      () => {
-        checkoutSparse(dir, commit.sha, scopes);
-        return runFallow(fallowBin, dir, options.timeoutSecs);
-      },
-    );
-    const after = new Set((fixScan.ok ? fixScan.findings : []).map(findingKey));
-    persisting = hits.lineHits
-      .filter((finding) => after.has(findingKey(finding)))
-      .map((finding) => finding.finding_id);
-  }
+  const fixScan =
+    hits.lineHits.length > 0
+      ? scanFixCommit(dir, commit, scopes, options, fallowBin)
+      : { ok: true, findings: [] };
   return {
     status: "analyzed",
     parent,
@@ -626,7 +707,8 @@ const runRecallCommit = (commit, options, fallowBin) => {
     findings: scan.findings.length,
     fileHits: hits.fileHits,
     lineHits: hits.lineHits,
-    persistingAfterFix: persisting,
+    persistingAfterFix: persistingLineHits(hits.lineHits, fixScan),
+    fixError: fixScan.ok ? undefined : fixScan.error,
   };
 };
 
@@ -674,14 +756,23 @@ export const selectAdvisories = (ultracite, options) => {
   };
 };
 
-const aggregateAdvisory = (advisory, commitResults) => {
+const markPersistence = (result) =>
+  result.lineHits.map((finding) => ({
+    ...finding,
+    persistsAfterFix:
+      result.persistingAfterFix === null
+        ? null
+        : result.persistingAfterFix.includes(finding.finding_id),
+  }));
+
+/** Joins the commit results of one advisory into one report row. */
+export const aggregateAdvisory = (advisory, commitResults) => {
   const results = advisory.commits.map((commit) => ({
     ...commit,
     ...commitResults.get(commit.sha),
   }));
   const analyzed = results.filter((result) => result.status === "analyzed");
-  const lineHits = analyzed.flatMap((result) => result.lineHits);
-  const persisting = new Set(analyzed.flatMap((result) => result.persistingAfterFix));
+  const lineHits = analyzed.flatMap(markPersistence);
   return {
     ghsa: advisory.ghsa,
     project: advisory.project,
@@ -695,13 +786,11 @@ const aggregateAdvisory = (advisory, commitResults) => {
       status: result.status,
       scopes: result.scopes,
       error: result.error,
+      fixError: result.fixError,
     })),
     fileHit: analyzed.some((result) => result.fileHits.length > 0),
     lineHit: lineHits.length > 0,
-    lineHits: lineHits.map((finding) => ({
-      ...finding,
-      persistsAfterFix: persisting.has(finding.finding_id),
-    })),
+    lineHits,
     fileHitCount: analyzed.reduce((sum, result) => sum + result.fileHits.length, 0),
   };
 };
@@ -739,6 +828,14 @@ const table = (headers, rows) =>
         `| ${row.map((cell) => String(cell).replaceAll("|", "\\|").replaceAll("\n", " ")).join(" | ")} |`,
     ),
   ].join("\n");
+
+/** Renders the "still present after fix" cell. A line hit whose fix scan failed counts as unknown. */
+export const persistenceCell = (lineHits) => {
+  const present = lineHits.filter((finding) => finding.persistsAfterFix === true).length;
+  const unknown = lineHits.filter((finding) => finding.persistsAfterFix === null).length;
+  const cell = `${present}/${lineHits.length}`;
+  return unknown > 0 ? `${cell} (${unknown} unknown: fix scan failed)` : cell;
+};
 
 const loc = (finding) => `\`${finding.path}:${finding.line}\``;
 
@@ -906,9 +1003,7 @@ const renderRecall = (recall) => {
           row.class,
           row.lint,
           row.lineHits.map((finding) => `${finding.category} ${loc(finding)}`).join("<br>"),
-          row.lineHits.filter((finding) => finding.persistsAfterFix).length +
-            "/" +
-            row.lineHits.length,
+          persistenceCell(row.lineHits),
         ]),
     ),
     "",
@@ -931,14 +1026,14 @@ const renderRecall = (recall) => {
     "",
   );
   const errors = recall.rows.flatMap((row) =>
-    row.commits
-      .filter((commit) => commit.error)
-      .map((commit) => [
-        row.ghsa,
-        commit.sha.slice(0, 10),
-        commit.status,
-        commit.error.slice(0, 200),
-      ]),
+    row.commits.flatMap((commit) =>
+      [
+        commit.error ? [commit.status, commit.error] : null,
+        commit.fixError ? ["fix-scan-error", commit.fixError] : null,
+      ]
+        .filter(Boolean)
+        .map(([status, error]) => [row.ghsa, commit.sha.slice(0, 10), status, error.slice(0, 200)]),
+    ),
   );
   if (errors.length > 0) {
     out.push("### Errors", "", table(["Advisory", "Commit", "Status", "Error"], errors), "");
@@ -985,10 +1080,12 @@ export const runSecurityCorpus = (options) => {
     );
   }
   mkdirSync(options.outDir, { recursive: true });
+  options = { ...options, fallowHash: fileSha256(fallowBin) };
   const ultracite = loadUltracite(options);
   const meta = {
     generated: new Date().toISOString(),
     fallow: run(fallowBin, ["--version"]).stdout.trim(),
+    fallowSha256: options.fallowHash,
     fallowCommit: git(REPO_ROOT, ["rev-parse", "HEAD"]).stdout.trim(),
     ultracite: `${ULTRACITE_SLUG}@${ULTRACITE_SHA}`,
     commits: MEASURED_COMMITS,
@@ -1004,7 +1101,9 @@ export const runSecurityCorpus = (options) => {
       ? null
       : repos.map((repo) => {
           console.error(`[precision] ${repo.name}`);
-          return runPrecisionRepo(repo, ultracite, options, fallowBin);
+          return guardPrecisionRepo(repo, (entry) =>
+            runPrecisionRepo(entry, ultracite, options, fallowBin),
+          );
         });
   const recall = options.phase === "precision" ? null : runRecall(ultracite, options, fallowBin);
   writeFileSync(

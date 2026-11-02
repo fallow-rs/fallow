@@ -5,13 +5,17 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  aggregateAdvisory,
   cachedFallow,
   changedRangesFromDiff,
   compactFinding,
+  guardPrecisionRepo,
   isCensusPath,
   matchPrecision,
   parseArgs,
   parseFixCommit,
+  persistenceCell,
+  persistingLineHits,
   recallHits,
   scopeForFile,
   selectAdvisories,
@@ -53,22 +57,32 @@ test("parseFixCommit splits a slug and a commit", () => {
   assert.equal(parseFixCommit("not-a-commit"), null);
 });
 
+const lines = (prefix, count) => Array.from({ length: count }, (_, i) => `${prefix}line ${i}`);
+
 test("changedRangesFromDiff keeps old-side ranges of source files only", () => {
   const diff = [
     "diff --git a/src/a.ts b/src/a.ts",
     "--- a/src/a.ts",
     "+++ b/src/a.ts",
     "@@ -10,3 +10,4 @@ fn",
+    ...lines("-", 3),
+    ...lines("+", 4),
     "@@ -40 +41,2 @@",
+    "-x",
+    ...lines("+", 2),
     "@@ -60,0 +62,5 @@",
+    ...lines("+", 5),
     "diff --git a/README.md b/README.md",
     "--- a/README.md",
     "+++ b/README.md",
     "@@ -1,2 +1,2 @@",
+    ...lines("-", 2),
+    ...lines("+", 2),
     "diff --git a/src/new.ts b/src/new.ts",
     "--- /dev/null",
     "+++ b/src/new.ts",
     "@@ -0,0 +1,9 @@",
+    ...lines("+", 9),
   ].join("\n");
   const ranges = changedRangesFromDiff(diff);
   assert.deepEqual([...ranges.keys()], ["src/a.ts"]);
@@ -269,4 +283,109 @@ test("selectAdvisories applies the class, repo and limit filters in order", () =
     ],
   );
   assert.equal(result.withoutFix, 1);
+});
+
+test("parseArgs rejects a zero limit and accepts a zero slack", () => {
+  assert.throws(() => parseArgs(["--limit", "0"]), /--limit requires an integer of at least 1/);
+  assert.throws(() => parseArgs(["--timeout-secs", "0"]), /--timeout-secs/);
+  assert.throws(() => parseArgs(["--slack", "-1"]), /--slack requires an integer of at least 0/);
+  assert.equal(parseArgs(["--slack", "0"]).slack, 0);
+});
+
+test("changedRangesFromDiff reads removed lines that look like file headers as hunk lines", () => {
+  const diff = [
+    "diff --git a/x.ts b/x.ts",
+    "--- a/x.ts",
+    "+++ b/x.ts",
+    "@@ -5,3 +5,1 @@",
+    "--- a/not.ts",
+    "-- a/y.ts",
+    "-b",
+    "+c",
+    "@@ -20 +19 @@",
+    "-q",
+    "\\ No newline at end of file",
+    "+r",
+    "diff --git a/z.ts b/z.ts",
+    "--- a/z.ts",
+    "+++ b/z.ts",
+    "@@ -1 +1 @@",
+    "-a",
+    "+b",
+  ].join("\n");
+  const ranges = changedRangesFromDiff(diff);
+  assert.deepEqual([...ranges.keys()], ["x.ts", "z.ts"]);
+  assert.deepEqual(ranges.get("x.ts"), [
+    { start: 5, end: 7 },
+    { start: 20, end: 20 },
+  ]);
+});
+
+test("cachedFallow scans again when the cache key differs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "security-corpus-test-"));
+  try {
+    const rawPath = join(dir, "raw", "scan.json");
+    let calls = 0;
+    const produce = () => {
+      calls += 1;
+      return { ok: true, findings: [] };
+    };
+    cachedFallow(rawPath, false, produce, { fallow: "a", scopes: ["src"] });
+    cachedFallow(rawPath, false, produce, { fallow: "a", scopes: ["src"] });
+    assert.equal(calls, 1);
+    cachedFallow(rawPath, false, produce, { fallow: "b", scopes: ["src"] });
+    assert.equal(calls, 2);
+    cachedFallow(rawPath, false, produce, { fallow: "b", scopes: ["lib"] });
+    assert.equal(calls, 3);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistingLineHits returns null when the fix scan failed", () => {
+  const hits = [finding("src/a.ts", 3)];
+  assert.equal(persistingLineHits(hits, { ok: false, error: "timed out" }), null);
+  assert.deepEqual(persistingLineHits(hits, { ok: true, findings: [] }), []);
+  assert.deepEqual(persistingLineHits(hits, { ok: true, findings: [finding("src/a.ts", 9)] }), [
+    hits[0].finding_id,
+  ]);
+});
+
+test("a failed fix scan marks line hits as unknown and records the error", () => {
+  const hit = finding("src/a.ts", 3);
+  const row = aggregateAdvisory(
+    {
+      ghsa: "GHSA-x",
+      project: "demo",
+      class: "xss",
+      lint: null,
+      summary: "s",
+      commits: [{ slug: "o/r", sha: "abc" }],
+    },
+    new Map([
+      [
+        "abc",
+        {
+          status: "analyzed",
+          fileHits: [],
+          lineHits: [hit],
+          persistingAfterFix: null,
+          fixError: "timed out",
+        },
+      ],
+    ]),
+  );
+  assert.equal(row.lineHits[0].persistsAfterFix, null);
+  assert.equal(row.commits[0].fixError, "timed out");
+  assert.equal(persistenceCell(row.lineHits), "0/1 (1 unknown: fix scan failed)");
+  assert.equal(persistenceCell([{ persistsAfterFix: true }, { persistsAfterFix: false }]), "1/2");
+});
+
+test("guardPrecisionRepo turns a thrown error into an error entry", () => {
+  const entry = guardPrecisionRepo({ name: "zod" }, () => {
+    throw new Error("git fetch failed");
+  });
+  assert.equal(entry.repo, "zod");
+  assert.equal(entry.error, "git fetch failed");
+  assert.equal(typeof entry.sha, "string");
 });

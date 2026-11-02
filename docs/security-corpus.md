@@ -52,7 +52,12 @@ A full recall run is slow, because each fix commit needs its own
 fetch and scan. When a build cache can remove the release binary during that
 time, copy the binary to a stable path and pass `--fallow-bin`. The harness
 caches each successful scan in `raw/` and does not cache a failed scan, so a
-second run continues where the first run stopped.
+second run continues where the first run stopped. The cache key holds the
+SHA-256 of the fallow binary, the commit and the checkout scopes. A rebuilt
+binary or a different scope therefore scans again without `--rerun`.
+
+When the scan of a fix commit fails, the report shows the persistence of
+those line hits as unknown and lists the failure under Errors.
 
 The harness writes `report.md`, `results.json` and `raw/` (compact fallow
 output per scan) to the output directory. The default directory is ignored by
