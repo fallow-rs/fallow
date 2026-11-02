@@ -17,3 +17,7 @@ export const outDir = path.resolve(process.cwd(), "dist");
 export function readTemplate(): string {
   return fs.readFileSync(path.join(here, "template.html"), "utf8");
 }
+
+// This module reads request input, so its `path.join` / `path.resolve` calls
+// pass the same-module source gate.
+export const requestUrl = (req: { url: string }): string => req.url;

@@ -6,7 +6,7 @@
 //! and dynamic):
 //!
 //! 1. The cone reaches a module that reads a non-public env secret
-//!    (`category: None`, the original finding).
+//!    (`category: "client-server-leak"`, the original finding).
 //! 2. The cone reaches a SERVER-ONLY module (`category: Some("server-only-import")`):
 //!    a module importing the `server-only` poison package or a server-only
 //!    Next.js / Node API (see the shared `imports_server_only_code` predicate in
@@ -90,8 +90,12 @@ use fallow_security::import_source_matches;
 /// The inline suppression kind token for the client-server-leak rule.
 const SUPPRESS_KIND: &str = "security-client-server-leak";
 
+/// Stable `category` string of the secret-leak sink. It equals the rule name,
+/// so every security finding carries a category.
+const SECRET_LEAK_CATEGORY: &str = "client-server-leak";
+
 /// Stable `category` string distinguishing the server-only-import sink from the
-/// secret-leak sink (`category: None`). Same rule, same suppress kind, same
+/// secret-leak sink (`category: "client-server-leak"`). Same rule, same suppress kind, same
 /// `SecurityFinding` shape; only the category differs so JSON / human / SARIF
 /// consumers can tell "reaches server-only code" apart from "reads a secret".
 const SERVER_ONLY_CATEGORY: &str = "server-only-import";
@@ -247,7 +251,7 @@ fn compute_server_only_source_set(
 /// distinct sink predicates run over the SAME cone:
 ///
 /// - reaching a module that reads a non-public env secret emits the secret-leak
-///   finding (`category: None`);
+///   finding (`category: "client-server-leak"`);
 /// - reaching a SERVER-ONLY module emits the server-only finding
 ///   (`category: Some("server-only-import")`).
 ///
@@ -618,7 +622,12 @@ fn build_leak_finding(
     // The client-server-leak rule is graph-structural, not catalogue-driven:
     // no source kind, no callee, no CWE. The candidate's sink slot anchors on
     // the client boundary file; the boundary slot is filled by the ranking pass.
-    let candidate = client_leak_candidate(anchor.path.clone(), anchor.line, anchor.col, None);
+    let candidate = client_leak_candidate(
+        anchor.path.clone(),
+        anchor.line,
+        anchor.col,
+        Some(SECRET_LEAK_CATEGORY.to_owned()),
+    );
 
     build_client_server_leak_finding(evidence, trace, candidate)
 }
@@ -719,7 +728,8 @@ fn build_direct_finding(
          Candidate for verification: confirm the secret value actually reaches client-bundled \
          code (it may be guarded, server-only, or build-time-stripped)."
     );
-    let candidate = client_leak_candidate(path.clone(), 1, 0, None);
+    let candidate =
+        client_leak_candidate(path.clone(), 1, 0, Some(SECRET_LEAK_CATEGORY.to_owned()));
     let trace = vec![TraceHop {
         path,
         line: 1,

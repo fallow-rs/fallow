@@ -14818,7 +14818,7 @@
             "string",
             "null"
           ],
-          "description": "The catalogue category id (e.g. `\"dangerous-html\"`). `Some` for\n`TaintedSink`. For `ClientServerLeak` this is `None` for the secret-leak\nfinding, and `Some(\"server-only-import\")` when a `\"use client\"` cone\nreaches server-only code."
+          "description": "The catalogue category id (e.g. `\"dangerous-html\"`). `Some` for\n`TaintedSink`. For `ClientServerLeak` it is `\"client-server-leak\"` for the\nsecret leak (older releases omit it) or `\"server-only-import\"` when a\n`\"use client\"` cone reaches server-only code."
         },
         "cwe": {
           "type": [
@@ -15483,7 +15483,7 @@
             "string",
             "null"
           ],
-          "description": "Catalogue category id of the sink (e.g. `\"dangerous-html\"`). For\n`client-server-leak` this is `None` for the secret-leak finding, and\n`Some(\"server-only-import\")` when a `\"use client\"` cone reaches\nserver-only code."
+          "description": "Catalogue category id of the sink (e.g. `\"dangerous-html\"`). For\n`client-server-leak` this is `\"client-server-leak\"` for the secret-leak\nfinding, and `\"server-only-import\"` when a `\"use client\"` cone reaches\nserver-only code. Older releases left it absent for the secret leak."
         },
         "cwe": {
           "type": [

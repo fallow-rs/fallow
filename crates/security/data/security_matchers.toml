@@ -48,6 +48,19 @@
 # binding sourced from a [[source]] path. Use this for broad sinks like
 # Object.assign, where source-free non-literal values are too noisy.
 #
+# Optional requires_module_source = true is a looser gate for broad sinks whose
+# input usually arrives through a helper call: the row fires when the argument
+# traces to a source, or when the sink module itself reads untrusted input. A
+# module that only imports or is imported by such a module does not count: a
+# dev server imports its whole build pipeline. A `secret = true` source never
+# counts. Optional ignored_source_kinds lists source kinds that neither back
+# the row nor satisfy this gate.
+#
+# A `secret = true` source (`process.env`) is a deployment secret, not attacker
+# input. It backs a row only when the row names its kind in
+# `requires_source_kinds`, or sets `secret_sources = true` (a secret in a log is
+# the defect itself).
+#
 # Optional literal_values / literal_contains match captured string literals.
 # Optional literal_integers matches captured integer literals. Optional
 # object_properties matches exact literal object keys. Optional
@@ -289,7 +302,9 @@ evidence_template = "Non-literal code assigned to {callee} (the browser runs it 
 
 # Dynamic regex construction from a non-literal pattern can let untrusted input
 # select a pathological expression or alter matching semantics. Literal regex
-# complexity analysis is intentionally out of scope for this row.
+# complexity analysis is intentionally out of scope for this row. Libraries
+# build regexes from their own option values and escape helpers all the time,
+# so the rows require a source-backed pattern, like `redos-regex`.
 [[matcher]]
 id = "dynamic-regex"
 cwe = 1333
@@ -298,6 +313,7 @@ effect = "process"
 sink_shape = "call"
 callee_patterns = ["RegExp"]
 arg_index = 0
+requires_source = true
 evidence_template = "Non-literal pattern passed to {callee}(). Candidate for verification: confirm attacker input cannot control the regular expression."
 
 [[matcher]]
@@ -308,6 +324,7 @@ effect = "process"
 sink_shape = "new-expression"
 callee_patterns = ["RegExp"]
 arg_index = 0
+requires_source = true
 evidence_template = "Non-literal pattern passed to new {callee}(). Candidate for verification: confirm attacker input cannot control the regular expression."
 
 [[matcher]]
@@ -486,6 +503,14 @@ requires_source_kinds = ["process-env", "import-meta-env"]
 evidence_template = "A non-public env secret reaches the body/options of {callee}(). Candidate for verification: confirm this credential is intended for this destination (an auth header sent to the credential's own provider is normal); review only if the destination is untrusted or not the credential's provider."
 
 # ── CWE-22: Path traversal ──────────────────────────────────────────────────
+# Build, CLI and config code joins paths from options all the time. The
+# `path.join` / `path.resolve` row therefore needs untrusted input in the
+# argument, in the same module (a static-file middleware reads `req.url`), or
+# in every direct importer (a handler passes its input to a helper). A module
+# that build code also imports, and a module two imports away, stay quiet,
+# because a dev server imports its config and its whole build pipeline.
+# CLI arguments do not count: the user who runs a CLI owns its file system.
+# The direct file-system rows below stay ungated.
 [[matcher]]
 id = "path-traversal"
 cwe = 22
@@ -496,6 +521,8 @@ callee_patterns = ["path.join", "path.resolve"]
 arg_index = 0
 variadic = true
 import_provenance = "node:path"
+requires_module_source = true
+ignored_source_kinds = ["process-argv"]
 evidence_template = "Non-literal path component passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
 
 [[matcher]]
@@ -521,6 +548,8 @@ import_provenance = "node:fs"
 evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the destination cannot escape the intended directory (reject `..`)."
 
 # ── CWE-113: HTTP response header injection ─────────────────────────────────
+# Node rejects CR/LF in header values, and adapters copy their own header maps
+# into the response. The rows therefore require a source-backed value.
 [[matcher]]
 id = "header-injection"
 cwe = 113
@@ -529,6 +558,7 @@ effect = "network"
 sink_shape = "member-call"
 callee_patterns = ["*.setHeader"]
 arg_index = 1
+requires_source = true
 evidence_template = "Non-literal header value passed to {callee}(). Candidate for verification: confirm CR/LF and untrusted header content are rejected before writing the response."
 
 [[matcher]]
@@ -539,6 +569,7 @@ effect = "network"
 sink_shape = "member-call"
 callee_patterns = ["*.writeHead"]
 arg_index = 1
+requires_source = true
 evidence_template = "Non-literal headers object passed to {callee}(). Candidate for verification: confirm attacker input cannot inject response header names or values."
 
 # ── CWE-601: Open redirect ──────────────────────────────────────────────────
@@ -1300,6 +1331,18 @@ title = "HTTP request input"
 path_patterns = ["*.searchParams"]
 
 [[source]]
+id = "http-request-input"
+title = "HTTP request input"
+# The raw request URL and headers of Node `IncomingMessage`, Express and the
+# Fetch `Request`: `req.url`, `req.originalUrl`, `request.headers`. A static
+# file or dev-server middleware reads the path from `req.url`. Gated to the
+# two request receiver names, because `ctx.url` / `event.headers` have other
+# meanings in other frameworks. A module that reads one of these also arms the
+# `path.join` gate above, also when `request` is an outgoing Fetch `Request`.
+path_patterns = ["*.url", "*.originalUrl", "*.headers"]
+receiver_allowlist = ["req", "request"]
+
+[[source]]
 id = "framework-handler-input"
 title = "Framework handler input"
 enabler = "express"
@@ -1411,6 +1454,7 @@ title = "Environment secret"
 # as secret sources. Public-by-convention vars (NEXT_PUBLIC_, VITE_, ...) are
 # excluded at extraction time (issue #890), so they never count as a secret.
 path_patterns = ["process.env"]
+secret = true
 
 [[source]]
 id = "import-meta-env"
@@ -1419,20 +1463,29 @@ title = "Environment secret (Vite)"
 # class as `process.env` for the secret-to-network category (issue #890).
 # Public-by-convention vars (VITE_, ...) are excluded at extraction time.
 path_patterns = ["import.meta.env"]
+secret = true
 
 [[source]]
 id = "message-event-data"
 title = "Message-event data"
 # `postMessage` / WebSocket / worker `message` event payloads: `event.data`,
-# `e.data`, `message.data`. Wildcard object so any event binding name matches.
+# `e.data`, `message.data`. Receiver-gated like the HTTP-input row: a bare
+# `*.data` also matched parse results, responses and stores (`input.data`,
+# `result.data`), which are not message payloads. A message handler that names
+# its parameter something else is a cheap false negative.
 path_patterns = ["*.data"]
+receiver_allowlist = ["event", "e", "evt", "ev", "msg", "message", "messageevent"]
 
 [[source]]
 id = "location-input"
 title = "Browser location input"
 # `location.search`, `location.hash`, `window.location.href`,
 # `document.location.search`. Attacker-influenceable URL surface in the browser.
+# The wildcard patterns are receiver-gated: `location` for `*.search` and
+# `*.hash`, `window` / `document` for `*.location.href`. A bare `*.hash` also
+# matched content hashes (`crypto.hash`, `metadata.hash`).
 path_patterns = ["*.search", "*.hash", "location.href", "*.location.href"]
+receiver_allowlist = ["location", "window", "document"]
 
 [[source]]
 id = "dom-xss-source"
@@ -1622,6 +1675,7 @@ callee_patterns = [
 ]
 arg_index = 0
 requires_source = true
+secret_sources = true
 evidence_template = "Source-backed value passed to {callee}(). Candidate for verification: confirm no secret or PII reaches logs, observability pipelines, or telemetry."
 
 # ── CWE-643: XPath injection (issue #897) ───────────────────────────────────
