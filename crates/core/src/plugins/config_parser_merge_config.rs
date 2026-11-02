@@ -9,13 +9,13 @@
 
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::multi_config::MAX_MULTI_CONFIGS;
 use super::{
     MAX_CONFIG_WRAPPER_DEPTH, extract_object_from_arrow_function, extract_object_from_function,
     find_config_object, find_variable_init, get_nested_expression, is_module_exports_target,
-    unwrap_to_identifier_name,
+    top_level_variable_declarations, unwrap_to_identifier_name,
 };
 
 const MERGE_CONFIG: &str = "mergeConfig";
@@ -75,14 +75,10 @@ pub fn read_last_match<'a, T>(
 /// `find_config_object` finds.
 pub fn find_merged_config_objects<'a>(program: &'a Program<'a>) -> Vec<&'a ObjectExpression<'a>> {
     let mut objects = find_exported_merge_call(program).map_or_else(Vec::new, |call| {
-        let mut collector = MergeCollector {
-            program,
-            objects: Vec::new(),
-            expanded: FxHashSet::default(),
-        };
-        // A cap of 3 levels covers the real shapes, such as
+        let mut collector = MergeCollector::new(program);
+        // A cap of 3 nested calls covers the real shapes, such as
         // `defineConfig(mergeConfig(base, defineConfig({..})))`.
-        collector.arguments(call, MAX_CONFIG_WRAPPER_DEPTH);
+        collector.arguments(call, MAX_CONFIG_WRAPPER_DEPTH, MAX_VARIABLE_HOPS);
         collector.objects
     });
     if objects.is_empty() {
@@ -138,17 +134,42 @@ fn find_merge_call<'a>(
     }
 }
 
-/// Collects the objects of a `mergeConfig` call. Arguments can repeat a
-/// variable that holds another merge, so the output can grow much faster
-/// than the source. Two limits keep the work linear: each variable expands
-/// once, and the collector stops at `MAX_MULTI_CONFIGS` objects.
+/// The maximum number of local variables that one path through a
+/// `mergeConfig` argument follows, as in `const a = b; const b = { .. }`.
+/// The limit keeps the recursion shallow for a long chain of aliases.
+const MAX_VARIABLE_HOPS: u8 = 8;
+
+/// Collects the objects of a `mergeConfig` call in argument order.
+///
+/// An argument can repeat a variable that holds another merge, so the output
+/// can grow much faster than the source. The collector walks each variable
+/// once and keeps its objects. A repeated variable adds the kept objects
+/// again at its own position, as Vite merges it there. The collector stops
+/// at `MAX_MULTI_CONFIGS` objects.
 struct MergeCollector<'a> {
     program: &'a Program<'a>,
     objects: Vec<&'a ObjectExpression<'a>>,
-    expanded: FxHashSet<&'a str>,
+    /// The init expression of each top-level variable, built on first use.
+    inits: Option<FxHashMap<&'a str, &'a Expression<'a>>>,
+    /// The objects of each variable walk, keyed by the name and the budget
+    /// that was left. A walk with less budget can give fewer objects, so a
+    /// walk with more budget does not reuse its result.
+    expanded: FxHashMap<(&'a str, u8, u8), Vec<&'a ObjectExpression<'a>>>,
+    /// The variables that the collector walks now, to stop a cycle.
+    in_progress: FxHashSet<&'a str>,
 }
 
 impl<'a> MergeCollector<'a> {
+    fn new(program: &'a Program<'a>) -> Self {
+        Self {
+            program,
+            objects: Vec::new(),
+            inits: None,
+            expanded: FxHashMap::default(),
+            in_progress: FxHashSet::default(),
+        }
+    }
+
     fn is_full(&self) -> bool {
         self.objects.len() >= MAX_MULTI_CONFIGS
     }
@@ -160,7 +181,7 @@ impl<'a> MergeCollector<'a> {
     }
 
     /// Push the objects of each argument of `call` in source order.
-    fn arguments(&mut self, call: &'a CallExpression<'a>, depth: u8) {
+    fn arguments(&mut self, call: &'a CallExpression<'a>, depth: u8, hops: u8) {
         for arg in call.arguments.iter().filter_map(Argument::as_expression) {
             if self.is_full() {
                 tracing::debug!(
@@ -169,7 +190,7 @@ impl<'a> MergeCollector<'a> {
                 );
                 return;
             }
-            self.argument(arg, depth);
+            self.argument(arg, depth, hops);
         }
     }
 
@@ -178,40 +199,79 @@ impl<'a> MergeCollector<'a> {
     /// `defineConfig(...)` or a local variable. The options object of any
     /// other call, such as a plugin call, is not a config.
     ///
-    /// Each wrapper, nested merge or variable costs one level of `depth`.
-    fn argument(&mut self, expr: &'a Expression<'a>, depth: u8) {
-        if depth == 0 {
-            return;
-        }
+    /// Each nested call costs one level of `depth`. Each variable costs one
+    /// of `hops`.
+    fn argument(&mut self, expr: &'a Expression<'a>, depth: u8, hops: u8) {
         match expr {
             Expression::ObjectExpression(obj) => self.push(Some(obj)),
-            Expression::ParenthesizedExpression(paren) => self.argument(&paren.expression, depth),
-            Expression::TSSatisfiesExpression(ts_sat) => self.argument(&ts_sat.expression, depth),
-            Expression::TSAsExpression(ts_as) => self.argument(&ts_as.expression, depth),
+            Expression::ParenthesizedExpression(paren) => {
+                self.argument(&paren.expression, depth, hops);
+            }
+            Expression::TSSatisfiesExpression(ts_sat) => {
+                self.argument(&ts_sat.expression, depth, hops);
+            }
+            Expression::TSAsExpression(ts_as) => self.argument(&ts_as.expression, depth, hops),
             Expression::ArrowFunctionExpression(arrow) => {
                 self.push(extract_object_from_arrow_function(arrow));
             }
             Expression::FunctionExpression(func) => self.push(extract_object_from_function(func)),
-            Expression::CallExpression(call) if is_merge_config_callee(&call.callee) => {
-                self.arguments(call, depth - 1);
+            Expression::CallExpression(call)
+                if depth > 0 && is_merge_config_callee(&call.callee) =>
+            {
+                self.arguments(call, depth - 1, hops);
             }
-            Expression::CallExpression(call) if is_define_config_callee(&call.callee) => {
+            Expression::CallExpression(call)
+                if depth > 0 && is_define_config_callee(&call.callee) =>
+            {
                 if let Some(config) = call.arguments.first().and_then(Argument::as_expression) {
-                    self.argument(config, depth - 1);
+                    self.argument(config, depth - 1, hops);
                 }
             }
-            _ => {
-                let Some(name) = unwrap_to_identifier_name(expr) else {
-                    return;
-                };
-                if !self.expanded.insert(name) {
-                    return;
-                }
-                if let Some(init) = find_variable_init(self.program, name) {
-                    self.argument(init, depth - 1);
-                }
-            }
+            Expression::Identifier(id) => self.variable(id.name.as_str(), depth, hops),
+            _ => {}
         }
+    }
+
+    /// Push the objects of a local variable. The first walk keeps them, so a
+    /// repeated variable costs no new walk.
+    fn variable(&mut self, name: &'a str, depth: u8, hops: u8) {
+        let key = (name, depth, hops);
+        if let Some(kept) = self.expanded.get(&key) {
+            let room = MAX_MULTI_CONFIGS.saturating_sub(self.objects.len());
+            let kept: Vec<_> = kept.iter().copied().take(room).collect();
+            self.objects.extend(kept);
+            return;
+        }
+        if hops == 0 || !self.in_progress.insert(name) {
+            return;
+        }
+        if let Some(init) = self.init(name) {
+            let start = self.objects.len();
+            self.argument(init, depth, hops - 1);
+            let walked = self.objects[start..].to_vec();
+            self.expanded.insert(key, walked);
+        }
+        self.in_progress.remove(name);
+    }
+
+    fn init(&mut self, name: &str) -> Option<&'a Expression<'a>> {
+        let program = self.program;
+        self.inits
+            .get_or_insert_with(|| {
+                let mut inits = FxHashMap::default();
+                for declarator in
+                    top_level_variable_declarations(program).flat_map(|decl| &decl.declarations)
+                {
+                    if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                        && let Some(init) = &declarator.init
+                    {
+                        inits.entry(id.name.as_str()).or_insert(init);
+                    }
+                }
+                inits
+            })
+            .get(name)
+            .copied()
     }
 }
 
@@ -400,10 +460,10 @@ mod tests {
         );
     }
 
-    /// A variable that holds a merge and repeats in the export expands once,
-    /// so the output does not grow with the square of the source.
+    /// A variable that holds a merge and repeats in the export is walked
+    /// once, and the output stops at the config limit.
     #[test]
-    fn merge_config_repeated_merge_variable_expands_once() {
+    fn merge_config_repeated_merge_variable_is_bounded() {
         let repeats = vec!["shared"; 300].join(", ");
         let source = format!(
             "const shared = mergeConfig(\n\
@@ -413,10 +473,16 @@ mod tests {
              );\n\
              export default mergeConfig({repeats});\n"
         );
-        assert_eq!(merged_object_count(&source), 3);
-        assert_eq!(
-            extract_config_string_or_array(&source, &ts_path(), &["test", "setupFiles"]),
-            vec!["./a.ts", "./b.ts", "./c.ts"]
+        let start = std::time::Instant::now();
+        assert_eq!(merged_object_count(&source), 64);
+        let setup_files =
+            extract_config_string_or_array(&source, &ts_path(), &["test", "setupFiles"]);
+        assert_eq!(setup_files.len(), 64);
+        assert_eq!(setup_files[..3], ["./a.ts", "./b.ts", "./c.ts"]);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "fan-out took {elapsed:?}"
         );
     }
 
@@ -425,5 +491,101 @@ mod tests {
         let objects = vec!["{ test: {} }"; 100].join(", ");
         let source = format!("export default mergeConfig({objects});");
         assert_eq!(merged_object_count(&source), 64);
+    }
+
+    /// A variable that a deep path reaches first must still expand fully
+    /// when a shallow argument repeats it.
+    #[test]
+    fn merge_config_variable_reached_deep_first_still_expands() {
+        let source = r#"
+            const shared = { test: { setupFiles: ["./s.ts"] } };
+            const x = mergeConfig(shared, { test: { setupFiles: ["./x.ts"] } });
+            export default mergeConfig(x, shared, { test: { setupFiles: ["./o.ts"] } });
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./s.ts", "./x.ts", "./s.ts", "./o.ts"]
+        );
+    }
+
+    #[test]
+    fn merge_config_variable_with_define_config_merge_keeps_every_field() {
+        let source = r#"
+            const shared = mergeConfig(
+              { test: { setupFiles: ["./a.ts"] } },
+              defineConfig({ test: { setupFiles: ["./b.ts"] } }),
+            );
+            export default mergeConfig(shared, { test: { setupFiles: ["./c.ts"] } });
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./a.ts", "./b.ts", "./c.ts"]
+        );
+    }
+
+    #[test]
+    fn merge_config_variable_chain_through_define_config_keeps_every_field() {
+        let source = r#"
+            const inner = { test: { setupFiles: ["./a.ts"] } };
+            const mid = defineConfig(inner);
+            export default mergeConfig(mid, { test: { setupFiles: ["./c.ts"] } });
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./a.ts", "./c.ts"]
+        );
+    }
+
+    /// A repeated variable keeps its place, so the last argument still sets
+    /// a single value.
+    #[test]
+    fn merge_config_repeated_variable_keeps_its_position() {
+        let source = r#"
+            const shared = { test: { environment: "shared" } };
+            export default mergeConfig(shared, { test: { environment: "override" } }, shared);
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
+            Some("shared")
+        );
+    }
+
+    /// A variable cycle ends, and a long variable chain stays bounded.
+    #[test]
+    fn merge_config_variable_cycle_and_long_chain_end() {
+        let cycle = r#"
+            const a = mergeConfig(b, { test: { include: ["a.ts"] } });
+            const b = mergeConfig(a, { test: { include: ["b.ts"] } });
+            export default mergeConfig(a);
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(cycle, &ts_path(), &["test", "include"]),
+            vec!["b.ts", "a.ts"]
+        );
+        let chain = (1..20_000)
+            .map(|i| format!("const v{i} = v{};", i - 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let source =
+            format!("const v0 = {{ test: {{}} }};\n{chain}\nexport default mergeConfig(v19999);\n");
+        assert_eq!(merged_object_count(&source), 0);
+    }
+
+    /// A walk that the call depth cut short must not hide the full walk of
+    /// the same variable at a shallower position.
+    #[test]
+    fn merge_config_depth_cut_walk_does_not_hide_full_walk() {
+        let source = r#"
+            const shared = mergeConfig({ test: { include: ["a.ts"] } }, { test: { include: ["b.ts"] } });
+            export default mergeConfig(
+              defineConfig(mergeConfig(defineConfig(shared))),
+              shared,
+              { test: { include: ["c.ts"] } },
+            );
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "include"]),
+            vec!["a.ts", "b.ts", "c.ts"]
+        );
     }
 }
