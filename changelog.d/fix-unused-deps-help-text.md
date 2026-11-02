@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow dead-code --help` now names every kind that `--unused-deps` selects.** The help said "Only report unused dependencies", but the flag also selects packages that code uses, when the package is in the wrong section. The help now names unused dependencies, dev dependencies and optional dependencies, plus type-only, test-only and dev-in-production dependencies. The note on the unused dependency rows in `fallow schema` now also lists `dev-dependency-in-production`. Findings, JSON output and exit codes do not change. Thanks @Smrtnyk for the report. (Closes [#4064](https://github.com/fallow-rs/fallow/issues/4064))
