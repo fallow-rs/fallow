@@ -142,6 +142,36 @@ const SINKS: &[SubstituteSink] = &[
         "compileFunction",
         "compileFunction",
     ),
+    // The extractor resolves a named import (`import { runInNewContext } from
+    // "vm"`) and a `require("vm")` binding to the `node:vm.<member>` path.
+    sink(
+        SinkClass::CodeExecution,
+        SinkShape::MemberCall,
+        "node:vm.runInNewContext",
+        "runInNewContext",
+        "runInNewContext",
+    ),
+    sink(
+        SinkClass::CodeExecution,
+        SinkShape::MemberCall,
+        "node:vm.runInThisContext",
+        "runInThisContext",
+        "runInThisContext",
+    ),
+    sink(
+        SinkClass::CodeExecution,
+        SinkShape::MemberCall,
+        "node:vm.runInContext",
+        "runInContext",
+        "runInContext",
+    ),
+    sink(
+        SinkClass::CodeExecution,
+        SinkShape::MemberCall,
+        "node:vm.compileFunction",
+        "compileFunction",
+        "compileFunction",
+    ),
     sink(
         SinkClass::Html,
         SinkShape::MemberAssign,
@@ -528,6 +558,16 @@ mod tests {
         assert_eq!(
             detect("src/run.ts", base, head),
             vec!["eval sink replaced by runInNewContext"]
+        );
+    }
+
+    #[test]
+    fn eval_replaced_by_required_run_in_this_context() {
+        let base = "export const run = (code: string) => eval(code);\n";
+        let head = "const { runInThisContext } = require('vm');\nexport const run = (code: string) => runInThisContext(code);\n";
+        assert_eq!(
+            detect("src/run.ts", base, head),
+            vec!["eval sink replaced by runInThisContext"]
         );
     }
 
