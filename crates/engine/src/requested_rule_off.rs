@@ -177,6 +177,9 @@ const REQUESTED_RULES: &[(&str, &[RequestedRule])] = &[
     ),
 ];
 
+/// The selector of the dependency rules, which a `--file` run never checks.
+const UNUSED_DEPS_FLAG: &str = "--unused-deps";
+
 const ARCHITECTURE_CYCLES: &str = "--cycles";
 const ARCHITECTURE_BOUNDARIES: &str = "--boundaries";
 const ARCHITECTURE_POLICY: &str = "--policy";
@@ -220,6 +223,10 @@ pub fn explicit_filter_flags(is_active: impl Fn(&str) -> bool) -> Vec<&'static s
 /// One `requested-rule-off` entry for each rule that `requested_flags` asks for
 /// and `config` has at `off`, deduplicated by config key.
 ///
+/// Pass `reports_dependencies = false` when the run drops dependency findings,
+/// as a `--file` run does. A rule at `error` would then still check nothing,
+/// so the `--unused-deps` entries would give a false remedy.
+///
 /// Read `config` after CLI flags changed its rules: an opt-in flag starts its
 /// detector. The session stores nothing, so a long-lived process cannot keep an
 /// entry of an earlier pass.
@@ -227,6 +234,7 @@ pub fn explicit_filter_flags(is_active: impl Fn(&str) -> bool) -> Vec<&'static s
 pub fn requested_rule_off_diagnostics(
     config: &ResolvedConfig,
     requested_flags: &[&str],
+    reports_dependencies: bool,
 ) -> Vec<WorkspaceDiagnostic> {
     let mut seen: Vec<&str> = Vec::new();
     let mut diagnostics = Vec::new();
@@ -234,6 +242,9 @@ pub fn requested_rule_off_diagnostics(
         let Some((flag, rules)) = REQUESTED_RULES.iter().find(|(flag, _)| flag == requested) else {
             continue;
         };
+        if !reports_dependencies && *flag == UNUSED_DEPS_FLAG {
+            continue;
+        }
         for (rule, severity) in *rules {
             if severity(&config.rules) != Severity::Off
                 || (config.production && PRODUCTION_FORCED_OFF.contains(rule))
@@ -396,7 +407,7 @@ mod tests {
                     keys
                 });
             assert_eq!(
-                rules_of(&requested_rule_off_diagnostics(&config, &[flag])),
+                rules_of(&requested_rule_off_diagnostics(&config, &[flag], true)),
                 expected,
                 "{flag}"
             );
@@ -407,15 +418,15 @@ mod tests {
     fn a_rule_that_is_on_fires_no_entry() {
         let mut config = all_off(false);
         config.rules.unused_files = Severity::Warn;
-        assert!(requested_rule_off_diagnostics(&config, &["--unused-files"]).is_empty());
+        assert!(requested_rule_off_diagnostics(&config, &["--unused-files"], true).is_empty());
         assert_eq!(
-            requested_rule_off_diagnostics(&config, &["--unused-exports"]).len(),
+            requested_rule_off_diagnostics(&config, &["--unused-exports"], true).len(),
             1,
             "positive control"
         );
         config.rules = RulesConfig::default();
         for flag in DEAD_CODE_FILTER_FLAGS.iter().copied() {
-            let entries = requested_rule_off_diagnostics(&config, &[flag]);
+            let entries = requested_rule_off_diagnostics(&config, &[flag], true);
             assert!(rules_of(&entries).is_empty(), "{flag}: {entries:?}");
         }
     }
@@ -425,14 +436,16 @@ mod tests {
         assert_eq!(
             rules_of(&requested_rule_off_diagnostics(
                 &all_off(true),
-                &["--unused-deps"]
+                &["--unused-deps"],
+                true
             )),
             vec![("unused-dependencies", "--unused-deps")]
         );
         assert_eq!(
             rules_of(&requested_rule_off_diagnostics(
                 &all_off(false),
-                &["--unused-deps"]
+                &["--unused-deps"],
+                true
             )),
             vec![
                 ("unused-dependencies", "--unused-deps"),
@@ -443,12 +456,25 @@ mod tests {
     }
 
     #[test]
+    fn a_run_without_dependency_findings_skips_only_the_dependency_rules() {
+        assert_eq!(
+            rules_of(&requested_rule_off_diagnostics(
+                &all_off(false),
+                &["--unused-deps", "--unused-files"],
+                false,
+            )),
+            vec![("unused-files", "--unused-files")]
+        );
+    }
+
+    #[test]
     fn an_empty_selection_and_an_unknown_flag_fire_nothing() {
         let config = all_off(false);
-        assert!(requested_rule_off_diagnostics(&config, &[]).is_empty());
-        assert!(requested_rule_off_diagnostics(&config, &["--not-a-flag"]).is_empty());
+        assert!(requested_rule_off_diagnostics(&config, &[], true).is_empty());
+        assert!(requested_rule_off_diagnostics(&config, &["--not-a-flag"], true).is_empty());
         assert_eq!(
-            requested_rule_off_diagnostics(&config, &["--not-a-flag", "--unused-files"]).len(),
+            requested_rule_off_diagnostics(&config, &["--not-a-flag", "--unused-files"], true)
+                .len(),
             1,
             "positive control"
         );
@@ -461,6 +487,7 @@ mod tests {
             rules_of(&requested_rule_off_diagnostics(
                 &config,
                 &architecture_requested_flags(true, true, true),
+                true,
             )),
             vec![
                 ("circular-dependencies", "--cycles"),
@@ -475,6 +502,7 @@ mod tests {
             rules_of(&requested_rule_off_diagnostics(
                 &config,
                 &["--cycles", "--circular-deps"],
+                true,
             ))
             .len(),
             3,
@@ -489,7 +517,8 @@ mod tests {
         assert_eq!(
             rules_of(&requested_rule_off_diagnostics(
                 &config,
-                &["--stale-suppressions"]
+                &["--stale-suppressions"],
+                true
             )),
             vec![("stale-suppressions", "--stale-suppressions")]
         );

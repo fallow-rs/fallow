@@ -231,6 +231,7 @@ pub(super) fn run_notes(
         fallow_engine::requested_rule_off::requested_rule_off_diagnostics(
             config,
             &opts.surface.requested_flags(opts.filters),
+            reports_dependencies,
         ),
     );
     notes.extend(loaded.and_then(|loaded| loaded.install_state.clone()));

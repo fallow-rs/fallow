@@ -248,6 +248,32 @@ fn production_mode_stays_silent_about_the_rules_it_forces_off() {
     );
 }
 
+/// A `--file` run drops dependency findings, so a rule at `error` would still
+/// check nothing. The note would give a false remedy there.
+#[test]
+fn a_file_run_skips_the_dependency_note_only() {
+    let dir = issue_project();
+    let root = dir.path();
+    set_config(
+        root,
+        &json!({ "rules": { "unused-dependencies": "off", "unused-exports": "off" } }),
+    );
+    let file = ["--file", "src/index.js"];
+    let mut args = vec!["dead-code", "--unused-deps", "--unused-exports"];
+    assert_eq!(
+        entries(&json_run(root, &args)),
+        vec![
+            entry("unused-exports", "--unused-exports"),
+            entry("unused-dependencies", "--unused-deps"),
+        ],
+    );
+    args.extend_from_slice(&file);
+    assert_eq!(
+        entries(&json_run(root, &args)),
+        vec![entry("unused-exports", "--unused-exports")],
+    );
+}
+
 fn suppression_project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("temporary project");
     let root = dir.path();

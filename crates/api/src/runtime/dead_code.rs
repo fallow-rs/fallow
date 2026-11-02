@@ -303,6 +303,7 @@ pub fn run_architecture(
             fallow_engine::requested_rule_off::requested_rule_off_diagnostics(
                 session.config(),
                 &options.requested_flags(),
+                true,
             ),
         );
         Ok(output.into())
@@ -767,6 +768,7 @@ fn build_dead_code_programmatic_output(
             fallow_engine::requested_rule_off::requested_rule_off_diagnostics(
                 session.config(),
                 &requested_flags,
+                reports_dependencies,
             ),
         )
         .collect(),
