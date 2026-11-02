@@ -531,7 +531,7 @@ fn dispatch_architecture_command(command: Command, dispatch: &DispatchContext<'_
             file,
             scope,
             finding_ids,
-            surface: check::CheckSurface::Architecture,
+            surface: check::CheckSurface::architecture(cycles, boundaries, policy),
         },
     )
 }

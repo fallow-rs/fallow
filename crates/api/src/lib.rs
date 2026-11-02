@@ -445,7 +445,7 @@ impl TypeAwareOptions {
 ///
 /// Each flag opts one issue type into the report. When no flag is enabled the
 /// analysis reports every issue type.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeadCodeFilters {
     /// Files never reached from any entry point.
     pub unused_files: bool,
@@ -584,6 +584,15 @@ impl DeadCodeFilters {
         true
     }
 
+    /// The canonical CLI selector of each active filter.
+    pub(crate) fn requested_flags(&self) -> Vec<&'static str> {
+        fallow_engine::requested_rule_off::explicit_filter_flags(|flag| {
+            let mut enabled = self.clone();
+            enabled.enable_cli_filter_flag(flag);
+            enabled == *self
+        })
+    }
+
     fn enable_cli_filter_flag(&mut self, flag: &str) {
         match flag {
             "--unused-files" => self.unused_files = true,
@@ -682,6 +691,16 @@ impl ArchitectureOptions {
             policy_violations: self.policy || all,
             ..DeadCodeFilters::default()
         }
+    }
+
+    /// The canonical CLI selector of each selector that the caller set. No
+    /// selector asks for no specific check, so the list is empty.
+    pub(crate) fn requested_flags(&self) -> Vec<&'static str> {
+        fallow_engine::requested_rule_off::architecture_requested_flags(
+            self.cycles,
+            self.boundaries,
+            self.policy,
+        )
     }
 
     /// The dead-code options that run this analysis.

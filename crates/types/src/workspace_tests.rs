@@ -977,6 +977,35 @@ fn override_rule_ineffective_is_an_advisory_root_note() {
 }
 
 #[test]
+fn requested_rule_off_is_an_advisory_root_note() {
+    let root = Path::new("/project");
+    let kind = WorkspaceDiagnosticKind::RequestedRuleOff {
+        rule: "unused-dependencies".to_owned(),
+        flag: "--unused-deps".to_owned(),
+    };
+    let diag = WorkspaceDiagnostic::new(root, root.to_path_buf(), kind.clone());
+    assert!(!diag.degrades_analysis);
+    assert!(!kind.warns_on_stderr());
+    assert!(!kind.is_redundant_config_entry());
+    assert_eq!(kind.unmatched_config_pattern(), None);
+    assert_eq!(kind.ineffective_override(), None);
+    assert_eq!(
+        kind.requested_rule_off(),
+        Some(("unused-dependencies", "--unused-deps"))
+    );
+    assert_eq!(
+        diag.message,
+        "unused-dependencies is off in config, so --unused-deps did not check it. Set the rule \
+         to \"error\" or \"warn\" to run this check."
+    );
+    let json = serde_json::to_value(&diag).expect("serialize");
+    assert_eq!(json["kind"], "requested-rule-off");
+    assert_eq!(json["rule"], "unused-dependencies");
+    assert_eq!(json["flag"], "--unused-deps");
+    assert!(json.get("degrades_analysis").is_none());
+}
+
+#[test]
 fn override_rule_ineffective_base_off_message_names_the_scoped_remedy() {
     let root = Path::new("/project");
     let diag = WorkspaceDiagnostic::new(

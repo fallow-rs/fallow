@@ -73,6 +73,7 @@ pub mod project_analysis;
 pub mod project_config;
 mod public_api;
 pub mod repo_refs;
+pub mod requested_rule_off;
 mod results;
 pub mod search_visibility;
 mod security;

@@ -667,6 +667,94 @@ mod tests {
         assert_eq!(json["unused_exports"].as_array().map(Vec::len), Some(0));
     }
 
+    fn requested_rule_off_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","type":"module","main":"src/a.ts",
+                "dependencies":{"left-pad":"1.3.0"}}"#,
+        )
+        .expect("write package");
+        std::fs::create_dir(project.path().join("node_modules")).expect("create node_modules");
+        std::fs::create_dir(project.path().join("src")).expect("create src");
+        std::fs::write(project.path().join("src/a.ts"), "import './b';\n").expect("write a");
+        std::fs::write(project.path().join("src/b.ts"), "import './a';\n").expect("write b");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"off","circular-dependencies":"off",
+                "boundary-violation":"off"}}"#,
+        )
+        .expect("write config");
+        project
+    }
+
+    /// MCP drops stderr on an envelope path, so the fact must reach the root
+    /// `warnings` array and the entry on each typed family.
+    #[tokio::test]
+    async fn typed_families_report_a_requested_rule_that_is_off() {
+        let project = requested_rule_off_project();
+        let root = Some(project.path().display().to_string());
+        let cases = [
+            (
+                AnalyzeParams {
+                    issue_types: Some(vec!["unused-deps".to_string()]),
+                    ..AnalyzeParams::default()
+                },
+                "unused-dependencies",
+                "--unused-deps",
+            ),
+            (
+                AnalyzeParams {
+                    issue_types: Some(vec!["circular-deps".to_string()]),
+                    ..AnalyzeParams::default()
+                },
+                "circular-dependencies",
+                "--circular-deps",
+            ),
+            (
+                AnalyzeParams {
+                    boundary_violations: Some(true),
+                    ..AnalyzeParams::default()
+                },
+                "boundary-violation",
+                "--boundary-violations",
+            ),
+        ];
+        for (params, rule, flag) in cases {
+            let result = run_analyze(
+                "unused-binary-on-api-path",
+                AnalyzeParams {
+                    root: root.clone(),
+                    no_cache: Some(true),
+                    ..params
+                },
+            )
+            .await
+            .expect("api result");
+            assert_eq!(result.is_error, Some(false));
+            let ContentBlock::Text(text) = &result.content[0] else {
+                panic!("expected text content");
+            };
+            let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
+            let entries: Vec<&serde_json::Value> = json["workspace_diagnostics"]
+                .as_array()
+                .expect("diagnostics")
+                .iter()
+                .filter(|entry| entry["kind"] == "requested-rule-off")
+                .collect();
+            assert_eq!(entries.len(), 1, "{rule}: {json}");
+            assert_eq!(entries[0]["rule"], rule);
+            assert_eq!(entries[0]["flag"], flag);
+            assert_eq!(
+                json["warnings"],
+                serde_json::json!([format!(
+                    "Requested checks did not run because their rules are off in config: {rule} \
+                     ({flag}). A zero count for these rules measures nothing."
+                )])
+            );
+        }
+    }
+
     /// `typeAware.enabled` in config makes `fallow dead-code` type-aware. The
     /// typed route cannot run that, so the tool runs the CLI for every family.
     #[tokio::test]

@@ -127,6 +127,70 @@ fn architecture_options_from_params(
 mod tests {
     use super::*;
 
+    /// The typed route reports only an explicit selector, and the root
+    /// `warnings` array states the fact, because MCP drops stderr.
+    #[tokio::test]
+    async fn typed_route_reports_a_requested_rule_that_is_off() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","type":"module","main":"src/a.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::create_dir(project.path().join("node_modules")).expect("create node_modules");
+        std::fs::create_dir(project.path().join("src")).expect("create src");
+        std::fs::write(project.path().join("src/a.ts"), "import './b';\n").expect("write a");
+        std::fs::write(project.path().join("src/b.ts"), "import './a';\n").expect("write b");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"circular-dependencies":"off"}}"#,
+        )
+        .expect("write config");
+        let envelope = |result: CallToolResult| -> serde_json::Value {
+            let ContentBlock::Text(text) = &result.content[0] else {
+                panic!("expected text content");
+            };
+            serde_json::from_str(&text.text).expect("json")
+        };
+        let params = |cycles: Option<bool>| ArchitectureParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            cycles,
+            ..ArchitectureParams::default()
+        };
+
+        let bare = envelope(
+            run_architecture("unused-binary-on-api-path", params(None))
+                .await
+                .expect("api result"),
+        );
+        assert!(!bare.to_string().contains("Requested checks"), "{bare}");
+        assert!(!bare.to_string().contains("requested-rule-off"), "{bare}");
+
+        let selected = envelope(
+            run_architecture("unused-binary-on-api-path", params(Some(true)))
+                .await
+                .expect("api result"),
+        );
+        assert_eq!(
+            selected["warnings"],
+            serde_json::json!([
+                "Requested checks did not run because their rules are off in config: \
+                 circular-dependencies (--cycles). A zero count for these rules measures nothing."
+            ])
+        );
+        assert!(
+            selected["workspace_diagnostics"]
+                .as_array()
+                .expect("diagnostics")
+                .iter()
+                .any(|entry| entry["kind"] == "requested-rule-off"
+                    && entry["rule"] == "circular-dependencies"
+                    && entry["flag"] == "--cycles"),
+            "{selected}"
+        );
+    }
+
     #[test]
     fn architecture_args_start_with_the_architecture_command() {
         let args = build_architecture_args(&ArchitectureParams::default());

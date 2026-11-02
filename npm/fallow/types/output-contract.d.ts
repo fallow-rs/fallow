@@ -863,6 +863,17 @@ files: string[]
  */
 reason: string
 } | {
+kind: "requested-rule-off"
+/**
+ * The canonical rule name in `rules`.
+ */
+rule: string
+/**
+ * The canonical CLI selector of the request, such as `--unused-deps`.
+ * A typed API or MCP request reports the same selector.
+ */
+flag: string
+} | {
 kind: "baseline-install-state-mismatch"
 baseline_node_modules: NodeModulesState
 run_node_modules: NodeModulesState

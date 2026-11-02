@@ -174,6 +174,8 @@ pub fn annotate_config_pattern_sarif(
             let properties =
                 if let Some((setting, pattern)) = diagnostic.kind.unmatched_config_pattern() {
                     serde_json::json!({ "setting": setting, "pattern": pattern })
+                } else if let Some((rule, flag)) = diagnostic.kind.requested_rule_off() {
+                    serde_json::json!({ "setting": "rules", "rule": rule, "flag": flag })
                 } else {
                     let (rule, files, reason) = diagnostic.kind.ineffective_override()?;
                     serde_json::json!({

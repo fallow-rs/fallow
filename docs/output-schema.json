@@ -13705,6 +13705,29 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "requested-rule-off"
+            },
+            "rule": {
+              "type": "string",
+              "description": "The canonical rule name in `rules`."
+            },
+            "flag": {
+              "type": "string",
+              "description": "The canonical CLI selector of the request, such as `--unused-deps`.\nA typed API or MCP request reports the same selector."
+            }
+          },
+          "required": [
+            "kind",
+            "rule",
+            "flag"
+          ],
+          "description": "An explicit issue-type selection asked for a rule that the config sets\nto `off`, so that check did not run (issue #4067). One entry per rule.\nThe opt-in flags that turn their rule on and a run with no selection\nnever report it. `path` is the root. Not degraded: the run measured\nwhat the config asked for, and no finding or exit code changes."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "baseline-install-state-mismatch"
             },
             "baseline_node_modules": {
