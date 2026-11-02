@@ -32420,6 +32420,17 @@
             "$ref": "#/definitions/DiffRiskAction"
           },
           "description": "Suppression actions."
+        },
+        "suppression": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiffRiskSuppression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The parsed `fallow-ignore` comment. Present only on an\n`added-suppression` finding whose evidence is `fallow-ignore` and\nwhose comment Fallow can parse."
         }
       },
       "required": [
@@ -35695,6 +35706,34 @@
         }
       ],
       "description": "Capture policy of the runtime evidence behind a report."
+    },
+    "DiffRiskSuppression": {
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The suppressed kinds in kebab-case, in source order. Empty for a\nblanket comment that suppresses every kind."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The human-authored reason after `--`, or `null` when absent."
+        },
+        "security_without_reason": {
+          "type": "boolean",
+          "description": "`true` when the comment names `security-sink` or\n`security-client-server-leak` and has no reason. An advisory signal\nonly: it does not change the severity of the finding."
+        }
+      },
+      "required": [
+        "kinds",
+        "security_without_reason"
+      ],
+      "description": "The parsed content of an added `fallow-ignore` comment."
     }
   }
 }

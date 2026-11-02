@@ -189,6 +189,26 @@ pub struct DiffRiskFinding {
     pub related: Vec<DiffRiskLocation>,
     /// Suppression actions.
     pub actions: Vec<DiffRiskAction>,
+    /// The parsed `fallow-ignore` comment. Present only on an
+    /// `added-suppression` finding whose evidence is `fallow-ignore` and
+    /// whose comment Fallow can parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppression: Option<DiffRiskSuppression>,
+}
+
+/// The parsed content of an added `fallow-ignore` comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DiffRiskSuppression {
+    /// The suppressed kinds in kebab-case, in source order. Empty for a
+    /// blanket comment that suppresses every kind.
+    pub kinds: Vec<String>,
+    /// The human-authored reason after `--`, or `null` when absent.
+    pub reason: Option<String>,
+    /// `true` when the comment names `security-sink` or
+    /// `security-client-server-leak` and has no reason. An advisory signal
+    /// only: it does not change the severity of the finding.
+    pub security_without_reason: bool,
 }
 
 /// The diff-risk section of `fallow audit` JSON.
@@ -252,6 +272,7 @@ mod tests {
                 description: "d".to_owned(),
                 comment: Some("// fallow-ignore-next-line weakened-tests".to_owned()),
             }],
+            suppression: None,
         };
         let value = serde_json::to_value(&finding).expect("serialize");
         assert_eq!(value["rule"], "weakened-tests");

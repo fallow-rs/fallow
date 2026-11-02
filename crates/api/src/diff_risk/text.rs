@@ -51,7 +51,7 @@ const SUPPRESSION_TOKENS: &[&str] = &[
     "c8 ignore",
     "v8 ignore",
 ];
-const FALLOW_IGNORE_TOKEN: &str = "fallow-ignore";
+pub(crate) const FALLOW_IGNORE_TOKEN: &str = "fallow-ignore";
 /// Suppression tokens of the diff-risk rules. A `fallow-ignore` comment that
 /// names only these is the suppression the findings ask for, so it is not an
 /// added suppression itself.

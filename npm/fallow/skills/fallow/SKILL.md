@@ -112,7 +112,7 @@ Dead-code filter flags select issue categories (`--unused-exports`, `--unused-ty
 
 `fallow architecture` reports the architecture findings: circular dependencies, re-export cycles, package cycles, boundary violations and rule-pack policy violations. Use `--cycles`, `--boundaries` or `--policy` to select one kind. The JSON output has `kind: "architecture"` and its own `schema_version`, with the same arrays and finding ids as `dead-code`. `fallow dead-code` still reports these findings until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. Run `fallow guard <files>` before an edit and `fallow architecture` after it. In bare `fallow`, `--only architecture` reports only these findings and `--skip architecture` removes them.
 
-For suppressible findings, use the placement listed in the issue catalogue: `// fallow-ignore-next-line <issue-type>` above the finding, or `// fallow-ignore-file <issue-type>` at the top of the file. Some types support only file-level suppression; others have no suppression comment. A bare supported form without a type suppresses all matching findings at that placement.
+For suppressible findings, use the placement listed in the issue catalogue: `// fallow-ignore-next-line <issue-type>` above the finding, or `// fallow-ignore-file <issue-type>` at the top of the file. Some types support only file-level suppression; others have no suppression comment. A bare supported form without a type suppresses all matching findings at that placement. Put `-- <reason>` after the types to record why. Always give a reason on a `security-sink` or `security-client-server-leak` suppression: `fallow audit` marks an added security suppression without a reason with `suppression.security_without_reason: true`. A blanket comment without a kind does not set this flag. To list existing suppressions without a reason, run `fallow suppressions --format json` and select `reason_present: false`.
 
 `fallow explain <issue-type>` describes one type without running analysis, and the MCP server serves the same catalogue as the `fallow://issue-types` resource.
 
@@ -412,6 +412,10 @@ export const keepThisToo = 2;
 
 // fallow-ignore-file
 // fallow-ignore-file unused-export
+
+// State the reason after `--` (every kind accepts it)
+// fallow-ignore-next-line security-sink -- the HTML is a constant template
+el.innerHTML = TEMPLATE;
 
 // Mark as intentionally unused (tracked for staleness)
 /** @expected-unused */

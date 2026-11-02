@@ -435,3 +435,97 @@ fn markdown_prints_a_diff_risk_table() {
         output.stdout
     );
 }
+
+/// An added `fallow-ignore` comment exposes its kinds and its `-- reason`.
+/// A security kind without a reason gets an advisory flag and message. The
+/// verdict stays `warn`: nothing becomes an error by default.
+#[test]
+fn added_fallow_ignore_exposes_kinds_reason_and_reasonless_security_flag() {
+    let tmp = fixture(None);
+    let dir = tmp.path();
+    fs::write(
+        dir.join("src/index.ts"),
+        "// fallow-ignore-next-line security-sink\nexport const a = 1;\n// fallow-ignore-next-line security-sink -- the value is a constant\nexport const b = 2;\n// fallow-ignore-next-line unused-export\nexport const c = 3;\n// @ts-ignore\nexport const price = (n: number): number => n * 2;\n",
+    )
+    .unwrap();
+
+    let (code, json) = audit_json(dir, &[]);
+    assert_eq!(code, 0, "warn findings keep exit 0: {json}");
+    assert_eq!(json["verdict"], "warn");
+    let by_line = |line: u64| -> serde_json::Value {
+        findings(&json)
+            .into_iter()
+            .find(|finding| {
+                finding["rule"] == "added-suppression" && finding["line"].as_u64() == Some(line)
+            })
+            .unwrap_or_else(|| panic!("no added-suppression finding on line {line}: {json}"))
+    };
+
+    let reasonless = by_line(1);
+    assert_eq!(
+        reasonless["suppression"]["kinds"],
+        serde_json::json!(["security-sink"])
+    );
+    assert!(
+        reasonless["suppression"]["reason"].is_null(),
+        "{reasonless}"
+    );
+    assert_eq!(reasonless["suppression"]["security_without_reason"], true);
+    assert!(
+        reasonless["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("security finding and gives no")),
+        "{reasonless}"
+    );
+
+    let reasoned = by_line(3);
+    assert_eq!(reasoned["suppression"]["reason"], "the value is a constant");
+    assert_eq!(reasoned["suppression"]["security_without_reason"], false);
+
+    let dead_code = by_line(5);
+    assert_eq!(
+        dead_code["suppression"]["kinds"],
+        serde_json::json!(["unused-export"])
+    );
+    assert_eq!(dead_code["suppression"]["security_without_reason"], false);
+
+    let lint = by_line(7);
+    assert!(lint.get("suppression").is_none(), "{lint}");
+}
+
+/// The review brief names a reasonless security suppression in the
+/// `suppression-added` evidence.
+#[test]
+fn review_brief_names_a_reasonless_security_suppression() {
+    let tmp = fixture(None);
+    let dir = tmp.path();
+    fs::write(
+        dir.join("src/index.ts"),
+        "// fallow-ignore-next-line security-client-server-leak\nexport const price = (n: number): number => n * 2;\n",
+    )
+    .unwrap();
+    commit_all(dir, "head");
+
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let brief = parse_json(&output);
+    let weakening = brief["weakening"].as_array().expect("weakening array");
+    assert!(
+        weakening.iter().any(|signal| {
+            signal["kind"] == "suppression-added"
+                && signal["evidence"]
+                    == "fallow-ignore added (security-client-server-leak, no reason)"
+        }),
+        "{weakening:?}"
+    );
+}

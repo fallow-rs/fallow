@@ -1301,6 +1301,7 @@ mod tests {
             introduced: true,
             related: Vec::new(),
             actions: Vec::new(),
+            suppression: None,
         }
     }
 
