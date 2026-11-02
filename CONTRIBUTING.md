@@ -186,6 +186,7 @@ The workspace follows the ownership boundaries in
 | `editors/nvim/` | Neovim integration documentation. |
 | `npm/fallow/` | npm wrapper, launchers, generated types, and bundled agent skill. |
 | `npm/<platform>/` | Platform-specific native binary packages consumed by the npm wrapper. |
+| `packaging/crates-io/fallow/` | Thin binary crate `fallow` outside the workspace, so that `cargo install fallow` installs the command of `fallow-cli`. The release publishes it after `fallow-cli` with the same version. |
 
 Dependency direction is deliberate. Foundation and analysis crates do not
 depend on protocol adapters. `fallow-core` remains an internal detector backend

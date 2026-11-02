@@ -923,3 +923,23 @@ test("fallow-setup skill keeps its trigger and the responsibility split", () => 
     assert.ok(skill.includes(required), `fallow-setup SKILL.md is missing: ${required}`);
   }
 });
+
+test("the fallow crate is published in lockstep with fallow-cli", () => {
+  const workspace = readFileSync("Cargo.toml", "utf8");
+  const version = /^\[workspace\.package\]\nversion = "([^"]+)"/mu.exec(workspace)?.[1];
+  assert.ok(version, "the workspace has a version");
+  const manifest = readFileSync("packaging/crates-io/fallow/Cargo.toml", "utf8");
+  // An installed version blocks a second `cargo install`, so the wrapper must move
+  // with each release and pin the matching fallow-cli.
+  assert.match(manifest, new RegExp(`^name = "fallow"\\nversion = "${version}"$`, "mu"));
+  assert.match(manifest, new RegExp(`^fallow-cli = "=${version}"$`, "mu"));
+
+  const release = readFileSync(".github/workflows/release.yml", "utf8");
+  const cli = release.indexOf("fallow-cli fallow-mcp; do");
+  const wrapper = release.indexOf("--manifest-path packaging/crates-io/fallow/Cargo.toml");
+  assert.ok(cli > 0, "the release publishes fallow-cli");
+  assert.ok(wrapper > cli, "the release publishes the fallow crate after fallow-cli");
+
+  const sync = readFileSync("scripts/sync-npm-versions.sh", "utf8");
+  assert.match(sync, /packaging\/crates-io\/fallow\/Cargo\.toml/u);
+});

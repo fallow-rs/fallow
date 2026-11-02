@@ -241,10 +241,11 @@ jobs:
           set -uo pipefail
           publish() {
             crate="$1"
+            shift
             attempt=1
             max_attempts=8
             while :; do
-              if out=$(cargo publish -p "$crate" --no-verify 2>&1); then
+              if out=$(cargo publish "$@" --no-verify 2>&1); then
                 printf '%s\n' "$out"
                 echo "::notice::${crate}: published"
                 return 0
@@ -274,8 +275,12 @@ jobs:
             # dependency already indexed; the retry loop is the real guarantee.
             if [ "$first" = 0 ]; then sleep 30; fi
             first=0
-            publish "$crate" || exit 1
+            publish "$crate" -p "$crate" || exit 1
           done
+          # The `fallow` crate is outside the workspace and pins the fallow-cli
+          # of this release, so it goes last.
+          sleep 30
+          publish fallow --manifest-path packaging/crates-io/fallow/Cargo.toml || exit 1
 
   # Profile-guided optimization (PGO). This job builds an instrumented
   # fallow-multicall on the release commit, runs scripts/pgo-train.sh on the
