@@ -501,8 +501,17 @@ line states exit code 0.
   `NON_CORE_KINDS`, so the dead-code stale-suppression pass ignores them.
   The brief `weakening[]` signals for tests, thresholds and suppressions are
   a projection of these findings (`crates/cli/src/audit_weakening.rs`). Do not
-  add a second detector there. Only the removed-security-step scan of CI files
-  is local to the brief.
+  add a second detector there. Two scans are local to the brief
+  (`crates/cli/src/audit_security_scan.rs`), and both give
+  `security-check-removed` signals: the removed-security-step scan of CI
+  files, and the sink substitution scan of changed non-test source files
+  (`crates/engine/src/sink_substitution.rs`). The second scan parses the base
+  and the head text of each file and compares the non-literal sink sites per
+  class (code execution, HTML). A class that loses one sink name and gains
+  another gives `<old> sink replaced by <new>`. A removed sink whose name
+  shows up in a new object key, computed member or alias gives
+  `<old> sink moved into <form>`. The scan works per file, so a sink that only
+  moves within the file gives nothing.
 - Brief test reach: `test_reach` in the brief classifies each changed value
   export with `ModuleGraph::export_test_reach`
   (`crates/graph/src/graph/test_reach.rs`). The check reads the existing test

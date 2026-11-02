@@ -81,6 +81,7 @@ pub mod session;
 mod session_reuse;
 pub mod shell_quote;
 pub mod similar_code;
+pub mod sink_substitution;
 pub mod source;
 mod suppress;
 pub mod test_paths;

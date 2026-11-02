@@ -402,6 +402,10 @@ pub mod review_deltas;
 #[path = "audit_weakening.rs"]
 pub mod weakening;
 
+#[path = "audit_security_scan.rs"]
+mod security_scan;
+use security_scan::compute_security_step_signals;
+
 #[path = "audit_routing.rs"]
 pub mod routing;
 
@@ -2211,61 +2215,6 @@ fn brief_weakening_signals(
     let mut signals = weakening::signals_from_diff_risk(diff_risk);
     signals.extend(security_step_signals);
     signals.sort_by(|a, b| a.file.cmp(&b.file));
-    signals
-}
-
-/// Scan the changed CI files for removed security steps: read each file's
-/// base content via [`BaseFileReader`] and compare it with the head content
-/// on disk. Best-effort, but a read failure never reads as empty content: a
-/// file deleted at head or absent at base scans against `""`, an unreadable
-/// head file is skipped, and a base-reader error stops the scan for the
-/// remaining files (the batch pipe is no longer trustworthy).
-fn compute_security_step_signals(
-    root: &Path,
-    base_ref: &str,
-    changed_files: &FxHashSet<PathBuf>,
-) -> Vec<weakening::WeakeningSignal> {
-    let Some(git_root) = git_toplevel(root) else {
-        return Vec::new();
-    };
-    let mut files: Vec<(&PathBuf, &Path, String)> = changed_files
-        .iter()
-        .filter_map(|abs| {
-            let relative = abs.strip_prefix(&git_root).ok()?;
-            let rel_str = relative.to_string_lossy().replace('\\', "/");
-            weakening::is_ci_file(&rel_str).then_some((abs, relative, rel_str))
-        })
-        .collect();
-    if files.is_empty() {
-        return Vec::new();
-    }
-    files.sort();
-    let Some(mut reader) = BaseFileReader::spawn(root) else {
-        return Vec::new();
-    };
-
-    let mut signals = Vec::new();
-    for (abs, relative, rel_str) in files {
-        let head = match std::fs::read(abs) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(_) => continue,
-        };
-        let base = match reader.read(base_ref, relative) {
-            BaseRead::Content(base) => base,
-            BaseRead::Missing => String::new(),
-            BaseRead::Error => break,
-        };
-        signals.extend(
-            weakening::detect_removed_security_steps(&base, &head)
-                .into_iter()
-                .map(|evidence| weakening::WeakeningSignal {
-                    kind: weakening::WeakeningKind::SecurityCheckRemoved,
-                    file: rel_str.clone(),
-                    evidence,
-                }),
-        );
-    }
     signals
 }
 

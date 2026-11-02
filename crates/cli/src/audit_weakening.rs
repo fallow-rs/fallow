@@ -8,7 +8,9 @@
 //! The diff-risk rules of `fallow audit` (`fallow_api::diff_risk`) own the
 //! test, threshold and suppression facts. This module projects those findings
 //! onto the brief signals, so the brief and the `diff_risk` section agree.
-//! Only the removed-security-step scan of CI files is local to the brief.
+//! The removed-security-step scan of CI files and the sink substitution
+//! scan of source files (`fallow_engine::sink_substitution`) are local to the
+//! brief.
 
 use fallow_output::{DiffRiskReport, DiffRiskRule, WeakenedTestsKind};
 pub use fallow_output::{WeakeningKind, WeakeningSignal};

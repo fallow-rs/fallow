@@ -20765,7 +20765,7 @@
         {
           "type": "string",
           "const": "security-check-removed",
-          "description": "A security check or step was removed from CI."
+          "description": "A security check or step was removed from CI, or a security sink in a\nsource file was replaced by another sink of the same class or moved out\nof the static sink view."
         }
       ],
       "description": "The category of a single weakening signal."

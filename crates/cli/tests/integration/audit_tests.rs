@@ -7819,6 +7819,125 @@ fn review_brief_weakening_reports_skip_removed_suppression_and_threshold() {
     );
 }
 
+/// Base files of the sink substitution test.
+const SINK_SUBSTITUTION_BASE: &[(&str, &str)] = &[
+    (
+        "package.json",
+        r#"{"name": "sink-substitution", "main": "src/index.ts"}"#,
+    ),
+    (
+        "src/index.ts",
+        "export { evalValue } from './eval';\nexport { render } from './render';\nexport { Html } from './html';\nexport { moved } from './moved';\n",
+    ),
+    (
+        "src/eval.ts",
+        "export const evalValue = (raw: string): unknown => {\n  const fn = new Function(`return ${raw}`);\n  return fn();\n};\n",
+    ),
+    (
+        "src/render.ts",
+        "export const render = (frame: HTMLIFrameElement, html: string): void => {\n  frame.innerHTML = html;\n};\n",
+    ),
+    (
+        "src/html.tsx",
+        "export const Html = ({ html }: { html: string }) => <div dangerouslySetInnerHTML={{ __html: html }} />;\n",
+    ),
+    (
+        "src/moved.ts",
+        "export const moved = (el: HTMLElement, html: string): void => {\n  el.innerHTML = html;\n};\n",
+    ),
+];
+
+/// Head files of the sink substitution test: three substitutions and one
+/// sink that only moves.
+const SINK_SUBSTITUTION_HEAD: &[(&str, &str)] = &[
+    (
+        "src/eval.ts",
+        "import vm from 'node:vm';\nexport const evalValue = (raw: string): unknown => vm.runInNewContext(`(${raw})`);\n",
+    ),
+    (
+        "src/render.ts",
+        "export const render = (frame: HTMLIFrameElement, html: string): void => {\n  frame.srcdoc = html;\n};\n",
+    ),
+    (
+        "src/html.tsx",
+        "export const Html = ({ html }: { html: string }) => <div {...{ dangerouslySetInnerHTML: { __html: html } }} />;\n",
+    ),
+    (
+        "src/moved.ts",
+        "export const moved = (el: HTMLElement, html: string): void => {\n  const target = el;\n  target.innerHTML = html;\n};\n",
+    ),
+];
+
+/// The review brief reports a security sink that a change swaps for another
+/// sink of the same class, or moves out of the static sink view. A rule that
+/// flags `new Function` does not flag `vm.runInNewContext`, so the swap
+/// silences the rule and keeps the risk. A sink that only moves keeps its
+/// name and gives no signal.
+#[test]
+fn review_brief_weakening_reports_security_sink_substitution() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    let write = |files: &[(&str, &str)]| {
+        for (path, content) in files {
+            fs::write(dir.join(path), content).unwrap();
+        }
+    };
+    write(SINK_SUBSTITUTION_BASE);
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+
+    write(SINK_SUBSTITUTION_HEAD);
+    commit_all(dir, "head");
+
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "the brief always exits 0. stderr: {}",
+        output.stderr
+    );
+    let brief = parse_json(&output);
+    let weakening = brief["weakening"]
+        .as_array()
+        .expect("brief JSON carries a weakening array");
+    let evidence_for = |file: &str| -> Vec<String> {
+        weakening
+            .iter()
+            .filter(|signal| signal["kind"] == "security-check-removed" && signal["file"] == file)
+            .filter_map(|signal| signal["evidence"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        evidence_for("src/eval.ts"),
+        vec!["new Function sink replaced by vm.runInNewContext".to_owned()],
+        "code execution swap: {weakening:?}"
+    );
+    assert_eq!(
+        evidence_for("src/render.ts"),
+        vec!["innerHTML sink replaced by srcdoc".to_owned()],
+        "HTML swap: {weakening:?}"
+    );
+    assert_eq!(
+        evidence_for("src/html.tsx"),
+        vec!["dangerouslySetInnerHTML sink moved into an object key".to_owned()],
+        "spread hides the JSX sink: {weakening:?}"
+    );
+    assert!(
+        evidence_for("src/moved.ts").is_empty(),
+        "a sink that only moves gives no signal: {weakening:?}"
+    );
+}
+
 /// Write a git repository whose `bun.lockb` blocks override resolution, with
 /// one uncommitted file so the audit family has a changeset to report on.
 fn bun_lockb_audit_repo(tmp: &TempDir) -> &std::path::Path {
