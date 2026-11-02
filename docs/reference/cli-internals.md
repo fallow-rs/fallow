@@ -510,8 +510,11 @@ line states exit code 0.
   class (code execution, HTML). A class that loses one sink name and gains
   another gives `<old> sink replaced by <new>`. A removed sink whose name
   shows up in a new object key, computed member or alias gives
-  `<old> sink moved into <form>`. The scan works per file, so a sink that only
-  moves within the file gives nothing.
+  `<old> sink moved into <form>`. Only a property sink (`innerHTML`, `srcdoc`,
+  `dangerouslySetInnerHTML`) counts in an object key, and only with a
+  non-literal value: `{ eval: 2 }` and `{ write: log }` are data, not a sink.
+  The scan works per file, so a sink that only moves within the file gives
+  nothing.
 - Brief test reach: `test_reach` in the brief classifies each changed value
   export with `ModuleGraph::export_test_reach`
   (`crates/graph/src/graph/test_reach.rs`). The check reads the existing test

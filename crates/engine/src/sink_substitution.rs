@@ -320,10 +320,39 @@ fn prev_non_space(bytes: &[u8], end: usize) -> Option<(usize, u8)> {
 }
 
 fn next_non_space(bytes: &[u8], start: usize) -> Option<u8> {
-    bytes[start..]
+    next_non_space_at(bytes, start).map(|(_, byte)| byte)
+}
+
+fn next_non_space_at(bytes: &[u8], start: usize) -> Option<(usize, u8)> {
+    bytes
+        .get(start..)?
         .iter()
-        .find(|byte| !byte.is_ascii_whitespace())
-        .copied()
+        .enumerate()
+        .find(|(_, byte)| !byte.is_ascii_whitespace())
+        .map(|(offset, byte)| (start + offset, *byte))
+}
+
+/// Whether the object key that ends at `end` is followed by `:` and a value
+/// that is not a literal. A literal value such as `{ innerHTML: 1 }` is data
+/// and never a sink payload.
+fn keys_non_literal_value(bytes: &[u8], end: usize) -> bool {
+    let Some((colon, b':')) = next_non_space_at(bytes, end) else {
+        return false;
+    };
+    let Some((value_start, first)) = next_non_space_at(bytes, colon + 1) else {
+        return false;
+    };
+    if first.is_ascii_digit() || matches!(first, b'\'' | b'"' | b'-' | b'+' | b'.') {
+        return false;
+    }
+    let word_end = bytes[value_start..]
+        .iter()
+        .position(|byte| !is_ident_byte(*byte))
+        .map_or(bytes.len(), |offset| value_start + offset);
+    !matches!(
+        &bytes[value_start..word_end],
+        b"true" | b"false" | b"null" | b"undefined"
+    )
 }
 
 /// The rest of the line after `start` ends the expression: an alias such as
@@ -335,7 +364,15 @@ fn ends_expression(bytes: &[u8], start: usize) -> bool {
         .is_none_or(|byte| matches!(byte, b';' | b',' | b')' | b'\n' | b'\r'))
 }
 
-fn classify_occurrence(bytes: &[u8], start: usize, end: usize) -> Option<HiddenForm> {
+/// Classify one occurrence of a sink token. `property_sink` allows the object
+/// key form: only a property sink (`innerHTML`, `srcDoc`) reaches the sink
+/// through an object key, for example under `Object.assign` or a JSX spread.
+fn classify_occurrence(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    property_sink: bool,
+) -> Option<HiddenForm> {
     let quote = start.checked_sub(1).map(|index| bytes[index]);
     if let Some(quote) = quote.filter(|byte| matches!(byte, b'\'' | b'"' | b'`')) {
         if bytes.get(end) != Some(&quote) {
@@ -346,13 +383,14 @@ fn classify_occurrence(bytes: &[u8], start: usize, end: usize) -> Option<HiddenF
         }
         let opens_key =
             prev_non_space(bytes, start - 1).is_some_and(|(_, byte)| matches!(byte, b'{' | b','));
-        return (opens_key && next_non_space(bytes, end + 1) == Some(b':'))
+        return (property_sink && opens_key && keys_non_literal_value(bytes, end + 1))
             .then_some(HiddenForm::ObjectKey);
     }
     let (prev_index, prev) = prev_non_space(bytes, start)?;
     let next = next_non_space(bytes, end);
     if matches!(prev, b'{' | b',') && next == Some(b':') {
-        return Some(HiddenForm::ObjectKey);
+        return (property_sink && keys_non_literal_value(bytes, end))
+            .then_some(HiddenForm::ObjectKey);
     }
     let plain_assign = prev == b'='
         && prev_index
@@ -363,7 +401,7 @@ fn classify_occurrence(bytes: &[u8], start: usize, end: usize) -> Option<HiddenF
 }
 
 /// Count the occurrences of `token` in each hidden form.
-fn hidden_form_counts(source: &str, token: &str) -> [usize; 3] {
+fn hidden_form_counts(source: &str, token: &str, property_sink: bool) -> [usize; 3] {
     let bytes = source.as_bytes();
     let mut counts = [0; 3];
     for (start, _) in source.match_indices(token) {
@@ -375,18 +413,20 @@ fn hidden_form_counts(source: &str, token: &str) -> [usize; 3] {
         if !bounded {
             continue;
         }
-        if let Some(form) = classify_occurrence(bytes, start, end) {
+        if let Some(form) = classify_occurrence(bytes, start, end, property_sink) {
             counts[form.slot()] += 1;
         }
     }
     counts
 }
 
-fn token_of(label: &str) -> &'static str {
-    SINKS
-        .iter()
-        .find(|row| row.label == label)
-        .map_or("", |row| row.token)
+/// The source token of the sink with `label`, and whether the sink is a
+/// property (an assignment target or a JSX attribute).
+fn token_of(label: &str) -> Option<(&'static str, bool)> {
+    SINKS.iter().find(|row| row.label == label).map(|row| {
+        let property = matches!(row.shape, SinkShape::MemberAssign | SinkShape::JsxAttr);
+        (row.token, property)
+    })
 }
 
 fn plural(labels: &[&str]) -> &'static str {
@@ -439,9 +479,11 @@ pub fn detect_sink_substitutions(path: &Path, base: &str, head: &str) -> Vec<Str
             continue;
         }
         for label in removed {
-            let token = token_of(label);
-            let before = hidden_form_counts(base, token);
-            let after = hidden_form_counts(head, token);
+            let Some((token, property_sink)) = token_of(label) else {
+                continue;
+            };
+            let before = hidden_form_counts(base, token, property_sink);
+            let after = hidden_form_counts(head, token, property_sink);
             if let Some(slot) = (0..HiddenForm::ALL.len()).find(|&i| after[i] > before[i]) {
                 evidence.push(format!(
                     "{label} sink moved {}",
@@ -541,6 +583,26 @@ mod tests {
         assert!(detect("src/set.ts", base, moved).is_empty());
         assert!(detect("src/set.ts", base, removed).is_empty());
         assert!(detect("src/set.ts", base, literal).is_empty());
+    }
+
+    #[test]
+    fn an_unrelated_object_key_with_a_sink_name_gives_no_signal() {
+        let base = "export const f = (el: Element, h: string, code: string) => { el.innerHTML = h; eval(code); };\n";
+        let head = "export const f = (el: Element, h: string, code: string) => { el.textContent = h; return code; };\nexport const o = { innerHTML: 1, eval: 2 };\n";
+        assert!(detect("src/a.ts", base, head).is_empty());
+        let doc = "export const f = (h: string) => { document.write(h); };\n";
+        let logger = "export const f = (h: string) => h;\nexport const log = { write: console.log, writeln: console.info };\n";
+        assert!(detect("src/a.ts", doc, logger).is_empty());
+    }
+
+    #[test]
+    fn a_property_sink_moved_into_an_assigned_object_key() {
+        let base = "export const set = (el: Element, h: string) => { el.innerHTML = h; };\n";
+        let head = "export const set = (el: Element, h: string) => { Object.assign(el, { innerHTML: h }); };\n";
+        assert_eq!(
+            detect("src/set.ts", base, head),
+            vec!["innerHTML sink moved into an object key"]
+        );
     }
 
     #[test]
