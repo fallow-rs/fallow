@@ -1,0 +1,6 @@
+projects:
+  app:
+    schema:
+      - schema/app.graphql
+      - https://api.example.com/graphql
+    documents: operations/*.graphql

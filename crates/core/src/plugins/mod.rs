@@ -1312,8 +1312,7 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
-    /// Check if this plugin should be active for the given project.
-    /// Default implementation checks `enablers()` against package.json dependencies.
+    /// Calls `is_enabled_with_deps`. The registry does not call this method, so do not override it.
     fn is_enabled(&self, pkg: &PackageJson, root: &Path) -> bool {
         let deps = pkg.all_dependency_names();
         self.is_enabled_with_deps(&deps, root)
@@ -2076,6 +2075,7 @@ mod fumadocs;
 mod gatsby;
 mod github_action;
 mod graphql_codegen;
+mod graphql_config;
 mod hardhat;
 mod husky;
 mod i18next;
