@@ -2484,7 +2484,7 @@
       "section": "issue-types",
       "row": "unused-dependency",
       "column": "Description",
-      "seed": "Dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+      "seed": "Dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production"
     },
     {
       "section": "issue-types",
@@ -2496,7 +2496,7 @@
       "section": "issue-types",
       "row": "unused-dev-dependency",
       "column": "Description",
-      "seed": "Dev dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+      "seed": "Dev dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production"
     },
     {
       "section": "issue-types",
@@ -2532,7 +2532,7 @@
       "section": "issue-types",
       "row": "unused-optional-dependency",
       "column": "Description",
-      "seed": "Optional dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+      "seed": "Optional dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production"
     },
     {
       "section": "issue-types",

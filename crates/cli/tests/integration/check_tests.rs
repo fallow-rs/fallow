@@ -1358,6 +1358,31 @@ fn check_unused_deps_filter() {
 }
 
 #[test]
+fn dead_code_help_names_every_unused_deps_kind() {
+    let output = run_fallow_raw(&["dead-code", "--help"]);
+    assert_eq!(output.code, 0, "dead-code --help should succeed");
+    let help = output
+        .stdout
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (_, after_flag) = help
+        .split_once("--unused-deps ")
+        .expect("help should list --unused-deps");
+    let (flag_help, _) = after_flag
+        .split_once("--unused-types")
+        .expect("help should list --unused-types after --unused-deps");
+    assert!(
+        flag_help.contains("unused dependencies, dev dependencies and optional dependencies"),
+        "help should name the three unused kinds: {flag_help}"
+    );
+    assert!(
+        flag_help.contains("type-only, test-only and dev-in-production dependencies"),
+        "help should name the three kinds of used packages: {flag_help}"
+    );
+}
+
+#[test]
 fn check_invalid_root_exits_2() {
     let output = run_fallow_raw(&["check", "--root", "/nonexistent/path/xyz", "--quiet"]);
     assert_eq!(output.code, 2, "invalid root should exit with code 2");

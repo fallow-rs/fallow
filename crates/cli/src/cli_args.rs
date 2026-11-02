@@ -717,7 +717,7 @@ pub enum Command {
         #[arg(long)]
         unused_exports: bool,
 
-        /// Only report unused dependencies
+        /// Only report dependency findings: unused dependencies, dev dependencies and optional dependencies, plus type-only, test-only and dev-in-production dependencies
         #[arg(long)]
         unused_deps: bool,
 
