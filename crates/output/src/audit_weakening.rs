@@ -13,7 +13,9 @@ pub enum WeakeningKind {
     ThresholdLowered,
     /// A suppression was added.
     SuppressionAdded,
-    /// A security check or step was removed from CI.
+    /// A security check or step was removed from CI, or a security sink in a
+    /// source file was replaced by another sink of the same class or moved out
+    /// of the static sink view.
     SecurityCheckRemoved,
 }
 
