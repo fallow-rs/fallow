@@ -820,13 +820,19 @@ fn process_tag_attr(
 }
 
 fn collect_inner_html_sink(attr: &AngularTemplateAttr<'_>, refs: &mut AngularTemplateRefs) {
-    if attr.name != "[innerHTML]" {
+    let Some((start, end)) = attr.span else {
         return;
-    }
-
-    if let Some((start, end)) = attr.span
-        && let Some(sink) = crate::template_usage::template_html_sink(attr.value, start, end)
+    };
+    let sink = if attr.name == "[innerHTML]" {
+        crate::template_usage::template_html_sink(attr.value, start, end)
+    } else if attr.name.eq_ignore_ascii_case("[srcdoc]")
+        || attr.name.eq_ignore_ascii_case("[attr.srcdoc]")
     {
+        crate::template_usage::template_srcdoc_sink(attr.value, start, end)
+    } else {
+        None
+    };
+    if let Some(sink) = sink {
         refs.security_sinks.push(sink);
     }
 }

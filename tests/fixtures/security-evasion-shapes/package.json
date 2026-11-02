@@ -1,0 +1,11 @@
+{
+  "name": "security-evasion-shapes-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "^20.0.0",
+    "react": "19.0.0",
+    "svelte": "^5.0.0",
+    "vue": "^3.0.0"
+  }
+}

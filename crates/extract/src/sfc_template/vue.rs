@@ -532,6 +532,17 @@ fn collect_v_html_sink(
     {
         usage.security_sinks.push(sink);
     }
+    let srcdoc_binding = parsed.attrs.iter().find(|attr| {
+        attr.name
+            .strip_prefix(':')
+            .or_else(|| attr.name.strip_prefix("v-bind:"))
+            .is_some_and(|name| name.eq_ignore_ascii_case("srcdoc"))
+    });
+    if let Some(value) = srcdoc_binding.and_then(|attr| attr.value.as_deref())
+        && let Some(sink) = crate::template_usage::template_srcdoc_sink(value, tag_start, tag_end)
+    {
+        usage.security_sinks.push(sink);
+    }
 }
 
 fn collect_v_for_locals(

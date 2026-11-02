@@ -96,6 +96,30 @@ callee_patterns = ["dangerouslySetInnerHTML"]
 arg_index = 0
 evidence_template = "Non-literal value bound to {callee}. Candidate for verification: confirm the HTML is sanitized (e.g. via DOMPurify) before render."
 
+# An iframe `srcdoc` renders its value as a full HTML document, so it is the
+# same XSS class as innerHTML. The extractor maps `el.setAttribute("srcdoc", x)`
+# to the `el.srcdoc` member-assign shape, and framework template bindings
+# (`:srcdoc`, `[srcdoc]`, `srcdoc={x}`) to `template.srcdoc`.
+[[matcher]]
+id = "dangerous-html"
+cwe = 79
+title = "Dangerous HTML sink"
+effect = "dom"
+sink_shape = "member-assign"
+callee_patterns = ["*.srcdoc"]
+arg_index = 0
+evidence_template = "Non-literal HTML assigned to {callee} (the iframe renders it as a full document). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
+
+[[matcher]]
+id = "dangerous-html"
+cwe = 79
+title = "Dangerous HTML sink"
+effect = "dom"
+sink_shape = "jsx-attr"
+callee_patterns = ["srcDoc", "srcdoc"]
+arg_index = 0
+evidence_template = "Non-literal HTML bound to the iframe {callee} prop (rendered as a full document). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
+
 # ── CWE-79: Template escape bypass (issue #897) ─────────────────────────────
 # Wrapping a non-literal value in a template engine's "safe string" marker tells
 # the engine to emit it WITHOUT HTML-escaping. Handlebars' `SafeString` is the
@@ -173,6 +197,17 @@ evidence_template = "String code passed to {callee}(). Candidate for verificatio
 [[matcher]]
 id = "code-injection"
 cwe = 95
+title = "String-code timer sink"
+effect = "process"
+sink_shape = "call"
+callee_patterns = ["setTimeout", "setInterval"]
+arg_index = 0
+arg_kinds = ["concat", "template-with-subst"]
+evidence_template = "Built string code passed to {callee}(). Candidate for verification: prefer a function callback over evaluating a string."
+
+[[matcher]]
+id = "code-injection"
+cwe = 95
 title = "Function constructor sink"
 effect = "process"
 sink_shape = "new-expression"
@@ -190,6 +225,28 @@ sink_shape = "new-expression"
 callee_patterns = ["Function"]
 arg_index = 0
 evidence_template = "Non-literal value passed to new {callee}(). Candidate for verification: confirm generated code cannot be influenced by attacker input."
+
+# `Function(code)` without `new`, `Function.prototype.constructor(code)` and
+# `x.constructor.constructor(code)` all reach the Function constructor.
+[[matcher]]
+id = "code-injection"
+cwe = 95
+title = "Function constructor sink"
+effect = "process"
+sink_shape = "call"
+callee_patterns = ["Function"]
+arg_index = 0
+evidence_template = "Non-literal value passed to {callee}(). Candidate for verification: confirm generated code cannot be influenced by attacker input."
+
+[[matcher]]
+id = "code-injection"
+cwe = 95
+title = "Function constructor sink"
+effect = "process"
+sink_shape = "member-call"
+callee_patterns = ["Function.prototype.constructor", "*.constructor.constructor"]
+arg_index = 0
+evidence_template = "Non-literal value passed to {callee}() (reaches the Function constructor). Candidate for verification: confirm generated code cannot be influenced by attacker input."
 
 # Dynamic regex construction from a non-literal pattern can let untrusted input
 # select a pathological expression or alter matching semantics. Literal regex

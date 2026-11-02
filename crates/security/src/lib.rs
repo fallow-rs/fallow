@@ -1351,6 +1351,21 @@ evidence_template = "   "
     }
 
     #[test]
+    fn every_jsx_attr_row_is_followed_through_jsx_spread() {
+        let missing: Vec<&str> = catalogue()
+            .matchers()
+            .iter()
+            .filter(|matcher| matcher.sink_shape == SinkShape::JsxAttr)
+            .flat_map(|matcher| matcher.callee_patterns.iter().map(CalleePattern::raw))
+            .filter(|raw| !fallow_types::security_sinks::JSX_SPREAD_SINK_PROPS.contains(raw))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "add these jsx-attr patterns to JSX_SPREAD_SINK_PROPS: {missing:?}"
+        );
+    }
+
+    #[test]
     fn wildcard_only_pattern_matches_nothing() {
         // Guard against a degenerate `*` pattern matching every callee.
         let star = parse_callee_pattern("*").unwrap();
