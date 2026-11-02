@@ -15942,9 +15942,9 @@ finding_id: string
 kind: SecurityFindingKind
 /**
  * The catalogue category id (e.g. `"dangerous-html"`). `Some` for
- * `TaintedSink`. For `ClientServerLeak` this is `None` for the secret-leak
- * finding, and `Some("server-only-import")` when a `"use client"` cone
- * reaches server-only code.
+ * `TaintedSink`. For `ClientServerLeak` it is `"client-server-leak"` for the
+ * secret leak (older releases omit it) or `"server-only-import"` when a
+ * `"use client"` cone reaches server-only code.
  */
 category?: (string | null)
 /**
@@ -16178,9 +16178,9 @@ line: number
 col: number
 /**
  * Catalogue category id of the sink (e.g. `"dangerous-html"`). For
- * `client-server-leak` this is `None` for the secret-leak finding, and
- * `Some("server-only-import")` when a `"use client"` cone reaches
- * server-only code.
+ * `client-server-leak` this is `"client-server-leak"` for the secret-leak
+ * finding, and `"server-only-import"` when a `"use client"` cone reaches
+ * server-only code. Older releases left it absent for the secret leak.
  */
 category?: (string | null)
 /**

@@ -1,4 +1,4 @@
-// Positive: response headers derived from a non-literal value are header-injection candidates.
+// Positive: response headers derived from request input are header-injection candidates.
 interface ResponseLike {
   setHeader(name: string, value: string): void;
   writeHead(status: number, headers: Record<string, string | string[]>): void;
@@ -13,34 +13,40 @@ interface NestedResponseLike {
   writeHead(status: number, headers: Record<string, unknown>): void;
 }
 
-export function reflectHeader(res: ResponseLike, value: string): void {
-  res.setHeader("X-User", value);
+interface RequestLike {
+  query: Record<string, string>;
+  body: Record<string, string>;
 }
 
-export function writeHeaders(res: ResponseLike, headers: Record<string, string>): void {
-  res.writeHead(302, headers);
+export function reflectHeader(req: RequestLike, res: ResponseLike): void {
+  const value = req.query.user;
+  res.setHeader("X-User", value); // candidate
 }
 
-export const writeHeadersWithStatusMessage = (
-  res: ResponseLike,
-  statusMessage: string,
-  headers: Record<string, string>,
-): void => {
-  res.writeHead(302, statusMessage, headers);
+export function writeHeaders(req: RequestLike, res: ResponseLike): void {
+  const headers = req.body;
+  res.writeHead(302, headers); // candidate
+}
+
+export const writeHeadersWithStatusMessage = (req: RequestLike, res: ResponseLike): void => {
+  const statusMessage = req.query.message;
+  const headers = req.body;
+  res.writeHead(302, statusMessage, headers); // candidate
 };
 
-export const writeComputedHeader = (res: ResponseLike, name: string): void => {
-  res.writeHead(302, { [name]: "dynamic" });
+export const writeComputedHeader = (req: RequestLike, res: ResponseLike): void => {
+  const name = req.query.name;
+  res.writeHead(302, { [name]: "dynamic" }); // candidate
 };
 
-export const writeSpreadHeaders = (
-  res: ResponseLike,
-  headers: Record<string, string>,
-): void => {
-  res.writeHead(302, { ...headers });
+export const writeSpreadHeaders = (req: RequestLike, res: ResponseLike): void => {
+  const headers = req.body;
+  res.writeHead(302, { ...headers }); // candidate
 };
 
-export const writeGetterHeaders = (res: ResponseLike, value: string): void => {
+// A getter body is not traced, so this request value is a known false negative.
+export const writeGetterHeaders = (req: RequestLike, res: ResponseLike): void => {
+  const value = req.query.value;
   res.writeHead(302, {
     get "X-Dynamic"() {
       return value;
@@ -50,4 +56,12 @@ export const writeGetterHeaders = (res: ResponseLike, value: string): void => {
 
 export const writeNestedHeaders = (res: NestedResponseLike): void => {
   res.writeHead(302, { "X-Nested": { value: "static" } });
+};
+
+// Negative: an adapter copies its own header map into the response. No request
+// input reaches the value, so it is not a candidate.
+export const copyHeaders = (res: ResponseLike, headers: Map<string, string>): void => {
+  for (const [headerName, headerValue] of headers) {
+    res.setHeader(headerName, headerValue);
+  }
 };

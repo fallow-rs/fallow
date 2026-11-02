@@ -25,6 +25,7 @@ use fallow_types::results::{
 };
 use fallow_types::suppress::IssueKind;
 
+use super::rank::module_input_source_kinds;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -257,38 +258,56 @@ fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
     has_direct_html_sanitizer(sink, &module.sanitized_sink_args)
 }
 
-/// The matched source `(id, title)` if any of a sink's captured argument
-/// identifiers trace to a source-tainted local binding, else `None`. The id is
-/// the stable catalogue source kind (slot 1 of the candidate record); the title
-/// is the human phrase for the evidence string. The intra-module, name-based
-/// back-trace from issue #859.
+/// The first matched source `(id, title)` of a sink's captured arguments, else
+/// `None`. See [`sink_sources`].
+#[cfg(test)]
 fn sink_source<'t>(
     sink: &SinkSite,
     tainted: &FxHashMap<&str, (&'t str, &'t str, u32)>,
     declared_deps: &FxHashSet<String>,
     request_receivers: &FxHashSet<String>,
 ) -> Option<(&'t str, &'t str, Option<u32>)> {
+    sink_sources(sink, tainted, declared_deps, request_receivers)
+        .into_iter()
+        .next()
+}
+
+/// Every matched source `(id, title)` of a sink's captured arguments, in
+/// precedence order: reads inside the argument first, then source-tainted
+/// local bindings. The id is the stable catalogue source kind (slot 1 of the
+/// candidate record); the title is the human phrase for the evidence string.
+/// The intra-module, name-based back-trace from issue #859. Each matcher takes
+/// the first source it admits, so a deployment secret in the argument does not
+/// hide request input next to it.
+fn sink_sources<'t>(
+    sink: &SinkSite,
+    tainted: &FxHashMap<&str, (&'t str, &'t str, u32)>,
+    declared_deps: &FxHashSet<String>,
+    request_receivers: &FxHashSet<String>,
+) -> Vec<(&'t str, &'t str, Option<u32>)> {
     let cat = catalogue();
     // Direct path: the source read is inside the sink argument (same statement),
     // so there is no separate binding span; the detector anchors at the sink.
-    if let Some((id, title)) = sink.arg_source_paths.iter().find_map(|path| {
-        cat.matching_source_for_deps_with_receivers(path, declared_deps, request_receivers)
-    }) {
-        return Some((id, title, None));
-    }
+    let mut sources: Vec<(&'t str, &'t str, Option<u32>)> = sink
+        .arg_source_paths
+        .iter()
+        .filter_map(|path| {
+            cat.matching_source_for_deps_with_receivers(path, declared_deps, request_receivers)
+        })
+        .map(|(id, title)| (id, title, None))
+        .collect();
 
     // Binding path: the argument references a source-tainted local; carry that
     // binding's source-read byte offset so the trace can anchor at the read.
-    if !tainted.is_empty()
-        && let Some((id, title, span)) = sink
-            .arg_idents
-            .iter()
-            .find_map(|name| tainted.get(name.as_str()).copied())
-    {
-        return Some((id, title, Some(span)));
+    if !tainted.is_empty() {
+        sources.extend(
+            sink.arg_idents
+                .iter()
+                .filter_map(|name| tainted.get(name.as_str()).copied())
+                .map(|(id, title, span)| (id, title, Some(span))),
+        );
     }
-
-    None
+    sources
 }
 
 type TaintedSinkSource<'a> = (&'a str, &'a str, Option<u32>);
@@ -602,25 +621,77 @@ fn module_allows_tainted_sink_scan(
         .is_file_suppressed(node.file_id, IssueKind::SecuritySink)
 }
 
+/// Whether a matcher may use a source of kind `id`. A deployment secret backs
+/// only the rows that name its kind in `requires_source_kinds` or set
+/// `secret_sources`; for every other row it is not attacker input. A kind in
+/// `ignored_source_kinds` never backs the row.
+fn matcher_accepts_source_kind(matcher: &Matcher, id: &str) -> bool {
+    !matcher.ignored_source_kinds.iter().any(|kind| kind == id)
+        && (matcher.secret_sources
+            || !matcher.requires_source_kinds.is_empty()
+            || !catalogue().is_secret_source(id))
+}
+
+/// The source kinds of the untrusted input that one module reads. Computed on
+/// first use, because only a `requires_module_source` row without an argument
+/// source needs them.
+struct ModuleSourceKinds<'m> {
+    module: &'m ModuleInfo,
+    kinds: std::cell::OnceCell<FxHashSet<&'static str>>,
+}
+
+impl ModuleSourceKinds<'_> {
+    fn get(&self, run: &TaintedSinkRun<'_>) -> &FxHashSet<&'static str> {
+        self.kinds.get_or_init(|| {
+            module_input_source_kinds(
+                self.module,
+                run.declared_deps,
+                run.context.request_receivers,
+            )
+        })
+    }
+}
+
+/// Whether a `requires_module_source` row may fire: the argument traces to a
+/// source, or the sink module itself reads input of a kind the row accepts.
+fn module_source_satisfied(
+    run: &TaintedSinkRun<'_>,
+    matcher: &Matcher,
+    source: Option<TaintedSinkSource<'_>>,
+    module_kinds: &ModuleSourceKinds<'_>,
+) -> bool {
+    !matcher.requires_module_source
+        || source.is_some()
+        || module_kinds
+            .get(run)
+            .iter()
+            .any(|kind| matcher_accepts_source_kind(matcher, kind))
+}
+
 fn match_tainted_sink<'a>(
     run: &TaintedSinkRun<'_>,
-    module: &ModuleInfo,
+    module_kinds: &ModuleSourceKinds<'_>,
     sink: &SinkSite,
     tainted_locals: &FxHashMap<&str, (&'a str, &'a str, u32)>,
 ) -> Option<(&'static Matcher, Option<TaintedSinkSource<'a>>)> {
-    let source = sink_source(
+    let module = module_kinds.module;
+    let sources = sink_sources(
         sink,
         tainted_locals,
         run.declared_deps,
         run.context.request_receivers,
     );
-    let source_id = source.map(|(id, title, _)| (id, title));
-    let matcher = run.active.iter().copied().find(|m| {
-        matcher_admits_sink(m, sink, source_id)
-            && m.provenance_satisfied(module, &sink.callee_path, ProvenanceBindings::Imports)
-    })?;
-
-    Some((matcher, source))
+    run.active.iter().copied().find_map(|m| {
+        let source = sources
+            .iter()
+            .copied()
+            .find(|(id, _, _)| matcher_accepts_source_kind(m, id));
+        let source_id = source.map(|(id, title, _)| (id, title));
+        (matcher_admits_sink(m, sink, source_id)
+            && module_source_satisfied(run, m, source, module_kinds)
+            && m.provenance_satisfied(module, &sink.callee_path, ProvenanceBindings::Imports))
+        .then_some((m, source))
+    })
 }
 
 /// Match every sink in one module against the active catalogue and push a
@@ -650,8 +721,14 @@ fn collect_module_tainted_sinks(
     // source-backed argument over a source-free one.
     let mut variadic_calls: FxHashMap<(u32, *const Matcher), usize> = FxHashMap::default();
 
+    let module_kinds = ModuleSourceKinds {
+        module,
+        kinds: std::cell::OnceCell::new(),
+    };
+
     for sink in &module.security_sinks {
-        let Some((matcher, source)) = match_tainted_sink(run, module, sink, &tainted_locals) else {
+        let Some((matcher, source)) = match_tainted_sink(run, &module_kinds, sink, &tainted_locals)
+        else {
             continue;
         };
 

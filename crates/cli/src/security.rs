@@ -1149,7 +1149,7 @@ fn apply_security_gate(
     Ok(Some(mode))
 }
 
-const SECURITY_BASE_SNAPSHOT_CACHE_VERSION: u8 = 1;
+const SECURITY_BASE_SNAPSHOT_CACHE_VERSION: u8 = 2;
 const MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone)]

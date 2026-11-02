@@ -30,6 +30,7 @@ use fallow_types::results::{
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 
+use super::tainted_sink::is_low_value_anchor;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use fallow_security::{catalogue, derive_security_severity};
 
@@ -275,6 +276,8 @@ pub struct SecurityRankingInput<'a> {
     pub declared_deps: &'a FxHashSet<String>,
     pub request_receivers: &'a FxHashSet<String>,
     pub boundary_crossings: &'a FxHashMap<PathBuf, (String, String)>,
+    /// Project root. Source origins are judged on the root-relative path.
+    pub root: &'a Path,
 }
 
 pub fn rank_security_findings(input: &SecurityRankingInput<'_>, findings: &mut [SecurityFinding]) {
@@ -309,12 +312,13 @@ impl<'a> SecurityRankingContext<'a> {
             .iter()
             .map(|node| (node.path.as_path(), node.file_id))
             .collect();
-        let source_index = UntrustedSourceIndex::build(
+        let source_index = UntrustedSourceIndex::build(&SourceIndexInput {
             graph,
             modules,
-            input.declared_deps,
-            input.request_receivers,
-        );
+            declared_deps: input.declared_deps,
+            request_receivers: input.request_receivers,
+            root: input.root,
+        });
         let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
             .iter()
             .map(|module| (module.file_id, module))
@@ -587,13 +591,24 @@ struct UntrustedSourceTrace {
     trace: Vec<TraceHop>,
 }
 
+/// The inputs that select the untrusted-source origins of a run.
+struct SourceIndexInput<'a> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    declared_deps: &'a FxHashSet<String>,
+    request_receivers: &'a FxHashSet<String>,
+    root: &'a Path,
+}
+
 impl UntrustedSourceIndex {
-    fn build(
-        graph: &ModuleGraph,
-        modules: &[ModuleInfo],
-        declared_deps: &FxHashSet<String>,
-        request_receivers: &FxHashSet<String>,
-    ) -> Self {
+    fn build(input: &SourceIndexInput<'_>) -> Self {
+        let SourceIndexInput {
+            graph,
+            modules,
+            declared_deps,
+            request_receivers,
+            root,
+        } = *input;
         let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
             .iter()
             .map(|module| (module.file_id, module))
@@ -606,7 +621,12 @@ impl UntrustedSourceIndex {
             let Some(module) = modules_by_id.get(&node.file_id) else {
                 continue;
             };
-            if !module_contains_untrusted_source(module, declared_deps, request_receivers) {
+            // A test, story or tooling-config file is not production input. Its
+            // request reads drive the code under test, so it is never an origin.
+            let rel_path = node.path.strip_prefix(root).unwrap_or(&node.path);
+            if is_low_value_anchor(rel_path)
+                || !module_contains_untrusted_source(module, declared_deps, request_receivers)
+            {
                 continue;
             }
             let idx = node.file_id.0 as usize;
@@ -756,36 +776,46 @@ fn is_source_reachability_candidate(finding: &SecurityFinding) -> bool {
         && finding.category.as_deref() != Some(super::hardcoded_secret::CATEGORY_ID)
 }
 
+/// Whether the module reads attacker-controlled input.
 fn module_contains_untrusted_source(
     module: &ModuleInfo,
     declared_deps: &FxHashSet<String>,
     request_receivers: &FxHashSet<String>,
 ) -> bool {
+    !module_input_source_kinds(module, declared_deps, request_receivers).is_empty()
+}
+
+/// The catalogue source kinds of the attacker-controlled input that a module
+/// reads. A deployment secret (`process.env`) is not attacker input, so its
+/// kinds are left out.
+pub(super) fn module_input_source_kinds(
+    module: &ModuleInfo,
+    declared_deps: &FxHashSet<String>,
+    request_receivers: &FxHashSet<String>,
+) -> FxHashSet<&'static str> {
     let cat = catalogue();
-    module.tainted_bindings.iter().any(|binding| {
-        cat.matching_source_for_deps_with_receivers(
-            &binding.source_path,
-            declared_deps,
-            request_receivers,
-        )
-        .is_some()
-    }) || module.security_sinks.iter().any(|sink| {
-        sink.arg_source_paths.iter().any(|path| {
+    let mut kinds = FxHashSet::default();
+    let mut record = |path: &str| {
+        if let Some((id, _)) =
             cat.matching_source_for_deps_with_receivers(path, declared_deps, request_receivers)
-                .is_some()
-        })
-    }) || module.member_accesses.iter().any(|access| {
-        let full_path = format!("{}.{}", access.object, access.member);
-        cat.matching_source_for_deps_with_receivers(&full_path, declared_deps, request_receivers)
-            .is_some()
-            || cat
-                .matching_source_for_deps_with_receivers(
-                    &access.object,
-                    declared_deps,
-                    request_receivers,
-                )
-                .is_some()
-    })
+            && !cat.is_secret_source(id)
+        {
+            kinds.insert(id);
+        }
+    };
+    for binding in &module.tainted_bindings {
+        record(&binding.source_path);
+    }
+    for sink in &module.security_sinks {
+        for path in &sink.arg_source_paths {
+            record(path);
+        }
+    }
+    for access in module.member_accesses.iter() {
+        record(&format!("{}.{}", access.object, access.member));
+        record(&access.object);
+    }
+    kinds
 }
 
 /// Count the distinct modules that transitively depend on `target` (fan-in) via
@@ -936,6 +966,7 @@ mod tests {
                 declared_deps: &declared_deps,
                 request_receivers: &request_receivers,
                 boundary_crossings: &boundary_crossings,
+                root: Path::new(ROOT),
             },
             findings,
         );
@@ -958,6 +989,7 @@ mod tests {
                 declared_deps: &declared_deps,
                 request_receivers: &request_receivers,
                 boundary_crossings: &boundary_crossings,
+                root: Path::new(ROOT),
             },
             findings,
         );
@@ -1379,6 +1411,42 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![TraceHopRole::ModuleSource, TraceHopRole::Sink]
         );
+    }
+
+    #[test]
+    fn test_file_is_not_an_untrusted_source_origin() {
+        // A test file reads request input to drive the code under test. That
+        // read is not production input, so it must not mark the imported
+        // module as reachable from an untrusted source.
+        let graph = build_graph(&["src/app.test.ts", "src/url.ts"], &[(0, 1)], &[]);
+        let modules = vec![member_source_module(0), module(1)];
+        let mut findings = vec![finding("src/url.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(!reach.reachable_from_untrusted_source);
+        assert!(reach.untrusted_source_trace.is_empty());
+        assert_eq!(findings[0].severity, SecuritySeverity::Low);
+    }
+
+    #[test]
+    fn env_secret_is_not_an_untrusted_source_origin() {
+        // `process.env` is a deployment secret, not attacker input.
+        let graph = build_graph(&["src/config.ts", "src/paths.ts"], &[(0, 1)], &[]);
+        let mut env_module = module(0);
+        env_module.member_accesses = vec![MemberAccess {
+            object: "process.env".to_string(),
+            member: "OUT_DIR".to_string(),
+        }]
+        .into();
+        let modules = vec![env_module, module(1)];
+        let mut findings = vec![finding("src/paths.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(!reach.reachable_from_untrusted_source);
     }
 
     #[test]

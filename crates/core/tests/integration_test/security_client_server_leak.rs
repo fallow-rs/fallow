@@ -271,7 +271,7 @@ fn every_finding_carries_a_suppress_action() {
 
 #[test]
 fn exactly_eleven_findings_reported() {
-    // Genuine secret leaks (category None): client.tsx (single-hop),
+    // Genuine secret leaks (category `client-server-leak`): client.tsx (single-hop),
     // client2.tsx (multi-hop), direct-client.tsx (direct read), vite-client.tsx
     // (transitive import.meta.env), vite-direct-client.tsx (direct
     // import.meta.env), and iface-value-client.tsx (value import next to an
@@ -308,10 +308,39 @@ fn exactly_eleven_findings_reported() {
 }
 
 #[test]
+fn secret_leak_carries_its_own_category() {
+    // Every security finding names a category, so a consumer can group
+    // candidates on `category` alone. The secret leak uses its rule name.
+    let results = analyze_with_security();
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/client.tsx")
+        })
+        .expect("client.tsx should be flagged");
+    assert_eq!(finding.category.as_deref(), Some("client-server-leak"));
+    assert_eq!(
+        finding.candidate.sink.category.as_deref(),
+        Some("client-server-leak")
+    );
+    assert!(
+        results
+            .security_findings
+            .iter()
+            .all(|f| f.category.is_some()),
+        "every finding names a category"
+    );
+}
+
+#[test]
 fn server_only_import_is_a_distinct_category() {
     // Capability A: a "use client" file transitively importing a util that imports
     // `cookies` from `next/headers` reports ONE finding with the server-only-import
-    // category, distinct from the secret-leak findings (category None).
+    // category, distinct from the secret-leak findings (category `client-server-leak`).
     let results = analyze_with_security();
     let finding = results
         .security_findings

@@ -163,18 +163,18 @@ fn code_injection_literal_does_not_fire() {
     );
 }
 
-// ── dynamic-regex (CWE-1333), ungated non-literal pattern construction ──────
+// ── dynamic-regex (CWE-1333), source-backed pattern construction ────────────
 
 #[test]
-fn dynamic_regex_call_non_literal_fires() {
+fn dynamic_regex_source_free_patterns_do_not_fire() {
+    // A library builds regexes from its own options; without request input in
+    // the pattern argument, `RegExp(x)` and `new RegExp(x)` are not candidates.
     let results = analyze_with_security_sink("security-dynamic-regex");
-    assert_candidate(&results, "src/call.ts", "dynamic-regex", 1333);
-}
-
-#[test]
-fn dynamic_regex_new_expression_non_literal_fires() {
-    let results = analyze_with_security_sink("security-dynamic-regex");
-    assert_candidate(&results, "src/constructor.ts", "dynamic-regex", 1333);
+    assert!(!anchored_on(&results, "src/call.ts"), "RegExp(pattern)");
+    assert!(
+        !anchored_on(&results, "src/constructor.ts"),
+        "new RegExp(pattern)"
+    );
 }
 
 #[test]
@@ -283,25 +283,41 @@ fn dynamic_regex_object_binding_source_backed_candidate_is_marked() {
 }
 
 #[test]
-fn dynamic_regex_shadowed_helper_name_keeps_candidate_unbacked() {
+fn dynamic_regex_env_secret_alone_does_not_fire() {
     let results = analyze_with_security_sink("security-dynamic-regex");
-    let finding = finding_on(&results, "src/source-helper-shadowed.ts");
-
-    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
     assert!(
-        !finding.source_backed,
+        !anchored_on(&results, "src/env-only.ts"),
+        "an environment value is not attacker input"
+    );
+}
+
+#[test]
+fn dynamic_regex_request_input_next_to_env_secret_is_source_backed() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/env-and-request.ts");
+
+    assert!(finding.source_backed);
+    assert_eq!(
+        finding.candidate.source_kind.as_deref(),
+        Some("http-request-input"),
+        "the secret must not hide the request input in the same argument"
+    );
+}
+
+#[test]
+fn dynamic_regex_shadowed_helper_name_does_not_fire() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    assert!(
+        !anchored_on(&results, "src/source-helper-shadowed.ts"),
         "a local parameter must shadow the same-named module helper"
     );
 }
 
 #[test]
-fn dynamic_regex_second_hop_helper_keeps_candidate_unbacked() {
+fn dynamic_regex_second_hop_helper_does_not_fire() {
     let results = analyze_with_security_sink("security-dynamic-regex");
-    let finding = finding_on(&results, "src/source-helper-multihop.ts");
-
-    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
     assert!(
-        !finding.source_backed,
+        !anchored_on(&results, "src/source-helper-multihop.ts"),
         "helper chains beyond one call are out of scope"
     );
 }
@@ -688,6 +704,36 @@ fn path_traversal_dynamic_later_segment_fires() {
 }
 
 #[test]
+fn path_traversal_join_without_request_input_does_not_fire() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert!(
+        !anchored_on(&results, "src/build-output.ts"),
+        "build code that only reads options and the environment must not be flagged"
+    );
+}
+
+#[test]
+fn path_traversal_join_in_a_module_without_its_own_input_does_not_fire() {
+    // The gate is per module: an importer that reads `req.url` does not arm
+    // the `path.join` of the helper it calls. This trades a false negative
+    // for quiet build and config code that a dev server imports.
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert!(
+        !anchored_on(&results, "src/imported-by-handler.ts"),
+        "a helper that does not read request input itself must not be flagged"
+    );
+}
+
+#[test]
+fn path_traversal_join_reached_only_from_a_test_file_does_not_fire() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert!(
+        !anchored_on(&results, "src/test-helper.ts"),
+        "a request read in a test file must not make the helper reachable"
+    );
+}
+
+#[test]
 fn path_traversal_reports_one_candidate_per_call() {
     let results = analyze_with_security_sink("security-path-traversal");
     assert_eq!(
@@ -980,6 +1026,7 @@ fn issue_882_catalogue_sinks_fire() {
         if !line.trim_start().starts_with("res.") {
             continue;
         }
+        let expected = usize::from(line.contains("// candidate"));
         let candidates = results
             .security_findings
             .iter()
@@ -994,8 +1041,9 @@ fn issue_882_catalogue_sinks_fire() {
             })
             .count();
         assert_eq!(
-            candidates, 1,
-            "each dynamic header call must retain exactly one candidate: {line}"
+            candidates, expected,
+            "each request-sourced header call must retain exactly one candidate, \
+             and a source-free call none: {line}"
         );
     }
 }

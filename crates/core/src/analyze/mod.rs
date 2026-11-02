@@ -2284,7 +2284,6 @@ fn annotate_security_findings(
         &unused_exports,
         &mut results.security_findings,
     );
-    let boundary_crossings = security::boundary_crossings_by_file(&results.boundary_violations);
     security::rank_security_findings(
         &security::SecurityRankingInput {
             graph: ctx.graph,
@@ -2292,7 +2291,8 @@ fn annotate_security_findings(
             line_offsets_by_file: ctx.line_offsets_by_file,
             declared_deps: ctx.declared_deps,
             request_receivers: ctx.request_receivers,
-            boundary_crossings: &boundary_crossings,
+            boundary_crossings: &security::boundary_crossings_by_file(&results.boundary_violations),
+            root: &ctx.config.root,
         },
         &mut results.security_findings,
     );

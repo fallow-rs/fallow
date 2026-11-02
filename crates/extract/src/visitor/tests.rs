@@ -1624,6 +1624,29 @@ fn security_sink_arg_idents_recurse_into_array_nested_object() {
 }
 
 #[test]
+fn security_sink_arg_idents_include_computed_keys_and_spreads() {
+    let info = parse(
+        "const name = req.query.name; const extra = req.body; \
+         res.writeHead(302, { [name]: \"x\", ...extra, plain: \"y\" });",
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "res.writeHead")
+        .expect("writeHead sink captured");
+
+    for ident in ["name", "extra"] {
+        assert!(
+            sink.arg_idents.iter().any(|n| n == ident),
+            "{ident} must surface, got: {:?}",
+            sink.arg_idents
+        );
+    }
+    // A static key is a property name, not a data reference.
+    assert!(!sink.arg_idents.iter().any(|n| n == "plain"));
+}
+
+#[test]
 fn security_redos_regex_capture_records_const_regexp_application() {
     let sink = redos_regex_sink(r#"const re = new RegExp("^(a+)+$"); re.test(req.body.value);"#);
 

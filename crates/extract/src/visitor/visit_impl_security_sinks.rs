@@ -687,8 +687,20 @@ fn collect_call_idents(call: &CallExpression<'_>, out: &mut Vec<String>) {
 
 fn collect_object_idents(obj: &ObjectExpression<'_>, out: &mut Vec<String>) {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            collect_idents_into(&prop.value, out);
+        match prop {
+            ObjectPropertyKind::ObjectProperty(prop) => {
+                // A computed key carries data too: `{ [name]: value }` writes a
+                // header or field whose name comes from `name`.
+                if prop.computed
+                    && let Some(key) = prop.key.as_expression()
+                {
+                    collect_idents_into(key, out);
+                }
+                collect_idents_into(&prop.value, out);
+            }
+            ObjectPropertyKind::SpreadProperty(spread) => {
+                collect_idents_into(&spread.argument, out);
+            }
         }
     }
 }
