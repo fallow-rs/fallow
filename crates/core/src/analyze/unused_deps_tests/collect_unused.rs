@@ -579,6 +579,7 @@ fn manifest<'a>(
         is_private,
         shipped: declared.clone(),
         installed: declared.clone(),
+        production: declared.iter().cloned().collect(),
         declared,
         externalizes_packages: false,
         script_programs: Vec::new(),

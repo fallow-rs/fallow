@@ -4698,6 +4698,264 @@ fn redundant_config_entries_are_not_reported_in_a_production_run() {
     assert!(redundant_config_entries(&json).is_empty(), "{json}");
 }
 
+/// Each `dependencies` entry that a `--production` run treats differently from
+/// a normal run, next to the entries that have no effect in either run.
+fn production_only_dependency_project(rules: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::create_dir_all(root.join("packages/lib/src")).expect("create workspace");
+    std::fs::create_dir_all(root.join("tools")).expect("create tools");
+    std::fs::write(
+        root.join("tools/unreachable.ts"),
+        "import tool from \"tool-dep\";\nconsole.log(tool);\n",
+    )
+    .expect("write unreachable file");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts",
+            "workspaces":["packages/*"],
+            "scripts":{"lint":"script-only ."},
+            "dependencies":{
+                "value-dep":"1.0.0","type-dep":"1.0.0","type-and-test-dep":"1.0.0",
+                "test-dep":"1.0.0","script-only":"1.0.0","root-type-lib-value":"1.0.0",
+                "@scope/type-dep":"1.0.0","@scope/value-dep":"1.0.0","tool-dep":"1.0.0"
+            },
+            "devDependencies":{"dev-type":"1.0.0","dev-test":"1.0.0"},
+            "optionalDependencies":{"optional-test":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import value from \"value-dep\";\n\
+         import scoped from \"@scope/value-dep\";\n\
+         import type { A } from \"type-dep\";\n\
+         import type { B } from \"type-and-test-dep\";\n\
+         import type { C } from \"root-type-lib-value\";\n\
+         import type { D } from \"@scope/type-dep\";\n\
+         import type { E } from \"dev-type\";\n\
+         console.log(value, scoped, null as unknown as A | B | C | D | E);\n",
+    )
+    .expect("write entry point");
+    std::fs::write(
+        root.join("src/index.test.ts"),
+        "import both from \"type-and-test-dep\";\n\
+         import test from \"test-dep\";\n\
+         import dev from \"dev-test\";\n\
+         import optional from \"optional-test\";\n\
+         console.log(both, test, dev, optional);\n",
+    )
+    .expect("write test");
+    std::fs::write(
+        root.join("packages/lib/package.json"),
+        r#"{"name":"lib","private":true,"type":"module","main":"src/index.ts",
+            "dependencies":{
+                "root-type-lib-value":"1.0.0","lib-value":"1.0.0",
+                "lib-type":"1.0.0","lib-test":"1.0.0"
+            }}"#,
+    )
+    .expect("write workspace package");
+    std::fs::write(
+        root.join("packages/lib/src/index.ts"),
+        "import shared from \"root-type-lib-value\";\n\
+         import value from \"lib-value\";\n\
+         import type { A } from \"lib-type\";\n\
+         console.log(shared, value, null as unknown as A);\n",
+    )
+    .expect("write workspace entry point");
+    std::fs::write(
+        root.join("packages/lib/src/index.test.ts"),
+        "import test from \"lib-test\";\nconsole.log(test);\n",
+    )
+    .expect("write workspace test");
+    write_production_only_config(root, rules, true);
+    dir
+}
+
+fn write_production_only_config(root: &std::path::Path, rules: &str, with_entries: bool) {
+    let ignore = if with_entries {
+        r#""ignoreDependencies":[
+            "value-dep","type-dep","type-and-test-dep","test-dep","script-only",
+            "root-type-lib-value","@scope/*","tool-dep","dev-type","dev-test","optional-test",
+            "lib-value","lib-type","lib-test"
+        ],"#
+    } else {
+        ""
+    };
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(r#"{{{ignore}"rules":{{{rules}}}}}"#),
+    )
+    .expect("write config");
+}
+
+fn redundant_dependency_entries(json: &serde_json::Value) -> Vec<String> {
+    redundant_config_entries(json)
+        .into_iter()
+        .filter(|(kind, _)| kind == "ignore-dependencies-entry-redundant")
+        .map(|(_, pattern)| pattern)
+        .collect()
+}
+
+fn dependency_finding_names(json: &serde_json::Value) -> Vec<String> {
+    [
+        "unused_dependencies",
+        "type_only_dependencies",
+        "test_only_dependencies",
+        "dev_dependencies_in_production",
+        "unlisted_dependencies",
+    ]
+    .into_iter()
+    .flat_map(|key| json[key].as_array().cloned().unwrap_or_default())
+    .filter_map(|finding| finding["package_name"].as_str().map(str::to_owned))
+    .collect()
+}
+
+#[test]
+fn an_ignore_dependencies_entry_that_a_production_run_needs_is_not_redundant() {
+    for (rules, expected) in [
+        (
+            "",
+            vec![
+                "value-dep",
+                "tool-dep",
+                "dev-type",
+                "dev-test",
+                "optional-test",
+                "lib-value",
+                "lib-type",
+            ],
+        ),
+        (
+            r#""test-only-dependencies":"off""#,
+            vec![
+                "value-dep",
+                "tool-dep",
+                "dev-type",
+                "dev-test",
+                "optional-test",
+                "lib-value",
+                "lib-type",
+            ],
+        ),
+        (
+            r#""type-only-dependencies":"off""#,
+            vec![
+                "value-dep",
+                "type-dep",
+                "type-and-test-dep",
+                "root-type-lib-value",
+                "@scope/*",
+                "tool-dep",
+                "dev-type",
+                "dev-test",
+                "optional-test",
+                "lib-value",
+                "lib-type",
+            ],
+        ),
+    ] {
+        let dir = production_only_dependency_project(rules);
+        let json_args = ["--format", "json", "--quiet"];
+        let normal = parse_json(&run_fallow_in_root("dead-code", dir.path(), &json_args));
+        let redundant = redundant_dependency_entries(&normal);
+        assert_eq!(redundant, expected, "rules {rules}: {normal}");
+
+        write_production_only_config(dir.path(), rules, false);
+        let production = parse_json(&run_fallow_in_root(
+            "dead-code",
+            dir.path(),
+            &["--production", "--format", "json", "--quiet"],
+        ));
+        let findings = dependency_finding_names(&production);
+        assert!(
+            redundant.iter().all(|entry| !findings.contains(entry)),
+            "rules {rules}: {redundant:?} are called redundant, but {findings:?} need an entry"
+        );
+    }
+}
+
+#[test]
+fn an_ignore_dependencies_entry_stays_redundant_when_no_production_rule_can_report_it() {
+    let dir = production_only_dependency_project(
+        r#""unused-dependencies":"off","type-only-dependencies":"off""#,
+    );
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet"],
+    ));
+    let redundant = redundant_dependency_entries(&json);
+    for entry in ["type-dep", "type-and-test-dep", "lib-test", "script-only"] {
+        assert!(
+            redundant.iter().any(|name| name == entry),
+            "{entry}: {json}"
+        );
+    }
+}
+
+#[test]
+fn a_workspace_that_the_source_walk_skips_gives_no_ignore_dependencies_entry_an_effect() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::create_dir_all(root.join("clone/lib")).expect("create workspace");
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root)
+        .status()
+        .expect("run git");
+    assert!(status.success());
+    std::fs::write(root.join(".gitignore"), "clone\n").expect("write gitignore");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"main":"src/index.ts","workspaces":["clone/*"],
+            "dependencies":{"real-dep":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import real from \"real-dep\";\nconsole.log(real);\n",
+    )
+    .expect("write entry point");
+    std::fs::write(
+        root.join("clone/lib/package.json"),
+        r#"{"name":"lib","private":true,"dependencies":{"ghost-dep":"1.0.0","@ghost/pkg":"1.0.0"}}"#,
+    )
+    .expect("write workspace package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"ignoreDependencies":["ghost-dep","@ghost/*"]}"#,
+    )
+    .expect("write config");
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    let notes: Vec<(&str, &str)> = json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|diagnostic| {
+            Some((
+                diagnostic["kind"].as_str()?,
+                diagnostic["pattern"].as_str()?,
+            ))
+        })
+        .filter(|(kind, _)| kind.starts_with("ignore-dependencies"))
+        .collect();
+    assert_eq!(
+        notes,
+        vec![
+            ("ignore-dependencies-glob-unmatched", "@ghost/*"),
+            ("ignore-dependencies-entry-redundant", "ghost-dep"),
+        ],
+        "{json}"
+    );
+}
+
 #[test]
 fn redundant_ignore_dependencies_follow_the_dependency_report_gate() {
     let dir = redundant_config_project();
