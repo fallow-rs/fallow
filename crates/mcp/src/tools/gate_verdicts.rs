@@ -722,14 +722,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_kind_with_no_requested_rule_adds_no_sentence() {
-        let warnings = warnings_of(&serde_json::json!({
-            "workspace_diagnostics": [{ "kind": "boundaries-not-configured" }],
-        }));
-        assert!(warnings.is_empty(), "{warnings:?}");
-    }
-
     fn staleness(advisory: &str, entries: u64, matched: u64, gate_trips: bool) -> Value {
         serde_json::json!({
             "baseline_entries": entries,

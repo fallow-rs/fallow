@@ -406,6 +406,13 @@ mod tests {
     #[test]
     fn a_rule_that_is_on_fires_no_entry() {
         let mut config = all_off(false);
+        config.rules.unused_files = Severity::Warn;
+        assert!(requested_rule_off_diagnostics(&config, &["--unused-files"]).is_empty());
+        assert_eq!(
+            requested_rule_off_diagnostics(&config, &["--unused-exports"]).len(),
+            1,
+            "positive control"
+        );
         config.rules = RulesConfig::default();
         for flag in DEAD_CODE_FILTER_FLAGS.iter().copied() {
             let entries = requested_rule_off_diagnostics(&config, &[flag]);
@@ -440,6 +447,11 @@ mod tests {
         let config = all_off(false);
         assert!(requested_rule_off_diagnostics(&config, &[]).is_empty());
         assert!(requested_rule_off_diagnostics(&config, &["--not-a-flag"]).is_empty());
+        assert_eq!(
+            requested_rule_off_diagnostics(&config, &["--not-a-flag", "--unused-files"]).len(),
+            1,
+            "positive control"
+        );
     }
 
     #[test]
