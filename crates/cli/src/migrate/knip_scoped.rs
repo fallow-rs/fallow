@@ -38,20 +38,29 @@ impl KnipScope {
         }
     }
 
-    /// The scope of one workspace key, or `None` when the key leaves the
-    /// project root.
-    fn workspace(key: &str) -> Option<Self> {
-        let path = key.trim().trim_start_matches("./").trim_end_matches('/');
+    /// The scope of one workspace key, or the reason why the key has no
+    /// project-root-relative path.
+    fn workspace(key: &str) -> Result<Self, &'static str> {
+        let normalized = normalize_path(key.trim());
+        let path = normalized.trim_end_matches('/');
+        if path.starts_with('!') {
+            return Err("negated workspace key; workspace config not migrated");
+        }
         if has_parent_segment(path) {
-            return None;
+            return Err("workspace path leaves the project root; workspace config not migrated");
         }
         let path_prefix = if path.is_empty() || path == "." {
             String::new()
         } else {
             format!("{path}/")
         };
-        Some(Self {
-            field_prefix: format!("workspaces.{key}."),
+        let field_prefix = if key == "." {
+            r#"workspaces["."]."#.to_string()
+        } else {
+            format!("workspaces.{key}.")
+        };
+        Ok(Self {
+            field_prefix,
             path_prefix,
         })
     }
@@ -64,12 +73,31 @@ impl KnipScope {
     /// Rewrite a scope-relative glob as a project-root-relative glob, or
     /// return `None` when the glob leaves the scope with a `..` segment.
     pub(super) fn rebase(&self, pattern: &str) -> Option<String> {
-        let pattern = pattern.trim_start_matches("./");
-        if has_parent_segment(pattern) {
+        let pattern = normalize_path(pattern);
+        if has_parent_segment(&pattern) {
             return None;
+        }
+        // `packages/**/` already matches any depth, so a leading `**/` in the
+        // pattern adds nothing.
+        if self.path_prefix.ends_with("**/") {
+            if pattern == "**" {
+                return Some(self.path_prefix.trim_end_matches('/').to_string());
+            }
+            if let Some(rest) = pattern.strip_prefix("**/") {
+                return Some(format!("{}{rest}", self.path_prefix));
+            }
         }
         Some(format!("{}{pattern}", self.path_prefix))
     }
+}
+
+/// Use `/` as the separator and drop a leading `./` or `/`, because fallow
+/// config paths are project-root-relative.
+fn normalize_path(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    path.trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
 }
 
 fn has_parent_segment(path: &str) -> bool {
@@ -120,9 +148,12 @@ fn append_value(config: &mut JsonMap, key: &str, value: Value) {
 /// Migrate knip `entry` patterns to fallow `entry`.
 ///
 /// Fallow `entry` files are runtime roots in every mode, so the knip
-/// production marker (a trailing `!`) is dropped. Fallow `entry` has no
-/// exclusion form, so a negated pattern is reported and not written: as a
-/// literal glob it would match no file.
+/// production marker (a trailing `!`) is dropped. A section that mixes marked
+/// and unmarked patterns gets one warning, because fallow has no
+/// production-only entry: `--production` only removes files that match the
+/// production exclusion patterns. Fallow `entry` has no exclusion form, so a
+/// negated pattern is reported and not written: as a literal glob it would
+/// match no file.
 pub(super) fn migrate_entry(
     value: &Value,
     scope: &KnipScope,
@@ -130,6 +161,8 @@ pub(super) fn migrate_entry(
     warnings: &mut Vec<MigrationWarning>,
 ) {
     let mut migrated = Vec::new();
+    let mut marked = false;
+    let mut unmarked = false;
     for pattern in string_or_array(value) {
         if pattern.starts_with('!') {
             warnings.push(MigrationWarning {
@@ -145,11 +178,31 @@ pub(super) fn migrate_entry(
             });
             continue;
         }
-        let body = pattern.strip_suffix(PRODUCTION_MARKER).unwrap_or(&pattern);
+        let body = match pattern.strip_suffix(PRODUCTION_MARKER) {
+            Some(body) => {
+                marked = true;
+                body
+            }
+            None => {
+                unmarked = true;
+                pattern.as_str()
+            }
+        };
         match scope.rebase(body) {
             Some(rebased) => migrated.push(rebased),
             None => warnings.push(traversal_warning(scope.field("entry"), &pattern)),
         }
+    }
+    if marked && unmarked {
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: scope.field("entry"),
+            message: "production markers (a trailing `!`) removed; fallow has no production-only entry, so the unmarked entries now also count in production mode".to_string(),
+            suggestion: Some(
+                "check the `--production` findings; remove an unmarked entry if it must not keep production code reachable"
+                    .to_string(),
+            ),
+        });
     }
     append_unique(config, "entry", migrated);
 }
@@ -281,15 +334,17 @@ pub(super) fn migrate_workspaces(
             });
             continue;
         };
-        let Some(scope) = KnipScope::workspace(key) else {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: format!("workspaces.{key}"),
-                message: "workspace path leaves the project root; workspace config not migrated"
-                    .to_string(),
-                suggestion: None,
-            });
-            continue;
+        let scope = match KnipScope::workspace(key) {
+            Ok(scope) => scope,
+            Err(reason) => {
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: format!("workspaces.{key}"),
+                    message: reason.to_string(),
+                    suggestion: None,
+                });
+                continue;
+            }
         };
         for (name, value) in section {
             migrate_workspace_field(

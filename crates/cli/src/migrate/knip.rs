@@ -375,7 +375,7 @@ mod tests {
             "entry": ["src/root.ts"],
             "workspaces": {
                 ".": {"entry": [".github/scripts/report.cjs"]},
-                "apps/server": {"entry": ["src/bin.ts!", "./scripts/*.ts"]},
+                "apps/server": {"entry": ["src/bin.ts!", "./scripts/*.ts!"]},
                 "packages/*": {"entry": "test/fixtures/*.ts"},
                 "./infra/cache/": {"entry": ["alchemy.run.ts!"]}
             }
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn migrate_knip_entry_drops_the_production_marker() {
-        let knip = serde_json::json!({"entry": ["src/main.ts!", "src/cli.ts"]});
+        let knip = serde_json::json!({"entry": ["src/main.ts!", "src/cli.ts!"]});
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -602,13 +602,70 @@ mod tests {
         assert_eq!(
             warning_fields(&warnings),
             [
-                "workspaces...project",
-                "workspaces...vitest",
-                "workspaces...ignoreBinaries",
-                "workspaces...unknownKey"
+                "workspaces[\".\"].project",
+                "workspaces[\".\"].vitest",
+                "workspaces[\".\"].ignoreBinaries",
+                "workspaces[\".\"].unknownKey"
             ]
         );
         assert!(warnings[1].message.contains("auto-detected"));
+    }
+
+    #[test]
+    fn migrate_knip_mixed_production_entries_warn_once_per_section() {
+        let knip = serde_json::json!({
+            "entry": ["src/prod.ts!", "src/dev.ts", "src/other.ts"],
+            "workspaces": {
+                "apps/server": {"entry": ["src/bin.ts!", "scripts/*.ts"]},
+                "apps/web": {"entry": ["src/main.ts!"]},
+                "apps/docs": {"entry": ["scripts/build.ts"]}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            warning_fields(&warnings),
+            ["entry", "workspaces.apps/server.entry"]
+        );
+        assert!(
+            warnings[0]
+                .message
+                .contains("unmarked entries now also count in production mode"),
+            "{}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn migrate_knip_workspace_keys_and_patterns_are_normalized() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "apps\\win": {"entry": ["src\\main.ts", "/src/abs.ts"]},
+                "/apps/rooted": {"entry": ["index.ts"]},
+                "!apps/neg": {"entry": ["n.ts"]},
+                "packages/**": {"entry": ["**/*.ts"], "ignore": ["!**/keep.ts"]}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!([
+                "apps/win/src/main.ts",
+                "apps/win/src/abs.ts",
+                "apps/rooted/index.ts",
+                "packages/**/*.ts"
+            ])
+        );
+        assert_eq!(
+            config.get("ignoreFindings").unwrap(),
+            &serde_json::json!(["!packages/**/keep.ts"])
+        );
+        assert_eq!(warning_fields(&warnings), ["workspaces.!apps/neg"]);
     }
 
     #[test]

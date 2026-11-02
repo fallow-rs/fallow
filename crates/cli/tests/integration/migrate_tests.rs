@@ -418,7 +418,10 @@ fn workspace_settings_fixture(suffix: &str) -> std::path::PathBuf {
         "knip.json",
         r#"{
             "workspaces": {
-                "apps/server": {"entry": ["src/bin.ts!"]},
+                "apps/server": {
+                    "entry": ["src/bin.ts!"],
+                    "ignoreIssues": {"src/ops/*.ts": ["exports"]}
+                },
                 "packages/*": {"ignore": ["src/generated/**"]}
             }
         }"#,
@@ -432,13 +435,17 @@ fn workspace_settings_fixture(suffix: &str) -> std::path::PathBuf {
         ("apps/server/package.json", r#"{"name": "server"}"#),
         (
             "apps/server/src/bin.ts",
-            "import { start } from './start';\nstart();\n",
+            "import { start } from './start';\nimport { query } from './ops/queries';\nstart(query);\n",
         ),
         (
             "apps/server/src/start.ts",
-            "export const start = () => 1;\n",
+            "export const start = (value: number) => value;\nexport const unusedStart = 2;\n",
         ),
         ("apps/server/src/orphan.ts", "export const orphan = 1;\n"),
+        (
+            "apps/server/src/ops/queries.ts",
+            "export const query = 1;\nexport const unusedQuery = 2;\n",
+        ),
         (
             "packages/lib/package.json",
             r#"{"name": "lib", "main": "src/index.ts"}"#,
@@ -472,6 +479,10 @@ fn migrate_knip_workspace_settings_keep_their_effect_after_migration() {
         migrated.contains("\"packages/*/src/generated/**\""),
         "{migrated}"
     );
+    assert!(
+        migrated.contains("\"apps/server/src/ops/*.ts\""),
+        "{migrated}"
+    );
 
     let check = run_fallow_raw(&[
         "dead-code",
@@ -494,6 +505,21 @@ fn migrate_knip_workspace_settings_keep_their_effect_after_migration() {
         unused_files,
         ["apps/server/src/orphan.ts"],
         "the migrated workspace entry and ignore must keep their effect"
+    );
+    let unused_exports: Vec<String> = findings["unused_exports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|finding| finding["export_name"].as_str())
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        unused_exports.contains(&"unusedStart".to_string()),
+        "an export outside the ignoreIssues glob must stay reported: {unused_exports:?}"
+    );
+    assert!(
+        !unused_exports.contains(&"unusedQuery".to_string()),
+        "the migrated ignoreIssues glob must hide this export: {unused_exports:?}"
     );
 
     cleanup(&dir);
