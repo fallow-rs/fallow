@@ -1,5 +1,6 @@
 mod declarations;
 mod helpers;
+mod remap;
 mod requirements;
 
 use requirements::{BindingRequirements, RequirementArena};
@@ -2150,124 +2151,6 @@ impl ModuleInfoExtractor {
 
     fn record_local_declaration_name(&mut self, name: &str) {
         self.local_declaration_names.insert(name.to_string());
-    }
-
-    pub(crate) fn remap_spans_with(&mut self, mut remap: impl FnMut(Span) -> Span) {
-        self.remap_graph_spans(&mut remap);
-        self.remap_type_and_signature_spans(&mut remap);
-        self.remap_handled_spans(&mut remap);
-        self.remap_security_spans(&mut remap);
-        for call in &mut self.imported_call_sites {
-            // `remap` keeps the empty span at offset 0 unchanged, but a call is
-            // never empty, so a one-byte span maps every call start.
-            call.span_start = remap(Span::new(call.span_start, call.span_start + 1)).start;
-        }
-        for reference in &mut self.import_binding_references {
-            // Same one-byte span method as the call sites above.
-            reference.span_start =
-                remap(Span::new(reference.span_start, reference.span_start + 1)).start;
-        }
-    }
-
-    /// Remap import/export/re-export/dynamic-import/require graph spans.
-    fn remap_graph_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
-        for export in &mut self.exports {
-            export.span = remap(export.span);
-            for member in &mut export.members {
-                member.span = remap(member.span);
-            }
-        }
-        for import in &mut self.imports {
-            import.span = remap(import.span);
-            import.source_span = remap(import.source_span);
-        }
-        for re_export in &mut self.re_exports {
-            re_export.span = remap(re_export.span);
-            re_export.statement_span = remap(re_export.statement_span);
-            re_export.source_span = remap(re_export.source_span);
-        }
-        for dynamic_import in &mut self.dynamic_imports {
-            dynamic_import.span = remap(dynamic_import.span);
-        }
-        for pattern in &mut self.dynamic_import_patterns {
-            pattern.span = remap(pattern.span);
-        }
-        for (span, _) in &mut self.import_load_kind_marks {
-            *span = remap(*span);
-        }
-        for require_call in &mut self.require_calls {
-            require_call.span = remap(require_call.span);
-        }
-        for (_, span) in &mut self.package_resolve_sites {
-            *span = remap(*span);
-        }
-    }
-
-    /// Remap type declarations, signature references, pending specifiers, and
-    /// local class member spans.
-    fn remap_type_and_signature_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
-        for declaration in &mut self.local_type_declarations {
-            declaration.span = remap(declaration.span);
-        }
-        for reference in &mut self.public_signature_type_references {
-            reference.span = remap(reference.span);
-        }
-        for reference in &mut self.local_signature_type_references {
-            reference.span = remap(reference.span);
-        }
-        for specifier in &mut self.pending_local_export_specifiers {
-            specifier.span = remap(specifier.span);
-        }
-        for forward in &mut self.pending_binding_forwards {
-            if let PendingBindingForward::ExportAssignment { span, .. } = forward {
-                *span = remap(*span);
-            }
-        }
-        for class in self.local_class_exports.values_mut() {
-            for member in &mut class.members {
-                member.span = remap(member.span);
-            }
-        }
-    }
-
-    /// Remap the deduped handled-require / handled-import span sets.
-    fn remap_handled_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
-        self.handled_require_spans = self
-            .handled_require_spans
-            .iter()
-            .map(|span| remap(*span))
-            .collect();
-        self.handled_import_spans = self
-            .handled_import_spans
-            .iter()
-            .map(|span| remap(*span))
-            .collect();
-    }
-
-    /// Remap inline-template, security sink, and security control site spans.
-    fn remap_security_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
-        for finding in &mut self.inline_template_findings {
-            finding.decorator_start =
-                remap(Span::new(finding.decorator_start, finding.decorator_start)).start;
-        }
-        for sink in &mut self.security_sinks {
-            let span = remap(Span::new(sink.span_start, sink.span_end));
-            sink.span_start = span.start;
-            sink.span_end = span.end;
-        }
-        for skipped in &mut self.security_unresolved_callee_sites {
-            let span = remap(Span::new(skipped.span_start, skipped.span_end));
-            skipped.span_start = span.start;
-            skipped.span_end = span.end;
-        }
-        for arg in &mut self.sanitized_sink_args {
-            arg.span_start = remap(Span::new(arg.span_start, arg.span_start)).start;
-        }
-        for control in &mut self.security_control_sites {
-            let span = remap(Span::new(control.span_start, control.span_end));
-            control.span_start = span.start;
-            control.span_end = span.end;
-        }
     }
 
     /// The named or default import that a top-level `local_name` binds, unless

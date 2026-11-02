@@ -126,6 +126,7 @@ mod search_visibility_tests;
 mod security_gate_tests;
 mod security_override_tests;
 mod security_workflow_tests;
+mod sfc_callee_line_tests;
 mod signal_tests;
 mod snapshot_tests;
 mod stable_ci_fingerprint_tests;

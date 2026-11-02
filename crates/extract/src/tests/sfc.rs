@@ -2408,3 +2408,75 @@ const { b } = await import("./instance-level");
             .any(|import| import.source == "./instance-level")
     );
 }
+
+/// The text of `source` at a byte offset that an SFC fact reports.
+fn text_at(source: &str, offset: u32) -> &str {
+    &source[offset as usize..]
+}
+
+const SCRIPT_AFTER_MARKUP: &str = r#"<template><div /></template>
+
+<script setup lang="ts">
+import { inject } from "vue";
+import dynamic from "next/dynamic";
+import { KEY } from "./keys";
+const value = inject(KEY);
+const Lazy = dynamic(() => import("./lazy"), { ssr: false });
+const id = req.query.id;
+"use client";
+callee.path();
+</script>
+"#;
+
+#[test]
+fn sfc_script_callee_use_offset_points_at_the_call() {
+    let info = parse_sfc(SCRIPT_AFTER_MARKUP, "Comp.vue");
+    let callee = info
+        .callee_uses
+        .iter()
+        .find(|use_site| use_site.callee_path == "callee.path")
+        .expect("callee use");
+    assert!(text_at(SCRIPT_AFTER_MARKUP, callee.span_start).starts_with("callee.path()"));
+}
+
+#[test]
+fn sfc_script_di_key_site_offset_points_at_the_call() {
+    let info = parse_sfc(SCRIPT_AFTER_MARKUP, "Comp.vue");
+    let site = info.di_key_sites.first().expect("inject site");
+    assert!(text_at(SCRIPT_AFTER_MARKUP, site.span_start).starts_with("inject(KEY)"));
+}
+
+#[test]
+fn sfc_script_misplaced_directive_offset_points_at_the_directive() {
+    let info = parse_sfc(SCRIPT_AFTER_MARKUP, "Comp.vue");
+    let site = info
+        .misplaced_directives
+        .first()
+        .expect("misplaced directive");
+    assert!(text_at(SCRIPT_AFTER_MARKUP, site.span_start).starts_with("\"use client\""));
+}
+
+#[test]
+fn sfc_script_tainted_binding_offset_points_at_the_read() {
+    let info = parse_sfc(SCRIPT_AFTER_MARKUP, "Comp.vue");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "id")
+        .expect("tainted binding");
+    assert!(text_at(SCRIPT_AFTER_MARKUP, binding.source_span_start).starts_with("req.query.id"));
+}
+
+#[test]
+fn sfc_script_client_only_import_offset_matches_the_dynamic_import() {
+    let info = parse_sfc(SCRIPT_AFTER_MARKUP, "Comp.vue");
+    let import = info
+        .dynamic_imports
+        .iter()
+        .find(|import| import.source == "./lazy")
+        .expect("dynamic import");
+    assert_eq!(
+        info.client_only_dynamic_import_spans,
+        vec![import.span.start]
+    );
+}
