@@ -325,6 +325,19 @@ can omit it and a missing relative dev runtime would be a false unresolved
 import. The tsconfig `jsxImportSource` option only credits the package as a
 referenced dependency.
 
+A `/// <reference types="pkg" />` directive is an import fact too. TypeScript
+loads the type declarations of `pkg` for the file, so the visitor records a
+type-only side-effect import of `pkg`. The dependency checks then apply the
+`import type` rules: the import uses the package, and in production mode a
+production dependency that only such imports use is a type-only dependency.
+TypeScript reads a triple-slash directive only in the comments before the
+first statement or directive prologue, so a directive after code records
+nothing. A `types` value that starts with `.` or `/` names a file and records
+nothing. `types="node"` records nothing: it resolves to `@types/node`, which
+the dependency checks always credit, and an import of `node` would only add a
+false unlisted dependency. A `path` directive is a separate fact
+(`triple_slash_reference_paths`) that keeps a declaration file reachable.
+
 A Vitest config can set the source for a group of files with
 `oxc.jsx.importSource` (or the older `esbuild.jsxImportSource`). Vitest runs
 the transform in dev mode, so such a file imports `jsxDEV` and `Fragment`

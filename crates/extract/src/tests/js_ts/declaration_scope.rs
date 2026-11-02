@@ -1,6 +1,8 @@
 //! Global-scope and triple-slash facts that decide whether a declaration file
 //! stays an entry point when nothing imports it.
 
+use fallow_types::extract::ImportedName;
+
 use crate::tests::{parse_at_path, parse_ts as parse_source};
 
 #[test]
@@ -72,6 +74,63 @@ fn reference_directive_without_a_path_records_nothing() {
         assert!(
             parse_source(source).triple_slash_reference_paths.is_empty(),
             "{source:?} must record no reference path"
+        );
+    }
+}
+
+/// The type-only side-effect imports that `types` directives record, as
+/// `(source, text at source_span)` pairs.
+fn type_reference_imports(source: &str) -> Vec<(String, String)> {
+    parse_source(source)
+        .imports
+        .iter()
+        .filter(|import| {
+            import.is_type_only && matches!(import.imported_name, ImportedName::SideEffect)
+        })
+        .map(|import| {
+            let text = &source[import.source_span.start as usize..import.source_span.end as usize];
+            (import.source.clone(), text.to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn reference_types_directive_records_a_type_only_package_import() {
+    let imports = type_reference_imports(
+        "#!/usr/bin/env node\n\
+         // A leading comment.\n\
+         /// <reference types=\"@acme/type-augment\" />\n\
+         ///<reference types=' vite/client ' resolution-mode=\"import\"/>\n\
+         /// <reference path=\"./local.d.ts\" />\n\
+         /// <reference types=\"./local-types\" />\n\
+         /// <reference lib=\"dom\" />\n\
+         import type { Root } from \"mdast\";\n\
+         export type Tree = Root;\n",
+    );
+    assert_eq!(
+        imports,
+        vec![
+            (
+                "@acme/type-augment".to_string(),
+                "@acme/type-augment".to_string()
+            ),
+            ("vite/client".to_string(), "vite/client".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn reference_types_directive_after_code_records_nothing() {
+    for source in [
+        "export const value = 1;\n/// <reference types=\"@acme/type-augment\" />\n",
+        "\"use strict\";\n/// <reference types=\"@acme/type-augment\" />\n",
+        "/* <reference types=\"@acme/type-augment\" /> */\nexport {};\n",
+        "/// <reference types=\"\" />\nexport {};\n",
+        "/// <reference types=\"node\" />\nexport {};\n",
+    ] {
+        assert!(
+            type_reference_imports(source).is_empty(),
+            "{source:?} must record no type reference import"
         );
     }
 }
