@@ -15,6 +15,9 @@ mod const_inline;
 use const_inline::holds_one_stable_object;
 #[path = "config_parser_local_inline.rs"]
 mod local_inline;
+#[path = "config_parser_merge_config.rs"]
+mod merge_config;
+use merge_config::{read_each_config, read_last_config, read_last_match};
 #[path = "config_parser_multi_config.rs"]
 mod multi_config;
 use multi_config::find_default_export_array;
@@ -80,8 +83,9 @@ pub(crate) fn extract_config_string_array(
     prop_path: &[&str],
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        get_nested_string_array_from_object(obj, prop_path)
+        read_each_config(program, |obj| {
+            get_nested_string_array_from_object(obj, prop_path)
+        })
     })
     .unwrap_or_default()
 }
@@ -94,8 +98,7 @@ pub(crate) fn extract_config_string(
     prop_path: &[&str],
 ) -> Option<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        get_nested_string_from_object(obj, prop_path)
+        read_last_config(program, prop_path, get_nested_string_from_object)
     })
 }
 
@@ -107,8 +110,7 @@ pub(crate) fn extract_config_command(
     prop_path: &[&str],
 ) -> Option<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        get_nested_command_from_object(obj, prop_path)
+        read_last_config(program, prop_path, get_nested_command_from_object)
     })
 }
 
@@ -117,12 +119,13 @@ pub(crate) fn extract_config_command(
 #[must_use]
 pub(crate) fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let mut values = Vec::new();
-        if let Some(prop) = find_property(obj, key) {
-            collect_all_string_values(&prop.value, &mut values);
-        }
-        Some(values)
+        read_each_config(program, |obj| {
+            let mut values = Vec::new();
+            if let Some(prop) = find_property(obj, key) {
+                collect_all_string_values(&prop.value, &mut values);
+            }
+            Some(values)
+        })
     })
     .unwrap_or_default()
 }
@@ -131,9 +134,10 @@ pub(crate) fn extract_config_property_strings(source: &str, path: &Path, key: &s
 #[must_use]
 pub(crate) fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let prop = find_property(obj, key)?;
-        Some(collect_shallow_string_values(&prop.value))
+        read_each_config(program, |obj| {
+            let prop = find_property(obj, key)?;
+            Some(collect_shallow_string_values(&prop.value))
+        })
     })
     .unwrap_or_default()
 }
@@ -147,12 +151,13 @@ pub(crate) fn extract_config_shallow_strings_or_object_property(
     object_property: &str,
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let prop = find_property(obj, key)?;
-        Some(collect_shallow_string_or_object_property_values(
-            &prop.value,
-            object_property,
-        ))
+        read_each_config(program, |obj| {
+            let prop = find_property(obj, key)?;
+            Some(collect_shallow_string_or_object_property_values(
+                &prop.value,
+                object_property,
+            ))
+        })
     })
     .unwrap_or_default()
 }
@@ -166,14 +171,15 @@ pub(crate) fn extract_config_nested_shallow_strings(
     key: &str,
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let nested = get_nested_expression(obj, outer_path)?;
-        if let Expression::ObjectExpression(nested_obj) = nested {
-            let prop = find_property(nested_obj, key)?;
-            Some(collect_shallow_string_values(&prop.value))
-        } else {
-            None
-        }
+        read_each_config(program, |obj| {
+            let nested = get_nested_expression(obj, outer_path)?;
+            if let Expression::ObjectExpression(nested_obj) = nested {
+                let prop = find_property(nested_obj, key)?;
+                Some(collect_shallow_string_values(&prop.value))
+            } else {
+                None
+            }
+        })
     })
     .unwrap_or_default()
 }
@@ -263,9 +269,10 @@ pub(crate) fn extract_config_truthy_bool_or_object(
     prop_path: &[&str],
 ) -> bool {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let expr = get_nested_expression(obj, prop_path)?;
-        Some(is_truthy_bool_or_object(expr))
+        read_last_config(program, prop_path, |obj, key_path| {
+            let expr = get_nested_expression(obj, key_path)?;
+            Some(is_truthy_bool_or_object(expr))
+        })
     })
     .unwrap_or(false)
 }
@@ -289,8 +296,7 @@ pub(crate) fn extract_config_object_keys(
     prop_path: &[&str],
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        get_nested_object_keys(obj, prop_path)
+        read_each_config(program, |obj| get_nested_object_keys(obj, prop_path))
     })
     .unwrap_or_default()
 }
@@ -304,8 +310,9 @@ pub(crate) fn extract_config_string_or_array(
     prop_path: &[&str],
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        get_nested_string_or_array(obj, prop_path, PathScope::Program(program))
+        read_each_config(program, |obj| {
+            get_nested_string_or_array(obj, prop_path, PathScope::Program(program))
+        })
     })
     .unwrap_or_default()
 }
@@ -324,8 +331,9 @@ pub(crate) fn extract_config_array_or_object_string_or_array(
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let Some(arr) = find_default_export_array(program) else {
-            let obj = find_config_object(program)?;
-            return get_nested_string_or_array(obj, prop_path, PathScope::Program(program));
+            return read_each_config(program, |obj| {
+                get_nested_string_or_array(obj, prop_path, PathScope::Program(program))
+            });
         };
         let values = arr
             .elements
@@ -349,9 +357,10 @@ pub(crate) fn extract_config_path(
     prop_path: &[&str],
 ) -> Option<PathBuf> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let expr = get_nested_expression(obj, prop_path)?;
-        expression_to_path(expr)
+        read_last_config(program, prop_path, |obj, key_path| {
+            let expr = get_nested_expression(obj, key_path)?;
+            expression_to_path(expr)
+        })
     })
 }
 
@@ -364,25 +373,29 @@ pub(crate) fn extract_config_array_nested_string_or_array(
     inner_path: &[&str],
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
-                && let Some(values) =
-                    get_nested_string_or_array(element_obj, inner_path, PathScope::Program(program))
-            {
-                results.extend(values);
+        read_each_config(program, |obj| {
+            let array_expr = get_nested_expression(obj, array_path)?;
+            let Expression::ArrayExpression(arr) = array_expr else {
+                return None;
+            };
+            let mut results = Vec::new();
+            for element in &arr.elements {
+                if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
+                    && let Some(values) = get_nested_string_or_array(
+                        element_obj,
+                        inner_path,
+                        PathScope::Program(program),
+                    )
+                {
+                    results.extend(values);
+                }
             }
-        }
-        if results.is_empty() {
-            None
-        } else {
-            Some(results)
-        }
+            if results.is_empty() {
+                None
+            } else {
+                Some(results)
+            }
+        })
     })
     .unwrap_or_default()
 }
@@ -401,30 +414,31 @@ pub(crate) fn extract_config_array_object_fields(
     keys: &[&str],
 ) -> Vec<Vec<Vec<String>>> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let Expression::ArrayExpression(arr) = get_nested_expression(obj, array_path)? else {
-            return None;
-        };
-        let elements = arr
-            .elements
-            .iter()
-            .filter_map(|element| match element.as_expression() {
-                Some(Expression::ObjectExpression(element_obj)) => Some(
-                    keys.iter()
-                        .map(|key| {
-                            get_nested_string_or_array(
-                                element_obj,
-                                &[key],
-                                PathScope::Program(program),
-                            )
-                            .unwrap_or_default()
-                        })
-                        .collect(),
-                ),
-                _ => None,
-            })
-            .collect();
-        Some(elements)
+        read_each_config(program, |obj| {
+            let Expression::ArrayExpression(arr) = get_nested_expression(obj, array_path)? else {
+                return None;
+            };
+            let elements = arr
+                .elements
+                .iter()
+                .filter_map(|element| match element.as_expression() {
+                    Some(Expression::ObjectExpression(element_obj)) => Some(
+                        keys.iter()
+                            .map(|key| {
+                                get_nested_string_or_array(
+                                    element_obj,
+                                    &[key],
+                                    PathScope::Program(program),
+                                )
+                                .unwrap_or_default()
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+                .collect();
+            Some(elements)
+        })
     })
     .unwrap_or_default()
 }
@@ -463,25 +477,26 @@ fn extract_config_object_nested(
     extract_fn: impl Fn(&ObjectExpression<'_>) -> Option<Vec<String>> + Sync,
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let obj_expr = get_nested_expression(obj, object_path)?;
-        let Expression::ObjectExpression(target_obj) = obj_expr else {
-            return None;
-        };
-        let mut results = Vec::new();
-        for prop in &target_obj.properties {
-            if let ObjectPropertyKind::ObjectProperty(p) = prop
-                && let Expression::ObjectExpression(value_obj) = &p.value
-                && let Some(values) = extract_fn(value_obj)
-            {
-                results.extend(values);
+        read_each_config(program, |obj| {
+            let obj_expr = get_nested_expression(obj, object_path)?;
+            let Expression::ObjectExpression(target_obj) = obj_expr else {
+                return None;
+            };
+            let mut results = Vec::new();
+            for prop in &target_obj.properties {
+                if let ObjectPropertyKind::ObjectProperty(p) = prop
+                    && let Expression::ObjectExpression(value_obj) = &p.value
+                    && let Some(values) = extract_fn(value_obj)
+                {
+                    results.extend(values);
+                }
             }
-        }
-        if results.is_empty() {
-            None
-        } else {
-            Some(results)
-        }
+            if results.is_empty() {
+                None
+            } else {
+                Some(results)
+            }
+        })
     })
     .unwrap_or_default()
 }
@@ -490,9 +505,10 @@ fn extract_config_object_nested(
 #[must_use]
 pub(crate) fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let prop = find_property(obj, key)?;
-        Some(collect_require_sources(&prop.value))
+        read_each_config(program, |obj| {
+            let prop = find_property(obj, key)?;
+            Some(collect_require_sources(&prop.value))
+        })
     })
     .unwrap_or_default()
 }
@@ -531,11 +547,12 @@ pub(crate) fn extract_config_aliases_kinded(
     prop_path: &[&str],
 ) -> Vec<(String, String, bool)> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let expr = get_nested_expression(obj, prop_path)?;
-        let mut visited = FxHashSet::default();
-        let aliases = resolve_alias_pairs_kinded(program, path, expr, &mut visited, 0);
-        (!aliases.is_empty()).then_some(aliases)
+        read_each_config(program, |obj| {
+            let expr = get_nested_expression(obj, prop_path)?;
+            let mut visited = FxHashSet::default();
+            let aliases = resolve_alias_pairs_kinded(program, path, expr, &mut visited, 0);
+            (!aliases.is_empty()).then_some(aliases)
+        })
     })
     .unwrap_or_default()
 }
@@ -551,23 +568,24 @@ pub(crate) fn extract_config_array_nested_aliases_kinded(
     alias_path: &[&str],
 ) -> Vec<(String, String, bool)> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
-                && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
-            {
-                results.extend(alias_constant::expression_to_alias_pairs_kinded(
-                    alias_expr,
-                    PathScope::Program(program),
-                ));
+        read_each_config(program, |obj| {
+            let array_expr = get_nested_expression(obj, array_path)?;
+            let Expression::ArrayExpression(arr) = array_expr else {
+                return None;
+            };
+            let mut results = Vec::new();
+            for element in &arr.elements {
+                if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
+                    && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
+                {
+                    results.extend(alias_constant::expression_to_alias_pairs_kinded(
+                        alias_expr,
+                        PathScope::Program(program),
+                    ));
+                }
             }
-        }
-        (!results.is_empty()).then_some(results)
+            (!results.is_empty()).then_some(results)
+        })
     })
     .unwrap_or_default()
 }
@@ -621,34 +639,35 @@ pub(crate) fn extract_config_array_object_strings(
     key: &str,
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            let Some(expr) = element.as_expression() else {
-                continue;
+        read_each_config(program, |obj| {
+            let array_expr = get_nested_expression(obj, array_path)?;
+            let Expression::ArrayExpression(arr) = array_expr else {
+                return None;
             };
-            match expr {
-                Expression::ObjectExpression(item) => {
-                    if let Some(prop) = find_property(item, key)
-                        && let Some(value) = expression_to_path_string(&prop.value)
-                    {
-                        results.push(value);
+
+            let mut results = Vec::new();
+            for element in &arr.elements {
+                let Some(expr) = element.as_expression() else {
+                    continue;
+                };
+                match expr {
+                    Expression::ObjectExpression(item) => {
+                        if let Some(prop) = find_property(item, key)
+                            && let Some(value) = expression_to_path_string(&prop.value)
+                        {
+                            results.push(value);
+                        }
                     }
-                }
-                _ => {
-                    if let Some(value) = expression_to_path_string(expr) {
-                        results.push(value);
+                    _ => {
+                        if let Some(value) = expression_to_path_string(expr) {
+                            results.push(value);
+                        }
                     }
                 }
             }
-        }
 
-        (!results.is_empty()).then_some(results)
+            (!results.is_empty()).then_some(results)
+        })
     })
     .unwrap_or_default()
 }
@@ -664,33 +683,34 @@ pub(crate) fn extract_config_static_dir_entries(
     array_path: &[&str],
 ) -> Vec<(String, Option<String>)> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            let Some(expr) = element.as_expression() else {
-                continue;
+        read_each_config(program, |obj| {
+            let array_expr = get_nested_expression(obj, array_path)?;
+            let Expression::ArrayExpression(arr) = array_expr else {
+                return None;
             };
-            match expr {
-                Expression::ObjectExpression(item) => {
-                    if let Some(from) = property_string(item, "from") {
-                        let to = property_string(item, "to");
-                        results.push((from, to));
+
+            let mut results = Vec::new();
+            for element in &arr.elements {
+                let Some(expr) = element.as_expression() else {
+                    continue;
+                };
+                match expr {
+                    Expression::ObjectExpression(item) => {
+                        if let Some(from) = property_string(item, "from") {
+                            let to = property_string(item, "to");
+                            results.push((from, to));
+                        }
                     }
-                }
-                _ => {
-                    if let Some(from) = expression_to_path_string(expr) {
-                        results.push((from, None));
+                    _ => {
+                        if let Some(from) = expression_to_path_string(expr) {
+                            results.push((from, None));
+                        }
                     }
                 }
             }
-        }
 
-        (!results.is_empty()).then_some(results)
+            (!results.is_empty()).then_some(results)
+        })
     })
     .unwrap_or_default()
 }
@@ -705,28 +725,29 @@ pub(crate) fn extract_config_array_object_command_pairs(
     secondary_key: &str,
 ) -> Vec<(String, Option<String>)> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            let Some(Expression::ObjectExpression(item)) = element.as_expression() else {
-                continue;
+        read_each_config(program, |obj| {
+            let array_expr = get_nested_expression(obj, array_path)?;
+            let Expression::ArrayExpression(arr) = array_expr else {
+                return None;
             };
-            let Some(primary) = find_property(item, primary_key)
-                .and_then(|prop| expression_to_command(&prop.value))
-            else {
-                continue;
-            };
-            let secondary = find_property(item, secondary_key)
-                .and_then(|prop| expression_to_path_string(&prop.value));
-            results.push((primary, secondary));
-        }
 
-        (!results.is_empty()).then_some(results)
+            let mut results = Vec::new();
+            for element in &arr.elements {
+                let Some(Expression::ObjectExpression(item)) = element.as_expression() else {
+                    continue;
+                };
+                let Some(primary) = find_property(item, primary_key)
+                    .and_then(|prop| expression_to_command(&prop.value))
+                else {
+                    continue;
+                };
+                let secondary = find_property(item, secondary_key)
+                    .and_then(|prop| expression_to_path_string(&prop.value));
+                results.push((primary, secondary));
+            }
+
+            (!results.is_empty()).then_some(results)
+        })
     })
     .unwrap_or_default()
 }
@@ -783,21 +804,22 @@ pub(crate) fn extract_lazy_imports_in_array(
     prop_path: &[&str],
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, prop_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-        let mut specs = Vec::new();
-        for element in &arr.elements {
-            let Some(expr) = element.as_expression() else {
-                continue;
+        read_each_config(program, |obj| {
+            let array_expr = get_nested_expression(obj, prop_path)?;
+            let Expression::ArrayExpression(arr) = array_expr else {
+                return None;
             };
-            if let Some(spec) = lazy_import_specifier(expr) {
-                specs.push(spec);
+            let mut specs = Vec::new();
+            for element in &arr.elements {
+                let Some(expr) = element.as_expression() else {
+                    continue;
+                };
+                if let Some(spec) = lazy_import_specifier(expr) {
+                    specs.push(spec);
+                }
             }
-        }
-        (!specs.is_empty()).then_some(specs)
+            (!specs.is_empty()).then_some(specs)
+        })
     })
     .unwrap_or_default()
 }
@@ -834,23 +856,25 @@ pub(crate) fn extract_config_array_tuple_heads(
     array_path: &[&str],
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let Expression::ArrayExpression(entries) = get_nested_expression(obj, array_path)? else {
-            return None;
-        };
-        let heads = entries
-            .elements
-            .iter()
-            .filter_map(|entry| match entry.as_expression() {
-                Some(Expression::ArrayExpression(tuple)) => tuple
-                    .elements
-                    .first()
-                    .and_then(ArrayExpressionElement::as_expression)
-                    .and_then(expression_to_string),
-                _ => None,
-            })
-            .collect();
-        Some(heads)
+        read_each_config(program, |obj| {
+            let Expression::ArrayExpression(entries) = get_nested_expression(obj, array_path)?
+            else {
+                return None;
+            };
+            let heads = entries
+                .elements
+                .iter()
+                .filter_map(|entry| match entry.as_expression() {
+                    Some(Expression::ArrayExpression(tuple)) => tuple
+                        .elements
+                        .first()
+                        .and_then(ArrayExpressionElement::as_expression)
+                        .and_then(expression_to_string),
+                    _ => None,
+                })
+                .collect();
+            Some(heads)
+        })
     })
     .unwrap_or_default()
 }
@@ -870,42 +894,43 @@ fn extract_config_plugin_option_string(
     option_key: &str,
 ) -> Option<String> {
     extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let plugins_expr = get_nested_expression(obj, plugins_path)?;
-        let Expression::ArrayExpression(plugins) = plugins_expr else {
-            return None;
-        };
+        read_last_match(program, |obj| {
+            let plugins_expr = get_nested_expression(obj, plugins_path)?;
+            let Expression::ArrayExpression(plugins) = plugins_expr else {
+                return None;
+            };
 
-        for entry in &plugins.elements {
-            let Some(Expression::ArrayExpression(tuple)) = entry.as_expression() else {
-                continue;
-            };
-            let Some(plugin_expr) = tuple
-                .elements
-                .first()
-                .and_then(ArrayExpressionElement::as_expression)
-            else {
-                continue;
-            };
-            if expression_to_string(plugin_expr).as_deref() != Some(plugin_name) {
-                continue;
+            for entry in &plugins.elements {
+                let Some(Expression::ArrayExpression(tuple)) = entry.as_expression() else {
+                    continue;
+                };
+                let Some(plugin_expr) = tuple
+                    .elements
+                    .first()
+                    .and_then(ArrayExpressionElement::as_expression)
+                else {
+                    continue;
+                };
+                if expression_to_string(plugin_expr).as_deref() != Some(plugin_name) {
+                    continue;
+                }
+
+                let Some(options_expr) = tuple
+                    .elements
+                    .get(1)
+                    .and_then(ArrayExpressionElement::as_expression)
+                else {
+                    continue;
+                };
+                let Expression::ObjectExpression(options_obj) = options_expr else {
+                    continue;
+                };
+                let option = find_property(options_obj, option_key)?;
+                return expression_to_path_string(&option.value);
             }
 
-            let Some(options_expr) = tuple
-                .elements
-                .get(1)
-                .and_then(ArrayExpressionElement::as_expression)
-            else {
-                continue;
-            };
-            let Expression::ObjectExpression(options_obj) = options_expr else {
-                continue;
-            };
-            let option = find_property(options_obj, option_key)?;
-            return expression_to_path_string(&option.value);
-        }
-
-        None
+            None
+        })
     })
 }
 
@@ -973,20 +998,21 @@ pub(crate) fn extract_vite_plugin_option_dependencies(source: &str, path: &Path)
             return None;
         }
 
-        let obj = find_config_object(program)?;
-        let plugins = get_nested_expression(obj, &["plugins"])?;
-        let Expression::ArrayExpression(plugin_array) = plugins else {
-            return None;
-        };
+        read_each_config(program, |obj| {
+            let plugins = get_nested_expression(obj, &["plugins"])?;
+            let Expression::ArrayExpression(plugin_array) = plugins else {
+                return None;
+            };
 
-        let mut deps = Vec::new();
-        for element in &plugin_array.elements {
-            if let Some(Expression::CallExpression(call)) = element.as_expression() {
-                read_vite_plugin_call(call, &bindings, 0, &mut deps);
+            let mut deps = Vec::new();
+            for element in &plugin_array.elements {
+                if let Some(Expression::CallExpression(call)) = element.as_expression() {
+                    read_vite_plugin_call(call, &bindings, 0, &mut deps);
+                }
             }
-        }
 
-        (!deps.is_empty()).then_some(deps)
+            (!deps.is_empty()).then_some(deps)
+        })
     })
     .unwrap_or_default()
 }
@@ -3972,35 +3998,6 @@ mod tests {
         assert_eq!(
             extract_config_string_array(source, &ts_path(), &["pageExtensions"]),
             vec!["page.tsx"]
-        );
-    }
-
-    /// Vitest's documented way to share a Vite config with the test runner.
-    #[test]
-    fn merge_config_extracts_nested_define_config_object() {
-        let source = r#"
-            import { defineConfig, mergeConfig } from 'vitest/config';
-            import viteConfig from './vite.config';
-            export default mergeConfig(viteConfig, defineConfig({
-                test: { environment: "jsdom" }
-            }));
-        "#;
-        assert_eq!(
-            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
-            Some("jsdom")
-        );
-    }
-
-    #[test]
-    fn define_config_wrapping_merge_config_extracts_object() {
-        let source = r#"
-            import { defineConfig, mergeConfig } from 'vitest/config';
-            import base from './base';
-            export default defineConfig(mergeConfig(base, { test: { environment: "jsdom" } }));
-        "#;
-        assert_eq!(
-            extract_config_string(source, &ts_path(), &["test", "environment"]).as_deref(),
-            Some("jsdom")
         );
     }
 

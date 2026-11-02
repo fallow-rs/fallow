@@ -726,6 +726,8 @@ mod vite_plus_plugin;
 mod vite_root_entries;
 #[path = "integration_test/vitest_include_scope.rs"]
 mod vitest_include_scope;
+#[path = "integration_test/vitest_merge_config_setup_files.rs"]
+mod vitest_merge_config_setup_files;
 #[path = "integration_test/vitest_script_config_arg.rs"]
 mod vitest_script_config_arg;
 #[path = "integration_test/webpack_alias_replacement.rs"]

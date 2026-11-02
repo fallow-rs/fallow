@@ -12,24 +12,26 @@ use std::path::{Path, PathBuf};
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
+use super::merge_config::find_merged_config_objects;
 use super::{
     PathScope, collect_require_sources, collect_shallow_string_values, expression_to_path,
-    extract_from_source, find_config_object, find_property, get_nested_expression,
-    get_nested_string_or_array, is_module_exports_target, object_expression,
-    path_from_config_string, resolve_alias_pairs_kinded,
+    extract_from_source, find_property, get_nested_expression, get_nested_string_or_array,
+    is_module_exports_target, object_expression, path_from_config_string,
+    resolve_alias_pairs_kinded,
 };
 
 /// The maximum number of configs read from one exported array, in source order.
 /// A build can export one config per locale or per target. The work for each
 /// config is linear in its size, and the inline budget bounds the copies.
-const MAX_MULTI_CONFIGS: usize = 64;
+pub(super) const MAX_MULTI_CONFIGS: usize = 64;
 
-/// The config objects of a program: the one object that `find_config_object`
+/// The config objects of a program: the objects that `find_merged_config_objects`
 /// finds, or else each object element of an exported config array. Elements
 /// that are not object literals, such as `merge(a, b)` or a spread, are skipped.
 pub fn find_config_objects<'a>(program: &'a Program<'a>) -> Vec<&'a ObjectExpression<'a>> {
-    if let Some(object) = find_config_object(program) {
-        return vec![object];
+    let merged = find_merged_config_objects(program);
+    if !merged.is_empty() {
+        return merged;
     }
     let Some(array) = find_default_export_array(program) else {
         return Vec::new();
@@ -234,7 +236,8 @@ mod tests {
     use oxc_span::SourceType;
 
     use super::super::extract_from_source;
-    use super::{find_config_object, find_config_objects};
+    use super::super::find_config_object;
+    use super::find_config_objects;
 
     fn count(source: &str) -> usize {
         extract_from_source(source, Path::new("webpack.config.js"), |program| {
