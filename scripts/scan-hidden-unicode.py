@@ -75,6 +75,8 @@ AGENT_GLOBS = [
 ]
 # Never walk these even when reachable via a glob; pure noise / huge.
 AGENT_SKIP_DIRS = {"node_modules", "target", ".git", "dist", ".next"}
+# Generated checkouts have their own instruction scan when a session opens there.
+AGENT_SKIP_PATHS = {REPO_ROOT / ".claude" / "worktrees"}
 
 # Keyword-soup shapes (agent mode, WARN-only). Each is (label, compiled regex).
 KEYWORD_PATTERNS = [
@@ -158,13 +160,16 @@ def committed_surface(staged_only: bool) -> list[Path]:
 
 
 def _walk_pruned(base: Path) -> Iterator[Path]:
-    """Yield files under base without descending into AGENT_SKIP_DIRS.
+    """Yield files under base without descending into generated directories.
 
     Path.glob("**") walks target/ and node_modules/ before the skip filter can
     reject them, which cost 10-25s per session start on a built checkout.
     """
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [name for name in dirnames if name not in AGENT_SKIP_DIRS]
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in AGENT_SKIP_DIRS and Path(dirpath) / name not in AGENT_SKIP_PATHS
+        ]
         for name in filenames:
             yield Path(dirpath) / name
 
