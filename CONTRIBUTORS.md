@@ -16,6 +16,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [AlphaLawless](https://github.com/AlphaLawless)
 - [alvis](https://github.com/alvis)
 - [AndranikSimonian](https://github.com/AndranikSimonian)
+- [andrius-kr](https://github.com/andrius-kr)
 - [ankoor7](https://github.com/ankoor7)
 - [ao-Barbosa](https://github.com/ao-Barbosa)
 - [avidianity](https://github.com/avidianity)
