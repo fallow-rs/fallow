@@ -7,7 +7,7 @@ use oxc_ast::ast::*;
 
 use super::{
     MAX_VITE_PLUGIN_WRAPPER_DEPTH, PluginImportBindings, collect_plugin_import_bindings,
-    expression_to_path_string, extract_from_source, find_config_object, get_nested_expression,
+    expression_to_path_string, extract_from_source, get_nested_expression,
 };
 
 /// Extract a path string at `option_path` in the options object of a call to
@@ -28,22 +28,24 @@ pub fn extract_vite_plugin_call_option_path(
         if imports.is_empty() {
             return None;
         }
-        let obj = find_config_object(program)?;
-        let Expression::ArrayExpression(plugin_array) = get_nested_expression(obj, &["plugins"])?
-        else {
-            return None;
-        };
-        plugin_array.elements.iter().find_map(|element| {
-            let Some(Expression::CallExpression(call)) = element.as_expression() else {
-                return None;
-            };
-            let call = find_plugin_binding_call(call, &imports, 0)?;
-            let Some(Expression::ObjectExpression(options)) =
-                call.arguments.first().and_then(Argument::as_expression)
+        super::read_last_config(program, |obj| {
+            let Expression::ArrayExpression(plugin_array) =
+                get_nested_expression(obj, &["plugins"])?
             else {
                 return None;
             };
-            expression_to_path_string(get_nested_expression(options, option_path)?)
+            plugin_array.elements.iter().find_map(|element| {
+                let Some(Expression::CallExpression(call)) = element.as_expression() else {
+                    return None;
+                };
+                let call = find_plugin_binding_call(call, &imports, 0)?;
+                let Some(Expression::ObjectExpression(options)) =
+                    call.arguments.first().and_then(Argument::as_expression)
+                else {
+                    return None;
+                };
+                expression_to_path_string(get_nested_expression(options, option_path)?)
+            })
         })
     })
 }
