@@ -836,6 +836,10 @@ const SECURITY_WITHOUT_REASON_MESSAGE: &str = "The change adds a `fallow-ignore`
 /// The parsed `fallow-ignore` comment of an `added-suppression` finding, or
 /// `None` for another rule, another suppression token, or a comment that the
 /// suppression parser does not read (for example a trailing comment).
+///
+/// Only a comment that names a security kind sets `security_without_reason`.
+/// A blanket comment also hides security findings, but it does not set the
+/// flag, so projects without security analysis get no extra signal.
 fn added_fallow_ignore(list: &[Suppression], finding: &RawFinding) -> Option<DiffRiskSuppression> {
     if finding.rule != DiffRiskRule::AddedSuppression
         || finding.evidence != text::FALLOW_IGNORE_TOKEN
