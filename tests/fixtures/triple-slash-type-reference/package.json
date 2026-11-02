@@ -1,0 +1,8 @@
+{
+  "name": "triple-slash-type-reference",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@acme/type-augment": "^1.0.0",
+    "@acme/late-reference": "^1.0.0"
+  }
+}

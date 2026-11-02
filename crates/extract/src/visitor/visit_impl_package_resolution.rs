@@ -6,11 +6,12 @@ use std::borrow::Cow;
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
+use oxc_span::GetSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::DynamicImportInfo;
 use crate::js_text::JsText;
-use fallow_types::extract::ImportLoadKind;
+use fallow_types::extract::{ImportInfo, ImportLoadKind, ImportedName};
 
 use super::super::ModuleInfoExtractor;
 use super::visit_module_require::{REQUIRE, is_this_file_create_require_call};
@@ -81,10 +82,33 @@ pub(super) fn program_has_global_declarations(program: &Program<'_>, is_module_f
         })
 }
 
+impl ModuleInfoExtractor {
+    /// Record the `path` and `types` triple-slash directives of the program.
+    ///
+    /// A `types` directive loads the type declarations of a package, like
+    /// `import type {} from "pkg"`. A type-only side-effect import credits the
+    /// package and keeps the `import type` rules for the dependency checks.
+    pub(super) fn record_triple_slash_references(&mut self, program: &Program<'_>) {
+        self.triple_slash_reference_paths = triple_slash_reference_paths(program);
+        for directive in triple_slash_type_references(program) {
+            self.imports.push(ImportInfo {
+                source: directive.package,
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: true,
+                is_type_only_star: false,
+                from_style: false,
+                span: directive.span,
+                source_span: directive.value_span,
+            });
+        }
+    }
+}
+
 /// The `path` values of every `/// <reference path="..." />` directive in the
 /// program, in source order. `types`, `lib` and `no-default-lib` directives
 /// name packages or compiler settings, not files, and are skipped.
-pub(super) fn triple_slash_reference_paths(program: &Program<'_>) -> Vec<String> {
+fn triple_slash_reference_paths(program: &Program<'_>) -> Vec<String> {
     program
         .comments
         .iter()
@@ -95,28 +119,100 @@ pub(super) fn triple_slash_reference_paths(program: &Program<'_>) -> Vec<String>
         .collect()
 }
 
+/// The `types` value that names the Node.js type declarations.
+const NODE_TYPES_REFERENCE: &str = "node";
+
+/// A package named by a `/// <reference types="..." />` directive.
+struct TypeReferenceDirective {
+    package: String,
+    /// Span of the whole directive comment.
+    span: Span,
+    /// Span of the `types` value.
+    value_span: Span,
+}
+
+/// Every package that a `/// <reference types="..." />` directive at the top
+/// of the program names, in source order.
+///
+/// TypeScript reads a triple-slash directive only in the comments before the
+/// first statement or directive prologue, so a directive after code is an
+/// ordinary comment. A `types` value that starts with `.` or `/` names a
+/// file, not a package, and is skipped.
+///
+/// `types="node"` is skipped too. TypeScript resolves it to `@types/node`,
+/// which the dependency checks always credit as an ambient type package. No
+/// manifest lists a package named `node`, so an import of it would only add a
+/// false unlisted dependency when `@types/node` comes from a hoisted install.
+fn triple_slash_type_references(program: &Program<'_>) -> Vec<TypeReferenceDirective> {
+    let leading_end = [
+        program
+            .directives
+            .first()
+            .map(|directive| directive.span.start),
+        program.body.first().map(|statement| statement.span().start),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+    .unwrap_or(program.span.end);
+    program
+        .comments
+        .iter()
+        .take_while(|comment| comment.span.end <= leading_end)
+        .filter(|comment| comment.is_line())
+        .filter_map(|comment| {
+            let content_span = comment.content_span();
+            let content = content_span.source_text(program.source_text);
+            let (value, offset) = reference_directive_attribute(content, "types")?;
+            if value.starts_with('.') || value.starts_with('/') || value == NODE_TYPES_REFERENCE {
+                return None;
+            }
+            let start = content_span.start + u32::try_from(offset).ok()?;
+            let end = start + u32::try_from(value.len()).ok()?;
+            Some(TypeReferenceDirective {
+                package: value.to_string(),
+                span: comment.span,
+                value_span: Span::new(start, end),
+            })
+        })
+        .collect()
+}
+
 /// Parse the content of a line comment (the text after `//`) as a
 /// `/ <reference path="..." />` directive and return its `path` value.
 fn reference_directive_path(content: &str) -> Option<String> {
+    reference_directive_attribute(content, "path").map(|(path, _)| path.to_string())
+}
+
+/// Parse the content of a line comment (the text after `//`) as a
+/// `/ <reference ... />` directive. Return the trimmed, non-empty value of
+/// the `name` attribute and its byte offset in `content`.
+fn reference_directive_attribute<'c>(content: &'c str, name: &str) -> Option<(&'c str, usize)> {
     let rest = content.strip_prefix('/')?.trim_start();
     let attributes = rest.strip_prefix("<reference")?;
     if !attributes.starts_with(char::is_whitespace) {
         return None;
     }
     let mut search = attributes;
-    while let Some(index) = search.find("path") {
+    while let Some(index) = search.find(name) {
         let preceded_by_space = search[..index]
             .chars()
             .next_back()
             .is_some_and(char::is_whitespace);
-        let after = &search[index + "path".len()..];
+        let after = &search[index + name.len()..];
         if preceded_by_space && let Some(value) = after.trim_start().strip_prefix('=') {
             let value = value.trim_start();
             let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
             let value = &value[quote.len_utf8()..];
             let end = value.find(quote)?;
-            let path = value[..end].trim();
-            return (!path.is_empty()).then(|| path.to_string());
+            let raw = &value[..end];
+            let leading = raw.len() - raw.trim_start().len();
+            let attribute = raw.trim();
+            if attribute.is_empty() {
+                return None;
+            }
+            let offset = content.len() - value.len() + leading;
+            return Some((attribute, offset));
         }
         search = after;
     }

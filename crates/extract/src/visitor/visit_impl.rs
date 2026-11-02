@@ -3623,7 +3623,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.is_module_file = program_has_module_syntax(program);
         self.has_global_declarations =
             program_has_global_declarations(program, self.is_module_file);
-        self.triple_slash_reference_paths = triple_slash_reference_paths(program);
+        self.record_triple_slash_references(program);
         self.capture_subclass_provenance = program.body.iter().any(|statement| match statement {
             Statement::ClassDeclaration(class) => class.heritage.is_some(),
             Statement::ExportDeclaration(export) => matches!(&export.declaration, Declaration::ClassDeclaration(class) if class.heritage.is_some()),

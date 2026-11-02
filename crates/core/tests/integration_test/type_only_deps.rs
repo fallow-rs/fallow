@@ -39,3 +39,38 @@ fn type_only_deps_not_reported_outside_production_mode() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn reference_types_directive_uses_the_package() {
+    let root = fixture_path("triple-slash-type-reference");
+    let results =
+        fallow_core::analyze(&super::common::create_config(root)).expect("analysis should succeed");
+
+    let unused: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert_eq!(
+        unused,
+        ["@acme/late-reference"],
+        "only a directive at the top of the file uses a package"
+    );
+    assert!(results.unlisted_dependencies.is_empty());
+    assert!(results.unresolved_imports.is_empty());
+    assert!(results.type_only_dependencies.is_empty());
+}
+
+#[test]
+fn reference_types_directive_is_a_type_only_use_in_production_mode() {
+    let root = fixture_path("triple-slash-type-reference");
+    let results =
+        fallow_core::analyze(&create_production_config(root)).expect("analysis should succeed");
+
+    let type_only: Vec<&str> = results
+        .type_only_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert_eq!(type_only, ["@acme/type-augment"]);
+}
