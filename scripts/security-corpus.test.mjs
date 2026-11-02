@@ -13,6 +13,7 @@ import {
   isCensusPath,
   matchPrecision,
   parseArgs,
+  parseDatasetSpec,
   parseFixCommit,
   persistenceCell,
   persistingLineHits,
@@ -246,7 +247,7 @@ test("cachedFallow does not cache a failed scan", () => {
 
 test("selectAdvisories applies the class, repo and limit filters in order", () => {
   const advisory = (ghsa, project, fixCommits) => ({ ghsa, project, summary: ghsa, fixCommits });
-  const ultracite = {
+  const dataset = {
     advisories: {
       advisories: [
         advisory("A", "astro", ["withastro/astro@aaaaaaa"]),
@@ -269,7 +270,7 @@ test("selectAdvisories applies the class, repo and limit filters in order", () =
     repos: new Set(["astro"]),
     limit: 1,
   };
-  const result = selectAdvisories(ultracite, options);
+  const result = selectAdvisories(dataset, options);
   assert.deepEqual(
     result.selected.map((row) => [row.ghsa, row.commits[0].sha]),
     [["A", "aaaaaaa"]],
@@ -388,4 +389,16 @@ test("guardPrecisionRepo turns a thrown error into an error entry", () => {
   assert.equal(entry.repo, "zod");
   assert.equal(entry.error, "git fetch failed");
   assert.equal(typeof entry.sha, "string");
+});
+
+test("parseDatasetSpec reads a pinned owner/repo@sha and rejects other values", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  assert.deepEqual(parseDatasetSpec(`acme/sink-study@${sha}`), { slug: "acme/sink-study", sha });
+  assert.throws(() => parseDatasetSpec(undefined), /--dataset-dir/);
+  assert.throws(() => parseDatasetSpec("acme/sink-study"), /owner\/repo@/);
+  assert.throws(() => parseDatasetSpec("acme/sink-study@main"), /owner\/repo@/);
+});
+
+test("parseArgs reads --dataset-dir", () => {
+  assert.equal(parseArgs(["--dataset-dir", "/data/study"]).datasetDir, "/data/study");
 });
