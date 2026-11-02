@@ -542,8 +542,11 @@ The `extract_config_*` readers in `config_parser.rs` read every argument
 that resolves to an object, as Vite merges them:
 
 - A list value concatenates in argument order.
-- A single value comes from the last argument that sets it.
+- A single value comes from the last argument that sets it. When that value
+  is not static, the reader gives no value, and an earlier static value does
+  not apply.
 
+The options object of another call, such as a plugin call, is not a config.
 An imported argument gives no object, because the parser does not follow
 imports. Code that calls `find_config_object` directly still reads one
 object only.

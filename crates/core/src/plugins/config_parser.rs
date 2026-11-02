@@ -17,7 +17,7 @@ use const_inline::holds_one_stable_object;
 mod local_inline;
 #[path = "config_parser_merge_config.rs"]
 mod merge_config;
-use merge_config::{find_merged_config_objects, read_each_config, read_last_config};
+use merge_config::{read_each_config, read_last_config, read_last_match};
 #[path = "config_parser_multi_config.rs"]
 mod multi_config;
 use multi_config::find_default_export_array;
@@ -98,7 +98,7 @@ pub(crate) fn extract_config_string(
     prop_path: &[&str],
 ) -> Option<String> {
     extract_from_source(source, path, |program| {
-        read_last_config(program, |obj| get_nested_string_from_object(obj, prop_path))
+        read_last_config(program, prop_path, get_nested_string_from_object)
     })
 }
 
@@ -110,9 +110,7 @@ pub(crate) fn extract_config_command(
     prop_path: &[&str],
 ) -> Option<String> {
     extract_from_source(source, path, |program| {
-        read_last_config(program, |obj| {
-            get_nested_command_from_object(obj, prop_path)
-        })
+        read_last_config(program, prop_path, get_nested_command_from_object)
     })
 }
 
@@ -271,8 +269,8 @@ pub(crate) fn extract_config_truthy_bool_or_object(
     prop_path: &[&str],
 ) -> bool {
     extract_from_source(source, path, |program| {
-        read_last_config(program, |obj| {
-            let expr = get_nested_expression(obj, prop_path)?;
+        read_last_config(program, prop_path, |obj, key_path| {
+            let expr = get_nested_expression(obj, key_path)?;
             Some(is_truthy_bool_or_object(expr))
         })
     })
@@ -359,8 +357,8 @@ pub(crate) fn extract_config_path(
     prop_path: &[&str],
 ) -> Option<PathBuf> {
     extract_from_source(source, path, |program| {
-        read_last_config(program, |obj| {
-            let expr = get_nested_expression(obj, prop_path)?;
+        read_last_config(program, prop_path, |obj, key_path| {
+            let expr = get_nested_expression(obj, key_path)?;
             expression_to_path(expr)
         })
     })
@@ -896,7 +894,7 @@ fn extract_config_plugin_option_string(
     option_key: &str,
 ) -> Option<String> {
     extract_from_source(source, path, |program| {
-        read_last_config(program, |obj| {
+        read_last_match(program, |obj| {
             let plugins_expr = get_nested_expression(obj, plugins_path)?;
             let Expression::ArrayExpression(plugins) = plugins_expr else {
                 return None;

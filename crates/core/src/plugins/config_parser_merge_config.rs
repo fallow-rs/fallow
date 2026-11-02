@@ -11,11 +11,15 @@
 use oxc_ast::ast::*;
 
 use super::{
-    MAX_CONFIG_WRAPPER_DEPTH, find_config_object, find_variable_init, is_module_exports_target,
-    resolve_config_argument, unwrap_to_identifier_name,
+    MAX_CONFIG_WRAPPER_DEPTH, extract_object_from_arrow_function, extract_object_from_function,
+    find_config_object, find_variable_init, get_nested_expression, is_module_exports_target,
+    unwrap_to_identifier_name,
 };
 
 const MERGE_CONFIG: &str = "mergeConfig";
+
+/// The helpers that return their first argument as the config.
+const DEFINE_CONFIG_HELPERS: &[&str] = &["defineConfig", "defineProject"];
 
 /// Run `read` on each exported config object and concatenate the results in
 /// source order, as Vite `mergeConfig` concatenates arrays. `None` when no
@@ -33,10 +37,26 @@ pub fn read_each_config<'a, T>(
     merged
 }
 
-/// Run `read` on each exported config object and keep the result of the last
-/// object that gives one, as a later `mergeConfig` argument replaces a single
-/// value of an earlier argument.
+/// Read a single value at `key_path` with `read(object, key_path)`. Vite
+/// takes the value of the last `mergeConfig` argument that sets the key, so
+/// only that object is read. When its value is not static, `read` gives
+/// `None`, and an earlier static value does not apply.
 pub fn read_last_config<'a, T>(
+    program: &'a Program<'a>,
+    key_path: &[&str],
+    read: impl FnOnce(&'a ObjectExpression<'a>, &[&str]) -> Option<T>,
+) -> Option<T> {
+    find_merged_config_objects(program)
+        .into_iter()
+        .rev()
+        .find(|object| get_nested_expression(object, key_path).is_some())
+        .and_then(|object| read(object, key_path))
+}
+
+/// Run `read` on each exported config object and keep the last result. Use
+/// this for a match inside a list, such as one plugin of `plugins`, because
+/// `mergeConfig` concatenates the lists of all arguments.
+pub fn read_last_match<'a, T>(
     program: &'a Program<'a>,
     read: impl FnMut(&'a ObjectExpression<'a>) -> Option<T>,
 ) -> Option<T> {
@@ -53,6 +73,9 @@ pub fn read_last_config<'a, T>(
 /// `find_config_object` finds.
 pub fn find_merged_config_objects<'a>(program: &'a Program<'a>) -> Vec<&'a ObjectExpression<'a>> {
     let mut objects = Vec::new();
+    // A cap of 3 levels covers the real shapes, such as
+    // `defineConfig(mergeConfig(base, defineConfig({..})))`, and it stops a
+    // variable that refers to itself.
     if let Some(call) = find_exported_merge_call(program) {
         collect_merge_arguments(program, call, MAX_CONFIG_WRAPPER_DEPTH, &mut objects);
     }
@@ -109,8 +132,7 @@ fn find_merge_call<'a>(
     }
 }
 
-/// Push the object of each argument of `call` in source order. A nested
-/// `mergeConfig(...)` argument gives its own arguments in its place.
+/// Push the object of each argument of `call` in source order.
 fn collect_merge_arguments<'a>(
     program: &'a Program<'a>,
     call: &'a CallExpression<'a>,
@@ -118,32 +140,73 @@ fn collect_merge_arguments<'a>(
     objects: &mut Vec<&'a ObjectExpression<'a>>,
 ) {
     for arg in call.arguments.iter().filter_map(Argument::as_expression) {
-        match as_merge_call(arg) {
-            Some(nested) if depth > 1 => {
-                collect_merge_arguments(program, nested, depth - 1, objects);
-            }
-            Some(_) => {}
-            None => objects.extend(resolve_config_argument(program, arg, depth)),
-        }
+        collect_merge_argument(program, arg, depth, objects);
     }
 }
 
-fn as_merge_call<'a>(expr: &'a Expression<'a>) -> Option<&'a CallExpression<'a>> {
+/// Push the objects that one `mergeConfig` argument stands for. A nested
+/// `mergeConfig(...)` gives each of its own arguments, also inside
+/// `defineConfig(...)` or a local variable. The options object of any other
+/// call, such as a plugin call, is not a config.
+///
+/// Each wrapper, nested merge or variable costs one level of `depth`.
+fn collect_merge_argument<'a>(
+    program: &'a Program<'a>,
+    expr: &'a Expression<'a>,
+    depth: u8,
+    objects: &mut Vec<&'a ObjectExpression<'a>>,
+) {
+    if depth == 0 {
+        return;
+    }
     match expr {
-        Expression::CallExpression(call) if is_merge_config_callee(&call.callee) => Some(call),
-        Expression::ParenthesizedExpression(paren) => as_merge_call(&paren.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => as_merge_call(&ts_sat.expression),
-        Expression::TSAsExpression(ts_as) => as_merge_call(&ts_as.expression),
-        _ => None,
+        Expression::ObjectExpression(obj) => objects.push(obj),
+        Expression::ParenthesizedExpression(paren) => {
+            collect_merge_argument(program, &paren.expression, depth, objects);
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            collect_merge_argument(program, &ts_sat.expression, depth, objects);
+        }
+        Expression::TSAsExpression(ts_as) => {
+            collect_merge_argument(program, &ts_as.expression, depth, objects);
+        }
+        Expression::ArrowFunctionExpression(arrow) => {
+            objects.extend(extract_object_from_arrow_function(arrow));
+        }
+        Expression::FunctionExpression(func) => objects.extend(extract_object_from_function(func)),
+        Expression::CallExpression(call) if is_merge_config_callee(&call.callee) => {
+            collect_merge_arguments(program, call, depth - 1, objects);
+        }
+        Expression::CallExpression(call) if is_define_config_callee(&call.callee) => {
+            if let Some(config) = call.arguments.first().and_then(Argument::as_expression) {
+                collect_merge_argument(program, config, depth - 1, objects);
+            }
+        }
+        _ => {
+            if let Some(init) =
+                unwrap_to_identifier_name(expr).and_then(|name| find_variable_init(program, name))
+            {
+                collect_merge_argument(program, init, depth - 1, objects);
+            }
+        }
     }
 }
 
 /// `mergeConfig(...)` or a namespace call such as `vite.mergeConfig(...)`.
 fn is_merge_config_callee(callee: &Expression<'_>) -> bool {
+    callee_name(callee) == Some(MERGE_CONFIG)
+}
+
+/// `defineConfig(...)` or `defineProject(...)`, also as a namespace call.
+fn is_define_config_callee(callee: &Expression<'_>) -> bool {
+    callee_name(callee).is_some_and(|name| DEFINE_CONFIG_HELPERS.contains(&name))
+}
+
+fn callee_name<'a>(callee: &'a Expression<'_>) -> Option<&'a str> {
     match callee {
-        Expression::Identifier(id) => id.name == MERGE_CONFIG,
-        Expression::StaticMemberExpression(member) => member.property.name == MERGE_CONFIG,
-        _ => false,
+        Expression::Identifier(id) => Some(id.name.as_str()),
+        Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
+        _ => None,
     }
 }
 
@@ -240,6 +303,67 @@ mod tests {
         assert_eq!(
             extract_config_string_or_array(source, &ts_path(), &["test", "include"]),
             vec!["a.test.ts"]
+        );
+    }
+
+    /// The options object of an unrelated call is not a config.
+    #[test]
+    fn merge_config_skips_objects_inside_other_calls() {
+        let source = r#"
+            import { mergeConfig } from 'vite';
+            export default mergeConfig(
+              { test: { setupFiles: ["./a.ts"] } },
+              somePlugin({ test: { setupFiles: ["./bogus.ts"] } }),
+            );
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./a.ts"]
+        );
+    }
+
+    #[test]
+    fn merge_config_reads_every_argument_of_a_local_merge() {
+        let source = r#"
+            import { mergeConfig } from 'vite';
+            const shared = mergeConfig({ test: { setupFiles: ["./a.ts"] } }, { test: { setupFiles: ["./b.ts"] } });
+            export default mergeConfig(shared, { test: { setupFiles: ["./c.ts"] } });
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./a.ts", "./b.ts", "./c.ts"]
+        );
+    }
+
+    #[test]
+    fn merge_config_reads_every_argument_of_a_merge_inside_define_config() {
+        let source = r#"
+            import { defineConfig, mergeConfig } from 'vite';
+            export default mergeConfig(
+              { test: { setupFiles: ["./a.ts"] } },
+              defineConfig(mergeConfig({ test: { setupFiles: ["./b.ts"] } }, { test: { setupFiles: ["./c.ts"] } })),
+            );
+        "#;
+        assert_eq!(
+            extract_config_string_or_array(source, &ts_path(), &["test", "setupFiles"]),
+            vec!["./a.ts", "./b.ts", "./c.ts"]
+        );
+    }
+
+    /// Vite uses the later value, so a later value that is not static hides
+    /// the earlier static value.
+    #[test]
+    fn merge_config_later_dynamic_value_wins_over_earlier_literal() {
+        let source = r#"
+            import { mergeConfig } from 'vite';
+            export default mergeConfig(
+              { test: { environment: "node" } },
+              { test: { environment: process.env.E } },
+            );
+        "#;
+        assert_eq!(
+            extract_config_string(source, &ts_path(), &["test", "environment"]),
+            None
         );
     }
 }

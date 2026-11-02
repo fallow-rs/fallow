@@ -28,7 +28,7 @@ pub fn extract_vite_plugin_call_option_path(
         if imports.is_empty() {
             return None;
         }
-        super::read_last_config(program, |obj| {
+        super::read_last_match(program, |obj| {
             let Expression::ArrayExpression(plugin_array) =
                 get_nested_expression(obj, &["plugins"])?
             else {

@@ -12,11 +12,12 @@ use std::path::{Path, PathBuf};
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
+use super::merge_config::find_merged_config_objects;
 use super::{
     PathScope, collect_require_sources, collect_shallow_string_values, expression_to_path,
-    extract_from_source, find_merged_config_objects, find_property, get_nested_expression,
-    get_nested_string_or_array, is_module_exports_target, object_expression,
-    path_from_config_string, resolve_alias_pairs_kinded,
+    extract_from_source, find_property, get_nested_expression, get_nested_string_or_array,
+    is_module_exports_target, object_expression, path_from_config_string,
+    resolve_alias_pairs_kinded,
 };
 
 /// The maximum number of configs read from one exported array, in source order.
