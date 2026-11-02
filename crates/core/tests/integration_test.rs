@@ -75,6 +75,8 @@ mod dynamic_import_then;
 mod dynamic_imports;
 #[path = "integration_test/effect_dead_code.rs"]
 mod effect_dead_code;
+#[path = "integration_test/effect_schema_exports_as_types.rs"]
+mod effect_schema_exports_as_types;
 #[path = "integration_test/egg_framework_plugin.rs"]
 mod egg_framework_plugin;
 #[path = "integration_test/entry_load_closure.rs"]

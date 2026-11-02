@@ -33,6 +33,7 @@ pub mod css_metrics;
 mod css_module_classes;
 pub mod dom_classes;
 pub mod effect_facts;
+mod effect_schema;
 pub mod federation_runtime;
 pub mod flags;
 mod function_body;

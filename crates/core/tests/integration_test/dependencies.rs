@@ -1284,6 +1284,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
+        effect: fallow_config::EffectConfig::default(),
         duplicates: fallow_config::DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
         mutation: fallow_config::MutationConfig::default(),

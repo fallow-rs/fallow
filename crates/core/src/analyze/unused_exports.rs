@@ -27,6 +27,10 @@ mod adapter;
 use adapter::star_re_export_overlays;
 #[path = "unused_exports_cjs.rs"]
 mod cjs;
+#[path = "unused_exports_types.rs"]
+mod types;
+use types::drop_types_paired_with_schemas;
+pub use types::suppress_signature_backing_types;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
@@ -46,6 +50,9 @@ struct UnusedExportModuleContext<'a> {
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     /// Declarations whose export credit is lost to a star-export collision.
     ambiguity: &'a AmbiguityParticipants,
+    /// Sorted Effect schema export names per file. `Some` only when
+    /// `effect.schemaExportsAsTypes` is on.
+    schema_exports: Option<&'a FxHashMap<FileId, &'a [String]>>,
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
@@ -422,6 +429,8 @@ pub fn find_unused_exports(
             None
         };
 
+    let schema_exports = types::schema_exports_by_file(config, modules);
+
     let ambiguity = graph.ambiguity_participants();
     let module_context = UnusedExportModuleContext {
         graph,
@@ -433,6 +442,7 @@ pub fn find_unused_exports(
         suppressions,
         line_offsets_by_file,
         ambiguity: &ambiguity,
+        schema_exports: schema_exports.as_ref(),
     };
 
     let module_results: Vec<UnusedExportModuleResult> = graph
@@ -504,10 +514,20 @@ fn collect_module_unused_export_findings(
     let mut unused_exports = Vec::new();
     let mut unused_types = Vec::new();
 
+    let schema_exports = ctx
+        .schema_exports
+        .and_then(|by_file| by_file.get(&module.file_id).copied())
+        .unwrap_or_default();
+
     for export in &module.exports {
+        let is_schema = !export.is_type_only
+            && schema_exports
+                .binary_search_by(|name| name.as_str().cmp(export_name_str(&export.name)))
+                .is_ok();
         if let Some(unused) = unused_export_for_module(
             module,
             export,
+            is_schema,
             ctx,
             UnusedExportMatchContext {
                 same_file_used_exports: match_ctx.same_file_used_exports,
@@ -518,7 +538,7 @@ fn collect_module_unused_export_findings(
                 stale_expected_unused: &mut *match_ctx.stale_expected_unused,
             },
         ) {
-            if export.is_type_only {
+            if export.is_type_only || is_schema {
                 unused_types.push(unused);
             } else {
                 unused_exports.push(unused);
@@ -526,6 +546,7 @@ fn collect_module_unused_export_findings(
         }
     }
 
+    drop_types_paired_with_schemas(&mut unused_types);
     (unused_exports, unused_types)
 }
 
@@ -565,17 +586,24 @@ struct UnusedExportMatchContext<'a> {
     stale_expected_unused: &'a mut Vec<StaleSuppression>,
 }
 
+fn export_name_str(name: &ExportName) -> &str {
+    match name {
+        ExportName::Named(name) => name.as_str(),
+        ExportName::Default => "default",
+    }
+}
+
+/// `is_schema` marks an Effect schema export that `effect.schemaExportsAsTypes`
+/// reports as an unused type.
 fn unused_export_for_module(
     module: &ModuleNode,
     export: &ExportSymbol,
+    is_schema: bool,
     ctx: &UnusedExportModuleContext<'_>,
     match_ctx: UnusedExportMatchContext<'_>,
 ) -> Option<UnusedExport> {
     let mut match_ctx = match_ctx;
-    let export_str = match &export.name {
-        ExportName::Named(name) => name.as_str(),
-        ExportName::Default => "default",
-    };
+    let export_str = export_name_str(&export.name);
 
     if unused_export_candidate_is_skipped(module, export, ctx, export_str, &mut match_ctx) {
         return None;
@@ -583,15 +611,21 @@ fn unused_export_for_module(
 
     let (line, col) =
         byte_offset_to_line_col(ctx.line_offsets_by_file, module.file_id, export.span.start);
-    let issue_kind = if export.is_type_only {
+    let issue_kind = if export.is_type_only || is_schema {
         IssueKind::UnusedType
     } else {
         IssueKind::UnusedExport
     };
-    if ctx
+    // A schema export keeps the `unused-export` comments written before the
+    // option was on, so they do not turn stale.
+    let suppressed = ctx
         .suppressions
         .is_suppressed(module.file_id, line, issue_kind)
-    {
+        || (is_schema
+            && ctx
+                .suppressions
+                .is_suppressed(module.file_id, line, IssueKind::UnusedExport));
+    if suppressed {
         return None;
     }
 
@@ -675,78 +709,6 @@ fn build_unused_export(
         deprecated: export.deprecated,
         deprecated_reason: export.deprecated_reason.as_deref().map(str::to_owned),
     }
-}
-
-/// Remove exported type findings when the type is only exported to support
-/// another public signature in the same module.
-///
-/// A backing export counts as live when it is not in `unused_values` or
-/// `unused_types`. A type stays hidden only while at least one of its backing
-/// exports is live. A hidden type counts as live for the types that it backs,
-/// so the check repeats until no more types become hidden.
-pub fn suppress_signature_backing_types(
-    unused_types: &mut Vec<UnusedExport>,
-    unused_values: &[UnusedExport],
-    graph: &ModuleGraph,
-    modules: &[fallow_types::extract::ModuleInfo],
-) {
-    if unused_types.is_empty() {
-        return;
-    }
-
-    let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
-        .iter()
-        .map(|module| (module.file_id, module.path.as_path()))
-        .collect();
-    let mut backers_by_type: FxHashMap<(&std::path::Path, &str), Vec<&str>> = FxHashMap::default();
-    for (module, path) in modules
-        .iter()
-        .filter_map(|module| path_by_id.get(&module.file_id).map(|path| (module, *path)))
-    {
-        for reference in &module.public_signature_type_references {
-            backers_by_type
-                .entry((path, reference.type_name.as_str()))
-                .or_default()
-                .push(reference.export_name.as_str());
-        }
-    }
-
-    let mut dead: FxHashSet<(&std::path::Path, &str)> = unused_values
-        .iter()
-        .chain(unused_types.iter())
-        .map(|unused| (unused.path.as_path(), unused.export_name.as_str()))
-        .collect();
-    let keys: Vec<(&std::path::Path, &str)> = unused_types
-        .iter()
-        .map(|unused| (unused.path.as_path(), unused.export_name.as_str()))
-        .collect();
-    let mut hidden = vec![false; keys.len()];
-    loop {
-        let newly_hidden: Vec<usize> = keys
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !hidden[*index])
-            .filter(|(_, key)| {
-                backers_by_type.get(*key).is_some_and(|backers| {
-                    backers
-                        .iter()
-                        .any(|backer| !dead.contains(&(key.0, *backer)))
-                })
-            })
-            .map(|(index, _)| index)
-            .collect();
-        if newly_hidden.is_empty() {
-            break;
-        }
-        for index in newly_hidden {
-            dead.remove(&keys[index]);
-            hidden[index] = true;
-        }
-    }
-
-    let mut hidden = hidden.into_iter();
-    unused_types.retain(|_| !hidden.next().unwrap_or(false));
 }
 
 /// File-name suffixes that idiomatically declare local helper types
