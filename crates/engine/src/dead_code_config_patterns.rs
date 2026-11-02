@@ -25,6 +25,9 @@ use fallow_config::{
 /// a file scope), because a dependency entry is then not relevant to what the
 /// run shows. A `--production` run checks fewer files and dependency
 /// sections, so it reports no redundant entry (issue #3824).
+/// A normal run does not report an `ignoreDependencies` entry that a
+/// `--production` run could need, because following the note would add a
+/// finding to that run.
 ///
 /// An `overrides` rule reports also in a `--production` run, because its cause
 /// does not depend on the files of the run. The `reports_dependencies` gate
