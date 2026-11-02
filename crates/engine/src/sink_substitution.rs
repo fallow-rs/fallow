@@ -448,8 +448,8 @@ fn grown(class: SinkClass, from: &SinkCounts, to: &SinkCounts) -> Vec<&'static s
 ///
 /// - A class whose sinks lose one name and gain another gives
 ///   `<removed> sink replaced by <added>`.
-/// - A removed sink whose name shows up in a new object key, computed member
-///   or alias gives `<removed> sink moved into <form>`.
+/// - A base sink whose count does not grow, and whose name shows up in a new
+///   object key, computed member or alias, gives `<sink> sink moved into <form>`.
 ///
 /// A sink that only moves within the file keeps its name and gives nothing.
 #[must_use]
@@ -465,11 +465,8 @@ pub fn detect_sink_substitutions(path: &Path, base: &str, head: &str) -> Vec<Str
     let mut evidence = Vec::new();
     for class in [SinkClass::CodeExecution, SinkClass::Html] {
         let removed = grown(class, &base_counts, &head_counts);
-        if removed.is_empty() {
-            continue;
-        }
         let added = grown(class, &head_counts, &base_counts);
-        if !added.is_empty() {
+        if !removed.is_empty() && !added.is_empty() {
             evidence.push(format!(
                 "{} {} replaced by {}",
                 removed.join(", "),
@@ -478,7 +475,18 @@ pub fn detect_sink_substitutions(path: &Path, base: &str, head: &str) -> Vec<Str
             ));
             continue;
         }
-        for label in removed {
+        // The extractor resolves some hidden forms, for example a JSX spread
+        // of an inline object or `(0, eval)(x)`. Such a move keeps the count
+        // of the sink, so each base sink whose count does not grow is a
+        // candidate, not only a removed sink.
+        let kept = base_counts
+            .iter()
+            .filter(|((row_class, label), count)| {
+                *row_class == class
+                    && head_counts.get(&(class, *label)).copied().unwrap_or(0) <= **count
+            })
+            .map(|((_, label), _)| *label);
+        for label in kept {
             let Some((token, property_sink)) = token_of(label) else {
                 continue;
             };
@@ -603,6 +611,13 @@ mod tests {
             detect("src/set.ts", base, head),
             vec!["innerHTML sink moved into an object key"]
         );
+    }
+
+    #[test]
+    fn an_alias_added_beside_a_kept_sink_gives_no_signal() {
+        let base = "export const run = (code: string) => eval(code);\n";
+        let head = "const run0 = eval;\nexport const run = (code: string) => eval(code);\nexport const run1 = (code: string) => run0(code);\n";
+        assert!(detect("src/run.ts", base, head).is_empty());
     }
 
     #[test]
