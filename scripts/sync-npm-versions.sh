@@ -132,6 +132,18 @@ update_similar_code_cargo_version() {
   "
 }
 
+update_fallow_crate_version() {
+  node -e "
+    const fs = require('fs');
+    const manifestPath = '$ROOT/packaging/crates-io/fallow/Cargo.toml';
+    let manifest = fs.readFileSync(manifestPath, 'utf8');
+    manifest = manifest
+      .replace(/(name = \"fallow\"\nversion = \")[^\"]+/, '\$1$VERSION')
+      .replace(/^(fallow-cli = \"=)[^\"]+/m, '\$1$VERSION');
+    fs.writeFileSync(manifestPath, manifest);
+  "
+}
+
 # Update main fallow package (version + optionalDependencies)
 update_optional_deps "$ROOT/npm/fallow/package.json"
 echo "  Updated fallow/package.json → $VERSION"
@@ -141,6 +153,9 @@ echo "  Updated fallow-similar-code/package.json → $VERSION"
 
 update_similar_code_cargo_version
 echo "  Updated similar-code sidecar Cargo version → $VERSION"
+
+update_fallow_crate_version
+echo "  Updated fallow crate version and fallow-cli pin → $VERSION"
 
 # Update Node bindings package (version + optionalDependencies)
 if [ "$SKIP_NAPI" = "1" ]; then

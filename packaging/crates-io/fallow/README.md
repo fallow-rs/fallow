@@ -9,9 +9,11 @@ cargo install fallow
 ```
 
 The command is the same as the command of
-[`fallow-cli`](https://crates.io/crates/fallow-cli). Without `--locked`, the
-install uses the newest 3.x release of `fallow-cli`. Install only one of the
-two crates, because both install a binary named `fallow`.
+[`fallow-cli`](https://crates.io/crates/fallow-cli). Each release of `fallow`
+pins the `fallow-cli` release with the same version.
+
+Both crates install a binary named `fallow`, so install only one of them. To
+switch from `fallow-cli`, run `cargo uninstall fallow-cli` first.
 
 Documentation: <https://fallow.tools/docs/>
 

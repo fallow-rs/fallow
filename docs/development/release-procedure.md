@@ -221,14 +221,18 @@ invariants in this file.
    synchronize its merged content after the protected merge, then require
    the main contract check to pass. Do not bypass either check.
 
-   Two version-bearing manifests sit outside the workspace bump and follow
-   opposite rules. `scripts/sync-npm-versions.sh` rewrites both and is wired to
-   no workflow, so a release can skip it silently.
+   Three version-bearing manifests sit outside the workspace bump.
+   `scripts/sync-npm-versions.sh` rewrites each of them and is wired to no
+   workflow, so a release can skip it silently.
 
    - `tools/type-aware-sidecar` bumps in lockstep with the CLI, inside the
      release commit. The CLI refuses a companion whose version differs from the
      binary, so a skipped bump turns `main` red on Windows validation rather
      than at publish time.
+   - `packaging/crates-io/fallow` bumps in lockstep with the CLI, inside the
+     release commit, together with its exact `fallow-cli` requirement. The
+     publish step publishes it after `fallow-cli`. `cargo install` skips an
+     installed version, so a skipped bump leaves users on the old CLI.
    - `crates/napi` and its `@fallow/*` platform manifests stay at the last
      published version through the release commit, keeping any dependabot bump
      that landed on top. Their platform packages do not exist on npm at the new

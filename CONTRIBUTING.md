@@ -177,7 +177,6 @@ The workspace follows the ownership boundaries in
 | `crates/lsp/` | LSP adapter for diagnostics, code actions, hover, and code lens. |
 | `crates/mcp/` | MCP adapter exposing fallow as typed tools for AI agents. |
 | `crates/multicall/` | Unpublished binary crate bundling the CLI, LSP, and MCP servers into the single `fallow` binary shipped by the npm platform packages. |
-| `packaging/crates-io/fallow/` | Thin binary crate `fallow`, outside the workspace, so that `cargo install fallow` installs the command of `fallow-cli`. Its caret dependency follows each 3.x release, so it needs a new publish only for a new major version. |
 | `crates/napi/` | NAPI adapter and Node.js bindings over the workspace Rust facade. |
 | `crates/license/` | Offline signed-license verification used by licensed CLI capabilities. |
 | `crates/v8-coverage/` | V8 coverage parsing and source-offset mapping. |
@@ -187,6 +186,7 @@ The workspace follows the ownership boundaries in
 | `editors/nvim/` | Neovim integration documentation. |
 | `npm/fallow/` | npm wrapper, launchers, generated types, and bundled agent skill. |
 | `npm/<platform>/` | Platform-specific native binary packages consumed by the npm wrapper. |
+| `packaging/crates-io/fallow/` | Thin binary crate `fallow` outside the workspace, so that `cargo install fallow` installs the command of `fallow-cli`. The release publishes it after `fallow-cli` with the same version. |
 
 Dependency direction is deliberate. Foundation and analysis crates do not
 depend on protocol adapters. `fallow-core` remains an internal detector backend
