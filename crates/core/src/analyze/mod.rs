@@ -2569,6 +2569,7 @@ fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResul
     populate_type_only_dependency_findings(input, pkg, &mut results);
     populate_test_only_dependency_findings(input, pkg, &mut results);
     populate_dev_dependency_in_production_findings(input, pkg, &mut results);
+    unused_deps::credit_production_ignores(input.graph, pkg, input.config, input.workspaces);
     results
 }
 
@@ -2657,7 +2658,6 @@ fn populate_unused_dependency_findings(
     if unused_dependency_rules_are_disabled(input.config) {
         return;
     }
-
     let (deps, dev_deps, optional_deps) = find_unused_dependencies(
         input.graph,
         pkg,

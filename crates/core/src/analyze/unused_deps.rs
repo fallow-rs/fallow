@@ -27,9 +27,12 @@ use crate::plugins::{CompiledPathRule, ProvidedDependencyRule};
 
 #[path = "unused_deps_peer_closure.rs"]
 mod peer_closure;
+#[path = "unused_deps_production_only.rs"]
+mod production_only;
 pub use peer_closure::peer_closure_seeds;
 pub use peer_closure::peer_dependency_hosts;
 use peer_closure::{PeerDependencyResolver, PeerSeedInput, peer_closure_shared_seeds};
+pub use production_only::{credit_production_ignores, find_type_only_dependencies};
 
 /// Return `true` if a virtual-module `prefix` from the active plugin set covers
 /// `spec`. Two shapes are recognised:
@@ -197,6 +200,9 @@ struct WorkspaceManifest<'a> {
     /// private siblings: a sibling's source reaches this workspace whether it is
     /// pulled in for the shipped build or only for the local one.
     declared: FxHashSet<String>,
+    /// The `dependencies` names, the only section a `--production` run reports
+    /// as unused.
+    production: Vec<String>,
     /// Names the package manager installs for this workspace: `dependencies`,
     /// `devDependencies` and `optionalDependencies`. A `peerDependencies`
     /// entry alone installs nothing, so a consumer or an ancestor manifest
@@ -320,6 +326,7 @@ fn read_workspace_manifests<'a>(
                 name: pkg.name.clone().unwrap_or_else(|| workspace.name.clone()),
                 is_private: pkg.private == Some(true),
                 declared: pkg.all_dependency_names().into_iter().collect(),
+                production: pkg.production_dependency_names(),
                 installed: pkg
                     .production_dependency_names()
                     .into_iter()
@@ -1694,56 +1701,6 @@ fn collect_workspace_unused_categories(
     });
 
     (prod, dev, optional)
-}
-
-/// Find production dependencies that are only imported via type-only imports.
-///
-/// In production mode, `import type { Foo } from 'pkg'` is erased at compile time,
-/// meaning the dependency is not needed at runtime. Such dependencies should be
-/// moved to devDependencies.
-///
-/// Only importers that reach the package through the root declaration count,
-/// see [`RootImporters`]. A root entry without such an importer is an unused
-/// dependency, not a type-only one.
-pub fn find_type_only_dependencies(
-    graph: &ModuleGraph,
-    pkg: &PackageJson,
-    config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> Vec<TypeOnlyDependency> {
-    let root_pkg_path = config.root.join("package.json");
-    let root_pkg_content = read_pkg_json_content(&root_pkg_path);
-    let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
-    let root_importers = RootImporters::new(graph, config, workspaces);
-    let production_peers = root_importers.production_peers(pkg, config);
-
-    let mut type_only_deps = Vec::new();
-
-    for dep in pkg.production_dependency_names() {
-        if workspace_names.contains(dep.as_str()) {
-            continue;
-        }
-        if production_peers.contains(&dep) {
-            continue;
-        }
-
-        let total_count = root_importers.of(&dep).len();
-        let type_only_count = root_importers.type_only_of(&dep).len();
-
-        let reported = total_count > 0 && type_only_count == total_count;
-        if reported && !config.ignore_dependencies.suppresses(&dep) {
-            let line = root_pkg_content
-                .as_deref()
-                .map_or(1, |c| find_dep_line_in_json(c, &dep));
-            type_only_deps.push(TypeOnlyDependency {
-                package_name: dep,
-                path: root_pkg_path.clone(),
-                line,
-            });
-        }
-    }
-
-    type_only_deps
 }
 
 /// Return the process-wide glob set matching production-excluded test/story files.
