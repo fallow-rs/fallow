@@ -1924,6 +1924,9 @@ impl ModuleInfoExtractor {
         self.record_source_returning_helper_from_variable_declarator(decl, declarator, init);
         self.record_sanitizer_helper_from_variable_declarator(decl, declarator, init);
         self.record_initialized_declarator_bindings(decl, declarator, init);
+        if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
+            self.record_sink_pattern_bindings(pattern, init);
+        }
         if let BindingPattern::BindingIdentifier(id) = &declarator.id {
             self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
             self.capture_hardcoded_secret_literal_sink(id.name.as_str(), init, declarator.span);
@@ -2259,6 +2262,9 @@ impl<'a> ModuleInfoExtractor {
         {
             self.node_url_file_url_to_path_bindings
                 .insert(s.local.name.to_string());
+        }
+        if !is_type_only && !s.import_kind.is_type() {
+            self.record_import_sink_binding(source, &s.imported.name(), s.local.name.as_str());
         }
         if matches!(source, "vue" | "@vue/reactivity") {
             self.module_direct_object_binding_targets
@@ -4855,6 +4861,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             && let AssignmentTarget::AssignmentTargetIdentifier(ident) = &expr.left
         {
             self.handle_dynamic_import_assignment(ident, &expr.right);
+            self.record_sink_assignment_binding(ident.name.as_str(), &expr.right);
         }
         walk::walk_assignment_expression(self, expr);
         if self.invalidate_projected_assignment(&expr.left) {
@@ -5799,23 +5806,6 @@ fn imported_callee_root<'a>(expression: &'a Expression<'a>) -> Option<&'a Identi
         }
         _ => None,
     }
-}
-
-fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
-    match unwrap_parens(expr) {
-        Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
-        _ => None,
-    }
-}
-
-fn callee_method_name<'a>(
-    callee: &'a Expression<'_>,
-    callee_path: Option<&'a str>,
-) -> Option<&'a str> {
-    if let Some(callee_path) = callee_path {
-        return callee_path.rsplit_once('.').map(|(_, method)| method);
-    }
-    terminal_static_member_name(callee)
 }
 
 /// Collect bare identifier references from a declarator initializer for the

@@ -854,17 +854,30 @@ fn prototype_pollution_static_proto_assign_fires() {
 
 #[test]
 fn prototype_pollution_safe_forms_do_not_fire() {
-    // Two negatives in src/safe.ts must both stay silent: an inline object-literal
-    // merge source (the `object` arg shape, excluded), and a TypeScript-cast
-    // `(obj as {...}).__proto__ = x` assign, which is a documented flattening blind
-    // spot (the cast object is not a bare identifier, so the callee path does not
-    // resolve to `*.__proto__`). The second is a conservative false-negative, not a
-    // safe pattern; this assertion flips if a future flattening change starts
-    // matching the cast form.
+    // An inline object-literal merge source (the `object` arg shape) is
+    // excluded, so src/safe.ts stays silent.
     let results = analyze_with_security_sink("security-prototype-pollution");
     assert!(
         !anchored_on(&results, "src/safe.ts"),
-        "neither an inline-object merge nor a cast-form __proto__ assign may be flagged"
+        "an inline-object merge may not be flagged"
+    );
+}
+
+#[test]
+fn prototype_pollution_cast_proto_assign_fires() {
+    // `(obj as {...}).__proto__ = x` flattens through the TypeScript cast to
+    // `obj.__proto__`, so it matches the `*.__proto__` row.
+    let results = analyze_with_security_sink("security-prototype-pollution");
+    assert!(
+        results.security_findings.iter().any(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/cast.ts")
+                && f.category.as_deref() == Some("prototype-pollution")
+                && f.line == 4
+        }),
+        "a cast-form `__proto__` assign must produce a prototype-pollution candidate at line 4"
     );
 }
 

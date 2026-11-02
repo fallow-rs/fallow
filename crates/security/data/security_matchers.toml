@@ -86,6 +86,18 @@ callee_patterns = ["*.insertAdjacentHTML"]
 arg_index = 1
 evidence_template = "Non-literal HTML passed to {callee}(). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
 
+# `Range.createContextualFragment()` parses its argument as markup, and any
+# script in the fragment runs when the fragment enters the document.
+[[matcher]]
+id = "dangerous-html"
+cwe = 79
+title = "Dangerous HTML sink"
+effect = "dom"
+sink_shape = "member-call"
+callee_patterns = ["*.createContextualFragment"]
+arg_index = 0
+evidence_template = "Non-literal HTML passed to {callee}(). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
+
 [[matcher]]
 id = "dangerous-html"
 cwe = 79
@@ -178,7 +190,10 @@ cwe = 94
 title = "Code injection sink"
 effect = "process"
 sink_shape = "member-call"
-callee_patterns = ["vm.runInNewContext", "vm.runInThisContext", "vm.runInContext"]
+# The extractor resolves a named import (`import { runInNewContext } from "vm"`)
+# and a CommonJS binding (`const { runInThisContext } = require("vm")`) to the
+# `node:vm.<member>` path. That path proves the provenance on its own.
+callee_patterns = ["vm.runInNewContext", "vm.runInThisContext", "vm.runInContext", "node:vm.runInNewContext", "node:vm.runInThisContext", "node:vm.runInContext"]
 arg_index = 0
 import_provenance = "node:vm"
 evidence_template = "Non-literal code passed to {callee}(). Candidate for verification: confirm the script source is trusted."
@@ -247,6 +262,30 @@ sink_shape = "member-call"
 callee_patterns = ["Function.prototype.constructor", "*.constructor.constructor"]
 arg_index = 0
 evidence_template = "Non-literal value passed to {callee}() (reaches the Function constructor). Candidate for verification: confirm generated code cannot be influenced by attacker input."
+
+# A `<script>` element loads its `src` and runs its text. The extractor maps an
+# assignment on a local bound to `document.createElement("script")` to the
+# `HTMLScriptElement.<property>` path. The same property on another element
+# (`img.src`, `span.textContent`) keeps its member path and matches no row.
+[[matcher]]
+id = "code-injection"
+cwe = 94
+title = "Script element source sink"
+effect = "dom"
+sink_shape = "member-assign"
+callee_patterns = ["HTMLScriptElement.src"]
+arg_index = 0
+evidence_template = "Non-literal URL assigned to {callee} (the browser loads and runs the script). Candidate for verification: confirm the script URL is not attacker-controlled or comes from an allowlisted origin."
+
+[[matcher]]
+id = "code-injection"
+cwe = 94
+title = "Inline script sink"
+effect = "dom"
+sink_shape = "member-assign"
+callee_patterns = ["HTMLScriptElement.text", "HTMLScriptElement.textContent", "HTMLScriptElement.innerText"]
+arg_index = 0
+evidence_template = "Non-literal code assigned to {callee} (the browser runs it as a script). Candidate for verification: confirm generated code cannot be influenced by attacker input."
 
 # Dynamic regex construction from a non-literal pattern can let untrusted input
 # select a pathological expression or alter matching semantics. Literal regex

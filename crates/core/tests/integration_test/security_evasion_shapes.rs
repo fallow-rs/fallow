@@ -104,6 +104,64 @@ const CASES: &[(&str, Expected)] = &[
         "src/srcdoc-frame.component.ts",
         Expected::Candidate("dangerous-html"),
     ),
+    (
+        "src/this-member-inner-html.ts",
+        Expected::Candidate("dangerous-html"),
+    ),
+    (
+        "src/shadow-root-inner-html.ts",
+        Expected::Candidate("dangerous-html"),
+    ),
+    (
+        "src/non-null-inner-html.ts",
+        Expected::Candidate("dangerous-html"),
+    ),
+    (
+        "src/as-cast-inner-html.ts",
+        Expected::Candidate("dangerous-html"),
+    ),
+    (
+        "src/optional-chain-inner-html.ts",
+        Expected::Candidate("dangerous-html"),
+    ),
+    ("src/this-member-literal.ts", Expected::Nothing),
+    (
+        "src/vm-named-import.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
+        "src/vm-named-import-alias.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
+        "src/vm-require-destructure.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    ("src/vm-local-name.ts", Expected::Nothing),
+    (
+        "src/function-alias-spread.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
+        "src/contextual-fragment.ts",
+        Expected::Candidate("dangerous-html"),
+    ),
+    ("src/contextual-fragment-literal.ts", Expected::Nothing),
+    ("src/script-src.ts", Expected::Candidate("code-injection")),
+    (
+        "src/script-src-reassign.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
+        "src/script-text-content.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    ("src/script-text.ts", Expected::Candidate("code-injection")),
+    ("src/text-content-non-script.ts", Expected::Nothing),
+    (
+        "src/script-shadowed.ts",
+        Expected::Candidate("code-injection"),
+    ),
 ];
 
 fn analyze() -> AnalysisResults {
@@ -191,4 +249,59 @@ fn eval_alias_stops_at_a_shadowing_binding() {
     lines.sort_unstable();
     lines.dedup();
     assert_eq!(lines, vec![2, 6]);
+}
+
+fn tainted_sink_lines(results: &AnalysisResults, suffix: &str) -> Vec<u32> {
+    let mut lines: Vec<u32> = results
+        .security_findings
+        .iter()
+        .filter(|finding| matches!(finding.kind, SecurityFindingKind::TaintedSink))
+        .filter(|finding| normalized(&finding.path).ends_with(suffix))
+        .map(|finding| finding.line)
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
+/// A `<script>` binding reaches only the assignments that resolve to it. A
+/// nested `img` local and a parameter of the same name hide it.
+#[test]
+fn script_element_binding_stops_at_a_shadowing_binding() {
+    let results = analyze();
+    assert_eq!(
+        tainted_sink_lines(&results, "src/script-shadowed.ts"),
+        vec![10]
+    );
+}
+
+/// The `Error` subclass fallback `this.__proto__ = new.target.prototype` sets
+/// the prototype of the new instance only, so it is not a candidate.
+#[test]
+fn this_proto_assignment_is_not_a_candidate() {
+    let results = analyze();
+    assert!(tainted_sink_lines(&results, "src/this-proto.ts").is_empty());
+}
+
+/// A named `vm` import and a `require("vm")` binding name the module in the
+/// evidence, so the reader sees which built-in runs the code.
+#[test]
+fn vm_binding_candidates_name_the_module() {
+    let results = analyze();
+    for (suffix, callee) in [
+        ("src/vm-named-import.ts", "node:vm.runInNewContext"),
+        ("src/vm-named-import-alias.ts", "node:vm.runInContext"),
+        ("src/vm-require-destructure.ts", "node:vm.runInThisContext"),
+    ] {
+        let finding = results
+            .security_findings
+            .iter()
+            .find(|finding| normalized(&finding.path).ends_with(suffix))
+            .unwrap_or_else(|| panic!("{suffix} should produce a candidate"));
+        assert!(
+            finding.evidence.contains(callee),
+            "{suffix}: evidence should name {callee}: {}",
+            finding.evidence
+        );
+    }
 }
