@@ -1554,6 +1554,90 @@ mod end_to_end {
         );
     }
     #[test]
+    fn target_matrix_reports_shared_and_unique_kills_of_real_adapter_runs() {
+        use crate::mutation::{Operator, discovery::RuntimeKind};
+        use fallow_output::{MutationKillMatrixStatus, MutationTargetOnlyKill};
+        if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        let (_project, root) = matrix_project();
+        let mut config = options(&root, MutationRunScope::All);
+        config.operators = Some(vec![Operator::ArithmeticOperator]);
+        config.analysis.no_cache = false;
+        config.kill_matrix_targets = vec!["./test/math.test.ts::A".to_owned()];
+        let one = run_mutation(&config).expect("target matrix");
+        let functions_with = |report: &fallow_output::MutationReport, status: MutantStatus| {
+            let mut names: Vec<String> = report
+                .mutants
+                .iter()
+                .filter(|mutant| mutant.status == status)
+                .filter_map(|mutant| mutant.location.function.clone())
+                .collect();
+            names.sort();
+            names.dedup();
+            names
+        };
+        assert_eq!(functions_with(&one, MutantStatus::Killed), ["add"]);
+        assert_eq!(
+            functions_with(&one, MutantStatus::Pruned),
+            ["double", "multiply", "subtract"]
+        );
+        assert!(one.mutants.iter().all(|mutant| {
+            mutant.status != MutantStatus::Pruned
+                || mutant.prune_reason.as_deref() == Some("no-target-coverage")
+        }));
+        assert_eq!(
+            one.kill_matrix.status,
+            MutationKillMatrixStatus::Complete,
+            "{:#?}",
+            one.kill_matrix
+        );
+        assert_eq!(one.kill_matrix.candidates, ["test/math.test.ts::A"]);
+        assert_eq!(one.kill_matrix.tests.len(), 1);
+        assert_eq!(
+            one.kill_matrix.tests[0].target_only_kills,
+            Some(Vec::new()),
+            "B also kills each add mutant"
+        );
+
+        config.kill_matrix_targets = vec![
+            "test/math.test.ts::A".to_owned(),
+            "test/math.test.ts::B".to_owned(),
+        ];
+        let two = run_mutation(&config).expect("target matrix of two tests");
+        assert!(
+            two.mutants.iter().all(|mutant| !mutant.cached),
+            "a result of other targets is no target evidence"
+        );
+        assert_eq!(two.kill_matrix.status, MutationKillMatrixStatus::Complete);
+        assert_eq!(two.kill_matrix.candidates, ["test/math.test.ts::A"]);
+        let (a, b) = (&two.kill_matrix.tests[0], &two.kill_matrix.tests[1]);
+        assert!(a.unique_kills.is_empty());
+        assert_eq!(
+            a.target_only_kills,
+            Some(
+                a.kills
+                    .iter()
+                    .map(|mutant| MutationTargetOnlyKill {
+                        mutant_id: mutant.clone(),
+                        targets: vec!["test/math.test.ts::B".to_owned()],
+                    })
+                    .collect()
+            )
+        );
+        assert!(!b.unique_kills.is_empty(), "only B kills subtract mutants");
+        let again = run_mutation(&config).expect("cached target matrix");
+        assert!(
+            again
+                .mutants
+                .iter()
+                .filter(|mutant| mutant.status != MutantStatus::Pruned)
+                .all(|mutant| mutant.cached)
+        );
+        assert_eq!(again.kill_matrix, two.kill_matrix);
+    }
+
+    #[test]
     fn project_prefixed_ids_keep_file_provenance_and_export_notes() {
         use crate::mutation::Operator;
         let Some(package) = companion_fixture() else {

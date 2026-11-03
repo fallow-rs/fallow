@@ -13,6 +13,7 @@ fn header() -> JournalHeader {
         operators: None,
         allow_side_effects: false,
         kill_matrix: false,
+        kill_matrix_targets: Vec::new(),
     }
 }
 

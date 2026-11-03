@@ -2241,7 +2241,7 @@ The `kill_matrix` object has these fields:
 | Field | Meaning |
 |---|---|
 | `status` | `complete`, `incomplete`, or `unavailable`, separate from mutation completion. |
-| `reasons` | Evidence limitations, such as `kill-matrix-disabled`, `incomplete-mutant-results`, `baseline-failure`, `partial-mutation-run`, or `missing-test-file-metadata`. |
+| `reasons` | Evidence limitations, such as `kill-matrix-disabled`, `incomplete-mutant-results`, `baseline-failure`, `partial-mutation-run`, `missing-test-file-metadata`, or `unmatched-target`. |
 | `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. |
 | `candidates` | Test IDs whose observed kill sets other tests cover. |
 | `coverage_without_kills` | Test IDs with runtime coverage and no observed kills. |
@@ -2249,6 +2249,21 @@ The `kill_matrix` object has these fields:
 Each mutant and attempt records `killing_tests` and `kill_matrix_complete`. The existing `killed_by` field keeps the first observed killer. Outside matrix mode, `killing_tests` is empty.
 
 Matrix mode does not add the other tests of the covering test files to the retry of a survivor. A survivor that normal mode kills in that retry can stay `survived` in matrix mode, so the two modes can give different scores.
+
+### `mutation --kill-matrix-for`: Check named tests
+
+```bash
+fallow mutation src/math.ts --kill-matrix-for "test/math.test.ts::adds" --format json --quiet
+```
+
+Use this mode to check whether specific tests are redundant without a full kill matrix. Repeat the flag for each target. A target is a test file (each test in it) or a test ID (`file::name`). It is exclusive with `--kill-matrix`.
+
+- Only the mutants that a target test covers run. The other mutants are `pruned` with `prune_reason: "no-target-coverage"`.
+- Each mutant runs its target tests with bail disabled, then its other covering tests with bail enabled, up to the first failure.
+- `kill_matrix.targets` lists each target with the `test_ids` that it selects. A target that selects no test exits `2` with `FALLOW_MUTATION_TARGET_UNMATCHED`.
+- `kill_matrix.tests` has rows for target tests only. `unique_kills` are kills that no other test detects, target or not. `target_only_kills` lists kills that only other targets share, each with those `targets`. `subsuming_tests` is empty (note `subsumers-not-computed`).
+- A target with kills and no `unique_kills` is a candidate. With `target_only_kills`, it stays redundant only while one of the sharing targets stays. Do not remove all sharing targets together.
+- The evidence covers the planned scope only. A unique kill outside the scope is not visible.
 
 ## `ci`: Provider-Aware Review Automation
 

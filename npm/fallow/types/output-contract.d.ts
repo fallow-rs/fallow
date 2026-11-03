@@ -20449,6 +20449,12 @@ candidates: string[]
  * Tests with coverage and no observed kills, sorted by test id.
  */
 coverage_without_kills: string[]
+/**
+ * The `--kill-matrix-for` targets, in the given order. Absent outside
+ * target mode. In target mode, `tests` has only target tests, and
+ * `subsuming_tests` is empty, because bail hides the other killers.
+ */
+targets?: (MutationKillMatrixTarget[] | null)
 }
 /**
  * The observed mutant kills of one eligible test.
@@ -20478,6 +20484,40 @@ subsuming_tests: string[]
  * Conservative evidence notes, sorted.
  */
 notes: string[]
+/**
+ * The kills that other target tests also detect and no non-target test
+ * detects, sorted by mutant id. Only `--kill-matrix-for` sets this
+ * field. The test stays redundant only while one of `targets` for each
+ * entry stays in the suite.
+ */
+target_only_kills?: (MutationTargetOnlyKill[] | null)
+}
+/**
+ * A kill of a target test that only other target tests share.
+ */
+export interface MutationTargetOnlyKill {
+/**
+ * The killed mutant.
+ */
+mutant_id: string
+/**
+ * The other target tests that also kill the mutant, sorted.
+ */
+targets: string[]
+}
+/**
+ * One `--kill-matrix-for` target and the dry-run tests that it selects.
+ */
+export interface MutationKillMatrixTarget {
+/**
+ * The target as the caller gave it, after path normalization: a test
+ * file or a runner test id.
+ */
+target: string
+/**
+ * The dry-run test ids that the target selects, sorted.
+ */
+test_ids: string[]
 }
 /**
  * The scope of a plan or a run.

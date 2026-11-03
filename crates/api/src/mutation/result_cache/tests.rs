@@ -311,6 +311,7 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
             .map(|&(id, key)| (id.to_owned(), key.to_owned()))
             .collect::<FxHashMap<_, _>>(),
         promoted: Vec::new(),
+        targets: Vec::new(),
     }
 }
 
@@ -452,4 +453,28 @@ fn matrix_cache_roundtrip_keeps_complete_killers_and_rejects_partial_evidence() 
     assert!(hit.kill_matrix_complete);
     assert!(next.get("m1", "k1").is_none());
     assert!(next.get("m2", "matrix:k2").is_none());
+}
+
+#[test]
+fn incomplete_target_evidence_never_replaces_a_cache_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let cache = open(dir.path());
+    cache.record(&outcome(
+        &[("m1", MutantStatus::Killed, false)],
+        &[("m1", "k1")],
+    ));
+    cache.save().unwrap();
+    let cache = open(dir.path());
+    cache.record(&outcome(
+        &[("m1", MutantStatus::Killed, false)],
+        &[("m1", "targets:abc:k1")],
+    ));
+    cache.save().unwrap();
+    let next = open(dir.path());
+    assert!(next.get("m1", "targets:abc:k1").is_none());
+    assert!(
+        next.get("m1", "k1").is_some(),
+        "the normal entry stays in place"
+    );
 }

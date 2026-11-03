@@ -80,6 +80,22 @@ fn validate(options: &MutationRunOptions) -> ProgrammaticResult<()> {
         )
         .with_context("mutation.maxMutants"));
     }
+    if options.kill_matrix && !options.kill_matrix_targets.is_empty() {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "the full kill matrix and the kill matrix for targets are exclusive; pass only one of them",
+        ));
+    }
+    if options
+        .kill_matrix_targets
+        .iter()
+        .any(|target| target.trim().is_empty())
+    {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "a kill matrix target must name a test file or a test id",
+        ));
+    }
     if options.time_budget.is_some_and(|budget| budget.is_zero())
         || options
             .runner_timeout
@@ -91,6 +107,99 @@ fn validate(options: &MutationRunOptions) -> ProgrammaticResult<()> {
         ));
     }
     Ok(())
+}
+
+/// The separator between the file and the name in a runner test id.
+const TEST_ID_SEPARATOR: &str = "::";
+
+/// A `--kill-matrix-for` target in the form of the runner test ids: the file
+/// part is root-relative, with forward slashes and no leading `./`. The name
+/// after the first `::` stays as given.
+fn normalize_target(root: &Path, target: &str) -> String {
+    let (file, name) = target
+        .split_once(TEST_ID_SEPARATOR)
+        .map_or((target, None), |(file, name)| (file, Some(name)));
+    let file = file.trim();
+    let path = Path::new(file);
+    let relative = if path.is_absolute() {
+        let canonical_root = root.canonicalize().ok();
+        path.strip_prefix(root)
+            .ok()
+            .or_else(|| {
+                canonical_root
+                    .as_deref()
+                    .and_then(|root| path.strip_prefix(root).ok())
+            })
+            .map_or_else(|| file.to_owned(), |rel| rel.to_string_lossy().into_owned())
+    } else {
+        file.to_owned()
+    };
+    let relative = relative.replace('\\', "/");
+    let mut trimmed = relative.as_str();
+    while let Some(rest) = trimmed.strip_prefix("./") {
+        trimmed = rest;
+    }
+    let relative = trimmed.to_owned();
+    match name {
+        Some(name) => format!("{relative}{TEST_ID_SEPARATOR}{name}"),
+        None => relative,
+    }
+}
+
+/// `options` with each `--kill-matrix-for` target normalized and without
+/// duplicates. `None` outside target mode. A target whose file part is empty
+/// after normalization, for example `./`, is an error.
+fn with_normalized_targets(
+    options: &MutationRunOptions,
+    root: &Path,
+) -> ProgrammaticResult<Option<MutationRunOptions>> {
+    if options.kill_matrix_targets.is_empty() {
+        return Ok(None);
+    }
+    let mut targets: Vec<String> = Vec::new();
+    for raw in &options.kill_matrix_targets {
+        let target = normalize_target(root, raw);
+        if target.is_empty() || target.starts_with(TEST_ID_SEPARATOR) {
+            return Err(mutation_error(
+                "FALLOW_INVALID_MUTATION_OPTIONS",
+                format!("the kill matrix target `{raw}` names no test file"),
+            ));
+        }
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    Ok(Some(MutationRunOptions {
+        kill_matrix_targets: targets,
+        ..options.clone()
+    }))
+}
+
+/// The targets in sorted order, so that the order of the flags does not make
+/// a resume mismatch.
+fn sorted_targets(targets: &[String]) -> Vec<String> {
+    let mut sorted = targets.to_vec();
+    sorted.sort();
+    sorted
+}
+
+/// The kill matrix mode of the report.
+fn kill_matrix_mode<'a>(
+    options: &'a MutationRunOptions,
+    outcome: Option<&'a ScheduleOutcome>,
+) -> crate::mutation::kill_matrix::Mode<'a> {
+    use crate::mutation::kill_matrix::Mode;
+    if !options.kill_matrix_targets.is_empty() {
+        return Mode::Targets {
+            requested: &options.kill_matrix_targets,
+            resolved: outcome.map_or(&[], |outcome| outcome.targets.as_slice()),
+        };
+    }
+    if options.kill_matrix {
+        Mode::Full
+    } else {
+        Mode::Disabled
+    }
 }
 
 fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<AnalysisSession> {
@@ -541,6 +650,9 @@ fn schedule_error(
         ScheduleError::RunPath { .. } => ("FALLOW_MUTATION_RUNNER_FAILED", None),
         ScheduleError::UnknownHit(_) => ("FALLOW_MUTATION_PLAN_MISMATCH", None),
         ScheduleError::Baseline(_) => ("FALLOW_MUTATION_BASELINE_FAILED", None),
+        ScheduleError::UnmatchedTargets(_) | ScheduleError::TargetsNeedTestFilter => {
+            ("FALLOW_MUTATION_TARGET_UNMATCHED", None)
+        }
     };
     let mut help = Vec::new();
     if matches!(error, ScheduleError::RunnerVersion(_)) {
@@ -749,6 +861,7 @@ fn open_stores(
         operators: planned.operators.clone(),
         allow_side_effects: options.allow_side_effects,
         kill_matrix: options.kill_matrix,
+        kill_matrix_targets: sorted_targets(&options.kill_matrix_targets),
     };
     let run_journal = start_journal(options, planned, mutation_cache, &header, keys)?;
     Ok((result_cache, run_journal))
@@ -973,6 +1086,7 @@ fn execute(
         },
         runner: range.clone(),
         kill_matrix: options.kill_matrix,
+        targets: options.kill_matrix_targets.clone(),
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),
         runner_timeout: options.runner_timeout.unwrap_or(DEFAULT_RUNNER_TIMEOUT),
         deadline,
@@ -1116,6 +1230,8 @@ pub fn run_mutation_with_progress(
     })?;
     guard_cache_holds_no_planned_file(planned.resolved.root(), &planned.cache_dir, &planned.plan)?;
     guard_typecheck_companion(options.typecheck, planned.resolved.root())?;
+    let normalized = with_normalized_targets(options, planned.resolved.root())?;
+    let options = normalized.as_ref().unwrap_or(options);
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline, progress);
     progress(MutationProgress::Finalize);
@@ -1164,7 +1280,7 @@ pub fn run_mutation_with_progress(
         version: tool_version(),
         elapsed_ms: ElapsedMs(millis(started.elapsed())),
         kill_matrix: crate::mutation::kill_matrix::build(
-            options.kill_matrix,
+            &kill_matrix_mode(options, outcome),
             &results,
             &baseline,
             &completion,
@@ -1456,6 +1572,66 @@ mod tests {
             error.message
         );
         assert!(guard_cache_holds_no_planned_file(root, &root.join(".fallow"), &plan).is_ok());
+    }
+
+    #[test]
+    fn kill_matrix_targets_take_the_form_of_runner_test_ids() {
+        let root = Path::new("/project");
+        assert_eq!(normalize_target(root, "./test/a.test.ts"), "test/a.test.ts");
+        assert_eq!(
+            normalize_target(root, "test\\a.test.ts::adds > two"),
+            "test/a.test.ts::adds > two"
+        );
+        if cfg!(unix) {
+            assert_eq!(
+                normalize_target(root, "/project/test/a.test.ts::a::b"),
+                "test/a.test.ts::a::b"
+            );
+            assert_eq!(
+                normalize_target(root, "/other/a.test.ts"),
+                "/other/a.test.ts"
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_that_normalizes_to_no_file_is_refused_and_order_does_not_matter() {
+        let root = Path::new("/project");
+        for raw in ["./", "././", "::name"] {
+            let options = MutationRunOptions {
+                kill_matrix_targets: vec![raw.to_owned()],
+                ..MutationRunOptions::default()
+            };
+            let error = with_normalized_targets(&options, root).expect_err(raw);
+            assert!(error.message.contains("names no test file"), "{raw}");
+        }
+        let options = MutationRunOptions {
+            kill_matrix_targets: vec!["./b.test.ts".to_owned(), "b.test.ts".to_owned()],
+            ..MutationRunOptions::default()
+        };
+        let normalized = with_normalized_targets(&options, root)
+            .expect("valid")
+            .expect("target mode");
+        assert_eq!(normalized.kill_matrix_targets, ["b.test.ts"]);
+        assert_eq!(
+            sorted_targets(&["b".to_owned(), "a".to_owned()]),
+            sorted_targets(&["a".to_owned(), "b".to_owned()])
+        );
+    }
+
+    #[test]
+    fn the_full_and_the_target_kill_matrix_are_exclusive() {
+        let both = MutationRunOptions {
+            kill_matrix: true,
+            kill_matrix_targets: vec!["test/a.test.ts".to_owned()],
+            ..MutationRunOptions::default()
+        };
+        assert!(validate(&both).is_err());
+        let blank = MutationRunOptions {
+            kill_matrix_targets: vec![" ".to_owned()],
+            ..MutationRunOptions::default()
+        };
+        assert!(validate(&blank).is_err());
     }
 
     #[test]
