@@ -677,6 +677,12 @@ mod tests {
     }
 
     #[test]
+    fn test_case_count_needs_a_test_root_for_effect_vitest_members() {
+        let src = "foo.live('a', f);\ndescribe.scoped('b', f);\nlayer.effect('c', f);\n";
+        assert_eq!(test_case_count(src), 0);
+    }
+
+    #[test]
     fn assertion_count_counts_expect_assert_and_should() {
         let src = "expect(a).toBe(1);\nexpect.soft(b).toBe(2);\nassert.equal(c, 3);\nassert(d);\nx.should.equal(4);\nexpect.assertions(2);\n// expect(e)\n";
         assert_eq!(assertion_count(src), 5);
