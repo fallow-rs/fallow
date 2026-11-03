@@ -2559,7 +2559,7 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
     ["Run runtime-coverage integration tests (feature-gated stub sidecar)", 2],
     ["Run schema drift gate (feature-gated schema-emit binary)", 1],
   ]) {
-    const escaped = step.replace(/[()]/gu, "\\$&");
+    const escaped = escapeRegExp(step);
     assert.match(
       check,
       new RegExp(`name: ${escaped}\\n\\s+if: matrix\\.partition == ${partition}\\n`, "u"),
