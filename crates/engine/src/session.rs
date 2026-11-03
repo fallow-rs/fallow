@@ -1729,9 +1729,9 @@ fn resolve_or_build_dead_code_graph(
             Err(rejection) => rejection,
         };
 
-    let resolved = core_backend::resolve_dead_code_imports(prelude, modules);
+    let mut resolved = core_backend::resolve_dead_code_imports(prelude, modules);
     let graph =
-        core_backend::build_dead_code_graph(prelude, &resolved.project, entry_points, modules);
+        core_backend::build_dead_code_graph(prelude, &mut resolved.project, entry_points, modules);
     (resolved, graph, rejection)
 }
 

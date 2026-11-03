@@ -1013,7 +1013,7 @@ mod tests {
             detection: None,
             enablers: vec![],
             entry_points: vec![],
-            entry_point_role: EntryPointRole::Runtime,
+            entry_point_role: Some(EntryPointRole::Runtime),
             manifest_entries: vec![ManifestEntryRule {
                 manifests: "**/kibana.jsonc".to_string(),
                 format: ManifestFormat::Jsonc,
@@ -1090,7 +1090,7 @@ mod tests {
             detection: None,
             enablers: vec![],
             entry_points: vec![],
-            entry_point_role: EntryPointRole::Runtime,
+            entry_point_role: Some(EntryPointRole::Runtime),
             manifest_entries: rules,
             config_patterns: vec![],
             config_default_export_opt_out: vec![],

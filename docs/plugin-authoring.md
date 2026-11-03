@@ -126,6 +126,19 @@ to coverage reachability. Use `runtime` for application roots, `test` for test
 roots, or `support` for setup and configuration roots. The default is
 `support`.
 
+In production mode (`--production`, `production: true` or
+`production: { deadCode: true }`), a file that only entries of user plugins
+with an explicit `"entryPointRole": "support"` match takes no part in
+dead-code analysis, like a test file. A plugin that sets no role keeps its
+entries, although its effective role is `support`. A left-out file
+is not an entry point, it gets no finding, and its imports credit no export,
+file or dependency. A file that a runtime root also seeds, such as a config
+`entry` glob, a `runtime` role glob, a built-in plugin entry or a production
+package.json script, stays a runtime root. A file that the analyzed code
+imports stays a normal module. Built-in plugin support entries do not change.
+The production `health` vital signs that come from dead code follow this
+result.
+
 ```jsonc
 {
   "entryPoints": ["src/main.ts"],

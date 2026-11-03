@@ -266,7 +266,7 @@ pub fn process_external_plugins(
             result.active_plugins.push(ext.name.clone());
             result
                 .entry_point_roles
-                .insert(ext.name.clone(), ext.entry_point_role);
+                .insert(ext.name.clone(), ext.effective_entry_point_role());
             result.entry_patterns.extend(
                 ext.entry_points
                     .iter()

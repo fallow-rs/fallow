@@ -32,9 +32,9 @@ const PACKAGE_JSON: &str = "package.json";
 /// The `(package.json path, package)` credits of the default-runtime rules
 /// that match at least one module with `jsx_runtime_from_config` set. The
 /// result is sorted.
-pub(super) fn collect_jsx_runtime_package_credits(
+pub(super) fn collect_jsx_runtime_package_credits<'a>(
     plugin_result: Option<&AggregatedPluginResult>,
-    modules: &[ModuleInfo],
+    modules: impl IntoIterator<Item = &'a ModuleInfo>,
     graph: &ModuleGraph,
     root: &Path,
     workspaces: &[WorkspaceInfo],
@@ -49,7 +49,7 @@ pub(super) fn collect_jsx_runtime_package_credits(
     let mut manifests = ManifestChain::new(root, workspaces);
     let mut credited: FxHashSet<(PathBuf, String)> = FxHashSet::default();
     for module in modules
-        .iter()
+        .into_iter()
         .filter(|module| module.jsx_runtime_from_config)
     {
         let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
