@@ -1040,7 +1040,7 @@ pub(super) fn print_trace_json<T: serde::Serialize>(
                 clippy::exit,
                 reason = "fatal serialization error requires immediate exit"
             )]
-            std::process::exit(2);
+            std::process::exit(i32::from(fallow_output::exit_code::EXIT_INVALID_INPUT));
         }
     };
     match json_style.serialize(&value) {
@@ -1051,7 +1051,7 @@ pub(super) fn print_trace_json<T: serde::Serialize>(
                 clippy::exit,
                 reason = "fatal serialization error requires immediate exit"
             )]
-            std::process::exit(2);
+            std::process::exit(i32::from(fallow_output::exit_code::EXIT_INVALID_INPUT));
         }
     }
 }
@@ -1072,7 +1072,7 @@ pub(super) fn print_semantic_trace_json<T: serde::Serialize>(
                 clippy::exit,
                 reason = "fatal serialization error requires immediate exit"
             )]
-            std::process::exit(2);
+            std::process::exit(i32::from(fallow_output::exit_code::EXIT_INVALID_INPUT));
         }
     };
     attach_semantic_explain_meta(&mut value, explain);
@@ -1084,7 +1084,7 @@ pub(super) fn print_semantic_trace_json<T: serde::Serialize>(
                 clippy::exit,
                 reason = "fatal serialization error requires immediate exit"
             )]
-            std::process::exit(2);
+            std::process::exit(i32::from(fallow_output::exit_code::EXIT_INVALID_INPUT));
         }
     }
 }
@@ -1102,7 +1102,7 @@ pub(super) fn print_semantic_impact_json<T: serde::Serialize>(
                 clippy::exit,
                 reason = "fatal serialization error requires immediate exit"
             )]
-            std::process::exit(2);
+            std::process::exit(i32::from(fallow_output::exit_code::EXIT_INVALID_INPUT));
         }
     };
     attach_semantic_explain_meta(&mut value, explain);
@@ -1114,7 +1114,7 @@ pub(super) fn print_semantic_impact_json<T: serde::Serialize>(
                 clippy::exit,
                 reason = "fatal serialization error requires immediate exit"
             )]
-            std::process::exit(2);
+            std::process::exit(i32::from(fallow_output::exit_code::EXIT_INVALID_INPUT));
         }
     }
 }

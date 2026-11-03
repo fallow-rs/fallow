@@ -6,8 +6,8 @@
 //!
 //! The codes 0, 1 and 2 belong to the shared report contract in
 //! `fallow-report-protocol`. The CLI gets the codes 1 and 2 from
-//! [`exit_gate_failed`] and [`exit_invalid_input`]. A literal `1` or `2` exit
-//! code fails a test below.
+//! [`exit_gate_failed`] and [`exit_invalid_input`]. A test below rejects a
+//! literal `1` or `2` in `ExitCode::from` or `process::exit`.
 
 use std::process::ExitCode;
 
@@ -132,6 +132,8 @@ mod tests {
         let needles = [
             concat!("ExitCode::from(", "1)"),
             concat!("ExitCode::from(", "2)"),
+            concat!("process::exit(", "1)"),
+            concat!("process::exit(", "2)"),
         ];
         // The stub copies the exit codes of the external sidecar, not the
         // report contract.
@@ -147,7 +149,7 @@ mod tests {
             .collect();
         assert!(
             offenders.is_empty(),
-            "use exit_gate_failed() or exit_invalid_input() from crate::exit_codes: {offenders:?}"
+            "use exit_gate_failed(), exit_invalid_input() or the contract constants: {offenders:?}"
         );
     }
 }
