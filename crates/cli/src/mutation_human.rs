@@ -15,8 +15,8 @@ use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationPlanDisposition,
     MutationPlanOutput, MutationReport, MutationResumeOutput, MutationScopeKind,
-    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTestKillRow,
-    MutationTypecheckOutput, TestReachClass,
+    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill,
+    MutationTestKillRow, MutationTypecheckOutput, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -739,6 +739,7 @@ fn kill_matrix_reason(reason: &str) -> &str {
         "baseline-failure" => "baseline failures excluded tests and left incomplete evidence.",
         "partial-mutation-run" => "the mutation run did not finish.",
         "missing-test-file-metadata" => "the runner did not report the test file of some tests.",
+        "unmatched-target" => "a --kill-matrix-for target selects no test of the run.",
         _ => "complete matrix evidence is unavailable.",
     }
 }
@@ -753,6 +754,9 @@ fn kill_matrix_note(note: &str) -> &str {
         }
         "incomplete-observed-evidence" => "Kill sets use incomplete observed evidence.",
         "static-export-reach-unavailable" => "Static export reach is unavailable.",
+        "subsumers-not-computed" => {
+            "Subsumers are not computed: the other tests stop at the first failure."
+        }
         _ => note,
     }
 }
@@ -802,6 +806,36 @@ fn render_subsuming_tests(out: &mut String, tests: &[String]) {
     }
 }
 
+/// The kills that only other target tests share, each with those targets.
+fn render_target_only_kills(out: &mut String, shared: &[MutationTargetOnlyKill]) {
+    if shared.is_empty() {
+        out.push_str("    Kills shared only with other targets: none\n");
+        return;
+    }
+    out.push_str("    Kills shared only with other targets:\n");
+    for kill in shared.iter().take(MAX_MATRIX_IDS_SHOWN) {
+        let targets: Vec<_> = kill
+            .targets
+            .iter()
+            .map(|target| shorten(target, MAX_TEST_NAME_CHARS))
+            .collect();
+        let _ = writeln!(
+            out,
+            "      {} (also: {})",
+            shorten(&kill.mutant_id, MAX_MATRIX_ID_CHARS),
+            targets.join(", ")
+        );
+    }
+    let hidden = shared.len().saturating_sub(MAX_MATRIX_IDS_SHOWN);
+    if hidden > 0 {
+        let _ = writeln!(
+            out,
+            "    {}",
+            more_line_in(hidden, "mutant", "mutants", "the saved JSON report")
+        );
+    }
+}
+
 fn render_test_kill_rows(out: &mut String, title: &str, rows: &[&MutationTestKillRow]) {
     if rows.is_empty() {
         return;
@@ -820,7 +854,10 @@ fn render_test_kill_rows(out: &mut String, title: &str, rows: &[&MutationTestKil
         );
         render_kill_id_list(out, "Kills", &row.kills, "mutant", "mutants");
         render_kill_id_list(out, "Unique kills", &row.unique_kills, "mutant", "mutants");
-        render_subsuming_tests(out, &row.subsuming_tests);
+        match &row.target_only_kills {
+            Some(shared) => render_target_only_kills(out, shared),
+            None => render_subsuming_tests(out, &row.subsuming_tests),
+        }
         for note in &row.notes {
             let _ = writeln!(out, "    Note: {}", kill_matrix_note(note));
         }
@@ -842,6 +879,19 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
         MutationKillMatrixStatus::Unavailable => "unavailable",
     };
     let _ = writeln!(out, "\nTest kill evidence: {status}");
+    for target in matrix.targets.iter().flatten() {
+        let _ = writeln!(
+            out,
+            "  Target {}: {} {}",
+            shorten(&target.target, MAX_TEST_NAME_CHARS),
+            target.test_ids.len(),
+            if target.test_ids.len() == 1 {
+                "test"
+            } else {
+                "tests"
+            }
+        );
+    }
     for reason in &matrix.reasons {
         let _ = writeln!(out, "  {reason}: {}", kill_matrix_reason(reason));
     }

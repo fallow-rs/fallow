@@ -35210,6 +35210,16 @@
             "type": "string"
           },
           "description": "Tests with coverage and no observed kills, sorted by test id."
+        },
+        "targets": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/MutationKillMatrixTarget"
+          },
+          "description": "The `--kill-matrix-for` targets, in the given order. Absent outside\ntarget mode. In target mode, `tests` has only target tests, and\n`subsuming_tests` is empty, because bail hides the other killers."
         }
       },
       "required": [
@@ -35279,6 +35289,16 @@
             "type": "string"
           },
           "description": "Conservative evidence notes, sorted."
+        },
+        "target_only_kills": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/MutationTargetOnlyKill"
+          },
+          "description": "The kills that other target tests also detect and no non-target test\ndetects, sorted by mutant id. Only `--kill-matrix-for` sets this\nfield. The test stays redundant only while one of `targets` for each\nentry stays in the suite."
         }
       },
       "required": [
@@ -35827,6 +35847,48 @@
         "samples"
       ],
       "description": "One production caller of an [`InspectCloudFunction`]."
+    },
+    "MutationTargetOnlyKill": {
+      "type": "object",
+      "properties": {
+        "mutant_id": {
+          "type": "string",
+          "description": "The killed mutant."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The other target tests that also kill the mutant, sorted."
+        }
+      },
+      "required": [
+        "mutant_id",
+        "targets"
+      ],
+      "description": "A kill of a target test that only other target tests share."
+    },
+    "MutationKillMatrixTarget": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "The target as the caller gave it, after path normalization: a test\nfile or a runner test id."
+        },
+        "test_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The dry-run test ids that the target selects, sorted."
+        }
+      },
+      "required": [
+        "target",
+        "test_ids"
+      ],
+      "description": "One `--kill-matrix-for` target and the dry-run tests that it selects."
     }
   }
 }

@@ -1330,6 +1330,12 @@
           ]
         },
         {
+          "name": "--kill-matrix-for",
+          "type": "string",
+          "required": false,
+          "description": "Check whether this test is redundant: a test file (each test in it) or a test id (`file::name`). Repeat the flag for more targets. Only the mutants that a target covers run: first the target tests without a stop at a failure, then the other covering tests up to the first failure"
+        },
+        {
           "name": "paths",
           "type": "string",
           "required": false,

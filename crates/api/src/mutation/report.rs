@@ -50,6 +50,9 @@ fn location(mutant: &PlannedMutant) -> MutantLocation {
     }
 }
 
+/// The prune reason of a mutant that no `--kill-matrix-for` target covers.
+pub const NO_TARGET_COVERAGE: &str = "no-target-coverage";
+
 fn prune_reason(mutant: &PlannedMutant) -> Option<String> {
     match mutant.disposition {
         MutantDisposition::Pruned(reason) => Some(kebab::<PruneReason>(&reason)),
@@ -191,6 +194,9 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             attempts: result.attempts.clone(),
             cached: result.cached,
             resumed: result.resumed,
+            // Only target mode prunes a mutant after the dry run.
+            prune_reason: (result.status == MutantStatus::Pruned)
+                .then(|| NO_TARGET_COVERAGE.to_owned()),
             ..base
         },
         (MutantDisposition::NoCoverage, None) => MutantResult {
@@ -573,6 +579,7 @@ mod tests {
             workers: 1,
             cache_keys: FxHashMap::default(),
             promoted: Vec::new(),
+            targets: Vec::new(),
         }
     }
 
@@ -605,6 +612,25 @@ mod tests {
         );
         let summary = summary(&results);
         assert_eq!(summary.coverage, Some(2.0 / 3.0));
+    }
+
+    #[test]
+    fn a_mutant_that_no_target_covers_is_pruned_and_leaves_score_and_coverage() {
+        let plan = plan(
+            vec![
+                planned("m1", Some(1), MutantDisposition::Planned, None),
+                planned("m2", Some(2), MutantDisposition::Planned, None),
+            ],
+            2,
+        );
+        let outcome = outcome(&[("m1", MutantStatus::Killed), ("m2", MutantStatus::Pruned)]);
+        let results = mutant_results(&plan, Some(&outcome));
+        assert_eq!(results[0].prune_reason, None);
+        assert_eq!(results[1].status, MutantStatus::Pruned);
+        assert_eq!(results[1].prune_reason.as_deref(), Some(NO_TARGET_COVERAGE));
+        let summary = summary(&results);
+        assert_eq!(summary.score, Some(1.0));
+        assert_eq!(summary.coverage, Some(1.0));
     }
 
     #[test]
