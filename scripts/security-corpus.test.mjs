@@ -402,3 +402,34 @@ test("parseDatasetSpec reads a pinned owner/repo@sha and rejects other values", 
 test("parseArgs reads --dataset-dir", () => {
   assert.equal(parseArgs(["--dataset-dir", "/data/study"]).datasetDir, "/data/study");
 });
+
+test("matchPrecision joins a script element sink to the createElement line before it", () => {
+  const file = "packages/demo/src/loader.ts";
+  const site = (id, line) => ({
+    id,
+    group: "injection",
+    kind: "script-element",
+    file,
+    line,
+    endLine: line,
+  });
+  const scriptSink = (line) => ({
+    ...finding(file, line, "code-injection"),
+    evidence:
+      "Non-literal code assigned to HTMLScriptElement.src (the browser runs it as a script).",
+  });
+  const sites = [site("demo:010", 10), site("demo:011", 40)];
+  const findings = [scriptSink(17), scriptSink(45), finding(file, 20, "code-injection")];
+  const result = matchPrecision({ repo, sites, labels: {}, findings });
+  assert.deepEqual(
+    result.sinks.map((sink) => [sink.id, sink.matches.map((match) => match.line)]),
+    [
+      ["demo:010", [17]],
+      ["demo:011", [45]],
+    ],
+  );
+  assert.deepEqual(
+    result.extras.map((extra) => extra.line),
+    [20],
+  );
+});
