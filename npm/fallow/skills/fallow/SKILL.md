@@ -124,6 +124,8 @@ Fallow ships an MCP server (`fallow-mcp`) that exposes these same analyses as ag
 
 The server also serves read-only reference resources (no subprocess, no analysis run, cacheable by URI; your client reads them through its own resource tool): `fallow://tools`, `fallow://issue-types`, `fallow://explain/{issue_type}`, `fallow://task-matrix`, and the config, plugin, and rule-pack JSON Schemas. Every resource payload is JSON. Each content item carries the server version in `_meta.fallow_version`.
 
+Fallow Cloud also runs a hosted MCP server at `POST https://api.fallow.cloud/mcp` (Bearer read-only or live API key). It serves production data with no local install, and has tools that `fallow-mcp` does not have, such as `get_file_context`, `verify_deployment`, and `list_errors`. Details: [references/mcp.md](references/mcp.md#hosted-fallow-cloud-mcp-server).
+
 Full tool catalogue, resource catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
 
 ## References
