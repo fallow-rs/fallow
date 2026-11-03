@@ -266,6 +266,29 @@ export const changedRangesFromDiff = (diff) => {
 const findingInSpan = (finding, path, start, end, slack) =>
   finding.path === path && finding.line >= start - slack && finding.line <= end + slack;
 
+const SCRIPT_ELEMENT_KIND = "script-element";
+const SCRIPT_ELEMENT_EVIDENCE = "HTMLScriptElement.";
+const SCRIPT_ELEMENT_WINDOW = 60;
+
+/**
+ * The dataset anchors a script element sink on its `createElement` line, but
+ * fallow reports the later `src` or `text` assignment. A script element
+ * candidate therefore joins the nearest script element site above it in the
+ * same file, within a fixed window.
+ */
+const isScriptElementSink = (finding, site, sites) => {
+  if (site.kind !== SCRIPT_ELEMENT_KIND || finding.path !== site.file) return false;
+  if (!finding.evidence?.includes(SCRIPT_ELEMENT_EVIDENCE)) return false;
+  if (finding.line < site.line || finding.line > site.line + SCRIPT_ELEMENT_WINDOW) return false;
+  return !sites.some(
+    (other) =>
+      other.kind === SCRIPT_ELEMENT_KIND &&
+      other.file === site.file &&
+      other.line > site.line &&
+      other.line <= finding.line,
+  );
+};
+
 /**
  * Joins fallow candidates to the classified sink sites of one repository.
  * `sinks` holds the injection-group sites (the data-flow classification),
@@ -278,8 +301,10 @@ export const matchPrecision = ({ repo, sites, labels, findings, slack = 0, isExc
   );
   const matched = new Set();
   const joined = sites.map((site) => {
-    const matches = inScope.filter((finding) =>
-      findingInSpan(finding, site.file, site.line, site.endLine ?? site.line, slack),
+    const matches = inScope.filter(
+      (finding) =>
+        findingInSpan(finding, site.file, site.line, site.endLine ?? site.line, slack) ||
+        isScriptElementSink(finding, site, sites),
     );
     for (const match of matches) {
       matched.add(match);
