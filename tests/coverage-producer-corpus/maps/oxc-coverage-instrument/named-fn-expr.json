@@ -115,7 +115,7 @@
     },
     "fnMap": {
       "0": {
-        "name": "gamma",
+        "name": "namedGamma",
         "line": 1,
         "decl": {
           "start": {
@@ -139,7 +139,7 @@
         }
       },
       "1": {
-        "name": "delta",
+        "name": "namedDelta",
         "line": 8,
         "decl": {
           "start": {

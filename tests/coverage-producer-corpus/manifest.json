@@ -5,7 +5,7 @@
     "platform": "linux-x64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "9a38a745d7fda23fb0ff5e78a4e5c5ba9ee70413e76aabca8bc9ae3334c3d4a5"
+    "producers_lock_sha256": "54aa629f675c9921902c63ca0e304141c97df9bdb50be57b5fb22e4490e26bf2"
   },
   "invariants": [
     {
@@ -88,7 +88,7 @@
     {
       "id": "oxc-coverage-instrument",
       "package": "oxc-coverage-instrument",
-      "version": "0.14.0",
+      "version": "0.18.0",
       "profile": "default",
       "driver": "producers/drivers/oxc-coverage-instrument.mjs",
       "consumers": "oxc-coverage-instrument vitest integration",
@@ -98,7 +98,7 @@
     {
       "id": "oxc-coverage-instrument-istanbul",
       "package": "oxc-coverage-instrument",
-      "version": "0.14.0",
+      "version": "0.18.0",
       "profile": "compat:istanbul",
       "driver": "producers/drivers/oxc-coverage-instrument-istanbul.mjs",
       "consumers": "oxc-coverage-instrument callers asking for Istanbul-shaped output",
@@ -321,13 +321,13 @@
       "producer": "oxc-coverage-instrument",
       "fixture": "named-fn-expr",
       "file": "maps/oxc-coverage-instrument/named-fn-expr.json",
-      "sha256": "6079f1cca53f55d9c26357d8c0a74faf57fe2fc479879e6ad66526e9473ee4a1"
+      "sha256": "e08ca79c1e9a44d590f3c779987986c833bd45754566ded3029fcaa0c657555f"
     },
     {
       "producer": "oxc-coverage-instrument",
       "fixture": "curried-arrow",
       "file": "maps/oxc-coverage-instrument/curried-arrow.json",
-      "sha256": "e78ce7d6b7628ede3d0dd47500f38b296772ce1f51fee79a0b94e9e85fa9aa69"
+      "sha256": "70b6ae0c815952cf503b3bb7062a7ca127e680dd21f04b3dc85c2c8dbc047686"
     },
     {
       "producer": "oxc-coverage-instrument",
@@ -369,13 +369,13 @@
       "producer": "oxc-coverage-instrument-istanbul",
       "fixture": "curried-arrow",
       "file": "maps/oxc-coverage-instrument-istanbul/curried-arrow.json",
-      "sha256": "6118d4f5d1f1eba7290194f4c7c56141ea22a55dbd7c9f81589e2d63191c7e90"
+      "sha256": "4fb8e77ff3c08e5e0a6b087f98f6d6f07cd74e2a1626f884d23dc22509fd0af1"
     },
     {
       "producer": "oxc-coverage-instrument-istanbul",
       "fixture": "accessors",
       "file": "maps/oxc-coverage-instrument-istanbul/accessors.json",
-      "sha256": "39db3b8b7809d490c64daacfa3138bfd9d00853a7a32f717c454328751337cb9"
+      "sha256": "341f4f5fd7674e33d7be9de778c0c2d60fc051a6b7d79619bba1a3337c0bc98b"
     },
     {
       "producer": "oxc-coverage-instrument-istanbul",
@@ -393,7 +393,7 @@
       "producer": "oxc-coverage-instrument-istanbul",
       "fixture": "decorated",
       "file": "maps/oxc-coverage-instrument-istanbul/decorated.json",
-      "sha256": "9e9725f7a94031ab8849feacfe6e41012e0b19a08b94b70ab6d70e0135a1d827"
+      "sha256": "6e1652753e1236bd35cc3b6c3011495013e8b91c6cdcd2bc5027a947adba6874"
     }
   ],
   "census": [
@@ -840,15 +840,15 @@
           "name": "namedGamma",
           "line": 1,
           "col": 14,
-          "coverage_source": "estimated",
-          "rationale": "oxc-coverage-instrument 0.12.0 in its default profile names a named function expression after the binding (`gamma`) rather than after the function (`namedGamma`), which is what Fallow extracts. The compat:istanbul profile of the same version records `namedGamma` and resolves."
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
         },
         {
           "name": "namedDelta",
           "line": 8,
           "col": 14,
-          "coverage_source": "estimated",
-          "rationale": "oxc-coverage-instrument 0.12.0 in its default profile names a named function expression after the binding (`delta`) rather than after the function (`namedDelta`), which is what Fallow extracts. The compat:istanbul profile of the same version records `namedDelta` and resolves."
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
         }
       ]
     },
