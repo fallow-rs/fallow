@@ -937,6 +937,19 @@ test run.
 - The hook needs Node 22.15 or later. On an older Node, and in browser mode,
   a native `require` loads the original file, and the path stays in
   `unloaded_paths`. A static `import` of the file is the workaround.
+- The setup file also adds `--import` of
+  `runtime/node-subprocess-preload.mjs` to `NODE_OPTIONS` of the worker,
+  with the overlay path and the active mutant in the URL. So a Node process
+  that a test starts (`spawn`, `exec`, `execFile` or `fork`) loads the
+  instrumented files with the same mutant, as with `node:test`. The setup
+  file sets the value again before each test and removes the value of an
+  earlier run, so a worker with `isolate: false` gives each child the
+  current mutant. The adapter clears the integrity log of the overlay
+  before each run and reads it after the run, so a copy that matches more
+  than one planned file reports `overlay-incomplete`. The hits of a child
+  process do not count as coverage. Without the hook API (Node older than
+  22.15) and in browser mode, the value stays as it is and a child loads
+  the original files.
 
 ### `node:test` and `bun test`
 
