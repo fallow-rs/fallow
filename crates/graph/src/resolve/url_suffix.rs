@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::path_info::{extract_package_name, is_valid_package_name};
+use super::path_info::is_valid_package_name;
 use super::types::{ResolveContext, ResolveResult};
 use super::workspace_alias::resolve_failed_bare_package_specifier;
 
@@ -40,11 +40,14 @@ pub(super) fn strip_vite_asset_query(specifier: &str) -> Option<&str> {
 /// Classify a bare package subpath with a Vite asset query that the resolver
 /// could not resolve.
 ///
-/// The resolver strips the query, so an installed package means the file is
-/// really missing. When the package is not installed, the import cannot be
-/// checked, so it credits the package the same as the plain subpath does.
-/// An unresolved result keeps the full specifier, so the report and
-/// `ignoreUnresolvedImports` match the text in the source file.
+/// The workspace and alias fallbacks run first, the same as for the plain
+/// subpath, so a workspace package gets the same result with or without its
+/// `node_modules` link. The resolver strips the query, so an installed
+/// external package means the file is really missing. When the package is not
+/// installed, the import cannot be checked, so it credits the package the
+/// same as the plain subpath does. An unresolved result keeps the full
+/// specifier, so the report and `ignoreUnresolvedImports` match the text in
+/// the source file.
 pub(super) fn resolve_failed_bare_asset_query_specifier(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
@@ -53,8 +56,7 @@ pub(super) fn resolve_failed_bare_asset_query_specifier(
     style_context: bool,
     matches_tsconfig_path_alias: bool,
 ) -> ResolveResult {
-    if !is_valid_package_name(base) || is_package_installed(from_file, &extract_package_name(base))
-    {
+    if !is_valid_package_name(base) {
         return ResolveResult::Unresolvable(specifier.to_string());
     }
     match resolve_failed_bare_package_specifier(
@@ -65,6 +67,11 @@ pub(super) fn resolve_failed_bare_asset_query_specifier(
         matches_tsconfig_path_alias,
     ) {
         ResolveResult::Unresolvable(_) => ResolveResult::Unresolvable(specifier.to_string()),
+        ResolveResult::NpmPackage(package_name)
+            if is_package_installed(from_file, &package_name) =>
+        {
+            ResolveResult::Unresolvable(specifier.to_string())
+        }
         resolved => resolved,
     }
 }

@@ -1,4 +1,4 @@
-use super::common::create_config;
+use super::common::{create_config, create_config_with_cache};
 use std::path::Path;
 
 const PACKAGE_JSON: &str = r#"{"name":"vite-asset-queries","private":true,"dependencies":{"plain-pkg":"1.0.0","@scope/mapped-pkg":"1.0.0"},"devDependencies":{"vite":"*"}}"#;
@@ -137,4 +137,121 @@ fn unknown_query_on_an_uninstalled_package_stays_unresolved() {
         analyze(dir.path()).unresolved,
         vec!["plain-pkg/build/worker.min.mjs?custom".to_string()]
     );
+}
+
+/// Build a workspace project whose `ui` package exports its `dist` output,
+/// but has only source files. `link` adds the `node_modules` symlink that a
+/// package manager creates for the workspace package.
+fn workspace_project(link: bool) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("project");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"workspace-root","private":true,"workspaces":["apps/*","packages/*"]}"#,
+    );
+    write(
+        root,
+        "apps/web/package.json",
+        r#"{"name":"web","private":true,"dependencies":{"@org/ui":"workspace:*"},"devDependencies":{"vite":"*"}}"#,
+    );
+    write(
+        root,
+        "apps/web/src/index.ts",
+        "import url from '@org/ui/dist/worker.js?worker';\nconsole.log(url);\n",
+    );
+    write(
+        root,
+        "packages/ui/package.json",
+        r#"{"name":"@org/ui","version":"1.0.0","exports":{"./dist/*":"./dist/*"}}"#,
+    );
+    write(
+        root,
+        "packages/ui/tsconfig.json",
+        r#"{"compilerOptions":{"rootDir":"src","outDir":"dist"}}"#,
+    );
+    write(
+        root,
+        "packages/ui/src/worker.ts",
+        "self.onmessage = () => {};\n",
+    );
+    if link {
+        std::fs::create_dir_all(root.join("node_modules/@org")).expect("node_modules");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../../packages/ui", root.join("node_modules/@org/ui"))
+            .expect("symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(
+            root.join("packages/ui"),
+            root.join("node_modules/@org/ui"),
+        )
+        .expect("symlink");
+    }
+    dir
+}
+
+fn assert_workspace_source_is_credited(link: bool) {
+    let dir = workspace_project(link);
+    let mut config = create_config(dir.path().to_path_buf());
+    config.entry_patterns = vec!["apps/web/src/index.ts".to_string()];
+    let results = fallow_core::analyze(&config).expect("analysis");
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.display().to_string())
+        .collect();
+    assert!(
+        unused_files.is_empty(),
+        "the query import must credit the workspace source (link: {link}): {unused_files:?}"
+    );
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.specifier.as_str())
+        .collect();
+    assert!(unresolved.is_empty(), "{unresolved:?}");
+}
+
+#[test]
+fn query_import_of_an_unlinked_workspace_package_credits_its_source() {
+    assert_workspace_source_is_credited(false);
+}
+
+#[test]
+fn query_import_of_a_linked_workspace_package_credits_its_source() {
+    assert_workspace_source_is_credited(true);
+}
+
+#[test]
+fn install_after_a_cached_run_reports_a_missing_query_file() {
+    let temp = tempfile::tempdir().expect("temp");
+    let root = temp.path().join("project");
+    write(&root, "package.json", PACKAGE_JSON);
+    write(
+        &root,
+        "src/index.ts",
+        "import a from 'plain-pkg/build/missing.mjs?url';\nconsole.log(a);\n",
+    );
+    let mut config = create_config_with_cache(root.clone(), temp.path().join("cache"));
+    config.entry_patterns = vec!["src/index.ts".to_string()];
+    let before = fallow_core::analyze(&config).expect("cold analysis");
+    assert!(before.unresolved_imports.is_empty());
+
+    write(
+        &root,
+        "node_modules/plain-pkg/package.json",
+        r#"{"name":"plain-pkg","version":"1.0.0","main":"index.js"}"#,
+    );
+    write(
+        &root,
+        "node_modules/plain-pkg/index.js",
+        "module.exports = {};",
+    );
+    let after = fallow_core::analyze(&config).expect("analysis after install");
+    let unresolved: Vec<&str> = after
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.specifier.as_str())
+        .collect();
+    assert_eq!(unresolved, vec!["plain-pkg/build/missing.mjs?url"]);
 }
