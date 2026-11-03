@@ -325,11 +325,32 @@ const runChecks = (companion, source, oldVersion, env, log) => {
   }
 };
 
+/**
+ * The pin of `source-lock.json` when it is a descendant of `pin`. A sync to
+ * such a pin would roll the companion back to an older skill, for example
+ * when another sync published a later merge first.
+ */
+const newerPublishedPin = (git, repoRoot, companion, pin) => {
+  const published = JSON.parse(readFileSync(join(companion, SOURCE_LOCK), "utf8")).commit;
+  if (typeof published !== "string" || published === pin) {
+    return null;
+  }
+  return git.succeeds(repoRoot, "merge-base", "--is-ancestor", pin, published) ? published : null;
+};
+
 const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
   const companion = companionSkillsRoot({ env, repoRoot });
   checkCompanion(git, companion);
   checkPrerequisites(env, skipChecks);
   const pin = resolvePin(git, repoRoot, options.pin);
+  const newerPin = newerPublishedPin(git, repoRoot, companion, pin);
+  if (newerPin !== null) {
+    log(
+      `${PREFIX}: nothing to sync. The companion already publishes a newer commit ` +
+        `(${newerPin}), which contains ${pin}.`,
+    );
+    return 0;
+  }
   const source = checkoutPin(git, repoRoot, pin);
   try {
     const pairs = releasedSkillPairs(source, companion);
