@@ -1,17 +1,5 @@
-# zip and paste reach this sidecar only through the pinned candle-core 0.11.0.
-# Remove these entries when candle moves to zip 9 and drops paste.
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0367"
-reason = "candle-core reads .npz archives with ZipArchive but never calls extract(); the sidecar loads only safetensors."
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0368"
-reason = "candle-core reads .npz archives with ZipArchive but never calls extract(); the sidecar loads only safetensors."
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0369"
-reason = "candle-core reads .npz archives with ZipArchive but never calls extract(); the sidecar loads only safetensors."
+# paste reaches this sidecar only through the pinned candle-core and tokenizers.
+# Remove this entry when candle, gemm, and tokenizers drop paste.
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0436"

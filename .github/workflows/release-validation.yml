@@ -372,10 +372,7 @@ jobs:
           cargo audit \
             --file tools/similar-code-sidecar/Cargo.lock \
             --deny unmaintained \
-            --ignore RUSTSEC-2024-0436 \
-            --ignore RUSTSEC-2026-0367 \
-            --ignore RUSTSEC-2026-0368 \
-            --ignore RUSTSEC-2026-0369
+            --ignore RUSTSEC-2024-0436
           cargo deny \
             --manifest-path tools/similar-code-sidecar/Cargo.toml \
             check licenses

@@ -774,7 +774,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(sidecarAudit[1], /--deny unmaintained/u);
   assert.deepEqual(
     [...sidecarAudit[1].matchAll(/--ignore (\S+)/gu)].map((match) => match[1]),
-    ["RUSTSEC-2024-0436", "RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"],
+    ["RUSTSEC-2024-0436"],
   );
   assert.match(
     sidecarAuditJob,

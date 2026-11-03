@@ -22,8 +22,8 @@ const PASTE_REVERSE_EDGES = new Set([
   "paste v1.0.15 -> gemm-f32 v0.19.0",
   "paste v1.0.15 -> gemm-f64 v0.19.0",
   "paste v1.0.15 -> pulp v0.22.3",
-  "paste v1.0.15 -> tokenizers v0.22.2",
-  "gemm v0.19.0 -> candle-core v0.11.0",
+  "paste v1.0.15 -> tokenizers v0.23.2",
+  "gemm v0.19.0 -> candle-core v0.11.1",
   "gemm-c32 v0.19.0 -> gemm v0.19.0",
   "gemm-c64 v0.19.0 -> gemm v0.19.0",
   "gemm-common v0.19.0 -> gemm v0.19.0",
@@ -37,38 +37,23 @@ const PASTE_REVERSE_EDGES = new Set([
   "gemm-f32 v0.19.0 -> gemm-f16 v0.19.0",
   "gemm-f64 v0.19.0 -> gemm v0.19.0",
   "pulp v0.22.3 -> gemm-common v0.19.0",
-  "tokenizers v0.22.2 -> candle-core v0.11.0",
-  `tokenizers v0.22.2 -> ${SIDECAR_PACKAGE}`,
-  "candle-core v0.11.0 -> candle-nn v0.11.0",
-  "candle-core v0.11.0 -> candle-transformers v0.11.0",
-  `candle-core v0.11.0 -> ${SIDECAR_PACKAGE}`,
-  "candle-nn v0.11.0 -> candle-transformers v0.11.0",
-  `candle-nn v0.11.0 -> ${SIDECAR_PACKAGE}`,
-  `candle-transformers v0.11.0 -> ${SIDECAR_PACKAGE}`,
-]);
-const ZIP_REVERSE_EDGES = new Set([
-  "zip v8.6.0 -> candle-core v0.11.0",
-  "candle-core v0.11.0 -> candle-nn v0.11.0",
-  "candle-core v0.11.0 -> candle-transformers v0.11.0",
-  `candle-core v0.11.0 -> ${SIDECAR_PACKAGE}`,
-  "candle-nn v0.11.0 -> candle-transformers v0.11.0",
-  `candle-nn v0.11.0 -> ${SIDECAR_PACKAGE}`,
-  `candle-transformers v0.11.0 -> ${SIDECAR_PACKAGE}`,
+  "tokenizers v0.23.2 -> candle-core v0.11.1",
+  `tokenizers v0.23.2 -> ${SIDECAR_PACKAGE}`,
+  "candle-core v0.11.1 -> candle-nn v0.11.1",
+  "candle-core v0.11.1 -> candle-transformers v0.11.1",
+  `candle-core v0.11.1 -> ${SIDECAR_PACKAGE}`,
+  "candle-nn v0.11.1 -> candle-transformers v0.11.1",
+  `candle-nn v0.11.1 -> ${SIDECAR_PACKAGE}`,
+  `candle-transformers v0.11.1 -> ${SIDECAR_PACKAGE}`,
 ]);
 
 /** Every crate that owns an accepted advisory, with its exact version and reverse edges. */
 const ACCEPTED_PACKAGES = {
   paste: { version: "1.0.15", reverseEdges: PASTE_REVERSE_EDGES },
-  zip: { version: "8.6.0", reverseEdges: ZIP_REVERSE_EDGES },
 };
 
 /** The only advisories that the release audit may ignore for the similar-code sidecar. */
-const ACCEPTED_ADVISORIES = [
-  { id: "RUSTSEC-2024-0436", package: "paste", kind: "unmaintained" },
-  { id: "RUSTSEC-2026-0367", package: "zip", kind: "vulnerability" },
-  { id: "RUSTSEC-2026-0368", package: "zip", kind: "vulnerability" },
-  { id: "RUSTSEC-2026-0369", package: "zip", kind: "vulnerability" },
-];
+const ACCEPTED_ADVISORIES = [{ id: "RUSTSEC-2024-0436", package: "paste", kind: "unmaintained" }];
 export const ACCEPTED_ADVISORY_IDS = ACCEPTED_ADVISORIES.map(({ id }) => id);
 
 const fail = (message) => {
@@ -121,7 +106,7 @@ const PASTE_RULES = [
         2,
         (chains) =>
           chains.some((chain) => chain.includes("gemm 0.19.0")) &&
-          chains.some((chain) => chain.includes("tokenizers 0.22.2")),
+          chains.some((chain) => chain.includes("tokenizers 0.23.2")),
       ),
     message: () => "similar-code audit allowlist must name both approved paste chains",
   },
@@ -150,52 +135,7 @@ const PASTE_RULES = [
   },
 ];
 
-const ZIP_RULES = [
-  {
-    test: (advisory) =>
-      hasChains(advisory, 3, (chains) =>
-        chains.every((chain) => chain.endsWith("candle-core 0.11.0 -> zip 8.6.0")),
-      ),
-    message: ({ id }) =>
-      `similar-code audit allowlist entry ${id} must name the three approved zip chains`,
-  },
-  {
-    test: checkedOn("2026-10-17"),
-    message: ({ id }) => `similar-code audit evidence date for ${id} is missing or changed`,
-  },
-  {
-    test: (advisory) => pinsRevisions(evidenceOf(advisory, "candle_release")),
-    message: ({ id }) =>
-      `zip audit evidence for ${id} must pin release and current official source revisions`,
-  },
-  {
-    test: (advisory) => {
-      const candle = evidenceOf(advisory, "candle_release");
-      return candle.version === "0.11.0" && candle.zip_requirement === "8.6.0";
-    },
-    message: ({ id }) => `zip audit evidence for ${id} must record the candle-core zip requirement`,
-  },
-  {
-    test: (advisory) => {
-      const zip = evidenceOf(advisory, "zip_upstream");
-      return (
-        zip?.fixed_in === ">=9.0.0" &&
-        /^9\.\d+\.\d+$/u.test(zip.latest_release) &&
-        DATE_PATTERN.test(zip.released_on)
-      );
-    },
-    message: ({ id }) =>
-      `zip audit evidence for ${id} must record the fixed zip release and its date`,
-  },
-  {
-    test: (advisory) =>
-      ["candle_release", "zip_upstream"].every((key) => pinsCratesIo(evidenceOf(advisory, key))),
-    message: ({ id }) =>
-      `zip audit evidence for ${id} must pin the latest crates.io release checksum`,
-  },
-];
-
-const PACKAGE_RULES = { paste: PASTE_RULES, zip: ZIP_RULES };
+const PACKAGE_RULES = { paste: PASTE_RULES };
 
 const validateAdvisory = (advisory, expected) => {
   for (const rule of [...COMMON_RULES, ...PACKAGE_RULES[expected.package]]) {
