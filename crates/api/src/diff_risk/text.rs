@@ -34,6 +34,14 @@ const TEST_CASE_MEMBERS: &[&str] = &[
     "fixme",
     "skipIf",
     "runIf",
+    // `@effect/vitest`: `it.effect`, `it.live`, `it.scoped`, `it.scopedLive`
+    // and the property test `it.prop`. `it.layer` and `it.flakyTest` do not
+    // register a test, so they stay out.
+    "effect",
+    "live",
+    "scoped",
+    "scopedLive",
+    "prop",
 ];
 /// Members of `expect` that are an assertion (`expect.soft(x)`).
 const EXPECT_ASSERTION_MEMBERS: &[&str] = &["soft", "poll"];
@@ -660,6 +668,18 @@ mod tests {
     fn test_case_count_counts_cases_with_modifiers_only() {
         let src = "describe('s', () => {\n  it('a', f);\n  it.skip('b', f);\n  test.each([1])('c', f);\n  test.describe('d', f);\n  submit(1);\n  // it('commented', f);\n});\n";
         assert_eq!(test_case_count(src), 3);
+    }
+
+    #[test]
+    fn test_case_count_counts_effect_vitest_members() {
+        let src = "it.effect('a', f);\nit.live('b', f);\nit.scoped('c', f);\nit.scopedLive('d', f);\nit.prop('e', arbs, f);\nit.effect.skip('f', f);\nit.effect.each([1])('g', f);\nit.effect.prop('h', arbs, f);\nit.layer(Live)('i', f);\nit.flakyTest(eff);\n";
+        assert_eq!(test_case_count(src), 8);
+    }
+
+    #[test]
+    fn test_case_count_needs_a_test_root_for_effect_vitest_members() {
+        let src = "foo.live('a', f);\ndescribe.scoped('b', f);\nlayer.effect('c', f);\n";
+        assert_eq!(test_case_count(src), 0);
     }
 
     #[test]
