@@ -331,9 +331,23 @@ const runChecks = (companion, source, oldVersion, env, log) => {
  * when another sync published a later merge first.
  */
 const newerPublishedPin = (git, repoRoot, companion, pin) => {
-  const published = JSON.parse(readFileSync(join(companion, SOURCE_LOCK), "utf8")).commit;
+  let lock;
+  try {
+    lock = JSON.parse(readFileSync(join(companion, SOURCE_LOCK), "utf8"));
+  } catch {
+    throw new Refusal(`${companion}/${SOURCE_LOCK} is not valid JSON. Fix it, then run again.`);
+  }
+  const published = lock?.commit;
   if (typeof published !== "string" || published === pin) {
     return null;
+  }
+  // Without the published commit, the ancestry check below cannot tell an
+  // older pin from a newer one, so the sync could roll the companion back.
+  if (!git.succeeds(repoRoot, "rev-parse", "--verify", "--quiet", `${published}^{commit}`)) {
+    throw new Refusal(
+      `the published commit ${published} is not in ${repoRoot}. ` +
+        `Run git -C ${repoRoot} fetch --unshallow origin, or fetch that commit, then run again.`,
+    );
   }
   return git.succeeds(repoRoot, "merge-base", "--is-ancestor", pin, published) ? published : null;
 };
