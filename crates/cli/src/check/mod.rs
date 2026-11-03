@@ -9,7 +9,7 @@ use fallow_types::results::AnalysisResults;
 use crate::baseline::BaselineData;
 use crate::baseline_gate::LoadedBaselineStaleness;
 use crate::error::emit_error;
-use crate::exit_codes::gate_failed_exit_code;
+use crate::exit_codes::{exit_invalid_input, gate_failed_exit_code};
 use crate::load_config_for_analysis;
 use crate::process_clock::{self, ProcessSpan};
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
@@ -1628,7 +1628,7 @@ pub fn benchmark_dead_code_json(
         workspace_diagnostics: &result.workspace_diagnostics,
         json_style: crate::json_style::JsonStyle::Compact,
     })
-    .map_err(|_| ExitCode::from(2))?;
+    .map_err(|_| exit_invalid_input())?;
     Ok((result.results.total_issues(), rendered.len()))
 }
 

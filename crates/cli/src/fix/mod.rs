@@ -18,6 +18,7 @@ mod plan;
 
 pub use fallow_config::is_config_fixable;
 
+use crate::exit_codes::exit_invalid_input;
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
 /// Compose the hard error for a `fix` run whose type-aware pass could not run.
@@ -289,7 +290,7 @@ fn finalize_fix_run(
     }
 
     if had_write_error {
-        ExitCode::from(2)
+        exit_invalid_input()
     } else {
         ExitCode::SUCCESS
     }
@@ -402,12 +403,12 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
                 Ok(json) => crate::report::sink::stdoutln!("{json}"),
                 Err(e) => {
                     eprintln!("Error: failed to serialize fix output: {e}");
-                    return ExitCode::from(2);
+                    return exit_invalid_input();
                 }
             },
             Err(e) => {
                 eprintln!("Error: failed to serialize fix output: {e}");
-                return ExitCode::from(2);
+                return exit_invalid_input();
             }
         }
     } else if matches!(opts.output, OutputFormat::GithubAnnotations) {
@@ -732,12 +733,12 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
                 Ok(json) => crate::report::sink::stdoutln!("{json}"),
                 Err(e) => {
                     eprintln!("Error: failed to serialize fix output: {e}");
-                    return Err(ExitCode::from(2));
+                    return Err(exit_invalid_input());
                 }
             },
             Err(e) => {
                 eprintln!("Error: failed to serialize fix output: {e}");
-                return Err(ExitCode::from(2));
+                return Err(exit_invalid_input());
             }
         }
     } else if matches!(input.output, OutputFormat::GithubAnnotations) {

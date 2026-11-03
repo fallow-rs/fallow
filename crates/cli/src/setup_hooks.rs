@@ -193,7 +193,7 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
         Ok(plan) => plan,
         Err(msg) => {
             eprintln!("{msg}");
-            return ExitCode::from(2);
+            return crate::exit_codes::exit_invalid_input();
         }
     };
 
@@ -201,14 +201,14 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
         eprintln!(
             "No .claude/, AGENTS.md, or .codex/ found; pass --agent claude or --agent codex to force a target."
         );
-        return ExitCode::from(2);
+        return crate::exit_codes::exit_invalid_input();
     }
 
     let report = match plan.execute(opts, mode) {
         Ok(report) => report,
         Err(msg) => {
             eprintln!("{msg}");
-            return ExitCode::from(2);
+            return crate::exit_codes::exit_invalid_input();
         }
     };
 
@@ -1894,7 +1894,7 @@ mod tests {
         let mut o = opts(tmp.path());
         o.agent = Some(HookAgentArg::Claude);
         let code = run_setup_hooks(&o);
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, crate::exit_codes::exit_invalid_input());
         let kept = std::fs::read_to_string(&script_path).unwrap();
         assert_eq!(kept, "#!/bin/sh\necho user-owned\n");
     }
@@ -2829,7 +2829,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let mut o = opts(tmp.path());
         o.uninstall = true;
-        assert_eq!(run_setup_hooks(&o), ExitCode::from(2));
+        assert_eq!(run_setup_hooks(&o), crate::exit_codes::exit_invalid_input());
     }
 
     #[test]

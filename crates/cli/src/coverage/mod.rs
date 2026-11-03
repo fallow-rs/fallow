@@ -28,6 +28,7 @@ use fallow_types::serde_path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::exit_codes::exit_invalid_input;
 use crate::health::coverage as runtime_coverage;
 use crate::license;
 
@@ -584,7 +585,7 @@ fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonSt
         Ok(lock) => lock,
         Err(message) => {
             eprintln!("fallow coverage setup: {message}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
     let mut setup_state = load_setup_state(root);
@@ -608,7 +609,7 @@ fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonSt
     mark_setup_completed(&mut setup_state);
     if let Err(message) = save_setup_state(root, &setup_state) {
         eprintln!("fallow coverage setup: {message}");
-        return ExitCode::from(2);
+        return exit_invalid_input();
     }
 
     run_setup_final_step(root, &context, &recipe_path)
@@ -759,7 +760,7 @@ fn run_setup_json(
         }
         Err(err) => {
             eprintln!("fallow coverage setup: failed to write JSON output: {err}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -1228,7 +1229,7 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
         Ok(accepted) => accepted,
         Err(message) => {
             eprintln!("fallow coverage setup: {message}");
-            return Some(ExitCode::from(2));
+            return Some(exit_invalid_input());
         }
     };
     if !accepted {
@@ -1243,7 +1244,7 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
         Ok(None) => return None,
         Err(message) => {
             eprintln!("fallow coverage setup: {message}");
-            return Some(ExitCode::from(2));
+            return Some(exit_invalid_input());
         }
     };
 
@@ -1295,7 +1296,7 @@ fn handle_sidecar_step(
                 Ok(accepted) => accepted,
                 Err(message) => {
                     eprintln!("fallow coverage setup: {message}");
-                    return Some(ExitCode::from(2));
+                    return Some(exit_invalid_input());
                 }
             };
             if !accepted {
@@ -1867,7 +1868,7 @@ fn run_health_analysis(root: &Path, coverage_path: &Path) -> ExitCode {
         Ok(path) => path,
         Err(err) => {
             eprintln!("fallow coverage setup: failed to resolve current executable: {err}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
 
@@ -1882,13 +1883,13 @@ fn run_health_analysis(root: &Path, coverage_path: &Path) -> ExitCode {
         Ok(status) => status,
         Err(err) => {
             eprintln!("fallow coverage setup: failed to run health analysis: {err}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
 
     match status.code() {
         Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(2)),
-        None => ExitCode::from(2),
+        None => exit_invalid_input(),
     }
 }
 

@@ -1527,7 +1527,7 @@ mod tests {
         let code = validate_dupes_flag_combination(&opts)
             .expect_err("--top with --group-by must be refused");
 
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, crate::exit_codes::exit_invalid_input());
         assert!(
             TOP_WITH_GROUP_BY_MESSAGE.contains("--top")
                 && TOP_WITH_GROUP_BY_MESSAGE.contains("--group-by"),

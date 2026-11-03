@@ -5,9 +5,26 @@
 //! manifest on these constants so agents never receive a stale copied ladder.
 //!
 //! The codes 0, 1 and 2 belong to the shared report contract in
-//! `fallow-report-protocol`. The gate table below reads them from that crate.
+//! `fallow-report-protocol`. The CLI gets the codes 1 and 2 from
+//! [`exit_gate_failed`] and [`exit_invalid_input`]. A literal `1` or `2` exit
+//! code fails a test below.
 
-use fallow_output::exit_code::{EXIT_GATE_FAILED, EXIT_OK};
+use std::process::ExitCode;
+
+use fallow_output::exit_code::{EXIT_GATE_FAILED, EXIT_INVALID_INPUT, EXIT_OK};
+
+/// Exit code 1: an enforced gate failed. The run found problems, the tool did
+/// not fail.
+#[must_use]
+pub fn exit_gate_failed() -> ExitCode {
+    ExitCode::from(EXIT_GATE_FAILED)
+}
+
+/// Exit code 2: the input was not valid, or the run could not complete.
+#[must_use]
+pub fn exit_invalid_input() -> ExitCode {
+    ExitCode::from(EXIT_INVALID_INPUT)
+}
 
 pub const RESOURCE_UNAVAILABLE_EXIT_CODE: u8 = 3;
 pub const RUNTIME_COVERAGE_SIDECAR_EXIT_CODE: u8 = 4;
@@ -50,8 +67,8 @@ pub const fn gate_failed_exit_code(gate: fallow_output::GateName, failed: bool) 
 /// The process exit code for the verdicts of one run: the highest code of the
 /// gates that failed, or 0.
 #[must_use]
-pub fn run_exit_code(codes: impl IntoIterator<Item = u8>) -> std::process::ExitCode {
-    std::process::ExitCode::from(codes.into_iter().max().unwrap_or(EXIT_OK))
+pub fn run_exit_code(codes: impl IntoIterator<Item = u8>) -> ExitCode {
+    ExitCode::from(codes.into_iter().max().unwrap_or(EXIT_OK))
 }
 
 #[cfg(test)]
@@ -95,12 +112,42 @@ mod tests {
             gate_exit_code(GateName::ErrorSeverityFindings, GateStatus::Pass),
             EXIT_OK
         );
-        assert_eq!(run_exit_code([]), std::process::ExitCode::from(EXIT_OK));
+        assert_eq!(run_exit_code([]), ExitCode::from(EXIT_OK));
     }
 
     #[test]
     fn the_run_exits_with_the_highest_failed_code() {
-        assert_eq!(run_exit_code([0, 1, 0]), std::process::ExitCode::from(1));
-        assert_eq!(run_exit_code([]), std::process::ExitCode::SUCCESS);
+        assert_eq!(run_exit_code([0, 1, 0]), exit_gate_failed());
+        assert_eq!(run_exit_code([]), ExitCode::SUCCESS);
+        assert_eq!(exit_invalid_input(), ExitCode::from(EXIT_INVALID_INPUT));
+    }
+
+    /// The exit codes 1 and 2 have one definition in the report contract. A
+    /// literal copy in the CLI can drift from it without a failed build.
+    #[test]
+    fn cli_reads_contract_exit_codes_from_the_shared_constants() {
+        use crate::architecture_boundaries::{
+            read_source_without_line_comments, rust_sources_under,
+        };
+        let needles = [
+            concat!("ExitCode::from(", "1)"),
+            concat!("ExitCode::from(", "2)"),
+        ];
+        // The stub copies the exit codes of the external sidecar, not the
+        // report contract.
+        let stub_sidecar = "crates/cli/src/bin/stub_sidecar.rs";
+        let offenders: Vec<String> = rust_sources_under(["crates/cli/src", "crates/cli/tests"])
+            .into_iter()
+            .filter(|source_path| source_path != stub_sidecar)
+            .filter(|source_path| {
+                let source = read_source_without_line_comments(source_path)
+                    .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+                needles.iter().any(|needle| source.contains(needle))
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "use exit_gate_failed() or exit_invalid_input() from crate::exit_codes: {offenders:?}"
+        );
     }
 }

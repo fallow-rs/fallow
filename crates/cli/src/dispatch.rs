@@ -19,7 +19,6 @@ use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
 use crate::cli_production::{ProductionModes, resolve_production_modes};
 use crate::cli_startup::cli_global_baseline_flag;
 use crate::dupes::{DupesOptions, DupesOverrides};
-use crate::error::emit_error;
 use crate::health::HealthOptions;
 use crate::list::ListOptions;
 use crate::runtime_support::{AnalysisKind, LoadConfigArgs, load_config};
@@ -31,6 +30,7 @@ use crate::{
     report, resolve_audit_baseline_path, rule_pack, security, setup_hooks, similar_code_cli,
     suppressions, telemetry, trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
 };
+use crate::{error::emit_error, exit_codes::exit_invalid_input};
 
 #[path = "dispatch_inspect.rs"]
 mod inspect_dispatch;
@@ -1457,7 +1457,7 @@ fn dispatch_audit_cache_command(
                     if report.skipped == 0 {
                         ExitCode::SUCCESS
                     } else {
-                        ExitCode::from(2)
+                        exit_invalid_input()
                     }
                 }
                 Err(error) => emit_error(

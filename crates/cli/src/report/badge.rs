@@ -1,3 +1,4 @@
+use crate::exit_codes::exit_invalid_input;
 /// Shields.io-compatible flat SVG badge generation.
 ///
 /// Generates self-contained SVG badges with embedded Verdana 11px character
@@ -221,7 +222,7 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
 pub fn print_health_badge(report: &HealthReport) -> ExitCode {
     let Some(ref score) = report.health_score else {
         eprintln!("Error: badge format requires --score (run `fallow health --format badge`)");
-        return ExitCode::from(2);
+        return exit_invalid_input();
     };
 
     let rounded = score.score as u32;

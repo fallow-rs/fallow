@@ -996,6 +996,7 @@ fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOption
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::exit_gate_failed;
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
     use std::path::PathBuf;
@@ -1194,7 +1195,7 @@ mod tests {
     #[test]
     fn plain_health_with_findings_fails() {
         let result = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(87.5, "A")));
-        assert_eq!(gate_exit(&result, None, None, false), ExitCode::from(1));
+        assert_eq!(gate_exit(&result, None, None, false), exit_gate_failed());
     }
 
     #[test]
@@ -1226,7 +1227,7 @@ mod tests {
         let result = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(50.0, "D")));
         assert_eq!(
             gate_exit(&result, Some(80.0), None, false),
-            ExitCode::from(1)
+            exit_gate_failed()
         );
     }
 
@@ -1244,7 +1245,7 @@ mod tests {
         );
         assert_eq!(
             gate_exit(&with_critical, None, Some(FindingSeverity::Critical), false),
-            ExitCode::from(1),
+            exit_gate_failed(),
         );
     }
 
@@ -1263,7 +1264,7 @@ mod tests {
                 Some(FindingSeverity::Critical),
                 false
             ),
-            ExitCode::from(1),
+            exit_gate_failed(),
         );
         let critical = fx_gate_result(vec![critical_finding()], Some(fx_health_score(87.5, "A")));
         assert_eq!(
@@ -1273,7 +1274,7 @@ mod tests {
                 Some(FindingSeverity::Critical),
                 false
             ),
-            ExitCode::from(1),
+            exit_gate_failed(),
         );
     }
 
@@ -1291,7 +1292,7 @@ mod tests {
         let result = fx_low_traffic_runtime_result();
         assert_eq!(
             gate_exit(&result, Some(0.0), None, false),
-            ExitCode::from(1)
+            exit_gate_failed()
         );
         assert_eq!(gate_exit(&result, None, None, true), ExitCode::SUCCESS);
     }
@@ -1368,7 +1369,7 @@ mod tests {
                     exit_reason: true,
                 },
             ),
-            ExitCode::from(1),
+            exit_gate_failed(),
         );
     }
 
@@ -1401,8 +1402,8 @@ mod tests {
     fn a_failed_type_aware_completeness_gate_fails_the_health_print() {
         let mut result = fx_gate_result(vec![], Some(fx_health_score(100.0, "A")));
         result.type_aware_meta = Some(incomplete_required_type_aware_meta());
-        assert_eq!(gate_exit(&result, None, None, false), ExitCode::from(1));
-        assert_eq!(gate_exit(&result, None, None, true), ExitCode::from(1));
+        assert_eq!(gate_exit(&result, None, None, false), exit_gate_failed());
+        assert_eq!(gate_exit(&result, None, None, true), exit_gate_failed());
 
         let options = HealthPrintOptions {
             quiet: true,

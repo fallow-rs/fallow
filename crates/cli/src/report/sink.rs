@@ -21,6 +21,7 @@
 //! stdout output without an error. The sink keeps any other stdout write error,
 //! and [`finish_stdout`] changes it into exit code 2 at the end of the run.
 
+use crate::exit_codes::exit_invalid_input;
 use std::fmt;
 use std::io::{self, BufWriter, Write};
 use std::sync::Mutex;
@@ -212,7 +213,7 @@ pub fn finish_stdout(code: std::process::ExitCode) -> std::process::ExitCode {
     };
     drop(inner);
     eprintln!("Error: failed to write the report to stdout: {error}");
-    std::process::ExitCode::from(2)
+    exit_invalid_input()
 }
 
 /// Write a line of report content to the sink. Drop-in replacement for

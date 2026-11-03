@@ -22,6 +22,7 @@ use fallow_output::BaselineMode;
 use crate::combined::{CombinedOptions, CombinedResults, collect_combined_results};
 use fallow_engine::shell_quote::shell_quote;
 
+use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 use crate::report;
 
 /// The most removed keys that the human report lists for one file.
@@ -495,14 +496,14 @@ fn exit_code(outcomes: &[FileOutcome], check: bool) -> ExitCode {
         .iter()
         .any(|outcome| matches!(outcome.status, Status::Refused | Status::Error))
     {
-        return ExitCode::from(2);
+        return exit_invalid_input();
     }
     if check
         && outcomes
             .iter()
             .any(|outcome| outcome.status == Status::WouldPrune)
     {
-        return ExitCode::from(1);
+        return exit_gate_failed();
     }
     ExitCode::SUCCESS
 }

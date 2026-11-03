@@ -3,95 +3,86 @@
 //! A gate is a rule that can fail a run. Each fallow tool keys these values by
 //! its own gate names.
 
+use std::borrow::Borrow;
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 /// What a gate concluded on this run.
 ///
-/// Four-valued rather than a boolean because audit's verdict has a warn tier
-/// (`crates/cli/src/cli_report.rs` maps it onto three conclusions) and because
-/// a gate can stand down without passing. Widening a published boolean later
-/// would retype a required field and bump every carrying envelope, so the width
-/// is decided here.
+/// The status has four values, not two. A verdict can have a warn tier that
+/// does not fail the run, and a gate can stand down without a pass. A change
+/// from a boolean to a wider type later would change the type of a required
+/// member and the version of each envelope that carries it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum GateStatus {
     /// The gate ran and its condition did not hold.
     Pass,
-    /// The gate ran and reached a warn tier that does not fail the run. Only
-    /// `audit-verdict` can report this today.
+    /// The gate ran and reached a warn tier that does not fail the run. Only a
+    /// gate with a warn tier reports this value.
     Warn,
     /// The gate ran and its condition held.
     Fail,
-    /// The gate could not judge this run and deliberately stood down: a
-    /// change-scoped baseline comparison, `health --report-only`, or a security
-    /// advisory shadowed by a configured gate. Distinct from `pass`, which
-    /// asserts the condition was evaluated and did not hold.
+    /// The gate could not judge this run and stood down on purpose. For
+    /// example, the run was told never to fail, or a different gate decides
+    /// the run. This is not `pass`: `pass` says that the gate evaluated the
+    /// condition and the condition did not hold.
     Skipped,
 }
 
 /// One gate's verdict on one run.
 ///
-/// `status` and `enforced` answer different questions and legitimately
-/// disagree. `status` is what the rule concluded; `enforced` is whether a
-/// `fail` from this gate would make the run exit non-zero. A
-/// `health --report-only` run is an explicit request never to fail, so a
-/// failing gate there reports `status: fail` with `enforced: false`, and a
-/// stale-baseline verdict published without `--fail-on-stale-baseline` reports
-/// the same pair.
+/// `status` and `enforced` answer different questions, and they can disagree.
+/// `status` is what the rule concluded. `enforced` tells if a `fail` from this
+/// gate makes the run exit non-zero. A run that was told never to fail reports
+/// a failed gate as `status: fail` with `enforced: false`.
 ///
 /// **A gate fails the build when `status` is `fail` AND `enforced` is true.**
-/// Neither member decides it alone: `enforced` is true on every armed gate,
-/// including the ones that passed, so gating on it by itself fails every run
-/// that armed anything. Read `status` on its own to decide what to say, and
-/// remember that `warn` and `skipped` are neither a pass nor a failure.
+/// One member alone does not decide it. `enforced` is true on every armed
+/// gate, also on a gate that passed. Thus a gate rule on `enforced` alone
+/// fails every run that armed a gate. Read `status` alone to decide what to
+/// say. `warn` and `skipped` are not a pass and not a failure.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GateOutcome {
     /// What the rule concluded.
     pub status: GateStatus,
     /// True when a `fail` from this gate makes the run exit non-zero. False
-    /// when the verdict is published for information only: the gate was never
-    /// armed, the run was told never to fail, or the combined machine formats
-    /// exit 0 for the gate (bare `fallow` without `--fail-on-issues`).
+    /// when the tool publishes the verdict for information only: no flag or
+    /// config armed the gate, the run was told never to fail, or the output
+    /// format exits 0 for the gate.
     pub enforced: bool,
-    /// The measured value the gate compared, when there is one: the duplication
-    /// percentage, the health score, the number of findings at or above the
-    /// severity floor, the number of `error` findings of `health-findings` and
-    /// of `error-severity-findings`, or
-    /// the number of files in `files`. Whole numbers are
-    /// carried as JSON numbers, so a count of three reads as `3.0`. Absent for
-    /// gates that compare no number.
+    /// The measured value that the gate compared, when there is one: for
+    /// example a percentage, a score, a number of findings, or the number of
+    /// files in `files`. A whole number is a JSON number, so a count of three
+    /// reads as `3.0`. Absent for a gate that compares no number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed: Option<f64>,
-    /// The configured limit `observed` was compared against, when there is one.
-    /// Absent for gates that compare no number.
+    /// The configured limit that the gate compared `observed` against, when
+    /// there is one. Absent for a gate that compares no number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f64>,
     /// How the limit was spelled, for a gate whose `threshold` number does not
-    /// carry its own unit. `health-min-severity` sets it to the severity floor
-    /// (`moderate`, `high` or `critical`); `health-findings` and
-    /// `error-severity-findings` set it to `error`, the rule severity they
-    /// count; `regression` sets it to the
-    /// tolerance as the user wrote it (`"50%"` or `"5"`), because `threshold`
-    /// there is the allowance in issues and the percentage would otherwise be
-    /// unrecoverable on the grouped envelope, which carries no `regression`
-    /// object. Absent for gates whose numbers speak for themselves.
+    /// carry its unit. Examples are a severity floor such as `high`, the rule
+    /// severity that the gate counts such as `error`, or a tolerance as the
+    /// user wrote it, such as `"50%"`. Each gate name documents its label.
+    /// Absent for a gate whose numbers have a clear meaning without a label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_label: Option<String>,
-    /// The files the gate judged, for a gate that judges files rather than a
-    /// number. Only `parse-error` sets it: one item per file that did not
-    /// parse cleanly, sorted by path. Absent when the list is empty.
+    /// The files that the gate judged, for a gate that judges files and not a
+    /// number. One item for each file, sorted by path. Absent when the list is
+    /// empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<GateFile>,
 }
 
-/// One file a file-judging gate names, with the reason the gate counted it.
+/// One file that a file-judging gate names, with the reason that the gate
+/// counted it.
 ///
-/// Today only `parse-error` emits it. The item carries the same facts as the
-/// `source-parse-degraded` entry in `workspace_diagnostics[]` for that file,
-/// so a consumer can act on the gate without a join. With `reason` set, the
-/// count and the parser outcome are placeholders.
+/// A gate that counts files that did not parse cleanly writes this item. When
+/// `reason` is set, `error_count` and `panicked` hold fixed values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GateFile {
@@ -99,7 +90,7 @@ pub struct GateFile {
     pub path: String,
     /// The number of parser errors for the file. `1` when `reason` is set.
     pub error_count: u32,
-    /// True when the parser stopped in the file instead of recovering, so the
+    /// True when the parser stopped in the file and did not recover, so the
     /// analysis saw only the part before the error. `true` when `reason` is set.
     pub panicked: bool,
     /// Why the file counts when it is not a parser error. Absent for a parser
@@ -108,13 +99,12 @@ pub struct GateFile {
     pub reason: Option<GateFileReason>,
 }
 
-/// Why a file counts for the `parse-error` gate, other than a parser error.
+/// Why a file counts for a parse gate, other than a parser error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum GateFileReason {
-    /// The file nests too deep to parse, so it was not parsed
-    /// (`source-nesting-too-deep`).
+    /// The file nests too deep to parse, so the tool did not parse it.
     NestingTooDeep,
 }
 
@@ -190,6 +180,76 @@ impl GateOutcome {
     #[must_use]
     pub const fn fails_run(&self) -> bool {
         self.enforced && matches!(self.status, GateStatus::Fail)
+    }
+}
+
+/// The verdict of every gate that a run evaluated, keyed by gate name.
+///
+/// Each tool defines its own gate names. The name of a gate is the JSON member
+/// name, and the members are in the order of the names. A tool never writes an
+/// empty object. When no gate ran, the member is absent.
+///
+/// The key set is OPEN. A name that a consumer does not recognize means "some
+/// gate", not an error.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename = "GateOutcomes"))]
+#[serde(transparent)]
+pub struct GateOutcomes<K: Ord>(BTreeMap<K, GateOutcome>);
+
+impl<K: Ord> Default for GateOutcomes<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: Ord> GateOutcomes<K> {
+    /// An empty set. [`Self::into_option`] makes it absent.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    /// Record the outcome of one gate. A previous entry for that name goes.
+    pub fn insert(&mut self, name: K, outcome: GateOutcome) {
+        self.0.insert(name, outcome);
+    }
+
+    /// Record the outcome of one gate when the gate ran.
+    pub fn insert_if(&mut self, name: K, outcome: Option<GateOutcome>) {
+        if let Some(outcome) = outcome {
+            self.0.insert(name, outcome);
+        }
+    }
+
+    /// Read the outcome of one gate.
+    #[must_use]
+    pub fn get<Q>(&self, name: &Q) -> Option<&GateOutcome>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.0.get(name)
+    }
+
+    /// Whether a gate of the set fails the run: its status is `fail` and it
+    /// is enforced.
+    #[must_use]
+    pub fn fails_run(&self) -> bool {
+        self.0.values().any(GateOutcome::fails_run)
+    }
+
+    /// Whether the set holds no gate.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Make an empty set `None`. This keeps the member absent on a run that
+    /// evaluated no gate.
+    #[must_use]
+    pub fn into_option(self) -> Option<Self> {
+        if self.0.is_empty() { None } else { Some(self) }
     }
 }
 

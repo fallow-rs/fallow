@@ -315,6 +315,7 @@ fn print_suppressions_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::exit_invalid_input;
 
     /// No explicit `--config`; static so the `&Option<PathBuf>` field borrows it.
     const NO_CONFIG: Option<PathBuf> = None;
@@ -367,7 +368,7 @@ mod tests {
         ] {
             assert_eq!(
                 run_suppressions(&suppressions_opts(&root, output)),
-                ExitCode::from(2),
+                exit_invalid_input(),
                 "format {output:?} should be rejected"
             );
         }

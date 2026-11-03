@@ -24,9 +24,9 @@ use crate::coverage::cloud_client::{
 use crate::coverage::cloud_rows;
 use crate::coverage::upload_common::parse_git_remote_to_project_id;
 use crate::coverage::upload_inventory::extension_supported;
-use crate::error::emit_error;
 use crate::health::HealthOptions;
 use crate::health::optimization_target::{StaticCost, optimization_target};
+use crate::{error::emit_error, exit_codes::exit_invalid_input};
 use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
@@ -203,12 +203,12 @@ pub fn benchmark_local_json(
     let report = result
         .report
         .runtime_coverage
-        .ok_or_else(|| ExitCode::from(2))?;
+        .ok_or_else(exit_invalid_input)?;
     let output =
-        runtime_json_output(&report, result.elapsed, false).map_err(|_| ExitCode::from(2))?;
+        runtime_json_output(&report, result.elapsed, false).map_err(|_| exit_invalid_input())?;
     let rendered = crate::json_style::JsonStyle::Compact
         .serialize(&output)
-        .map_err(|_| ExitCode::from(2))?;
+        .map_err(|_| exit_invalid_input())?;
     Ok((
         report.findings.len(),
         report.hot_paths.len(),
@@ -1749,7 +1749,7 @@ fn print_runtime_json(
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
     crate::report::emit_report_json(&output, "runtime coverage JSON", json_style)

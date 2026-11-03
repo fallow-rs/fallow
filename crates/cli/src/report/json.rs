@@ -1,4 +1,4 @@
-use crate::report::sink::outln;
+use crate::{exit_codes::exit_invalid_input, report::sink::outln};
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -53,7 +53,7 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
         }
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -133,7 +133,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
 
@@ -855,7 +855,7 @@ pub(super) fn print_health_json(
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -888,7 +888,7 @@ pub(super) fn print_grouped_health_json(
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -950,7 +950,7 @@ pub(super) fn print_duplication_json(
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -1020,7 +1020,7 @@ pub(super) fn print_grouped_duplication_json(
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped duplication report: {e}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }

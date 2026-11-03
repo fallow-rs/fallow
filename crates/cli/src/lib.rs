@@ -342,7 +342,7 @@ fn signal_test_helper() -> ExitCode {
         Ok(c) => c,
         Err(err) => {
             let _ = writeln!(std::io::stderr(), "spawn sleep failed: {err}");
-            return ExitCode::from(2);
+            return exit_codes::exit_invalid_input();
         }
     };
     let pid = child.id();
@@ -366,7 +366,7 @@ fn signal_test_helper() -> ExitCode {
 
 #[cfg(not(unix))]
 fn signal_test_helper() -> ExitCode {
-    ExitCode::from(2)
+    exit_codes::exit_invalid_input()
 }
 
 fn install_spawn_hooks() {
@@ -659,7 +659,7 @@ pub fn benchmark_inspect_file_evidence_bundle_json(
         Ok((child_call_count, rendered_bytes)) => {
             (ExitCode::SUCCESS, child_call_count, rendered_bytes)
         }
-        Err(_) => (ExitCode::from(2), 0, 0),
+        Err(_) => (exit_codes::exit_invalid_input(), 0, 0),
     }
 }
 
@@ -711,7 +711,7 @@ pub fn benchmark_security_survivors_json(
             unverdicted,
             rendered_bytes,
         ),
-        Err(_) => (ExitCode::from(2), 0, 0, 0, 0, 0),
+        Err(_) => (exit_codes::exit_invalid_input(), 0, 0, 0, 0, 0),
     }
 }
 
@@ -816,7 +816,7 @@ pub fn benchmark_recommend_json(root: &Path) -> (ExitCode, usize, usize, bool, u
             heterogeneous,
             rendered_bytes,
         ),
-        Err(_) => (ExitCode::from(2), 0, 0, false, 0),
+        Err(_) => (exit_codes::exit_invalid_input(), 0, 0, false, 0),
     }
 }
 
@@ -1237,10 +1237,10 @@ mod tests {
 
     use super::*;
     use crate::cli_args::TOP_LEVEL_AFTER_LONG_HELP;
-    use crate::cli_format::Format;
     use crate::dispatch::{
         architecture_issue_filters, check_issue_filters, type_aware_status_output,
     };
+    use crate::{cli_format::Format, exit_codes::exit_gate_failed};
 
     /// Validates that the CLI definition has no flag name collisions, missing
     /// fields, or other structural errors. Catches issues like a global alias
@@ -1915,7 +1915,7 @@ mod tests {
     #[test]
     fn emit_error_returns_given_exit_code() {
         let code = emit_error("test error", 2, fallow_config::OutputFormat::Human);
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, exit_codes::exit_invalid_input());
     }
 
     fn telemetry_run_for_mode(mode: telemetry::AnalysisMode) -> TelemetryRun {
@@ -1938,7 +1938,7 @@ mod tests {
         let run = telemetry_run_for_mode(telemetry::AnalysisMode::Static);
 
         assert_eq!(fallback_failure_reason_for(&run, ExitCode::SUCCESS), None);
-        assert_eq!(fallback_failure_reason_for(&run, ExitCode::from(1)), None);
+        assert_eq!(fallback_failure_reason_for(&run, exit_gate_failed()), None);
     }
 
     #[test]
@@ -1959,7 +1959,7 @@ mod tests {
             Some(telemetry::FailureReason::Auth),
         );
         assert_eq!(
-            fallback_failure_reason_for(&static_run, ExitCode::from(2)),
+            fallback_failure_reason_for(&static_run, exit_codes::exit_invalid_input()),
             Some(telemetry::FailureReason::Analysis),
         );
     }
