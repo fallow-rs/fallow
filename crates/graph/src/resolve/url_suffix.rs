@@ -118,6 +118,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn installed_package_is_found_in_an_ancestor_node_modules() {
         let dir = tempfile::tempdir().expect("project");
         let root = dir.path();

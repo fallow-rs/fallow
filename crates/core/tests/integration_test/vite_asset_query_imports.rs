@@ -140,9 +140,8 @@ fn unknown_query_on_an_uninstalled_package_stays_unresolved() {
 }
 
 /// Build a workspace project whose `ui` package exports its `dist` output,
-/// but has only source files. `link` adds the `node_modules` symlink that a
-/// package manager creates for the workspace package.
-fn workspace_project(link: bool) -> tempfile::TempDir {
+/// but has only source files.
+fn workspace_project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("project");
     let root = dir.path();
     write(
@@ -175,24 +174,11 @@ fn workspace_project(link: bool) -> tempfile::TempDir {
         "packages/ui/src/worker.ts",
         "self.onmessage = () => {};\n",
     );
-    if link {
-        std::fs::create_dir_all(root.join("node_modules/@org")).expect("node_modules");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("../../packages/ui", root.join("node_modules/@org/ui"))
-            .expect("symlink");
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(
-            root.join("packages/ui"),
-            root.join("node_modules/@org/ui"),
-        )
-        .expect("symlink");
-    }
     dir
 }
 
-fn assert_workspace_source_is_credited(link: bool) {
-    let dir = workspace_project(link);
-    let mut config = create_config(dir.path().to_path_buf());
+fn assert_workspace_source_is_credited(root: &Path) {
+    let mut config = create_config(root.to_path_buf());
     config.entry_patterns = vec!["apps/web/src/index.ts".to_string()];
     let results = fallow_core::analyze(&config).expect("analysis");
     let unused_files: Vec<String> = results
@@ -202,7 +188,7 @@ fn assert_workspace_source_is_credited(link: bool) {
         .collect();
     assert!(
         unused_files.is_empty(),
-        "the query import must credit the workspace source (link: {link}): {unused_files:?}"
+        "the query import must credit the workspace source: {unused_files:?}"
     );
     let unresolved: Vec<&str> = results
         .unresolved_imports
@@ -214,12 +200,22 @@ fn assert_workspace_source_is_credited(link: bool) {
 
 #[test]
 fn query_import_of_an_unlinked_workspace_package_credits_its_source() {
-    assert_workspace_source_is_credited(false);
+    let dir = workspace_project();
+    assert_workspace_source_is_credited(dir.path());
 }
 
+/// A package manager links a workspace package into `node_modules`. A
+/// directory symlink on the Windows runner needs extra privileges, so this
+/// case runs on Unix only.
+#[cfg(unix)]
 #[test]
 fn query_import_of_a_linked_workspace_package_credits_its_source() {
-    assert_workspace_source_is_credited(true);
+    let dir = workspace_project();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("node_modules/@org")).expect("node_modules");
+    std::os::unix::fs::symlink("../../packages/ui", root.join("node_modules/@org/ui"))
+        .expect("symlink");
+    assert_workspace_source_is_credited(root);
 }
 
 #[test]
