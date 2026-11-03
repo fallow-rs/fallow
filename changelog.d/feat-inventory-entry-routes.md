@@ -1,3 +1,0 @@
-### Added
-
-- **`fallow coverage upload-inventory --with-callers` uploads the entry routes that can reach each function.** The upload body (version 4) adds a `routes` array and a `routeIds` array per function. The `nextjs`, `remix`, `sveltekit` and `nuxt` plugins find the route files, and the CLI takes each route pattern from the file name, never from a request path. A route handler gives one route per exported HTTP method. Reach follows the runtime imports of the module graph, so it means "can reach", not "did reach". The upload keeps at most 500 routes and at most 50 route ids per function, lowers the per-function cap when the total would grow too large, and reports each cut in a `routeLimits` header and a warning.
