@@ -13,6 +13,11 @@ name: PGO Validate
 # lower than base, or when a PGO binary is larger than its base binary. This
 # compares the pull request with its own base build, which main cannot catch
 # one commit later.
+#
+# A dependency version bump almost never changes the PGO result, and each run
+# holds two macOS runners for more than an hour. So Cargo.lock is not a
+# trigger path, and the train job skips Dependabot Cargo branches. The weekly
+# schedule on main finds a dependency that breaks PGO before a release.
 on:
   pull_request:
     branches: [main]
@@ -26,8 +31,9 @@ on:
       - '.github/workflows/pgo-validate.yml'
       - '.github/workflows/release.yml'
       - 'Cargo.toml'
-      - 'Cargo.lock'
       - 'rust-toolchain.toml'
+  schedule:
+    - cron: '40 3 * * 0'
   workflow_dispatch:
 
 concurrency:
@@ -43,6 +49,7 @@ env:
 jobs:
   train:
     name: Train PGO profile (${{ matrix.target }})
+    if: ${{ !startsWith(github.head_ref, 'dependabot/cargo/') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     # The same runners and container as the pgo-profile job in release.yml.
