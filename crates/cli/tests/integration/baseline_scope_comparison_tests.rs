@@ -65,6 +65,15 @@ fn fix_one_entry(dir: &TempDir) {
     write(dir.path(), "src/lib.test.js", LIB_TEST_FIXED);
 }
 
+/// One shell word without its surrounding quotes. The test paths contain no
+/// inner quotes, so one layer of `'` or `"` is all the shell removes.
+fn unquote_shell_word(word: &str) -> &str {
+    ['\'', '"']
+        .into_iter()
+        .find_map(|quote| word.strip_prefix(quote)?.strip_suffix(quote))
+        .unwrap_or(word)
+}
+
 fn root_arg(dir: &TempDir) -> &str {
     dir.path().to_str().expect("temp path is UTF-8")
 }
@@ -216,7 +225,14 @@ fn the_command_in_the_gate_failure_removes_only_the_fixed_entry() {
         .nth(1)
         .and_then(|rest| rest.split(", or re-save").next())
         .unwrap_or_else(|| panic!("no remedy in {}", output.stderr));
-    let mut args: Vec<&str> = printed.split_whitespace().skip(1).collect();
+    // The remedy quotes the baseline path for the shell. Windows quotes every
+    // path with a drive colon, and a direct process call takes no shell, so
+    // the test removes that one layer of quotes as the shell would.
+    let mut args: Vec<&str> = printed
+        .split_whitespace()
+        .skip(1)
+        .map(unquote_shell_word)
+        .collect();
     args.extend_from_slice(&["--format", "json"]);
     let pruned = fallow(&dir, &args);
 
