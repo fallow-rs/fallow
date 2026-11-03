@@ -420,4 +420,22 @@ describe("DeadCodeTreeProvider", () => {
       "a -> b -> a",
     ]);
   });
+
+  it("keeps a stable category id when the issue count changes", () => {
+    const provider = new DeadCodeTreeProvider();
+    provider.update({ ...emptyCheck(), unused_files: [{ path: "a.ts", actions: [] }] });
+    const before = findCategory(provider.getChildren() as TestTreeItem[], "Unused Files (1)");
+
+    provider.update({
+      ...emptyCheck(),
+      unused_files: [
+        { path: "a.ts", actions: [] },
+        { path: "b.ts", actions: [] },
+      ],
+    });
+    const after = findCategory(provider.getChildren() as TestTreeItem[], "Unused Files (2)");
+
+    expect(before.id).toBeDefined();
+    expect(after.id).toBe(before.id);
+  });
 });

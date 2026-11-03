@@ -62,6 +62,8 @@ class SecurityGroupItem extends vscode.TreeItem {
     findings: ReadonlyArray<SecurityFindingItem>,
   ) {
     super(`${groupLabel} (${findings.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    // A stable id keeps the expansion state when a refresh changes the count in the label.
+    this.id = `securityGroup:${groupLabel}`;
     this.findings = findings;
     this.description = "security candidates to verify";
     this.tooltip = [CANDIDATE_TOOLTIP_PREFIX, "", `${groupLabel}: ${findings.length}`].join("\n");
