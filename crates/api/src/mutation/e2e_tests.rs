@@ -773,6 +773,30 @@ mod end_to_end {
         Some(dunce::canonicalize(package).expect("package path"))
     }
 
+    /// Node.js 26 removed `--experimental-transform-types`, so no flag loads
+    /// an enum there. A Node.js without the flag skips the test. This is not a
+    /// missing dependency, so `FALLOW_MUTATION_E2E_REQUIRED` does not apply.
+    #[expect(
+        clippy::print_stderr,
+        reason = "a skipped end-to-end test says why it did not run"
+    )]
+    fn node_has_transform_types() -> bool {
+        use crate::mutation::discovery::RuntimeKind;
+        let supported = crate::mutation::discovery::discover_runtime(None, &[RuntimeKind::Node])
+            .ok()
+            .and_then(|runtime| {
+                std::process::Command::new(runtime.path)
+                    .args(["--experimental-transform-types", "-e", ""])
+                    .output()
+                    .ok()
+            })
+            .is_some_and(|output| output.status.success());
+        if !supported {
+            eprintln!("skipped: this Node.js has no --experimental-transform-types");
+        }
+        supported
+    }
+
     /// Copies `files` of a companion fixture to a new committed repository.
     fn fixture_repository(fixture: &Path, files: &[&str]) -> (tempfile::TempDir, PathBuf) {
         let project = tempfile::tempdir().expect("dir");
@@ -989,6 +1013,9 @@ mod end_to_end {
     fn a_node_test_run_uses_the_module_flags_of_the_test_script() {
         use crate::mutation::discovery::RuntimeKind;
         if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        if !node_has_transform_types() {
             return;
         }
         let project = tempfile::tempdir().expect("dir");

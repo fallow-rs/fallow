@@ -51,7 +51,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts

@@ -13,7 +13,7 @@
 
 [tools]
 # Same major version as each `actions/setup-node` step in `ci.yml`.
-node = "22"
+node = "26"
 
 # Same version as the typos action that the CI `typos` job pins:
 # crate-ci/typos@512fc24f32f44ab01972217aaaf3dc86ec234d53
