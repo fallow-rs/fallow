@@ -406,7 +406,7 @@ test("similar-code sidecar links Accelerate only on macOS", () => {
   // Only candle-core gets the feature: that is the measured configuration.
   assert.match(
     macos,
-    /^candle = \{ package = "candle-core", version = "=0\.11\.0", features = \["accelerate"\] \}$/mu,
+    /^candle = \{ package = "candle-core", version = "=0\.11\.1", features = \["accelerate"\] \}$/mu,
   );
   assert.doesNotMatch(macos, /candle-nn|candle-transformers/u);
   for (const [name, lines] of sections) {
