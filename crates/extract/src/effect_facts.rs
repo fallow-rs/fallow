@@ -127,9 +127,11 @@ struct Collector<'s, 'a> {
     schema: SchemaShapes<'s, 'a>,
     /// `(local binding, export name)` for each export that names a binding.
     export_bindings: Vec<(String, String)>,
-    /// A default export without a binding: `export default Schema.Struct(...)`
-    /// or `export default class extends Schema.Class(...)`.
-    anonymous_default_schema: bool,
+    /// The shape of a default export without a binding:
+    /// `export default Schema.Struct(...)`,
+    /// `export default class extends Schema.Class(...)` or
+    /// `export default Imported.pipe(...)`.
+    anonymous_default_schema: Option<SchemaShape>,
 }
 
 impl<'s, 'a> Collector<'s, 'a> {
@@ -186,7 +188,7 @@ impl<'s, 'a> Collector<'s, 'a> {
             literal_tags: FxHashSet::default(),
             schema: SchemaShapes::new(semantic, imports),
             export_bindings,
-            anonymous_default_schema: false,
+            anonymous_default_schema: None,
         }
     }
 
@@ -209,8 +211,15 @@ impl<'s, 'a> Collector<'s, 'a> {
                 None => {}
             }
         }
-        if self.anonymous_default_schema {
-            schema_exports.push("default".to_string());
+        match self.anonymous_default_schema {
+            Some(SchemaShape::Known) => schema_exports.push("default".to_string()),
+            Some(SchemaShape::Derived(import_local)) => {
+                derived_schema_exports.push(EffectDerivedSchema {
+                    export_name: "default".to_string(),
+                    import_local,
+                });
+            }
+            None => {}
         }
         schema_exports.sort_unstable();
         schema_exports.dedup();
@@ -318,11 +327,11 @@ impl<'s, 'a> Collector<'s, 'a> {
                             self.schema.record(id.symbol_id(), &id.name, shape);
                         }
                     } else {
-                        self.anonymous_default_schema |= shape == Some(SchemaShape::Known);
+                        self.anonymous_default_schema = shape;
                     }
                     self.record_class_layers(class, true, known);
                 } else if let Some(expression) = export.declaration.as_expression() {
-                    self.anonymous_default_schema |= self.schema.is_schema_expression(expression);
+                    self.anonymous_default_schema = self.schema.expression_shape(expression);
                 }
             }
             _ => {}

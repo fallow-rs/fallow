@@ -6,15 +6,18 @@
 //!   the first member (`Schema.Struct(...)`, `Schema.String`), or a class
 //!   factory in a class heritage (`Schema.Class<X>("X")({...})`), or
 //! - a module-scope binding that is already a schema (`User.pipe(...)`), or
-//! - an imported binding (`Imported.pipe(...)`). The chain is then a derived
-//!   schema: it is a schema only when the import is one, and the analyze
-//!   layer resolves the import to decide.
+//! - a named or default import (`Imported.pipe(...)`, `Imported`). The chain
+//!   is then a derived schema: it is a schema only when the import is one,
+//!   and the analyze layer resolves the import to decide. A chain without a
+//!   `pipe` call needs no `Schema` import (`Imported.annotations({...})`),
+//!   but the collector still runs only in a module that imports Effect.
 //!
 //! Each later member must be a method that returns a schema (`pipe`,
 //! `annotations`, `extend`), and each `pipe` argument must be a `Schema`
 //! transform (`Schema.brand("Id")`, `Schema.minLength(1)`). The rule is
 //! conservative: a chain that ends in `make`, `decode*`, a field read or an
-//! arrow function is not a schema.
+//! arrow function is not a schema. A chain on a member of a namespace import
+//! (`Imported.User.pipe(...)`) is not a schema: the root is the namespace.
 
 use oxc_ast::ast::{Argument, Class, Expression, IdentifierReference};
 use oxc_semantic::{Semantic, SymbolId};
@@ -208,11 +211,6 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
         self.schema_chain(expression, is_schema_constructor)
     }
 
-    /// True when the module itself proves that the expression is a schema.
-    pub fn is_schema_expression(&self, expression: &Expression<'a>) -> bool {
-        self.expression_shape(expression) == Some(SchemaShape::Known)
-    }
-
     /// Walk a chain of calls and static members to its root identifier.
     /// `accepts_head` checks the member read directly off the `Schema` binding.
     fn schema_chain(
@@ -220,7 +218,7 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
         expression: &Expression<'a>,
         accepts_head: fn(&str) -> bool,
     ) -> Option<SchemaShape> {
-        if self.namespaces.is_empty() {
+        if self.namespaces.is_empty() && self.imports.is_empty() {
             return None;
         }
         let mut members: Vec<&str> = Vec::new();

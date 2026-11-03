@@ -7,9 +7,12 @@ use fallow_config::Severity;
 const FIXTURE: &str = "effect-schema-exports-as-types";
 
 /// Exports that stay value exports with the option on. A forwarded decoder,
-/// a forwarded plain value and a `pipe` on a plain value are not schemas.
+/// a forwarded plain value, an alias of a plain value, a `pipe` on a plain
+/// value and a re-export whose name matches a schema import are not schemas.
 const VALUE_EXPORTS_WITH_OPTION_ON: &[&str] = &[
+    "Collided",
     "NotEffectSchema",
+    "aliasedPlain",
     "decodeBaseRule",
     "decodeUsed",
     "notDerived",
@@ -58,9 +61,13 @@ fn option_off_reports_schemas_as_unused_exports() {
     assert_eq!(
         findings.exports,
         vec![
+            "AliasedRule",
+            "AnnotatedRule",
             "ChainedError",
+            "Collided",
             "DerivedRule",
             "DerivedTwice",
+            "ForwardedDefault",
             "ForwardedUnion",
             "NotEffectSchema",
             "PairedSchema",
@@ -68,8 +75,11 @@ fn option_off_reports_schemas_as_unused_exports() {
             "UnusedId",
             "UnusedPayload",
             "UnusedUser",
+            "aliasedPlain",
             "decodeBaseRule",
             "decodeUsed",
+            "default",
+            "default",
             "default",
             "notDerived",
             "plainValue",
@@ -90,9 +100,12 @@ fn option_on_reports_schemas_as_unused_types() {
     assert_eq!(
         findings.types,
         vec![
+            "AliasedRule",
+            "AnnotatedRule",
             "ChainedError",
             "DerivedRule",
             "DerivedTwice",
+            "ForwardedDefault",
             "ForwardedUnion",
             "PairedSchema",
             "ReExportedRule",
@@ -100,6 +113,8 @@ fn option_on_reports_schemas_as_unused_types() {
             "UnusedId",
             "UnusedPayload",
             "UnusedUser",
+            "default",
+            "default",
             "default",
         ],
         "a schema and its same-name type alias give one finding, because they share a finding id"

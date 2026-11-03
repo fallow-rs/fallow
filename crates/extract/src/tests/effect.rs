@@ -424,3 +424,50 @@ export const Own = Schema.String
     );
     assert_eq!(facts.schema_exports, vec!["Own"]);
 }
+
+fn derived_pairs(facts: &fallow_types::extract::EffectFacts) -> Vec<(&str, &str)> {
+    facts
+        .derived_schema_exports
+        .iter()
+        .map(|derived| (derived.export_name.as_str(), derived.import_local.as_str()))
+        .collect()
+}
+
+#[test]
+fn records_aliases_of_an_import_without_a_schema_import() {
+    let facts = facts(
+        r#"
+import { Effect } from "effect"
+import { Rule } from "./contracts"
+export const Alias = Rule
+export const Annotated = Rule.annotations({ title: "Annotated" })
+export const Run = Effect.void
+"#,
+    );
+    assert_eq!(
+        derived_pairs(&facts),
+        vec![("Alias", "Rule"), ("Annotated", "Rule")]
+    );
+    assert!(
+        facts.schema_exports.is_empty(),
+        "{:?}",
+        facts.schema_exports
+    );
+}
+
+#[test]
+fn records_a_default_exported_chain_on_an_import_as_derived() {
+    let facts = facts(
+        r#"
+import { Schema } from "effect"
+import { Rule } from "./contracts"
+export default Rule.pipe(Schema.brand("Branded"))
+"#,
+    );
+    assert_eq!(derived_pairs(&facts), vec![("default", "Rule")]);
+    assert!(
+        facts.schema_exports.is_empty(),
+        "{:?}",
+        facts.schema_exports
+    );
+}
