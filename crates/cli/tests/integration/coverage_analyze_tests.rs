@@ -306,3 +306,110 @@ fn coverage_analyze_explain_attaches_meta_block() {
         "expected _meta.warnings.cloud_functions_unmatched to be present"
     );
 }
+
+/// A runtime-context answer in the shape that Fallow Cloud sends, with the
+/// paths, names and ids changed to the `coverage-gaps` fixture.
+const RECORDED_RUNTIME_CONTEXT: &str = include_str!("fixtures/cloud-runtime-context-recorded.json");
+
+#[test]
+fn coverage_analyze_cloud_keeps_the_cloud_context_of_each_row() {
+    let (endpoint, _request, handle) = serve_once(RECORDED_RUNTIME_CONTEXT);
+    let output = std::process::Command::new(fallow_bin())
+        .args([
+            "coverage",
+            "analyze",
+            "--cloud",
+            "--repo",
+            "acme/web",
+            "--api-endpoint",
+            &endpoint,
+            "--format",
+            "json",
+            "--root",
+        ])
+        .arg(fixture_path("coverage-gaps"))
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_KEY", "fallow_live_test")
+        .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE")
+        .output()
+        .expect("run fallow");
+    handle.join().expect("server joins");
+    let command_output = crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: output.status.code().unwrap_or(-1),
+    };
+    assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
+    let json = parse_json(&command_output);
+    let pointer = |path: &str| json.pointer(path).cloned();
+
+    // Report level: the capabilities of the read.
+    let capabilities = pointer("/runtime_coverage/cloud_context/capabilities")
+        .expect("report cloud_context.capabilities");
+    assert!(
+        capabilities
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item == "function_errors")),
+        "{capabilities}"
+    );
+
+    // The called function: a hot path with the production signals.
+    assert_eq!(
+        pointer("/runtime_coverage/hot_paths/0/function"),
+        Some(serde_json::json!("covered"))
+    );
+    let hot = "/runtime_coverage/hot_paths/0/cloud_context";
+    assert_eq!(
+        pointer(&format!("{hot}/performance/cpu/state")),
+        Some(serde_json::json!("tracked"))
+    );
+    assert_eq!(
+        pointer(&format!("{hot}/performance/browser/state")),
+        Some(serde_json::json!("untracked"))
+    );
+    assert_eq!(
+        pointer(&format!("{hot}/errors/state")),
+        Some(serde_json::json!("tracked"))
+    );
+    assert_eq!(
+        pointer(&format!("{hot}/branches/ranges_never_run")),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(
+        pointer(&format!("{hot}/covered_by_test")),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(
+        pointer(&format!("{hot}/test_hit_count")),
+        Some(serde_json::json!(59248))
+    );
+    // Fields that the CLI reads stay in their own place, not in the copy.
+    assert_eq!(pointer(&format!("{hot}/file_path")), None);
+    assert_eq!(pointer(&format!("{hot}/hit_count")), None);
+
+    // The never_called function: a finding with the same signals.
+    assert_eq!(
+        pointer("/runtime_coverage/findings/0/function"),
+        Some(serde_json::json!("indirectlyCovered"))
+    );
+    let finding = "/runtime_coverage/findings/0/cloud_context";
+    assert_eq!(
+        pointer(&format!("{finding}/errors/state")),
+        Some(serde_json::json!("tracked"))
+    );
+    assert_eq!(
+        pointer(&format!("{finding}/covered_by_test")),
+        Some(serde_json::Value::Null)
+    );
+
+    // The blast-radius row: the production callers.
+    assert_eq!(
+        pointer("/runtime_coverage/blast_radius/0/cloud_context/production_callers/0/function"),
+        Some(serde_json::json!("app"))
+    );
+    assert_eq!(
+        pointer("/runtime_coverage/blast_radius/0/cloud_context/test_caller_count"),
+        Some(serde_json::json!(0))
+    );
+}

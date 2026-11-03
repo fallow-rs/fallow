@@ -2978,7 +2978,6 @@ mod tests {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-                signals: vec![],
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
                     last_received_at: None,
@@ -2993,6 +2992,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![RuntimeCoverageFinding {
+                    cloud_context: None,
                     id: "fallow:prod:aabbccdd".to_string(),
                     stable_id: None,
                     source_hash: None,
@@ -3014,15 +3014,8 @@ mod tests {
                     actions: vec![],
                     discriminators: None,
                 }],
-                hot_paths: vec![],
-                blast_radius: vec![],
-                importance: vec![],
-                watermark: None,
-                warnings: vec![],
                 actionable: true,
-                actionability_reason: None,
-                actionability_verdict: None,
-                provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -3051,7 +3044,6 @@ mod tests {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-                signals: vec![],
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
                     last_received_at: None,
@@ -3066,6 +3058,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![RuntimeCoverageFinding {
+                    cloud_context: None,
                     id: "fallow:prod:11223344".to_string(),
                     stable_id: None,
                     source_hash: None,
@@ -3087,15 +3080,8 @@ mod tests {
                     actions: vec![],
                     discriminators: None,
                 }],
-                hot_paths: vec![],
-                blast_radius: vec![],
-                importance: vec![],
-                watermark: None,
-                warnings: vec![],
                 actionable: true,
-                actionability_reason: None,
-                actionability_verdict: None,
-                provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                ..Default::default()
             }),
             ..Default::default()
         };

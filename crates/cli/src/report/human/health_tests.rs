@@ -886,6 +886,7 @@ fn health_runtime_coverage_renders_section() {
     let root = PathBuf::from("/project");
     let mut report = empty_report();
     report.runtime_coverage = Some(fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
@@ -903,6 +904,7 @@ fn health_runtime_coverage_renders_section() {
             ..Default::default()
         },
         findings: vec![fallow_output::RuntimeCoverageFinding {
+            cloud_context: None,
             id: "fallow:prod:deadbeef".to_owned(),
             stable_id: None,
             path: root.join("src/cold.ts"),
@@ -925,6 +927,7 @@ fn health_runtime_coverage_renders_section() {
             discriminators: None,
         }],
         hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
+            cloud_context: None,
             id: "fallow:hot:cafebabe".to_owned(),
             stable_id: None,
             path: root.join("src/hot.ts"),
@@ -1020,6 +1023,7 @@ fn runtime_coverage_report_with_quality(
     quality: Option<fallow_output::RuntimeCoverageCaptureQuality>,
 ) -> fallow_output::RuntimeCoverageReport {
     fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),

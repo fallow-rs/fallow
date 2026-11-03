@@ -2,7 +2,8 @@
 //!
 //! One `GET /v1/coverage/:repo/file-context?path=<path>` request gives the
 //! production data of one file: per function the tracking state, calls,
-//! errors, CPU and never-run branch ranges, plus a file summary. Every
+//! errors, CPU, browser long frame time, never-run branch ranges and callers,
+//! plus a file summary. Every
 //! failure becomes a [`FileContextFailure`] that the caller shows as a section
 //! status, so a cloud problem never fails the inspect run.
 
@@ -99,7 +100,16 @@ pub struct FileContextFunction {
     #[serde(default)]
     pub cpu: Option<FileContextCpu>,
     #[serde(default)]
+    pub browser: Option<FileContextBrowser>,
+    #[serde(default)]
     pub branches: Option<FileContextBranches>,
+    /// Importer files from the static caller graph. `None` when not known.
+    #[serde(default)]
+    pub static_callers: Option<u64>,
+    /// Callers from the CPU profiles of the deployment. `None` without a
+    /// profile; an empty list means a profile without a caller.
+    #[serde(default)]
+    pub production_callers: Option<Vec<FileContextCaller>>,
     #[serde(default)]
     pub summary: String,
 }
@@ -120,6 +130,28 @@ pub struct FileContextCpu {
     pub state: String,
     #[serde(default)]
     pub self_ms_per_hour: Option<f64>,
+}
+
+/// Long animation frame time in the browser. Only Chromium reports it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileContextBrowser {
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub long_frame_ms_per_hour: Option<f64>,
+}
+
+/// One production caller from the CPU profiles.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileContextCaller {
+    #[serde(default)]
+    pub stable_id: Option<String>,
+    pub file: String,
+    pub function: String,
+    #[serde(default)]
+    pub line: Option<u32>,
+    #[serde(default)]
+    pub samples: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

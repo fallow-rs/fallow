@@ -263,13 +263,13 @@ pub use health_report::{HealthReport, HealthSection};
 pub use health_runtime_coverage::{
     OPTIMIZATION_TARGET_UNMATCHED_WARNING, RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction,
     RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCapturePolicy, RuntimeCoverageCaptureQuality,
-    RuntimeCoverageConfidence, RuntimeCoverageCostBasis, RuntimeCoverageDataSource,
-    RuntimeCoverageDiscriminators, RuntimeCoverageEvidence, RuntimeCoverageFinding,
-    RuntimeCoverageHotPath, RuntimeCoverageImportanceEntry, RuntimeCoverageMessage,
-    RuntimeCoverageOptimizationTarget, RuntimeCoverageProvenance, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
-    RuntimeCoverageSignal, RuntimeCoverageSummary, RuntimeCoverageVerdict,
-    RuntimeCoverageWatermark,
+    RuntimeCoverageCloudContext, RuntimeCoverageConfidence, RuntimeCoverageCostBasis,
+    RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageImportanceEntry,
+    RuntimeCoverageMessage, RuntimeCoverageOptimizationTarget, RuntimeCoverageProvenance,
+    RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand,
+    RuntimeCoverageSchemaVersion, RuntimeCoverageSignal, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 pub use health_scores::{
     COGNITIVE_EXTRACTION_THRESHOLD, ClockProvenance, ClockSource, ComplexityViolation,
@@ -305,11 +305,12 @@ pub use impact::{
     serialize_cross_repo_impact_json_output, serialize_impact_json_output,
 };
 pub use inspect_envelopes::{
-    ExplainOutput, InspectCloudErrors, InspectCloudEvidence, InspectCloudFunction,
-    InspectCloudMatch, InspectCloudStatus, InspectCloudSummary, InspectCloudUnpairedFunction,
-    InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
-    InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
-    InspectTargetDescriptor, serialize_explain_json_output, serialize_inspect_json_output,
+    ExplainOutput, InspectCloudCaller, InspectCloudErrors, InspectCloudEvidence,
+    InspectCloudFunction, InspectCloudMatch, InspectCloudStatus, InspectCloudSummary,
+    InspectCloudUnpairedFunction, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
+    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
+    InspectSymbolIdentity, InspectTargetDescriptor, serialize_explain_json_output,
+    serialize_inspect_json_output,
 };
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, ARCHITECTURE_DOCS,

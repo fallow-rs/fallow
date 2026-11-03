@@ -335,10 +335,37 @@ pub struct InspectCloudFunction {
     pub errors: Option<InspectCloudErrors>,
     /// Self CPU milliseconds per profiled hour. `None` when not measured.
     pub cpu_ms_per_hour: Option<f64>,
+    /// Long animation frame milliseconds per hour of visible page time in
+    /// the browser. `None` when not measured (a server function, or a
+    /// browser without the API).
+    pub browser_long_frame_ms_per_hour: Option<f64>,
     /// Branch ranges that never ran. `None` when not measured.
     pub never_run_ranges: Option<u64>,
+    /// Files that import the function, from the static caller graph. `None`
+    /// when not known.
+    pub static_callers: Option<u64>,
+    /// Functions that called this one in the CPU profiles of the deployment,
+    /// most samples first. `None` when the deployment has no CPU profile; an
+    /// empty list means a profile without a caller.
+    pub production_callers: Option<Vec<InspectCloudCaller>>,
     /// One-line summary from the cloud.
     pub summary: String,
+}
+
+/// One production caller of an [`InspectCloudFunction`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InspectCloudCaller {
+    /// Stable id of the calling function.
+    pub stable_id: Option<String>,
+    /// File of the calling function, relative to the repository root.
+    pub file: String,
+    /// Name of the calling function.
+    pub function: String,
+    /// 1-based start line of the calling function.
+    pub line: Option<u32>,
+    /// CPU profile samples with this caller to callee step on the stack.
+    pub samples: u64,
 }
 
 /// One local function without a deployed function.

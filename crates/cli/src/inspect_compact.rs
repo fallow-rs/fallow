@@ -323,12 +323,44 @@ fn prod_text(function: &InspectCloudFunction, period: u16) -> String {
     if let Some(cpu) = function.cpu_ms_per_hour {
         parts.push(format!("{cpu:.1} ms CPU/h"));
     }
+    if let Some(browser) = function.browser_long_frame_ms_per_hour {
+        parts.push(format!("{browser:.1} ms long frames/h"));
+    }
     if let Some(ranges) = function.never_run_ranges
         && ranges > 0
     {
         parts.push(format!("{ranges} never-run {}", plural(ranges, "branch")));
     }
+    if let Some(callers) = function.static_callers {
+        parts.push(format!("{callers} static {}", plural(callers, "caller")));
+    }
+    if let Some(callers) = function
+        .production_callers
+        .as_deref()
+        .filter(|callers| !callers.is_empty())
+    {
+        parts.push(production_callers_text(callers));
+    }
     parts.join(", ")
+}
+
+/// Production callers named in one prod line. More callers are counted.
+const PROD_LINE_CALLERS: usize = 2;
+
+/// `prod callers a (src/a.ts), b (src/b.ts) and 3 more`.
+fn production_callers_text(callers: &[fallow_output::InspectCloudCaller]) -> String {
+    let named: Vec<String> = callers
+        .iter()
+        .take(PROD_LINE_CALLERS)
+        .map(|caller| format!("{} ({})", caller.function, caller.file))
+        .collect();
+    let rest = callers.len().saturating_sub(PROD_LINE_CALLERS);
+    let more = if rest > 0 {
+        format!(" and {rest} more")
+    } else {
+        String::new()
+    };
+    format!("prod callers {}{more}", named.join(", "))
 }
 
 fn plural(count: u64, word: &str) -> String {
@@ -436,9 +468,31 @@ mod tests {
             calls: Some(0),
             errors: None,
             cpu_ms_per_hour: None,
+            browser_long_frame_ms_per_hour: None,
             never_run_ranges: None,
+            static_callers: None,
+            production_callers: None,
             summary: String::new(),
         }
+    }
+
+    #[test]
+    fn prod_callers_past_the_line_limit_are_counted() {
+        let caller = |name: &str| fallow_output::InspectCloudCaller {
+            stable_id: None,
+            file: "src/b.ts".to_owned(),
+            function: name.to_owned(),
+            line: Some(1),
+            samples: 1,
+        };
+        let mut function = never_called(None);
+        function.production_callers = Some(vec![caller("x"), caller("y"), caller("z")]);
+        assert_eq!(
+            prod_text(&function, 30),
+            "never_called in 30 days, prod callers x (src/b.ts), y (src/b.ts) and 1 more"
+        );
+        function.production_callers = Some(Vec::new());
+        assert_eq!(prod_text(&function, 30), "never_called in 30 days");
     }
 
     #[test]

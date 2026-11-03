@@ -433,6 +433,10 @@ pub struct RuntimeCoverageDiscriminators {
     pub meets_observation_volume: bool,
 }
 
+/// Fields of a Fallow Cloud row that the CLI does not read itself, copied as
+/// the cloud sent them. See `RuntimeCoverageFinding::cloud_context`.
+pub type RuntimeCoverageCloudContext = serde_json::Map<String, serde_json::Value>;
+
 /// One per-function runtime-coverage finding in `runtime_coverage.findings`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -491,6 +495,16 @@ pub struct RuntimeCoverageFinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub discriminators: Option<RuntimeCoverageDiscriminators>,
+    /// Production signals of the function from the Fallow Cloud runtime-context
+    /// row, as the cloud sent them: for example `errors`, `performance` (with
+    /// `cpu` and `browser`), `branches`, `covered_by_test` and
+    /// `test_hit_count`. The block holds only the row fields that the CLI does
+    /// not read for the verdict, and a newer cloud can add keys. Cloud mode
+    /// only; omitted in local mode. Context only: these signals never change
+    /// the verdict, the confidence or the actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub cloud_context: Option<RuntimeCoverageCloudContext>,
 }
 
 /// One hot function in `runtime_coverage.hot_paths`, ranked by invocations.
@@ -534,6 +548,12 @@ pub struct RuntimeCoverageHotPath {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub optimization_target: Option<RuntimeCoverageOptimizationTarget>,
+    /// Production signals of the hot function from the Fallow Cloud
+    /// runtime-context row, in the shape of `RuntimeCoverageFinding::cloud_context`.
+    /// Cloud mode only; omitted in local mode. Context only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub cloud_context: Option<RuntimeCoverageCloudContext>,
 }
 
 /// Speed-work inputs for one hot function: how often it runs and how much
@@ -653,6 +673,14 @@ pub struct RuntimeCoverageBlastRadiusEntry {
     pub deploys_touched: Option<u32>,
     /// Risk band derived from caller counts and traffic-weighted reach.
     pub risk_band: RuntimeCoverageRiskBand,
+    /// Fields of the Fallow Cloud blast-radius row that the CLI does not read,
+    /// as the cloud sent them: for example `production_callers`,
+    /// `caller_sites`, `test_caller_count`, `non_runtime_caller_count` and
+    /// `context_unavailable_reason`. Cloud mode only, and only when the cloud
+    /// sent the blast-radius rows. Context only: the risk band does not read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub cloud_context: Option<RuntimeCoverageCloudContext>,
 }
 
 /// One production-importance entry in `runtime_coverage.importance`, scoring
@@ -763,6 +791,13 @@ pub struct RuntimeCoverageReport {
     /// Provenance an agent reads to self-attenuate confidence (mirrors
     /// the cloud runtime-context `provenance`). F4: context only.
     pub provenance: RuntimeCoverageProvenance,
+    /// Fields of the Fallow Cloud runtime-context answer that the CLI does not
+    /// read, as the cloud sent them: for example `capabilities`, `page`,
+    /// `context_unavailable` and `commit_shas`. Cloud mode only; omitted in
+    /// local mode. Context only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub cloud_context: Option<RuntimeCoverageCloudContext>,
 }
 
 /// Warning code for hot paths that have no `optimization_target`: the hot
@@ -943,6 +978,7 @@ mod tests {
 
     fn hot_path(matched: bool) -> RuntimeCoverageHotPath {
         RuntimeCoverageHotPath {
+            cloud_context: None,
             id: "fallow:hot:test".to_owned(),
             stable_id: None,
             path: PathBuf::from("src/app.js"),

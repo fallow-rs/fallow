@@ -312,6 +312,7 @@ impl From<SavedRuntimeCoverage> for RuntimeCoverageReport {
 impl From<SavedRuntimeCoverageFinding> for RuntimeCoverageFinding {
     fn from(saved: SavedRuntimeCoverageFinding) -> Self {
         Self {
+            cloud_context: None,
             id: saved.id,
             stable_id: saved.stable_id,
             source_hash: saved.source_hash,

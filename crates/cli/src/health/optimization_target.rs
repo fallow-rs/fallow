@@ -489,6 +489,7 @@ mod tests {
 
     fn hot(stable_id: Option<&str>) -> RuntimeCoverageHotPath {
         RuntimeCoverageHotPath {
+            cloud_context: None,
             id: "fallow:hot:test".to_owned(),
             stable_id: stable_id.map(str::to_owned),
             path: PathBuf::from("src/app.js"),

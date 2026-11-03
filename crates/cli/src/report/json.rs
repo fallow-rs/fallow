@@ -1355,7 +1355,6 @@ mod tests {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-                signals: Vec::new(),
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
                     functions_tracked: Some(3),
@@ -1375,6 +1374,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![RuntimeCoverageFinding {
+                    cloud_context: None,
                     id: "fallow:prod:deadbeef".to_owned(),
                     stable_id: None,
                     path: root.join("src/cold.ts"),
@@ -1402,6 +1402,7 @@ mod tests {
                     discriminators: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
+                    cloud_context: None,
                     id: "fallow:hot:cafebabe".to_owned(),
                     stable_id: None,
                     path: root.join("src/hot.ts"),
@@ -1413,17 +1414,13 @@ mod tests {
                     actions: vec![],
                     optimization_target: None,
                 }],
-                blast_radius: vec![],
-                importance: vec![],
                 watermark: Some(RuntimeCoverageWatermark::LicenseExpiredGrace),
                 warnings: vec![RuntimeCoverageMessage {
                     code: "partial-merge".to_owned(),
                     message: "Merged coverage omitted one chunk.".to_owned(),
                 }],
                 actionable: true,
-                actionability_reason: None,
-                actionability_verdict: None,
-                provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                ..Default::default()
             }),
             ..Default::default()
         };

@@ -9,6 +9,7 @@
 //! telemetry recording, exit-code gating, and human / machine rendering.
 
 pub mod coverage;
+mod coverage_rows;
 pub mod mutation_report;
 pub mod optimization_target;
 mod runtime_static_signals;
@@ -1300,11 +1301,13 @@ mod tests {
             branching_by_file: fallow_engine::health::BranchingByFile::default(),
             report: fallow_output::HealthReport {
                 runtime_coverage: Some(fallow_output::RuntimeCoverageReport {
+                    cloud_context: None,
                     schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
                     verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
                     signals: Vec::new(),
                     summary: fx_summary(1, 0, 1, 0),
                     findings: vec![fallow_output::RuntimeCoverageFinding {
+                        cloud_context: None,
                         id: "fallow:prod:lowtraffic".to_owned(),
                         stable_id: None,
                         path: PathBuf::from("/project/src/cold.ts"),

@@ -1,0 +1,127 @@
+{
+  "data": {
+    "schema_version": "fallow-cloud-file-context-v1",
+    "repo": "acme/app",
+    "path": "src/api.ts",
+    "state": "observed",
+    "latest_sha": "abc123",
+    "period_days": 30,
+    "generated_at": "2026-11-03T08:17:46.970Z",
+    "actionable": true,
+    "actionability_reason": null,
+    "never_called_withheld": false,
+    "summary": {
+      "functions": 2,
+      "called": 1,
+      "never_called": 1,
+      "untracked": 0,
+      "calls": 1401060,
+      "error_groups": 0,
+      "error_events": 0,
+      "text": "2 functions: 1 ran, 1 never ran, 0 untracked. 1401060 calls in total. No error groups."
+    },
+    "functions": [
+      {
+        "name": "loadUser",
+        "line": 11,
+        "end_line": 11,
+        "stable_id": "fallow:fn:00000000000000b1",
+        "state": "called",
+        "period_state": "called",
+        "calls": 1401060,
+        "deployments_observed": 1,
+        "last_seen_at": "2026-11-03T08:00:00.000Z",
+        "errors": {
+          "state": "tracked",
+          "groups": 0,
+          "events": 0,
+          "top": null
+        },
+        "cpu": {
+          "state": "tracked",
+          "self_ms_per_hour": 7.84,
+          "total_ms_per_hour": 248.19,
+          "share_of_process": 0.0001,
+          "samples": 95
+        },
+        "browser": {
+          "state": "tracked",
+          "long_frame_ms_per_hour": 412.6,
+          "forced_layout_ms_per_hour": 38.2,
+          "entries": 57,
+          "share_of_script_time": 0.21
+        },
+        "branches": {
+          "state": "observed",
+          "ranges_total": 3,
+          "ranges_never_run": 0,
+          "never_run": [],
+          "never_run_truncated": false,
+          "function_calls": 1401060
+        },
+        "static_callers": 3,
+        "production_callers": [
+          {
+            "stable_id": "fallow:fn:00000000000000b2",
+            "file": "src/index.ts",
+            "function": "boot",
+            "line": 2,
+            "samples": 94
+          },
+          {
+            "stable_id": "fallow:fn:00000000000000b3",
+            "file": "src/jobs/worker.ts",
+            "function": "runJob",
+            "line": 40,
+            "samples": 1
+          }
+        ],
+        "summary": "Ran 1401060 times in production in 30 days (1 deployment). No error groups. Called in production by boot (src/index.ts)."
+      },
+      {
+        "name": "parseRow",
+        "line": 12,
+        "end_line": 12,
+        "stable_id": "fallow:fn:00000000000000b4",
+        "state": "never_called",
+        "period_state": "never_called",
+        "calls": 0,
+        "deployments_observed": 1,
+        "last_seen_at": null,
+        "errors": {
+          "state": "tracked",
+          "groups": 0,
+          "events": 0,
+          "top": null
+        },
+        "cpu": {
+          "state": "insufficient",
+          "self_ms_per_hour": null,
+          "total_ms_per_hour": null,
+          "share_of_process": null,
+          "samples": 0
+        },
+        "browser": {
+          "state": "untracked",
+          "long_frame_ms_per_hour": null,
+          "forced_layout_ms_per_hour": null,
+          "entries": null,
+          "share_of_script_time": null
+        },
+        "branches": {
+          "state": "untracked",
+          "ranges_total": null,
+          "ranges_never_run": null,
+          "never_run": [],
+          "never_run_truncated": false,
+          "function_calls": null
+        },
+        "static_callers": null,
+        "production_callers": null,
+        "summary": "Tracked, never ran in production in 30 days. No error groups."
+      }
+    ],
+    "warnings": [],
+    "context_only": true
+  }
+}

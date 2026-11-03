@@ -901,12 +901,14 @@ mod tests {
 
     fn runtime_with_hot(path: &str, function: &str, line: u32) -> RuntimeCoverageReport {
         let mut report = RuntimeCoverageReport {
+            cloud_context: None,
             schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::HotPathTouched,
             signals: vec![fallow_output::RuntimeCoverageSignal::HotPathTouched],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![],
             hot_paths: vec![RuntimeCoverageHotPath {
+                cloud_context: None,
                 id: "fallow:hot:deadbeef".to_owned(),
                 stable_id: None,
                 path: PathBuf::from(path),
@@ -933,11 +935,13 @@ mod tests {
 
     fn runtime_with_cold_delete(path: &str, function: &str, line: u32) -> RuntimeCoverageReport {
         RuntimeCoverageReport {
+            cloud_context: None,
             schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:deadbeef".to_owned(),
                 stable_id: Some("fallow:fn:deadbeef".to_owned()),
                 source_hash: Some("feedfacefeedface".to_owned()),
@@ -977,11 +981,13 @@ mod tests {
         line: u32,
     ) -> RuntimeCoverageReport {
         RuntimeCoverageReport {
+            cloud_context: None,
             schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:review001".to_owned(),
                 stable_id: Some("fallow:fn:review001".to_owned()),
                 source_hash: Some("feedfacefeedface".to_owned()),
