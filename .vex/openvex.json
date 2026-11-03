@@ -17,45 +17,6 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "paste is an unmaintained compile-time macro crate used by candle; no patched release exists. Source: tools/similar-code-sidecar/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "RUSTSEC-2026-0367"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "candle-core reads .npz archives with ZipArchive but never calls extract(); the sidecar loads only safetensors. Source: tools/similar-code-sidecar/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "RUSTSEC-2026-0368"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "candle-core reads .npz archives with ZipArchive but never calls extract(); the sidecar loads only safetensors. Source: tools/similar-code-sidecar/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "RUSTSEC-2026-0369"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "candle-core reads .npz archives with ZipArchive but never calls extract(); the sidecar loads only safetensors. Source: tools/similar-code-sidecar/osv-scanner.toml"
     }
   ]
 }

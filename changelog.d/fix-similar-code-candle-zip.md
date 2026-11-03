@@ -1,0 +1,3 @@
+### Security
+
+- **`fallow-similar-code` no longer ships `zip` 8.6.0.** The sidecar now uses `candle-core`, `candle-nn` and `candle-transformers` 0.11.1, which require `zip` 9. The lockfile now selects `zip` 9.3.0. This removes RUSTSEC-2026-0429 and the three allowlist entries for RUSTSEC-2026-0367, RUSTSEC-2026-0368 and RUSTSEC-2026-0369. The sidecar never opened a ZIP archive, but the release audit failed on the new advisory. The sidecar also moves from `tokenizers` 0.22.2 to 0.23.2, because `candle-core` 0.11.1 requires 0.23, and one copy now serves both. The F32 conformance baseline does not change, so the embedding semantics stay at v2 and the vector cache stays valid. The `paste` allowlist entry RUSTSEC-2024-0436 stays.

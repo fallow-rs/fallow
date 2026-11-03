@@ -88,21 +88,16 @@ npm run conformance:semantic-clones:candle -- \
 The baseline contains only model provenance, similarities, and selection
 decisions. It contains no fixture source or embedding vectors.
 
-The temporary `audit-allowlist.json` owns only these advisories and expires
+The temporary `audit-allowlist.json` owns only this advisory and expires
 automatically:
 
 - `RUSTSEC-2024-0436` (`paste` 1.0.15 is unmaintained). Remove it as soon as
   released Candle, gemm, and tokenizers versions remove both remaining `paste`
   dependency chains.
-- `RUSTSEC-2026-0367`, `RUSTSEC-2026-0368`, and `RUSTSEC-2026-0369` (`zip`
-  8.6.0 extraction flaws). Candle 0.11.0 requires `zip` 8.6.0 and only reads
-  archive entries. The sidecar loads only safetensors, so it never extracts a
-  ZIP archive. Remove them as soon as a released `candle-core` depends on
-  `zip` 9.0.0 or later.
 
-`scripts/check-similar-code-sidecar-audit.mjs` checks each entry and its
+`scripts/check-similar-code-sidecar-audit.mjs` checks the entry and its
 reverse dependency edges. The `cargo audit` step in the release validation
-workflow ignores exactly these advisory IDs. That workflow runs before the
+workflow ignores exactly this advisory ID. That workflow runs before the
 release dispatch and again inside the release workflow. After you remove an
 entry, rerun conformance, the platform build matrix, the audit, license
 checks, and the release binary size gate.
