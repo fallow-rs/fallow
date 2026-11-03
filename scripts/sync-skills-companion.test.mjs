@@ -297,7 +297,13 @@ test(
     assert.equal(git(skills, "rev-parse", "origin/main"), before);
     assert.doesNotMatch(output, /push origin main/u, "the companion main branch is protected");
     assert.match(output, /push origin HEAD:refs\/heads\/docs\/sync-fallow-/u);
-    assert.match(output, /gh pr create/u);
+    // `gh pr create --fill` reads the local branch, and the push above creates
+    // only the remote branch, so the hint gives the title and body itself.
+    assert.doesNotMatch(output, /--fill/u);
+    assert.match(
+      output,
+      /gh pr create .*--title 'docs: sync the Fallow skill from fallow \(#42, #43\)' --body '.+'/u,
+    );
     assert.match(output, /Public skills contract/u);
   }),
 );
@@ -313,6 +319,31 @@ test(
     const lock = JSON.parse(readFileSync(join(fixture.skills, "source-lock.json"), "utf8"));
     assert.equal(lock.commit, pin);
     assert.equal(git(fixture.skills, "log", "-1", "--format=%s"), "docs: custom sync");
+  }),
+);
+
+test(
+  "the printed gh pr create hint survives a shell for any --message",
+  withFixture((fixture) => {
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    const message = "\n\ndocs: it's $HOME `id`\nsecond line\n\nbody";
+    const { code, output } = sync(fixture, ["--message", message]);
+    assert.equal(code, 0, output);
+    const hint = output.split("\n").find((line) => line.includes("gh pr create"));
+    assert.ok(hint, output);
+    // Parse the hint with a real shell: print each argument after `gh pr create`.
+    const args = execFileSync(
+      "sh",
+      ["-c", `set -- ${hint.replace("gh pr create", "")}; printf '%s\\0' "$@"`],
+      {
+        encoding: "utf8",
+      },
+    ).split("\0");
+    assert.equal(
+      args[args.indexOf("--title") + 1],
+      git(fixture.skills, "log", "-1", "--format=%s"),
+    );
+    assert.equal(args[args.indexOf("--title") + 1], "docs: it's $HOME `id` second line");
   }),
 );
 
