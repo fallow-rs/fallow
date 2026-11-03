@@ -708,8 +708,9 @@ query, vite, and astro, then run
 `pgo-validate.yml` runs on pull requests that change `scripts/pgo-train.sh`,
 `.github/scripts/pgo-compare.mjs`, `.github/scripts/pgo-profile-match.mjs`,
 `benchmarks/download-fixtures.mjs`, `.github/actions/setup-rust/**`,
-`.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`,
-`Cargo.lock`, or `rust-toolchain.toml`. It trains one profile per PGO target
+`.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`, or
+`rust-toolchain.toml`. It skips Dependabot Cargo branches, and it runs every
+Sunday on `main`. It trains one profile per PGO target
 with the same script, runners, and container as `release.yml`. It builds
 `fallow-multicall` with and without the profile on Linux x64 and macOS arm64,
 and compares the held-out fixtures query, vite, and astro with interleaved
