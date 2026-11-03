@@ -192,7 +192,8 @@ pub struct ExternalPluginDef {
     /// Coverage role for `entryPoints`.
     ///
     /// Defaults to `support`. Set to `runtime` for application entry points
-    /// or `test` for test framework entry points.
+    /// or `test` for test framework entry points. In production mode, a file
+    /// that only `support` entries match takes no part in dead-code analysis.
     #[serde(default = "default_external_entry_point_role")]
     pub entry_point_role: EntryPointRole,
 

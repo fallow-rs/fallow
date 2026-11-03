@@ -309,7 +309,7 @@ pub fn resolve_dead_code_imports(
 
 pub fn build_dead_code_graph(
     prelude: &DeadCodeBackendPrelude<'_>,
-    project: &fallow_graph::resolve::ResolvedProject,
+    project: &mut fallow_graph::resolve::ResolvedProject,
     entry_points: &DeadCodeEntryPoints,
     modules: &[ModuleInfo],
 ) -> DeadCodeGraphRun {

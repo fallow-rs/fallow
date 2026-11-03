@@ -90,8 +90,8 @@ fn icon_name_matches_collection(icon_name: &str, collection: &str) -> bool {
 
 /// Map extracted Iconify strings to sorted declared `@iconify-json/<prefix>`
 /// package names.
-fn iconify_packages_for_modules(
-    modules: &[ModuleInfo],
+fn iconify_packages_for_modules<'a>(
+    modules: impl IntoIterator<Item = &'a ModuleInfo>,
     declared: &FxHashSet<String>,
 ) -> Vec<String> {
     let collections = declared_iconify_collection_names(declared);
@@ -122,8 +122,8 @@ fn iconify_packages_for_modules(
 ///
 /// Returns an empty `Vec` (cheap no-op) unless the project declares an
 /// Iconify-ecosystem dependency, so non-Iconify projects pay nothing.
-pub(super) fn collect_iconify_referenced_deps(
-    modules: &[ModuleInfo],
+pub(super) fn collect_iconify_referenced_deps<'a>(
+    modules: impl IntoIterator<Item = &'a ModuleInfo>,
     pkg: Option<&PackageJson>,
     workspaces: &[WorkspaceInfo],
 ) -> Vec<String> {

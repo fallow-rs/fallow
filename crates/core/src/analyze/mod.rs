@@ -22,6 +22,7 @@ mod mixed_barrel;
 mod package_cycles;
 mod package_json_utils;
 mod package_manager;
+mod plugin_slices;
 mod policy;
 mod predicates;
 mod production_only_suppressions;
@@ -744,6 +745,7 @@ pub(crate) fn find_dead_code_full(
     workspaces: &[fallow_config::WorkspaceInfo],
     modules: &[ModuleInfo],
     collect_usages: bool,
+    excluded: &FxHashSet<FileId>,
 ) -> AnalysisResults {
     let _span = tracing::info_span!("find_dead_code").entered();
 
@@ -776,6 +778,7 @@ pub(crate) fn find_dead_code_full(
         declared_deps: &run_context.declared_deps,
         class_member_rules: &class_member_rules,
         collect_usages,
+        excluded,
     });
 
     populate_post_detection_findings(&mut PostDetectionInput {
@@ -827,6 +830,8 @@ struct SetupAndDetectInput<'a, 'm> {
     declared_deps: &'a FxHashSet<String>,
     class_member_rules: &'a ClassMemberRules,
     collect_usages: bool,
+    /// Production-mode files that take no part; they credit no package.
+    excluded: &'a FxHashSet<FileId>,
 }
 
 /// Build the plugin result augmented with Iconify, inline loader and default
@@ -835,13 +840,19 @@ struct SetupAndDetectInput<'a, 'm> {
 /// Extracted from `find_dead_code_full` to keep that orchestrator's body as
 /// setup -> detect -> populate.
 fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults {
+    let credit_modules = || {
+        input
+            .modules
+            .iter()
+            .filter(|m| !input.excluded.contains(&m.file_id))
+    };
     let iconify_referenced =
-        iconify::collect_iconify_referenced_deps(input.modules, input.pkg, input.workspaces);
+        iconify::collect_iconify_referenced_deps(credit_modules(), input.pkg, input.workspaces);
     let loader_referenced =
         inline_loaders::collect_inline_loader_referenced_deps(input.resolved_modules, input.graph);
     let jsx_runtime_referenced = jsx_runtime_credits::collect_jsx_runtime_package_credits(
         input.plugin_result,
-        input.modules,
+        credit_modules(),
         input.graph,
         &input.config.root,
         input.workspaces,
@@ -867,7 +878,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     };
 
     let (virtual_prefixes, generated_patterns, generated_type_prefixes) =
-        derive_plugin_string_slices(plugin_result);
+        plugin_slices::derive_plugin_string_slices(plugin_result);
 
     let mut results = run_parallel_dead_code_detectors(DeadCodeDetectorInput {
         graph: input.graph,
@@ -901,7 +912,11 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
 fn collect_federation_runtime_remotes(
     input: &SetupAndDetectInput<'_, '_>,
 ) -> Vec<crate::plugins::ProvidedDependencyRule> {
-    let sources = input.modules.iter().filter_map(|module| {
+    let included = input
+        .modules
+        .iter()
+        .filter(|m| !input.excluded.contains(&m.file_id));
+    let sources = included.filter_map(|module| {
         let node = input.graph.modules.get(module.file_id.0 as usize)?;
         Some((node.path.as_path(), &*module.semantic_facts))
     });
@@ -913,42 +928,6 @@ fn collect_federation_runtime_remotes(
         .collect();
     fallow_config::record_workspace_diagnostics(&input.config.root, diagnostics);
     remotes.rules
-}
-
-/// Derive the borrowed plugin string slices (virtual module prefixes, generated
-/// import patterns, generated type-import prefixes) consumed by the detectors.
-fn derive_plugin_string_slices(
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
-    let virtual_prefixes = plugin_result
-        .map(|pr| {
-            pr.virtual_module_prefixes
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
-    let generated_patterns = plugin_result
-        .map(|pr| {
-            pr.generated_import_patterns
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
-    let generated_type_prefixes = plugin_result
-        .map(|pr| {
-            pr.generated_type_import_prefixes
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
-    (
-        virtual_prefixes,
-        generated_patterns,
-        generated_type_prefixes,
-    )
 }
 
 /// Shared context for the post-detector populate sequence in

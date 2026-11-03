@@ -131,7 +131,16 @@ mod orchestration {
     use std::path::PathBuf;
 
     fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
-        find_dead_code_full(graph, config, &[], None, &[], &[], false)
+        find_dead_code_full(
+            graph,
+            config,
+            &[],
+            None,
+            &[],
+            &[],
+            false,
+            &FxHashSet::default(),
+        )
     }
 
     fn make_config_with_rules(rules: RulesConfig) -> ResolvedConfig {
@@ -386,6 +395,7 @@ mod orchestration {
             &[],
             &[],
             false, // collect_usages = false
+            &FxHashSet::default(),
         );
         assert!(
             results_no_collect.export_usages.is_empty(),
@@ -400,6 +410,7 @@ mod orchestration {
             &[],
             &[],
             true, // collect_usages = true
+            &FxHashSet::default(),
         );
         assert!(
             !results_with_collect.export_usages.is_empty(),
@@ -474,7 +485,16 @@ mod orchestration {
         };
         let config = make_config_with_rules(rules);
 
-        let results = find_dead_code_full(&graph, &config, &[], None, &[], &modules, false);
+        let results = find_dead_code_full(
+            &graph,
+            &config,
+            &[],
+            None,
+            &[],
+            &modules,
+            false,
+            &FxHashSet::default(),
+        );
 
         assert!(
             !results.unused_files.iter().any(|f| f
