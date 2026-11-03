@@ -34,15 +34,15 @@ pub(super) const MAX_INLINE_NESTING: usize = 4;
 /// The copied AST nodes stay at or below `source_len`, and each node of the
 /// parsed source spans at least one byte, so the AST grows at most to two
 /// times its parsed size.
+///
+/// The pass also replaces an array element `defineProject(value)` with
+/// `value`, also when the program has no qualifying constant.
 pub(super) fn inline_value_constants<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
     source_len: usize,
 ) {
     let values = constant_values(allocator, program);
-    if values.is_empty() {
-        return;
-    }
     Inliner::new(allocator, &values, source_len).visit_program(program);
 }
 
@@ -363,6 +363,7 @@ impl<'a> VisitMut<'a> for Inliner<'a, '_> {
     }
 
     fn visit_array_expression_element(&mut self, element: &mut ArrayExpressionElement<'a>) {
+        unwrap_define_helper_call(element);
         let copy = element.as_expression().and_then(|expr| self.copy_for(expr));
         let Some(value) = copy else {
             walk_mut::walk_array_expression_element(self, element);
@@ -372,6 +373,24 @@ impl<'a> VisitMut<'a> for Inliner<'a, '_> {
         self.nesting += 1;
         walk_mut::walk_array_expression_element(self, element);
         self.nesting -= 1;
+    }
+}
+
+/// Replace an array element `defineProject(value)` or `defineConfig(value)`
+/// with `value`. These helpers return their only argument, so a list such as
+/// `projects: [defineProject(unit)]` holds the value itself.
+fn unwrap_define_helper_call(element: &mut ArrayExpressionElement<'_>) {
+    let ArrayExpressionElement::CallExpression(call) = element else {
+        return;
+    };
+    if call.arguments.len() != 1
+        || call.arguments[0].is_spread()
+        || !super::merge_config::is_define_config_callee(&call.callee)
+    {
+        return;
+    }
+    if let Some(argument) = call.arguments.pop() {
+        *element = ArrayExpressionElement::from(argument.into_expression());
     }
 }
 

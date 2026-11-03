@@ -29,7 +29,7 @@ pub(super) use relative_package_root::try_relative_package_root_source_fallback;
 use scss_paths::{find_scss_through_path_alias, lookup_scss_path};
 use tsconfig_output::try_tsconfig_output_source;
 pub(super) use tsconfig_output::{
-    try_canonical_source_fallbacks, try_relative_tsconfig_output_fallback,
+    try_canonical_source_fallbacks, try_relative_output_source_fallbacks,
 };
 use workspace_package_asset::{exports_target_asset, workspace_package_asset};
 
