@@ -744,13 +744,18 @@ finds no binary or no base ref, it prints a note and passes, because CI still
 runs the check:
 
 ```bash
-fallow audit --config scripts/fallow-file-length.json --base <ref> --no-css --quiet
+fallow audit --config scripts/fallow-file-length.json --base <merge-base> --no-css --quiet
 ```
+
+The script gives the merge base of `HEAD` and the ref to `--base`, not the
+ref. `fallow audit` reads the base files at the commit that `--base` names.
+When the base branch removed lines from a long file after the branch started,
+a compare with the ref shows growth that the branch did not add.
 
 - The `file-length` pre-commit step compares the working tree with `HEAD`.
   It reads the working tree, not the staged blob.
-- The `file-length` pre-push step compares the working tree with
-  `origin/main`, or with `upstream/main` in a fork clone.
+- The `file-length` pre-push step compares the working tree with the merge
+  base of `origin/main`, or of `upstream/main` in a fork clone.
 - `npm run verify:fast` runs the script against `origin/main`.
 - The `File length` step of the CI `Fallow Self Analysis` job runs the audit
   with the binary of the pull request against `origin/<base branch>`. The

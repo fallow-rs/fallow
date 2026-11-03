@@ -24,9 +24,16 @@ if [ ! -x "$fallow" ]; then
   fi
 fi
 
+# `fallow audit` reads the base files at the commit that `--base` names. When
+# the base branch removed lines from a long file after the branch started, a
+# small edit on the branch then looks like growth. The merge base holds the
+# files that the branch started from, so the script compares with it. CI
+# compares the merge commit of the pull request with the base branch, and
+# that merge commit holds the change of the base branch too.
 for base in "$@"; do
   if git rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1; then
-    exec "$fallow" audit --config scripts/fallow-file-length.json --base "$base" --no-css --quiet
+    merge_base=$(git merge-base HEAD "$base" 2>/dev/null) || merge_base=$base
+    exec "$fallow" audit --config scripts/fallow-file-length.json --base "$merge_base" --no-css --quiet
   fi
 done
 
