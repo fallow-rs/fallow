@@ -97,7 +97,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -108,7 +108,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -569,7 +569,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1131,7 +1131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1226,7 +1226,7 @@ dependencies = [
  "sha2 0.11.1",
  "signal-hook",
  "similar 3.2.1",
- "srcmap-sourcemap",
+ "srcmap-sourcemap 0.4.0",
  "syn 3.0.9",
  "tempfile",
  "toml",
@@ -1346,7 +1346,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "srcmap-sourcemap",
+ "srcmap-sourcemap 0.4.0",
  "tempfile",
  "toml",
  "tracing",
@@ -2163,7 +2163,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2692,7 +2692,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2993,7 +2993,7 @@ dependencies = [
  "oxc_coverage_types",
  "serde_json",
  "srcmap-remapping",
- "srcmap-sourcemap",
+ "srcmap-sourcemap 0.3.9",
 ]
 
 [[package]]
@@ -3976,7 +3976,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4298,7 +4298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4321,15 +4321,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "srcmap-codec"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cae7e00ed3a2a08f47e8265db91cf082c759d2e78d8328414208c02340950f14"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "srcmap-generator"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ceb9043924adb7a987cbe5cf467a93463c8dcb177e97c169d78f586d66fd8191"
 dependencies = [
  "rustc-hash",
- "srcmap-codec",
- "srcmap-scopes",
- "srcmap-sourcemap",
+ "srcmap-codec 0.3.9",
+ "srcmap-scopes 0.3.9",
+ "srcmap-sourcemap 0.3.9",
 ]
 
 [[package]]
@@ -4339,7 +4348,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7323b4eaf9a05921a6de1a0b231fb792aa76429f3a0e0c80d94858681abd452a"
 dependencies = [
  "srcmap-generator",
- "srcmap-sourcemap",
+ "srcmap-sourcemap 0.3.9",
 ]
 
 [[package]]
@@ -4348,7 +4357,16 @@ version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cdfe41caa18fc53ab7ffe9d43deb3d0e3e5f18e8f72b543458c6aab3ac7a7bf"
 dependencies = [
- "srcmap-codec",
+ "srcmap-codec 0.3.9",
+]
+
+[[package]]
+name = "srcmap-scopes"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22a332e089bd164c5a0cc21182ffd98a9051f59b771f21c26c0d4e63a432e739"
+dependencies = [
+ "srcmap-codec 0.4.0",
 ]
 
 [[package]]
@@ -4360,8 +4378,22 @@ dependencies = [
  "memchr",
  "serde",
  "serde_json",
- "srcmap-codec",
- "srcmap-scopes",
+ "srcmap-codec 0.3.9",
+ "srcmap-scopes 0.3.9",
+]
+
+[[package]]
+name = "srcmap-sourcemap"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e7081eae3039de3ddeb2f0ad5ee05a39c5c973346f0d580fdef7d32007a4786"
+dependencies = [
+ "memchr",
+ "serde",
+ "serde_json",
+ "srcmap-codec 0.4.0",
+ "srcmap-scopes 0.4.0",
+ "url",
 ]
 
 [[package]]
@@ -4506,7 +4538,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4516,7 +4548,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5088,7 +5120,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
