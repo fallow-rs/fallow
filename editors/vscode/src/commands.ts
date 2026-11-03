@@ -60,6 +60,7 @@ import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js
 import { registerChild, unregisterChild } from "./process-registry.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
 import { appendTypeAwareArgs, TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
+import { typeAwareEnvironment } from "./typeAwareCompanion.js";
 import { noteTypeAwareDegradation, typeAwareDegradationWarnings } from "./typeAwareDegradation.js";
 import { getWorkspaceRoot } from "./workspaceRoot.js";
 import {
@@ -179,7 +180,11 @@ export const execFallow = (
 
     const child = child_process.spawn(binary, [...args], {
       cwd,
-      env: options.env ? { ...process.env, ...options.env } : process.env,
+      env: {
+        ...process.env,
+        ...typeAwareEnvironment(binary, getWorkspaceRoot()),
+        ...options.env,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     registerChild(child);

@@ -115,9 +115,11 @@ FALLOW_TYPE_AWARE_BACKEND=tsrs node --test tools/type-aware-sidecar/test/*.test.
 
 tsrs has no Windows or macOS x64 binaries, and the backend stays opt-in while
 tsrs is a 0.x release. The VS Code extension bundles only the default backend,
-so the tsrs backend needs an npm or CLI install. Fallow reads the selection
-once per process and rejects an unknown or non-Unicode value before it starts
-the companion.
+so the tsrs backend needs an npm or CLI install. When the extension runs Fallow
+from the project `node_modules`, it uses a `fallow-type-aware` package from the
+same `node_modules` whose version equals the Fallow version. Fallow reads the
+selection once per process and rejects an unknown or non-Unicode value before
+it starts the companion.
 
 ## Ownership boundary with tsc and Oxlint
 
@@ -297,12 +299,12 @@ fallow dead-code --root packages/app --unused-class-members --type-aware \
 
 Fallow never searches project `node_modules/.bin` or `PATH` for this executable.
 It accepts an explicit `FALLOW_TYPE_AWARE_BIN` path, or a regular non-symlinked
-sidecar next to the active Fallow executable. The `fallow` npm launcher and the
-Node-API loader resolve a version-matched `fallow-type-aware` npm package
-themselves and wire it through `FALLOW_TYPE_AWARE_BIN`, marked as
-wrapper-provided. `type-aware status` reports the resolution path as
+sidecar next to the active Fallow executable. The `fallow` npm launcher, the
+Node-API loader, and the VS Code extension resolve a version-matched
+`fallow-type-aware` npm package themselves and wire it through
+`FALLOW_TYPE_AWARE_BIN`, marked as wrapper-provided. `type-aware status` reports the resolution path as
 `discovery_source`: `environment-override` (user-set `FALLOW_TYPE_AWARE_BIN`),
-`npm-wrapper` (companion resolved from `node_modules` by a fallow npm wrapper),
+`npm-wrapper` (companion resolved from `node_modules` by a fallow launcher),
 or `installed-sibling` (found next to the active executable). Requests, responses, warnings,
 candidate counts, project counts, and execution time are bounded. The child
 process receives a minimal environment. Relative, missing, and project-local
@@ -354,7 +356,9 @@ identity or a bounded provenance summary.
 
 Combined analysis, audit, MCP, LSP, VS Code, the Rust API, and Node bindings use
 the same exact-version protocol. The VS Code package bundles the companion and
-its TypeScript runtime. CI integrations install the matching optional package.
+its TypeScript runtime, and passes it to each Fallow child process. A
+version-matched project companion takes its place for a project-local Fallow.
+CI integrations install the matching optional package.
 Baseline and regression comparisons include semantic mode identity so a
 syntactic run is never silently compared with a type-aware run.
 
