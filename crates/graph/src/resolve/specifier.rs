@@ -12,8 +12,8 @@ use super::fallbacks::{
     installed_workspace_package_target, lookup_internal_file_id, nearest_package_manifest,
     normalize_path_lexically, package_imports_workspace_target, try_canonical_source_fallbacks,
     try_css_extension_fallback, try_package_imports_fallback, try_path_alias_fallback,
-    try_pnpm_workspace_fallback, try_relative_package_root_source_fallback,
-    try_relative_tsconfig_output_fallback, try_scss_include_path_fallback,
+    try_pnpm_workspace_fallback, try_relative_output_source_fallbacks,
+    try_relative_package_root_source_fallback, try_scss_include_path_fallback,
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
 };
@@ -1943,7 +1943,7 @@ fn try_failed_package_fallbacks(
     if let Some(result) = try_relative_package_root_source_fallback(ctx, from_file, specifier) {
         return Some(result);
     }
-    try_relative_tsconfig_output_fallback(ctx, from_file, specifier)
+    try_relative_output_source_fallbacks(ctx, from_file, specifier)
 }
 
 fn resolve_failed_alias_specifier(

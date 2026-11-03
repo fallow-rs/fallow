@@ -175,6 +175,10 @@ mod lit_unrendered_element;
 mod lit_unused_state;
 #[path = "integration_test/member_detection.rs"]
 mod member_detection;
+#[path = "integration_test/metro_extra_node_modules.rs"]
+mod metro_extra_node_modules;
+#[path = "integration_test/nested_local_path_dependency.rs"]
+mod nested_local_path_dependency;
 #[path = "integration_test/nesting_too_deep_diagnostic.rs"]
 mod nesting_too_deep_diagnostic;
 #[path = "integration_test/nx_project_json.rs"]
@@ -183,6 +187,8 @@ mod nx_project_json;
 mod opentelemetry_plugin;
 #[path = "integration_test/orm_entity_reflection.rs"]
 mod orm_entity_reflection;
+#[path = "integration_test/output_extension_sibling.rs"]
+mod output_extension_sibling;
 #[path = "integration_test/package_dist_to_src_entries.rs"]
 mod package_dist_to_src_entries;
 #[path = "integration_test/parse_degraded_diagnostic.rs"]

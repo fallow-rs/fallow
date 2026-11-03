@@ -281,7 +281,7 @@ fn is_merge_config_callee(callee: &Expression<'_>) -> bool {
 }
 
 /// `defineConfig(...)` or `defineProject(...)`, also as a namespace call.
-fn is_define_config_callee(callee: &Expression<'_>) -> bool {
+pub(super) fn is_define_config_callee(callee: &Expression<'_>) -> bool {
     callee_name(callee).is_some_and(|name| DEFINE_CONFIG_HELPERS.contains(&name))
 }
 

@@ -2827,7 +2827,7 @@ fn collect_all_string_values(expr: &Expression, values: &mut Vec<String>) {
 }
 
 /// Convert a `PropertyKey` to a `String`.
-fn property_key_to_string(key: &PropertyKey) -> Option<String> {
+pub(crate) fn property_key_to_string(key: &PropertyKey) -> Option<String> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
         PropertyKey::StringLiteral(s) => Some(s.value.text().into_owned()),

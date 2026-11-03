@@ -821,8 +821,9 @@ merges these sources and keeps the first entry for each canonical directory:
 1. `package.json` `workspaces`, `pnpm-workspace.yaml` `packages`, and the Deno
    `workspace` field.
 2. `tsconfig.json` `references`.
-3. `link:` and `file:` specs in the root `dependencies`, `devDependencies` and
-   `optionalDependencies`.
+3. `link:` and `file:` specs in the `dependencies`, `devDependencies` and
+   `optionalDependencies` of the root manifest and of each workspace that
+   source 1 or 2 found. A target path is relative to the declaring manifest.
 4. The shallow scan of two directory levels. This source runs only when no
    workspace pattern exists.
 5. Nested independent pnpm projects. This source runs only when a root

@@ -1,5 +1,6 @@
 //! Map TypeScript build output paths back to source with the `rootDir` and
-//! `outDir` of the tsconfig files of the package that owns the path.
+//! `outDir` of the tsconfig files of the package that owns the path, or with
+//! a sibling source file of the same stem.
 
 use std::path::Path;
 
@@ -11,13 +12,25 @@ use super::{
     normalize_path_lexically, try_pnpm_workspace_fallback, try_source_fallback,
 };
 
+/// Resolve a relative import of a build output file to its source file:
+/// first through the tsconfig output mapping, then through a sibling source
+/// file with the same stem.
+pub(in crate::resolve) fn try_relative_output_source_fallbacks(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    try_relative_tsconfig_output_fallback(ctx, from_file, specifier)
+        .or_else(|| try_output_extension_sibling_fallback(ctx, from_file, specifier))
+}
+
 /// Resolve a relative import into a TypeScript output directory to its source.
 ///
 /// A script or a test can import the emitted file (`../lib/types/a.js`) of a
 /// package whose tsconfig declares `rootDir` and `outDir`. The output is often
 /// not on disk, and `outDir` can have any name. The tsconfig files of the
 /// package that owns the target path map the output path to the source file.
-pub(in crate::resolve) fn try_relative_tsconfig_output_fallback(
+fn try_relative_tsconfig_output_fallback(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
@@ -72,6 +85,48 @@ pub(in crate::resolve) fn try_tsconfig_output_source(
         return None;
     };
     lookup_internal_file_id(ctx, &source)
+}
+
+/// The source extensions of the files that a bundler compiles. TypeScript
+/// itself maps `.cjs` only to `.cts` and `.mjs` only to `.mts`, and the
+/// resolver already applies that mapping.
+const COMPILED_SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts"];
+
+/// The output extensions that a bundler can give a compiled source file.
+const OUTPUT_EXTS: &[&str] = &["cjs", "mjs"];
+
+/// Resolve `./name.cjs` or `./name.mjs` to a sibling TypeScript source file.
+///
+/// A bundler can compile `src/loader.ts` and `src/app.ts` into one output
+/// folder as `loader.cjs` and `app.cjs`. The loader then loads `./app.cjs`,
+/// which exists only in the output folder. This fallback applies only when
+/// the importer is a compiled source file, the target is not on disk, and a
+/// source file with the same stem is in the same folder as the target.
+fn try_output_extension_sibling_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with("./") && !specifier.starts_with("../") {
+        return None;
+    }
+    if !has_extension(from_file, COMPILED_SOURCE_EXTS) {
+        return None;
+    }
+    let target = normalize_path_lexically(&from_file.parent()?.join(specifier));
+    if !has_extension(&target, OUTPUT_EXTS) {
+        return None;
+    }
+    COMPILED_SOURCE_EXTS
+        .iter()
+        .find_map(|ext| lookup_internal_file_id(ctx, &target.with_extension(ext)))
+        .map(ResolveResult::InternalModule)
+}
+
+fn has_extension(path: &Path, extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| extensions.contains(&ext))
 }
 
 #[cfg(test)]

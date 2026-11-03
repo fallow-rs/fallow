@@ -1942,3 +1942,63 @@ fn const_that_the_file_writes_to_does_not_resolve() {
         result.setup_files
     );
 }
+
+/// Projects that a `defineProject` call wraps, bound to local constants that
+/// spread another project.
+const BOUND_PROJECTS_CONFIG: &str = r#"
+import { defineConfig } from "vite";
+import { defineProject } from "vitest/config";
+
+const browserProject = {
+  extends: true,
+  test: {
+    name: "browser",
+    include: ["src/**/*.browser.ts"],
+    setupFiles: ["./support/browserSetup.ts"],
+  },
+} satisfies object;
+
+const scenarioProject = {
+  ...browserProject,
+  test: {
+    ...browserProject.test,
+    name: "scenarios",
+    include: ["support/*.scenario.tsx"],
+    setupFiles: ["./support/counter.ts", ...browserProject.test.setupFiles],
+  },
+};
+
+export default defineConfig(() => {
+  return {
+    test: {
+      projects: [
+        defineProject({ test: { name: "unit", include: ["src/**/*.unit.ts"] } }),
+        defineProject(browserProject),
+        defineProject(scenarioProject),
+      ],
+    },
+  };
+});
+"#;
+
+#[test]
+fn projects_in_define_project_calls_register_includes_and_setup_files() {
+    let result = resolve(BOUND_PROJECTS_CONFIG);
+    let matches = |path: &str| super::super::entry_rules_match(&result, path);
+    assert!(matches("src/a.browser.ts"), "{:?}", entry_globs(&result));
+    assert!(
+        matches("support/home.scenario.tsx"),
+        "{:?}",
+        entry_globs(&result)
+    );
+    assert!(matches("src/a.unit.ts"), "{:?}", entry_globs(&result));
+    for setup in ["support/browserSetup.ts", "support/counter.ts"] {
+        assert!(
+            result
+                .setup_files
+                .contains(&std::path::Path::new("/project").join(setup)),
+            "{setup} is a setup file: {:?}",
+            result.setup_files
+        );
+    }
+}
