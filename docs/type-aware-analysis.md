@@ -116,8 +116,9 @@ FALLOW_TYPE_AWARE_BACKEND=tsrs node --test tools/type-aware-sidecar/test/*.test.
 tsrs has no Windows or macOS x64 binaries, and the backend stays opt-in while
 tsrs is a 0.x release. The VS Code extension bundles only the default backend,
 so the tsrs backend needs an npm or CLI install. When the extension runs Fallow
-from the project `node_modules`, it uses a `fallow-type-aware` package from the
-same `node_modules` whose version equals the Fallow version. Fallow reads the
+from the project `node_modules`, it uses the `fallow-type-aware` package of the
+same install (also from the pnpm store) when its version equals the Fallow
+version. Fallow reads the
 selection once per process and rejects an unknown or non-Unicode value before
 it starts the companion.
 
@@ -302,7 +303,8 @@ It accepts an explicit `FALLOW_TYPE_AWARE_BIN` path, or a regular non-symlinked
 sidecar next to the active Fallow executable. The `fallow` npm launcher, the
 Node-API loader, and the VS Code extension resolve a version-matched
 `fallow-type-aware` npm package themselves and wire it through
-`FALLOW_TYPE_AWARE_BIN`, marked as wrapper-provided. `type-aware status` reports the resolution path as
+`FALLOW_TYPE_AWARE_BIN`, marked as wrapper-provided. `type-aware status`
+reports the resolution path as
 `discovery_source`: `environment-override` (user-set `FALLOW_TYPE_AWARE_BIN`),
 `npm-wrapper` (companion resolved from `node_modules` by a fallow launcher),
 or `installed-sibling` (found next to the active executable). Requests, responses, warnings,

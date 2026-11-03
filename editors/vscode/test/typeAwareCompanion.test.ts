@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -83,6 +83,7 @@ describe("typeAwareEnvironment", () => {
 
     expect(typeAwareEnvironment(project.nativeBinary, project.root, unix)).toEqual({
       FALLOW_TYPE_AWARE_BIN: project.projectCompanion,
+      FALLOW_TYPE_AWARE_SCRIPT: "",
       FALLOW_TYPE_AWARE_BIN_SOURCE: "npm-wrapper",
     });
   });
@@ -116,11 +117,33 @@ describe("typeAwareEnvironment", () => {
     );
   });
 
+  it("finds the companion next to the wrapper in a pnpm layout", () => {
+    const root = join(base, "project");
+    const nodeModules = join(root, "node_modules");
+    const store = join(nodeModules, ".pnpm", "fallow@3.38.1", "node_modules");
+    mkdirSync(join(store, "fallow"), { recursive: true });
+    writeJson(join(store, "fallow", "package.json"), { version: "3.38.1" });
+    mkdirSync(join(store, "fallow-type-aware"), { recursive: true });
+    writeJson(join(store, "fallow-type-aware", "package.json"), { version: "3.38.1" });
+    writeFileSync(join(store, "fallow-type-aware", "fallow-type-aware.mjs"), "");
+    symlinkSync(join(store, "fallow"), join(nodeModules, "fallow"), "junction");
+    mkdirSync(join(nodeModules, ".bin"), { recursive: true });
+    const shim = join(nodeModules, ".bin", "fallow-lsp");
+    writeFileSync(shim, "");
+
+    expect(typeAwareEnvironment(shim, root, unix)).toEqual({
+      FALLOW_TYPE_AWARE_BIN: realpathSync(join(store, "fallow-type-aware", "fallow-type-aware.mjs")),
+      FALLOW_TYPE_AWARE_SCRIPT: "",
+      FALLOW_TYPE_AWARE_BIN_SOURCE: "npm-wrapper",
+    });
+  });
+
   it("keeps the bundled companion when the project companion version differs", () => {
     const project = createProject(base, "3.38.1", "3.38.0");
 
     expect(typeAwareEnvironment(project.nativeBinary, project.root, unix)).toEqual({
       FALLOW_TYPE_AWARE_BIN: bundled,
+      FALLOW_TYPE_AWARE_SCRIPT: "",
     });
   });
 
@@ -129,6 +152,7 @@ describe("typeAwareEnvironment", () => {
 
     expect(typeAwareEnvironment(project.nativeBinary, project.root, unix)).toEqual({
       FALLOW_TYPE_AWARE_BIN: bundled,
+      FALLOW_TYPE_AWARE_SCRIPT: "",
     });
   });
 
@@ -138,9 +162,11 @@ describe("typeAwareEnvironment", () => {
 
     expect(typeAwareEnvironment(managed, project.root, unix)).toEqual({
       FALLOW_TYPE_AWARE_BIN: bundled,
+      FALLOW_TYPE_AWARE_SCRIPT: "",
     });
     expect(typeAwareEnvironment(project.nativeBinary, null, unix)).toEqual({
       FALLOW_TYPE_AWARE_BIN: bundled,
+      FALLOW_TYPE_AWARE_SCRIPT: "",
     });
   });
 

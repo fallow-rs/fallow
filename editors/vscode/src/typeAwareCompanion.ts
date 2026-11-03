@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative } from "node:path";
 
 const TYPE_AWARE_ENV = "FALLOW_TYPE_AWARE_BIN";
@@ -52,6 +53,25 @@ const isInside = (parent: string, child: string): boolean => {
 };
 
 /**
+ * The `fallow-type-aware` package directory for a project `node_modules`. npm
+ * and yarn hoist it to the top level. pnpm keeps it next to the `fallow`
+ * wrapper in its store, so resolve it from the real wrapper path, as the npm
+ * wrapper does.
+ */
+const companionPackageDir = (nodeModules: string): string | null => {
+  const hoisted = join(nodeModules, COMPANION_PACKAGE);
+  if (existsSync(join(hoisted, "package.json"))) {
+    return hoisted;
+  }
+  try {
+    const wrapper = realpathSync(join(nodeModules, "fallow", "package.json"));
+    return dirname(createRequire(wrapper).resolve(`${COMPANION_PACKAGE}/package.json`));
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Find the `fallow-type-aware` companion in the project `node_modules` for a
  * Fallow binary from the same `node_modules`. The Rust client rejects a
  * companion with a different version, so accept only an exact version match.
@@ -72,8 +92,12 @@ const projectTypeAwareCompanion = (
   const fallowVersion =
     readVersion(join(dirname(fallowBinary), "package.json")) ??
     readVersion(join(nodeModules, "fallow", "package.json"));
-  const companionDir = join(nodeModules, COMPANION_PACKAGE);
-  if (!fallowVersion || readVersion(join(companionDir, "package.json")) !== fallowVersion) {
+  const companionDir = companionPackageDir(nodeModules);
+  if (
+    !fallowVersion ||
+    !companionDir ||
+    readVersion(join(companionDir, "package.json")) !== fallowVersion
+  ) {
     return null;
   }
   const companion = join(companionDir, COMPANION_FILE);
@@ -113,7 +137,9 @@ export const typeAwareEnvironment = (
   const command = typeAwareCommand(companion, platform, execPath);
   return {
     [TYPE_AWARE_ENV]: command.binary,
-    ...(command.script ? { [TYPE_AWARE_SCRIPT_ENV]: command.script } : {}),
+    // An empty value counts as unset, so a stale script from the shell does not
+    // reach a companion that runs directly.
+    [TYPE_AWARE_SCRIPT_ENV]: command.script ?? "",
     ...(project ? { [TYPE_AWARE_SOURCE_ENV]: PROJECT_COMPANION_SOURCE } : {}),
   };
 };
