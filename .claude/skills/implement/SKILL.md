@@ -26,6 +26,9 @@ Deliver the requested change through the native Fallow lifecycle.
 5. For changes with user-facing design decisions, run `panel-review` before
    editing.
 6. Create an implementation branch and ready pull request before tracked edits.
+   Record the URL of each pull request of the objective, in every
+   repository, in `.plans/<task>.md` when you open it. `sweep` checks this
+   list.
 7. Implement in pipeline order and keep generated contracts, public docs, and
    companion repositories synchronized. Follow the test evidence rules in
    `docs/development/quality-gates.md`. For a bug, get a command that fails
@@ -37,6 +40,10 @@ Deliver the requested change through the native Fallow lifecycle.
    `docs/development/review-routing.md`. Resolve every block.
 10. Update the pull request with current verification evidence and the proof
     level of each claim.
+11. Continue with `review`, then `ship`, then `sweep` in the same session.
+    Do not stop at an open pull request, and do not wait for a prompt. Stop
+    only for a decision that belongs to the maintainer. The work is done only
+    when it meets the definition of done in `AGENTS.md`.
 
 Preserve unrelated work. Never create process artifacts under committed
 `docs/`. Prefer durable knowledge in indexed docs and keep this skill

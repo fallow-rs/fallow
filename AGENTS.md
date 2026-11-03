@@ -37,6 +37,29 @@ Fallow's native lifecycle is authoritative:
 implement -> panel-review -> review -> ship -> sweep
 ```
 
+Run an objective from the maintainer through the full lifecycle in one pass.
+Do not stop after `implement`, and do not wait for a prompt to ship or sweep.
+Use `panel-review` only when the change has design or user-facing decisions.
+
+An objective is done only when all of these are true:
+
+- every pull request of the objective is merged to `main`, and the CI of the
+  merged commit is complete and green (armed auto-merge is not enough);
+- every companion pull request is merged to the default branch of its
+  repository;
+- every follow-up that the work found is fixed, or has a GitHub issue that the
+  final report links (for a repository outside `fallow-rs`, a draft issue in
+  the final report);
+- the touched branches and worktrees are clean.
+
+A note in `.plans/`, in `/tmp`, or in the chat report does not track a
+follow-up. An open pull request is not done. This is also true while CI runs.
+When a merge is blocked, report the pull request, the blocker, and the next
+action. Three stops are not blocks: a draft or no-merge request from the
+maintainer, a maintainer step that a documented procedure requires (for
+example the npm approval of a release), and an open decision for the
+maintainer, reported with a recommended answer.
+
 Use the corresponding tracked skills under `.agents/skills/`. Codex consumes
 that canonical tree directly. Claude adapters under `.claude/skills/` are
 generated and must pass `npm run check:agent-adapters`.

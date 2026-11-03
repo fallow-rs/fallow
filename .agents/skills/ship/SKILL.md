@@ -31,8 +31,11 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    after the merge. Publish its commit with the commands that it prints.
    `ship-wait-checks.mjs` prints this step for such a change.
 4. Create signed conventional commits only.
-5. Merge with pinned auto-merge. Do not wait for the checks in the
-   foreground:
+5. Merge with pinned auto-merge after steps 1 to 4. Arm it before any CI
+   wait, except in a serial merge (see "Serial merge of many pull
+   requests"). Do not keep the merge for a later step of the session: when
+   the session stops, an unarmed pull request stays open. Do not wait for
+   the checks in the foreground:
 
    ```bash
    gh pr merge <number> --auto --squash --match-head-commit <reviewed sha> --subject "<type>: <summary> (#<number>)"
@@ -80,6 +83,9 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    your code, a comment or a doc wrong without a text conflict. Fix that in
    a follow-up pull request.
 8. Return every touched checkout to a clean, synchronized state.
+
+Each new pull request of the objective, for example a follow-up of step 7,
+goes through `review` and `ship` too. Record its URL in `.plans/<task>.md`.
 
 Do not call work complete while required merged-commit workflows are still
 running.
