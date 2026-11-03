@@ -2,6 +2,10 @@
 
 Codebase intelligence for TypeScript and JavaScript.
 
+This crate installs fallow for TypeScript and JavaScript. To analyze a Rust
+workspace, install [`cargo-fallow`](https://crates.io/crates/cargo-fallow) and
+run `cargo fallow`.
+
 This crate installs the `fallow` command:
 
 ```bash
