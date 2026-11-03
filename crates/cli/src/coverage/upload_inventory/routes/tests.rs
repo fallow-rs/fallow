@@ -60,6 +60,23 @@ fn next_pages_router() {
 }
 
 #[test]
+fn next_pages_router_catch_all_pages() {
+    assert_eq!(
+        pattern("nextjs", "pages/docs/[...slug].tsx"),
+        any("/docs/[...slug]")
+    );
+    assert_eq!(
+        pattern("nextjs", "pages/[[...slug]].tsx"),
+        any("/[[...slug]]")
+    );
+    assert_eq!(
+        pattern("nextjs", "app/docs/[...slug]/page.tsx"),
+        any("/docs/[...slug]")
+    );
+    assert_eq!(pattern("nextjs", "pages/[...slug].test.tsx"), None);
+}
+
+#[test]
 fn remix_flat_routes() {
     assert_eq!(pattern("remix", "app/routes/_index.tsx"), any("/"));
     assert_eq!(
@@ -123,6 +140,24 @@ fn nuxt_pages_and_server_routes() {
     );
     assert_eq!(pattern("nuxt", "server/utils/db.ts"), None);
     assert_eq!(pattern("nuxt", "layouts/default.vue"), None);
+}
+
+#[test]
+fn nuxt_catch_all_pages_and_server_routes() {
+    assert_eq!(pattern("nuxt", "pages/[...slug].vue"), any("/[...slug]"));
+    assert_eq!(
+        pattern("nuxt", "app/pages/docs/[[...slug]].vue"),
+        any("/docs/[[...slug]]")
+    );
+    assert_eq!(pattern("nuxt", "pages/[...slug].spec.ts"), None);
+    assert_eq!(
+        pattern("nuxt", "server/api/[...slug].ts"),
+        any("/api/[...slug]")
+    );
+    assert_eq!(
+        pattern("nuxt", "server/api/files/[...path].get.ts"),
+        Some(("/api/files/[...path]".to_owned(), MethodRule::Fixed("GET")))
+    );
 }
 
 #[test]

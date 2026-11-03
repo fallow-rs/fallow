@@ -193,6 +193,21 @@ const fn route(framework: &'static str, pattern: String, methods: MethodRule) ->
     }
 }
 
+/// True when `stem` has a `.` outside `[...]` brackets. A catch-all page
+/// (`[...slug]`, `[[...slug]]`) has dots only inside its brackets.
+fn has_dot_outside_brackets(stem: &str) -> bool {
+    let mut depth = 0_usize;
+    stem.chars().any(|ch| {
+        match ch {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            '.' => return depth == 0,
+            _ => {}
+        }
+        false
+    })
+}
+
 fn is_group(seg: &str) -> bool {
     seg.len() > 2 && seg.starts_with('(') && seg.ends_with(')')
 }
@@ -221,7 +236,7 @@ fn derive_next(dirs: &[&str], file: &str) -> Option<DerivedRoute> {
     let stem = split_ext(file, NEXT_PAGE_EXTENSIONS)?;
     // `_app`, `_document` and `_error` are not pages; a dotted stem is a test or
     // a colocated module, not a page.
-    if stem.starts_with('_') || stem.contains('.') {
+    if stem.starts_with('_') || has_dot_outside_brackets(stem) {
         return None;
     }
     let leaf = (stem != "index").then_some(stem);
@@ -295,7 +310,7 @@ fn derive_sveltekit(dirs: &[&str], file: &str) -> Option<DerivedRoute> {
 fn derive_nuxt(dirs: &[&str], file: &str) -> Option<DerivedRoute> {
     if let Some(rest) = strip_root(dirs, &[&["pages"], &["app", "pages"]]) {
         let stem = split_ext(file, &["vue", "ts", "tsx", "js", "jsx"])?;
-        if stem.contains('.') {
+        if has_dot_outside_brackets(stem) {
             return None;
         }
         let leaf = (stem != "index").then_some(stem);
