@@ -728,6 +728,42 @@ test("file-size guard runs for commits and on every pull request", () => {
   assert.match(jsLint, /node scripts\/check-file-size\.mjs --base "origin\/\$BASE_REF"/u);
 });
 
+test("fallow audit holds the file-length rule for .mjs and .ts files", () => {
+  const hooks = readFileSync("hk.pkl", "utf8");
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const config = readJson(".fallowrc.json");
+  const gate = readJson("scripts/fallow-file-length.json");
+  const selfAnalyze = /\n  fallow-self-analyze:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
+  const filter = /\n {12}self-analyze:\n((?: {14}- .*\n)+)/u.exec(ci)?.[1] ?? "";
+
+  const [limit] = config.health.thresholdOverrides;
+  assert.deepEqual(limit.files, ["**/*.mjs", "**/*.ts"]);
+  assert.equal(limit.maxFileLines, 2000);
+  assert.equal(gate.extends, "../.fallowrc.json");
+  assert.equal(gate.audit.worsened, "error");
+
+  const preCommit = /\["pre-commit"\][\s\S]*?(?=\n  \["commit-msg"\])/u.exec(hooks)?.[0] ?? "";
+  const prePush = /\["pre-push"\][\s\S]*$/u.exec(hooks)?.[0] ?? "";
+  assert.match(preCommit, /sh scripts\/hook-file-length\.sh HEAD/u);
+  assert.match(prePush, /sh scripts\/hook-file-length\.sh origin\/main upstream\/main/u);
+
+  // The job has a path filter, so the filter must hold each file type that
+  // the rule checks and the two config files.
+  for (const pattern of [
+    "'**/*.mjs'",
+    "'**/*.ts'",
+    "'.fallowrc.json'",
+    "'scripts/fallow-file-length.json'",
+  ]) {
+    assert.ok(filter.includes(pattern), `self-analyze filter misses ${pattern}`);
+  }
+  assert.match(
+    selfAnalyze,
+    /audit --config scripts\/fallow-file-length\.json --base "origin\/\$BASE_REF" --no-css/u,
+  );
+  assert.match(selfAnalyze, /fetch-depth: 0/u);
+});
+
 /**
  * The envelope named `name` and every envelope embedding it, mapped to the numeric
  * `schema_version` it publishes. An envelope is a definition whose

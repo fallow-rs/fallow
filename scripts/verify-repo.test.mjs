@@ -47,6 +47,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "check:parse-sites"]],
   ["npm", ["run", "check:emitted-versions"]],
   ["npm", ["run", "check:conformance-fixtures"]],
+  ["sh", ["scripts/hook-file-length.sh", "origin/main"]],
   ["node", ["--test", "scripts/workflow-policy.test.mjs"]],
 ];
 
@@ -147,9 +148,10 @@ test("the base ref steps run when the base ref exists", () => {
   });
 
   assert.equal(exitCode, 0);
-  assert.deepEqual(checkedRefs, ["origin/main", "origin/main"]);
+  assert.deepEqual(checkedRefs, ["origin/main", "origin/main", "origin/main"]);
   assert.ok(executed.includes("Large file growth"));
   assert.ok(executed.includes("Changelog fragments"));
+  assert.ok(executed.includes("File length"));
 });
 
 test("the base ref steps are skipped when the base ref is missing", () => {
@@ -170,9 +172,11 @@ test("the base ref steps are skipped when the base ref is missing", () => {
   assert.equal(exitCode, 0);
   assert.ok(!executed.includes("Large file growth"));
   assert.ok(!executed.includes("Changelog fragments"));
-  assert.equal(executed.length, commandsForMode("fast").length - 2);
+  assert.ok(!executed.includes("File length"));
+  assert.equal(executed.length, commandsForMode("fast").length - 3);
   assert.match(output, /Large file growth: skipped, because origin\/main does not exist/u);
   assert.match(output, /Changelog fragments: skipped, because origin\/main does not exist/u);
+  assert.match(output, /File length: skipped, because origin\/main does not exist/u);
   assert.match(output, /git fetch origin main/u);
 });
 

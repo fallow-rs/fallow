@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "extends": "../.fallowrc.json",
+  "rules": {
+    "complexity-cyclomatic": "off",
+    "complexity-cognitive": "off",
+    "complexity-crap": "off"
+  },
+  "audit": {
+    "worsened": "error",
+    "deadCode": false,
+    "dupes": false
+  }
+}

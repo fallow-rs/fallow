@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-// Stop large source files from growing. A change may shrink a file over the
-// line limit or keep its size, but it must not add lines to it. A new file
-// over the limit fails too. See docs/development/quality-gates.md#file-size.
+// Stop large Rust source files from growing. A change may shrink a file over
+// the line limit or keep its size, but it must not add lines to it. A new file
+// over the limit fails too. `fallow audit` holds the same limit for .mjs and
+// .ts files (health.maxFileLines in .fallowrc.json), so this script checks
+// .rs files only. See docs/development/quality-gates.md#file-size.
 
 import { execFileSync } from "node:child_process";
 import { extname, resolve } from "node:path";
@@ -11,11 +13,11 @@ import { pathToFileURL } from "node:url";
 /** The largest line count that a checked file can have without the no-growth rule. */
 export const LINE_LIMIT = 2000;
 
-const CHECKED_EXTENSIONS = new Set([".rs", ".mjs", ".ts"]);
+const CHECKED_EXTENSIONS = new Set([".rs"]);
 const SNAPSHOT_DIRECTORIES = new Set(["snapshots", "__snapshots__"]);
 // Test files grow with each new test case, so the rule skips them.
 const TEST_DIRECTORIES = new Set(["tests", "test"]);
-const TEST_FILE = /(?:^tests\.rs|_tests?\.rs|\.test\.(?:mjs|ts))$/u;
+const TEST_FILE = /(?:^tests\.rs|_tests?\.rs)$/u;
 // The repository generators write one of two exact header lines in the first
 // lines of the file. A comment that only names the words does not match.
 const GENERATED_HEADER_LINES = 10;
