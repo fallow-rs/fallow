@@ -297,7 +297,13 @@ test(
     assert.equal(git(skills, "rev-parse", "origin/main"), before);
     assert.doesNotMatch(output, /push origin main/u, "the companion main branch is protected");
     assert.match(output, /push origin HEAD:refs\/heads\/docs\/sync-fallow-/u);
-    assert.match(output, /gh pr create/u);
+    // `gh pr create --fill` reads the local branch, and the push above creates
+    // only the remote branch, so the hint gives the title and body itself.
+    assert.doesNotMatch(output, /--fill/u);
+    assert.match(
+      output,
+      /gh pr create .*--title 'docs: sync the Fallow skill from fallow \(#42, #43\)' --body '.+'/u,
+    );
     assert.match(output, /Public skills contract/u);
   }),
 );

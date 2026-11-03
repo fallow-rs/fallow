@@ -393,7 +393,14 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     const branch = `docs/sync-fallow-${pin.slice(0, 9)}`;
     log("Publish it through a pull request:");
     log(`  git -C ${companion} push origin HEAD:refs/heads/${branch}`);
-    log(`  gh pr create --repo fallow-rs/fallow-skills --base ${MAIN} --head ${branch} --fill`);
+    // `gh pr create --fill` reads the local branch, and the push creates only the remote one.
+    const title = shellQuote(message.split("\n")[0]);
+    const body = shellQuote(
+      `Syncs the released Fallow skill from fallow-rs/fallow@${pin.slice(0, 9)}.`,
+    );
+    log(
+      `  gh pr create --repo fallow-rs/fallow-skills --base ${MAIN} --head ${branch} --title ${title} --body ${body}`,
+    );
     log(
       `After the merge: git -C ${companion} fetch origin && git -C ${companion} reset --hard ${ORIGIN_MAIN}`,
     );
@@ -403,6 +410,9 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     rmSync(source, { recursive: true, force: true });
   }
 };
+
+/** Quote `value` as one POSIX shell word. */
+const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
 /**
  * Run the sync. Return the exit code: 0 on success or when nothing changed,
