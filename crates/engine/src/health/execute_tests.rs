@@ -1435,12 +1435,14 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
         target_keys: vec![],
     };
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: fx_summary(3, 0, 2, 1),
         findings: vec![
             fallow_output::RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:aaaaaaaa".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/a.ts"),
@@ -1455,6 +1457,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
                 discriminators: None,
             },
             fallow_output::RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:bbbbbbbb".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/b.ts"),
@@ -1469,6 +1472,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
                 discriminators: None,
             },
             fallow_output::RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:cccccccc".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/c.ts"),
@@ -1485,6 +1489,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
         ],
         hot_paths: vec![
             fallow_output::RuntimeCoverageHotPath {
+                cloud_context: None,
                 id: "fallow:hot:11111111".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot-a.ts"),
@@ -1497,6 +1502,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
                 optimization_target: None,
             },
             fallow_output::RuntimeCoverageHotPath {
+                cloud_context: None,
                 id: "fallow:hot:22222222".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot-b.ts"),
@@ -1555,11 +1561,13 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
         target_keys: vec![],
     };
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
         findings: vec![fallow_output::RuntimeCoverageFinding {
+            cloud_context: None,
             id: "fallow:prod:aaaaaaaa".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/a.ts"),
@@ -1607,12 +1615,14 @@ fn runtime_coverage_changed_review_uses_hot_path_verdict() {
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 2, 0, 0),
         findings: vec![],
         hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
+            cloud_context: None,
             id: "fallow:hot:33333333".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/hot.ts"),
@@ -1651,12 +1661,14 @@ fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/other.ts"));
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 2, 0, 0),
         findings: vec![],
         hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
+            cloud_context: None,
             id: "fallow:hot:44444444".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/hot.ts"),
@@ -1694,6 +1706,7 @@ fn fx_runtime_coverage_report_with_hot_paths(
     hot_paths: Vec<fallow_output::RuntimeCoverageHotPath>,
 ) -> fallow_output::RuntimeCoverageReport {
     fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
@@ -1718,6 +1731,7 @@ fn fx_hot_path(
     end_line: u32,
 ) -> fallow_output::RuntimeCoverageHotPath {
     fallow_output::RuntimeCoverageHotPath {
+        cloud_context: None,
         id: id.to_owned(),
         stable_id: None,
         path: PathBuf::from(path),
@@ -1947,11 +1961,13 @@ fn runtime_coverage_pr_context_promotes_hot_path_touched_above_cold_code() {
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
         findings: vec![fallow_output::RuntimeCoverageFinding {
+            cloud_context: None,
             id: "fallow:prod:cold0001".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/cold.ts"),
@@ -1998,11 +2014,13 @@ fn runtime_coverage_pr_context_promotes_hot_path_touched_above_cold_code() {
 fn runtime_coverage_standalone_keeps_cold_code_primary_above_unchanged_hot_paths() {
     let root = Path::new("/project");
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
         findings: vec![fallow_output::RuntimeCoverageFinding {
+            cloud_context: None,
             id: "fallow:prod:cold0002".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/cold.ts"),
@@ -2046,6 +2064,7 @@ fn runtime_coverage_license_grace_outranks_pr_context_signals() {
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fallow_output::RuntimeCoverageReport {
+        cloud_context: None,
         schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
         verdict: fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace,
         signals: Vec::new(),

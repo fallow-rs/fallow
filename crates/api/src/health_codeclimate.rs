@@ -624,6 +624,7 @@ mod tests {
             let report = HealthReport {
                 runtime_coverage: Some(RuntimeCoverageReport {
                     findings: vec![RuntimeCoverageFinding {
+                        cloud_context: None,
                         id: "runtime-fixture".to_string(),
                         stable_id: None,
                         source_hash: None,

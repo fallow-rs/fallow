@@ -20,8 +20,8 @@ use std::path::Path;
 
 use fallow_cov_protocol::function_identity_id;
 use fallow_output::{
-    InspectCloudErrors, InspectCloudEvidence, InspectCloudFunction, InspectCloudMatch,
-    InspectCloudStatus, InspectCloudSummary, InspectCloudUnpairedFunction,
+    InspectCloudCaller, InspectCloudErrors, InspectCloudEvidence, InspectCloudFunction,
+    InspectCloudMatch, InspectCloudStatus, InspectCloudSummary, InspectCloudUnpairedFunction,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -212,6 +212,23 @@ fn paired_function(
         .as_ref()
         .filter(|cpu| cpu.state == "tracked")
         .and_then(|cpu| cpu.self_ms_per_hour);
+    let browser_long_frame_ms_per_hour = cloud
+        .browser
+        .as_ref()
+        .filter(|browser| browser.state == "tracked")
+        .and_then(|browser| browser.long_frame_ms_per_hour);
+    let production_callers = cloud.production_callers.as_ref().map(|callers| {
+        callers
+            .iter()
+            .map(|caller| InspectCloudCaller {
+                stable_id: caller.stable_id.clone(),
+                file: caller.file.clone(),
+                function: caller.function.clone(),
+                line: caller.line,
+                samples: caller.samples,
+            })
+            .collect()
+    });
     let never_run_ranges = cloud
         .branches
         .as_ref()
@@ -231,7 +248,10 @@ fn paired_function(
         },
         errors,
         cpu_ms_per_hour,
+        browser_long_frame_ms_per_hour,
         never_run_ranges,
+        static_callers: cloud.static_callers,
+        production_callers,
         summary: cloud.summary.clone(),
     }
 }
@@ -351,7 +371,10 @@ mod tests {
             calls: Some(1),
             errors: None,
             cpu: None,
+            browser: None,
             branches: None,
+            static_callers: None,
+            production_callers: None,
             summary: String::new(),
         }
     }

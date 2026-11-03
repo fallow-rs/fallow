@@ -9775,6 +9775,15 @@ actionability_reason?: (string | null)
  */
 actionability_verdict?: (string | null)
 provenance: RuntimeCoverageProvenance
+/**
+ * Fields of the Fallow Cloud runtime-context answer that the CLI does not
+ * read, as the cloud sent them: for example `capabilities`, `page`,
+ * `context_unavailable` and `commit_shas`. Cloud mode only; omitted in
+ * local mode. Context only.
+ */
+cloud_context?: ({
+[k: string]: unknown
+} | null)
 }
 /**
  * Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
@@ -9929,6 +9938,18 @@ actions?: RuntimeCoverageAction[]
  * from JSON when absent.
  */
 discriminators?: (RuntimeCoverageDiscriminators | null)
+/**
+ * Production signals of the function from the Fallow Cloud runtime-context
+ * row, as the cloud sent them: for example `errors`, `performance` (with
+ * `cpu` and `browser`), `branches`, `covered_by_test` and
+ * `test_hit_count`. The block holds only the row fields that the CLI does
+ * not read for the verdict, and a newer cloud can add keys. Cloud mode
+ * only; omitted in local mode. Context only: these signals never change
+ * the verdict, the confidence or the actions.
+ */
+cloud_context?: ({
+[k: string]: unknown
+} | null)
 }
 /**
  * Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
@@ -10090,6 +10111,14 @@ actions?: RuntimeCoverageAction[]
  * in this checkout.
  */
 optimization_target?: (RuntimeCoverageOptimizationTarget | null)
+/**
+ * Production signals of the hot function from the Fallow Cloud
+ * runtime-context row, in the shape of `RuntimeCoverageFinding::cloud_context`.
+ * Cloud mode only; omitted in local mode. Context only.
+ */
+cloud_context?: ({
+[k: string]: unknown
+} | null)
 }
 /**
  * Speed-work inputs for one hot function: how often it runs and how much
@@ -10168,6 +10197,16 @@ caller_count_weighted_by_traffic: number
  */
 deploys_touched?: (number | null)
 risk_band: RuntimeCoverageRiskBand
+/**
+ * Fields of the Fallow Cloud blast-radius row that the CLI does not read,
+ * as the cloud sent them: for example `production_callers`,
+ * `caller_sites`, `test_caller_count`, `non_runtime_caller_count` and
+ * `context_unavailable_reason`. Cloud mode only, and only when the cloud
+ * sent the blast-radius rows. Context only: the risk band does not read it.
+ */
+cloud_context?: ({
+[k: string]: unknown
+} | null)
 }
 /**
  * One production-importance entry in `runtime_coverage.importance`, scoring
@@ -12527,9 +12566,26 @@ errors?: (InspectCloudErrors | null)
  */
 cpu_ms_per_hour?: (number | null)
 /**
+ * Long animation frame milliseconds per hour of visible page time in
+ * the browser. `None` when not measured (a server function, or a
+ * browser without the API).
+ */
+browser_long_frame_ms_per_hour?: (number | null)
+/**
  * Branch ranges that never ran. `None` when not measured.
  */
 never_run_ranges?: (number | null)
+/**
+ * Files that import the function, from the static caller graph. `None`
+ * when not known.
+ */
+static_callers?: (number | null)
+/**
+ * Functions that called this one in the CPU profiles of the deployment,
+ * most samples first. `None` when the deployment has no CPU profile; an
+ * empty list means a profile without a caller.
+ */
+production_callers?: (InspectCloudCaller[] | null)
 /**
  * One-line summary from the cloud.
  */
@@ -12547,6 +12603,31 @@ groups: number
  * Error events attributed to the function.
  */
 events: number
+}
+/**
+ * One production caller of an [`InspectCloudFunction`].
+ */
+export interface InspectCloudCaller {
+/**
+ * Stable id of the calling function.
+ */
+stable_id?: (string | null)
+/**
+ * File of the calling function, relative to the repository root.
+ */
+file: string
+/**
+ * Name of the calling function.
+ */
+function: string
+/**
+ * 1-based start line of the calling function.
+ */
+line?: (number | null)
+/**
+ * CPU profile samples with this caller to callee step on the stack.
+ */
+samples: number
 }
 /**
  * One local function without a deployed function.

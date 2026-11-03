@@ -2665,6 +2665,7 @@ fn runtime_finding(
     source_hash: Option<&str>,
 ) -> fallow_output::RuntimeCoverageFinding {
     fallow_output::RuntimeCoverageFinding {
+        cloud_context: None,
         id: id.to_owned(),
         stable_id: stable_id.map(str::to_owned),
         source_hash: source_hash.map(str::to_owned),

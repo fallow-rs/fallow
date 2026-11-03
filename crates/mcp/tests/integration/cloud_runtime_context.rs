@@ -143,6 +143,43 @@ fn a_call_with_a_key_returns_the_runtime_coverage_block() {
     );
 }
 
+/// A runtime-context answer in the shape that Fallow Cloud sends, shared with
+/// the CLI tests of `coverage analyze --cloud`.
+const RECORDED_RUNTIME_CONTEXT: &str =
+    include_str!("../../../cli/tests/integration/fixtures/cloud-runtime-context-recorded.json");
+
+#[test]
+fn a_call_returns_the_production_signals_of_each_row() {
+    let (endpoint, _request, handle) = serve_once(RECORDED_RUNTIME_CONTEXT);
+    let mut server = McpServer::start(Some(&endpoint));
+    let result = server.call_cloud_runtime_context();
+    handle.join().expect("stub server joins");
+    assert_ne!(result["isError"], true, "call must succeed: {result}");
+    let payload = tool_payload(&result);
+    let runtime = &payload["runtime_coverage"];
+
+    let capabilities = runtime["cloud_context"]["capabilities"]
+        .as_array()
+        .expect("capabilities array");
+    assert!(
+        capabilities.iter().any(|item| item == "function_errors"),
+        "{runtime}"
+    );
+    let hot = runtime["hot_paths"]
+        .as_array()
+        .expect("hot_paths array")
+        .iter()
+        .find(|path| path["function"] == "covered")
+        .expect("covered is a hot path");
+    let context = &hot["cloud_context"];
+    assert_eq!(context["performance"]["cpu"]["state"], "tracked");
+    assert_eq!(context["errors"]["state"], "tracked");
+    assert_eq!(context["branches"]["state"], "observed");
+    assert_eq!(context["covered_by_test"], true);
+    let blast = &runtime["blast_radius"][0]["cloud_context"];
+    assert_eq!(blast["production_callers"][0]["function"], "app");
+}
+
 #[test]
 fn a_call_without_a_key_is_refused_with_a_typed_body() {
     let mut server = McpServer::start(None);

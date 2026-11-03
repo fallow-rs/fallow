@@ -1,0 +1,212 @@
+{
+  "data": {
+    "schema_version": "fallow-cloud-runtime-v1",
+    "repo": "acme/web",
+    "project_id": "web-api",
+    "generated_at": "2026-11-03T08:16:54.619Z",
+    "window": {
+      "start": "2026-10-27T08:00:00.000Z",
+      "end": "2026-11-03T08:00:00.000Z",
+      "period_days": 7
+    },
+    "evidence_window": {
+      "first_observed_at": "2026-11-02T17:11:19.611Z",
+      "last_observed_at": "2026-11-03T08:16:30.969Z",
+      "observed_hours": 15.09,
+      "deployments_in_period": 49
+    },
+    "actionable": true,
+    "actionability_reason": null,
+    "verdict": null,
+    "provenance": {
+      "data_source": "cloud",
+      "is_production": true,
+      "freshness_days": 0,
+      "untracked_ratio": 0,
+      "unresolved_ratio": 0,
+      "stale": false,
+      "stale_after_days": 14
+    },
+    "summary": {
+      "trace_count": 2007940404,
+      "deployments_seen": 1,
+      "functions_tracked": 2,
+      "functions_hit": 1,
+      "functions_unhit": 1,
+      "functions_untracked": 0,
+      "coverage_percent": 50,
+      "last_received_at": "2026-11-03T08:16:30.969Z"
+    },
+    "commit_shas": [
+      "1111111111111111111111111111111111111111"
+    ],
+    "capabilities": [
+      "cross_deployment_function_history",
+      "function_identity_v2",
+      "function_errors"
+    ],
+    "functions": [
+      {
+        "file_path": "/app/src/covered.ts",
+        "repo_path": "src/covered.ts",
+        "function_name": "covered",
+        "line_number": 1,
+        "column_number": 8,
+        "start_line": 1,
+        "end_line": 3,
+        "stable_id": "fallow:fn:00000000000000c1",
+        "previous_deployment_history": {
+          "deployments_observed": 20,
+          "deployments_called": 20,
+          "last_called_deployment_sha": "1111111111111111111111111111111111111111",
+          "last_called_at": "2026-11-02T16:00:00.000Z",
+          "truncated": true,
+          "history_span_days": 4.83
+        },
+        "hit_count": 868627,
+        "prod_hit_count": 868627,
+        "test_hit_count": 59248,
+        "covered_by_test": true,
+        "was_called": true,
+        "tracking_state": "called",
+        "period_tracking_state": "called",
+        "deployments_observed": 1,
+        "last_seen_at": "2026-11-03T08:00:00.000Z",
+        "resolution_status": "native",
+        "mapping_quality": "high",
+        "branches": {
+          "state": "observed",
+          "ranges_total": 3,
+          "ranges_never_run": 1,
+          "never_run": [
+            {
+              "start_line": 2,
+              "start_column": 38,
+              "end_line": 2,
+              "end_column": 68,
+              "kind": "block"
+            }
+          ],
+          "never_run_truncated": false,
+          "function_calls": 868627
+        },
+        "performance": {
+          "cpu": {
+            "state": "tracked",
+            "self_ms_per_hour": 16375.12,
+            "total_ms_per_hour": 38001.36,
+            "share_of_process": 0.2945,
+            "samples": 14546
+          },
+          "browser": {
+            "state": "untracked",
+            "long_frame_ms_per_hour": null,
+            "forced_layout_ms_per_hour": null,
+            "entries": null,
+            "share_of_script_time": null
+          }
+        },
+        "errors": {
+          "state": "tracked",
+          "groups": 0,
+          "events": 0,
+          "top": null
+        }
+      },
+      {
+        "file_path": "/app/src/covered.ts",
+        "repo_path": "src/covered.ts",
+        "function_name": "indirectlyCovered",
+        "line_number": 5,
+        "column_number": 8,
+        "start_line": 5,
+        "end_line": 7,
+        "stable_id": "fallow:fn:00000000000000c2",
+        "previous_deployment_history": {
+          "deployments_observed": 20,
+          "deployments_called": 0,
+          "last_called_deployment_sha": null,
+          "last_called_at": null,
+          "truncated": true,
+          "history_span_days": 4.83
+        },
+        "hit_count": 0,
+        "prod_hit_count": null,
+        "test_hit_count": null,
+        "covered_by_test": null,
+        "was_called": false,
+        "tracking_state": "never_called",
+        "period_tracking_state": "never_called",
+        "deployments_observed": 1,
+        "last_seen_at": null,
+        "resolution_status": "native",
+        "mapping_quality": "high",
+        "never_called_source": "runtime_observed",
+        "branches": {
+          "state": "untracked",
+          "ranges_total": null,
+          "ranges_never_run": null,
+          "never_run": [],
+          "never_run_truncated": false,
+          "function_calls": null
+        },
+        "performance": {
+          "cpu": {
+            "state": "insufficient",
+            "self_ms_per_hour": null,
+            "total_ms_per_hour": null,
+            "share_of_process": null,
+            "samples": 0
+          },
+          "browser": {
+            "state": "untracked",
+            "long_frame_ms_per_hour": null,
+            "forced_layout_ms_per_hour": null,
+            "entries": null,
+            "share_of_script_time": null
+          }
+        },
+        "errors": {
+          "state": "tracked",
+          "groups": 0,
+          "events": 0,
+          "top": null
+        }
+      }
+    ],
+    "blast_radius": [
+      {
+        "id": "fallow:blast:e5c4cacc",
+        "stable_id": "fallow:fn:00000000000000c1",
+        "file": "/app/src/covered.ts",
+        "function": "covered",
+        "line": 1,
+        "deploys_touched": 1,
+        "production_callers": [
+          {
+            "stable_id": "fallow:fn:00000000000000a1",
+            "file": "/app/src/main.ts",
+            "function": "app",
+            "line": 5,
+            "samples": 1
+          }
+        ],
+        "caller_count": 1,
+        "test_caller_count": 0,
+        "non_runtime_caller_count": 0,
+        "caller_count_weighted_by_traffic": 5214944,
+        "caller_sites": [
+          {
+            "file": "src/main.ts",
+            "symbols": [
+              "covered"
+            ]
+          }
+        ],
+        "risk_band": "low"
+      }
+    ],
+    "importance": [],
+    "warnings": []
+  }
+}

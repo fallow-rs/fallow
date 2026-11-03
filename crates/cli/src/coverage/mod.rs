@@ -43,6 +43,7 @@ pub use upload_static_findings::UploadStaticFindingsArgs;
 mod analyze;
 mod cloud_client;
 mod cloud_reads;
+mod cloud_rows;
 mod cloud_transport;
 pub mod credentials;
 pub mod file_context;

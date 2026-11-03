@@ -2182,6 +2182,14 @@
         "provenance": {
           "description": "Provenance an agent reads to self-attenuate confidence (mirrors\nthe cloud runtime-context `provenance`). F4: context only.",
           "$ref": "#/definitions/RuntimeCoverageProvenance"
+        },
+        "cloud_context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Fields of the Fallow Cloud runtime-context answer that the CLI does not\nread, as the cloud sent them: for example `capabilities`, `page`,\n`context_unavailable` and `commit_shas`. Cloud mode only; omitted in\nlocal mode. Context only."
         }
       },
       "required": [
@@ -2648,6 +2656,14 @@
             }
           ],
           "description": "The discriminator inputs that produced this verdict (#321), emitted so an\nagent can reproduce it and see the confidence cap. `None` for findings\nnot built from the merge pipeline (e.g. baseline round-trips). Omitted\nfrom JSON when absent."
+        },
+        "cloud_context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Production signals of the function from the Fallow Cloud runtime-context\nrow, as the cloud sent them: for example `errors`, `performance` (with\n`cpu` and `browser`), `branches`, `covered_by_test` and\n`test_hit_count`. The block holds only the row fields that the CLI does\nnot read for the verdict, and a newer cloud can add keys. Cloud mode\nonly; omitted in local mode. Context only: these signals never change\nthe verdict, the confidence or the actions."
         }
       },
       "required": [
@@ -2716,6 +2732,14 @@
             }
           ],
           "description": "Per-call cost inputs and the speed-work score for this hot function.\nOmitted when the hot path has no `stable_id` or no static counterpart\nin this checkout."
+        },
+        "cloud_context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Production signals of the hot function from the Fallow Cloud\nruntime-context row, in the shape of `RuntimeCoverageFinding::cloud_context`.\nCloud mode only; omitted in local mode. Context only."
         }
       },
       "required": [
@@ -2793,6 +2817,14 @@
         "risk_band": {
           "description": "Risk band derived from caller counts and traffic-weighted reach.",
           "$ref": "#/definitions/RuntimeCoverageRiskBand"
+        },
+        "cloud_context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Fields of the Fallow Cloud blast-radius row that the CLI does not read,\nas the cloud sent them: for example `production_callers`,\n`caller_sites`, `test_caller_count`, `non_runtime_caller_count` and\n`context_unavailable_reason`. Cloud mode only, and only when the cloud\nsent the blast-radius rows. Context only: the risk band does not read it."
         }
       },
       "required": [
@@ -35620,12 +35652,36 @@
           ],
           "description": "Self CPU milliseconds per profiled hour. `None` when not measured."
         },
+        "browser_long_frame_ms_per_hour": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Long animation frame milliseconds per hour of visible page time in\nthe browser. `None` when not measured (a server function, or a\nbrowser without the API)."
+        },
         "never_run_ranges": {
           "type": [
             "integer",
             "null"
           ],
           "description": "Branch ranges that never ran. `None` when not measured."
+        },
+        "static_callers": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Files that import the function, from the static caller graph. `None`\nwhen not known."
+        },
+        "production_callers": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/InspectCloudCaller"
+          },
+          "description": "Functions that called this one in the CPU profiles of the deployment,\nmost samples first. `None` when the deployment has no CPU profile; an\nempty list means a profile without a caller."
         },
         "summary": {
           "type": "string",
@@ -35734,6 +35790,43 @@
         "security_without_reason"
       ],
       "description": "The parsed content of an added `fallow-ignore` comment."
+    },
+    "InspectCloudCaller": {
+      "type": "object",
+      "properties": {
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of the calling function."
+        },
+        "file": {
+          "type": "string",
+          "description": "File of the calling function, relative to the repository root."
+        },
+        "function": {
+          "type": "string",
+          "description": "Name of the calling function."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based start line of the calling function."
+        },
+        "samples": {
+          "type": "integer",
+          "description": "CPU profile samples with this caller to callee step on the stack."
+        }
+      },
+      "required": [
+        "file",
+        "function",
+        "samples"
+      ],
+      "description": "One production caller of an [`InspectCloudFunction`]."
     }
   }
 }

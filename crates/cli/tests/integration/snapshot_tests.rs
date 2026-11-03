@@ -3066,6 +3066,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         },
         findings: vec![
             RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:deadbeef".to_string(),
                 stable_id: Some("fallow:fn:00000001".to_string()),
                 path: root.join("src/cold.ts"),
@@ -3092,6 +3093,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                 discriminators: None,
             },
             RuntimeCoverageFinding {
+                cloud_context: None,
                 id: "fallow:prod:feedface".to_string(),
                 stable_id: None,
                 path: root.join("src/unknown.ts"),
@@ -3119,6 +3121,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             },
         ],
         hot_paths: vec![RuntimeCoverageHotPath {
+            cloud_context: None,
             id: "fallow:hot:cafebabe".to_string(),
             stable_id: Some("fallow:fn:00000002".to_string()),
             path: root.join("src/hot.ts"),
@@ -3138,9 +3141,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             message: "One dump was incomplete.".to_string(),
         }],
         actionable: true,
-        actionability_reason: None,
-        actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        ..Default::default()
     });
     report
 }
