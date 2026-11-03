@@ -20,17 +20,18 @@ use crate::params::{
     TraceErrorParams, TraceExportParams, TraceFileParams, TraceImportPathParams,
 };
 use crate::tools::{
-    execute_code_mode, inspect_target, request_cancellation, run_analyze, run_architecture,
-    run_audit, run_check_changed, run_check_runtime_coverage, run_decision_surface, run_explain,
+    architecture_call, dupes_call, execute_code_mode, health_call, inspect_target,
+    request_cancellation, resolve_cargo_fallow, run_analyze, run_architecture, run_audit,
+    run_check_changed, run_check_runtime_coverage, run_decision_surface, run_explain,
     run_feature_flags, run_find_dupes, run_find_similar_code, run_fix_apply, run_fix_preview,
     run_get_blast_radius, run_get_cleanup_candidates, run_get_cloud_deployment_changes,
     run_get_cloud_review_packet, run_get_cloud_runtime_context, run_get_hot_paths,
     run_get_importance, run_get_token_blast_radius, run_guard, run_health, run_impact,
     run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
     run_list_suppressions, run_mutation_inspect, run_mutation_plan, run_project_info,
-    run_recommend, run_security_candidates, run_symbol_impact, run_symbol_trace,
+    run_recommend, run_rust_call, run_security_candidates, run_symbol_impact, run_symbol_trace,
     run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool, run_trace_export_tool,
-    run_trace_file_tool, run_trace_import_path_tool, with_request_cancellation,
+    run_trace_file_tool, run_trace_import_path_tool, rust_manifest, with_request_cancellation,
 };
 
 #[cfg(test)]
@@ -39,6 +40,8 @@ mod tests;
 #[derive(Clone)]
 pub struct FallowMcp {
     binary: String,
+    /// The `cargo-fallow` binary for a call on a Rust workspace.
+    cargo_fallow: String,
     tool_router: ToolRouter<Self>,
 }
 
@@ -47,6 +50,7 @@ impl FallowMcp {
         let binary = resolve_binary();
         Self {
             binary,
+            cargo_fallow: resolve_cargo_fallow(),
             tool_router: Self::tool_router(),
         }
     }
@@ -137,6 +141,10 @@ impl FallowMcp {
         &self,
         params: Parameters<ArchitectureParams>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(manifest) = rust_manifest(params.0.root.as_deref()) {
+            return run_rust_call(&self.cargo_fallow, architecture_call(&params.0, &manifest))
+                .await;
+        }
         run_architecture(&self.binary, params.0).await
     }
 
@@ -210,6 +218,9 @@ impl FallowMcp {
         &self,
         params: Parameters<FindDupesParams>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(manifest) = rust_manifest(params.0.root.as_deref()) {
+            return run_rust_call(&self.cargo_fallow, dupes_call(&params.0, &manifest)).await;
+        }
         run_find_dupes(&self.binary, params.0).await
     }
 
@@ -334,6 +345,9 @@ impl FallowMcp {
         &self,
         params: Parameters<HealthParams>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(manifest) = rust_manifest(params.0.root.as_deref()) {
+            return run_rust_call(&self.cargo_fallow, health_call(&params.0, &manifest)).await;
+        }
         run_health(&self.binary, params.0).await
     }
 

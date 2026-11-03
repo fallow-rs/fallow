@@ -100,6 +100,7 @@ async fn cancel_tool_call(name: &str, arguments: serde_json::Value) -> (u32, boo
 
     let server = FallowMcp {
         binary: binary.to_string_lossy().into_owned(),
+        cargo_fallow: "cargo-fallow".to_string(),
         tool_router: FallowMcp::tool_router(),
     };
     let (client, server_io) = tokio::io::duplex(64 * 1024);

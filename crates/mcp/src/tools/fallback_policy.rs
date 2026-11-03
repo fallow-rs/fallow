@@ -72,6 +72,9 @@ mod tests {
             // `fallow mutation inspect`.
             "mutation.rs",
             "recommend.rs",
+            // The Rust route runs the separate `cargo-fallow` binary. fallow
+            // has no in-process API for Rust workspaces.
+            "rust.rs",
             "security.rs",
             "semantic.rs",
             "similar_code.rs",

@@ -5,10 +5,10 @@
 use std::borrow::Cow;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Privacy mode for author emails emitted by `--ownership`.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmailModeParam {
     Raw,
@@ -30,7 +30,7 @@ impl EmailModeParam {
 
 /// How a health baseline matches findings, mirroring the CLI's
 /// `--baseline-mode` flag.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BaselineModeParam {
     Count,
@@ -46,7 +46,7 @@ impl BaselineModeParam {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TypeAwareRequireParam {
     BestEffort,
@@ -275,7 +275,7 @@ pub struct CombinedParams {
     pub coverage_root: Option<String>,
 }
 
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct ArchitectureParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
@@ -598,7 +598,7 @@ pub struct MutationInspectParams {
     pub allow_remote_extends: Option<bool>,
 }
 
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct FindDupesParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,

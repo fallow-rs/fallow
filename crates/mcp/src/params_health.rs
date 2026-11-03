@@ -2,7 +2,7 @@
 
 use super::*;
 
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct HealthParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
