@@ -19,6 +19,7 @@ mod module_augmentation;
 mod react_structural;
 mod reflective_object_uses;
 mod require_resolve;
+mod security_set_attribute;
 mod security_sources;
 mod signature_references;
 mod type_only_namespace;
