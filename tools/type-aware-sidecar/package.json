@@ -39,9 +39,9 @@
     "provenance": true
   },
   "devDependencies": {
-    "@codspeed/tinybench-plugin": "5.7.1",
-    "tinybench": "6.1.2",
+    "@codspeed/tinybench-plugin": "6.1.0",
+    "tinybench": "6.2.2",
     "tsrs": "0.20.1-ts7.1.0-beta",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   }
 }

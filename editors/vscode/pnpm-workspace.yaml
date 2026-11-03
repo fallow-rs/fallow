@@ -5,16 +5,22 @@ allowBuilds:
 # minimatch 11.0.3 is younger than the 7-day minimum release age. Remove this entry after 2026-11-04.
 minimumReleaseAgeExclude:
   - minimatch@11.0.3
+  # glob 14.0.2 is younger than the 7-day minimum release age. Remove this entry after 2026-11-04.
+  - glob@14.0.2
 
 overrides:
   # Azure Identity still requests MSAL 6; the auth-code fix starts at 7.1.0.
   "@azure/msal-node": 7.1.1
   "brace-expansion@5": 5.0.12
-  # vscode-languageclient 10 requests minimatch 10; GHSA-g3hv-75wg-m249 is fixed from 11.0.1, and the client uses only the Minimatch class, which 11 keeps.
+  # vscode-languageclient 11 requests minimatch 10; GHSA-g3hv-75wg-m249 is fixed from 11.0.1, and the client uses only the Minimatch class, which 11 keeps.
   "minimatch@10": 11.0.3
   # Mocha 11 supports the VS Code host but still requests these older majors.
   "diff@7": 8.0.4
   "serialize-javascript@6": 7.1.4
+  # Mocha 11 requests glob 10; GHSA-3g3m-2fjr-6pw4 is fixed from 14.0.2, and glob 14 keeps the `hasMagic`, `sync` and `Glob` API that mocha uses.
+  "glob@10": 14.0.2
+  # Mocha 11 also requests minimatch 9 and uses only the named `minimatch` function, which 11 keeps (GHSA-g3hv-75wg-m249).
+  "minimatch@9": 11.0.3
 
 supportedArchitectures:
   os:
