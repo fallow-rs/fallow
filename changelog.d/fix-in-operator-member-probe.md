@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow dead-code` credits a class member that a runtime probe checks by name.** Code such as `"displayDetail" in cause && typeof cause.displayDetail === "string"` checks an untyped value for a member. A class can supply the member only for this check, so fallow no longer reports it as an unused class member. `Reflect.has(cause, "displayDetail")` gives the same credit. The credit applies to classes in the module that holds the probe and in its direct import neighbors: the modules that it imports and the modules that import it. Classes in other modules keep their report, and a type-only import is not a link. A probe in an unreachable file, a probe with a dynamic key, `Object.hasOwn` and `hasOwnProperty` give no credit.
