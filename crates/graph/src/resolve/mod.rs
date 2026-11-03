@@ -35,6 +35,7 @@ mod tests;
 mod tsconfig_scope;
 mod types;
 mod upgrades;
+mod url_suffix;
 mod work;
 mod workspace_alias;
 
