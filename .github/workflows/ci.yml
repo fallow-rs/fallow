@@ -317,10 +317,15 @@ jobs:
               - 'schema.json'
               - '.github/scripts/**'
               - '.github/workflows/ci.yml'
+            # The "File length" step checks each .mjs and .ts file.
             self-analyze:
               - '.github/workflows/ci.yml'
               - 'editors/vscode/**'
               - 'npm/fallow/**'
+              - '**/*.mjs'
+              - '**/*.ts'
+              - '.fallowrc.json'
+              - 'scripts/fallow-file-length.json'
             # `skills` gates the public skill contract: the public plugin must
             # match the source under npm/fallow/skills after its one declared
             # frontmatter transform.
@@ -1037,8 +1042,9 @@ jobs:
       - name: Agent adapter drift
         run: npm run check:agent-adapters
       # Same rule as the file-size pre-commit step, against the merge base.
-      # It is the last step and runs after a failed step, so a growth failure
-      # hides no other result.
+      # It checks .rs files. The "File length" step of the "Fallow Self
+      # Analysis" job checks .mjs and .ts files. It is the last step and runs
+      # after a failed step, so a growth failure hides no other result.
       - name: Large file growth
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
@@ -1279,6 +1285,8 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Depth 2: on a pull request, HEAD is the merge commit and HEAD^1 is the
+      # tip of the base branch. The "File length" step compares the two.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
@@ -1323,6 +1331,13 @@ jobs:
           if [ "$code" -gt 1 ]; then
             exit "$code"
           fi
+      # A .mjs or .ts file over 2000 lines must not grow: health.maxFileLines
+      # in scripts/fallow-file-length.json. The audit fails on a new long file and on a long
+      # file that grew by 5 lines or more. scripts/check-file-size.mjs holds
+      # the same limit for .rs files in the "JS Lint and Format" job.
+      - name: File length
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: ./target/debug/fallow audit --config scripts/fallow-file-length.json --base HEAD^1 --no-css --quiet
 
   vscode:
     name: VS Code Extension

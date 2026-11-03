@@ -609,6 +609,7 @@ sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
 node scripts/check-miri-cfg.mjs
 node scripts/check-file-size.mjs --staged
+sh scripts/hook-file-length.sh HEAD
 sh scripts/hook-changelog-fragments.sh
 npm run lint:js
 npm run fmt:js:check
@@ -625,7 +626,9 @@ when a staged line starts with `<<<<<<<`, `|||||||` or `>>>>>>>`; build such
 lines at runtime in tests. `cargo fmt` and Clippy run
 only when staged files include a Rust file or a Cargo, toolchain, rustfmt or
 Clippy config file. The file-size check runs only when staged files include a
-`.rs`, `.mjs` or `.ts` file. See [File size](#file-size).
+`.rs` file. The file-length check runs only when staged files include a `.mjs`
+or `.ts` file, `.fallowrc.json` or `scripts/fallow-file-length.json`. See
+[File size](#file-size).
 
 The Miri cfg check reads the crates that the CI `miri` job tests. It fails when
 code that Miri compiles names a module declared under `not(miri)`, for example
@@ -642,6 +645,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 cargo shear
+sh scripts/hook-file-length.sh origin/main upstream/main
 ```
 
 The `cargo doc` step is the same command as the required `Documentation` CI
@@ -663,10 +667,16 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-it
 
 ## File size
 
-The `file-size` pre-commit step stops large source files from growing. It
-checks each staged `.rs`, `.mjs` and `.ts` file. The limit is 2000 lines
-(`LINE_LIMIT` in `scripts/check-file-size.mjs`). The step fails in these
-cases:
+A source file over 2000 lines must not grow. Two checks hold this limit:
+
+- `scripts/check-file-size.mjs` checks `.rs` files.
+- `fallow audit` checks `.mjs` and `.ts` files with `health.maxFileLines`.
+
+### Rust files
+
+The `file-size` pre-commit step checks each staged `.rs` file. The limit is
+2000 lines (`LINE_LIMIT` in `scripts/check-file-size.mjs`). The step fails in
+these cases:
 
 - A staged file over the limit has more lines than its `HEAD` version.
 - A new staged file is over the limit.
@@ -686,9 +696,9 @@ The step skips these files:
   header by hand, so review a new generator header like any other change.
 - Files in a `snapshots` or `__snapshots__` directory. Snapshot files
   (`.snap`) are not checked file types.
-- Test files. These are files in a `tests` or `test` directory, Rust files
-  named `tests.rs`, `*_tests.rs` or `*_test.rs`, and `*.test.mjs` or
-  `*.test.ts` files. A test file grows with each new test case.
+- Test files. These are files in a `tests` or `test` directory, and files
+  named `tests.rs`, `*_tests.rs` or `*_test.rs`. A test file grows with each
+  new test case.
 
 To fix a failure, move the new code to a new module, or remove lines from
 the file in the same change. To skip only this step for one commit, run
@@ -707,11 +717,65 @@ needs a maintainer decision. The step is the last step of the job and runs
 after a failed step. When the step cannot read the base ref, for example
 because the ref is not fetched, it exits with 2, not 1.
 
-`verify:fast` runs the same command as its `Large file growth` step, so a
-local run finds the failure before CI does. The step compares with the local
-`origin/main` ref, so run `git fetch origin main` first to compare with the
-current base. When `origin/main` does not exist, for example in a fork clone
-with another remote name, `verify:fast` skips the step and prints the reason.
+### JavaScript and TypeScript files
+
+The first `health.thresholdOverrides` entry in
+`scripts/fallow-file-length.json` sets
+`maxFileLines: 2000` for `**/*.mjs` and `**/*.ts`. Two later entries set
+`maxFileLines: 0` for test files and for generated files, so the check skips
+them. A later entry wins. Add a new generated `.mjs` or `.ts` file to the last
+entry. The check also skips each path in `ignorePatterns` and in
+`health.ignore`.
+
+`scripts/fallow-file-length.json` extends `.fallowrc.json` for the gate. The
+overrides are not in `.fallowrc.json`, because there they change each
+`fallow health` run in the repository. The gate config also
+turns off the cyclomatic, cognitive and CRAP rules, and it sets
+`audit.worsened` to `error`. A change then fails only on file length. The
+audit fails in these cases:
+
+- A new file is over the limit, or a file crosses the limit (`introduced`).
+- A file over the limit grew by 5 lines or more (`worsened`).
+
+A file over the limit that grew by 1 to 4 lines stays `inherited` and passes.
+This is the line-count tolerance of `fallow audit`. A comment line and a blank
+line count as lines.
+
+`scripts/hook-file-length.sh` runs the audit. It uses
+`target/debug/fallow` when it exists, else a `fallow` on the `PATH`. When it
+finds no binary or no base ref, it prints a note and passes, because CI still
+runs the check:
+
+```bash
+fallow audit --config scripts/fallow-file-length.json --base <merge-base> --no-css --quiet
+```
+
+The script gives the merge base of `HEAD` and the ref to `--base`, not the
+ref. `fallow audit` reads the base files at the commit that `--base` names.
+When the base branch removed lines from a long file after the branch started,
+a compare with the ref shows growth that the branch did not add.
+
+- The `file-length` pre-commit step compares the working tree with `HEAD`.
+  It reads the working tree, not the staged blob.
+- The `file-length` pre-push step compares the working tree with the merge
+  base of `origin/main`, or of `upstream/main` in a fork clone.
+- `npm run verify:fast` runs the script against `origin/main`.
+- The `File length` step of the CI `Fallow Self Analysis` job runs the audit
+  with the binary of the pull request against `HEAD^1`. HEAD is the merge
+  commit of the pull request, so `HEAD^1` is the tip of the base branch. The
+  job runs when a pull request changes a `.mjs` or `.ts` file or one of the
+  two config files.
+
+To fix a failure, move the new code to a new module, or remove lines from the
+file in the same change. To skip only the hook step for one commit, run
+`HK_SKIP_STEPS=file-length git commit`. The CI step has no skip route.
+
+`verify:fast` runs the two checks as its `Large file growth` and `File length`
+steps, so a local run finds the failure before CI does. The steps compare with
+the local `origin/main` ref, so run `git fetch origin main` first to compare
+with the current base. When `origin/main` does not exist, for example in a
+fork clone with another remote name, `verify:fast` skips the steps and prints
+the reason.
 
 During a merge commit, the pre-commit step compares each file with the larger
 of its `HEAD` and `MERGE_HEAD` versions. Thus growth that the merged branch

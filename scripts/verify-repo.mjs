@@ -24,7 +24,7 @@ const FAST_COMMANDS = [
     args: ["run", "check:agent-adapters"],
   },
   {
-    // CI runs the same rule in the "JS Lint and Format" job.
+    // CI runs the same rule for .rs files in the "JS Lint and Format" job.
     label: "Large file growth",
     command: "node",
     args: ["scripts/check-file-size.mjs", "--base", BASE_REF],
@@ -109,6 +109,14 @@ const FAST_COMMANDS = [
     label: "Conformance fixtures",
     command: "npm",
     args: ["run", "check:conformance-fixtures"],
+  },
+  {
+    // The step above builds the fallow binary that this step runs. CI runs
+    // the same rule for .mjs and .ts files in the "Fallow Self Analysis" job.
+    label: "File length",
+    command: "sh",
+    args: ["scripts/hook-file-length.sh", BASE_REF],
+    requiresRef: BASE_REF,
   },
   {
     // Fast, and it catches a Rust file with Windows-only code that no

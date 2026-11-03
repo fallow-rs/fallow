@@ -1,0 +1,3 @@
+### Changed
+
+- **The repository uses `fallow audit` to stop long `.mjs` and `.ts` files from growing.** The repository config sets `health.maxFileLines: 2000` for `.mjs` and `.ts` files, and skips test files and generated files. CI, the `hk` pre-commit and pre-push hooks, and `npm run verify:fast` run `fallow audit` against the base ref. The audit fails on a new file over the limit and on a long file that grew by 5 lines or more. `scripts/check-file-size.mjs` now checks only `.rs` files. This change affects contributors only. The released packages do not change. (Closes [#4128](https://github.com/fallow-rs/fallow/issues/4128))
