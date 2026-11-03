@@ -1324,7 +1324,7 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | `dangerous-html` | 79 | `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `dangerouslySetInnerHTML` / iframe `srcdoc` (property, `setAttribute`, JSX `srcDoc`, Vue / Svelte / Angular bindings) / `Range.createContextualFragment` |
 | `template-escape-bypass` | 79 | template-engine `SafeString(...)` wrapping a non-literal value |
 | `command-injection` | 78 | `child_process` `exec` / `execSync` / `spawn` / `spawnSync` (provenance-gated to `node:child_process`) |
-| `code-injection` | 94 | `eval` (also `(0, eval)`, `globalThis.eval`, a local alias) / `Function` constructor forms / string `setTimeout` / `vm.runInNewContext` (also a named or `require` binding) / `<script>` element `src` and text |
+| `code-injection` | 94 | `eval` (also `(0, eval)`, `globalThis.eval`, a local alias) / `Function` constructor forms / string `setTimeout` / `vm.runInNewContext`, `vm.compileFunction` and `new vm.Script` (also a named or `require` binding) / `<script>` element `src` (property or `setAttribute`) and text |
 | `dynamic-regex` | 1333 | `RegExp(...)` / `new RegExp(...)` with a non-literal pattern that traces to untrusted input |
 | `redos-regex` | 1333 | vulnerable regex literals tested with source-backed input |
 | `resource-amplification` | 400 | source-backed size into `Array(...)` / `new Array(...)` / `Buffer.alloc*` / `String.prototype.repeat` / `padStart` / `padEnd` (directly `Math.min`-clamped sizes stay quiet) |

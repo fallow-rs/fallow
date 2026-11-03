@@ -905,7 +905,7 @@ impl ModuleInfoExtractor {
             &expr.arguments,
             expr.span,
         );
-        self.capture_set_attribute_srcdoc_sink(expr, &callee_path);
+        self.capture_set_attribute_sink(expr, &callee_path);
         if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
         {
             self.security_sinks.push(SinkSite {
@@ -1561,7 +1561,10 @@ impl ModuleInfoExtractor {
 
     /// `el.setAttribute("srcdoc", html)` sets the same document as
     /// `el.srcdoc = html`, so it is captured as that member-assign shape.
-    fn capture_set_attribute_srcdoc_sink(&mut self, expr: &CallExpression<'_>, callee_path: &str) {
+    /// `script.setAttribute("src", url)` on a local bound to a new `<script>`
+    /// element becomes `HTMLScriptElement.src`. The `src` of another element
+    /// (`img.setAttribute("src", url)`) is not captured.
+    fn capture_set_attribute_sink(&mut self, expr: &CallExpression<'_>, callee_path: &str) {
         let Some(object_path) = callee_path.strip_suffix(".setAttribute") else {
             return;
         };
@@ -1573,15 +1576,24 @@ impl ModuleInfoExtractor {
         else {
             return;
         };
-        if !self
-            .static_string_value(name_expr)
-            .is_some_and(|name| name.eq_ignore_ascii_case("srcdoc"))
-        {
+        let Some(name) = self.static_string_value(name_expr) else {
             return;
-        }
-        let srcdoc_path = format!("{object_path}.srcdoc");
+        };
+        let sink_path = if name.eq_ignore_ascii_case("srcdoc") {
+            format!("{object_path}.srcdoc")
+        } else if name.eq_ignore_ascii_case("src") {
+            let Expression::StaticMemberExpression(member) = unwrap_parens(&expr.callee) else {
+                return;
+            };
+            let Some(path) = self.script_element_assign_path(&member.object, "src") else {
+                return;
+            };
+            path
+        } else {
+            return;
+        };
         self.push_security_sink_arg(PushSinkArgInput {
-            callee_path: &srcdoc_path,
+            callee_path: &sink_path,
             sink_shape: SinkShape::MemberAssign,
             arg_index: 0,
             arg_expr: value_expr,

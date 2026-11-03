@@ -206,10 +206,25 @@ sink_shape = "member-call"
 # The extractor resolves a named import (`import { runInNewContext } from "vm"`)
 # and a CommonJS binding (`const { runInThisContext } = require("vm")`) to the
 # `node:vm.<member>` path. That path proves the provenance on its own.
-callee_patterns = ["vm.runInNewContext", "vm.runInThisContext", "vm.runInContext", "node:vm.runInNewContext", "node:vm.runInThisContext", "node:vm.runInContext"]
+callee_patterns = ["vm.runInNewContext", "vm.runInThisContext", "vm.runInContext", "vm.compileFunction", "node:vm.runInNewContext", "node:vm.runInThisContext", "node:vm.runInContext", "node:vm.compileFunction"]
 arg_index = 0
 import_provenance = "node:vm"
 evidence_template = "Non-literal code passed to {callee}(). Candidate for verification: confirm the script source is trusted."
+
+# `new vm.Script(code)` compiles its first argument. A named import
+# (`import { Script } from "vm"`) and a `require("vm")` binding resolve to
+# `node:vm.Script`. A local class named `Script` keeps the bare name and
+# matches no row.
+[[matcher]]
+id = "code-injection"
+cwe = 94
+title = "Code injection sink"
+effect = "process"
+sink_shape = "new-expression"
+callee_patterns = ["vm.Script", "node:vm.Script"]
+arg_index = 0
+import_provenance = "node:vm"
+evidence_template = "Non-literal code passed to new {callee}(). Candidate for verification: confirm the script source is trusted."
 
 [[matcher]]
 id = "code-injection"
