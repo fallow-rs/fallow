@@ -6,6 +6,17 @@ use fallow_config::Severity;
 
 const FIXTURE: &str = "effect-schema-exports-as-types";
 
+/// Exports that stay value exports with the option on. A forwarded decoder,
+/// a forwarded plain value and a `pipe` on a plain value are not schemas.
+const VALUE_EXPORTS_WITH_OPTION_ON: &[&str] = &[
+    "NotEffectSchema",
+    "decodeBaseRule",
+    "decodeUsed",
+    "notDerived",
+    "plainValue",
+    "unusedHelper",
+];
+
 struct Findings {
     exports: Vec<String>,
     types: Vec<String>,
@@ -47,13 +58,21 @@ fn option_off_reports_schemas_as_unused_exports() {
     assert_eq!(
         findings.exports,
         vec![
+            "ChainedError",
+            "DerivedRule",
+            "DerivedTwice",
+            "ForwardedUnion",
             "NotEffectSchema",
             "PairedSchema",
+            "ReExportedRule",
             "UnusedId",
             "UnusedPayload",
             "UnusedUser",
+            "decodeBaseRule",
             "decodeUsed",
             "default",
+            "notDerived",
+            "plainValue",
             "unusedHelper",
         ]
     );
@@ -65,14 +84,18 @@ fn option_off_reports_schemas_as_unused_exports() {
 fn option_on_reports_schemas_as_unused_types() {
     let findings = findings(true, Severity::Error);
     assert_eq!(
-        findings.exports,
-        vec!["NotEffectSchema", "decodeUsed", "unusedHelper"],
-        "a local Schema object and a decoder stay value exports"
+        findings.exports, VALUE_EXPORTS_WITH_OPTION_ON,
+        "a local Schema object, a decoder and a forwarded non-schema value stay value exports"
     );
     assert_eq!(
         findings.types,
         vec![
+            "ChainedError",
+            "DerivedRule",
+            "DerivedTwice",
+            "ForwardedUnion",
             "PairedSchema",
+            "ReExportedRule",
             "UnusedAlias",
             "UnusedId",
             "UnusedPayload",
@@ -90,9 +113,6 @@ fn option_on_reports_schemas_as_unused_types() {
 #[test]
 fn option_on_with_unused_types_off_hides_schemas() {
     let findings = findings(true, Severity::Off);
-    assert_eq!(
-        findings.exports,
-        vec!["NotEffectSchema", "decodeUsed", "unusedHelper"]
-    );
+    assert_eq!(findings.exports, VALUE_EXPORTS_WITH_OPTION_ON);
     assert!(findings.types.is_empty(), "{:?}", findings.types);
 }

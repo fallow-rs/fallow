@@ -391,3 +391,36 @@ fn records_a_default_exported_schema_expression() {
     );
     assert!(decoder.is_empty(), "{decoder:?}");
 }
+
+#[test]
+fn records_chains_that_start_at_an_import_as_derived_schemas() {
+    let facts = facts(
+        r#"
+import { Schema } from "effect"
+import { Rule, helper } from "./contracts"
+import type { TypeOnly } from "./contracts"
+export const Derived = Rule.pipe(Schema.decodeTo(Schema.String))
+const Step = Rule.pipe(Schema.brand("Step"))
+export const DerivedTwice = Step.annotations({})
+export class DerivedClass extends Rule.extend<DerivedClass>("DerivedClass")({}) {}
+export const NotSchemaPipe = helper.pipe((value: unknown) => value)
+export const Made = Rule.make({})
+export const FromType = TypeOnly
+export const Own = Schema.String
+"#,
+    );
+    let derived: Vec<(&str, &str)> = facts
+        .derived_schema_exports
+        .iter()
+        .map(|derived| (derived.export_name.as_str(), derived.import_local.as_str()))
+        .collect();
+    assert_eq!(
+        derived,
+        vec![
+            ("Derived", "Rule"),
+            ("DerivedTwice", "Rule"),
+            ("DerivedClass", "Rule"),
+        ]
+    );
+    assert_eq!(facts.schema_exports, vec!["Own"]);
+}

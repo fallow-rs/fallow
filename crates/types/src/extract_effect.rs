@@ -20,6 +20,19 @@ pub struct EffectFacts {
     pub layer_root_keys: Vec<String>,
     /// Sorted names of exports that an Effect schema declares.
     pub schema_exports: Vec<String>,
+    /// Exports that are schemas only when an imported binding is a schema
+    /// (`export const B = Imported.pipe(Schema.brand("B"))`). The analyze
+    /// layer resolves the import to decide.
+    pub derived_schema_exports: Vec<EffectDerivedSchema>,
+}
+
+/// An export whose chain starts at an imported binding.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectDerivedSchema {
+    /// The export name.
+    pub export_name: String,
+    /// The local name of the import binding at the root of the chain.
+    pub import_local: String,
 }
 
 /// A module-scope class that extends a tagged error constructor.
