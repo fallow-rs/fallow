@@ -109,6 +109,7 @@ use crate::base_worktree::{
     reclaim_orphan_cache_entry, remove_reusable_audit_caches, resolve_cache_max_age_with_source,
     sweep_old_reusable_caches_in, sweep_reusable_caches_with_report,
 };
+use crate::exit_codes::exit_gate_failed;
 use std::{fs, process::Command};
 
 fn git(dir: &std::path::Path, args: &[&str]) {
@@ -3764,7 +3765,7 @@ fn audit_new_only_still_gates_pasted_clone_as_introduced() {
     assert_eq!(comparison.dupes.demoted_count(), 0);
     assert_eq!(
         crate::audit::print_audit_result(&result, true, false),
-        std::process::ExitCode::from(1),
+        exit_gate_failed(),
         "a genuinely pasted clone must keep failing with exit code 1"
     );
     let json = super::output::build_audit_json_output(&result).expect("audit json should build");

@@ -10,6 +10,7 @@ use ignore::Match;
 use notify::{RecommendedWatcher, Watcher};
 use rustc_hash::FxHashSet;
 
+use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 use crate::report;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
@@ -351,7 +352,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             Ok(session) => session,
             Err(e) => {
                 eprintln!("Analysis error: {e}");
-                return ExitCode::from(2);
+                return exit_invalid_input();
             }
         };
     let mut analysis =
@@ -359,7 +360,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             Ok(analysis) => analysis,
             Err(e) => {
                 eprintln!("Analysis error: {e}");
-                return ExitCode::from(2);
+                return exit_invalid_input();
             }
         };
     let type_aware = if config.type_aware.enabled {
@@ -391,7 +392,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             Err(error) => {
                 if config.type_aware.require == fallow_config::TypeAwareRequire::Complete {
                     eprintln!("Type-aware analysis failed: {error}");
-                    return ExitCode::from(2);
+                    return exit_invalid_input();
                 }
                 let message =
                     crate::type_aware_degrade::degraded_message(&config.root, &error.to_string());
@@ -462,7 +463,7 @@ fn watch_type_aware_exit_code(
                 identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
             })
     {
-        ExitCode::from(1)
+        exit_gate_failed()
     } else {
         ExitCode::SUCCESS
     }
@@ -554,7 +555,7 @@ impl WatchLoopState {
             Ok(watcher) => Some(watcher),
             Err(e) => {
                 eprintln!("Failed to create file watcher: {e}");
-                return Err(ExitCode::from(2));
+                return Err(exit_invalid_input());
             }
         };
 
@@ -600,7 +601,7 @@ fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCo
             WatchPoll::Continue => continue,
             WatchPoll::Disconnected => {
                 eprintln!("Channel error: notify sender disconnected");
-                return ExitCode::from(2);
+                return exit_invalid_input();
             }
             WatchPoll::Idle => {}
         }
@@ -1323,7 +1324,7 @@ mod tests {
         let opts = make_watch_options(root, OutputFormat::Json, 8, true);
 
         reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, _args| {
-            Err(ExitCode::from(2))
+            Err(exit_invalid_input())
         });
 
         assert!(matches!(config.output, OutputFormat::Human));

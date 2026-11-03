@@ -747,7 +747,7 @@ pub fn fail_on_issues_exit_code(gates: Option<&GateOutcomes>) -> u8 {
     };
     FAIL_ON_ISSUES_GATES
         .iter()
-        .filter_map(|name| gates.get(*name).map(|outcome| (*name, outcome)))
+        .filter_map(|name| gates.get(name).map(|outcome| (*name, outcome)))
         .filter(|(_, outcome)| outcome.fails_run())
         .map(|(name, outcome)| crate::exit_codes::gate_exit_code(name, outcome.status))
         .max()
@@ -860,7 +860,7 @@ mod tests {
         })
         .expect("the default exit rule is always published");
         let outcome = gates
-            .get(GateName::ErrorSeverityFindings)
+            .get(&GateName::ErrorSeverityFindings)
             .expect("the default exit rule");
         assert_eq!(outcome.status, GateStatus::Fail);
         assert!(outcome.fails_run());
@@ -884,11 +884,11 @@ mod tests {
         })
         .expect("the regression gate armed the object");
         assert_eq!(
-            gates.get(GateName::Regression).expect("armed").status,
+            gates.get(&GateName::Regression).expect("armed").status,
             GateStatus::Pass
         );
         let outcome = gates
-            .get(GateName::ErrorSeverityFindings)
+            .get(&GateName::ErrorSeverityFindings)
             .expect("the default exit rule joins the object");
         assert_eq!(outcome.status, GateStatus::Fail);
         assert!(outcome.enforced);
@@ -1098,7 +1098,7 @@ mod tests {
             parse_error: parse_error_outcome(true, true, &files),
         })
         .expect("health always states its default rule");
-        let entry = gates.get(GateName::ParseError).expect("armed");
+        let entry = gates.get(&GateName::ParseError).expect("armed");
         assert_eq!(entry.status, GateStatus::Fail);
         assert!(!entry.fails_run());
     }
@@ -1156,10 +1156,10 @@ mod tests {
             for name in FAIL_ON_ISSUES_GATES {
                 // Only `--fail-on-issues` arms the clone-group gate.
                 if name == GateName::DuplicationFindings && !fail_on_issues {
-                    assert!(gates.get(name).is_none());
+                    assert!(gates.get(&name).is_none());
                     continue;
                 }
-                let entry = gates.get(name).expect("every entry is armed here");
+                let entry = gates.get(&name).expect("every entry is armed here");
                 assert_eq!(entry.status, GateStatus::Fail, "{name:?}");
                 assert_eq!(entry.enforced, fail_on_issues, "{name:?}");
             }

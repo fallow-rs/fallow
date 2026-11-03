@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use fallow_output::CodeClimateIssue;
 
 use super::diff_filter::DiffIndex;
+use crate::exit_codes::exit_invalid_input;
 use crate::report::emit_json;
 use fallow_output::PrDecisionConclusion;
 use fallow_output::{
@@ -183,7 +184,7 @@ fn print_review_envelope_from_ci_issues(
         Ok(review_id) => review_id,
         Err(error) => {
             eprintln!("Error: {error}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
     let envelope = render_review_envelope_with_diff(
@@ -212,7 +213,7 @@ fn print_review_envelope_from_ci_issues(
         Ok(value) => value,
         Err(error) => {
             eprintln!("Error: failed to serialize review envelope: {error}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
     emit_json(&value, "review envelope")

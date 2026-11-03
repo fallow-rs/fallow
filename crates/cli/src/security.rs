@@ -4951,7 +4951,7 @@ mod tests {
         // The fixture has real leak candidates, so --fail-on-issues raises exit 1.
         let root = leak_fixture_root();
         let code = run(&run_opts(&root, OutputFormat::Human, true));
-        assert_eq!(code, ExitCode::from(1));
+        assert_eq!(code, crate::exit_codes::exit_gate_failed());
     }
 
     #[test]
@@ -4959,7 +4959,7 @@ mod tests {
         // Only human / json / sarif are supported; compact exits 2 before analysis.
         let root = leak_fixture_root();
         let code = run(&run_opts(&root, OutputFormat::Compact, false));
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, crate::exit_codes::exit_invalid_input());
     }
 
     #[test]

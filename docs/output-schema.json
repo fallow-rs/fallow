@@ -23316,7 +23316,7 @@
         "message",
         "exit_code"
       ],
-      "description": "Structured JSON error emitted on stdout when `--format json` is active and a\ncommand fails. It carries no `kind` discriminator: it is distinguished from\nthe kind-tagged success envelopes by the required `error: true` field, and is\na document-root branch alongside `FallowOutput` and `CodeClimateOutput` in\n`docs/output-schema.json`. Agents that pass `--format json` and observe a\nnon-zero exit code parse this shape from stdout."
+      "description": "Structured JSON error that a tool writes to stdout when `--format json` is\nactive and a command fails. It has no `kind` discriminator. The required\n`error: true` member separates it from a success envelope, which carries a\n`kind`. The error document is one of the root branches of the output\nschema. A consumer that passes `--format json` and sees a non-zero exit\ncode parses this shape from stdout."
     },
     "TypeAwareMeta": {
       "type": "object",
@@ -28727,42 +28727,42 @@
         },
         "enforced": {
           "type": "boolean",
-          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the verdict is published for information only: the gate was never\narmed, the run was told never to fail, or the combined machine formats\nexit 0 for the gate (bare `fallow` without `--fail-on-issues`)."
+          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the tool publishes the verdict for information only: no flag or\nconfig armed the gate, the run was told never to fail, or the output\nformat exits 0 for the gate."
         },
         "observed": {
           "type": [
             "number",
             "null"
           ],
-          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, the number of `error` findings of `health-findings` and\nof `error-severity-findings`, or\nthe number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
+          "description": "The measured value that the gate compared, when there is one: for\nexample a percentage, a score, a number of findings, or the number of\nfiles in `files`. A whole number is a JSON number, so a count of three\nreads as `3.0`. Absent for a gate that compares no number."
         },
         "threshold": {
           "type": [
             "number",
             "null"
           ],
-          "description": "The configured limit `observed` was compared against, when there is one.\nAbsent for gates that compare no number."
+          "description": "The configured limit that the gate compared `observed` against, when\nthere is one. Absent for a gate that compares no number."
         },
         "threshold_label": {
           "type": [
             "string",
             "null"
           ],
-          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `health-findings` and\n`error-severity-findings` set it to `error`, the rule severity they\ncount; `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
+          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its unit. Examples are a severity floor such as `high`, the rule\nseverity that the gate counts such as `error`, or a tolerance as the\nuser wrote it, such as `\"50%\"`. Each gate name documents its label.\nAbsent for a gate whose numbers have a clear meaning without a label."
         },
         "files": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/GateFile"
           },
-          "description": "The files the gate judged, for a gate that judges files rather than a\nnumber. Only `parse-error` sets it: one item per file that did not\nparse cleanly, sorted by path. Absent when the list is empty."
+          "description": "The files that the gate judged, for a gate that judges files and not a\nnumber. One item for each file, sorted by path. Absent when the list is\nempty."
         }
       },
       "required": [
         "status",
         "enforced"
       ],
-      "description": "One gate's verdict on one run.\n\n`status` and `enforced` answer different questions and legitimately\ndisagree. `status` is what the rule concluded; `enforced` is whether a\n`fail` from this gate would make the run exit non-zero. A\n`health --report-only` run is an explicit request never to fail, so a\nfailing gate there reports `status: fail` with `enforced: false`, and a\nstale-baseline verdict published without `--fail-on-stale-baseline` reports\nthe same pair.\n\n**A gate fails the build when `status` is `fail` AND `enforced` is true.**\nNeither member decides it alone: `enforced` is true on every armed gate,\nincluding the ones that passed, so gating on it by itself fails every run\nthat armed anything. Read `status` on its own to decide what to say, and\nremember that `warn` and `skipped` are neither a pass nor a failure."
+      "description": "One gate's verdict on one run.\n\n`status` and `enforced` answer different questions, and they can disagree.\n`status` is what the rule concluded. `enforced` tells if a `fail` from this\ngate makes the run exit non-zero. A run that was told never to fail reports\na failed gate as `status: fail` with `enforced: false`.\n\n**A gate fails the build when `status` is `fail` AND `enforced` is true.**\nOne member alone does not decide it. `enforced` is true on every armed\ngate, also on a gate that passed. Thus a gate rule on `enforced` alone\nfails every run that armed a gate. Read `status` alone to decide what to\nsay. `warn` and `skipped` are not a pass and not a failure."
     },
     "GateStatus": {
       "oneOf": [
@@ -28774,7 +28774,7 @@
         {
           "type": "string",
           "const": "warn",
-          "description": "The gate ran and reached a warn tier that does not fail the run. Only\n`audit-verdict` can report this today."
+          "description": "The gate ran and reached a warn tier that does not fail the run. Only a\ngate with a warn tier reports this value."
         },
         {
           "type": "string",
@@ -28784,10 +28784,10 @@
         {
           "type": "string",
           "const": "skipped",
-          "description": "The gate could not judge this run and deliberately stood down: a\nchange-scoped baseline comparison, `health --report-only`, or a security\nadvisory shadowed by a configured gate. Distinct from `pass`, which\nasserts the condition was evaluated and did not hold."
+          "description": "The gate could not judge this run and stood down on purpose. For\nexample, the run was told never to fail, or a different gate decides\nthe run. This is not `pass`: `pass` says that the gate evaluated the\ncondition and the condition did not hold."
         }
       ],
-      "description": "What a gate concluded on this run.\n\nFour-valued rather than a boolean because audit's verdict has a warn tier\n(`crates/cli/src/cli_report.rs` maps it onto three conclusions) and because\na gate can stand down without passing. Widening a published boolean later\nwould retype a required field and bump every carrying envelope, so the width\nis decided here."
+      "description": "What a gate concluded on this run.\n\nThe status has four values, not two. A verdict can have a warn tier that\ndoes not fail the run, and a gate can stand down without a pass. A change\nfrom a boolean to a wider type later would change the type of a required\nmember and the version of each envelope that carries it."
     },
     "GateName": {
       "oneOf": [
@@ -28799,7 +28799,7 @@
         {
           "type": "string",
           "const": "regression",
-          "description": "`--fail-on-regression`: issue counts grew past `--tolerance` compared\nwith the regression baseline."
+          "description": "`--fail-on-regression`: issue counts grew past `--tolerance` compared\nwith the regression baseline. `threshold` is the allowance in issues.\n`threshold_label` is the tolerance as the user wrote it (`\"50%\"` or\n`\"5\"`), because the grouped envelope carries no `regression` object."
         },
         {
           "type": "string",
@@ -28814,7 +28814,7 @@
         {
           "type": "string",
           "const": "duplication-threshold",
-          "description": "`--threshold`: duplication exceeded the configured percentage."
+          "description": "`--threshold`: duplication exceeded the configured percentage.\n`observed` is the duplication percentage."
         },
         {
           "type": "string",
@@ -28824,12 +28824,12 @@
         {
           "type": "string",
           "const": "health-min-score",
-          "description": "`--min-score`: the health score fell below the configured minimum."
+          "description": "`--min-score`: the health score fell below the configured minimum.\n`observed` is the health score."
         },
         {
           "type": "string",
           "const": "health-min-severity",
-          "description": "`--min-severity`: at least one complexity finding reached the configured\nseverity. One branch of the findings gate; see [`Self::HealthFindings`]."
+          "description": "`--min-severity`: at least one complexity finding reached the configured\nseverity. One branch of the findings gate; see [`Self::HealthFindings`].\n`observed` is the number of findings at or above the floor, and\n`threshold_label` is the floor (`moderate`, `high` or `critical`)."
         },
         {
           "type": "string",
@@ -28869,17 +28869,17 @@
         {
           "type": "string",
           "const": "parse-error",
-          "description": "`--fail-on-parse-error` or the `failOnParseError` config key: at least\none source file did not parse cleanly (a `source-parse-degraded` or\n`source-nesting-too-deep` entry in `workspace_diagnostics[]`). The\nentry lists each such file in `files`. Never armed by default, because\nthe parser also rejects valid syntax that is newer than the parser."
+          "description": "`--fail-on-parse-error` or the `failOnParseError` config key: at least\none source file did not parse cleanly (a `source-parse-degraded` or\n`source-nesting-too-deep` entry in `workspace_diagnostics[]`). The\nentry lists each such file in `files`, with the same facts as the\ndiagnostic of that file, so a consumer can act without a join. A file\nwith a `source-nesting-too-deep` entry has `reason: nesting-too-deep`.\nThe gate is never armed by default, because\nthe parser also rejects valid syntax that is newer than the parser."
         }
       ],
-      "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set."
+      "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set: a name\nthat a consumer does not recognize means \"some gate\", not an error.\n\nThe default exit rule of a command is always in `gate_outcomes`, also when\nno flag armed a gate: `error-severity-findings` on `dead-code`, `check` and\nthe combined run (with `health-findings` when the combined run analyzed\nhealth), `health-findings` on `health`, `security-advisory` on `security`\nand `audit-verdict` on `audit`. `dupes` has no default exit rule, so a\n`dupes` run that armed no gate carries no object and always exits 0. The\ntyped programmatic API runs no CLI gate and leaves the object absent.\n\nA gate reports `skipped` when it stands down: a change-scoped baseline\ncomparison, `health --report-only`, or a security advisory that a\nconfigured `--gate` shadows. Only `audit-verdict` reports `warn`."
     },
     "GateOutcomes": {
       "type": "object",
       "additionalProperties": {
         "$ref": "#/definitions/GateOutcome"
       },
-      "description": "The verdict of every gate a run evaluated, keyed by name.\n\nA gate is armed by a flag or by config. The default exit rule of a command\nis always in the object, also when no flag armed a gate:\n`error-severity-findings` on `dead-code`, `check` and the combined run\n(with `health-findings` when the combined run analyzed health),\n`health-findings` on `health`, `security-advisory` on `security` and\n`audit-verdict` on `audit`. A reader of the JSON sees a failing run without\nthe exit code. `dupes` has no default exit rule, so a `dupes` run that armed\nno gate carries no object and always exits 0.\n\nAn empty object is never emitted. The typed programmatic API runs no CLI\ngate and leaves the object absent.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `baseline-growth`, `duplication-threshold`,\n`duplication-findings`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,\n`type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
+      "description": "The verdict of every gate that a run evaluated, keyed by gate name.\n\nEach tool defines its own gate names. The name of a gate is the JSON member\nname, and the members are in the order of the names. A tool never writes an\nempty object. When no gate ran, the member is absent.\n\nThe key set is OPEN. A name that a consumer does not recognize means \"some\ngate\", not an error.\n\nThe names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require` and `parse-error`. `GateName` describes each name and the default entries of each command."
     },
     "RequestOutcomes": {
       "type": "object",
@@ -29127,7 +29127,7 @@
         },
         "panicked": {
           "type": "boolean",
-          "description": "True when the parser stopped in the file instead of recovering, so the\nanalysis saw only the part before the error. `true` when `reason` is set."
+          "description": "True when the parser stopped in the file and did not recover, so the\nanalysis saw only the part before the error. `true` when `reason` is set."
         },
         "reason": {
           "anyOf": [
@@ -29146,7 +29146,7 @@
         "error_count",
         "panicked"
       ],
-      "description": "One file a file-judging gate names, with the reason the gate counted it.\n\nToday only `parse-error` emits it. The item carries the same facts as the\n`source-parse-degraded` entry in `workspace_diagnostics[]` for that file,\nso a consumer can act on the gate without a join. With `reason` set, the\ncount and the parser outcome are placeholders."
+      "description": "One file that a file-judging gate names, with the reason that the gate\ncounted it.\n\nA gate that counts files that did not parse cleanly writes this item. When\n`reason` is set, `error_count` and `panicked` hold fixed values."
     },
     "DeprecatedExportInUseFinding": {
       "type": "object",
@@ -34936,10 +34936,10 @@
         {
           "type": "string",
           "const": "nesting-too-deep",
-          "description": "The file nests too deep to parse, so it was not parsed\n(`source-nesting-too-deep`)."
+          "description": "The file nests too deep to parse, so the tool did not parse it."
         }
       ],
-      "description": "Why a file counts for the `parse-error` gate, other than a parser error."
+      "description": "Why a file counts for a parse gate, other than a parser error."
     },
     "CyclomaticPolicy": {
       "oneOf": [

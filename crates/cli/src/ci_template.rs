@@ -1,3 +1,4 @@
+use crate::exit_codes::exit_invalid_input;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -52,7 +53,7 @@ fn vendor_gitlab_files(root: &Path, force: bool) -> ExitCode {
         let path = root.join(file.path);
         if let Err(err) = write_vendored_file(&path, file.content, file.executable, force) {
             eprintln!("Error: failed to write {}: {err}", path.display());
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     }
 
@@ -139,7 +140,7 @@ mod tests {
 
         let code = vendor_gitlab_files(dir.path(), false);
 
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, exit_invalid_input());
         assert_eq!(std::fs::read_to_string(path).expect("read"), "custom");
     }
 

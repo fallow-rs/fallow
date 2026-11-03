@@ -4,7 +4,9 @@ use fallow_config::OutputFormat;
 
 use super::{Cli, Command, setup_tracing};
 use crate::cli_format::FormatConfig;
-use crate::exit_codes::{COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE, RESOURCE_UNAVAILABLE_EXIT_CODE};
+use crate::exit_codes::{
+    COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE, RESOURCE_UNAVAILABLE_EXIT_CODE, exit_gate_failed,
+};
 use crate::{api, cache_notice, claude_code_hint, output_runtime, telemetry, update_check};
 
 #[derive(Clone, Copy)]
@@ -46,7 +48,7 @@ pub fn record_run_epilogue(
             run.quiet,
             hint_root,
             parent_run.is_some(),
-            success || exit_code == ExitCode::from(1),
+            success || exit_code == exit_gate_failed(),
         );
     }
     if success {
@@ -59,7 +61,7 @@ pub fn fallback_failure_reason_for(
     run: &TelemetryRun,
     exit_code: ExitCode,
 ) -> Option<telemetry::FailureReason> {
-    if matches!(exit_code, ExitCode::SUCCESS) || exit_code == ExitCode::from(1) {
+    if matches!(exit_code, ExitCode::SUCCESS) || exit_code == exit_gate_failed() {
         return None;
     }
     if exit_code == ExitCode::from(api::NETWORK_EXIT_CODE) {

@@ -7,6 +7,7 @@ use fallow_types::envelope::Meta;
 use serde_json::{Value, json};
 
 use crate::error::emit_error;
+use crate::exit_codes::exit_gate_failed;
 use crate::report;
 use crate::report::sink::outln;
 use fallow_output::{
@@ -126,7 +127,7 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
     let completeness_failed = inspect_type_aware_completeness_failed(&bundle);
     let emitted = emit_inspect_bundle(bundle, opts);
     if emitted == ExitCode::SUCCESS && completeness_failed {
-        ExitCode::from(1)
+        exit_gate_failed()
     } else {
         emitted
     }

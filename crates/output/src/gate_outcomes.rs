@@ -36,8 +36,6 @@
 //! so the emitter cannot drift, and a gate added later is an additive optional
 //! key that bumps no `schema_version`.
 
-use std::collections::BTreeMap;
-
 use serde::Serialize;
 
 pub use fallow_report_protocol::{GateFile, GateFileReason, GateOutcome, GateStatus};
@@ -46,7 +44,20 @@ pub use fallow_report_protocol::{GateFile, GateFileReason, GateOutcome, GateStat
 ///
 /// Taken from the exit-code sites rather than from any integration's input
 /// list, because a gate a consumer cannot name is exactly the one whose verdict
-/// goes missing. Serialized as kebab-case and published as an open set.
+/// goes missing. Serialized as kebab-case and published as an open set: a name
+/// that a consumer does not recognize means "some gate", not an error.
+///
+/// The default exit rule of a command is always in `gate_outcomes`, also when
+/// no flag armed a gate: `error-severity-findings` on `dead-code`, `check` and
+/// the combined run (with `health-findings` when the combined run analyzed
+/// health), `health-findings` on `health`, `security-advisory` on `security`
+/// and `audit-verdict` on `audit`. `dupes` has no default exit rule, so a
+/// `dupes` run that armed no gate carries no object and always exits 0. The
+/// typed programmatic API runs no CLI gate and leaves the object absent.
+///
+/// A gate reports `skipped` when it stands down: a change-scoped baseline
+/// comparison, `health --report-only`, or a security advisory that a
+/// configured `--gate` shadows. Only `audit-verdict` reports `warn`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -59,7 +70,9 @@ pub enum GateName {
     /// `threshold_label` is `error`.
     ErrorSeverityFindings,
     /// `--fail-on-regression`: issue counts grew past `--tolerance` compared
-    /// with the regression baseline.
+    /// with the regression baseline. `threshold` is the allowance in issues.
+    /// `threshold_label` is the tolerance as the user wrote it (`"50%"` or
+    /// `"5"`), because the grouped envelope carries no `regression` object.
     Regression,
     /// `--fail-on-stale-baseline`: the loaded baseline has entries that matched
     /// nothing this run.
@@ -69,15 +82,19 @@ pub enum GateName {
     /// keys and `threshold` is zero.
     BaselineGrowth,
     /// `--threshold`: duplication exceeded the configured percentage.
+    /// `observed` is the duplication percentage.
     DuplicationThreshold,
     /// `--fail-on-issues` or `--ci` on `dupes` and on the bare run: at least
     /// one clone group remains after the baseline and suppression filters.
     /// `observed` is the number of clone groups and `threshold` is zero.
     DuplicationFindings,
     /// `--min-score`: the health score fell below the configured minimum.
+    /// `observed` is the health score.
     HealthMinScore,
     /// `--min-severity`: at least one complexity finding reached the configured
     /// severity. One branch of the findings gate; see [`Self::HealthFindings`].
+    /// `observed` is the number of findings at or above the floor, and
+    /// `threshold_label` is the floor (`moderate`, `high` or `critical`).
     HealthMinSeverity,
     /// The health findings gate with no severity floor: a complexity finding
     /// whose `complexity-*` rule is `error` fails the run. `observed` is the
@@ -105,7 +122,10 @@ pub enum GateName {
     /// `--fail-on-parse-error` or the `failOnParseError` config key: at least
     /// one source file did not parse cleanly (a `source-parse-degraded` or
     /// `source-nesting-too-deep` entry in `workspace_diagnostics[]`). The
-    /// entry lists each such file in `files`. Never armed by default, because
+    /// entry lists each such file in `files`, with the same facts as the
+    /// diagnostic of that file, so a consumer can act without a join. A file
+    /// with a `source-nesting-too-deep` entry has `reason: nesting-too-deep`.
+    /// The gate is never armed by default, because
     /// the parser also rejects valid syntax that is newer than the parser.
     ParseError,
 }
@@ -162,84 +182,70 @@ impl GateName {
     }
 }
 
-/// The verdict of every gate a run evaluated, keyed by name.
+/// The verdict of every gate a run evaluated, keyed by [`GateName`].
 ///
-/// A gate is armed by a flag or by config. The default exit rule of a command
-/// is always in the object, also when no flag armed a gate:
-/// `error-severity-findings` on `dead-code`, `check` and the combined run
-/// (with `health-findings` when the combined run analyzed health),
-/// `health-findings` on `health`, `security-advisory` on `security` and
-/// `audit-verdict` on `audit`. A reader of the JSON sees a failing run without
-/// the exit code. `dupes` has no default exit rule, so a `dupes` run that armed
-/// no gate carries no object and always exits 0.
+/// The map shape is in `fallow-report-protocol`, so a tool with other gate
+/// names writes the same JSON. [`GateName`] documents the default entries of
+/// each command. An empty object is never emitted.
+pub type GateOutcomes = fallow_report_protocol::GateOutcomes<GateName>;
+
+/// Add the gate names of this build to the `GateOutcomes` description of a
+/// set of schema definitions, and return the definitions.
 ///
-/// An empty object is never emitted. The typed programmatic API runs no CLI
-/// gate and leaves the object absent.
-///
-/// The names this build can emit are `error-severity-findings`, `regression`,
-/// `stale-baseline`, `baseline-growth`, `duplication-threshold`,
-/// `duplication-findings`, `health-min-score`,
-/// `health-min-severity`, `health-findings`, `health-coverage-gaps`,
-/// `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
-/// `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not
-/// recognise means "some gate", not an error.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(transparent)]
-pub struct GateOutcomes(BTreeMap<GateName, GateOutcome>);
-
-impl GateOutcomes {
-    /// An empty set, which serializes to nothing once [`Self::into_option`]
-    /// has been applied.
-    #[must_use]
-    pub fn new() -> Self {
-        Self(BTreeMap::new())
+/// The map type is generic in `fallow-report-protocol`, so its doc comment
+/// cannot name the gates of fallow. The generated TypeScript emits no
+/// `GateName` type, so this description is where a TypeScript consumer finds
+/// the names. The list comes from [`GateName::ALL`] and cannot drift.
+#[must_use]
+pub fn with_gate_outcome_names(
+    mut definitions: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let names: Vec<String> = GateName::ALL
+        .iter()
+        .map(|name| format!("`{}`", name.as_str()))
+        .collect();
+    let object = definitions
+        .get_mut("GateOutcomes")
+        .and_then(serde_json::Value::as_object_mut);
+    if let (Some(object), Some((last, rest))) = (object, names.split_last()) {
+        let generic = object
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let description = format!(
+            "{generic}\n\nThe names that this build can emit are {} and {last}. \
+             `GateName` describes each name and the default entries of each command.",
+            rest.join(", ")
+        );
+        object.insert("description".to_owned(), description.into());
     }
-
-    /// Record one gate's outcome, replacing any previous entry for that name.
-    pub fn insert(&mut self, name: GateName, outcome: GateOutcome) {
-        self.0.insert(name, outcome);
-    }
-
-    /// Record one gate's outcome when it ran at all.
-    pub fn insert_if(&mut self, name: GateName, outcome: Option<GateOutcome>) {
-        if let Some(outcome) = outcome {
-            self.0.insert(name, outcome);
-        }
-    }
-
-    /// Read one gate's outcome.
-    #[must_use]
-    pub fn get(&self, name: GateName) -> Option<&GateOutcome> {
-        self.0.get(&name)
-    }
-
-    /// Whether a gate of the set fails the run: its status is `fail` and it
-    /// is enforced.
-    #[must_use]
-    pub fn fails_run(&self) -> bool {
-        self.0
-            .values()
-            .any(|outcome| outcome.enforced && outcome.status == GateStatus::Fail)
-    }
-
-    /// Whether the set holds no gate.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Collapse an empty set to `None`, which is how the field stays absent on
-    /// a run that evaluated no gate.
-    #[must_use]
-    pub fn into_option(self) -> Option<Self> {
-        if self.0.is_empty() { None } else { Some(self) }
-    }
+    definitions
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gate_map_description_lists_every_gate_name() {
+        let mut definitions = serde_json::Map::new();
+        definitions.insert(
+            "GateOutcomes".to_owned(),
+            serde_json::json!({ "description": "Generic." }),
+        );
+        let definitions = with_gate_outcome_names(definitions);
+        let description = definitions["GateOutcomes"]["description"]
+            .as_str()
+            .expect("description is a string");
+        assert!(description.starts_with("Generic.\n\n"), "{description}");
+        for name in GateName::ALL {
+            assert!(
+                description.contains(&format!("`{}`", name.as_str())),
+                "{description}"
+            );
+        }
+        assert!(description.contains("`type-aware-require` and `parse-error`."));
+    }
 
     #[test]
     fn empty_set_collapses_to_absent() {

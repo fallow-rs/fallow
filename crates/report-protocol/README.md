@@ -10,8 +10,11 @@ The crate contains:
   it fails with `--format json`.
 - `GateOutcome`, `GateStatus`, `GateFile` and `GateFileReason`: the verdict of
   one gate on one run.
-- `exit_code`: the process exit codes of the contract. The gate table of
-  `fallow-cli` reads `EXIT_OK` and `EXIT_GATE_FAILED` from this module.
+- `GateOutcomes<K>`: the verdict of every gate of one run, keyed by gate name.
+  Each tool supplies its own key type. `fallow-output` uses
+  `GateOutcomes<GateName>`.
+- `exit_code`: the process exit codes of the contract. `fallow-cli` reads
+  `EXIT_OK`, `EXIT_GATE_FAILED` and `EXIT_INVALID_INPUT` from this module.
 - `REPORT_PROTOCOL_VERSION`: the version of the wire contract. No fallow report
   writes this value yet. It is for tools that consume this crate.
 

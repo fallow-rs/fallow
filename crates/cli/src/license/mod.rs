@@ -877,6 +877,7 @@ fn render_json_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::exit_invalid_input;
 
     #[test]
     fn activate_args_debug_masks_raw_jwt() {
@@ -1093,19 +1094,19 @@ mod tests {
     #[test]
     fn run_trial_without_email_errors() {
         let exit = run_trial(None, false, JsonStyle::Compact);
-        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+        assert_eq!(format!("{exit:?}"), format!("{:?}", exit_invalid_input()));
     }
 
     #[test]
     fn run_trial_without_email_errors_in_json_mode() {
         let exit = run_trial(None, true, JsonStyle::Compact);
-        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+        assert_eq!(format!("{exit:?}"), format!("{:?}", exit_invalid_input()));
     }
 
     #[test]
     fn activate_without_jwt_source_errors_before_verification() {
         let exit = run_activate(&ActivateArgs::default(), true, JsonStyle::Compact);
-        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+        assert_eq!(format!("{exit:?}"), format!("{:?}", exit_invalid_input()));
     }
 
     #[test]

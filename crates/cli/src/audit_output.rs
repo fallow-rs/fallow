@@ -15,6 +15,7 @@ use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
 
 use crate::error::emit_error;
+use crate::exit_codes::exit_invalid_input;
 use crate::report;
 use crate::report::plural;
 use crate::report::sink::outln;
@@ -188,7 +189,7 @@ fn print_audit_format(
         }
         OutputFormat::Badge => {
             eprintln!("Error: badge format is not supported for the audit command");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -1495,6 +1496,7 @@ mod tests {
     use fallow_output::PrDecisionConclusion;
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
+    use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 
     use super::{
         audit_decision_conclusion, build_audit_codeclimate, build_audit_json_output,
@@ -1781,14 +1783,17 @@ mod tests {
     fn print_audit_result_rejects_badge_format() {
         let result = audit_result(AuditVerdict::Pass, OutputFormat::Badge);
 
-        assert_eq!(print_audit_result(&result, true, false), ExitCode::from(2));
+        assert_eq!(
+            print_audit_result(&result, true, false),
+            exit_invalid_input()
+        );
     }
 
     #[test]
     fn print_audit_result_maps_fail_verdict_to_error_exit() {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Human);
 
-        assert_eq!(print_audit_result(&result, true, false), ExitCode::from(1));
+        assert_eq!(print_audit_result(&result, true, false), exit_gate_failed());
     }
 
     #[test]
@@ -1926,7 +1931,10 @@ mod tests {
         let result = audit_result_with_findings(AuditVerdict::Fail, OutputFormat::Human);
 
         // Fail maps to exit 1 and renders the red status line via build_status_parts.
-        assert_eq!(print_audit_result(&result, false, false), ExitCode::from(1));
+        assert_eq!(
+            print_audit_result(&result, false, false),
+            exit_gate_failed()
+        );
     }
 
     #[test]
