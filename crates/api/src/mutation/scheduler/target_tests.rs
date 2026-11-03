@@ -231,3 +231,34 @@ fn a_target_timeout_skips_the_other_tests_and_leaves_incomplete_evidence() {
         "a timeout of the targets runs no other test"
     );
 }
+
+#[test]
+fn a_target_killer_that_fails_without_the_other_tests_leaves_incomplete_evidence() {
+    // t2 passes with t1 in the dry run, but fails in a run without t1, also
+    // with no active mutant: it depends on the order of the tests. Its kill
+    // is no evidence, so it must not count as a unique or a shared kill.
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(killed_by_each(run, &[tid("t2")])),
+    ))
+    .with_control(|_, run| {
+        if run.test_ids == [tid("t2")] {
+            Ok(killed_by_each_always(run, &[tid("t2")]))
+        } else {
+            Ok(passing_control(run))
+        }
+    });
+    let outcome =
+        run_schedule(&spawner, &plan(&["m2"]), &target_config(&[tid("t2")])).expect("schedule");
+    assert!(
+        !outcome.results["m2"].kill_matrix_complete,
+        "an unconfirmed target killer must not give complete evidence"
+    );
+    assert!(
+        spawner
+            .controls()
+            .iter()
+            .any(|(_, run)| run.test_ids == [tid("t2")]),
+        "the target tests get a control run when the other tests are left out"
+    );
+}

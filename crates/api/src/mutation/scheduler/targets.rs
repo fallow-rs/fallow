@@ -43,33 +43,36 @@ impl Worker<'_> {
             .killing_tests
             .iter()
             .any(|test| !job.targets.contains(test));
-        if target_kill && other_killer && merged.kill_matrix_complete {
-            merged.kill_matrix_complete = self.other_killer_confirmed(&others, caps)?;
+        if target_kill && merged.kill_matrix_complete {
+            merged.kill_matrix_complete = self.passes_without_mutant(&targets, caps)?
+                && (!other_killer || self.passes_without_mutant(&others, caps)?);
         }
         Ok(merged)
     }
 
-    /// True when the other tests of a target kill pass in a control run with
-    /// no active mutant. The other run is a part of the test files, so a test
-    /// that depends on a target test can fail there without the mutant. Such
-    /// a failure must not remove the uniqueness of a target kill. The memo
-    /// gives each test set at most one control run.
-    fn other_killer_confirmed(
+    /// True when the tests of `job` pass in a control run with no active
+    /// mutant. Each phase runs a part of the covering tests, so a test that
+    /// depends on the order of the tests can fail there without the mutant.
+    /// A target that fails without the other tests must not count as a
+    /// killer, and an other test that fails without the targets must not
+    /// remove the uniqueness of a target kill. The memo gives each test set
+    /// at most one control run.
+    fn passes_without_mutant(
         &mut self,
-        others: &Job,
+        job: &Job,
         caps: Capabilities,
     ) -> Result<bool, ScheduleError> {
-        let tests: Vec<String> = others
+        let tests: Vec<String> = job
             .tests
             .iter()
             .filter(|test| !self.memo.is_failed(test))
             .cloned()
             .collect();
-        if tests.len() != others.tests.len() {
+        if tests.len() != job.tests.len() {
             return Ok(false);
         }
         Ok(matches!(
-            self.check_control(&tests, others, caps)?,
+            self.check_control(&tests, job, caps)?,
             ControlCheck::Passed
         ))
     }

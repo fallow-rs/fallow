@@ -544,11 +544,13 @@ fallow mutation src/math.ts \
 - `killing_tests` of a mutant holds each target test that kills it, and the
   first other test that kills it. `kill_matrix_complete` is true when the
   target run gave an exact result for each target test and, after a target
-  kill, the other run gave a final result. When another test kills a mutant
-  that a target kills, Fallow first runs those other tests with no active
-  mutant. A test can fail in a run without the targets because it depends on
-  the order of the tests. When this control run does not pass, the evidence
-  of the mutant is incomplete, and the matrix gives no candidates.
+  kill, the other run gave a final result. Each run holds only a part of the
+  covering tests. A test can fail in such a run because it depends on the
+  order of the tests. After a target kill, Fallow runs the target tests with
+  no active mutant. When another test also kills the mutant, Fallow runs
+  those other tests with no active mutant too. When a control run does not
+  pass, the evidence of the mutant is incomplete, and the matrix gives no
+  candidates.
 
 Each target test with coverage gets a row in `kill_matrix.tests`. Other tests
 get no row.
