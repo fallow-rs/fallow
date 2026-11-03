@@ -19,7 +19,7 @@ doctest = false
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.23"
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "pkcs8", "pem"] }
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc", "pkcs8", "pem"] }
 
 [lints]
 workspace = true
