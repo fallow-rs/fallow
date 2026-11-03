@@ -193,9 +193,11 @@ pub struct ExternalPluginDef {
     ///
     /// Defaults to `support`. Set to `runtime` for application entry points
     /// or `test` for test framework entry points. In production mode, a file
-    /// that only `support` entries match takes no part in dead-code analysis.
-    #[serde(default = "default_external_entry_point_role")]
-    pub entry_point_role: EntryPointRole,
+    /// that only entries with an explicit `support` role match takes no part
+    /// in dead-code analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "EntryPointRole", default = "schema_default_entry_point_role")]
+    pub entry_point_role: Option<EntryPointRole>,
 
     /// Entry points DERIVED from framework manifest files.
     ///
@@ -561,7 +563,29 @@ fn default_external_entry_point_role() -> EntryPointRole {
     EntryPointRole::Support
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the schema default must have the field type"
+)]
+fn schema_default_entry_point_role() -> Option<EntryPointRole> {
+    Some(default_external_entry_point_role())
+}
+
 impl ExternalPluginDef {
+    /// The role of `entryPoints`: the configured role, else `support`.
+    #[must_use]
+    pub fn effective_entry_point_role(&self) -> EntryPointRole {
+        self.entry_point_role
+            .unwrap_or_else(default_external_entry_point_role)
+    }
+
+    /// Whether the config sets `"entryPointRole": "support"` explicitly.
+    /// Production mode leaves out only these support entries.
+    #[must_use]
+    pub fn has_explicit_support_role(&self) -> bool {
+        self.entry_point_role == Some(EntryPointRole::Support)
+    }
+
     /// The reason for a plugin with no activation condition. Config load and
     /// `fallow plugin-check` both use it, so one state has one phrase.
     pub const NEVER_ACTIVATES_REASON: &str =

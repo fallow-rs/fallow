@@ -656,9 +656,11 @@ through package-manager indirection. Projects deployed through a custom script
 name should declare the deployed file in `entry` when no manifest, framework,
 or infrastructure entry already identifies it as runtime code.
 
-In production mode, a file that only user `support` entry rules match (inline
-`framework[]` entries and plugin files) takes no part in dead-code analysis
-(issue #4068). Plugin entry matching records such a file in
+In production mode, a file that only user entry rules with an explicit
+`"entryPointRole": "support"` match (inline `framework[]` entries and plugin
+files) takes no part in dead-code analysis (issue #4068). A plugin that sets
+no role keeps its entries: `ExternalPluginDef::has_explicit_support_role`
+reads the configured value, not the `support` default. Plugin entry matching records such a file in
 `CategorizedEntryPoints::production_excluded` instead of the entry points. A
 user plugin that has the name of a built-in plugin or of an internal script
 entry source keeps its entries, because entry rules carry only the name. The
@@ -671,8 +673,9 @@ and bin paths, Iconify names, JSX runtime packages, Module Federation runtime
 calls), and hides their source-owned findings and stale suppressions. The
 graph-cache resolver payload is written before the modules turn inert, and the
 persisted graph is keyed on the entry-point set, so a warm cache from the other
-mode gives the cold result. The files stay discovered and parsed, so `health` and `dupes` do
-not change.
+mode gives the cold result. The files stay discovered and parsed, so `dupes`
+does not change. The production `health` vital signs that come from dead code,
+such as `dead_export_pct`, follow the new result.
 
 ### CLI flag-value crediting
 

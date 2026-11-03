@@ -92,7 +92,7 @@ fn production_skipped_plugins(config: &ResolvedConfig) -> Option<FxHashSet<&str>
     let mut names: FxHashSet<&str> = config
         .external_plugins
         .iter()
-        .filter(|plugin| plugin.entry_point_role == EntryPointRole::Support)
+        .filter(|plugin| plugin.has_explicit_support_role())
         .map(|plugin| plugin.name.as_str())
         .collect();
     if names.is_empty() {

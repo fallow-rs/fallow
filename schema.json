@@ -478,7 +478,7 @@
           "default": []
         },
         "entryPointRole": {
-          "description": "Coverage role for `entryPoints`.\n\nDefaults to `support`. Set to `runtime` for application entry points\nor `test` for test framework entry points. In production mode, a file\nthat only `support` entries match takes no part in dead-code analysis.",
+          "description": "Coverage role for `entryPoints`.\n\nDefaults to `support`. Set to `runtime` for application entry points\nor `test` for test framework entry points. In production mode, a file\nthat only entries with an explicit `support` role match takes no part\nin dead-code analysis.",
           "$ref": "#/$defs/EntryPointRole",
           "default": "support"
         },

@@ -14,7 +14,7 @@ fn make_external(name: &str, enablers: &[&str], config_patterns: &[&str]) -> Ext
         detection: None,
         enablers: enablers.iter().map(|s| (*s).to_string()).collect(),
         entry_points: Vec::new(),
-        entry_point_role: fallow_config::EntryPointRole::Support,
+        entry_point_role: Some(fallow_config::EntryPointRole::Support),
         manifest_entries: Vec::new(),
         config_patterns: config_patterns.iter().map(|s| (*s).to_string()).collect(),
         config_default_export_opt_out: Vec::new(),
@@ -448,7 +448,7 @@ fn external_plugin_detected_by_enablers() {
         tooling_dependencies: vec!["my-framework-cli".to_string()],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -482,7 +482,7 @@ fn external_plugin_not_detected_when_dep_missing() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -511,7 +511,7 @@ fn external_plugin_prefix_enabler() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -536,7 +536,7 @@ fn external_plugin_detection_dependency() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -572,7 +572,7 @@ fn external_plugin_detection_any_combinator() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -604,7 +604,7 @@ fn external_plugin_detection_all_combinator_fails_partial() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -630,7 +630,7 @@ fn external_plugin_used_exports_aggregated() {
             exports: vec!["default".to_string(), "getServerSideProps".to_string()],
         }],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -656,7 +656,7 @@ fn external_plugin_without_enablers_or_detection_stays_inactive() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -849,7 +849,7 @@ fn external_plugin_detection_overrides_enablers() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -877,7 +877,7 @@ fn external_plugin_detection_overrides_enablers_positive() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -903,7 +903,7 @@ fn external_plugin_config_patterns_added_to_always_used() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -945,7 +945,7 @@ fn external_plugin_detection_all_combinator_succeeds() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -987,7 +987,7 @@ fn external_plugin_nested_any_inside_all() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext.clone()]);
@@ -1025,7 +1025,7 @@ fn external_plugin_detection_file_exists_against_discovered() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -1054,7 +1054,7 @@ fn external_plugin_detection_file_exists_no_match() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -1755,7 +1755,7 @@ fn multiple_external_plugins_independently_activated() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let ext_b = ExternalPluginDef {
@@ -1770,7 +1770,7 @@ fn multiple_external_plugins_independently_activated() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext_a, ext_b]);
@@ -1805,7 +1805,7 @@ fn external_plugin_multiple_used_exports() {
             },
         ],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -2092,7 +2092,7 @@ fn process_external_plugins_prefix_enabler_requires_slash() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
@@ -2118,7 +2118,7 @@ fn process_external_plugins_prefix_enabler_matches_scoped() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
@@ -2288,7 +2288,7 @@ fn external_plugin_detection_all_with_file_and_dep() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -2324,7 +2324,7 @@ fn external_plugin_detection_all_dep_and_file_missing_file() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
@@ -2735,7 +2735,7 @@ fn process_external_plugins_detection_dependency() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
@@ -2766,7 +2766,7 @@ fn process_external_plugins_detection_not_matched() {
         tooling_dependencies: vec![],
         used_exports: vec![],
         used_class_members: vec![],
-        entry_point_role: fallow_config::EntryPointRole::Runtime,
+        entry_point_role: Some(fallow_config::EntryPointRole::Runtime),
         manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();

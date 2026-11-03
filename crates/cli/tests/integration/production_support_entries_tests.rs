@@ -270,6 +270,44 @@ fn a_support_file_that_runtime_code_imports_stays_a_normal_module() {
 }
 
 #[test]
+fn a_user_plugin_without_an_explicit_role_keeps_its_entries_in_production() {
+    // `entryPointRole` defaults to `support`, but only an explicit
+    // `support` role opts in. A plugin that lists app entries without a
+    // role keeps them in production.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{ "name": "app", "private": true, "type": "module", "devDependencies": { "x": "1.0.0" } }"#,
+    );
+    write(root, "src/index.js", "console.log('app');\n");
+    write(
+        root,
+        "src/pages/home.js",
+        "import { lib } from '../lib.js';\nconsole.log(lib);\n",
+    );
+    write(root, "src/lib.js", "export const lib = 1;\n");
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{ "framework": [{ "name": "app", "enablers": ["x"], "entryPoints": ["src/pages/*.js"] }] }"#,
+    );
+
+    let json = dead_code(root, &["--production"]);
+    let files = unused_file_paths(&json);
+    assert!(
+        !files.iter().any(|f| f.ends_with("lib.js")),
+        "a plugin without an explicit role keeps its entries: {files:?}"
+    );
+    let exports = unused_export_names(&json);
+    assert!(
+        !exports.iter().any(|e| e.ends_with(":lib")),
+        "a plugin without an explicit role keeps crediting imports: {exports:?}"
+    );
+}
+
+#[test]
 fn a_user_plugin_with_a_built_in_name_keeps_its_support_entries() {
     // Entry rules carry only the plugin name, so a user plugin named like a
     // built-in shares its rules. Production mode keeps such entries.
