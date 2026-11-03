@@ -83,7 +83,9 @@ pub use mutation::{run_mutation_inspect, run_mutation_plan};
 pub use project_info::{build_project_info_args, run_project_info};
 pub use recommend::run_recommend;
 pub use rust::{
-    architecture_call, dupes_call, health_call, resolve_cargo_fallow, run_rust_call, rust_manifest,
+    analyze_call, architecture_call, dupes_call, health_call, mutation_inspect_call,
+    mutation_plan_call, resolve_cargo_fallow, run_rust_call, rust_manifest, unsupported_tool_body,
+    with_mixed_root_warning,
 };
 pub use security::{build_security_candidates_args, run_security_candidates};
 pub use semantic::{run_symbol_impact, run_symbol_trace};

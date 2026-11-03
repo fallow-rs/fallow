@@ -8,8 +8,12 @@
 //! JSON error document), so the route passes its JSON through unchanged.
 //!
 //! A root with a `Cargo.toml` and no `package.json` takes the Rust route. A
-//! root with both files keeps the JavaScript route, so no existing call
-//! changes its result.
+//! root with both files keeps the JavaScript route, and the result gets a
+//! `warnings` entry that points to `cargo fallow`.
+//!
+//! The mutation tools never compile and never run tests: `mutation_plan` runs
+//! `mutants --list` and `mutation_inspect` runs `mutants --inspect <id>
+//! --no-build`, which reads the coverage map from the cache only.
 //!
 //! The route fails closed: a parameter that `cargo-fallow` cannot honor gives
 //! a typed error, not a silent drop.
@@ -21,10 +25,14 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
 
-use crate::params::HealthParams;
-use crate::params::{ArchitectureParams, FindDupesParams};
+use crate::params::{
+    AnalyzeParams, ArchitectureParams, FindDupesParams, HealthParams, MutationInspectParams,
+    MutationPlanParams,
+};
+use fallow_api::MutationRunScope;
 
-use super::{run_tool, typed_validation_error_body};
+use super::mutation::plan_scope;
+use super::{run_tool, typed_validation_error_body, validation_error_body};
 
 /// The environment variable that names the `cargo-fallow` binary.
 pub const CARGO_FALLOW_BIN_ENV: &str = "CARGO_FALLOW_BIN";
@@ -32,6 +40,12 @@ pub const CARGO_FALLOW_BIN_ENV: &str = "CARGO_FALLOW_BIN";
 const BINARY_NAME: &str = "cargo-fallow";
 const NOT_FOUND_CODE: &str = "FALLOW_RUST_BINARY_NOT_FOUND";
 const UNSUPPORTED_PARAMS_CODE: &str = "FALLOW_RUST_UNSUPPORTED_PARAMS";
+pub(super) const UNSUPPORTED_TOOL_CODE: &str = "FALLOW_RUST_UNSUPPORTED_TOOL";
+const NO_CACHED_MAP_CODE: &str = "CARGO_FALLOW_NO_CACHED_MAP";
+/// Added to the `help` of a missing coverage map: the command that builds the
+/// map compiles the workspace and runs its tests.
+const NO_CACHED_MAP_HELP: &str = "The command in the first sentence compiles the workspace and runs the tests, \
+     so ask your host first. The MCP tools never compile and never run tests.";
 const CONTEXT: &str = "rust";
 
 /// One tool call that the Rust route runs.
@@ -46,8 +60,68 @@ pub struct RustCall {
 /// The `Cargo.toml` of the root when the call takes the Rust route.
 pub fn rust_manifest(root: Option<&str>) -> Option<PathBuf> {
     let dir = root.map_or_else(|| PathBuf::from("."), PathBuf::from);
-    let manifest = dir.join("Cargo.toml");
-    (manifest.is_file() && !dir.join("package.json").is_file()).then_some(manifest)
+    is_rust_dir(&dir).then(|| dir.join("Cargo.toml"))
+}
+
+/// Whether `dir` has a `Cargo.toml` and no `package.json`.
+pub fn is_rust_dir(dir: &Path) -> bool {
+    dir.join("Cargo.toml").is_file() && !dir.join("package.json").is_file()
+}
+
+/// The `warnings` entry for a root with both `Cargo.toml` and `package.json`.
+/// The call keeps the JavaScript route, so the entry points to `cargo fallow`.
+pub fn mixed_root_warning(root: Option<&str>) -> Option<String> {
+    let dir = root.map_or_else(|| PathBuf::from("."), PathBuf::from);
+    (dir.join("Cargo.toml").is_file() && dir.join("package.json").is_file()).then(|| {
+        "The root also has a Cargo.toml. This result covers TypeScript and JavaScript only. \
+         Run `cargo fallow` to analyze the Rust workspace."
+            .to_string()
+    })
+}
+
+/// Add the [`mixed_root_warning`] to the root `warnings` array of a
+/// successful JSON result. An error result, a text result, a result with a
+/// `warnings` value that is not an array, and a result on another root stay
+/// as they are.
+pub fn with_mixed_root_warning(
+    root: Option<&str>,
+    result: Result<CallToolResult, McpError>,
+) -> Result<CallToolResult, McpError> {
+    let Some(warning) = mixed_root_warning(root) else {
+        return result;
+    };
+    result.map(|result| append_warning(result, warning))
+}
+
+fn append_warning(result: CallToolResult, warning: String) -> CallToolResult {
+    if result.is_error == Some(true) || result.content.len() != 1 {
+        return result;
+    }
+    let Some(text) = result.content[0].as_text() else {
+        return result;
+    };
+    let Ok(serde_json::Value::Object(mut root)) = serde_json::from_str(&text.text) else {
+        return result;
+    };
+    let warnings = root
+        .entry("warnings")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    let Some(warnings) = warnings.as_array_mut() else {
+        return result;
+    };
+    warnings.push(serde_json::Value::String(warning));
+    let text = serde_json::Value::Object(root).to_string();
+    CallToolResult::success(vec![ContentBlock::text(text)])
+}
+
+/// The error body of a tool that has no Rust route.
+pub fn unsupported_tool_body(tool: &str, help: &str) -> String {
+    typed_validation_error_body(
+        format!("{tool} has no route for a Rust workspace yet"),
+        UNSUPPORTED_TOOL_CODE,
+        help,
+        CONTEXT,
+    )
 }
 
 /// Resolve the `cargo-fallow` binary: `CARGO_FALLOW_BIN`, else a sibling of
@@ -151,13 +225,98 @@ fn push_value(args: &mut Vec<String>, flag: &str, value: Option<impl ToString>) 
 const DUPES_PARAMS: &[&str] = &["root", "mode", "min_tokens", "min_lines", "threshold"];
 const HEALTH_PARAMS: &[&str] = &["root", "max_cyclomatic", "max_cognitive"];
 const ARCHITECTURE_PARAMS: &[&str] = &["root", "boundaries"];
+const ANALYZE_PARAMS: &[&str] = &["root"];
+const MUTATION_PLAN_PARAMS: &[&str] = &["root", "package", "changed_since", "all", "paths"];
+const MUTATION_INSPECT_PARAMS: &[&str] = &["root", "package", "mutant_id"];
+
+fn check_params(tool: &str, params: &impl Serialize, supported: &[&str]) -> Result<(), String> {
+    let unsupported = unsupported_params(params, supported);
+    if unsupported.is_empty() {
+        Ok(())
+    } else {
+        Err(unsupported_error(tool, &unsupported, supported))
+    }
+}
+
+fn check_package(package: Option<&str>) -> Result<(), String> {
+    if package.is_some_and(|package| package.trim().is_empty()) {
+        return Err(validation_error_body("package must not be empty"));
+    }
+    Ok(())
+}
+
+/// `analyze` runs `cargo fallow check` with the deps and visibility checks.
+/// The partial run has no health score.
+pub fn analyze_call(params: &AnalyzeParams, manifest: &Path) -> Result<RustCall, String> {
+    check_params("analyze", params, ANALYZE_PARAMS)?;
+    let mut args = base_args("check", manifest);
+    args.extend(["--only", "deps", "--only", "visibility"].map(String::from));
+    Ok(RustCall {
+        tool: "analyze",
+        args,
+    })
+}
+
+/// `mutation_plan` runs `cargo fallow mutants --list`, which compiles nothing
+/// and runs no test. Without `paths` or `changed_since`, the list covers the
+/// whole package.
+pub fn mutation_plan_call(
+    params: &MutationPlanParams,
+    manifest: &Path,
+) -> Result<RustCall, String> {
+    check_params("mutation_plan", params, MUTATION_PLAN_PARAMS)?;
+    check_package(params.package.as_deref())?;
+    let scope = plan_scope(params)?;
+    let mut args = base_args("mutants", manifest);
+    args.push("--list".to_string());
+    push_value(
+        &mut args,
+        "--package",
+        params.package.as_deref().map(str::trim),
+    );
+    match scope {
+        MutationRunScope::Changed { base } => push_value(&mut args, "--in-diff", base),
+        MutationRunScope::Paths(paths) => {
+            for path in paths {
+                push_value(&mut args, "--file", Some(path.to_string_lossy()));
+            }
+        }
+        MutationRunScope::All => {}
+    }
+    Ok(RustCall {
+        tool: "mutation_plan",
+        args,
+    })
+}
+
+/// `mutation_inspect` runs `cargo fallow mutants --inspect <id> --no-build`,
+/// which reads the coverage map from the cache only.
+pub fn mutation_inspect_call(
+    params: &MutationInspectParams,
+    manifest: &Path,
+) -> Result<RustCall, String> {
+    check_params("mutation_inspect", params, MUTATION_INSPECT_PARAMS)?;
+    check_package(params.package.as_deref())?;
+    let mutant_id = params.mutant_id.trim();
+    if mutant_id.is_empty() {
+        return Err(validation_error_body("mutant_id must not be empty"));
+    }
+    let mut args = base_args("mutants", manifest);
+    push_value(
+        &mut args,
+        "--package",
+        params.package.as_deref().map(str::trim),
+    );
+    args.extend(["--inspect", mutant_id, "--no-build"].map(String::from));
+    Ok(RustCall {
+        tool: "mutation_inspect",
+        args,
+    })
+}
 
 /// `find_dupes` runs `cargo fallow dupes`.
 pub fn dupes_call(params: &FindDupesParams, manifest: &Path) -> Result<RustCall, String> {
-    let unsupported = unsupported_params(params, DUPES_PARAMS);
-    if !unsupported.is_empty() {
-        return Err(unsupported_error("find_dupes", &unsupported, DUPES_PARAMS));
-    }
+    check_params("find_dupes", params, DUPES_PARAMS)?;
     let mut args = base_args("dupes", manifest);
     push_value(&mut args, "--mode", params.mode.as_deref());
     push_value(&mut args, "--min-tokens", params.min_tokens);
@@ -172,14 +331,7 @@ pub fn dupes_call(params: &FindDupesParams, manifest: &Path) -> Result<RustCall,
 /// `check_health` runs `cargo fallow complexity`. The Rust report has the
 /// complexity findings only: no health score, no file scores and no hotspots.
 pub fn health_call(params: &HealthParams, manifest: &Path) -> Result<RustCall, String> {
-    let unsupported = unsupported_params(params, HEALTH_PARAMS);
-    if !unsupported.is_empty() {
-        return Err(unsupported_error(
-            "check_health",
-            &unsupported,
-            HEALTH_PARAMS,
-        ));
-    }
+    check_params("check_health", params, HEALTH_PARAMS)?;
     let mut args = base_args("complexity", manifest);
     push_value(&mut args, "--max-cyclomatic", params.max_cyclomatic);
     push_value(&mut args, "--max-cognitive", params.max_cognitive);
@@ -192,14 +344,7 @@ pub fn health_call(params: &HealthParams, manifest: &Path) -> Result<RustCall, S
 /// `check_architecture` runs `cargo fallow boundaries`. A Rust workspace has
 /// no import cycle check and no policy rules yet.
 pub fn architecture_call(params: &ArchitectureParams, manifest: &Path) -> Result<RustCall, String> {
-    let unsupported = unsupported_params(params, ARCHITECTURE_PARAMS);
-    if !unsupported.is_empty() {
-        return Err(unsupported_error(
-            "check_architecture",
-            &unsupported,
-            ARCHITECTURE_PARAMS,
-        ));
-    }
+    check_params("check_architecture", params, ARCHITECTURE_PARAMS)?;
     Ok(RustCall {
         tool: "check_architecture",
         args: base_args("boundaries", manifest),
@@ -221,7 +366,37 @@ pub async fn run_rust_call(
             not_found_body(binary),
         )]));
     }
-    run_tool(binary, call.tool, &call.args).await
+    run_tool(binary, call.tool, &call.args)
+        .await
+        .map(explain_missing_map)
+}
+
+/// A missing coverage map keeps the message and the help of `cargo-fallow`,
+/// and the help adds that the command which builds the map runs the tests.
+fn explain_missing_map(result: CallToolResult) -> CallToolResult {
+    if result.is_error != Some(true) || result.content.len() != 1 {
+        return result;
+    }
+    let Some(text) = result.content[0].as_text() else {
+        return result;
+    };
+    let Ok(serde_json::Value::Object(mut body)) = serde_json::from_str(&text.text) else {
+        return result;
+    };
+    if body.get("code").and_then(serde_json::Value::as_str) != Some(NO_CACHED_MAP_CODE) {
+        return result;
+    }
+    let help = match body.get("help").and_then(serde_json::Value::as_str) {
+        Some(help) => format!("{help} {NO_CACHED_MAP_HELP}"),
+        None => NO_CACHED_MAP_HELP.to_string(),
+    };
+    body.insert("help".to_string(), serde_json::Value::String(help));
+    body.insert(
+        "context".to_string(),
+        serde_json::Value::String(CONTEXT.to_string()),
+    );
+    let text = serde_json::Value::Object(body).to_string();
+    CallToolResult::error(vec![ContentBlock::text(text)])
 }
 
 fn not_found_body(binary: &str) -> String {
@@ -488,5 +663,234 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&result_text(&result)).expect("json body");
         assert_eq!(value["code"], "CARGO_FALLOW_MANIFEST_NOT_FOUND");
+        assert_eq!(
+            value.get("help"),
+            None,
+            "only a missing map gets a help: {value}"
+        );
+        assert_eq!(value.get("context"), None, "{value}");
+    }
+
+    fn error_value(body: &str) -> serde_json::Value {
+        serde_json::from_str(body).expect("json body")
+    }
+
+    #[test]
+    fn analyze_runs_the_deps_and_visibility_checks() {
+        let params = AnalyzeParams {
+            root: Some("/repo".into()),
+            ..AnalyzeParams::default()
+        };
+        let call = analyze_call(&params, Path::new("/repo/Cargo.toml")).expect("supported");
+        assert_eq!(call.tool, "analyze");
+        assert_eq!(call.args[0], "check");
+        assert_eq!(call.args[6..], ["--only", "deps", "--only", "visibility"]);
+    }
+
+    #[test]
+    fn analyze_rejects_a_javascript_param() {
+        let params = AnalyzeParams {
+            production: Some(true),
+            ..AnalyzeParams::default()
+        };
+        let body = analyze_call(&params, Path::new("Cargo.toml")).expect_err("unsupported");
+        assert_eq!(
+            error_value(&body)["message"],
+            "analyze on a Rust workspace does not support: production"
+        );
+    }
+
+    #[test]
+    fn mutation_plan_lists_the_mutants_and_compiles_nothing() {
+        let params = MutationPlanParams {
+            package: Some("core".into()),
+            paths: Some(vec!["src/lib.rs".into(), "src/a".into()]),
+            ..MutationPlanParams::default()
+        };
+        let call = mutation_plan_call(&params, Path::new("/repo/Cargo.toml")).expect("supported");
+        assert_eq!(call.tool, "mutation_plan");
+        assert_eq!(call.args[0], "mutants");
+        assert_eq!(
+            call.args[6..],
+            [
+                "--list",
+                "--package",
+                "core",
+                "--file",
+                "src/lib.rs",
+                "--file",
+                "src/a"
+            ]
+        );
+        let changed = MutationPlanParams {
+            changed_since: Some("origin/main".into()),
+            ..MutationPlanParams::default()
+        };
+        let call = mutation_plan_call(&changed, Path::new("Cargo.toml")).expect("supported");
+        assert_eq!(call.args[6..], ["--list", "--in-diff", "origin/main"]);
+        let all = MutationPlanParams {
+            all: Some(true),
+            ..MutationPlanParams::default()
+        };
+        let call = mutation_plan_call(&all, Path::new("Cargo.toml")).expect("supported");
+        assert_eq!(call.args[6..], ["--list"]);
+    }
+
+    #[test]
+    fn mutation_plan_rejects_a_limit_and_conflicting_scopes() {
+        let limited = MutationPlanParams {
+            max_mutants: Some(5),
+            ..MutationPlanParams::default()
+        };
+        let body = mutation_plan_call(&limited, Path::new("Cargo.toml")).expect_err("limit");
+        assert_eq!(error_value(&body)["code"], UNSUPPORTED_PARAMS_CODE);
+        let both = MutationPlanParams {
+            all: Some(true),
+            changed_since: Some("main".into()),
+            ..MutationPlanParams::default()
+        };
+        let body = mutation_plan_call(&both, Path::new("Cargo.toml")).expect_err("scopes");
+        assert!(body.contains("mutually exclusive"));
+    }
+
+    fn inspect_params(mutant_id: &str) -> MutationInspectParams {
+        MutationInspectParams {
+            mutant_id: mutant_id.into(),
+            report: None,
+            root: None,
+            config: None,
+            allow_remote_extends: None,
+            package: None,
+        }
+    }
+
+    #[test]
+    fn mutation_inspect_reads_the_cache_only() {
+        let params = MutationInspectParams {
+            package: Some("core".into()),
+            ..inspect_params(" m-12 ")
+        };
+        let call = mutation_inspect_call(&params, Path::new("Cargo.toml")).expect("supported");
+        assert_eq!(call.tool, "mutation_inspect");
+        assert_eq!(call.args[0], "mutants");
+        assert_eq!(
+            call.args[6..],
+            ["--package", "core", "--inspect", "m-12", "--no-build"]
+        );
+    }
+
+    #[test]
+    fn mutation_inspect_rejects_a_report_and_an_empty_id() {
+        let params = MutationInspectParams {
+            report: Some("report.json".into()),
+            ..inspect_params("m-1")
+        };
+        let body = mutation_inspect_call(&params, Path::new("Cargo.toml")).expect_err("report");
+        assert_eq!(
+            error_value(&body)["message"],
+            "mutation_inspect on a Rust workspace does not support: report"
+        );
+        let body =
+            mutation_inspect_call(&inspect_params("  "), Path::new("Cargo.toml")).expect_err("id");
+        assert!(body.contains("mutant_id must not be empty"));
+    }
+
+    #[test]
+    fn a_rust_only_tool_error_names_the_tool_and_the_code() {
+        let value = error_value(&unsupported_tool_body("project_info", "Call analyze."));
+        assert_eq!(value["code"], UNSUPPORTED_TOOL_CODE);
+        assert_eq!(value["context"], CONTEXT);
+        assert_eq!(value["exit_code"], 2);
+        assert_eq!(
+            value["message"],
+            "project_info has no route for a Rust workspace yet"
+        );
+        assert_eq!(value["help"], "Call analyze.");
+    }
+
+    #[test]
+    fn a_mixed_root_gets_a_warning_and_other_roots_do_not() {
+        let mixed = workspace(&["Cargo.toml", "package.json"]);
+        let warning = mixed_root_warning(root_of(&mixed).as_deref()).expect("mixed root");
+        assert!(warning.contains("cargo fallow"));
+        let js = workspace(&["package.json"]);
+        assert_eq!(mixed_root_warning(root_of(&js).as_deref()), None);
+        let rust = workspace(&["Cargo.toml"]);
+        assert_eq!(mixed_root_warning(root_of(&rust).as_deref()), None);
+    }
+
+    #[test]
+    fn the_mixed_root_warning_lands_in_the_root_warnings_array() {
+        let mixed = workspace(&["Cargo.toml", "package.json"]);
+        let root = root_of(&mixed);
+        let report = CallToolResult::success(vec![ContentBlock::text(
+            r#"{"kind":"dupes","warnings":["first"]}"#,
+        )]);
+        let result = with_mixed_root_warning(root.as_deref(), Ok(report)).expect("result");
+        let value: serde_json::Value =
+            serde_json::from_str(&result_text(&result)).expect("json body");
+        let warnings = value["warnings"].as_array().expect("warnings array");
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0], "first");
+        assert!(
+            warnings[1]
+                .as_str()
+                .is_some_and(|w| w.contains("cargo fallow"))
+        );
+
+        let bare = CallToolResult::success(vec![ContentBlock::text(r#"{"kind":"health"}"#)]);
+        let result = with_mixed_root_warning(root.as_deref(), Ok(bare)).expect("result");
+        let value: serde_json::Value =
+            serde_json::from_str(&result_text(&result)).expect("json body");
+        assert_eq!(value["warnings"].as_array().map(Vec::len), Some(1));
+
+        let failed = CallToolResult::error(vec![ContentBlock::text(r#"{"error":true}"#)]);
+        let result = with_mixed_root_warning(root.as_deref(), Ok(failed)).expect("result");
+        assert_eq!(result_text(&result), r#"{"error":true}"#);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_missing_coverage_map_gives_an_error_that_keeps_the_help() {
+        let dir = workspace(&[]);
+        let report = r#"{"error":true,"message":"the cache has no coverage map for this source of package `core`","exit_code":2,"code":"CARGO_FALLOW_NO_CACHED_MAP","help":"Run `cargo fallow mutants -p core --inspect m-1` once to build the map. Then run this command again."}"#;
+        let stub = stub_binary(dir.path(), report, 2);
+        let call = mutation_inspect_call(&inspect_params("m-1"), Path::new("Cargo.toml"));
+        let result = run_rust_call(&stub, call).await.expect("tool result");
+        assert_eq!(result.is_error, Some(true));
+        let value: serde_json::Value =
+            serde_json::from_str(&result_text(&result)).expect("json body");
+        assert_eq!(value["code"], NO_CACHED_MAP_CODE);
+        assert_eq!(value["context"], CONTEXT);
+        let help = value["help"].as_str().expect("help");
+        assert!(help.starts_with("Run `cargo fallow mutants -p core --inspect m-1` once"));
+        assert!(
+            help.contains(
+                "The command in the first sentence compiles the workspace and runs the tests"
+            ),
+            "{help}"
+        );
+    }
+
+    #[test]
+    fn an_empty_package_or_path_list_is_an_error() {
+        let plan = MutationPlanParams {
+            package: Some(" ".into()),
+            ..MutationPlanParams::default()
+        };
+        let body = mutation_plan_call(&plan, Path::new("Cargo.toml")).expect_err("package");
+        assert_eq!(error_value(&body)["message"], "package must not be empty");
+        let inspect = MutationInspectParams {
+            package: Some(String::new()),
+            ..inspect_params("m-1")
+        };
+        let body = mutation_inspect_call(&inspect, Path::new("Cargo.toml")).expect_err("package");
+        assert_eq!(error_value(&body)["message"], "package must not be empty");
+        let paths = MutationPlanParams {
+            paths: Some(Vec::new()),
+            ..MutationPlanParams::default()
+        };
+        let body = mutation_plan_call(&paths, Path::new("Cargo.toml")).expect_err("paths");
+        assert!(body.contains("paths must contain at least one entry"));
     }
 }
