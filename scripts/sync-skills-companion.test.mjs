@@ -323,6 +323,31 @@ test(
 );
 
 test(
+  "the printed gh pr create hint survives a shell for any --message",
+  withFixture((fixture) => {
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    const message = "\n\ndocs: it's $HOME `id`\nsecond line\n\nbody";
+    const { code, output } = sync(fixture, ["--message", message]);
+    assert.equal(code, 0, output);
+    const hint = output.split("\n").find((line) => line.includes("gh pr create"));
+    assert.ok(hint, output);
+    // Parse the hint with a real shell: print each argument after `gh pr create`.
+    const args = execFileSync(
+      "sh",
+      ["-c", `set -- ${hint.replace("gh pr create", "")}; printf '%s\\0' "$@"`],
+      {
+        encoding: "utf8",
+      },
+    ).split("\0");
+    assert.equal(
+      args[args.indexOf("--title") + 1],
+      git(fixture.skills, "log", "-1", "--format=%s"),
+    );
+    assert.equal(args[args.indexOf("--title") + 1], "docs: it's $HOME `id` second line");
+  }),
+);
+
+test(
   "refuses manifest versions that differ",
   withFixture(
     (fixture) => {

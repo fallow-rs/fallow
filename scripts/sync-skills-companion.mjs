@@ -394,7 +394,7 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     log("Publish it through a pull request:");
     log(`  git -C ${companion} push origin HEAD:refs/heads/${branch}`);
     // `gh pr create --fill` reads the local branch, and the push creates only the remote one.
-    const title = shellQuote(message.split("\n")[0]);
+    const title = shellQuote(git(companion, "log", "-1", "--format=%s"));
     const body = shellQuote(
       `Syncs the released Fallow skill from fallow-rs/fallow@${pin.slice(0, 9)}.`,
     );
