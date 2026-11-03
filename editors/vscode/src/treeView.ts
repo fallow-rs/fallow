@@ -104,6 +104,8 @@ class CategoryItem extends vscode.TreeItem {
       `${ISSUE_CATEGORY_LABELS[category]} (${issues.length})`,
       vscode.TreeItemCollapsibleState.Collapsed,
     );
+    // A stable id keeps the expansion state when a refresh changes the count in the label.
+    this.id = `category:${category}`;
     this.issues = issues;
     this.contextValue = "category";
     this.iconPath = new vscode.ThemeIcon(CATEGORY_ICONS[category] ?? "warning");

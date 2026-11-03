@@ -263,4 +263,28 @@ describe("SecurityTreeProvider", () => {
 
     expect(provider.getChildren()).toEqual([]);
   });
+
+  it("keeps a stable group id when the finding count changes", () => {
+    const sink = (line: number): SecurityFindingInput => ({
+      kind: "tainted-sink",
+      category: "dangerous-html",
+      cwe: 79,
+      path: "src/app.tsx",
+      line,
+      col: 4,
+      evidence: "innerHTML reaches req.query.html",
+      trace: [],
+      actions: [],
+    });
+    const provider = new SecurityTreeProvider();
+    provider.update(result([sink(1)]));
+    const before = (provider.getChildren() as TestTreeItem[])[0];
+
+    provider.update(result([sink(1), sink(2)]));
+    const after = (provider.getChildren() as TestTreeItem[])[0];
+
+    expect(after?.label).toBe("dangerous-html (CWE-79) (2)");
+    expect(before?.id).toBeDefined();
+    expect(after?.id).toBe(before?.id);
+  });
 });
