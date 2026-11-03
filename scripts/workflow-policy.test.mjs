@@ -1684,9 +1684,10 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
     ".github/workflows/pgo-validate.yml",
     ".github/workflows/release.yml",
     "Cargo.toml",
-    "Cargo.lock",
     "rust-toolchain.toml",
   ]);
+  assert.match(workflow, /^ {2}schedule:\n {4}- cron: '40 3 \* \* 0'$/mu);
+  assert.match(train, /^ {4}if: \$\{\{ !startsWith\(github\.head_ref, 'dependabot\/cargo\/'\) \}\}$/mu);
   assert.match(workflow, /^ {2}workflow_dispatch:$/mu);
   assert.match(workflow, /^permissions: \{\}$/mu);
   assert.match(train, /scripts\/pgo-train\.sh/u);

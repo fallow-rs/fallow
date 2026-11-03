@@ -301,9 +301,10 @@ On pull requests:
 - `PGO Validate`, when `scripts/pgo-train.sh`,
   `.github/scripts/pgo-compare.mjs`, `.github/scripts/pgo-profile-match.mjs`,
   `benchmarks/download-fixtures.mjs`, `.github/actions/setup-rust/**`,
-  `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`,
-  `Cargo.lock`, or `rust-toolchain.toml` changes. It compares a PGO build with
-  a base build of the same pull request.
+  `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`, or
+  `rust-toolchain.toml` changes. It skips Dependabot Cargo branches. It
+  compares a PGO build with a base build of the same pull request. A weekly
+  run on `main` covers dependency changes.
 - `Test GitHub Action`, when its own paths change.
 
 On push to `main` only (each one also has `workflow_dispatch`):
