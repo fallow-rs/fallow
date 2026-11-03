@@ -55,7 +55,7 @@
     "@commitlint/config-conventional": "21.2.4",
     "@resvg/resvg-js": "2.6.2",
     "@tanstack/intent": "0.5.6",
-    "oxfmt": "0.74.0",
+    "oxfmt": "0.75.0",
     "oxlint": "1.89.0"
   }
 }
