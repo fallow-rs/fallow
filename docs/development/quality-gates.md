@@ -719,14 +719,17 @@ because the ref is not fetched, it exits with 2, not 1.
 
 ### JavaScript and TypeScript files
 
-The first `health.thresholdOverrides` entry in `.fallowrc.json` sets
+The first `health.thresholdOverrides` entry in
+`scripts/fallow-file-length.json` sets
 `maxFileLines: 2000` for `**/*.mjs` and `**/*.ts`. Two later entries set
 `maxFileLines: 0` for test files and for generated files, so the check skips
 them. A later entry wins. Add a new generated `.mjs` or `.ts` file to the last
 entry. The check also skips each path in `ignorePatterns` and in
 `health.ignore`.
 
-`scripts/fallow-file-length.json` extends `.fallowrc.json` for the gate. It
+`scripts/fallow-file-length.json` extends `.fallowrc.json` for the gate. The
+overrides are not in `.fallowrc.json`, because there they change each
+`fallow health` run in the repository. The gate config also
 turns off the cyclomatic, cognitive and CRAP rules, and it sets
 `audit.worsened` to `error`. A change then fails only on file length. The
 audit fails in these cases:
@@ -758,7 +761,8 @@ a compare with the ref shows growth that the branch did not add.
   base of `origin/main`, or of `upstream/main` in a fork clone.
 - `npm run verify:fast` runs the script against `origin/main`.
 - The `File length` step of the CI `Fallow Self Analysis` job runs the audit
-  with the binary of the pull request against `origin/<base branch>`. The
+  with the binary of the pull request against `HEAD^1`. HEAD is the merge
+  commit of the pull request, so `HEAD^1` is the tip of the base branch. The
   job runs when a pull request changes a `.mjs` or `.ts` file or one of the
   two config files.
 

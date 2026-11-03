@@ -1285,12 +1285,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Full history: the "File length" step compares HEAD with the base
-      # branch of the pull request.
+      # Depth 2: on a pull request, HEAD is the merge commit and HEAD^1 is the
+      # tip of the base branch. The "File length" step compares the two.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          filter: blob:none
+          fetch-depth: 2
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: debug-fallow-bin
@@ -1333,14 +1332,12 @@ jobs:
             exit "$code"
           fi
       # A .mjs or .ts file over 2000 lines must not grow: health.maxFileLines
-      # in .fallowrc.json. The audit fails on a new long file and on a long
+      # in scripts/fallow-file-length.json. The audit fails on a new long file and on a long
       # file that grew by 5 lines or more. scripts/check-file-size.mjs holds
       # the same limit for .rs files in the "JS Lint and Format" job.
       - name: File length
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: ./target/debug/fallow audit --config scripts/fallow-file-length.json --base "origin/$BASE_REF" --no-css --quiet
+        run: ./target/debug/fallow audit --config scripts/fallow-file-length.json --base HEAD^1 --no-css --quiet
 
   vscode:
     name: VS Code Extension

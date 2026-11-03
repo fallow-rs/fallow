@@ -736,7 +736,11 @@ test("fallow audit holds the file-length rule for .mjs and .ts files", () => {
   const selfAnalyze = /\n  fallow-self-analyze:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
   const filter = /\n {12}self-analyze:\n((?: {14}- .*\n)+)/u.exec(ci)?.[1] ?? "";
 
-  const [limit] = config.health.thresholdOverrides;
+  // The overrides live in the gate config only. In .fallowrc.json they would
+  // change each `fallow health` run in the repository, also the snapshot
+  // tests of fixtures that read the root config.
+  assert.equal(config.health?.thresholdOverrides, undefined);
+  const [limit] = gate.health.thresholdOverrides;
   assert.deepEqual(limit.files, ["**/*.mjs", "**/*.ts"]);
   assert.equal(limit.maxFileLines, 2000);
   assert.equal(gate.extends, "../.fallowrc.json");
@@ -759,9 +763,12 @@ test("fallow audit holds the file-length rule for .mjs and .ts files", () => {
   }
   assert.match(
     selfAnalyze,
-    /audit --config scripts\/fallow-file-length\.json --base "origin\/\$BASE_REF" --no-css/u,
+    /audit --config scripts\/fallow-file-length\.json --base HEAD\^1 --no-css/u,
   );
-  assert.match(selfAnalyze, /fetch-depth: 0/u);
+  // A partial clone with full history makes the git churn of
+  // `health --targets` fetch blobs one at a time.
+  assert.match(selfAnalyze, /fetch-depth: 2/u);
+  assert.doesNotMatch(selfAnalyze, /filter: blob:none/u);
 });
 
 /**

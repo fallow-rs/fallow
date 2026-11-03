@@ -1,6 +1,5 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  "minimumVersion": "3.38.0",
   "ignorePatterns": [
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
@@ -38,34 +37,6 @@
       "scripts/check-contract-surfaces.mjs",
       "scripts/public-smoke-conformance.mjs",
       "scripts/styling-corpus-smoke.mjs"
-    ],
-    "thresholdOverrides": [
-      {
-        "files": ["**/*.mjs", "**/*.ts"],
-        "maxFileLines": 2000,
-        "reason": "A .mjs or .ts file over 2000 lines must not grow. See docs/development/quality-gates.md#file-size."
-      },
-      {
-        "files": [
-          "**/test/**",
-          "**/tests/**",
-          "**/snapshots/**",
-          "**/__snapshots__/**",
-          "**/*.test.mjs",
-          "**/*.test.ts"
-        ],
-        "maxFileLines": 0,
-        "reason": "A test file grows with each new test case."
-      },
-      {
-        "files": [
-          "editors/vscode/src/generated/**",
-          "npm/fallow/types/output-contract.d.ts",
-          "**/generated-protocol.mjs"
-        ],
-        "maxFileLines": 0,
-        "reason": "A generator writes these files. Change the generator, not the file."
-      }
     ]
   },
   "duplicates": {
