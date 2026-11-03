@@ -63,8 +63,9 @@ The probes cover measured differences between producers. Each probe names its
 - `plain` baseline function declarations.
 - `named-fn-expr` istanbul-lib-instrument anchors `decl` at the identifier
   (column 23), v8-to-istanbul at the `function` keyword (column 14): a
-  nine-column split on one construct. `oxc-coverage-instrument`'s default
-  profile names the record after the binding, and both units go unattributed.
+  nine-column split on one construct. `oxc-coverage-instrument` 0.14.0 and
+  earlier named the record after the binding in the default profile; 0.18.0
+  names it after the function, so both units resolve.
 - `curried-arrow` record N's `loc.start` lands exactly on record N+1's
   `decl.start`. v8-to-istanbul emits a single record for the whole chain, so
   two of the three arrows are correctly unattributed.
@@ -92,7 +93,7 @@ map rather than as a miss.
 
 A unit that resolves to no record is an `estimated` census entry carrying a
 hand-written `rationale` naming the producer version and the behavior. The gate
-fires on a census DELTA, never on the existence of a miss. Six such entries
+fires on a census DELTA, never on the existence of a miss. Four such entries
 exist today.
 
 ## Provenance
