@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   configureBundledTypeAwareCompanion,
+  fallowChildEnvironment,
   typeAwareCommand,
   typeAwareEnvironment,
 } from "../src/typeAwareCompanion.js";
@@ -132,7 +133,9 @@ describe("typeAwareEnvironment", () => {
     writeFileSync(shim, "");
 
     expect(typeAwareEnvironment(shim, root, unix)).toEqual({
-      FALLOW_TYPE_AWARE_BIN: realpathSync(join(store, "fallow-type-aware", "fallow-type-aware.mjs")),
+      FALLOW_TYPE_AWARE_BIN: realpathSync(
+        join(store, "fallow-type-aware", "fallow-type-aware.mjs"),
+      ),
       FALLOW_TYPE_AWARE_SCRIPT: "",
       FALLOW_TYPE_AWARE_BIN_SOURCE: "npm-wrapper",
     });
@@ -187,6 +190,26 @@ describe("typeAwareEnvironment", () => {
     expect(
       typeAwareEnvironment(project.nativeBinary, project.root, { ...unix, bundled: null }),
     ).toEqual({});
+  });
+});
+
+describe("fallowChildEnvironment", () => {
+  it("keeps the host environment, because an executable LSP server gets no merge", () => {
+    const env = fallowChildEnvironment("/storage/fallow-lsp", null, {
+      PATH: "/usr/bin",
+      HOME: "/home/user",
+    });
+
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HOME).toBe("/home/user");
+  });
+
+  it("keeps a user-set FALLOW_TYPE_AWARE_BIN", () => {
+    const env = fallowChildEnvironment("/storage/fallow-lsp", null, {
+      FALLOW_TYPE_AWARE_BIN: "/custom/fallow-type-aware",
+    });
+
+    expect(env.FALLOW_TYPE_AWARE_BIN).toBe("/custom/fallow-type-aware");
   });
 });
 

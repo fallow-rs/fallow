@@ -51,7 +51,7 @@ import {
 } from "./diagnosticFilter.js";
 import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./download.js";
 import { TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
-import { typeAwareEnvironment } from "./typeAwareCompanion.js";
+import { fallowChildEnvironment } from "./typeAwareCompanion.js";
 import { getWorkspaceRoot } from "./workspaceRoot.js";
 
 let client: LanguageClient | null = null;
@@ -318,7 +318,7 @@ export const startClient = async (
     transport: TransportKind.stdio,
     // Each start resolves the companion again, so a restart with another binary
     // or another workspace does not reuse an old choice.
-    options: { env: typeAwareEnvironment(resolved.command, getWorkspaceRoot()) },
+    options: { env: fallowChildEnvironment(resolved.command, getWorkspaceRoot()) },
   };
 
   const traceLevel = getTraceLevel();

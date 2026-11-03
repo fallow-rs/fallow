@@ -112,6 +112,20 @@ export interface TypeAwareEnvironmentOptions {
 }
 
 /**
+ * The full environment for a Fallow child process: the extension host
+ * environment plus the type-aware companion entries. An executable LSP server
+ * gets these options as they are, with no merge, so it needs the full set.
+ */
+export const fallowChildEnvironment = (
+  fallowBinary: string,
+  workspaceRoot: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv => ({
+  ...env,
+  ...typeAwareEnvironment(fallowBinary, workspaceRoot, { env }),
+});
+
+/**
  * Environment entries that point a Fallow child process at its type-aware
  * companion. A user-set `FALLOW_TYPE_AWARE_BIN` wins. Next is a version-matched
  * project companion for a project-local binary. Last is the bundled companion.
