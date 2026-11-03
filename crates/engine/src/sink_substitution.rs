@@ -173,6 +173,13 @@ const SINKS: &[SubstituteSink] = &[
         "compileFunction",
     ),
     sink(
+        SinkClass::CodeExecution,
+        SinkShape::NewExpression,
+        "node:vm.Script",
+        "new Script",
+        "Script",
+    ),
+    sink(
         SinkClass::Html,
         SinkShape::MemberAssign,
         "*.innerHTML",
@@ -568,6 +575,16 @@ mod tests {
         assert_eq!(
             detect("src/run.ts", base, head),
             vec!["eval sink replaced by runInThisContext"]
+        );
+    }
+
+    #[test]
+    fn eval_replaced_by_imported_script() {
+        let base = "export const run = (code: string) => eval(code);\n";
+        let head = "import { Script } from 'node:vm';\nexport const run = (code: string) => new Script(code).runInThisContext();\n";
+        assert_eq!(
+            detect("src/run.ts", base, head),
+            vec!["eval sink replaced by new Script"]
         );
     }
 

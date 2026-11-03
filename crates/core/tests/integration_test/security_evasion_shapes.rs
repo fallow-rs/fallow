@@ -139,6 +139,20 @@ const CASES: &[(&str, Expected)] = &[
     ),
     ("src/vm-local-name.ts", Expected::Nothing),
     (
+        "src/vm-script-default-import.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
+        "src/vm-script-named-import.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    (
+        "src/vm-compile-function.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    ("src/vm-script-literal.ts", Expected::Nothing),
+    ("src/vm-script-local-class.ts", Expected::Nothing),
+    (
         "src/function-alias-spread.ts",
         Expected::Candidate("code-injection"),
     ),
@@ -158,6 +172,11 @@ const CASES: &[(&str, Expected)] = &[
     ),
     ("src/script-text.ts", Expected::Candidate("code-injection")),
     ("src/text-content-non-script.ts", Expected::Nothing),
+    (
+        "src/script-set-attribute-src.ts",
+        Expected::Candidate("code-injection"),
+    ),
+    ("src/set-attribute-src-non-script.ts", Expected::Nothing),
     (
         "src/script-shadowed.ts",
         Expected::Candidate("code-injection"),
@@ -299,15 +318,19 @@ fn this_proto_assignment_is_not_a_candidate() {
     assert!(tainted_sink_lines(&results, "src/this-proto.ts").is_empty());
 }
 
-/// A named `vm` import and a `require("vm")` binding name the module in the
-/// evidence, so the reader sees which built-in runs the code.
+/// A named `vm` import, a `require("vm")` binding and a `<script>` element
+/// binding name the resolved callee in the evidence, so the reader sees what
+/// runs the code.
 #[test]
-fn vm_binding_candidates_name_the_module() {
+fn bound_sink_candidates_name_the_resolved_callee() {
     let results = analyze();
     for (suffix, callee) in [
         ("src/vm-named-import.ts", "node:vm.runInNewContext"),
         ("src/vm-named-import-alias.ts", "node:vm.runInContext"),
         ("src/vm-require-destructure.ts", "node:vm.runInThisContext"),
+        ("src/vm-script-named-import.ts", "node:vm.Script"),
+        ("src/vm-compile-function.ts", "node:vm.compileFunction"),
+        ("src/script-set-attribute-src.ts", "HTMLScriptElement.src"),
     ] {
         let finding = results
             .security_findings
