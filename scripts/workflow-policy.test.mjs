@@ -896,7 +896,9 @@ test("release stages the fallow npm root for maintainer approval", () => {
     "the staged branch must end by skipping the direct publish",
   );
   assert.match(npmPublish, /grep -q '\^npm error code E409\$'/u);
-  assert.match(npmPublish, /npm install -g --ignore-scripts npm@11\.19\.0/u);
+  assert.match(npmPublish, /node-version: '26\.13\.0'/u);
+  assert.match(npmPublish, /run: test "\$\(npm --version\)" = 11\.20\.0/u);
+  assert.doesNotMatch(npmPublish, /npm install -g/u);
   assert.match(security, /Stage the `fallow` npm root, never publish it from the workflow/u);
   assert.match(security, /exactly one `npm stage publish` call/u);
 });
@@ -2233,7 +2235,7 @@ test("the release validation heavy selector skips startup when unset", async () 
   assert.match(selector, /runs-on: ubuntu-26.04/);
   assert.match(selector, /permissions:\n      contents: read\n/);
   assert.match(selector, /ref: refs\/heads\/main\n          persist-credentials: false/);
-  assert.match(selector, /node-version: '22'/);
+  assert.match(selector, /node-version: '26'/);
   const output = selector.match(/^      runner: \$\{\{ (.+) \}\}$/m)?.[1];
   assertHeavySelectorScript(runInNewContext, selector, output);
 });

@@ -94,32 +94,42 @@ describe("node-test adapter with the Node flags of the test script", () => {
 
   after(() => project?.cleanup());
 
-  test("the test processes get node_args, with a relative --import from the root", async () => {
-    companion = startCompanion();
-    const ready = await init({
-      env: {},
-      node_args: ["--experimental-transform-types", "--import", "./support/setup.mjs"],
-    });
-    assert.equal(ready.type, "ready", JSON.stringify(ready));
-    const dryRun = await request({ type: "dry_run", test_files: [COLOR_TEST] });
-    assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
-    assert.deepEqual(dryRun.unhandled_errors, []);
-    assert.deepEqual(
-      dryRun.tests.map(({ name, status }) => ({ name, status })),
-      [
-        { name: "red", status: "pass" },
-        { name: "setup", status: "pass" },
-      ],
-    );
-    const result = await request({
-      type: "run",
-      mutant_id: "e1",
-      test_ids: [`${COLOR_TEST}::red`],
-      timeout_ms: 10_000,
-      bail: true,
-    });
-    assert.equal(result.status, "killed", JSON.stringify(result));
-  });
+  // Node.js 26 removed `--experimental-transform-types`, so no flag loads the
+  // enum there. The floor job runs this test on the lowest supported Node.js.
+  const transformTypes = process.allowedNodeEnvironmentFlags.has("--experimental-transform-types");
+
+  test(
+    "the test processes get node_args, with a relative --import from the root",
+    {
+      skip: transformTypes ? false : "this Node.js has no --experimental-transform-types",
+    },
+    async () => {
+      companion = startCompanion();
+      const ready = await init({
+        env: {},
+        node_args: ["--experimental-transform-types", "--import", "./support/setup.mjs"],
+      });
+      assert.equal(ready.type, "ready", JSON.stringify(ready));
+      const dryRun = await request({ type: "dry_run", test_files: [COLOR_TEST] });
+      assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
+      assert.deepEqual(dryRun.unhandled_errors, []);
+      assert.deepEqual(
+        dryRun.tests.map(({ name, status }) => ({ name, status })),
+        [
+          { name: "red", status: "pass" },
+          { name: "setup", status: "pass" },
+        ],
+      );
+      const result = await request({
+        type: "run",
+        mutant_id: "e1",
+        test_ids: [`${COLOR_TEST}::red`],
+        timeout_ms: 10_000,
+        bail: true,
+      });
+      assert.equal(result.status, "killed", JSON.stringify(result));
+    },
+  );
 
   test("a test file that does not load gives a message that starts with the error line", async () => {
     companion = startCompanion();

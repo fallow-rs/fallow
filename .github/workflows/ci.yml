@@ -68,7 +68,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: github.event_name == 'push'
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Decide whether main requires full checks
         id: policy
         if: github.event_name == 'push'
@@ -389,7 +389,7 @@ jobs:
           ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
            (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Select Check runner
         id: heavy-runner
@@ -540,7 +540,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
@@ -626,7 +626,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install contract bundle dependencies
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
@@ -677,7 +677,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install NAPI package dependencies
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
@@ -861,7 +861,7 @@ jobs:
           cache-key: pr-windows-type-aware
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Test Windows npm launcher
         run: npm --prefix npm/fallow test
       - name: Test Windows child-process wiring
@@ -908,7 +908,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Check public skill matches the Fallow source contract
         working-directory: ${{ github.event_name == 'pull_request' && '.fallow-skills-base' || '.' }}
         env:
@@ -981,7 +981,7 @@ jobs:
           min-score: "100"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
       - run: npm ci --no-audit --no-fund --ignore-scripts
       - name: oxlint
         run: npm run lint:js
@@ -1043,7 +1043,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: node scripts/check-file-size.mjs --base "origin/$BASE_REF"
 
-  # The JS Lint job runs the companion tests on the current Node.js 22 and
+  # The JS Lint job runs the companion tests on the current Node.js 26 and
   # without Bun. This job runs them on the lowest Node.js and Bun versions
   # that crates/api/mutation-runner-protocol.json declares, so that a range
   # floor that no longer works fails here.
@@ -1101,7 +1101,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install locked repository tools
         run: npm ci --no-audit --no-fund --ignore-scripts
@@ -1238,7 +1238,7 @@ jobs:
           shared-key: debug-fallow-bin
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Build current fallow binary
         run: cargo build --bin fallow
       - name: Put current fallow binary first on PATH
@@ -1288,7 +1288,7 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - name: Install VS Code extension dependencies
@@ -1340,7 +1340,7 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - name: Cache VS Code test download
@@ -1381,7 +1381,7 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - name: Install VS Code dependencies
@@ -1435,7 +1435,7 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - name: Cache VS Code test download
@@ -1790,7 +1790,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
       - run: npm ci --ignore-scripts
         working-directory: viz-frontend
       - run: npm run lint
