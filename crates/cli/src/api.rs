@@ -771,7 +771,7 @@ mod tests {
     fn token_leak_authenticated_ureq_paths_stay_sanitized() {
         const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
         const CLOUD_TRANSPORT: &str = include_str!("coverage/cloud_transport.rs");
-        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
+        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory/mod.rs");
         const UPLOAD_SOURCE_MAPS: &str = include_str!("coverage/upload_source_maps.rs");
         const LICENSE: &str = include_str!("license/mod.rs");
         const CI: &str = include_str!("ci.rs");
@@ -848,7 +848,7 @@ mod tests {
         const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
         const CLOUD_TRANSPORT: &str = include_str!("coverage/cloud_transport.rs");
         const CLOUD_READS: &str = include_str!("coverage/cloud_reads.rs");
-        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
+        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory/mod.rs");
         const LICENSE: &str = include_str!("license/mod.rs");
 
         assert_manual_debug_mask(CLOUD_TRANSPORT, "CloudAuth", r#".field("api_key", &"***")"#);

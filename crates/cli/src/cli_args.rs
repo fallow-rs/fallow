@@ -2594,11 +2594,11 @@ pub enum CoverageCli {
         #[arg(long)]
         dry_run: bool,
 
-        /// Also upload importer edges (which files import each function) so the
-        /// cloud can show change-time blast radius. Opt-in: this builds the
-        /// import graph by running the full static analysis, whereas the default
-        /// upload is a fast per-file walk. The graph is cached, so a CI step that
-        /// already ran analysis pays little extra.
+        /// Also upload importer edges (which files import each function) and the
+        /// framework entry routes that can statically reach each function. Opt-in:
+        /// this builds the import graph by running the full static analysis, whereas
+        /// the default upload is a fast per-file walk. The graph is cached, so a CI
+        /// step that already ran analysis pays little extra.
         #[arg(long)]
         with_callers: bool,
 

@@ -811,7 +811,7 @@ fn fix_command_dead_code_routes_through_analysis_session() {
 fn coverage_upload_dead_code_routes_through_analysis_session() {
     for source_path in [
         "crates/cli/src/coverage/upload_static_findings.rs",
-        "crates/cli/src/coverage/upload_inventory.rs",
+        "crates/cli/src/coverage/upload_inventory/mod.rs",
     ] {
         let source =
             read_source_without_line_comments(source_path).expect("read coverage upload module");
@@ -913,8 +913,9 @@ fn list_surfaces_delegate_inventory_composition_to_engine() {
 
 #[test]
 fn coverage_inventory_reuses_session_discovery() {
-    let source = read_source_without_line_comments("crates/cli/src/coverage/upload_inventory.rs")
-        .expect("read coverage upload inventory");
+    let source =
+        read_source_without_line_comments("crates/cli/src/coverage/upload_inventory/mod.rs")
+            .expect("read coverage upload inventory");
     assert!(
         source.contains("AnalysisSession::from_resolved_config"),
         "coverage upload-inventory must create one AnalysisSession for inventory discovery"
@@ -927,9 +928,8 @@ fn coverage_inventory_reuses_session_discovery() {
         "coverage inventory collection must receive the shared AnalysisSession"
     );
     assert!(
-        collapsed.contains("fn collect_caller_edges(session: &AnalysisSession")
-            || collapsed.contains("fn collect_caller_edges( session: &AnalysisSession"),
-        "caller-edge collection must reuse the inventory AnalysisSession"
+        collapsed.contains("fn collect_graph_context( session: &AnalysisSession"),
+        "caller-edge and route collection must reuse the inventory AnalysisSession"
     );
     assert!(
         !source.contains("discover_files_with_plugin_scopes"),
@@ -1204,7 +1204,7 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
         "the origin remote and working-tree state of a coverage upload",
     ),
     (
-        "crates/cli/src/coverage/upload_inventory.rs",
+        "crates/cli/src/coverage/upload_inventory/tests.rs",
         "repository fixtures in its own tests",
     ),
     (

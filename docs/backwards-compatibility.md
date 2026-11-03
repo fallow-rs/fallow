@@ -496,8 +496,24 @@ exactly `maxSitesPerFunction` importers is indistinguishable from a truncated
 one without the count. The header is absent whenever `callerEdges` is, so a
 version 1 or version 2 body keeps its exact wire shape.
 
-Complexity, churn, importer edges, and the size-guard header are descriptive
-context. None of them gates a verdict, an actionability decision, or a
+- **Version 4**: adds an optional top-level `routes` array and an optional
+  per-function `routeIds` array. Each route has `id`, `pattern`, `method`
+  (`null` when the route serves any method), `file`, `files` and `framework`.
+  `routeIds` names the routes whose files can statically reach the file of the
+  function through runtime imports. Emitted only for
+  `upload-inventory --with-callers`, and only when a route plugin (`nextjs`,
+  `remix`, `sveltekit`, `nuxt`) finds route files.
+
+A `routes` pattern comes from the route file name, never from a request path.
+Dynamic segments keep the spelling of the framework (`[id]`, `$id`). A
+`routeLimits` header travels with `routes`: `maxRoutes`, the
+`maxRoutesPerFunction` cap that applied, `droppedRoutes` and
+`truncatedFunctions`. When `routes` is present, a function without `routeIds`
+has no detected route that reaches it. When `routes` is absent, route reach is
+unknown.
+
+Complexity, churn, importer edges, entry routes, and the size-guard headers are
+descriptive context. None of them gates a verdict, an actionability decision, or a
 confidence level.
 
 ## What may change in minor/patch versions
