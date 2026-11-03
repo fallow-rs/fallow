@@ -211,6 +211,13 @@ const FULL_ONLY_INSTALLS = [
     resolveFrom: "tools/type-aware-sidecar/package.json",
     installCommand: "npm ci --prefix tools/type-aware-sidecar",
   },
+  {
+    // The repository script tests render the contributor image. Without this
+    // probe, a partial root install fails only after the workspace tests.
+    dependency: "@resvg/resvg-js",
+    resolveFrom: "package.json",
+    installCommand: ROOT_INSTALL,
+  },
 ];
 
 export const CI_ONLY_GATES = [
