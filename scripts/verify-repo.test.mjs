@@ -221,10 +221,10 @@ test("preflight names every missing install and runs no gate", () => {
   assert.doesNotMatch(output, /oxfmt/u);
 });
 
-test("full mode also checks the NAPI and type-aware sidecar installs", () => {
+test("full mode also checks the NAPI, sidecar and contributor-render installs", () => {
   const fast = installsForMode("fast").map(({ dependency }) => dependency);
   const full = installsForMode("full").map(({ dependency }) => dependency);
-  assert.deepEqual(full, [...fast, "@napi-rs/cli", "tsrs"]);
+  assert.deepEqual(full, [...fast, "@napi-rs/cli", "tsrs", "@resvg/resvg-js"]);
   assert.deepEqual(
     findInstallProblems("full", () => {}),
     [],

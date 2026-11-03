@@ -18,6 +18,7 @@ import {
   perturbCoverageColumns,
   perturbCoverageMap,
   producerVersionDrift,
+  startFailureMessage,
   runConformance,
   runSelfTest,
 } from "./coverage-producer-conformance.mjs";
@@ -403,4 +404,24 @@ test("the script starts as CI runs it and stops on a missing fallow binary", () 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a missing fallow binary names the binary and the rebuild command", () => {
+  const error = Object.assign(new Error("spawnSync /repo/target/debug/fallow ENOENT"), {
+    code: "ENOENT",
+  });
+  const message = startFailureMessage("v8/bare-if", "/repo/target/debug/fallow", error);
+  assert.match(
+    message,
+    /^v8\/bare-if: the fallow binary at \/repo\/target\/debug\/fallow is gone/u,
+  );
+  assert.match(message, /cargo build -p fallow-cli --bin fallow/u);
+});
+
+test("another start failure keeps the error text", () => {
+  const error = Object.assign(new Error("spawnSync fallow EACCES"), { code: "EACCES" });
+  assert.equal(
+    startFailureMessage("v8/bare-if", "fallow", error),
+    "v8/bare-if: failed to start fallow: spawnSync fallow EACCES",
+  );
 });

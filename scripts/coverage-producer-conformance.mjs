@@ -612,6 +612,21 @@ export const perturbCoverageColumns = (map, virtualPath, source, direction = "ri
   return columns === 0 ? null : { columns, direction, map: copy, shift };
 };
 
+/**
+ * The failure message when fallow does not start. A cargo build in another
+ * process can remove the binary while the conformance run uses it.
+ *
+ * @param {string} label
+ * @param {string} binary
+ * @param {Error & { code?: string }} error
+ * @returns {string}
+ */
+export const startFailureMessage = (label, binary, error) =>
+  error.code === "ENOENT"
+    ? `${label}: the fallow binary at ${binary} is gone. Another cargo build can remove it ` +
+      "while it links. Run cargo build -p fallow-cli --bin fallow, then run again."
+    : `${label}: failed to start fallow: ${error.message}`;
+
 const invokeFallow = (binary, request) => {
   const result = spawnSync(
     binary,
@@ -643,7 +658,7 @@ const invokeFallow = (binary, request) => {
     { encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 60_000 },
   );
   if (result.error) {
-    fail(`${request.label}: failed to start fallow: ${result.error.message}`);
+    fail(startFailureMessage(request.label, binary, result.error));
   }
   if (result.signal) {
     fail(`${request.label}: fallow terminated by signal ${result.signal}`);
