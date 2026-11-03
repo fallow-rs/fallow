@@ -490,6 +490,8 @@ mod scoped_used_class_members;
 mod scss_partials;
 #[path = "integration_test/super_method_calls.rs"]
 mod super_method_calls;
+#[path = "integration_test/vite_asset_query_imports.rs"]
+mod vite_asset_query_imports;
 #[path = "integration_test/vite_sass_crediting.rs"]
 mod vite_sass_crediting;
 

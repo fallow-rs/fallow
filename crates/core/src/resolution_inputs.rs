@@ -65,7 +65,32 @@ pub fn resolution_inputs_hash(
         target.hash(&mut hasher);
     }
 
+    let mut install_states = node_modules_states(root, workspaces);
+    install_states.sort_unstable();
+    install_states.len().hash(&mut hasher);
+    for state in &install_states {
+        state.hash(&mut hasher);
+    }
+
     hasher.finish()
+}
+
+/// Return `(path, exists)` for the `node_modules` directory of the project
+/// root and of each workspace root.
+///
+/// The resolver reports a bare import with a Vite asset query as unresolved
+/// only when the package is installed, so an install changes the result
+/// without an edit to a source file or a manifest. Only the existence keys the
+/// mode: a modification time changes on every fresh install in CI and would
+/// make each restored cache miss.
+fn node_modules_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, bool)> {
+    std::iter::once(root)
+        .chain(workspaces.iter().map(|ws| ws.root.as_path()))
+        .map(|dir| {
+            let path = dir.join("node_modules");
+            (portable_key(root, &path), path.is_dir())
+        })
+        .collect()
 }
 
 /// `package.json` fields whose paths the resolver follows for a package
