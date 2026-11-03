@@ -947,7 +947,8 @@ test run.
   current mutant. The adapter clears the integrity log of the overlay
   before each run and reads it after the run, so a copy that matches more
   than one planned file reports `overlay-incomplete`. The hits of a child
-  process do not count as coverage. Without the hook API (Node older than
+  process do not count as coverage, so a mutant that only a child process
+  reaches stays `no_coverage`. Without the hook API (Node older than
   22.15) and in browser mode, the value stays as it is and a child loads
   the original files.
 

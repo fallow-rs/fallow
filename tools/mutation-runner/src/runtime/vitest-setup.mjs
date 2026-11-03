@@ -86,9 +86,9 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
  * Node process that a test starts (spawn, exec, execFile or fork) loads the
  * instrumented files and runs the same mutant. The function first removes
  * the flag of an earlier file or run in this worker, because a worker that
- * does not isolate its test files keeps its environment. The preload URL has no space or quote, so the
- * NODE_OPTIONS parse keeps it as one argument. The existing value comes
- * first, so a loader of the project keeps its order.
+ * does not isolate its test files keeps its environment. The preload URL has
+ * no space or quote, so the NODE_OPTIONS parse keeps it as one argument. The
+ * existing value comes first, so a loader of the project keeps its order.
  *
  * Without the synchronous hook API, the preload cannot serve a file, so the
  * value stays as it is.
