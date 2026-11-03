@@ -591,8 +591,10 @@ jobs:
         # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
+      # Partition 2 runs these tests and partition 1 runs the other two extra
+      # steps. Partition 1 took about 3 minutes longer when it ran all three.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
-        if: matrix.partition == 1
+        if: matrix.partition == 2
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
@@ -1399,9 +1401,11 @@ jobs:
   vscode-target-host:
     name: VS Code target host (${{ matrix.target }})
     needs: [changes, vscode-package-targets]
-    # Three runners, one of them macOS. On pull requests this runs only for
-    # VSIX packaging inputs. Main runs it unless prose-only, and release
-    # validation runs it again before a release.
+    # Linux and Windows only. On pull requests this runs only for VSIX
+    # packaging inputs. Main runs it unless prose-only. The darwin-x64 leg
+    # runs only in release validation (weekly, in the release pre-flight and
+    # in each release) and in the release `vscode-host-smoke` job. On busy
+    # days the macos-15-intel queue held a CI run on main for up to two hours.
     if: needs.changes.outputs.vscode-host == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -1419,10 +1423,6 @@ jobs:
             target: win32-x64
             cli: target/debug/fallow.exe
             lsp: target/debug/fallow-lsp.exe
-          - os: macos-15-intel
-            target: darwin-x64
-            cli: target/debug/fallow
-            lsp: target/debug/fallow-lsp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
