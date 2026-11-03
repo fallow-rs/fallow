@@ -851,10 +851,10 @@ consistent:
   catalog consumers, also when the fallow config `workspaces.patterns` adds
   it. pnpm resolves its `catalog:` references against its own catalog.
 
-Source 3 is for yarn-era monorepos such as older Kibana. These repositories
+Source 3 is for older yarn monorepos. These repositories
 have no `workspaces` field. The root lists each package as
-`"@kbn/foo": "link:path/to/foo"`, often three to five levels deep, where the
-shallow scan does not go. Without the workspace, a bare `@kbn/foo` import
+`"@scope/foo": "link:path/to/foo"`, often three to five levels deep, where the
+shallow scan does not go. Without the workspace, a bare `@scope/foo` import
 resolves as an external package, and the package files become unused files.
 A target is a workspace only when it is a directory inside the project root
 that holds a package manifest. Fallow skips a target outside the root, a
@@ -877,6 +877,11 @@ scan does not read `.gitignore`. A target with a malformed
 `package.json` gets the `malformed-package-json` diagnostic, the same as a
 declared workspace. Source 3 runs in every repository, also when source 1
 exists, and discovery does not follow link specs of the linked packages.
+A target of a member manifest is a workspace with its own manifest. An import
+in that package of a dependency that only the parent member lists is thus an
+unlisted dependency, and the parent entry is an unused dependency. pnpm
+installs only the dependencies of the local manifest, so this report matches
+the pnpm install.
 
 In this layout the root `link:` entry is the declaration of the package. The
 unused-dependency pass does not report a root `link:` or `file:` entry when

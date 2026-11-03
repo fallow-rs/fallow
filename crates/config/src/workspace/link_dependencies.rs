@@ -14,8 +14,14 @@ use super::{
 /// A workspace package can keep a local package in a subfolder and depend on
 /// it with `file:./modules/pkg`. pnpm installs a `file:` folder as a copy in
 /// its store, so the import does not reach the source through a symlink.
+/// The local package is then a workspace with its own manifest. An import in
+/// the local package of a dependency that only the parent manifest lists is an
+/// unlisted dependency, and the parent entry is an unused dependency. npm and
+/// yarn symlink the folder, so Node can resolve such an import from the parent
+/// `node_modules`, but pnpm installs only the dependencies of the local
+/// manifest. Root `link:` and `file:` workspaces follow the same model.
 ///
-/// Older yarn monorepos (for example Kibana before its pnpm move) declare no
+/// Older yarn monorepos declare no
 /// `workspaces` field. The root lists each local package as
 /// `"@scope/pkg": "link:path/to/pkg"`, often three to five directories deep,
 /// out of reach of the shallow fallback scan. A target is a workspace only when

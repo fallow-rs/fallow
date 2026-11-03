@@ -102,6 +102,10 @@ const OUTPUT_EXTS: &[&str] = &["cjs", "mjs"];
 /// which exists only in the output folder. This fallback applies only when
 /// the importer is a compiled source file, the target is not on disk, and a
 /// source file with the same stem is in the same folder as the target.
+///
+/// The fallback does not read the bundler or the tsconfig module settings. A
+/// project that builds with plain `tsc` emits `x.js` for `x.ts`, so there
+/// `./x.mjs` fails at run time. TypeScript reports that import as TS2307.
 fn try_output_extension_sibling_fallback(
     ctx: &ResolveContext<'_>,
     from_file: &Path,

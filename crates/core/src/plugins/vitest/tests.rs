@@ -2002,3 +2002,23 @@ fn projects_in_define_project_calls_register_includes_and_setup_files() {
         );
     }
 }
+
+#[test]
+fn define_project_calls_register_includes_without_top_level_constants() {
+    let result = resolve(
+        r#"
+import { defineConfig, defineProject } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    projects: [defineProject({ test: { include: ["a/**/*.unit.ts"] } })],
+  },
+});
+"#,
+    );
+    assert!(
+        super::super::entry_rules_match(&result, "a/b.unit.ts"),
+        "{:?}",
+        entry_globs(&result)
+    );
+}
