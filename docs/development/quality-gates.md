@@ -295,7 +295,6 @@ On pull requests:
 
 - `CI` (`ci.yml`). Its jobs include the required status checks on `main`.
 - `Commitlint` (job `Commit messages`).
-- `Ecosystem CI`, when Rust sources or `tests/ecosystem/**` change.
 - `Type-aware Benchmarks`, when `tools/type-aware-sidecar/**` changes.
 - `Protocol parity`, when `crates/cli/Cargo.toml` or `Cargo.lock` changes.
 - `PGO Validate`, when `scripts/pgo-train.sh`,
@@ -311,6 +310,9 @@ On push to `main` only (each one also has `workflow_dispatch`):
 
 - `Coverage`, with the coverage floor.
 - `Cross-Architecture`.
+- `Ecosystem CI`, when Rust sources or `tests/ecosystem/**` change. It is not
+  a required check and its analysis step never fails, so it does not run on
+  pull requests.
 - `Fuzz Smoke`, which also runs every week.
 - `Scorecard`.
 - `osv-scanner ignores`, which also runs every week. It fails when an
@@ -323,6 +325,12 @@ On push to `main`, and on a pull request only with the `ci:perf` label:
 Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
 without the label starts these workflows, but every job skips and uses no
 runner.
+
+`CI` uses no macOS runner. The `VS Code target host` job runs the Linux and
+Windows legs. The darwin-x64 leg runs in `Release Validation`: every week, in
+the release pre-flight, and in each release. The release `vscode-host-smoke`
+job also loads the darwin-x64 extension before the publish jobs can start. On
+busy days, the macOS queue held a `CI` run on `main` for up to two hours.
 
 On a schedule only: `Branch Coverage`, `Ecosystem (Full)`, `Hawk`, and
 `Release Validation`. `Branch Coverage` runs every week and with
@@ -359,8 +367,9 @@ The slowest `CI` jobs have parts that run in parallel:
 - `Check (1/2)` and `Check (2/2)` each build every test binary and run half
   of the nextest suite (`--partition hash:N/2`). The suite uses about 29
   CPU-minutes, so one 4-vCPU runner needs more than 7 minutes for it.
-  `Check (1/2)` also runs the runtime-coverage feature tests, the schema drift
-  gate and the coverage producer conformance check.
+  `Check (1/2)` also runs the schema drift gate and the coverage producer
+  conformance check. `Check (2/2)` also runs the runtime-coverage feature
+  tests. The two partitions then take about the same time.
 - `Lint and contracts` runs both Clippy passes, `cargo fmt --check`, the
   contract bundle drift gate and the staged subgenerator tests.
 - `NAPI package` runs the NAPI build and smoke test. On `main` the build uses
