@@ -246,6 +246,53 @@ test(
 );
 
 test(
+  "a pin older than the published source lock changes nothing",
+  withFixture((fixture) => {
+    const older = changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    changeSkill(fixture, "three\n", "docs: reword the reference (#43)");
+    assert.equal(sync(fixture).code, 0);
+    git(fixture.skills, "push", "-q", "origin", "HEAD:main");
+    const before = companionState(fixture.skills);
+
+    const { code, output } = sync(fixture, ["--pin", older]);
+    assert.equal(code, 0, output);
+    assert.match(output, /already publishes a newer commit/u);
+    assert.deepEqual(companionState(fixture.skills), before);
+    assert.equal(readFileSync(join(fixture.skills, PUBLISHED_CLI_REFERENCE), "utf8"), "three\n");
+  }),
+);
+
+test(
+  "refuses a published source lock that the fallow checkout does not have",
+  withFixture((fixture) => {
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    write(fixture.skills, { "source-lock.json": sourceLock("1".repeat(40)) });
+    commitAll(fixture.skills, "chore: pin an unknown commit");
+    git(fixture.skills, "push", "-q", "origin", "main");
+    const before = companionState(fixture.skills);
+
+    const { code, output } = sync(fixture);
+    assert.equal(code, 1);
+    assert.match(output, /is not in .*fetch/u);
+    assert.deepEqual(companionState(fixture.skills), before);
+  }),
+);
+
+test(
+  "refuses a source lock that is not valid JSON",
+  withFixture((fixture) => {
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    write(fixture.skills, { "source-lock.json": "{" });
+    commitAll(fixture.skills, "chore: break the lock");
+    git(fixture.skills, "push", "-q", "origin", "main");
+
+    const { code, output } = sync(fixture);
+    assert.equal(code, 1);
+    assert.match(output, /source-lock\.json is not valid JSON/u);
+  }),
+);
+
+test(
   "refuses uncommitted changes under npm/fallow/skills",
   withFixture((fixture) => {
     write(fixture.fallow, { [CLI_REFERENCE]: "edited\n" });
