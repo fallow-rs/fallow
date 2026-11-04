@@ -25,6 +25,7 @@ const baseParams = (
   unusedClassMembers: 0,
   unresolvedImports: 0,
   unlistedDependencies: 0,
+  unlistedBinaries: 0,
   duplicateExports: 0,
   typeOnlyDependencies: 0,
   testOnlyDependencies: 0,
