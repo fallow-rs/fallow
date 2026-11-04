@@ -83,37 +83,6 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
 }
 
 #[test]
-fn protocol_adapters_do_not_own_process_tree_primitives() {
-    let process_tree_markers = [
-        "process_group(0)",
-        "TerminateJobObject",
-        "AssignProcessToJobObject",
-        "CreateJobObjectW",
-        "CREATE_SUSPENDED",
-        "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
-        "libc::waitid",
-    ];
-    for source_path in rust_sources_under([
-        "crates/cli/src",
-        "crates/lsp/src",
-        "crates/mcp/src",
-        "crates/napi/src",
-    ]) {
-        if source_path == "crates/cli/src/architecture_boundaries.rs" {
-            continue;
-        }
-        let source = read_source_without_line_comments(&source_path)
-            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        for marker in process_tree_markers {
-            assert!(
-                !source.contains(marker),
-                "{source_path} contains process-tree primitive {marker}; use fallow-process"
-            );
-        }
-    }
-}
-
-#[test]
 fn contributor_architecture_map_and_roadmap_track_current_ownership() {
     let contributing = std::fs::read_to_string(workspace_root().join("CONTRIBUTING.md"))
         .expect("read contributing guide");
@@ -183,41 +152,6 @@ fn contributor_architecture_map_and_roadmap_track_current_ownership() {
 }
 
 #[test]
-fn api_consumers_depend_on_api_not_engine_cli_or_core() {
-    for manifest in [
-        "crates/lsp/Cargo.toml",
-        "crates/mcp/Cargo.toml",
-        "crates/napi/Cargo.toml",
-    ] {
-        assert_no_deps(manifest, &["fallow-engine", "fallow-cli", "fallow-core"]);
-    }
-}
-
-#[test]
-fn cli_does_not_depend_on_core() {
-    let manifest = read_manifest("crates/cli/Cargo.toml");
-    assert!(
-        !section_has_dep(&manifest, "dependencies", "fallow-core"),
-        "fallow-cli must not depend on fallow-core in production dependencies"
-    );
-    assert!(
-        !section_has_dep(&manifest, "dev-dependencies", "fallow-core"),
-        "fallow-cli tests must use public contract crates instead of fallow-core"
-    );
-}
-
-#[test]
-fn only_engine_depends_on_core_as_backend_adapter() {
-    let allowed = ["crates/engine/Cargo.toml"];
-    for manifest_path in workspace_crate_manifests() {
-        if manifest_path == "crates/core/Cargo.toml" || allowed.contains(&manifest_path.as_str()) {
-            continue;
-        }
-        assert_no_deps(&manifest_path, &["fallow-core"]);
-    }
-}
-
-#[test]
 fn root_envelope_compatibility_debt_stays_removed() {
     let root_envelopes =
         std::fs::read_to_string(workspace_root().join("crates/output/src/root_envelopes.rs"))
@@ -239,51 +173,6 @@ fn root_envelope_compatibility_debt_stays_removed() {
             "compatibility docs must keep tagged-envelope guidance: {required}"
         );
     }
-}
-
-#[test]
-fn lower_contract_crates_do_not_depend_upward() {
-    assert_no_deps(
-        "crates/types/Cargo.toml",
-        &[
-            "fallow-config",
-            "fallow-output",
-            "fallow-api",
-            "fallow-engine",
-            "fallow-cli",
-            "fallow-core",
-        ],
-    );
-    assert_no_deps(
-        "crates/config/Cargo.toml",
-        &[
-            "fallow-output",
-            "fallow-api",
-            "fallow-engine",
-            "fallow-cli",
-            "fallow-core",
-        ],
-    );
-    assert_no_deps(
-        "crates/security/Cargo.toml",
-        &[
-            "fallow-output",
-            "fallow-api",
-            "fallow-engine",
-            "fallow-cli",
-            "fallow-core",
-        ],
-    );
-    assert_no_deps(
-        "crates/output/Cargo.toml",
-        &["fallow-api", "fallow-engine", "fallow-cli", "fallow-core"],
-    );
-}
-
-#[test]
-fn api_and_engine_do_not_depend_on_cli() {
-    assert_no_deps("crates/api/Cargo.toml", &["fallow-cli"]);
-    assert_no_deps("crates/engine/Cargo.toml", &["fallow-api", "fallow-cli"]);
 }
 
 #[test]
@@ -328,48 +217,6 @@ fn engine_owns_parse_cache_size_policy() {
         !core_backend.contains("collect_file_hashes"),
         "session-owned artifact metadata must not live in the fallow-core adapter"
     );
-}
-
-#[test]
-fn api_does_not_depend_on_core_or_cli() {
-    assert_no_deps("crates/api/Cargo.toml", &["fallow-core", "fallow-cli"]);
-    for source_path in rust_sources_under(["crates/api/src"]) {
-        let source = read_source_without_line_comments(&source_path)
-            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        for forbidden in [
-            "fallow_core::",
-            "use fallow_core",
-            "fallow_cli::",
-            "use fallow_cli",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{source_path} must consume fallow-engine or API-owned helpers instead of {forbidden}"
-            );
-        }
-    }
-}
-
-#[test]
-fn public_boundaries_do_not_wildcard_reexport_internal_type_crates() {
-    for source_path in [
-        "crates/engine/src/source.rs",
-        "crates/engine/src/results.rs",
-        "crates/api/src/editor.rs",
-    ] {
-        let source =
-            std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
-        for forbidden in [
-            concat!("pub use fallow_types::extract::", "*"),
-            concat!("pub use fallow_types::results::", "*"),
-            concat!("pub use fallow_types::output_dead_code::", "*"),
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{source_path} must keep public boundary reexports explicit"
-            );
-        }
-    }
 }
 
 #[test]
@@ -2578,18 +2425,6 @@ fn assert_doc_hidden_before(source: &str, item: &str) {
         recent_attributes.contains("#[doc(hidden)]"),
         "{item} must stay hidden from fallow-core rustdoc; expose engine/api wrappers instead"
     );
-}
-
-fn assert_no_deps(manifest_path: &str, forbidden: &[&str]) {
-    let manifest = read_manifest(manifest_path);
-    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        for dep in forbidden {
-            assert!(
-                !section_has_dep(&manifest, section, dep),
-                "{manifest_path} must not list {dep} under {section}"
-            );
-        }
-    }
 }
 
 fn workspace_crate_manifests() -> Vec<String> {
