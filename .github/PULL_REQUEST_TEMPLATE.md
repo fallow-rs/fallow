@@ -12,7 +12,7 @@
 
 ## Checklist
 
-- [ ] I understand each line of this pull request, and I can explain it in review.
+- [ ] I know what this change does, its impact, and the trade-offs that I made. I can explain them in review.
 
 ## Not in this change
 

@@ -410,8 +410,8 @@ You can use any tool to write a change, including a coding agent. Reviewers judg
 
 These rules apply to every pull request:
 
-- You understand each line of the change, and you can explain it in review without the tool.
-- You are responsible for the change. Your `Signed-off-by` line is your own statement under the [DCO](#developer-certificate-of-origin). Add it only after you read the full diff.
+- You know what the change does and why. You know its impact on users and on other parts of fallow, and the trade-offs that you made. You can explain them in review without the tool. You do not have to know each line.
+- You are responsible for the change. Your `Signed-off-by` line is your own statement under the [DCO](#developer-certificate-of-origin). Add it only when you can stand behind the change.
 - Run the checks in [Submitting changes](#submitting-changes) yourself. Write in the pull request what you did not verify, for example a platform that you did not test.
 - Keep the description short. Remove generated filler before you post it.
 
