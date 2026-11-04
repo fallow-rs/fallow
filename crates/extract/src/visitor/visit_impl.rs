@@ -4713,6 +4713,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_new_expression(&mut self, expr: &oxc_ast::ast::NewExpression<'a>) {
         self.record_queue_worker_constructor_param_sources(expr);
         self.record_callee_use(&expr.callee, expr.span.start, true);
+        self.record_new_url_package_reference(expr);
 
         if let Some(source) = new_url_import_source(expr) {
             // A speculative reference credits its target when it resolves, and
@@ -4723,9 +4724,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // - The expression is a direct argument of a filesystem call or of
             //   `fileURLToPath`, so it names a file on disk. The file can be an
             //   output that does not exist yet, or a probe for an optional file.
-            // Other specifiers with an extension (`new Worker(new URL("./worker.js",
-            // import.meta.url))`) keep `is_speculative = false`, so a missing file
-            // is still reported as `unresolved-import`.
+            // Other specifiers with an extension (`new URL("./worker.js", ...)`) stay
+            // not speculative, so a missing file is still an `unresolved-import`.
             let is_speculative = PathBuf::from(&source).extension().is_none()
                 || self.filesystem_path_new_url_spans.contains(&expr.span);
             self.dynamic_imports.push(DynamicImportInfo {

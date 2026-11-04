@@ -1,0 +1,12 @@
+{
+  "name": "new-url-node-modules-package",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "vite build" },
+  "devDependencies": {
+    "@scope/assets": "1.0.0",
+    "icon-pack": "1.0.0",
+    "idle-dep": "1.0.0",
+    "vite": "8.0.0"
+  }
+}
