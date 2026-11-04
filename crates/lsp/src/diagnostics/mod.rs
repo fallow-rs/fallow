@@ -112,6 +112,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     unused::push_member_diagnostics(&mut map, results, &mut mapper);
     absent_props::push_absent_prop_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
+    quality::push_duplicate_export_alias_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
     structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
     structural::push_re_export_cycle_diagnostics(&mut map, results);
@@ -526,6 +527,7 @@ mod severity_gate {
             unresolved_imports: _,
             unlisted_dependencies: _,
             duplicate_exports: _,
+            duplicate_export_aliases: _,
             type_only_dependencies: _,
             test_only_dependencies: _,
             dev_dependencies_in_production: _,
@@ -913,6 +915,30 @@ mod severity_gate {
                                     line: 1,
                                     col: 0,
                                 }],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "duplicate-export-alias",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.duplicate_export_aliases.push(
+                        fallow_api::editor_results::DuplicateExportAliasFinding::with_actions(
+                            fallow_api::editor_results::DuplicateExportAlias {
+                                path: root.join("a.ts"),
+                                local_name: "a".to_string(),
+                                export_names: vec!["a".to_string(), "b".to_string()],
+                                line: 1,
+                                col: 0,
+                                locations: vec![
+                                    fallow_api::editor_results::DuplicateExportAliasLocation {
+                                        export_name: "a".to_string(),
+                                        line: 1,
+                                        col: 0,
+                                    },
+                                ],
                             },
                         ),
                     );

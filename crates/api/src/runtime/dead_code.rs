@@ -1031,6 +1031,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unresolved_imports
         || filters.unlisted_deps
         || filters.duplicate_exports
+        || filters.duplicate_export_aliases
         || filters.circular_deps
         || filters.re_export_cycles
         || filters.package_cycles
@@ -1135,6 +1136,9 @@ fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut An
 fn apply_dead_code_graph_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
     if !filters.duplicate_exports {
         results.duplicate_exports.clear();
+    }
+    if !filters.duplicate_export_aliases {
+        results.duplicate_export_aliases.clear();
     }
     if !filters.circular_deps {
         results.circular_dependencies.clear();

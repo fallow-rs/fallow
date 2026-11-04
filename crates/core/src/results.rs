@@ -1,3 +1,4 @@
+pub use fallow_types::output_dead_code::DuplicateExportAliasFinding;
 pub use fallow_types::output_dead_code::{
     AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
     BoundaryViolationFinding, CircularDependencyFinding, DevDependencyInProductionFinding,
@@ -41,6 +42,7 @@ pub use fallow_types::results::{
     UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember,
     UnusedServerAction, UnusedSvelteEvent,
 };
+pub use fallow_types::results::{DuplicateExportAlias, DuplicateExportAliasLocation};
 pub use fallow_types::results::{
     EffectCatchSite, EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,
 };

@@ -497,6 +497,8 @@ pub struct DeadCodeFilters {
     pub unlisted_deps: bool,
     /// The same symbol exported more than once.
     pub duplicate_exports: bool,
+    /// One binding that one module exports under two or more names.
+    pub duplicate_export_aliases: bool,
     /// Circular import chains.
     pub circular_deps: bool,
     /// Cycles formed through re-export chains.
@@ -555,6 +557,7 @@ impl DeadCodeFilters {
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
+            || self.duplicate_export_aliases
             || self.circular_deps
             || self.re_export_cycles
             || self.package_cycles
@@ -620,6 +623,7 @@ impl DeadCodeFilters {
             "--unresolved-imports" => self.unresolved_imports = true,
             "--unlisted-deps" => self.unlisted_deps = true,
             "--duplicate-exports" => self.duplicate_exports = true,
+            "--duplicate-export-aliases" => self.duplicate_export_aliases = true,
             "--circular-deps" => self.circular_deps = true,
             "--re-export-cycles" => self.re_export_cycles = true,
             "--package-cycles" => self.package_cycles = true,

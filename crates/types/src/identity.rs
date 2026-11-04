@@ -35,9 +35,9 @@ use crate::discover::StableFileKey;
 use crate::output_dead_code::{
     AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
     BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
-    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    DevDependencyInProductionFinding, DuplicateExportAliasFinding, DuplicateExportFinding,
+    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
@@ -455,6 +455,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unresolved_imports,
         unlisted_dependencies,
         duplicate_exports,
+        duplicate_export_aliases,
         type_only_dependencies,
         test_only_dependencies,
         dev_dependencies_in_production,
@@ -529,6 +530,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unresolved_imports);
     visitor.visit(unlisted_dependencies);
     visitor.visit(duplicate_exports);
+    visitor.visit(duplicate_export_aliases);
     visitor.visit(type_only_dependencies);
     visitor.visit(test_only_dependencies);
     visitor.visit(dev_dependencies_in_production);
@@ -1070,6 +1072,17 @@ identified!(
         f.output.output_name.clone(),
     ],
     position: |g| (g.output.line, g.output.col, 0),
+);
+
+identified!(
+    DuplicateExportAliasFinding,
+    token: |_t| "duplicate-export-alias",
+    parts: |f, p| {
+        let mut names = f.alias.export_names.clone();
+        names.sort_unstable();
+        vec![p.key(&f.alias.path), f.alias.local_name.clone(), names.join(",")]
+    },
+    position: |g| (g.alias.line, g.alias.col, 0),
 );
 
 identified!(

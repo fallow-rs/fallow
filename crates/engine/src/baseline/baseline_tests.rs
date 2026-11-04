@@ -461,6 +461,7 @@ fn filter_keeps_new_issues_not_in_baseline() {
         unresolved_imports: vec![],
         unlisted_dependencies: vec![],
         duplicate_exports: vec![],
+        duplicate_export_aliases: vec![],
         type_only_dependencies: vec![],
         test_only_dependencies: vec![],
         dev_dependencies_in_production: vec![],
@@ -539,6 +540,7 @@ fn filter_with_empty_baseline_keeps_all() {
         unresolved_imports: vec![],
         unlisted_dependencies: vec![],
         duplicate_exports: vec![],
+        duplicate_export_aliases: vec![],
         type_only_dependencies: vec![],
         test_only_dependencies: vec![],
         dev_dependencies_in_production: vec![],
@@ -604,6 +606,7 @@ fn filter_new_exports_by_file_and_name() {
         unresolved_imports: vec![],
         unlisted_dependencies: vec![],
         duplicate_exports: vec![],
+        duplicate_export_aliases: vec![],
         type_only_dependencies: vec![],
         test_only_dependencies: vec![],
         dev_dependencies_in_production: vec![],
@@ -2110,6 +2113,18 @@ fn make_full_results() -> AnalysisResults {
                 imported_from: vec![],
             },
         ));
+    r.duplicate_export_aliases.push(
+        fallow_types::output_dead_code::DuplicateExportAliasFinding::with_actions(
+            fallow_types::results::DuplicateExportAlias {
+                path: PathBuf::from("src/worker.ts"),
+                local_name: "layer".to_string(),
+                export_names: vec!["layer".to_string(), "default".to_string()],
+                line: 1,
+                col: 13,
+                locations: vec![],
+            },
+        ),
+    );
     r.duplicate_exports
         .push(crate::results::DuplicateExportFinding::with_actions(
             crate::results::DuplicateExport {
@@ -2184,6 +2199,8 @@ fn baseline_from_results_captures_all_extended_fields() {
     );
     assert_eq!(baseline.duplicate_exports.len(), 1);
     assert!(baseline.duplicate_exports[0].starts_with("duplicate-export:Config:"));
+    assert_eq!(baseline.duplicate_export_aliases.len(), 1);
+    assert!(baseline.duplicate_export_aliases[0].starts_with("duplicate-export-alias:"));
     assert_eq!(
         baseline.type_only_dependencies,
         vec!["type-only-dependency:package.json:zod"]
@@ -2209,6 +2226,7 @@ fn filter_removes_all_extended_baseline_issues() {
     assert!(filtered.unresolved_imports.is_empty());
     assert!(filtered.unlisted_dependencies.is_empty());
     assert!(filtered.duplicate_exports.is_empty());
+    assert!(filtered.duplicate_export_aliases.is_empty());
     assert!(filtered.type_only_dependencies.is_empty());
     assert!(filtered.test_only_dependencies.is_empty());
     assert!(filtered.boundary_violations.is_empty());

@@ -631,6 +631,7 @@ mod tests {
             IssueKind::UnprovidedInject,
             IssueKind::UnresolvedImport,
             IssueKind::DuplicateExport,
+            IssueKind::DuplicateExportAlias,
             IssueKind::CircularDependency,
             IssueKind::ReExportCycle,
             IssueKind::PackageCycle,

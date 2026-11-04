@@ -1,5 +1,5 @@
 {
-  "total_issues": 3,
+  "total_issues": 6,
   "unused_files": [
     {
       "path": "src/orphan.ts"
@@ -23,6 +23,11 @@
         { "path": "src/pages/home.ts" }
       ]
     }
+  ],
+  "duplicate_export_aliases": [
+    { "path": "src/pages/about.ts", "export_names": ["render", "default"] },
+    { "path": "src/pages/contact.ts", "export_names": ["render", "default"] },
+    { "path": "src/pages/home.ts", "export_names": ["render", "default"] }
   ],
   "circular_dependencies": []
 }

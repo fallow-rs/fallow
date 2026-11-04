@@ -677,6 +677,13 @@
           },
           "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
         },
+        "duplicate_export_aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateExportAliasFinding"
+          },
+          "description": "One module that exports one binding under two or more names. Wrapped\nin [`DuplicateExportAliasFinding`]. Default severity is `warn`."
+        },
         "type_only_dependencies": {
           "type": "array",
           "items": {
@@ -1322,6 +1329,13 @@
             "$ref": "#/definitions/DuplicateExportFinding"
           },
           "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
+        },
+        "duplicate_export_aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateExportAliasFinding"
+          },
+          "description": "One module that exports one binding under two or more names. Wrapped\nin [`DuplicateExportAliasFinding`]. Default severity is `warn`."
         },
         "type_only_dependencies": {
           "type": "array",
@@ -6345,6 +6359,10 @@
           "type": "integer",
           "description": "Same-named exports declared in more than one module."
         },
+        "duplicate_export_aliases": {
+          "type": "integer",
+          "description": "Bindings that one module exports under two or more names."
+        },
         "type_only_dependencies": {
           "type": "integer",
           "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode."
@@ -7123,6 +7141,13 @@
             "$ref": "#/definitions/DuplicateExportFinding"
           },
           "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
+        },
+        "duplicate_export_aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateExportAliasFinding"
+          },
+          "description": "One module that exports one binding under two or more names. Wrapped\nin [`DuplicateExportAliasFinding`]. Default severity is `warn`."
         },
         "type_only_dependencies": {
           "type": "array",
@@ -31007,6 +31032,13 @@
           },
           "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
         },
+        "duplicate_export_aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateExportAliasFinding"
+          },
+          "description": "One module that exports one binding under two or more names. Wrapped\nin [`DuplicateExportAliasFinding`]. Default severity is `warn`."
+        },
         "type_only_dependencies": {
           "type": "array",
           "items": {
@@ -35889,6 +35921,110 @@
         "test_ids"
       ],
       "description": "One `--kill-matrix-for` target and the dry-run tests that it selects."
+    },
+    "DuplicateExportAliasFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that exports the binding."
+        },
+        "local_name": {
+          "type": "string",
+          "description": "The local name of the binding. For a re-export, the name that the\nsource module exports."
+        },
+        "export_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The export names of the binding, in source order."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the first export of the binding."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the first export of the binding."
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateExportAliasLocation"
+          },
+          "description": "One location for each export name, in source order."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the binding gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "local_name",
+        "export_names",
+        "line",
+        "col",
+        "locations",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`DuplicateExportAlias`] finding. There is no\nsafe auto-fix: a consumer outside the project can import any of the\nnames. Actions are manual remediation guidance plus a line-level\nsuppress."
+    },
+    "DuplicateExportAliasLocation": {
+      "type": "object",
+      "properties": {
+        "export_name": {
+          "type": "string",
+          "description": "The export name at this location (`default` for a default export)."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        }
+      },
+      "required": [
+        "export_name",
+        "line",
+        "col"
+      ],
+      "description": "One export name of a [`DuplicateExportAlias`]."
     }
   }
 }

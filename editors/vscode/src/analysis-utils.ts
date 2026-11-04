@@ -361,6 +361,7 @@ const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
   "unresolved_imports",
   "unlisted_dependencies",
   "duplicate_exports",
+  "duplicate_export_aliases",
   "type_only_dependencies",
   "test_only_dependencies",
   "dev_dependencies_in_production",

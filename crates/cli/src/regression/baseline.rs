@@ -949,6 +949,7 @@ mod tests {
             unresolved_imports: 1,
             unlisted_dependencies: 0,
             duplicate_exports: 1,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,

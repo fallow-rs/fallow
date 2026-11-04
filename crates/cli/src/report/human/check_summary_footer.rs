@@ -230,6 +230,12 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
         results.unused_effect_layers.len(),
         "unused Effect layers",
     );
+    push_summary_part_forms(
+        parts,
+        results.duplicate_export_aliases.len(),
+        "duplicate export alias",
+        "duplicate export aliases",
+    );
     push_summary_part(
         parts,
         results.unused_tagged_errors.len(),

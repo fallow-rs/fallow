@@ -199,6 +199,7 @@ mod orchestration {
         unresolved_imports: Severity::Off,
         unlisted_dependencies: Severity::Off,
         duplicate_exports: Severity::Off,
+        duplicate_export_aliases: Severity::Off,
         type_only_dependencies: Severity::Off,
         circular_dependencies: Severity::Off,
         re_export_cycle: Severity::Off,

@@ -58,6 +58,14 @@ def normalize_duplicates(items):
     return result
 
 
+def normalize_export_aliases(items):
+    """Extract (path, sorted_export_names) from duplicate export aliases."""
+    return {
+        (item.get("path", ""), tuple(sorted(item.get("export_names", []))))
+        for item in items
+    }
+
+
 def compare_sets(actual_set, expected_set, label):
     """Compare two sets, returning a list of mismatch descriptions."""
     errors = []
@@ -162,6 +170,11 @@ def main():
         actual_set = normalize_duplicates(actual.get("duplicate_exports", []))
         expected_set = normalize_duplicates(expected["duplicate_exports"])
         errors.extend(compare_sets(actual_set, expected_set, "duplicate_exports"))
+
+    if "duplicate_export_aliases" in expected:
+        actual_set = normalize_export_aliases(actual.get("duplicate_export_aliases", []))
+        expected_set = normalize_export_aliases(expected["duplicate_export_aliases"])
+        errors.extend(compare_sets(actual_set, expected_set, "duplicate_export_aliases"))
 
     if errors:
         print("FAIL")

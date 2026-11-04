@@ -1517,6 +1517,15 @@ assert_contains "$OUT_UEL_ANN" "::warning file=src/services.ts,line=3,col=7,titl
 OUT_UEL_FILTERED=$(jq '.unused_effect_layers = [{"path": "src/services.ts", "line": 3, "col": 0, "name": "CacheLive", "actions": []}, {"path": "src/other.ts", "line": 5, "col": 0, "name": "OtherLive", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/services.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_UEL_FILTERED" '.unused_effect_layers | length' "1" "uel: filter-changed keeps only changed-file findings"
 
+DEA_ITEM='{"path": "src/worker.ts", "line": 1, "col": 13, "local_name": "layer", "export_names": ["layer", "default"], "locations": [], "actions": []}'
+OUT_DEA=$(jq --argjson item "$DEA_ITEM" '.duplicate_export_aliases = [$item] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_DEA" "Duplicate export aliases" "dea: shows summary row and section"
+assert_contains "$OUT_DEA" '`layer`, `default`' "dea: shows export names in section"
+OUT_DEA_ANN=$(jq --argjson item "$DEA_ITEM" '.duplicate_export_aliases = [$item]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_DEA_ANN" "::warning file=src/worker.ts,line=1,col=14,title=Duplicate export alias::" "dea: warning-severity annotation"
+OUT_DEA_FILTERED=$(jq --argjson item "$DEA_ITEM" '.duplicate_export_aliases = [$item, ($item | .path = "src/other.ts")]' "$FIXTURES/check.json" | jq --argjson changed '["src/worker.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_DEA_FILTERED" '.duplicate_export_aliases | length' "1" "dea: filter-changed keeps only changed-file findings"
+
 OUT_UTE=$(jq '.unused_tagged_errors = [{"path": "src/errors.ts", "line": 4, "col": 0, "name": "Expired", "tag": "Expired", "catch_sites": [], "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UTE" "Unused tagged errors" "ute: shows summary row and section"
 assert_contains "$OUT_UTE" "Expired" "ute: shows class name in section"

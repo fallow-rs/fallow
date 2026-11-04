@@ -235,6 +235,9 @@ pub enum IssueKind {
     /// An audit diff that adds a dependency to a `package.json`. Audit-only
     /// and off by default.
     AddedDependency,
+    /// One module exports one binding under two or more names, for example
+    /// `export const a = 1; export default a;`.
+    DuplicateExportAlias,
 }
 
 impl IssueKind {
@@ -304,6 +307,7 @@ impl IssueKind {
         Self::TestOnlyBranch,
         Self::DivergedCloneSibling,
         Self::AddedDependency,
+        Self::DuplicateExportAlias,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -380,6 +384,7 @@ impl IssueKind {
             Self::TestOnlyBranch => 62,
             Self::DivergedCloneSibling => 63,
             Self::AddedDependency => 64,
+            Self::DuplicateExportAlias => 65,
         }
     }
 
@@ -451,6 +456,7 @@ impl IssueKind {
             62 => Some(Self::TestOnlyBranch),
             63 => Some(Self::DivergedCloneSibling),
             64 => Some(Self::AddedDependency),
+            65 => Some(Self::DuplicateExportAlias),
             _ => None,
         }
     }
@@ -886,6 +892,7 @@ mod tests {
             (62, IssueKind::TestOnlyBranch),
             (63, IssueKind::DivergedCloneSibling),
             (64, IssueKind::AddedDependency),
+            (65, IssueKind::DuplicateExportAlias),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

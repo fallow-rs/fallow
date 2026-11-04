@@ -1020,6 +1020,23 @@ fn collect_check_component_wiring(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
         env,
+        "duplicate_export_aliases",
+        "Duplicate export alias",
+        Anchor::line_col,
+        |it| {
+            let names = arr(it, "export_names")
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "'{}' is exported under several names: {names}.\n\nKeep one export name, or add the names to ignoreExports when they are an intentional public API.",
+                s(it, "local_name"),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
         "unused_effect_layers",
         "Unused Effect layer",
         Anchor::line_col,

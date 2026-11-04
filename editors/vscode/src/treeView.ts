@@ -52,6 +52,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unresolved-imports": "error",
   "unlisted-dependencies": "package",
   "duplicate-exports": "files",
+  "duplicate-export-aliases": "references",
   "type-only-dependencies": "symbol-interface",
   "test-only-dependencies": "beaker",
   "dev-dependencies-in-production": "package",
@@ -574,6 +575,22 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         ),
       ),
     );
+
+    if (this.result.duplicate_export_aliases) {
+      addCategory(
+        "duplicate-export-aliases",
+        this.result.duplicate_export_aliases.map(
+          (alias) =>
+            new IssueItem(
+              `${alias.local_name} as ${alias.export_names.join(", ")}`,
+              alias.path,
+              alias.line,
+              alias.col,
+              "duplicate-export-aliases",
+            ),
+        ),
+      );
+    }
 
     if (this.result.type_only_dependencies) {
       addCategory(

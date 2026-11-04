@@ -530,6 +530,7 @@ const ISSUE_TYPE_FILTERS: ReadonlyArray<readonly [CheckFindingKey, keyof IssueTy
   ["unresolved_imports", "unresolved-imports"],
   ["unlisted_dependencies", "unlisted-dependencies"],
   ["duplicate_exports", "duplicate-exports"],
+  ["duplicate_export_aliases", "duplicate-export-aliases"],
   ["type_only_dependencies", "type-only-dependencies"],
   ["test_only_dependencies", "test-only-dependencies"],
   ["dev_dependencies_in_production", "dev-dependencies-in-production"],

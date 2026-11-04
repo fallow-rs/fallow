@@ -42,6 +42,7 @@
   "unused_component_inputs": {"path": "/widget.component.ts", "component_name": "WidgetComponent", "input_name": "size", "line": 29, "col": 0, "actions": []},
   "unused_component_outputs": {"path": "/widget.component.ts", "component_name": "WidgetComponent", "output_name": "change", "line": 30, "col": 0, "actions": []},
   "unused_svelte_events": {"path": "/Child.svelte", "component_name": "Child", "event_name": "dead", "line": 31, "col": 0, "actions": []},
+  "duplicate_export_aliases": {"path": "/worker.ts", "local_name": "layer", "export_names": ["layer", "default"], "line": 1, "col": 13, "locations": [], "actions": []},
   "unused_effect_layers": {"path": "/services.ts", "name": "CacheLive", "kind": "top_level", "line": 33, "col": 0, "dead_consumers": ["OrphanLive"], "actions": []},
   "unused_tagged_errors": {"path": "/errors.ts", "name": "Expired", "tag": "Expired", "line": 34, "col": 0, "catch_sites": [], "actions": []},
   "unproduced_catch_tags": {"path": "/main.ts", "tag": "Expired", "line": 35, "col": 0, "candidate_classes": ["Expired"], "actions": []},

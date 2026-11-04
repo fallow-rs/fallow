@@ -38,6 +38,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "unresolved-imports": "unresolved-import",
   "unlisted-dependencies": "unlisted-dependency",
   "duplicate-exports": "duplicate-export",
+  "duplicate-export-aliases": "duplicate-export-alias",
   "type-only-dependencies": "type-only-dependency",
   "test-only-dependencies": "test-only-dependency",
   "dev-dependencies-in-production": "dev-dependency-in-production",

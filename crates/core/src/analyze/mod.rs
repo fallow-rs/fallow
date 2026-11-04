@@ -6,6 +6,7 @@ mod bundle_externalization;
 mod class_member_rules;
 mod component_health;
 mod deprecated_exports;
+mod duplicate_export_aliases;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 mod effect;
@@ -13,6 +14,7 @@ pub mod feature_flags;
 mod gitignored_targets;
 mod graph_confidence;
 mod iconify;
+mod import_and_duplicate_detectors;
 mod inline_loaders;
 mod invalid_client_exports;
 mod jsx_runtime_credits;
@@ -72,19 +74,19 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-    DuplicateExportFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnproducedCatchTagFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEffectLayerFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
-    UnusedTaggedErrorFinding, UnusedTypeFinding,
+    DuplicateExportAliasFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
+    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnproducedCatchTagFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEffectLayerFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedStoreMemberFinding,
+    UnusedSvelteEventFinding, UnusedTaggedErrorFinding, UnusedTypeFinding,
 };
 
 use crate::results::{
@@ -1751,6 +1753,7 @@ struct ParallelDeadCodeDetectorResults {
     dependency_results: AnalysisResults,
     unresolved_imports: Vec<UnresolvedImportFinding>,
     duplicate_exports: Vec<DuplicateExportFinding>,
+    duplicate_export_aliases: Vec<DuplicateExportAliasFinding>,
     boundary_violations: Vec<BoundaryViolationFinding>,
     boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
     boundary_call_violations: Vec<BoundaryCallViolationFinding>,
@@ -1782,6 +1785,7 @@ impl ParallelDeadCodeDetectorResults {
             dev_dependencies_in_production: self.dependency_results.dev_dependencies_in_production,
             unresolved_imports: self.unresolved_imports,
             duplicate_exports: self.duplicate_exports,
+            duplicate_export_aliases: self.duplicate_export_aliases,
             boundary_violations: self.boundary_violations,
             boundary_coverage_violations: self.boundary_coverage_violations,
             boundary_call_violations: self.boundary_call_violations,
@@ -1811,7 +1815,7 @@ fn collect_parallel_dead_code_detector_results(
         (
             (member_results, dependency_results),
             (
-                (unresolved_imports, duplicate_exports),
+                (unresolved_imports, (duplicate_exports, duplicate_export_aliases)),
                 (
                     (
                         boundary_violations,
@@ -1831,7 +1835,11 @@ fn collect_parallel_dead_code_detector_results(
                 || run_member_and_dependency_detectors(input),
                 || {
                     rayon::join(
-                        || run_import_and_duplicate_detectors(input),
+                        || {
+                            import_and_duplicate_detectors::run_import_and_duplicate_detectors(
+                                input,
+                            )
+                        },
                         || run_boundary_cycle_and_usage_detectors(input),
                     )
                 },
@@ -1847,6 +1855,7 @@ fn collect_parallel_dead_code_detector_results(
         dependency_results,
         unresolved_imports,
         duplicate_exports,
+        duplicate_export_aliases,
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
@@ -1908,34 +1917,6 @@ fn run_member_and_dependency_detectors(
                 modules: input.modules,
                 line_offsets_by_file: input.line_offsets_by_file,
             })
-        },
-    )
-}
-
-fn run_import_and_duplicate_detectors(
-    input: DeadCodeDetectorInput<'_>,
-) -> (Vec<UnresolvedImportFinding>, Vec<DuplicateExportFinding>) {
-    rayon::join(
-        || {
-            run_unresolved_import_detector(UnresolvedImportDetectorInput {
-                resolved_modules: input.resolved_modules,
-                config: input.config,
-                suppressions: input.suppressions,
-                virtual_prefixes: input.virtual_prefixes,
-                generated_patterns: input.generated_patterns,
-                generated_type_prefixes: input.generated_type_prefixes,
-                line_offsets_by_file: input.line_offsets_by_file,
-            })
-        },
-        || {
-            run_duplicate_export_detector(
-                input.graph,
-                input.config,
-                input.suppressions,
-                input.line_offsets_by_file,
-                input.plugin_result,
-                input.resolved_modules,
-            )
         },
     )
 }
@@ -2015,41 +1996,6 @@ fn run_cycle_and_usage_detectors(
             )
         },
     )
-}
-
-fn run_duplicate_export_detector(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    resolved_modules: &[ResolvedModule],
-) -> Vec<DuplicateExportFinding> {
-    if config.rules.duplicate_exports == Severity::Off {
-        return Vec::new();
-    }
-    let duplicate_exports = if let Some(plugin_result) = plugin_result {
-        unused_exports::find_duplicate_exports_with_plugins(
-            graph,
-            config,
-            suppressions,
-            line_offsets_by_file,
-            Some(plugin_result),
-            resolved_modules,
-        )
-    } else {
-        unused_exports::find_duplicate_exports(
-            graph,
-            config,
-            suppressions,
-            line_offsets_by_file,
-            resolved_modules,
-        )
-    };
-    duplicate_exports
-        .into_iter()
-        .map(DuplicateExportFinding::with_actions)
-        .collect()
 }
 
 fn run_boundary_violation_detector(

@@ -173,6 +173,7 @@ else
       (if ((.check.unused_component_inputs // []) | length) > 0 then "| [Unused component inputs](\(docs("unused-component-inputs"))) | \(.check.unused_component_inputs | length) |" else null end),
       (if ((.check.unused_component_outputs // []) | length) > 0 then "| [Unused component outputs](\(docs("unused-component-outputs"))) | \(.check.unused_component_outputs | length) |" else null end),
       (if ((.check.unused_svelte_events // []) | length) > 0 then "| [Unused Svelte events](\(docs("unused-svelte-events"))) | \(.check.unused_svelte_events | length) |" else null end),
+      (if ((.check.duplicate_export_aliases // []) | length) > 0 then "| [Duplicate export aliases](\(docs("duplicate-export-aliases"))) | \(.check.duplicate_export_aliases | length) |" else null end),
       (if ((.check.unused_effect_layers // []) | length) > 0 then "| [Unused Effect layers](\(docs("unused-effect-layers"))) | \(.check.unused_effect_layers | length) |" else null end),
       (if ((.check.unused_tagged_errors // []) | length) > 0 then "| [Unused tagged errors](\(docs("unused-tagged-errors"))) | \(.check.unused_tagged_errors | length) |" else null end),
       (if ((.check.unproduced_catch_tags // []) | length) > 0 then "| [Unproduced catch tags](\(docs("unproduced-catch-tags"))) | \(.check.unproduced_catch_tags | length) |" else null end),

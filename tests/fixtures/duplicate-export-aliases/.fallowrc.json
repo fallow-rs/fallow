@@ -1,0 +1,1 @@
+{ "ignoreExports": [{ "file": "src/ignored.ts", "exports": ["default"] }] }

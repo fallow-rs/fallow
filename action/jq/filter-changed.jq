@@ -118,6 +118,9 @@ def filter_check:
   (if .unused_effect_layers then
     .unused_effect_layers |= map(select(.path | in_changed))
   else . end) |
+  (if .duplicate_export_aliases then
+    .duplicate_export_aliases |= map(select(.path | in_changed))
+  else . end) |
   (if .unused_tagged_errors then
     .unused_tagged_errors |= map(select(.path | in_changed))
   else . end) |
@@ -177,6 +180,7 @@ def filter_check:
       (.unused_component_outputs // [] | length) +
       (.unused_svelte_events // [] | length) +
       (.unused_effect_layers // [] | length) +
+      (.duplicate_export_aliases // [] | length) +
       (.unused_tagged_errors // [] | length) +
       (.unproduced_catch_tags // [] | length) +
       (.unprovided_injects // [] | length) +

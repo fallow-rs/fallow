@@ -679,6 +679,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.unused_effect_layers {
             $visit(&finding.layer.path, finding.layer.line, &finding.actions);
         }
+        for finding in &results.duplicate_export_aliases {
+            $visit(&finding.alias.path, finding.alias.line, &finding.actions);
+        }
         for finding in &results.unused_tagged_errors {
             $visit(&finding.error.path, finding.error.line, &finding.actions);
         }
@@ -942,6 +945,13 @@ macro_rules! visit_suppress_line_findings_mut {
             $visit(
                 &finding.layer.path,
                 finding.layer.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.duplicate_export_aliases {
+            $visit(
+                &finding.alias.path,
+                finding.alias.line,
                 &mut finding.actions,
             );
         }
@@ -1243,6 +1253,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
+        duplicate_export_aliases: results.duplicate_export_aliases.len(),
         type_only_dependencies: results.type_only_dependencies.len(),
         test_only_dependencies: results.test_only_dependencies.len(),
         dev_dependencies_in_production: results.dev_dependencies_in_production.len(),

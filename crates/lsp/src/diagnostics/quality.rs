@@ -5,7 +5,9 @@ use ls_types::{
     Location, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_api::editor_results::{DuplicateExport, DuplicateLocation};
+use fallow_api::editor_results::{
+    DuplicateExport, DuplicateExportAlias, DuplicateExportAliasLocation, DuplicateLocation,
+};
 use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
@@ -29,6 +31,93 @@ pub fn push_duplicate_export_diagnostics(
                 mapper,
             );
         }
+    }
+}
+
+/// Push one WARNING per export name of a binding that one file exports under
+/// two or more names. Each diagnostic links the other names of the binding.
+pub fn push_duplicate_export_alias_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    mapper: &mut PositionMapper,
+) {
+    for finding in &results.duplicate_export_aliases {
+        let alias = &finding.alias;
+        let Some(uri) = Uri::from_file_path(&alias.path) else {
+            continue;
+        };
+        for loc in &alias.locations {
+            let diagnostic = duplicate_export_alias_diagnostic(
+                alias,
+                loc,
+                &uri,
+                finding.finding_id.as_deref(),
+                mapper,
+            );
+            map.entry(uri.clone()).or_default().push(diagnostic);
+        }
+    }
+}
+
+fn duplicate_export_alias_diagnostic(
+    alias: &DuplicateExportAlias,
+    loc: &DuplicateExportAliasLocation,
+    uri: &Uri,
+    finding_id: Option<&str>,
+    mapper: &mut PositionMapper,
+) -> Diagnostic {
+    let line = loc.line.saturating_sub(1);
+    let (start, end) = mapper.utf16_col_span(&alias.path, line, loc.col, &loc.export_name);
+    let related: Vec<DiagnosticRelatedInformation> = alias
+        .locations
+        .iter()
+        .filter(|other| other.export_name != loc.export_name)
+        .map(|other| {
+            let other_line = other.line.saturating_sub(1);
+            let (other_start, other_end) =
+                mapper.utf16_col_span(&alias.path, other_line, other.col, &other.export_name);
+            DiagnosticRelatedInformation {
+                location: Location {
+                    uri: uri.clone(),
+                    range: Range {
+                        start: Position {
+                            line: other_line,
+                            character: other_start,
+                        },
+                        end: Position {
+                            line: other_line,
+                            character: other_end,
+                        },
+                    },
+                },
+                message: format!("Also exported as '{}'", other.export_name),
+            }
+        })
+        .collect();
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line,
+                character: start,
+            },
+            end: Position {
+                line,
+                character: end,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String("duplicate-export-alias".to_string())),
+        code_description: doc_link_for_code("duplicate-export-alias"),
+        message: format!(
+            "'{}' is exported under {} names: {}",
+            alias.local_name,
+            alias.export_names.len(),
+            alias.export_names.join(", ")
+        ),
+        related_information: (!related.is_empty()).then_some(related),
+        data: finding_data(finding_id),
+        ..Default::default()
     }
 }
 

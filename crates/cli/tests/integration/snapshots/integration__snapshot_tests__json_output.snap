@@ -35,6 +35,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "unresolved_imports": 1,
     "unlisted_dependencies": 1,
     "duplicate_exports": 1,
+    "duplicate_export_aliases": 0,
     "type_only_dependencies": 1,
     "test_only_dependencies": 1,
     "dev_dependencies_in_production": 0,

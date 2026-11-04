@@ -117,6 +117,10 @@ const REQUESTED_RULES: &[(&str, &[RequestedRule])] = &[
         &[("duplicate-exports", |r| r.duplicate_exports)],
     ),
     (
+        "--duplicate-export-aliases",
+        &[("duplicate-export-aliases", |r| r.duplicate_export_aliases)],
+    ),
+    (
         "--circular-deps",
         &[("circular-dependencies", |r| r.circular_dependencies)],
     ),

@@ -32,9 +32,10 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::output_dead_code::{
     AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
     BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
-    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-    DynamicSegmentNameConflictFinding, EffectiveSeverity, EmptyCatalogGroupFinding, GatedFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    DevDependencyInProductionFinding, DuplicateExportAliasFinding, DuplicateExportFinding,
+    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EffectiveSeverity,
+    EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
@@ -192,6 +193,7 @@ file_scoped! {
     UnusedComponentOutputFinding => output.path, unused_component_outputs;
     UnusedSvelteEventFinding => event.path, unused_svelte_events;
     UnusedEffectLayerFinding => layer.path, unused_effect_layers;
+    DuplicateExportAliasFinding => alias.path, duplicate_export_aliases;
     UnusedTaggedErrorFinding => error.path, unused_tagged_errors;
     UnproducedCatchTagFinding => catch_tag.path, unproduced_catch_tags;
     UnusedServerActionFinding => action.path, unused_server_actions;
@@ -501,6 +503,7 @@ fn for_each_gated_finding(
         unresolved_imports,
         unlisted_dependencies,
         duplicate_exports,
+        duplicate_export_aliases,
         type_only_dependencies,
         test_only_dependencies,
         dev_dependencies_in_production,
@@ -574,6 +577,7 @@ fn for_each_gated_finding(
     visit(unresolved_imports, f);
     visit(unlisted_dependencies, f);
     visit(duplicate_exports, f);
+    visit(duplicate_export_aliases, f);
     visit(type_only_dependencies, f);
     visit(test_only_dependencies, f);
     visit(dev_dependencies_in_production, f);
@@ -634,6 +638,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         unresolved_imports,
         unlisted_dependencies,
         duplicate_exports,
+        duplicate_export_aliases,
         type_only_dependencies,
         test_only_dependencies,
         dev_dependencies_in_production,
@@ -703,6 +708,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unresolved_imports)
         || tally.add(unlisted_dependencies)
         || tally.add(duplicate_exports)
+        || tally.add(duplicate_export_aliases)
         || tally.add(type_only_dependencies)
         || tally.add(test_only_dependencies)
         || tally.add(dev_dependencies_in_production)

@@ -101,6 +101,8 @@ def dependency_action(pkg):
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused component input::Input '\(.input_name | san)' on component '\(.component_name | san)' is read nowhere in its own component (neither class body nor template).\(nl)\(nl)Remove the input, or use it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unused_component_outputs[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused component output::Output '\(.output_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the output, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.duplicate_export_aliases[]? |
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Duplicate export alias::'\(.local_name | san)' is exported under several names: \((.export_names // []) | map(san) | join(", ")).\(nl)\(nl)Keep one export name, or add the names to ignoreExports when they are an intentional public API."),
   (.unused_effect_layers[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused Effect layer::Layer '\(.name | san)' is composed only into layers that nothing uses.\(nl)\(nl)Remove the unused consumer layers first, then this layer, or compose it into a layer that reaches a runtime."),
   (.unused_tagged_errors[]? |

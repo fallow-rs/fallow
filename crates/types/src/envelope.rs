@@ -189,6 +189,9 @@ pub struct CheckSummary {
     pub unlisted_dependencies: usize,
     /// Same-named exports declared in more than one module.
     pub duplicate_exports: usize,
+    /// Bindings that one module exports under two or more names.
+    #[serde(default)]
+    pub duplicate_export_aliases: usize,
     /// Production dependencies only used via type-only imports (could be
     /// devDependencies). Only populated in production mode.
     pub type_only_dependencies: usize,

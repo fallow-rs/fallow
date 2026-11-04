@@ -227,15 +227,20 @@ pub(super) fn migrate_exclude(
     };
 
     for knip_name in excluded {
-        if let Some((_, fallow_name)) = KNIP_RULE_MAP.iter().find(|(k, _)| k == knip_name) {
+        let mut mapped = false;
+        for (_, fallow_name) in KNIP_RULE_MAP.iter().filter(|(k, _)| k == knip_name) {
             rules_obj.insert((*fallow_name).to_string(), Value::String("off".to_string()));
-        } else if !migrate_namespace_issue_type(
-            "exclude",
-            knip_name,
-            IssueTypeEffect::Off,
-            |base| excluded.iter().any(|name| name == base),
-            warnings,
-        ) {
+            mapped = true;
+        }
+        if !mapped
+            && !migrate_namespace_issue_type(
+                "exclude",
+                knip_name,
+                IssueTypeEffect::Off,
+                |base| excluded.iter().any(|name| name == base),
+                warnings,
+            )
+        {
             warn_unmapped_rule_key("exclude", knip_name, warnings);
         }
     }

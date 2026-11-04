@@ -101,6 +101,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub duplicate_exports: usize,
     #[serde(default)]
+    pub duplicate_export_aliases: usize,
+    #[serde(default)]
     pub circular_dependencies: usize,
     #[serde(default)]
     pub re_export_cycles: usize,
@@ -152,6 +154,7 @@ impl CheckCounts {
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
             duplicate_exports: results.duplicate_exports.len(),
+            duplicate_export_aliases: results.duplicate_export_aliases.len(),
             circular_dependencies: results.circular_dependencies.len(),
             re_export_cycles: results.re_export_cycles.len(),
             package_cycles: results.package_cycles.len(),
@@ -221,6 +224,9 @@ impl CheckCounts {
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
             duplicate_exports: b.duplicate_exports,
+            // `fallow_config::RegressionBaseline` has no `duplicate_export_aliases`
+            // field; default to 0 until the config baseline schema gains one.
+            duplicate_export_aliases: 0,
             circular_dependencies: b.circular_dependencies,
             re_export_cycles: b.re_export_cycles,
             package_cycles: b.package_cycles,
@@ -299,6 +305,7 @@ impl CheckCounts {
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
         push_delta!(duplicate_exports);
+        push_delta!(duplicate_export_aliases);
         push_delta!(circular_dependencies);
         push_delta!(re_export_cycles);
         push_delta!(package_cycles);
@@ -468,6 +475,7 @@ mod tests {
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -526,6 +534,7 @@ mod tests {
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
                 duplicate_exports: 0,
+                duplicate_export_aliases: 0,
                 circular_dependencies: 1,
                 re_export_cycles: 0,
                 package_cycles: 0,
@@ -580,6 +589,7 @@ mod tests {
             unresolved_imports: 0,
             unlisted_dependencies: 1,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -639,6 +649,7 @@ mod tests {
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -685,6 +696,7 @@ mod tests {
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -729,6 +741,7 @@ mod tests {
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -767,6 +780,7 @@ mod tests {
             unresolved_imports: 1,
             unlisted_dependencies: 1,
             duplicate_exports: 1,
+            duplicate_export_aliases: 0,
             circular_dependencies: 1,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -814,6 +828,7 @@ mod tests {
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,

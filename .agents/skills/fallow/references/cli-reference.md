@@ -152,6 +152,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unresolved-imports` | Unresolved imports |
 | `--unlisted-deps` | Unlisted dependencies |
 | `--duplicate-exports` | Duplicate exports |
+| `--duplicate-export-aliases` | One module exports one binding under two or more names |
 | `--circular-deps` | Circular dependencies |
 | `--re-export-cycles` | Re-export cycles (`kind: multi-node` for barrel files re-exporting from each other in a loop, `kind: self-loop` for a barrel re-exporting from itself). File-scoped finding; chain propagation through the loop is a no-op so imports may silently come up empty. Distinct from `--circular-deps` (runtime cycles). |
 | `--package-cycles` | Two or more workspace packages import each other in a loop |

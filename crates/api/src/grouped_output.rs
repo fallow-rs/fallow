@@ -355,6 +355,11 @@ where
                 .unused_svelte_events
                 .push(item.clone());
         }
+        for item in &results.duplicate_export_aliases {
+            self.entry_for_path(&item.alias.path)
+                .duplicate_export_aliases
+                .push(item.clone());
+        }
         for item in &results.unused_effect_layers {
             self.entry_for_path(&item.layer.path)
                 .unused_effect_layers

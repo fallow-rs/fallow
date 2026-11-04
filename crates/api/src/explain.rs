@@ -167,6 +167,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#duplicate-exports",
     },
     RuleDef {
+        id: "fallow/duplicate-export-alias",
+        category: "Dead code",
+        name: "Duplicate Export Aliases",
+        short: "One module exports one binding under two or more names",
+        full: "One module exports the same binding under two or more names, for example `export const layer = make(); export default layer;` or `export { a, a as b }`. Consumers can import one value under several names, so the export surface is larger than it needs to be. Fallow groups the exports of a file by binding: a local binding name, or the source and imported name of a named re-export. Value and type-only exports are separate groups, and a plain specifier of a name that the file declares only as a type joins the type group. Two bindings with the same initializer are two bindings and are not reported. `export *`, files with CommonJS exports (`export =`, `module.exports`), component files and unreachable files are skipped. `ignoreExports` exempts a file with `*`, or a binding when one of its names is listed. Default warn. The rule differs from `duplicate-export`, which reports one export name in several files.",
+        docs_path: "explanations/dead-code#duplicate-export-aliases",
+    },
+    RuleDef {
         id: "fallow/circular-dependency",
         category: "Architecture",
         name: "Circular Dependencies",
@@ -852,6 +860,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unlisted-dependency" => RuleGuide {
             example: "Root src/app.ts imports @acme/shared, an npm workspace package. The root package.json lists workspaces but does not list @acme/shared as a dependency, so the import is unlisted even when npm links it into node_modules.",
             how_to_fix: "Declare the imported package in the owning package.json, including the root manifest for root code. Use dependencies for runtime needs or devDependencies for tooling/tests, with a version accepted by your package manager. Self-references need no declaration. For deliberately ambient packages, use ignoreDependencies as an explicit opt-out.",
+        },
+        "fallow/duplicate-export-alias" => RuleGuide {
+            example: "src/worker.ts has export const handler = createHandler() and export default handler, so one binding has the names handler and default.",
+            how_to_fix: "Keep one export name and update the importers of the other names. If the names are an intentional public API, add them to ignoreExports, or suppress the line with // fallow-ignore-next-line duplicate-export-alias.",
         },
         "fallow/duplicate-export" => RuleGuide {
             example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",

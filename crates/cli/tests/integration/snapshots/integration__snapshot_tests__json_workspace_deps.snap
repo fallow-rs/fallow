@@ -35,6 +35,7 @@ expression: redact_version(&json_str)
     "unresolved_imports": 0,
     "unlisted_dependencies": 0,
     "duplicate_exports": 0,
+    "duplicate_export_aliases": 0,
     "type_only_dependencies": 0,
     "test_only_dependencies": 0,
     "dev_dependencies_in_production": 0,

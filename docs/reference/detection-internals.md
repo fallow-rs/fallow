@@ -1025,6 +1025,15 @@ Two modules that overlay each other both stay. A module that imports `X` under
 an alias and declares its own `X` without the star re-export is a wrapper.
 Importers see two `X` exports with different behavior, so the group keeps the
 wrapper.
+`duplicate-export-alias` is a different rule: it reads the export surface of one
+file, not the names of several files. It groups the `ResolvedModule` exports by
+binding: a local export by its local name and type-only flag, a named re-export
+by its source specifier, imported name and type-only flag. A group with two or
+more distinct export names is a finding. The rule skips `export *`, exports
+with an empty span, files with CommonJS exports (`export =` turns an imported
+binding into a `default` re-export, and the module object is not one binding),
+component files, and unreachable files. Entry files are reported, because the
+finding is about the export surface, not about usage.
 Dependency ignores suppress findings without fabricating resolution edges. Raw-specifier
 unresolved-import ignores are not filesystem globs. A relative import whose
 target is missing and ignored by a repository ignore file is build output, not

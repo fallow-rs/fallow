@@ -57,6 +57,7 @@ else
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
     table_row("Duplicate exports"; "duplicate_exports"; "duplicate-exports"),
+    table_row("Duplicate export aliases"; "duplicate_export_aliases"; "duplicate-export-aliases"),
     table_row("Circular dependencies"; "circular_dependencies"; "circular-dependencies"),
     table_row("Re-export cycles"; "re_export_cycles"; "re-export-cycles"),
     table_row("Boundary violations"; "boundary_violations"; "boundary-violations"),
@@ -184,6 +185,9 @@ else
   section("Unused Svelte events"; "unused_svelte_events";
     "Svelte components dispatching a `createEventDispatcher` event listened to nowhere in the project (cross-file dead-output direction).\n\n| File | Component | Event |\n|------|-----------|-------|\n";
     "| `\(.path):\(.line)` | `\(.component_name)` | `\(.event_name)` |") +
+  section("Duplicate export aliases"; "duplicate_export_aliases";
+    "One binding exported under two or more names in one file.\n\n| File | Binding | Names |\n|------|---------|-------|\n";
+    "| `\(.path):\(.line)` | `\(.local_name)` | \((.export_names // []) | map("`\(.)`") | join(", ")) |") +
   section("Unused Effect layers"; "unused_effect_layers";
     "Effect layers composed only into layers that nothing uses.\n\n| File | Layer |\n|------|-------|\n";
     "| `\(.path):\(.line)` | `\(.name)` |") +

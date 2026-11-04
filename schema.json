@@ -257,6 +257,7 @@
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
+        "duplicate-export-aliases": "warn",
         "type-only-dependencies": "warn",
         "test-only-dependencies": "warn",
         "dev-dependencies-in-production": "warn",
@@ -1801,6 +1802,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "duplicate-export-aliases": {
+          "description": "One module that exports one binding under two or more names, for\nexample `export const a = 1; export default a;`. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "type-only-dependencies": {
           "description": "A production dependency imported only via type-only imports (a\n`devDependencies` candidate). Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
@@ -2845,6 +2851,17 @@
         },
         "duplicate-exports": {
           "description": "Optional override for [`RulesConfig::duplicate_exports`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duplicate-export-aliases": {
+          "description": "Optional override for [`RulesConfig::duplicate_export_aliases`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

@@ -1,4 +1,7 @@
-/// Knip rule names mapped to fallow rule names.
+/// Knip rule names mapped to fallow rule names. One source rule name can
+/// map to several fallow rules: `duplicates` (one binding exported under several
+/// names) maps to `duplicate-export-aliases`, and also to `duplicate-exports`
+/// so that a migrated config keeps the severity that earlier versions wrote.
 pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("files", "unused-files"),
     ("dependencies", "unused-dependencies"),
@@ -10,6 +13,7 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("unlisted", "unlisted-dependencies"),
     ("unresolved", "unresolved-imports"),
     ("duplicates", "duplicate-exports"),
+    ("duplicates", "duplicate-export-aliases"),
     ("cycles", "circular-dependencies"),
 ];
 
@@ -378,12 +382,12 @@ mod tests {
     }
 
     #[test]
-    fn rule_map_has_no_duplicate_knip_keys() {
+    fn rule_map_has_no_duplicate_pairs() {
         let mut seen = FxHashSet::default();
-        for (knip, _) in KNIP_RULE_MAP {
+        for (knip, fallow) in KNIP_RULE_MAP {
             assert!(
-                seen.insert(*knip),
-                "KNIP_RULE_MAP has duplicate knip key `{knip}`"
+                seen.insert((*knip, *fallow)),
+                "KNIP_RULE_MAP has duplicate pair `{knip}` -> `{fallow}`"
             );
         }
     }
