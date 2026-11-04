@@ -32,6 +32,7 @@ def filter_check:
   (if .deprecated_exports_in_use then .deprecated_exports_in_use |= map(select(.path | in_changed)) else . end) |
   (if .unused_enum_members  then .unused_enum_members  |= map(select(.path | in_changed))      else . end) |
   (if .unused_class_members then .unused_class_members |= map(select(.path | in_changed))      else . end) |
+  (if .unused_namespace_members then .unused_namespace_members |= map(select(.path | in_changed))      else . end) |
   (if .unused_store_members then .unused_store_members |= map(select(.path | in_changed))      else . end) |
   (if .unresolved_imports   then .unresolved_imports   |= map(select(.path | in_changed))      else . end) |
   (if .unlisted_dependencies then
@@ -149,6 +150,7 @@ def filter_check:
       (.unused_optional_dependencies // [] | length) +
       (.unused_enum_members // [] | length) +
       (.unused_class_members // [] | length) +
+      (.unused_namespace_members // [] | length) +
       (.unused_store_members // [] | length) +
       (.unresolved_imports // [] | length) +
       (.unlisted_dependencies // [] | length) +

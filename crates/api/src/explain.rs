@@ -143,6 +143,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-store-members",
     },
     RuleDef {
+        id: "fallow/unused-namespace-member",
+        category: "Dead code",
+        name: "Unused Namespace Members",
+        short: "Namespace member is never referenced",
+        full: "Exported members of an exported TypeScript namespace that no code reads. A nested namespace member has a dotted name (`Inner.x`). A whole use of the namespace (an argument, an alias, a spread) counts every member as used. Declaration files, `declare global`, module augmentations and the public API of an entry point are not checked. Defaults to warn.",
+        docs_path: "explanations/dead-code#unused-namespace-members",
+    },
+    RuleDef {
         id: "fallow/unresolved-import",
         category: "Dead code",
         name: "Unresolved Imports",
@@ -703,7 +711,8 @@ fn security_alias_id(normalized: &str) -> Option<&'static str> {
 #[must_use]
 pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
     source_dead_code_rule_guide(rule.id)
-        .or_else(|| member_import_rule_guide(rule.id))
+        .or_else(|| member_rule_guide(rule.id))
+        .or_else(|| import_rule_guide(rule.id))
         .or_else(|| architecture_rule_guide(rule.id))
         .or_else(|| catalog_rule_guide(rule.id))
         .or_else(|| health_runtime_rule_guide(rule.id))
@@ -783,7 +792,7 @@ fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
     })
 }
 
-fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
+fn member_rule_guide(id: &str) -> Option<RuleGuide> {
     Some(match id {
         "fallow/unused-enum-member" => RuleGuide {
             example: "Status.Legacy remains in an exported enum, but no code reads that member.",
@@ -796,6 +805,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-store-member" => RuleGuide {
             example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
             how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
+        },
+        "fallow/unused-namespace-member" => RuleGuide {
+            example: "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",
+            how_to_fix: "Remove the unused member, or remove its export keyword when only the namespace body uses it. For generated code, turn the rule off for those files in overrides. Suppress an intentional member with // fallow-ignore-next-line unused-namespace-member.",
         },
         "fallow/unprovided-inject" => RuleGuide {
             example: "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
@@ -861,6 +874,12 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
             example: "FieldText, FieldNumber, and FieldSelect (across three files) each declare exactly { name, label, value, onChange, error }. The five significant prop names are identical, so they form one duplicate-prop-shape group.",
             how_to_fix: "Extract one shared Props type (e.g. type FieldProps = { name; label; value; onChange; error }) that every member reuses, or a base component the variants compose. Keep them separate only if a per-variant prop divergence is planned. Enable the rule with rules.duplicate-prop-shape = \"warn\" (it defaults to off). To accept one member, suppress it with // fallow-ignore-next-line duplicate-prop-shape above the component definition; the suppressed member still appears in its siblings' sharing_components because the group is real regardless of suppression.",
         },
+        _ => return None,
+    })
+}
+
+fn import_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
             how_to_fix: "Fix the specifier, restore the missing file, install the package, or align tsconfig path aliases with the runtime resolver.",

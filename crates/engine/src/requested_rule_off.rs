@@ -57,6 +57,10 @@ const REQUESTED_RULES: &[(&str, &[RequestedRule])] = &[
         &[("unused-store-members", |r| r.unused_store_members)],
     ),
     (
+        "--unused-namespace-members",
+        &[("unused-namespace-members", |r| r.unused_namespace_members)],
+    ),
+    (
         "--unprovided-injects",
         &[("unprovided-injects", |r| r.unprovided_injects)],
     ),

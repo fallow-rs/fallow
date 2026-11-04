@@ -81,6 +81,11 @@ fn push_summary_core_parts(
 fn push_summary_member_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
     push_summary_part(parts, results.unused_enum_members.len(), "enum members");
     push_summary_part(parts, results.unused_class_members.len(), "class members");
+    push_summary_part(
+        parts,
+        results.unused_namespace_members.len(),
+        "namespace members",
+    );
     push_summary_part(parts, results.unused_store_members.len(), "store members");
 }
 

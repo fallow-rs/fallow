@@ -649,6 +649,13 @@
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
+        "unused_namespace_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedNamespaceMemberFinding"
+          },
+          "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -1308,6 +1315,13 @@
             "$ref": "#/definitions/UnusedClassMemberFinding"
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
+        },
+        "unused_namespace_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedNamespaceMemberFinding"
+          },
+          "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
         },
         "unused_store_members": {
           "type": "array",
@@ -5420,14 +5434,14 @@
         },
         "parent_name": {
           "type": "string",
-          "description": "Name of the parent enum or class."
+          "description": "Name of the parent enum, class, store, or exported namespace."
         },
         "member_name": {
           "type": "string",
-          "description": "Name of the unused member."
+          "description": "Name of the unused member. A member of a nested namespace has the dotted\npath from the exported namespace (`Inner.x`)."
         },
         "kind": {
-          "description": "Whether this is an enum member, class method, or class property.",
+          "description": "The kind of member: enum member, class method, class property, store\nmember, or namespace member.",
           "$ref": "#/definitions/MemberKind"
         },
         "line": {
@@ -5447,7 +5461,7 @@
         "line",
         "col"
       ],
-      "description": "An unused enum or class member."
+      "description": "An unused enum, class, store, or namespace member."
     },
     "UnresolvedImport": {
       "type": "object",
@@ -6305,6 +6319,10 @@
           "type": "integer",
           "description": "Unused class members."
         },
+        "unused_namespace_members": {
+          "type": "integer",
+          "description": "Unused namespace members."
+        },
         "unused_store_members": {
           "type": "integer",
           "description": "Unused store members."
@@ -7131,6 +7149,13 @@
             "$ref": "#/definitions/UnusedClassMemberFinding"
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
+        },
+        "unused_namespace_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedNamespaceMemberFinding"
+          },
+          "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
         },
         "unused_store_members": {
           "type": "array",
@@ -11250,14 +11275,14 @@
         },
         "parent_name": {
           "type": "string",
-          "description": "Name of the parent enum or class."
+          "description": "Name of the parent enum, class, store, or exported namespace."
         },
         "member_name": {
           "type": "string",
-          "description": "Name of the unused member."
+          "description": "Name of the unused member. A member of a nested namespace has the dotted\npath from the exported namespace (`Inner.x`)."
         },
         "kind": {
-          "description": "Whether this is an enum member, class method, or class property.",
+          "description": "The kind of member: enum member, class method, class property, store\nmember, or namespace member.",
           "$ref": "#/definitions/MemberKind"
         },
         "line": {
@@ -11332,14 +11357,14 @@
         },
         "parent_name": {
           "type": "string",
-          "description": "Name of the parent enum or class."
+          "description": "Name of the parent enum, class, store, or exported namespace."
         },
         "member_name": {
           "type": "string",
-          "description": "Name of the unused member."
+          "description": "Name of the unused member. A member of a nested namespace has the dotted\npath from the exported namespace (`Inner.x`)."
         },
         "kind": {
-          "description": "Whether this is an enum member, class method, or class property.",
+          "description": "The kind of member: enum member, class method, class property, store\nmember, or namespace member.",
           "$ref": "#/definitions/MemberKind"
         },
         "line": {
@@ -17395,14 +17420,14 @@
         },
         "parent_name": {
           "type": "string",
-          "description": "Name of the parent enum or class."
+          "description": "Name of the parent enum, class, store, or exported namespace."
         },
         "member_name": {
           "type": "string",
-          "description": "Name of the unused member."
+          "description": "Name of the unused member. A member of a nested namespace has the dotted\npath from the exported namespace (`Inner.x`)."
         },
         "kind": {
-          "description": "Whether this is an enum member, class method, or class property.",
+          "description": "The kind of member: enum member, class method, class property, store\nmember, or namespace member.",
           "$ref": "#/definitions/MemberKind"
         },
         "line": {
@@ -31029,6 +31054,13 @@
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
+        "unused_namespace_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedNamespaceMemberFinding"
+          },
+          "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -36145,6 +36177,88 @@
         "col"
       ],
       "description": "A location that runs a binary."
+    },
+    "UnusedNamespaceMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum, class, store, or exported namespace."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member. A member of a nested namespace has the dotted\npath from the exported namespace (`Inner.x`)."
+        },
+        "kind": {
+          "description": "The kind of member: enum member, class method, class property, store\nmember, or namespace member.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A namespace\nmember takes the member rule unchanged: any module this run analyzed\nincompletely can hold the access that credits it. Sorted,\ndeduplicated, and omitted from the wire when empty. This is disclosure\nonly, because a namespace member offers no mutation."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_namespace_members` key (an exported member of an exported\nTypeScript namespace that no code reads). `member_name` is the dotted path\nfrom the exported namespace, for example `Inner.x`. Emits only a\nline-level suppress action: a member can be a multi-line function, class\nor nested namespace, so there is no safe one-line auto-fix."
     }
   }
 }

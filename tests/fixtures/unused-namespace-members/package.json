@@ -1,0 +1,4 @@
+{
+  "name": "unused-namespace-members",
+  "main": "src/index.ts"
+}

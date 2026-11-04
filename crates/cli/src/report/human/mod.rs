@@ -135,6 +135,10 @@ fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static 
             "Class methods or properties never referenced outside their class",
             "https://fallow.tools/docs/explanations/dead-code/#unused-class-members",
         )),
+        "Unused namespace members" => Some((
+            "Namespace members that no code reads",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-namespace-members",
+        )),
         "Unused store members" => Some((
             "Store state or actions never accessed by any consumer",
             "https://fallow.tools/docs/explanations/dead-code/#unused-store-members",
@@ -313,6 +317,7 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
         // and emits no suppress hint.
         "Unused enum members" => IssueKind::UnusedEnumMember,
         "Unused class members" => IssueKind::UnusedClassMember,
+        "Unused namespace members" => IssueKind::UnusedNamespaceMember,
         "Unused store members" => IssueKind::UnusedStoreMember,
         "Unresolved imports" => IssueKind::UnresolvedImport,
         "Unlisted dependencies" => IssueKind::UnlistedDependency,

@@ -40,6 +40,8 @@ use fallow_types::extract::{
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
+mod static_imports;
+use static_imports::collect_static_import_specifiers;
 
 pub(crate) const ROUTE_LOADER_DATA_OBJECT: &str = "$fallow.routeLoaderData";
 pub(crate) const MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES: usize = 8192;
@@ -832,6 +834,19 @@ pub(crate) struct ModuleInfoExtractor {
     /// Transient visitor state; never persisted.
     local_namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
+    /// Names of the nested exported namespaces between the exported root
+    /// namespace and the body that the visitor walks. A member of a nested
+    /// namespace gets the dotted path `Inner.x`, relative to the root.
+    /// Transient visitor state; never persisted.
+    namespace_member_path: Vec<String>,
+    /// Span of the exported root namespace declaration (`export namespace N`)
+    /// that `visit_ts_namespace_declaration` reaches next. Transient visitor
+    /// state; never persisted.
+    exported_namespace_root: Option<Span>,
+    /// Span of the nested namespace declaration that is an exported member of
+    /// the namespace around it (`export namespace Inner`, or a segment of a
+    /// dotted `namespace A.B`). Transient visitor state; never persisted.
+    exported_namespace_member: Option<Span>,
     /// Spans of exported namespaces that are type-only only because their
     /// body emits no JavaScript (see `namespace_is_instantiated`). When such a
     /// namespace merges with a value export of the same name, the merged
@@ -1536,6 +1551,14 @@ impl ModuleInfoExtractor {
     }
 
     /// Store the import binding references that the semantic pass found.
+    pub(crate) fn push_namespace_member_uses(
+        &mut self,
+        uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
+    ) {
+        self.semantic_facts
+            .extend(uses.into_iter().map(SemanticFact::NamespaceMemberUse));
+    }
+
     pub(crate) fn set_import_binding_references(
         &mut self,
         references: Vec<ImportBindingReference>,
@@ -4051,46 +4074,6 @@ pub(crate) fn extend_whole_object_uses(info: &mut ModuleInfo, extra: Vec<String>
         }
     }
     info.whole_object_uses = uses.into();
-}
-
-/// Collect every statically-resolvable module specifier from a dynamic
-/// `import()` source expression, following conditional and logical branches so
-/// `import(cond ? './a' : './b')` yields both `./a` and `./b`. String literals
-/// and no-substitution template literals resolve; genuinely runtime branches (a
-/// bare identifier, a call) are skipped, so a mixed
-/// `import(cond ? './a' : runtimeVar)` still credits the literal branch while
-/// `import(runtimeVar)` yields nothing (correctly left unresolvable). Repeated
-/// literals across branches are deduplicated so one call site never yields two
-/// identical edges (and thus duplicate unresolved-import findings).
-fn collect_static_import_specifiers(source: &Expression<'_>, out: &mut Vec<String>) {
-    match source {
-        Expression::StringLiteral(lit) => {
-            let value = lit.value.text().into_owned();
-            if !out.contains(&value) {
-                out.push(value);
-            }
-        }
-        Expression::TemplateLiteral(tpl)
-            if tpl.expressions.is_empty() && !tpl.quasis.is_empty() =>
-        {
-            let value = tpl.quasis[0].value.raw.to_string();
-            if !value.is_empty() && !out.contains(&value) {
-                out.push(value);
-            }
-        }
-        Expression::ParenthesizedExpression(paren) => {
-            collect_static_import_specifiers(&paren.expression, out);
-        }
-        Expression::ConditionalExpression(cond) => {
-            collect_static_import_specifiers(&cond.consequent, out);
-            collect_static_import_specifiers(&cond.alternate, out);
-        }
-        Expression::LogicalExpression(logical) => {
-            collect_static_import_specifiers(&logical.left, out);
-            collect_static_import_specifiers(&logical.right, out);
-        }
-        _ => {}
-    }
 }
 
 fn try_extract_property_callback_import<'a, 'b>(

@@ -12,10 +12,13 @@ use crate::dispatch::resolve_negatable_flag;
 use crate::dupes::{DupesMode, DupesOverrides};
 use crate::health::SortBy;
 use crate::runtime_support::{AnalysisKind, GroupBy};
+#[path = "cli_args_min_occurrences.rs"]
+mod min_occurrences;
 use crate::{
     audit_decision_surface, doctor, flags, mutation_cli, security, setup_hooks, similar_code_cli,
     viz,
 };
+use min_occurrences::parse_min_occurrences;
 
 const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
@@ -744,6 +747,10 @@ pub enum Command {
         /// Only report unused store members
         #[arg(long)]
         unused_store_members: bool,
+
+        /// Only report unused namespace members
+        #[arg(long)]
+        unused_namespace_members: bool,
 
         /// Only report unprovided injects
         #[arg(long)]
@@ -3059,18 +3066,3 @@ pub use rule_pack_args::RulePackCli;
 #[path = "cli_args_audit.rs"]
 mod audit_args;
 pub use audit_args::*;
-
-/// Parse `--min-occurrences` and reject values below 2. A single occurrence
-/// is not a duplicate; silently clamping would diverge from the config-file
-/// validator, which also rejects `< 2`.
-fn parse_min_occurrences(s: &str) -> Result<usize, String> {
-    let value: usize = s
-        .parse()
-        .map_err(|_| format!("`{s}` is not a non-negative integer"))?;
-    if value < 2 {
-        return Err(format!(
-            "must be at least 2 (got {value}); a single occurrence isn't a duplicate"
-        ));
-    }
-    Ok(value)
-}

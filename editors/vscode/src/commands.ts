@@ -508,6 +508,7 @@ const ISSUE_TYPE_FILTERS: ReadonlyArray<readonly [CheckFindingKey, keyof IssueTy
   ["unused_optional_dependencies", "unused-optional-dependencies"],
   ["unused_enum_members", "unused-enum-members"],
   ["unused_class_members", "unused-class-members"],
+  ["unused_namespace_members", "unused-namespace-members"],
   ["unused_store_members", "unused-store-members"],
   ["unused_server_actions", "unused-server-actions"],
   ["unused_load_data_keys", "unused-load-data-keys"],

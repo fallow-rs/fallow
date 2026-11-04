@@ -30,6 +30,7 @@ mod fluent_chain;
 mod heritage;
 mod instance;
 mod member_probe;
+mod namespace;
 mod playwright;
 mod typed_property;
 
@@ -39,6 +40,9 @@ use fluent_chain::*;
 use heritage::*;
 use instance::*;
 use member_probe::propagate_member_name_probe_accesses;
+use namespace::{
+    credit_namespace_member_uses, drop_members_of_unused_namespaces, namespace_member_credited,
+};
 use playwright::*;
 use typed_property::*;
 
@@ -171,6 +175,9 @@ struct MemberSkipContext<'a> {
     super_class: Option<&'a str>,
     implemented_interfaces: &'a [String],
     is_public_api_class_export: bool,
+    /// The namespace members of this export are never reported: the export
+    /// is public API of an entry point, or the file is a declaration file.
+    namespace_members_exempt: bool,
     lit_active: bool,
 }
 
@@ -736,6 +743,8 @@ pub struct UnusedMemberResults {
     pub class_members: Vec<UnusedClassMemberCandidate>,
     /// Unused store members (Pinia stores).
     pub store_members: Vec<UnusedMember>,
+    /// Unused members of exported TypeScript namespaces.
+    pub namespace_members: Vec<UnusedMember>,
 }
 
 /// A class-member candidate plus whether it only exists for semantic
@@ -845,6 +854,7 @@ type MemberScanBuckets = (
     Vec<UnusedMember>,
     Vec<UnusedClassMemberCandidate>,
     Vec<UnusedMember>,
+    Vec<UnusedMember>,
 );
 
 struct MemberReportContext<'a, 'scan> {
@@ -861,6 +871,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
     let mut unused_store_members = Vec::new();
+    let mut unused_namespace_members = Vec::new();
     let allowlist = ClassMemberAllowlist::from_rules(input.user_class_member_allowlist);
     let semantic_framework_candidates =
         ClassMemberAllowlist::from_rules(input.semantic_framework_candidates);
@@ -878,10 +889,11 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     }
     .collect();
 
-    for (enum_members, class_members, store_members) in member_results {
+    for (enum_members, class_members, store_members, namespace_members) in member_results {
         unused_enum_members.extend(enum_members);
         unused_class_members.extend(class_members);
         unused_store_members.extend(store_members);
+        unused_namespace_members.extend(namespace_members);
     }
 
     if input.report_unmatched_patterns {
@@ -893,6 +905,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         enum_members: unused_enum_members,
         class_members: unused_class_members,
         store_members: unused_store_members,
+        namespace_members: drop_members_of_unused_namespaces(unused_namespace_members),
     }
 }
 
@@ -907,7 +920,7 @@ impl MemberReportContext<'_, '_> {
     }
 
     fn collect_module(&self, module: &crate::graph::ModuleNode) -> MemberScanBuckets {
-        let mut buckets = (Vec::new(), Vec::new(), Vec::new());
+        let mut buckets = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         if !module.is_reachable() {
             return buckets;
         }
@@ -990,6 +1003,8 @@ impl MemberReportContext<'_, '_> {
         let file_self_accesses = self.prepared.self_accessed_members.get(&module.file_id);
         let is_public_api_class_export =
             is_entry_point_public_class_export(module, export, &self.prepared.public_class_exports);
+        let namespace_members_exempt = crate::graph::is_declaration_file_path(&module.path)
+            || self.prepared.public_class_exports.contains(export_key);
         let (super_class, implemented_interfaces) = self
             .prepared
             .heritage_context
@@ -1015,6 +1030,7 @@ impl MemberReportContext<'_, '_> {
                     super_class,
                     implemented_interfaces,
                     is_public_api_class_export,
+                    namespace_members_exempt,
                     lit_active: self.input.lit_active,
                 },
                 buckets,
@@ -1078,7 +1094,7 @@ fn push_unused_member(
             });
         }
         MemberKind::StoreMember => buckets.2.push(unused),
-        MemberKind::NamespaceMember => unreachable!(),
+        MemberKind::NamespaceMember => buckets.3.push(unused),
     }
 }
 
@@ -1502,7 +1518,7 @@ fn build_unsuppressed_unused_member(
         MemberKind::EnumMember => IssueKind::UnusedEnumMember,
         MemberKind::ClassMethod | MemberKind::ClassProperty => IssueKind::UnusedClassMember,
         MemberKind::StoreMember => IssueKind::UnusedStoreMember,
-        MemberKind::NamespaceMember => unreachable!(),
+        MemberKind::NamespaceMember => IssueKind::UnusedNamespaceMember,
     };
     if suppressions.is_suppressed(file_id, line, issue_kind) {
         return None;
@@ -1520,7 +1536,11 @@ fn build_unsuppressed_unused_member(
 
 fn should_skip_member_for_unused_report(member: &MemberInfo, ctx: &MemberSkipContext<'_>) -> bool {
     if matches!(member.kind, MemberKind::NamespaceMember) {
-        return true;
+        return ctx.namespace_members_exempt
+            || ctx
+                .accessed_members
+                .get(ctx.export_key)
+                .is_some_and(|accessed| namespace_member_credited(accessed, &member.name));
     }
 
     if ctx.is_public_api_class_export && is_class_member_kind(member.kind) {
@@ -1768,6 +1788,8 @@ fn collect_direct_member_accesses(
                     .insert(access.member.clone());
             }
         }
+
+        credit_namespace_member_uses(graph, resolved, local_to_export_keys, &mut accessed_members);
 
         for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
             .qualified_class_member_accesses()

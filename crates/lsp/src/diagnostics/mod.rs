@@ -524,6 +524,7 @@ mod severity_gate {
             unused_enum_members: _,
             unused_class_members: _,
             unused_store_members: _,
+            unused_namespace_members: _,
             unresolved_imports: _,
             unlisted_dependencies: _,
             unlisted_binaries: _,
@@ -848,6 +849,24 @@ mod severity_gate {
                                 member_name: "m".to_string(),
                                 kind: fallow_api::editor_extract::MemberKind::ClassMethod,
                                 line: 7,
+                                col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-namespace-member",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_namespace_members.push(
+                        fallow_api::editor_results::UnusedNamespaceMemberFinding::with_actions(
+                            fallow_api::editor_results::UnusedMember {
+                                path: root.join("a.ts"),
+                                parent_name: "N".to_string(),
+                                member_name: "a".to_string(),
+                                kind: fallow_api::editor_extract::MemberKind::NamespaceMember,
+                                line: 9,
                                 col: 0,
                             },
                         ),

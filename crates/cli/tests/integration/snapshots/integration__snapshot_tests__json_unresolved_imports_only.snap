@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
+assertion_line: 1101
 expression: redact_version(&json_str)
 ---
 {
@@ -18,6 +19,7 @@ expression: redact_version(&json_str)
     "unused_dependencies": 0,
     "unused_enum_members": 0,
     "unused_class_members": 0,
+    "unused_namespace_members": 0,
     "unused_store_members": 0,
     "unprovided_injects": 0,
     "unrendered_components": 0,

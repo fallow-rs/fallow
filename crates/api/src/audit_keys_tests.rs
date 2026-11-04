@@ -888,6 +888,31 @@ fn unused_store_member_results(root: &Path) -> AnalysisResults {
     results
 }
 
+fn unused_namespace_member_results(root: &Path) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results
+        .unused_namespace_members
+        .push(UnusedNamespaceMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/legacy.ts"),
+            parent_name: "Legacy".to_string(),
+            member_name: "Inner.unused".to_string(),
+            kind: MemberKind::NamespaceMember,
+            line: 4,
+            col: 15,
+        }));
+    results
+}
+
+#[test]
+fn dead_code_keys_cover_unused_namespace_member() {
+    let root = root();
+    let keys = dead_code_keys(&unused_namespace_member_results(&root), &root);
+    assert!(
+        keys.contains("unused-namespace-member:src/legacy.ts:Legacy:Inner.unused"),
+        "{keys:?}"
+    );
+}
+
 #[test]
 fn dead_code_keys_cover_unused_store_member() {
     let root = root();
@@ -1955,6 +1980,7 @@ fn audit_ledger_errors_match_the_exit_code_rule_for_every_collection() {
         server_action_load_data_and_route_results(&root),
         angular_input_output_and_policy_results(&root),
         unused_store_member_results(&root),
+        unused_namespace_member_results(&root),
         production_and_directive_results(&root),
         AnalysisResults {
             prop_drilling_chains: vec![PropDrillingChainFinding::with_actions(PropDrillingChain {

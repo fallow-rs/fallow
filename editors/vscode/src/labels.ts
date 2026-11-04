@@ -16,6 +16,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "unused-optional-dependencies": "unused-optional-dependency",
   "unused-enum-members": "unused-enum-member",
   "unused-class-members": "unused-class-member",
+  "unused-namespace-member": "unused-namespace-member",
   "unused-store-member": "unused-store-member",
   "unused-server-action": "unused-server-action",
   "unused-load-data-keys": "unused-load-data-key",

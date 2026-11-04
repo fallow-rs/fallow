@@ -50,6 +50,7 @@ mod literal_membership;
 pub mod mdx;
 mod module_info;
 mod module_parse;
+mod namespace_member_uses;
 mod nesting;
 pub mod og_image;
 mod parse;

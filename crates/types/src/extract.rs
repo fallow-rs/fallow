@@ -10,6 +10,12 @@ pub use crate::complexity_contribution::{
 };
 use crate::discover::FileId;
 use crate::suppress::{Suppression, UnknownSuppressionKind};
+#[path = "extract_playwright_facts.rs"]
+mod playwright_facts;
+use playwright_facts::{
+    playwright_fixture_alias_facts, playwright_fixture_definition_facts,
+    playwright_fixture_type_facts, playwright_fixture_use_facts,
+};
 
 /// Extracted module information from a single file.
 ///
@@ -2285,6 +2291,25 @@ pub enum SemanticFact {
     /// A static member name probed with `"name" in value` or `Reflect.has(value, "name")`.
     /// Appended because bitcode encodes enum variants by ordinal.
     MemberNameProbe(MemberNameProbeFact),
+    /// A use of a member of a TypeScript namespace that a plain member access
+    /// does not record: a nested chain (`N.Inner.x`), a value that leaves the
+    /// chain (`use(N)`), or a reference inside the namespace body.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    NamespaceMemberUse(NamespaceMemberUseFact),
+}
+
+/// A use of a namespace member, found by the semantic pass.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NamespaceMemberUseFact {
+    /// The local name of the root binding: an import binding, or a namespace
+    /// that the module declares.
+    pub object: String,
+    /// The dotted member path after the root. Empty for a bare root.
+    pub path: String,
+    /// The code hands the value at `path` on (an argument, an alias, a
+    /// spread). Every member below `path` then counts as used.
+    pub whole: bool,
 }
 
 /// A static member name that a runtime probe checks on an untyped value.
@@ -2943,58 +2968,6 @@ fn fluent_chain_new_member_access_facts(
 ) -> impl Iterator<Item = &FluentChainNewMemberAccessFact> {
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
-            Some(access)
-        } else {
-            None
-        }
-    })
-}
-
-/// Iterate typed Playwright fixture-use facts.
-fn playwright_fixture_use_facts(
-    semantic_facts: &[SemanticFact],
-) -> impl Iterator<Item = &PlaywrightFixtureUseFact> {
-    semantic_facts.iter().filter_map(|fact| {
-        if let SemanticFact::PlaywrightFixtureUse(access) = fact {
-            Some(access)
-        } else {
-            None
-        }
-    })
-}
-
-/// Iterate typed Playwright fixture-definition facts.
-fn playwright_fixture_definition_facts(
-    semantic_facts: &[SemanticFact],
-) -> impl Iterator<Item = &PlaywrightFixtureDefinitionFact> {
-    semantic_facts.iter().filter_map(|fact| {
-        if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
-            Some(access)
-        } else {
-            None
-        }
-    })
-}
-
-/// Iterate typed Playwright fixture-alias facts.
-fn playwright_fixture_alias_facts(
-    semantic_facts: &[SemanticFact],
-) -> impl Iterator<Item = &PlaywrightFixtureAliasFact> {
-    semantic_facts.iter().filter_map(|fact| {
-        if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
-            Some(access)
-        } else {
-            None
-        }
-    })
-}
-
-/// Iterate typed Playwright fixture-type facts.
-fn playwright_fixture_type_facts(
-    semantic_facts: &[SemanticFact],
-) -> impl Iterator<Item = &PlaywrightFixtureTypeFact> {
-    semantic_facts.iter().filter_map(|fact| {
-        if let SemanticFact::PlaywrightFixtureType(access) = fact {
             Some(access)
         } else {
             None

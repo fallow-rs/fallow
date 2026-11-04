@@ -407,7 +407,14 @@ impl ModuleInfoExtractor {
 
     /// Push a single namespace-member entry with the shared `NamespaceMember`
     /// defaults (no decorator / static / self-return signals).
-    fn push_namespace_member(&mut self, name: String, span: oxc_span::Span) {
+    /// A member of a nested namespace gets the dotted path from the exported
+    /// root namespace (`Inner.x`).
+    pub(super) fn push_namespace_member(&mut self, name: String, span: oxc_span::Span) {
+        let name = if self.namespace_member_path.is_empty() {
+            name
+        } else {
+            format!("{}.{name}", self.namespace_member_path.join("."))
+        };
         self.pending_namespace_members.push(MemberInfo {
             name,
             kind: MemberKind::NamespaceMember,

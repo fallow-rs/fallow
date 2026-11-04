@@ -64,6 +64,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unused_optional_dependencies,
         &mut rules.unused_enum_members,
         &mut rules.unused_class_members,
+        &mut rules.unused_namespace_members,
         &mut rules.unused_store_members,
         &mut rules.unprovided_injects,
         &mut rules.unrendered_components,

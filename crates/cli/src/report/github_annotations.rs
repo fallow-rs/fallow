@@ -626,6 +626,21 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
         env,
+        "unused_namespace_members",
+        "Unused namespace member",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Namespace member '{}.{}' is never referenced.\n\nConsider removing it, or removing its export keyword when only the namespace body uses it.{}",
+                s(it, "parent_name"),
+                s(it, "member_name"),
+                caveat_note(it),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
         "unused_store_members",
         "Unused store member",
         Anchor::line_col,

@@ -463,6 +463,8 @@ pub struct DeadCodeFilters {
     pub unused_enum_members: bool,
     /// Class members never used outside their declaration.
     pub unused_class_members: bool,
+    /// Members of an exported TypeScript namespace that no code reads.
+    pub unused_namespace_members: bool,
     /// Store members (for example Pinia) never used outside the store.
     pub unused_store_members: bool,
     /// `inject` calls with no matching `provide`.
@@ -542,6 +544,7 @@ impl DeadCodeFilters {
             || self.deprecated_exports_in_use
             || self.unused_enum_members
             || self.unused_class_members
+            || self.unused_namespace_members
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -609,6 +612,7 @@ impl DeadCodeFilters {
             "--unused-deps" => self.unused_deps = true,
             "--unused-enum-members" => self.unused_enum_members = true,
             "--unused-class-members" => self.unused_class_members = true,
+            "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,

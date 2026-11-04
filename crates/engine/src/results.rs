@@ -36,7 +36,7 @@ pub use fallow_types::output_dead_code::{
     UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
     UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };

@@ -59,6 +59,8 @@ def dependency_action(pkg):
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused enum member::Enum member '\(.parent_name | san).\(.member_name | san)' is never referenced in the codebase.\(nl)\(nl)Consider removing it to keep the enum minimal."),
   (.unused_class_members[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused class member::Class member '\(.parent_name | san).\(.member_name | san)' is never referenced.\(nl)\(nl)Consider removing it or marking it as private."),
+  (.unused_namespace_members[]? |
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused namespace member::Namespace member '\(.parent_name | san).\(.member_name | san)' is never referenced.\(nl)\(nl)Consider removing it, or removing its export keyword when only the namespace body uses it."),
   (.unused_store_members[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused store member::Store member '\(.parent_name | san).\(.member_name | san)' is never accessed by any consumer.\(nl)\(nl)Consider removing the unused store state, getter, or action."),
   (.unresolved_imports[]? |

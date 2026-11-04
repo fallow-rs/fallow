@@ -19,7 +19,9 @@ use fallow_types::results::AnalysisResults;
 #[path = "dead_code_codeclimate_catalog.rs"]
 mod catalog_issues;
 use catalog_issues::{
-    push_misconfigured_dependency_override_issues, push_unresolved_catalog_reference_issues,
+    push_empty_catalog_group_issues, push_misconfigured_dependency_override_issues,
+    push_unresolved_catalog_reference_issues, push_unused_catalog_entry_issues,
+    push_unused_dependency_override_issues,
 };
 
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
@@ -1760,138 +1762,6 @@ fn push_stale_suppression_issues(
     }
 }
 
-fn push_unused_catalog_entry_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    entries: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if entries.is_empty() {
-        return;
-    }
-    for entry in entries {
-        let level = finding_codeclimate(entry, severity);
-        let finding_id = entry.finding_id.as_deref();
-        let entry = &entry.entry;
-        let path = cc_path(&entry.path, root);
-        let line_str = entry.line.to_string();
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/unused-catalog-entry",
-            &path,
-            &line_str,
-            &entry.catalog_name,
-            &entry.entry_name,
-        ]);
-        let description = if entry.catalog_name == "default" {
-            format!(
-                "Catalog entry '{}' is not referenced by any workspace package",
-                entry.entry_name
-            )
-        } else {
-            format!(
-                "Catalog entry '{}' (catalog '{}') is not referenced by any workspace package",
-                entry.entry_name, entry.catalog_name
-            )
-        };
-        issues.push(dead_code_issue(
-            finding_id,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/unused-catalog-entry",
-                description: &description,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: Some(entry.line),
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_empty_catalog_group_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if groups.is_empty() {
-        return;
-    }
-    for group in groups {
-        let level = finding_codeclimate(group, severity);
-        let finding_id = group.finding_id.as_deref();
-        let group = &group.group;
-        let path = cc_path(&group.path, root);
-        let line_str = group.line.to_string();
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/empty-catalog-group",
-            &path,
-            &line_str,
-            &group.catalog_name,
-        ]);
-        issues.push(dead_code_issue(
-            finding_id,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/empty-catalog-group",
-                description: &format!("Catalog group '{}' has no entries", group.catalog_name),
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: Some(group.line),
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_unused_dependency_override_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    for finding in findings {
-        let level = finding_codeclimate(finding, severity);
-        let finding_id = finding.finding_id.as_deref();
-        let finding = &finding.entry;
-        let path = cc_path(&finding.path, root);
-        let line_str = finding.line.to_string();
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/unused-dependency-override",
-            &path,
-            &line_str,
-            finding.source.as_label(),
-            &finding.raw_key,
-        ]);
-        let mut description = format!(
-            "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in the lockfile",
-            finding.raw_key, finding.version_range, finding.target_package,
-        );
-        if let Some(hint) = &finding.hint {
-            use std::fmt::Write as _;
-            let _ = write!(description, " ({hint})");
-        }
-        issues.push(dead_code_issue(
-            finding_id,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/unused-dependency-override",
-                description: &description,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: Some(finding.line),
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
 /// Build CodeClimate issues from dead-code analysis results.
 ///
 /// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
@@ -2107,6 +1977,21 @@ impl CodeClimateBuilder<'_> {
             "fallow/unused-store-member",
             "Store",
             self.rules.unused_store_members,
+        );
+        push_unused_member_issues(
+            &mut self.issues,
+            self.results.unused_namespace_members.iter().map(|m| {
+                (
+                    &m.member,
+                    m.reachability_caveats.as_slice(),
+                    m.effective_severity,
+                    m.finding_id.as_deref(),
+                )
+            }),
+            self.root,
+            "fallow/unused-namespace-member",
+            "Namespace",
+            self.rules.unused_namespace_members,
         );
     }
 

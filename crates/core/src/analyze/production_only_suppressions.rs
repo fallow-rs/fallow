@@ -32,10 +32,11 @@ use super::{
     store_member_rule_is_active,
 };
 
-const MEMBER_KINDS: [IssueKind; 3] = [
+const MEMBER_KINDS: [IssueKind; 4] = [
     IssueKind::UnusedEnumMember,
     IssueKind::UnusedClassMember,
     IssueKind::UnusedStoreMember,
+    IssueKind::UnusedNamespaceMember,
 ];
 
 /// Collect the stale suppressions of this run, without a suppression that
@@ -174,6 +175,7 @@ fn is_member_rule_active(input: &PostDetectionInput<'_, '_>, kind: IssueKind) ->
     match kind {
         IssueKind::UnusedEnumMember => rules.unused_enum_members != Severity::Off,
         IssueKind::UnusedClassMember => rules.unused_class_members != Severity::Off,
+        IssueKind::UnusedNamespaceMember => rules.unused_namespace_members != Severity::Off,
         IssueKind::UnusedStoreMember => {
             store_member_rule_is_active(input.config, input.declared_deps)
         }
@@ -198,6 +200,7 @@ fn unused_members_of_kind(
                 .map(|candidate| &candidate.member),
         ),
         IssueKind::UnusedStoreMember => Box::new(members.store_members.iter()),
+        IssueKind::UnusedNamespaceMember => Box::new(members.namespace_members.iter()),
         _ => Box::new(std::iter::empty()),
     }
 }

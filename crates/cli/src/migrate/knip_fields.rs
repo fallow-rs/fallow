@@ -49,28 +49,17 @@ pub(super) fn warn_unmapped_rule_key(
 /// The severity of a knip issue type that `rules` does not set.
 const DEFAULT_SEVERITY: &str = "error";
 
-/// Whether a knip setting turns an issue type off or on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum IssueTypeEffect {
-    /// `exclude`, `ignoreIssues`, or a rule set to `"off"`.
-    Off,
-    /// `include`, or a rule set to `"warn"` or `"error"`.
-    On,
-}
-
-/// Migrate a knip namespace issue type (`nsExports`, `nsTypes`,
-/// `namespaceMembers`). Returns `false` when `key` is not one.
+/// Migrate a knip namespace issue type (`nsExports`, `nsTypes`). Returns
+/// `false` when `key` is not one.
 ///
 /// `has_peer(base)` tells whether the same setting gives the base issue type
 /// (`exports` for `nsExports`) the same effect. Fallow reports the namespace
 /// findings under the base type, so the entry then needs no migration. An
 /// entry without that peer gets a warning, because fallow cannot apply it to
-/// the namespace findings alone. `namespaceMembers` has no fallow finding, so
-/// only an entry that turns it on gets a warning.
+/// the namespace findings alone.
 pub(super) fn migrate_namespace_issue_type(
     context: &str,
     key: &str,
-    effect: IssueTypeEffect,
     has_peer: impl Fn(&str) -> bool,
     warnings: &mut Vec<MigrationWarning>,
 ) -> bool {
@@ -80,30 +69,21 @@ pub(super) fn migrate_namespace_issue_type(
     else {
         return false;
     };
-    match base {
-        Some(base) if !has_peer(base) => {
-            let fallow_rule = KNIP_RULE_MAP
-                .iter()
-                .find(|(name, _)| name == base)
-                .map_or(*base, |(_, rule)| *rule);
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: format!("{context}.{key}"),
-                message: format!(
-                    "fallow reports issue type `{key}` as `{fallow_rule}`, together with `{base}`; not migrated on its own"
-                ),
-                suggestion: Some(format!(
-                    "set `{base}` the same way to apply the setting to both"
-                )),
-            });
-        }
-        None if effect == IssueTypeEffect::On => warnings.push(MigrationWarning {
+    if !has_peer(base) {
+        let fallow_rule = KNIP_RULE_MAP
+            .iter()
+            .find(|(name, _)| name == base)
+            .map_or(*base, |(_, rule)| *rule);
+        warnings.push(MigrationWarning {
             source: "knip",
             field: format!("{context}.{key}"),
-            message: format!("fallow does not report members of a TypeScript namespace (`{key}`)"),
-            suggestion: None,
-        }),
-        _ => {}
+            message: format!(
+                "fallow reports issue type `{key}` as `{fallow_rule}`, together with `{base}`; not migrated on its own"
+            ),
+            suggestion: Some(format!(
+                "set `{base}` the same way to apply the setting to both"
+            )),
+        });
     }
     true
 }
@@ -193,17 +173,12 @@ pub(super) fn migrate_rules(
         if KNIP_RULE_MAP.iter().any(|(k, _)| k == key) {
             continue;
         }
-        let effect = if severity.as_str() == Some("off") {
-            IssueTypeEffect::Off
-        } else {
-            IssueTypeEffect::On
-        };
         // An unset base rule has the default severity `"error"`.
         let has_peer = |base: &str| match rules_obj.get(base) {
             Some(peer) => peer == severity,
             None => severity.as_str() == Some(DEFAULT_SEVERITY),
         };
-        if !migrate_namespace_issue_type("rules", key, effect, has_peer, warnings) {
+        if !migrate_namespace_issue_type("rules", key, has_peer, warnings) {
             warn_unmapped_rule_key("rules", key, warnings);
         }
     }
@@ -236,7 +211,6 @@ pub(super) fn migrate_exclude(
             && !migrate_namespace_issue_type(
                 "exclude",
                 knip_name,
-                IssueTypeEffect::Off,
                 |base| excluded.iter().any(|name| name == base),
                 warnings,
             )
@@ -273,7 +247,6 @@ pub(super) fn migrate_include(
         if !migrate_namespace_issue_type(
             "include",
             name,
-            IssueTypeEffect::On,
             |base| included.iter().any(|other| other == base),
             warnings,
         ) {

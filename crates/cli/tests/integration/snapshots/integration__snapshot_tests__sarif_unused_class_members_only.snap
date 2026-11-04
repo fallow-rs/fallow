@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
+assertion_line: 1403
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -141,6 +142,19 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-class-members",
               "defaultConfiguration": {
                 "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-namespace-member",
+              "shortDescription": {
+                "text": "Namespace member is never referenced"
+              },
+              "fullDescription": {
+                "text": "Exported members of an exported TypeScript namespace that no code reads. A nested namespace member has a dotted name (`Inner.x`). A whole use of the namespace (an argument, an alias, a spread) counts every member as used. Declaration files, `declare global`, module augmentations and the public API of an entry point are not checked. Defaults to warn."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-namespace-members",
+              "defaultConfiguration": {
+                "level": "warning"
               }
             },
             {

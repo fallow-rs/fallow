@@ -9,6 +9,8 @@ use crate::{
     issue_output_contracts, normalize_uri,
 };
 use fallow_config::{RulesConfig, Severity};
+#[path = "dead_code_sarif_members.rs"]
+mod members;
 use fallow_types::{
     issue_meta::issue_sarif_rule_description,
     output_dead_code::*,
@@ -24,6 +26,7 @@ use fallow_types::{
         UnusedMember, UnusedServerAction, UnusedSvelteEvent, UnusedTaggedError,
     },
 };
+use members::push_member_sarif_results;
 
 #[path = "dead_code_sarif_component_framework.rs"]
 mod component_framework;
@@ -1284,6 +1287,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "dev-dependency-in-production" => rules.dev_dependencies_in_production,
         "unused-enum-member" => rules.unused_enum_members,
         "unused-class-member" => rules.unused_class_members,
+        "unused-namespace-member" => rules.unused_namespace_members,
         "unused-store-member" => rules.unused_store_members,
         "unresolved-import" => rules.unresolved_imports,
         "unlisted-dependency" => rules.unlisted_dependencies,
@@ -1637,65 +1641,6 @@ fn push_classified_dependency_sarif_results(
                 root,
                 finding_level(d, rules.dev_dependencies_in_production),
                 columns.next().unwrap_or(1),
-            )
-        },
-    );
-}
-
-fn push_member_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    ctx: &SarifCtx<'_>,
-    snippets: &mut SourceSnippetCache,
-) {
-    let SarifCtx {
-        results,
-        root,
-        rules,
-    } = *ctx;
-
-    push_sarif_results(sarif_results, &results.unused_enum_members, snippets, |m| {
-        with_caveats(
-            sarif_member_fields(
-                &m.member,
-                root,
-                "fallow/unused-enum-member",
-                finding_level(m, rules.unused_enum_members),
-                "Enum",
-            ),
-            &m.reachability_caveats,
-        )
-    });
-    push_sarif_results(
-        sarif_results,
-        &results.unused_class_members,
-        snippets,
-        |m| {
-            with_caveats(
-                sarif_member_fields(
-                    &m.member,
-                    root,
-                    "fallow/unused-class-member",
-                    finding_level(m, rules.unused_class_members),
-                    "Class",
-                ),
-                &m.reachability_caveats,
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.unused_store_members,
-        snippets,
-        |m| {
-            with_caveats(
-                sarif_member_fields(
-                    &m.member,
-                    root,
-                    "fallow/unused-store-member",
-                    finding_level(m, rules.unused_store_members),
-                    "Store",
-                ),
-                &m.reachability_caveats,
             )
         },
     );

@@ -155,6 +155,7 @@ impl DeadCodeAuditLedger {
             unused_optional_dependencies,
             unused_enum_members,
             unused_class_members,
+            unused_namespace_members,
             unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
@@ -243,6 +244,7 @@ impl DeadCodeAuditLedger {
         annotate!(unused_optional_dependencies, "unused_optional_dependencies");
         annotate!(unused_enum_members, "unused_enum_members");
         annotate!(unused_class_members, "unused_class_members");
+        annotate!(unused_namespace_members, "unused_namespace_members");
         annotate!(unused_store_members, "unused_store_members");
         annotate!(unresolved_imports, "unresolved_imports");
         annotate!(unlisted_dependencies, "unlisted_dependencies");
@@ -640,6 +642,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_optional_dependencies,
             unused_enum_members,
             unused_class_members,
+            unused_namespace_members,
             unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
@@ -743,6 +746,7 @@ impl DeadCodeKeyCollector<'_> {
         self.add_member_findings(
             unused_enum_members,
             unused_class_members,
+            unused_namespace_members,
             unused_store_members,
         );
         self.add_component_contract_findings(&ComponentContractFindingSlices {
@@ -964,10 +968,12 @@ impl<'a> DeadCodeKeyCollector<'a> {
         &mut self,
         unused_enum_members: &[fallow_types::output_dead_code::UnusedEnumMemberFinding],
         unused_class_members: &[fallow_types::output_dead_code::UnusedClassMemberFinding],
+        unused_namespace_members: &[fallow_types::output_dead_code::UnusedNamespaceMemberFinding],
         unused_store_members: &[fallow_types::output_dead_code::UnusedStoreMemberFinding],
     ) {
         self.add_unused_enum_members(unused_enum_members);
         self.add_unused_class_members(unused_class_members);
+        self.add_unused_namespace_members(unused_namespace_members);
         self.add_unused_store_members(unused_store_members);
     }
 
@@ -1235,6 +1241,13 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_items(AuditCollection::UnusedClassMembers, items);
     }
 
+    fn add_unused_namespace_members(
+        &mut self,
+        items: &[fallow_types::output_dead_code::UnusedNamespaceMemberFinding],
+    ) {
+        self.add_items(AuditCollection::UnusedNamespaceMembers, items);
+    }
+
     fn add_unused_store_members(
         &mut self,
         items: &[fallow_types::output_dead_code::UnusedStoreMemberFinding],
@@ -1438,6 +1451,7 @@ pub fn retain_introduced_dead_code(
         deprecated_exports_in_use,
         unused_enum_members,
         unused_class_members,
+        unused_namespace_members,
         unused_store_members,
         unresolved_imports,
         unused_dependencies,
@@ -1505,6 +1519,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unused_optional_dependencies: _unused_optional_dependencies,
         unused_enum_members: _unused_enum_members,
         unused_class_members: _unused_class_members,
+        unused_namespace_members: _unused_namespace_members,
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
@@ -1652,6 +1667,7 @@ pub fn annotate_dead_code_json(
         unlisted_binaries,
         unused_enum_members,
         unused_class_members,
+        unused_namespace_members,
         unused_store_members,
         unresolved_imports,
         duplicate_exports,

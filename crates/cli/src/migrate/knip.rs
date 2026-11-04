@@ -517,7 +517,11 @@ mod tests {
             &serde_json::json!([
                 {
                     "files": ["apps/server/**/*.graphql.ts"],
-                    "rules": {"unused-exports": "off", "unused-types": "off"}
+                    "rules": {
+                        "unused-exports": "off",
+                        "unused-types": "off",
+                        "unused-namespace-members": "off"
+                    }
                 },
                 {
                     "files": ["packages/*/src/_generated/**"],
@@ -554,8 +558,17 @@ mod tests {
         assert_eq!(
             config.get("overrides").unwrap(),
             &serde_json::json!([
-                {"files": ["src/ui/*.tsx"], "rules": {"unused-exports": "off"}}
+                {
+                    "files": ["src/ui/*.tsx"],
+                    "rules": {"unused-exports": "off", "unused-namespace-members": "off"}
+                }
             ])
+        );
+        assert_eq!(
+            config
+                .get("rules")
+                .and_then(|rules| rules.get("unused-namespace-members")),
+            Some(&serde_json::json!("off"))
         );
         assert_eq!(
             warning_fields(&warnings),
@@ -591,20 +604,23 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_namespace_members_warn_only_when_turned_on() {
+    fn migrate_knip_namespace_members_map_to_unused_namespace_members() {
         let knip = serde_json::json!({
-            "rules": {"namespaceMembers": "error", "exports": "warn", "nsExports": "warn"},
-            "include": ["exports", "nsExports", "namespaceMembers"]
+            "rules": {"namespaceMembers": "warn"},
+            "include": ["exports", "namespaceMembers"],
+            "exclude": ["namespaceMembers"]
         });
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
+        assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(
-            warning_fields(&warnings),
-            ["rules.namespaceMembers", "include.namespaceMembers"]
+            config
+                .get("rules")
+                .and_then(|rules| rules.get("unused-namespace-members")),
+            Some(&serde_json::json!("off"))
         );
-        assert!(warnings[0].message.contains("TypeScript namespace"));
     }
 
     #[test]
@@ -956,8 +972,8 @@ mod tests {
     fn migrate_knip_exclude_all_mappable_types() {
         let knip: serde_json::Value = serde_json::from_str(
             r#"{"exclude": ["files", "dependencies", "devDependencies", "exports",
-                "types", "enumMembers", "classMembers", "unlisted", "binaries", "unresolved",
-                "duplicates", "cycles"]}"#,
+                "types", "enumMembers", "classMembers", "namespaceMembers", "unlisted", "binaries",
+                "unresolved", "duplicates", "cycles"]}"#,
         )
         .unwrap();
         let mut config = empty_config();

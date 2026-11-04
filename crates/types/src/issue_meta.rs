@@ -3,6 +3,9 @@
 use std::sync::LazyLock;
 
 use crate::suppress::IssueKind;
+#[path = "issue_meta_derived.rs"]
+mod derived;
+use derived::{dead_code_filter_flags_from_meta, known_issue_kind_names_from_meta};
 
 #[path = "issue_meta_kind_methods.rs"]
 mod kind_methods;
@@ -180,6 +183,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         filter_flag: Some("--unused-class-members"),
         mcp_issue_type: Some("unused-class-members"),
         suppress_token: Some("unused-class-member"),
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "source",
+    },
+    IssueKindMeta {
+        kind: Some(IssueKind::UnusedNamespaceMember),
+        code: "unused-namespace-member",
+        aliases: &["unused-namespace-members"],
+        label: "Unused Namespace Members",
+        config_key: Some("unused-namespace-members"),
+        filter_flag: Some("--unused-namespace-members"),
+        mcp_issue_type: Some("unused-namespace-members"),
+        suppress_token: Some("unused-namespace-member"),
         suppress_file_level: false,
         lsp: true,
         docs_category: "source",
@@ -1072,6 +1088,13 @@ pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
         },
     },
     IssueTsAliasMeta {
+        code: "unused-namespace-member",
+        alias: TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedNamespaceMemberFinding",
+        },
+    },
+    IssueTsAliasMeta {
         code: "unused-store-member",
         alias: TsAliasMeta {
             name: "UnusedMember",
@@ -1309,6 +1332,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Unused class members",
         docs_anchor: "unused-class-members",
         result_key: "unused_class_members",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-namespace-member",
+        sarif_description: "Namespace member is never referenced",
+        meta_description: "Exported members of an exported TypeScript namespace that no code reads.",
+        meta_docs_path: "explanations/dead-code#unused-namespace-members",
+        meta_name: "Unused Namespace Members",
+        summary_label: "Unused namespace members",
+        docs_anchor: "unused-namespace-members",
+        result_key: "unused_namespace_members",
         counts_in_total: true,
     },
     IssueResultMeta {
@@ -1801,27 +1835,6 @@ pub static MCP_ISSUE_TYPE_FLAGS: LazyLock<Vec<(&'static str, &'static str)>> =
 /// Result issue codes emitted by the dead-code CodeClimate formatter.
 pub static CODECLIMATE_RESULT_CODES: LazyLock<Vec<&'static str>> =
     LazyLock::new(codeclimate_result_codes_from_meta);
-
-fn known_issue_kind_names_from_meta() -> Vec<&'static str> {
-    let mut names = Vec::new();
-    for meta in ISSUE_KIND_META.iter().filter(|meta| meta.kind.is_some()) {
-        push_unique(&mut names, meta.code);
-        for alias in meta.aliases {
-            push_unique(&mut names, *alias);
-        }
-    }
-    names
-}
-
-fn dead_code_filter_flags_from_meta() -> Vec<&'static str> {
-    let mut flags = Vec::new();
-    for meta in ISSUE_KIND_META {
-        if let Some(flag) = meta.filter_flag {
-            push_unique(&mut flags, flag);
-        }
-    }
-    flags
-}
 
 fn mcp_issue_type_flags_from_meta() -> Vec<(&'static str, &'static str)> {
     ISSUE_KIND_META
