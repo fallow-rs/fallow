@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -73,11 +74,14 @@ fn is_cancelled(request: Option<&CancellationToken>) -> bool {
     request.is_some_and(CancellationToken::is_cancelled)
 }
 
+#[path = "code_mode_rust.rs"]
+mod code_mode_rust;
 #[path = "code_mode_subprocess.rs"]
 mod code_mode_subprocess;
 #[path = "code_mode_tools.rs"]
 mod code_mode_tools;
 
+use code_mode_rust::{is_rust_root, reject_rust_root, rust_root_envelope};
 #[cfg(test)]
 use code_mode_subprocess::normalize_output;
 use code_mode_subprocess::run_fallow_sync;
@@ -101,6 +105,17 @@ pub fn execute_code_mode(
     params: CodeExecuteParams,
     request: Option<CancellationToken>,
 ) -> Result<String, String> {
+    execute_code_mode_in(binary, params, request, Path::new("."))
+}
+
+/// [`execute_code_mode`] with the server folder as a parameter. A host call
+/// without a root runs in `cwd`, so `cwd` decides the Rust refusal then.
+fn execute_code_mode_in(
+    binary: String,
+    params: CodeExecuteParams,
+    request: Option<CancellationToken>,
+    cwd: &Path,
+) -> Result<String, String> {
     let timeout_ms = params
         .timeout_ms
         .unwrap_or(DEFAULT_TIMEOUT_MS)
@@ -120,6 +135,9 @@ pub fn execute_code_mode(
             error_limit,
         ));
     }
+    if is_rust_root(params.root.as_deref(), cwd) {
+        return Err(rust_root_envelope(&limits, error_limit));
+    }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
     let runtime = build_code_mode_runtime(deadline, request.clone())?;
@@ -128,6 +146,7 @@ pub fn execute_code_mode(
     let state = Rc::new(RefCell::new(CodeModeState::new(
         binary,
         params.root,
+        cwd.to_path_buf(),
         deadline,
         request,
         max_output_bytes,
@@ -523,6 +542,8 @@ fn user_source(code: &str) -> String {
 struct CodeModeState {
     binary: String,
     default_root: Option<String>,
+    /// The server folder: the root of a host call without a root.
+    cwd: PathBuf,
     deadline: Instant,
     /// Cancellation token of the MCP request that runs the snippet.
     request: Option<CancellationToken>,
@@ -558,6 +579,7 @@ impl CodeModeState {
     fn new(
         binary: String,
         default_root: Option<String>,
+        cwd: PathBuf,
         deadline: Instant,
         request: Option<CancellationToken>,
         max_output_bytes: usize,
@@ -565,6 +587,7 @@ impl CodeModeState {
         Self {
             binary,
             default_root,
+            cwd,
             deadline,
             request,
             max_output_bytes,
@@ -592,6 +615,7 @@ impl CodeModeState {
         let tool = CodeModeTool::from_name(tool)?;
         let params = merge_default_root(params_json, self.default_root.as_deref())?;
         reject_file_write_params(tool, &params)?;
+        reject_rust_root(&params, &self.cwd)?;
         let key = memo_key(tool, &params);
         Ok(ResolvedHostCall { tool, params, key })
     }
@@ -1375,6 +1399,7 @@ fn classify_host_error(message: &str) -> &'static str {
         || message.contains("unsupported code mode fallow tool")
         || message.contains("similar-code is not exposed through Code Mode")
         || message.contains("mutation testing is not exposed through Code Mode")
+        || message.contains("Code Mode has no Rust route")
     {
         return "unsupported_tool";
     }
@@ -1402,6 +1427,7 @@ fn classify_host_error(message: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::super::base_root_fixture::git;
+    use super::code_mode_rust::execute_code_mode_off_rust;
     use super::*;
 
     #[test]
@@ -1472,7 +1498,7 @@ mod tests {
 
     #[test]
     fn oversized_code_is_rejected_before_runtime() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "x".repeat(MAX_CODE_BYTES + 1),
@@ -1509,7 +1535,7 @@ mod tests {
         )
         .expect("source");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code:
@@ -1545,7 +1571,7 @@ mod tests {
         )
         .expect("source");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.combined({ no_cache: true, score: true });".to_string(),
@@ -1577,7 +1603,7 @@ mod tests {
         )
         .expect("package json");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.combined({ coverage: 'missing-coverage.json' });".to_string(),
@@ -1642,7 +1668,7 @@ mod tests {
         )
         .expect("changed source");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: r#"return fallow.checkChanged({ since: "HEAD", no_cache: true });"#
@@ -1678,7 +1704,7 @@ mod tests {
         )
         .expect("source");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.featureFlags({ no_cache: true });".to_string(),
@@ -1737,7 +1763,7 @@ mod tests {
         )
         .expect("shared source");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.listBoundaries({ no_cache: true });".to_string(),
@@ -1760,7 +1786,7 @@ mod tests {
 
     #[test]
     fn api_backed_explain_does_not_spawn_binary() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.explain({ issue_type: 'unused-export' });".to_string(),
@@ -1795,7 +1821,7 @@ mod tests {
         )
         .expect("source");
 
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "/definitely/not/fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.projectInfo({ files: true, no_cache: true });".to_string(),
@@ -1817,7 +1843,7 @@ mod tests {
 
     #[test]
     fn cpu_bound_snippets_report_timeout() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "while (true) {}".to_string(),
@@ -1988,7 +2014,7 @@ mod tests {
         let request = CancellationToken::new();
         let canceller = cancel_soon(&request);
         let started = Instant::now();
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "while (true) {}".to_string(),
@@ -2017,6 +2043,7 @@ mod tests {
         let mut state = CodeModeState::new(
             "/definitely/not/fallow".to_string(),
             None,
+            std::env::temp_dir(),
             Instant::now() + Duration::from_secs(30),
             Some(request),
             1_000_000,
@@ -2162,7 +2189,7 @@ mod tests {
 
     #[test]
     fn code_mode_returns_standalone_guidance_for_similar_code_dispatch() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return fallow.run('find_similar_code', {});".to_string(),
@@ -2206,7 +2233,7 @@ mod tests {
                 "return fallow.run('{tool}', {{ root: {root:?}, {param}: {target:?} }});",
                 root = dir.path().to_str().expect("utf8"),
             );
-            let output = execute_code_mode(
+            let output = execute_code_mode_off_rust(
                 "fallow".to_string(),
                 CodeExecuteParams {
                     code,
@@ -2342,45 +2369,6 @@ mod tests {
             classify_host_error("failed to execute fallow binary 'fallow': No such file"),
             "subprocess"
         );
-    }
-
-    // ---- merge_default_root ------------------------------------------------
-
-    #[test]
-    fn merge_default_root_no_default_leaves_params_unchanged() {
-        let params = merge_default_root(r#"{"files":true}"#, None).unwrap();
-        assert_eq!(params["files"], true);
-        assert!(params.get("root").is_none());
-    }
-
-    #[test]
-    fn merge_default_root_invalid_json_returns_error() {
-        let err = merge_default_root("{invalid", Some("/tmp/p")).unwrap_err();
-        assert!(err.contains("invalid params JSON"), "error was: {err}");
-    }
-
-    #[test]
-    fn merge_default_root_numeric_value_is_rejected() {
-        let err = merge_default_root("42", Some("/tmp/p")).unwrap_err();
-        assert!(err.contains("params must be an object"), "error was: {err}");
-    }
-
-    #[test]
-    fn merge_default_root_string_value_is_rejected() {
-        let err = merge_default_root(r#""hello""#, Some("/tmp/p")).unwrap_err();
-        assert!(err.contains("params must be an object"), "error was: {err}");
-    }
-
-    #[test]
-    fn merge_default_root_boolean_value_is_rejected() {
-        let err = merge_default_root("true", Some("/tmp/p")).unwrap_err();
-        assert!(err.contains("params must be an object"), "error was: {err}");
-    }
-
-    #[test]
-    fn merge_default_root_empty_object_gets_root_injected() {
-        let params = merge_default_root("{}", Some("/repo")).unwrap();
-        assert_eq!(params["root"], "/repo");
     }
 
     // ---- normalize_code_mode_error -----------------------------------------
@@ -2826,7 +2814,7 @@ mod tests {
     fn snippet_that_is_not_a_function_is_rejected() {
         // A string literal like "hello" parses as a paren-expression that wraps
         // to a non-function value, triggering the type-check throw.
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: r#"("hello")"#.to_string(),
@@ -2851,7 +2839,7 @@ mod tests {
 
     #[test]
     fn snippet_returning_json_value_succeeds() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return { status: \"ok\", count: 3 };".to_string(),
@@ -2872,7 +2860,7 @@ mod tests {
 
     #[test]
     fn snippet_can_access_root_from_params() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return root;".to_string(),
@@ -2891,7 +2879,7 @@ mod tests {
 
     #[test]
     fn snippet_returning_null_produces_null_result() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return null;".to_string(),
@@ -2910,7 +2898,7 @@ mod tests {
 
     #[test]
     fn snippet_throwing_error_populates_error_field() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: r#"throw new Error("intentional test error");"#.to_string(),
@@ -2935,7 +2923,7 @@ mod tests {
 
     #[test]
     fn response_always_includes_limits_block() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
@@ -2959,7 +2947,7 @@ mod tests {
 
     #[test]
     fn timeout_is_capped_at_max_timeout_ms() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
@@ -2977,7 +2965,7 @@ mod tests {
 
     #[test]
     fn max_output_bytes_is_capped_at_max_output_bytes_constant() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
@@ -2995,7 +2983,7 @@ mod tests {
 
     #[test]
     fn missing_timeout_uses_default() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
@@ -3018,7 +3006,7 @@ mod tests {
     #[test]
     fn hardened_globals_are_inaccessible_in_snippet() {
         for blocked in ["fetch", "process", "require", "Deno", "Bun"] {
-            let output = execute_code_mode(
+            let output = execute_code_mode_off_rust(
                 "fallow".to_string(),
                 CodeExecuteParams {
                     code: format!("return typeof {blocked};"),
@@ -3040,7 +3028,7 @@ mod tests {
 
     #[test]
     fn fallow_object_is_accessible_in_snippet() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return typeof fallow;".to_string(),
@@ -3058,7 +3046,7 @@ mod tests {
 
     #[test]
     fn fallow_run_is_callable_and_fails_fast_on_missing_binary() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "nonexistent-binary-xyz-12345".to_string(),
             CodeExecuteParams {
                 code: r#"return fallow.run("impact", {});"#.to_string(),
@@ -3081,7 +3069,7 @@ mod tests {
 
     #[test]
     fn fallow_run_with_unsupported_tool_records_unsupported_tool_error_kind() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: r#"return fallow.run("fix_apply", {});"#.to_string(),
@@ -3103,7 +3091,7 @@ mod tests {
 
     #[test]
     fn successful_response_has_empty_calls_array_when_no_host_calls_made() {
-        let output = execute_code_mode(
+        let output = execute_code_mode_off_rust(
             "fallow".to_string(),
             CodeExecuteParams {
                 code: "return { computed: 1 + 2 };".to_string(),
@@ -3131,7 +3119,7 @@ mod tests {
         code: &str,
         max_output_bytes: usize,
     ) -> (bool, serde_json::Value, usize) {
-        let (ok, output) = match execute_code_mode(
+        let (ok, output) = match execute_code_mode_off_rust(
             binary.to_string(),
             CodeExecuteParams {
                 code: code.to_string(),
@@ -4150,6 +4138,7 @@ mod tests {
         let mut state = CodeModeState::new(
             "fallow".to_string(),
             None,
+            std::env::temp_dir(),
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .expect("past instant"),
@@ -4294,6 +4283,7 @@ mod tests {
         let mut state = CodeModeState::new(
             binary,
             None,
+            std::env::temp_dir(),
             Instant::now() + Duration::from_secs(30),
             None,
             2_000,

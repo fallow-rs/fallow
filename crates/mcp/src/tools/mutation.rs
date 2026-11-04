@@ -19,6 +19,18 @@ use super::api_runtime::{
 };
 use super::{push_global, push_remote_extends, run_tool, validation_error_body};
 
+/// The error for `package` on the JavaScript route: only a Cargo workspace
+/// has packages in this sense.
+const PACKAGE_ON_JS_MESSAGE: &str =
+    "package is valid only on a Rust workspace (a root with Cargo.toml and no package.json)";
+
+fn reject_package(package: Option<&str>) -> Result<(), String> {
+    match package {
+        Some(_) => Err(validation_error_body(PACKAGE_ON_JS_MESSAGE)),
+        None => Ok(()),
+    }
+}
+
 /// Build the static mutation plan through the typed API. Without the
 /// `operators` param, `plan_mutation` applies the `mutation.operators` config
 /// key, as `fallow mutation --plan` does.
@@ -74,6 +86,7 @@ pub fn mutation_plan_options(
     params: &MutationPlanParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<MutationRunOptions, String> {
+    reject_package(params.package.as_deref())?;
     Ok(MutationRunOptions {
         // The plan scope comes from the tool's own `changed_since`, `paths`
         // and `all` params, not from the inherited environment.
@@ -85,7 +98,7 @@ pub fn mutation_plan_options(
     })
 }
 
-fn plan_scope(params: &MutationPlanParams) -> Result<MutationRunScope, String> {
+pub(super) fn plan_scope(params: &MutationPlanParams) -> Result<MutationRunScope, String> {
     let all = params.all == Some(true);
     let base = non_empty_string(params.changed_since.as_deref());
     let selected = [all, params.paths.is_some(), base.is_some()]
@@ -147,6 +160,7 @@ fn plan_operators(names: Option<&[String]>) -> Result<Option<Vec<Operator>>, Str
 /// Returns a validation error body when `mutant_id` or a given `report` is
 /// empty.
 pub fn build_mutation_inspect_args(params: &MutationInspectParams) -> Result<Vec<String>, String> {
+    reject_package(params.package.as_deref())?;
     let mutant_id = params.mutant_id.trim();
     if mutant_id.is_empty() {
         return Err(validation_error_body("mutant_id must not be empty"));
@@ -644,5 +658,20 @@ mod tests {
         assert!(is_error, "{body}");
         assert_eq!(body["code"], "FALLOW_INVALID_MUTATION_OPTIONS");
         assert_eq!(body["exit_code"], 2);
+    }
+
+    #[test]
+    fn a_package_on_a_javascript_project_is_an_error() {
+        let body =
+            mutation_plan_options(&plan_params(serde_json::json!({ "package": "core" })), None)
+                .err()
+                .unwrap();
+        assert_eq!(error_message(&body), PACKAGE_ON_JS_MESSAGE);
+        let body = build_mutation_inspect_args(&inspect_params(serde_json::json!({
+            "mutant_id": "m_1",
+            "package": "core",
+        })))
+        .unwrap_err();
+        assert_eq!(error_message(&body), PACKAGE_ON_JS_MESSAGE);
     }
 }

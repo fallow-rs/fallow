@@ -1253,3 +1253,46 @@ mod route_parity_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
+mod merge_default_root_tests {
+    use super::*;
+
+    #[test]
+    fn merge_default_root_no_default_leaves_params_unchanged() {
+        let params = merge_default_root(r#"{"files":true}"#, None).unwrap();
+        assert_eq!(params["files"], true);
+        assert!(params.get("root").is_none());
+    }
+
+    #[test]
+    fn merge_default_root_invalid_json_returns_error() {
+        let err = merge_default_root("{invalid", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("invalid params JSON"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_numeric_value_is_rejected() {
+        let err = merge_default_root("42", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_string_value_is_rejected() {
+        let err = merge_default_root(r#""hello""#, Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_boolean_value_is_rejected() {
+        let err = merge_default_root("true", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_empty_object_gets_root_injected() {
+        let params = merge_default_root("{}", Some("/repo")).unwrap();
+        assert_eq!(params["root"], "/repo");
+    }
+}

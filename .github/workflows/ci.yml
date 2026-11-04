@@ -220,6 +220,7 @@ jobs:
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
+              - 'crates/mcp/src/tools/rust.rs'
               - 'crates/mcp/Cargo.toml'
               - 'crates/mcp/src/lib.rs'
               - 'crates/mcp/src/server/tests/e2e.rs'
