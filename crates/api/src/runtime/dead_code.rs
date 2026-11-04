@@ -900,7 +900,7 @@ fn configure_project_for_dead_code(
     options: &DeadCodeOptions,
 ) -> ProjectConfig {
     if options.include_entry_exports {
-        project_config.config.include_entry_exports = true;
+        project_config.config.force_include_entry_exports();
     }
     if options.show_cascade {
         project_config.config.show_cascade = true;
@@ -1014,6 +1014,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.deprecated_exports_in_use
         || filters.unused_enum_members
         || filters.unused_class_members
+        || filters.unused_namespace_members
         || filters.unused_store_members
         || filters.unprovided_injects
         || filters.unrendered_components
@@ -1030,7 +1031,9 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unused_load_data_keys
         || filters.unresolved_imports
         || filters.unlisted_deps
+        || filters.unlisted_binaries
         || filters.duplicate_exports
+        || filters.duplicate_export_aliases
         || filters.circular_deps
         || filters.re_export_cycles
         || filters.package_cycles
@@ -1073,8 +1076,14 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
     if !filters.unused_store_members {
         results.unused_store_members.clear();
     }
+    if !filters.unused_namespace_members {
+        results.unused_namespace_members.clear();
+    }
     if !filters.unlisted_deps {
         results.unlisted_dependencies.clear();
+    }
+    if !filters.unlisted_binaries {
+        results.unlisted_binaries.clear();
     }
 }
 
@@ -1135,6 +1144,9 @@ fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut An
 fn apply_dead_code_graph_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
     if !filters.duplicate_exports {
         results.duplicate_exports.clear();
+    }
+    if !filters.duplicate_export_aliases {
+        results.duplicate_export_aliases.clear();
     }
     if !filters.circular_deps {
         results.circular_dependencies.clear();

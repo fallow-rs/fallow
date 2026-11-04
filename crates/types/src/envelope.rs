@@ -139,6 +139,9 @@ pub struct CheckSummary {
     pub unused_enum_members: usize,
     /// Unused class members.
     pub unused_class_members: usize,
+    /// Unused namespace members.
+    #[serde(default)]
+    pub unused_namespace_members: usize,
     /// Unused store members.
     #[serde(default)]
     pub unused_store_members: usize,
@@ -187,8 +190,15 @@ pub struct CheckSummary {
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.
     pub unlisted_dependencies: usize,
+    /// Binaries that scripts or process calls run, but that no installed or
+    /// listed package provides.
+    #[serde(default)]
+    pub unlisted_binaries: usize,
     /// Same-named exports declared in more than one module.
     pub duplicate_exports: usize,
+    /// Bindings that one module exports under two or more names.
+    #[serde(default)]
+    pub duplicate_export_aliases: usize,
     /// Production dependencies only used via type-only imports (could be
     /// devDependencies). Only populated in production mode.
     pub type_only_dependencies: usize,

@@ -644,7 +644,7 @@ impl ModuleInfoExtractor {
     /// method. The class visit calls this for each method before it walks the
     /// class body. Thus a local such as `const old = this.current()` resolves
     /// also when the method comes after the call site (issue #4033).
-    pub(super) fn record_this_return_binding(&mut self, method: &MethodDefinition<'_>) {
+    fn record_this_return_binding(&mut self, method: &MethodDefinition<'_>) {
         let call_suffix = match method.kind {
             MethodDefinitionKind::Method => "()",
             MethodDefinitionKind::Get => "",

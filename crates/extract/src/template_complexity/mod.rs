@@ -353,7 +353,7 @@ fn mask_ranges(source: &str, regex: &regex::Regex) -> String {
 /// trivial baseline, anchor the finding at the first non-trivial expression,
 /// and produce the synthetic `<template>` [`FunctionComplexity`] whose
 /// `line_count` is the whole file's line count.
-pub(in crate::template_complexity) fn build_template_complexity(
+fn build_template_complexity(
     source: &str,
     complexity: &TemplateComplexity,
 ) -> Option<FunctionComplexity> {
@@ -367,7 +367,7 @@ pub(in crate::template_complexity) fn build_template_complexity(
 /// `{#snippet}`..`{/snippet}` block) and drives its `line_count`; `None`
 /// keeps the whole-file line count the `<template>` unit has always
 /// reported.
-pub(in crate::template_complexity) fn build_unit_complexity(
+fn build_unit_complexity(
     source: &str,
     complexity: &TemplateComplexity,
     name: &str,

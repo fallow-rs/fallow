@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
+assertion_line: 2330
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -144,6 +145,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-namespace-member",
+              "shortDescription": {
+                "text": "Namespace member is never referenced"
+              },
+              "fullDescription": {
+                "text": "Exported members of an exported TypeScript namespace that no code reads. A nested namespace member has a dotted name (`Inner.x`). A whole use of the namespace (an argument, an alias, a spread) counts every member as used. Declaration files, `declare global`, module augmentations and the public API of an entry point are not checked. Defaults to warn."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-namespace-members",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unused-store-member",
               "shortDescription": {
                 "text": "Store member is never accessed by any consumer"
@@ -183,6 +197,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unlisted-binary",
+              "shortDescription": {
+                "text": "Binary used but provided by no installed package"
+              },
+              "fullDescription": {
+                "text": "Binaries that package.json scripts or process calls in source (`spawn`, `execSync`, `execa`, the `$` template of zx or execa, `Bun.spawn`) run with a literal command, when no installed or listed package provides them. A binary counts as provided when a `node_modules/.bin` link exists, a declared dependency or a workspace package declares it in `bin`, or it maps to a declared dependency. Shell builtins, commands that `npx` or `pnpm dlx` download, and a fixed list of common operating-system tools are skipped. The check needs installed dependencies and reports nothing without a root `node_modules`. Defaults to warn."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unlisted-binaries",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/duplicate-export",
               "shortDescription": {
                 "text": "Export name appears in multiple modules"
@@ -193,6 +220,19 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://fallow.tools/docs/explanations/dead-code/#duplicate-exports",
               "defaultConfiguration": {
                 "level": "error"
+              }
+            },
+            {
+              "id": "fallow/duplicate-export-alias",
+              "shortDescription": {
+                "text": "One module exports one binding under two or more names"
+              },
+              "fullDescription": {
+                "text": "One module exports the same binding under two or more names, for example `export const layer = make(); export default layer;` or `export { a, a as b }`. Consumers can import one value under several names, so the export surface is larger than it needs to be. Fallow groups the exports of a file by binding: a local binding name, or the source and imported name of a named re-export. Value and type-only exports are separate groups, and a plain specifier of a name that the file declares only as a type joins the type group. Two bindings with the same initializer are two bindings and are not reported. `export *`, files with CommonJS exports (`export =`, `module.exports`), component files and unreachable files are skipped. `ignoreExports` exempts a file with `*`, or a binding when one of its names is listed. Default warn. The rule differs from `duplicate-export`, which reports one export name in several files."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#duplicate-export-aliases",
+              "defaultConfiguration": {
+                "level": "warning"
               }
             },
             {

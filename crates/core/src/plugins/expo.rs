@@ -11,7 +11,9 @@ use oxc_ast::ast::{
 };
 use rustc_hash::FxHashSet;
 
-use super::{Plugin, PluginResult, config_parser};
+use oxc_span::GetSpan;
+
+use super::{Plugin, PluginResult, RequiredDependency, config_parser};
 
 const ENABLERS: &[&str] = &["expo"];
 
@@ -35,6 +37,20 @@ const CONFIG_PATTERNS: &[&str] = &["app.json", "app.config.{ts,js,mjs,cjs}"];
 const CONFIG_PLUGIN_PATHS: &[&[&str]] = &[&["plugins"], &["expo", "plugins"]];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["expo", "expo-cli", "@expo/webpack-config"];
+
+/// The package that applies `userInterfaceStyle` on Android at prebuild time.
+/// Expo warns and ignores the key when the app does not install it.
+const SYSTEM_UI_PACKAGE: &str = "expo-system-ui";
+
+/// The property paths of `userInterfaceStyle` that the Android build reads:
+/// `android.userInterfaceStyle`, else the top-level key. iOS applies its own
+/// key without `expo-system-ui`. `app.json` nests each path under `expo`.
+const USER_INTERFACE_STYLE_PATHS: &[&[&str]] = &[
+    &["userInterfaceStyle"],
+    &["android", "userInterfaceStyle"],
+    &["expo", "userInterfaceStyle"],
+    &["expo", "android", "userInterfaceStyle"],
+];
 
 pub struct ExpoPlugin;
 
@@ -71,7 +87,63 @@ impl Plugin for ExpoPlugin {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
         add_config_plugins(&mut result, source, config_path, root);
+        add_system_ui_requirement(&mut result, source, config_path);
         result
+    }
+}
+
+/// Require `expo-system-ui` when the app config sets `userInterfaceStyle`.
+///
+/// The finding points at the first key that sets the style.
+pub(super) fn add_system_ui_requirement(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+) {
+    let Some(key_start) = user_interface_style_offset(source, config_path) else {
+        return;
+    };
+    let is_json = config_path
+        .extension()
+        .is_some_and(|ext| ext == "json" || ext == "jsonc");
+    let offset = if is_json {
+        key_start.saturating_sub(1)
+    } else {
+        key_start
+    };
+    result
+        .required_dependencies
+        .push(RequiredDependency::at_offset(
+            SYSTEM_UI_PACKAGE.to_owned(),
+            config_path,
+            source,
+            offset,
+            false,
+        ));
+}
+
+/// The byte offset of the first `userInterfaceStyle` key in the parsed config.
+/// A JSON config is parsed inside a one-byte wrapper.
+fn user_interface_style_offset(source: &str, config_path: &Path) -> Option<usize> {
+    config_parser::extract_from_source(source, config_path, |program| {
+        let config = config_parser::find_config_object(program)?;
+        USER_INTERFACE_STYLE_PATHS
+            .iter()
+            .filter_map(|path| nested_property_key_start(config, path))
+            .min()
+    })
+}
+
+/// The start of the key of the property at `path`.
+fn nested_property_key_start(object: &ObjectExpression<'_>, path: &[&str]) -> Option<usize> {
+    let (key, rest) = path.split_first()?;
+    let property = config_parser::find_property(object, key)?;
+    if rest.is_empty() {
+        return Some(property.key.span().start as usize);
+    }
+    match property.value.get_inner_expression() {
+        Expression::ObjectExpression(nested) => nested_property_key_start(nested, rest),
+        _ => None,
     }
 }
 

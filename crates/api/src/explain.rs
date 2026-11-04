@@ -143,6 +143,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-store-members",
     },
     RuleDef {
+        id: "fallow/unused-namespace-member",
+        category: "Dead code",
+        name: "Unused Namespace Members",
+        short: "Namespace member is never referenced",
+        full: "Exported members of an exported TypeScript namespace that no code reads. A nested namespace member has a dotted name (`Inner.x`). A whole use of the namespace (an argument, an alias, a spread) counts every member as used. Declaration files, `declare global`, module augmentations and the public API of an entry point are not checked. Defaults to warn.",
+        docs_path: "explanations/dead-code#unused-namespace-members",
+    },
+    RuleDef {
         id: "fallow/unresolved-import",
         category: "Dead code",
         name: "Unresolved Imports",
@@ -159,12 +167,28 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unlisted-dependencies",
     },
     RuleDef {
+        id: "fallow/unlisted-binary",
+        category: "Dependencies",
+        name: "Unlisted Binaries",
+        short: "Binary used but provided by no installed package",
+        full: "Binaries that package.json scripts or process calls in source (`spawn`, `execSync`, `execa`, the `$` template of zx or execa, `Bun.spawn`) run with a literal command, when no installed or listed package provides them. A binary counts as provided when a `node_modules/.bin` link exists, a declared dependency or a workspace package declares it in `bin`, or it maps to a declared dependency. Shell builtins, commands that `npx` or `pnpm dlx` download, and a fixed list of common operating-system tools are skipped. The check needs installed dependencies and reports nothing without a root `node_modules`. Defaults to warn.",
+        docs_path: "explanations/dead-code#unlisted-binaries",
+    },
+    RuleDef {
         id: "fallow/duplicate-export",
         category: "Dead code",
         name: "Duplicate Exports",
         short: "Export name appears in multiple modules",
         full: "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating.",
         docs_path: "explanations/dead-code#duplicate-exports",
+    },
+    RuleDef {
+        id: "fallow/duplicate-export-alias",
+        category: "Dead code",
+        name: "Duplicate Export Aliases",
+        short: "One module exports one binding under two or more names",
+        full: "One module exports the same binding under two or more names, for example `export const layer = make(); export default layer;` or `export { a, a as b }`. Consumers can import one value under several names, so the export surface is larger than it needs to be. Fallow groups the exports of a file by binding: a local binding name, or the source and imported name of a named re-export. Value and type-only exports are separate groups, and a plain specifier of a name that the file declares only as a type joins the type group. Two bindings with the same initializer are two bindings and are not reported. `export *`, files with CommonJS exports (`export =`, `module.exports`), component files and unreachable files are skipped. `ignoreExports` exempts a file with `*`, or a binding when one of its names is listed. Default warn. The rule differs from `duplicate-export`, which reports one export name in several files.",
+        docs_path: "explanations/dead-code#duplicate-export-aliases",
     },
     RuleDef {
         id: "fallow/circular-dependency",
@@ -687,7 +711,8 @@ fn security_alias_id(normalized: &str) -> Option<&'static str> {
 #[must_use]
 pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
     source_dead_code_rule_guide(rule.id)
-        .or_else(|| member_import_rule_guide(rule.id))
+        .or_else(|| member_rule_guide(rule.id))
+        .or_else(|| import_rule_guide(rule.id))
         .or_else(|| architecture_rule_guide(rule.id))
         .or_else(|| catalog_rule_guide(rule.id))
         .or_else(|| health_runtime_rule_guide(rule.id))
@@ -767,7 +792,7 @@ fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
     })
 }
 
-fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
+fn member_rule_guide(id: &str) -> Option<RuleGuide> {
     Some(match id {
         "fallow/unused-enum-member" => RuleGuide {
             example: "Status.Legacy remains in an exported enum, but no code reads that member.",
@@ -780,6 +805,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-store-member" => RuleGuide {
             example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
             how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
+        },
+        "fallow/unused-namespace-member" => RuleGuide {
+            example: "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",
+            how_to_fix: "Remove the unused member, or remove its export keyword when only the namespace body uses it. For generated code, turn the rule off for those files in overrides. Suppress an intentional member with // fallow-ignore-next-line unused-namespace-member.",
         },
         "fallow/unprovided-inject" => RuleGuide {
             example: "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
@@ -845,6 +874,12 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
             example: "FieldText, FieldNumber, and FieldSelect (across three files) each declare exactly { name, label, value, onChange, error }. The five significant prop names are identical, so they form one duplicate-prop-shape group.",
             how_to_fix: "Extract one shared Props type (e.g. type FieldProps = { name; label; value; onChange; error }) that every member reuses, or a base component the variants compose. Keep them separate only if a per-variant prop divergence is planned. Enable the rule with rules.duplicate-prop-shape = \"warn\" (it defaults to off). To accept one member, suppress it with // fallow-ignore-next-line duplicate-prop-shape above the component definition; the suppressed member still appears in its siblings' sharing_components because the group is real regardless of suppression.",
         },
+        _ => return None,
+    })
+}
+
+fn import_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
             how_to_fix: "Fix the specifier, restore the missing file, install the package, or align tsconfig path aliases with the runtime resolver.",
@@ -852,6 +887,14 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unlisted-dependency" => RuleGuide {
             example: "Root src/app.ts imports @acme/shared, an npm workspace package. The root package.json lists workspaces but does not list @acme/shared as a dependency, so the import is unlisted even when npm links it into node_modules.",
             how_to_fix: "Declare the imported package in the owning package.json, including the root manifest for root code. Use dependencies for runtime needs or devDependencies for tooling/tests, with a version accepted by your package manager. Self-references need no declaration. For deliberately ambient packages, use ignoreDependencies as an explicit opt-out.",
+        },
+        "fallow/duplicate-export-alias" => RuleGuide {
+            example: "src/worker.ts has export const handler = createHandler() and export default handler, so one binding has the names handler and default.",
+            how_to_fix: "Keep one export name and update the importers of the other names. If the names are an intentional public API, add them to ignoreExports, or suppress the line with // fallow-ignore-next-line duplicate-export-alias.",
+        },
+        "fallow/unlisted-binary" => RuleGuide {
+            example: "The package.json script `pack` runs `gnome-extensions pack ext`, and src/capture.ts calls `spawnSync(\"hyprctl\", [\"version\"])`. No installed package provides either binary.",
+            how_to_fix: "Add the package that provides the binary to devDependencies. When the operating system or the CI image provides it, add the name to ignoreBinaries.",
         },
         "fallow/duplicate-export" => RuleGuide {
             example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",

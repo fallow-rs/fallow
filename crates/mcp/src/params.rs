@@ -5,10 +5,10 @@
 use std::borrow::Cow;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Privacy mode for author emails emitted by `--ownership`.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmailModeParam {
     Raw,
@@ -30,7 +30,7 @@ impl EmailModeParam {
 
 /// How a health baseline matches findings, mirroring the CLI's
 /// `--baseline-mode` flag.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BaselineModeParam {
     Count,
@@ -46,7 +46,7 @@ impl BaselineModeParam {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TypeAwareRequireParam {
     BestEffort,
@@ -62,7 +62,7 @@ impl TypeAwareRequireParam {
     }
 }
 
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct AnalyzeParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
@@ -275,7 +275,7 @@ pub struct CombinedParams {
     pub coverage_root: Option<String>,
 }
 
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct ArchitectureParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
@@ -533,7 +533,7 @@ pub struct InspectSimilarCodeParams {
 }
 
 /// Parameters for the static mutation plan. The plan runs no project code.
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct MutationPlanParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
@@ -568,10 +568,15 @@ pub struct MutationPlanParams {
 
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// The Cargo package of a Rust workspace with more than one package.
+    /// Valid only on a Rust workspace, where the plan covers the whole package
+    /// unless `paths` or `changed_since` is set.
+    pub package: Option<String>,
 }
 
 /// Parameters for one mutant of a saved mutation report.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct MutationInspectParams {
     /// The `mutant_id` from a mutation plan or report.
     #[schemars(length(min = 1))]
@@ -596,9 +601,13 @@ pub struct MutationInspectParams {
     /// without `report`, as for `config`. Defaults to false and never grants
     /// process-global trust.
     pub allow_remote_extends: Option<bool>,
+
+    /// The Cargo package of a Rust workspace with more than one package.
+    /// Valid only on a Rust workspace.
+    pub package: Option<String>,
 }
 
-#[derive(Default, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct FindDupesParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,

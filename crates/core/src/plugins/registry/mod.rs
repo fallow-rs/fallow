@@ -269,7 +269,7 @@ impl PluginRegexValidationError {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct PluginRegexValidationErrorInput<'a> {
+struct PluginRegexValidationErrorInput<'a> {
     plugin_name: &'a str,
     config_path: Option<&'a Path>,
     rule_kind: &'static str,
@@ -402,6 +402,8 @@ pub struct AggregatedPluginResult {
     pub referenced_dependencies: Vec<String>,
     /// Dependencies referenced by package.json metadata, scoped to that package.json path.
     pub package_referenced_dependencies: Vec<(PathBuf, String)>,
+    /// Packages that a config needs installed, with the config location.
+    pub required_dependencies: Vec<super::RequiredDependency>,
     /// Additional always-used files discovered from config parsing: (pattern, plugin_name).
     pub discovered_always_used: Vec<(String, String)>,
     /// Setup files discovered from config parsing: (path, plugin_name).
@@ -602,6 +604,7 @@ impl AggregatedPluginResult {
             framework_class_member_contracts,
             referenced_dependencies,
             package_referenced_dependencies,
+            required_dependencies,
             discovered_always_used,
             setup_files,
             tooling_dependencies,
@@ -645,6 +648,7 @@ impl AggregatedPluginResult {
         self.referenced_dependencies.extend(referenced_dependencies);
         self.package_referenced_dependencies
             .extend(package_referenced_dependencies);
+        push_missing(&mut self.required_dependencies, required_dependencies);
         self.discovered_always_used.extend(discovered_always_used);
         self.setup_files.extend(setup_files);
         self.tooling_dependencies.extend(tooling_dependencies);
@@ -1403,7 +1407,7 @@ fn should_warn(key: String) -> bool {
 /// subscriber. The runtime path calls [`emit_plugin_diagnostics`] to convert
 /// each variant into one `tracing::warn!` line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PluginDiagnostic {
+enum PluginDiagnostic {
     /// Two or more plugins declared an identical `config_patterns` entry.
     PatternCollision {
         pattern: String,

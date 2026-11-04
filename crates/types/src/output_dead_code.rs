@@ -39,11 +39,11 @@ use crate::output::{
 use crate::results::{
     AbsentComponentProp, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
     CircularDependency, DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction,
-    DuplicateExport, DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup,
-    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    DuplicateExport, DuplicateExportAlias, DuplicatePropShape, DynamicSegmentNameConflict,
+    EmptyCatalogGroup, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
     MixedClientServerBarrel, PackageCycle, PolicyViolation, PrivateTypeLeak, PropDrillingChain,
     ReExportCycle, ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper,
-    TypeOnlyDependency, UnlistedDependency, UnproducedCatchTag, UnprovidedInject,
+    TypeOnlyDependency, UnlistedBinary, UnlistedDependency, UnproducedCatchTag, UnprovidedInject,
     UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
     UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
     UnusedDependency, UnusedDependencyOverride, UnusedEffectLayer, UnusedExport, UnusedFile,
@@ -2177,6 +2177,65 @@ impl UnusedSvelteEventFinding {
     }
 }
 
+/// Wire-shape envelope for a [`DuplicateExportAlias`] finding. There is no
+/// safe auto-fix: a consumer outside the project can import any of the
+/// names. Actions are manual remediation guidance plus a line-level
+/// suppress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicateExportAliasFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub alias: DuplicateExportAlias,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the binding gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl DuplicateExportAliasFinding {
+    /// Build the wrapper from a raw [`DuplicateExportAlias`]. Emits a manual
+    /// fix action plus a line-level suppress.
+    #[must_use]
+    pub fn with_actions(alias: DuplicateExportAlias) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::RemoveDuplicate,
+                "Keep one export name for the binding and remove the other names",
+                "Manual review required: update the importers of a removed name first. Code outside the analyzed project can import any of the names. If the names are an intentional public API, add them to ignoreExports.",
+            ),
+            suppress_line("// fallow-ignore-next-line duplicate-export-alias"),
+        ];
+        Self {
+            finding_id: None,
+            alias,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
 /// Wire-shape envelope for an [`UnusedEffectLayer`] finding. There is no safe auto-fix: a test or a script outside the project graph can still use the layer. Actions are manual
 /// remediation guidance plus a line-level suppress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3103,6 +3162,74 @@ impl UnusedStoreMemberFinding {
     }
 }
 
+/// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+/// `unused_namespace_members` key (an exported member of an exported
+/// TypeScript namespace that no code reads). `member_name` is the dotted path
+/// from the exported namespace, for example `Inner.x`. Emits only a
+/// line-level suppress action: a member can be a multi-line function, class
+/// or nested namespace, so there is no safe one-line auto-fix.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedNamespaceMemberFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub member: UnusedMember,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+    /// Advisory caveats on the verdict behind this finding. A namespace
+    /// member takes the member rule unchanged: any module this run analyzed
+    /// incompletely can hold the access that credits it. Sorted,
+    /// deduplicated, and omitted from the wire when empty. This is disclosure
+    /// only, because a namespace member offers no mutation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
+}
+
+impl UnusedNamespaceMemberFinding {
+    /// Build the wrapper from a raw [`UnusedMember`]. Emits only a line-level
+    /// suppress action.
+    #[must_use]
+    pub fn with_actions(member: UnusedMember) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-namespace-member".to_string(),
+            scope: None,
+        })];
+        Self {
+            finding_id: None,
+            member,
+            actions,
+            introduced: None,
+            effective_severity: None,
+            reachability_caveats: Vec::new(),
+        }
+    }
+}
+
 /// Build the `IssueAction` vec for the three `unused_dependencies`,
 /// `unused_dev_dependencies`, `unused_optional_dependencies` views over the
 /// same bare [`UnusedDependency`] struct. Each wrapper differs only in the
@@ -3415,6 +3542,80 @@ impl UnlistedDependencyFinding {
         Self {
             finding_id: None,
             dep,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnlistedBinary`] finding. Carries an
+/// `install-dependency` primary (non-auto-fixable) plus an `ignoreBinaries`
+/// config suppress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnlistedBinaryFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub binary: UnlistedBinary,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl UnlistedBinaryFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(binary: UnlistedBinary) -> Self {
+        let name = &binary.binary_name;
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::InstallDependency,
+                auto_fixable: false,
+                description: "Add the package that provides this binary to devDependencies"
+                    .to_string(),
+                note: Some(
+                    "If the operating system or the CI image provides this binary, add it to ignoreBinaries instead"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::AddToConfig(AddToConfigAction {
+                kind: AddToConfigKind::AddToConfig,
+                auto_fixable: false,
+                description: format!("Add \"{name}\" to ignoreBinaries in fallow config"),
+                config_key: "ignoreBinaries".to_string(),
+                value: AddToConfigValue::Scalar(name.clone()),
+                value_schema: Some(
+                    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreBinaries/items"
+                        .to_string(),
+                ),
+            }),
+        ];
+        Self {
+            finding_id: None,
+            binary,
             actions,
             introduced: None,
             effective_severity: None,
@@ -4258,6 +4459,7 @@ impl_caveated_finding!(
     UnusedTypeFinding,
     UnusedEnumMemberFinding,
     UnusedClassMemberFinding,
+    UnusedNamespaceMemberFinding,
     UnusedStoreMemberFinding,
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
@@ -4382,15 +4584,18 @@ impl_gated_finding!(
     DynamicSegmentNameConflictFinding,
     UnusedEnumMemberFinding,
     UnusedClassMemberFinding,
+    UnusedNamespaceMemberFinding,
     UnusedStoreMemberFinding,
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
     UnusedOptionalDependencyFinding,
     UnlistedDependencyFinding,
+    UnlistedBinaryFinding,
     TypeOnlyDependencyFinding,
     TestOnlyDependencyFinding,
     DevDependencyInProductionFinding,
     DuplicateExportFinding,
+    DuplicateExportAliasFinding,
     UnusedCatalogEntryFinding,
     EmptyCatalogGroupFinding,
     UnresolvedCatalogReferenceFinding,
@@ -4412,106 +4617,8 @@ impl_gated_finding!(
 // re-orders actions tells you what broke instead of just "the snapshot
 // changed".
 #[cfg(test)]
-mod caveat_tokens {
-    use super::*;
-
-    /// The token-side helpers must render the same words as the typed ones, so
-    /// one finding reads identically whether a surface holds the findings or
-    /// re-reads them off a serialized envelope.
-    #[test]
-    fn token_labels_match_the_typed_labels() {
-        let typed = [
-            ReachabilityCaveat::IncompleteFileAnalysis,
-            ReachabilityCaveat::IncompleteImportGraph,
-        ];
-        let tokens: Vec<&str> = typed.iter().map(|c| c.token()).collect();
-
-        assert_eq!(
-            caveat_labels_for_tokens(tokens.iter().copied()),
-            caveat_labels(&typed)
-        );
-        assert_eq!(
-            caveat_suffix_for_tokens(tokens.iter().copied()),
-            caveat_suffix(&typed)
-        );
-    }
-
-    #[test]
-    fn no_tokens_means_nothing_to_say() {
-        assert_eq!(caveat_labels_for_tokens(std::iter::empty()), None);
-        assert_eq!(caveat_suffix_for_tokens(std::iter::empty()), None);
-    }
-
-    /// The CI review formats can only see the rendered description, so the
-    /// recogniser and the renderer have to stay one pair. A description with
-    /// no caveat must not match, or the review formats would withhold the
-    /// suggestion block on every finding in a clean run.
-    #[test]
-    fn a_rendered_suffix_is_recognised_by_the_marker() {
-        for caveats in [
-            &[ReachabilityCaveat::IncompleteImportGraph][..],
-            &[
-                ReachabilityCaveat::IncompleteFileAnalysis,
-                ReachabilityCaveat::IncompleteImportGraph,
-            ][..],
-        ] {
-            let suffix = caveat_suffix(caveats).expect("a caveat renders a suffix");
-            assert!(
-                description_carries_caveat(&format!("Something is never referenced{suffix}")),
-                "the marker must match what caveat_suffix writes: {suffix}"
-            );
-        }
-        assert!(
-            description_carries_caveat(&format!(
-                "Something is never referenced{}",
-                caveat_suffix_for_tokens(["some-future-cause"]).expect("token suffix")
-            )),
-            "the token-side renderer writes the same marker"
-        );
-        assert!(
-            !description_carries_caveat("Class member 'Widget.helper' is never referenced"),
-            "a clean description must not read as caveated"
-        );
-    }
-
-    /// A caveat is a RUN-level condition covering several ways a file goes
-    /// unread: a degraded parse, an unreadable file, and three kinds of file
-    /// discovery skipped before opening. A message naming only the parse case
-    /// told a reader whose run was degraded by the size guard to go fix parse
-    /// errors that do not exist, which is the same overclaiming the caveat
-    /// itself exists to prevent.
-    #[test]
-    fn no_caveat_message_names_a_single_cause() {
-        for caveat in [
-            ReachabilityCaveat::IncompleteFileAnalysis,
-            ReachabilityCaveat::IncompleteImportGraph,
-        ] {
-            let message = caveat.message();
-            assert!(
-                !message.contains("parse cleanly") && !message.contains("parse error"),
-                "{} names the parse cause alone, but a size-skipped or unreadable \
-                 file reaches the same caveat: {message}",
-                caveat.token()
-            );
-            assert!(
-                message.contains("workspace_diagnostics"),
-                "{} must point at the list that names the actual files: {message}",
-                caveat.token()
-            );
-        }
-    }
-
-    /// The value set is open. A token a consumer build does not recognise still
-    /// means the evidence is incomplete, so it must survive into the rendered
-    /// hedge rather than being dropped back into a confident-looking finding.
-    #[test]
-    fn an_unrecognised_token_still_renders_as_a_caveat() {
-        let suffix = caveat_suffix_for_tokens(["some-future-cause"])
-            .expect("an unknown token is still a caveat");
-
-        assert_eq!(suffix, " (caveat: some future cause)");
-    }
-}
+#[path = "output_dead_code_caveat_tokens.rs"]
+mod caveat_tokens;
 
 /// The gate, pinned as one property across every finding type rather than as
 /// one test per mutation surface.
@@ -4526,897 +4633,9 @@ mod caveat_tokens {
 /// exposes an auto-fixable mutation and never gets annotated is what
 /// `every_auto_fixable_dead_code_mutation_is_gated` catches.
 #[cfg(test)]
-mod mutation_gate {
-    use super::*;
-    use crate::extract::MemberKind;
-    use crate::results::DependencyLocation;
-    use std::path::PathBuf;
-
-    const BOTH: [ReachabilityCaveat; 2] = [
-        ReachabilityCaveat::IncompleteFileAnalysis,
-        ReachabilityCaveat::IncompleteImportGraph,
-    ];
-
-    fn export(name: &str) -> UnusedExport {
-        UnusedExport {
-            path: PathBuf::from("/p/src/mod.ts"),
-            export_name: name.to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-            deprecated: false,
-            deprecated_reason: None,
-        }
-    }
-
-    fn member(name: &str) -> UnusedMember {
-        UnusedMember {
-            path: PathBuf::from("/p/src/mod.ts"),
-            parent_name: "Color".to_string(),
-            member_name: name.to_string(),
-            kind: MemberKind::EnumMember,
-            line: 2,
-            col: 2,
-        }
-    }
-
-    fn class_member(name: &str) -> UnusedMember {
-        UnusedMember {
-            parent_name: "Widget".to_string(),
-            kind: MemberKind::ClassMethod,
-            ..member(name)
-        }
-    }
-
-    fn store_member(name: &str) -> UnusedMember {
-        UnusedMember {
-            parent_name: "useCounterStore".to_string(),
-            kind: MemberKind::StoreMember,
-            ..member(name)
-        }
-    }
-
-    fn dependency(name: &str) -> UnusedDependency {
-        UnusedDependency {
-            package_name: name.to_string(),
-            location: DependencyLocation::Dependencies,
-            path: PathBuf::from("/p/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        }
-    }
-
-    /// One finding type: its name, the uncaveated finding, and the same
-    /// finding after the annotation pass stamped a caveat on it.
-    type GatedPair = (&'static str, Box<dyn Gated>, Box<dyn Gated>);
-
-    /// Every caveated finding type, boxed behind the one question the mutation
-    /// surfaces ask.
-    fn every_finding_type() -> Vec<GatedPair> {
-        fn pair<T: Gated + Clone + 'static>(name: &'static str, clean: T) -> GatedPair {
-            let mut caveated = clean.clone();
-            caveated.stamp(BOTH.to_vec());
-            (name, Box::new(clean), Box::new(caveated))
-        }
-        vec![
-            pair(
-                "unused_files",
-                UnusedFileFinding::with_actions(UnusedFile {
-                    path: PathBuf::from("/p/src/orphan.ts"),
-                }),
-            ),
-            pair(
-                "unused_exports",
-                UnusedExportFinding::with_actions(export("helper")),
-            ),
-            pair(
-                "unused_types",
-                UnusedTypeFinding::with_actions(export("Shape")),
-            ),
-            pair(
-                "unused_enum_members",
-                UnusedEnumMemberFinding::with_actions(member("Blue")),
-            ),
-            pair(
-                "unused_class_members",
-                UnusedClassMemberFinding::with_actions(class_member("legacyMethod")),
-            ),
-            pair(
-                "unused_store_members",
-                UnusedStoreMemberFinding::with_actions(store_member("onlyUsedInBigFile")),
-            ),
-            pair(
-                "unused_dependencies",
-                UnusedDependencyFinding::with_actions(dependency("lodash")),
-            ),
-            pair(
-                "unused_dev_dependencies",
-                UnusedDevDependencyFinding::with_actions(dependency("vitest")),
-            ),
-            pair(
-                "unused_optional_dependencies",
-                UnusedOptionalDependencyFinding::with_actions(dependency("fsevents")),
-            ),
-        ]
-    }
-
-    /// Erases the finding type down to what a mutation surface needs: the gate,
-    /// the actions it gates, and the annotation-pass write.
-    trait Gated {
-        fn actions(&self) -> &[IssueAction];
-        fn gate_allows_mutation(&self) -> bool;
-        fn stamp(&mut self, caveats: Vec<ReachabilityCaveat>);
-    }
-
-    impl<T: MutationEvidence + CaveatedFinding + HasActions> Gated for T {
-        fn actions(&self) -> &[IssueAction] {
-            HasActions::actions(self)
-        }
-        fn gate_allows_mutation(&self) -> bool {
-            self.may_auto_apply_mutation()
-        }
-        fn stamp(&mut self, caveats: Vec<ReachabilityCaveat>) {
-            self.set_reachability_caveats(caveats);
-        }
-    }
-
-    trait HasActions {
-        fn actions(&self) -> &[IssueAction];
-    }
-
-    macro_rules! has_actions {
-        ($($ty:ty),+ $(,)?) => { $( impl HasActions for $ty {
-            fn actions(&self) -> &[IssueAction] { &self.actions }
-        } )+ };
-    }
-    has_actions!(
-        UnusedFileFinding,
-        UnusedExportFinding,
-        UnusedTypeFinding,
-        UnusedEnumMemberFinding,
-        UnusedClassMemberFinding,
-        UnusedStoreMemberFinding,
-        UnusedDependencyFinding,
-        UnusedDevDependencyFinding,
-        UnusedOptionalDependencyFinding,
-    );
-
-    /// THE property. Not "the CLI withholds it" or "the LSP hides it": no
-    /// finding whose evidence the run itself flagged may advertise an
-    /// automatically applicable mutation, whichever surface is reading.
-    #[test]
-    fn every_auto_fixable_dead_code_mutation_is_gated() {
-        for (name, _clean, caveated) in every_finding_type() {
-            assert!(
-                !caveated.gate_allows_mutation(),
-                "{name}: a stamped finding must fail the gate"
-            );
-            for action in caveated.actions() {
-                assert!(
-                    !action.is_auto_fixable(),
-                    "{name}: a caveated finding still advertises an auto-fixable action, so an \
-                     agent following the documented actions contract would plan a removal \
-                     `fallow fix` refuses"
-                );
-            }
-        }
-    }
-
-    /// The other half, and the one a blunt fix breaks: the gate must not turn
-    /// every finding into a manual one. A run that read every file it
-    /// discovered keeps exactly the behavior it had.
-    #[test]
-    fn an_uncaveated_finding_keeps_its_auto_fix() {
-        let auto_fixable_types = [
-            "unused_exports",
-            "unused_types",
-            "unused_enum_members",
-            "unused_dependencies",
-            "unused_dev_dependencies",
-            "unused_optional_dependencies",
-        ];
-        for (name, clean, _caveated) in every_finding_type() {
-            assert!(
-                clean.gate_allows_mutation(),
-                "{name}: a finding with no caveat must pass the gate"
-            );
-            if auto_fixable_types.contains(&name) {
-                assert!(
-                    clean.actions().iter().any(IssueAction::is_auto_fixable),
-                    "{name}: the gate must not withhold a mutation the run has the evidence for"
-                );
-            }
-        }
-    }
-
-    /// The caveat is advisory about the FINDING and decisive only about the
-    /// MUTATION: the actions array keeps its shape so a consumer reading
-    /// `actions[0].type` is unaffected, and the suppress alternative stays.
-    #[test]
-    fn the_gate_downgrades_a_mutation_without_removing_it() {
-        let clean = UnusedExportFinding::with_actions(export("helper"));
-        let mut caveated = clean.clone();
-        caveated.set_reachability_caveats(BOTH.to_vec());
-
-        assert_eq!(caveated.actions.len(), clean.actions.len());
-        let IssueAction::Fix(fix) = &caveated.actions[0] else {
-            panic!("position 0 stays the fix action");
-        };
-        assert!(!fix.auto_fixable);
-        assert_eq!(
-            fix.note.as_deref(),
-            Some(INCOMPLETE_EVIDENCE_NOTE),
-            "the withheld action says why in its own note, not only in a sibling array"
-        );
-    }
-
-    /// A pre-existing note is context the user still needs (the re-export
-    /// warning names a public-API risk the caveat says nothing about), so the
-    /// gate appends rather than overwrites.
-    #[test]
-    fn a_gated_mutation_keeps_the_note_it_already_had() {
-        let mut re_export = export("helper");
-        re_export.is_re_export = true;
-        let mut finding = UnusedExportFinding::with_actions(re_export);
-        finding.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
-
-        let IssueAction::Fix(fix) = &finding.actions[0] else {
-            panic!("position 0 stays the fix action");
-        };
-        let note = fix.note.as_deref().expect("note present");
-        assert!(note.contains("public API"), "the original note survives");
-        assert!(
-            note.contains("Evidence is incomplete"),
-            "the caveat is added"
-        );
-    }
-
-    /// The gate is complete only if every finding type that can ever expose an
-    /// auto-fixable mutation is in it. The one member type deliberately left
-    /// out is safe for a different reason, and this pins that reason rather
-    /// than trusting a comment: a store member exposes no fix action at all,
-    /// because reflective access via a Pinia plugin or `$onAction` is
-    /// invisible to syntactic analysis, so no evidence this run could gather
-    /// would open the removal. If it ever ships one, it needs
-    /// `reachability_caveats` and a row in `impl_caveated_finding!` first.
-    ///
-    /// A class member used to sit here on the weaker argument that its removal
-    /// STARTS withheld. That argument covered only the syntactic finding: the
-    /// type-aware sidecar reopens the removal through
-    /// [`UnusedClassMemberFinding::set_semantic_decision`], and the review
-    /// formats rendered a one-click commit for it regardless of
-    /// `auto_fixable`. It is inside the gate now, so the assertion here is
-    /// only that the SYNTACTIC finding still ships no auto-fix; the reopening
-    /// path is pinned by `a_complete_semantic_verdict_cannot_reopen_a_
-    /// caveated_class_member`.
-    #[test]
-    fn a_store_member_exposes_no_mutation_at_all() {
-        let store = UnusedStoreMemberFinding::with_actions(member("total"));
-        assert!(
-            !store.actions.iter().any(IssueAction::is_auto_fixable),
-            "a store member must expose no automatically applicable mutation"
-        );
-        assert!(
-            !store
-                .actions
-                .iter()
-                .any(|action| matches!(action, IssueAction::Fix(_))),
-            "and no fix action at all"
-        );
-
-        let class = UnusedClassMemberFinding::with_actions(class_member("helper"));
-        assert!(
-            !class.actions.iter().any(IssueAction::is_auto_fixable),
-            "a class member's syntactic removal stays withheld until semantic evidence opens it"
-        );
-    }
-
-    /// The semantic pass runs after the annotation pass and is the only code
-    /// path that RAISES `auto_fixable`. A `Complete` verdict must not re-open a
-    /// mutation the incomplete run already withheld.
-    #[test]
-    fn a_complete_semantic_verdict_cannot_reopen_a_caveated_mutation() {
-        use crate::semantic::{
-            SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
-            SemanticNamespace, SemanticSymbol,
-        };
-
-        let complete_negative = || SemanticCandidateDecision {
-            query_id: 0,
-            subject: SemanticSymbol {
-                path: PathBuf::from("/p/src/mod.ts"),
-                namespace: SemanticNamespace::Value,
-                declaration_kind: "function".to_string(),
-                exported_name: "helper".to_string(),
-                local_name: "helper".to_string(),
-                owner: None,
-                line: 1,
-                col: 0,
-            },
-            decision: SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
-            status: SemanticCompleteness::Complete,
-            owning_projects: Vec::new(),
-            evidence: Vec::new(),
-            contract: None,
-            framework_contract: None,
-            closed_world_eligible: false,
-            edit_guard: None,
-            reason_code: None,
-            explanation: String::new(),
-            actions: Vec::new(),
-            total_evidence_count: 0,
-            truncated: false,
-            omissions: Vec::new(),
-        };
-
-        let mut clean = UnusedExportFinding::with_actions(export("helper"));
-        clean.set_semantic_decision(complete_negative());
-        assert!(
-            clean.actions.iter().any(IssueAction::is_auto_fixable),
-            "a complete negative verdict on a clean run still enables the fix"
-        );
-
-        let mut caveated = UnusedExportFinding::with_actions(export("helper"));
-        caveated.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
-        caveated.set_semantic_decision(complete_negative());
-        assert!(
-            !caveated.actions.iter().any(IssueAction::is_auto_fixable),
-            "the semantic pass must ask the gate too"
-        );
-    }
-
-    /// The class-member twin, on its own eligibility flag. `closed_world_
-    /// eligible` is proved over the program the sidecar could see, which is
-    /// the program this run parsed; a member whose only call site sits in a
-    /// file the run never opened is absent from that world for the same reason
-    /// it is absent from the syntactic verdict, so a `true` here is not
-    /// evidence the run lacks.
-    #[test]
-    fn a_complete_semantic_verdict_cannot_reopen_a_caveated_class_member() {
-        use crate::semantic::{
-            SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
-            SemanticNamespace, SemanticSymbol,
-        };
-
-        let eligible = || SemanticCandidateDecision {
-            query_id: 0,
-            subject: SemanticSymbol {
-                path: PathBuf::from("/p/src/mod.ts"),
-                namespace: SemanticNamespace::Value,
-                declaration_kind: "method".to_string(),
-                exported_name: "Widget".to_string(),
-                local_name: "legacyMethod".to_string(),
-                owner: Some("Widget".to_string()),
-                line: 2,
-                col: 2,
-            },
-            decision: SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
-            status: SemanticCompleteness::Complete,
-            owning_projects: Vec::new(),
-            evidence: Vec::new(),
-            contract: None,
-            framework_contract: None,
-            closed_world_eligible: true,
-            edit_guard: None,
-            reason_code: None,
-            explanation: "closed world proved".to_string(),
-            actions: Vec::new(),
-            total_evidence_count: 0,
-            truncated: false,
-            omissions: Vec::new(),
-        };
-
-        let mut clean = UnusedClassMemberFinding::with_actions(class_member("legacyMethod"));
-        clean.set_semantic_decision(eligible());
-        assert!(
-            clean.actions.iter().any(IssueAction::is_auto_fixable),
-            "a closed-world verdict on a run that read every file still opens the removal"
-        );
-
-        let mut caveated = UnusedClassMemberFinding::with_actions(class_member("legacyMethod"));
-        caveated.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
-        caveated.set_semantic_decision(eligible());
-        assert!(
-            !caveated.actions.iter().any(IssueAction::is_auto_fixable),
-            "the class-member semantic pass must ask the gate too"
-        );
-        let IssueAction::Fix(fix) = &caveated.actions[0] else {
-            panic!("position 0 stays the fix action");
-        };
-        assert_eq!(
-            fix.note.as_deref(),
-            Some(INCOMPLETE_EVIDENCE_NOTE),
-            "the withheld action says why, rather than repeating a closed-world explanation \
-             computed over a program the run did not fully read"
-        );
-    }
-}
+#[path = "output_dead_code_mutation_gate.rs"]
+mod mutation_gate;
 
 #[cfg(test)]
-mod position_0_invariants {
-    use super::*;
-    use crate::output::FixActionType;
-    use crate::results::{DependencyOverrideSource, DuplicateLocation};
-    use std::path::PathBuf;
-
-    /// Helper: extract the kebab-case `type` discriminant from an
-    /// [`IssueAction`] at a specific position. Returns `None` when the
-    /// position is out of bounds or the action shape lacks a discriminant
-    /// (today every variant has one).
-    fn action_type(action: &IssueAction) -> &'static str {
-        match action {
-            IssueAction::Fix(fix) => match fix.kind {
-                FixActionType::RemoveExport => "remove-export",
-                FixActionType::DeleteFile => "delete-file",
-                FixActionType::RemoveDependency => "remove-dependency",
-                FixActionType::MoveDependency => "move-dependency",
-                FixActionType::RemoveEnumMember => "remove-enum-member",
-                FixActionType::RemoveClassMember => "remove-class-member",
-                FixActionType::ResolveImport => "resolve-import",
-                FixActionType::InstallDependency => "install-dependency",
-                FixActionType::RemoveDuplicate => "remove-duplicate",
-                FixActionType::MoveToDev => "move-to-dev",
-                FixActionType::MoveToProd => "move-to-prod",
-                FixActionType::RefactorCycle => "refactor-cycle",
-                FixActionType::RefactorReExportCycle => "refactor-re-export-cycle",
-                FixActionType::RefactorBoundary => "refactor-boundary",
-                FixActionType::ExportType => "export-type",
-                FixActionType::MigrateDeprecatedExport => "migrate-deprecated-export",
-                FixActionType::RemoveCatalogEntry => "remove-catalog-entry",
-                FixActionType::RemoveEmptyCatalogGroup => "remove-empty-catalog-group",
-                FixActionType::UpdateCatalogReference => "update-catalog-reference",
-                FixActionType::AddCatalogEntry => "add-catalog-entry",
-                FixActionType::RemoveCatalogReference => "remove-catalog-reference",
-                FixActionType::RemoveDependencyOverride => "remove-dependency-override",
-                FixActionType::FixDependencyOverride => "fix-dependency-override",
-                FixActionType::ResolvePolicyViolation => "resolve-policy-violation",
-                FixActionType::MoveToServerModule => "move-to-server-module",
-                FixActionType::SplitMixedBarrel => "split-mixed-barrel",
-                FixActionType::HoistDirective => "hoist-directive",
-                FixActionType::WireServerAction => "wire-server-action",
-                FixActionType::ProvideInject => "provide-inject",
-                FixActionType::UseLoadData => "use-load-data",
-                FixActionType::RenderComponent => "render-component",
-                FixActionType::UseComponentProp => "use-component-prop",
-                FixActionType::ReviewComponentProp => "review-component-prop",
-                FixActionType::EmitComponentEvent => "emit-component-event",
-                FixActionType::WireSvelteEvent => "wire-svelte-event",
-                FixActionType::ComposeEffectLayer => "compose-effect-layer",
-                FixActionType::FailTaggedError => "fail-tagged-error",
-                FixActionType::RemoveCatchTagHandler => "remove-catch-tag-handler",
-                FixActionType::ResolveRouteCollision => "resolve-route-collision",
-                FixActionType::ResolveDynamicSegmentNameConflict => {
-                    "resolve-dynamic-segment-name-conflict"
-                }
-                FixActionType::AddSuppressionReason => "add-suppression-reason",
-                FixActionType::RemoveStaleSuppression => "remove-stale-suppression",
-            },
-            IssueAction::SuppressLine(_) => "suppress-line",
-            IssueAction::SuppressFile(_) => "suppress-file",
-            IssueAction::AddToConfig(_) => "add-to-config",
-        }
-    }
-
-    fn assert_manual_fix_then_suppress(
-        actions: &[IssueAction],
-        primary_type: &str,
-        suppress_comment: &str,
-    ) {
-        assert_eq!(actions.len(), 2);
-        assert_eq!(action_type(&actions[0]), primary_type);
-        let IssueAction::Fix(primary) = &actions[0] else {
-            panic!("position-0 should be a manual fix action");
-        };
-        assert!(!primary.auto_fixable);
-        assert!(primary.note.is_some());
-        assert_eq!(action_type(&actions[1]), "suppress-line");
-        let IssueAction::SuppressLine(suppress) = &actions[1] else {
-            panic!("position-1 should be a suppress-line action");
-        };
-        assert_eq!(suppress.comment, suppress_comment);
-    }
-
-    #[test]
-    fn pnpm_catalog_entry_action_is_auto_fixable() {
-        let finding = UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
-            entry_name: "unused".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 3,
-            hardcoded_consumers: vec![],
-        });
-
-        let IssueAction::Fix(fix) = &finding.actions[0] else {
-            panic!("position-0 should be a fix action");
-        };
-        assert!(fix.auto_fixable);
-        assert_eq!(finding.actions.len(), 2);
-        assert_eq!(action_type(&finding.actions[1]), "suppress-line");
-    }
-
-    #[test]
-    fn bun_package_json_catalog_entry_action_is_manual_only() {
-        let finding = UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
-            entry_name: "unused".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 4,
-            hardcoded_consumers: vec![],
-        });
-
-        let IssueAction::Fix(fix) = &finding.actions[0] else {
-            panic!("position-0 should be a fix action");
-        };
-        assert!(!fix.auto_fixable);
-        assert!(fix.description.contains("manually"));
-        assert_eq!(finding.actions.len(), 1);
-    }
-
-    #[test]
-    fn bun_package_json_empty_catalog_group_action_is_manual_only() {
-        let finding = EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
-            catalog_name: "empty".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 4,
-        });
-
-        let IssueAction::Fix(fix) = &finding.actions[0] else {
-            panic!("position-0 should be a fix action");
-        };
-        assert!(!fix.auto_fixable);
-        assert!(fix.description.contains("manually"));
-        assert_eq!(finding.actions.len(), 1);
-    }
-
-    #[test]
-    fn unprovided_inject_primary_action_is_provide_inject() {
-        let finding = UnprovidedInjectFinding::with_actions(UnprovidedInject {
-            path: PathBuf::from("src/context.ts"),
-            key_name: "userKey".to_string(),
-            framework: "svelte".to_string(),
-            line: 7,
-            col: 12,
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "provide-inject",
-            "// fallow-ignore-next-line unprovided-inject",
-        );
-    }
-
-    #[test]
-    fn unused_server_action_primary_action_is_wire_server_action() {
-        let finding = UnusedServerActionFinding::with_actions(UnusedServerAction {
-            path: PathBuf::from("app/actions.ts"),
-            action_name: "saveDraft".to_string(),
-            line: 3,
-            col: 13,
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "wire-server-action",
-            "// fallow-ignore-next-line unused-server-action",
-        );
-    }
-
-    #[test]
-    fn unused_load_data_key_primary_action_is_use_load_data() {
-        let finding = UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
-            path: PathBuf::from("src/routes/+page.server.ts"),
-            key_name: "profile".to_string(),
-            line: 12,
-            col: 6,
-            route_dir: Some("src/routes".to_string()),
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "use-load-data",
-            "// fallow-ignore-next-line unused-load-data-key",
-        );
-    }
-
-    #[test]
-    fn unrendered_component_primary_action_is_render_component() {
-        let finding = UnrenderedComponentFinding::with_actions(UnrenderedComponent {
-            path: PathBuf::from("src/components/EmptyState.vue"),
-            component_name: "EmptyState".to_string(),
-            framework: "vue".to_string(),
-            reachable_via: None,
-            line: 1,
-            col: 0,
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "render-component",
-            "// fallow-ignore-next-line unrendered-component",
-        );
-    }
-
-    #[test]
-    fn unused_component_prop_primary_action_is_use_component_prop() {
-        let finding = UnusedComponentPropFinding::with_actions(UnusedComponentProp {
-            path: PathBuf::from("src/components/Card.vue"),
-            component_name: "Card".to_string(),
-            prop_name: "variant".to_string(),
-            line: 5,
-            col: 10,
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "use-component-prop",
-            "// fallow-ignore-next-line unused-component-prop",
-        );
-    }
-
-    #[test]
-    fn unused_component_emit_primary_action_is_emit_component_event() {
-        let finding = UnusedComponentEmitFinding::with_actions(UnusedComponentEmit {
-            path: PathBuf::from("src/components/Picker.vue"),
-            component_name: "Picker".to_string(),
-            emit_name: "focus".to_string(),
-            line: 6,
-            col: 14,
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "emit-component-event",
-            "// fallow-ignore-next-line unused-component-emit",
-        );
-    }
-
-    #[test]
-    fn unused_svelte_event_primary_action_is_wire_svelte_event() {
-        let finding = UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
-            path: PathBuf::from("src/Dialog.svelte"),
-            component_name: "Dialog".to_string(),
-            event_name: "closed".to_string(),
-            line: 19,
-            col: 8,
-        });
-
-        assert_manual_fix_then_suppress(
-            &finding.actions,
-            "wire-svelte-event",
-            "// fallow-ignore-next-line unused-svelte-event",
-        );
-    }
-
-    #[test]
-    fn unresolved_import_actions_include_ignore_unresolved_imports_config_suppress() {
-        let inner = UnresolvedImport {
-            specifier: "@example/icons".to_string(),
-            path: PathBuf::from("src/index.ts"),
-            line: 4,
-            col: 12,
-            specifier_col: 18,
-        };
-        let finding = UnresolvedImportFinding::with_actions(inner);
-
-        assert_eq!(action_type(&finding.actions[0]), "resolve-import");
-        assert_eq!(action_type(&finding.actions[1]), "add-to-config");
-        let IssueAction::AddToConfig(action) = &finding.actions[1] else {
-            panic!("position-1 should be AddToConfig");
-        };
-        assert!(!action.auto_fixable);
-        assert_eq!(action.config_key, "ignoreUnresolvedImports");
-        let AddToConfigValue::Scalar(value) = &action.value else {
-            panic!("ignoreUnresolvedImports action should carry a scalar value");
-        };
-        assert_eq!(value, "@example/icons");
-        assert_eq!(
-            action.value_schema.as_deref(),
-            Some(
-                "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
-            )
-        );
-    }
-
-    /// Invariant: when no other catalog declares the package, position 0
-    /// of `unresolved_catalog_references[].actions` is `add-catalog-entry`,
-    /// directing the agent to grow the targeted catalog.
-    ///
-    /// Downstream consumers (MCP `actions[0].type` dispatch and JSON
-    /// consumers that read the first action) pattern-match on this string. A future refactor that puts the
-    /// generic `remove-catalog-reference` fallback at position 0 would
-    /// flip every CI annotation from "add this entry" to "remove this
-    /// reference", reversing the recommended action.
-    #[test]
-    fn unresolved_catalog_position_0_is_add_when_no_alternatives() {
-        let inner = UnresolvedCatalogReference {
-            entry_name: "react".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("apps/web/package.json"),
-            line: 7,
-            available_in_catalogs: Vec::new(),
-        };
-        let finding = UnresolvedCatalogReferenceFinding::with_actions(inner);
-        assert_eq!(
-            action_type(&finding.actions[0]),
-            "add-catalog-entry",
-            "position-0 must be `add-catalog-entry` when no alternative catalog declares the package"
-        );
-        let IssueAction::Fix(fix) = &finding.actions[0] else {
-            panic!("position-0 should be an IssueAction::Fix");
-        };
-        assert!(
-            fix.available_in_catalogs.is_none(),
-            "add-catalog-entry must NOT carry available_in_catalogs"
-        );
-        assert!(
-            fix.suggested_target.is_none(),
-            "add-catalog-entry must NOT carry suggested_target"
-        );
-    }
-
-    /// Invariant: when at least one alternative catalog declares the
-    /// package, position 0 flips to `update-catalog-reference` and carries
-    /// the alternative list. When exactly one alternative exists, the
-    /// action also carries `suggested_target` so deterministic agents can
-    /// land the edit without picking from the list. This is the
-    /// counterpart to `unresolved_catalog_position_0_is_add_when_no_alternatives`.
-    #[test]
-    fn unresolved_catalog_position_0_is_update_when_alternatives_exist() {
-        let inner = UnresolvedCatalogReference {
-            entry_name: "react".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("apps/web/package.json"),
-            line: 7,
-            available_in_catalogs: vec!["react18".to_string()],
-        };
-        let finding = UnresolvedCatalogReferenceFinding::with_actions(inner);
-        assert_eq!(
-            action_type(&finding.actions[0]),
-            "update-catalog-reference",
-            "position-0 must be `update-catalog-reference` when at least one alternative catalog declares the package"
-        );
-        let IssueAction::Fix(fix) = &finding.actions[0] else {
-            panic!("position-0 should be an IssueAction::Fix");
-        };
-        assert_eq!(
-            fix.available_in_catalogs.as_deref(),
-            Some(&["react18".to_string()][..]),
-            "update-catalog-reference must carry the alternative list"
-        );
-        assert_eq!(
-            fix.suggested_target.as_deref(),
-            Some("react18"),
-            "single-alternative case must surface `suggested_target` for deterministic agents"
-        );
-
-        // Two alternatives: still update, but no unambiguous target.
-        let inner_two = UnresolvedCatalogReference {
-            entry_name: "react".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("apps/web/package.json"),
-            line: 7,
-            available_in_catalogs: vec!["react17".to_string(), "react18".to_string()],
-        };
-        let finding_two = UnresolvedCatalogReferenceFinding::with_actions(inner_two);
-        assert_eq!(
-            action_type(&finding_two.actions[0]),
-            "update-catalog-reference"
-        );
-        let IssueAction::Fix(fix_two) = &finding_two.actions[0] else {
-            panic!("position-0 should be an IssueAction::Fix");
-        };
-        assert!(
-            fix_two.suggested_target.is_none(),
-            "multi-alternative case must NOT carry `suggested_target` (agent must pick)"
-        );
-    }
-
-    /// Invariant: position 0 of `duplicate_exports[].actions` is
-    /// `add-to-config` (the safe `ignoreExports` rule for the
-    /// namespace-barrel case), NOT the destructive `remove-duplicate`.
-    ///
-    /// This protects the shadcn / Radix / bits-ui pattern where every
-    /// `components/ui/<name>/index.ts` intentionally re-exports the same
-    /// short names. Any consumer that reads `actions[0].type` as "the
-    /// recommended fix" must see the non-destructive path first; flipping
-    /// position 0 to `remove-duplicate` would propose deleting an
-    /// intentional API surface.
-    ///
-    /// This test pins position 0 across both possible auto_fixable values
-    /// for the add-to-config action (the per-instance flip flag handled
-    /// by `set_config_fixable`).
-    #[test]
-    fn duplicate_exports_position_0_is_add_to_config_not_remove_duplicate() {
-        let inner = DuplicateExport {
-            export_name: "Root".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("components/ui/accordion/index.ts"),
-                    line: 1,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("components/ui/dialog/index.ts"),
-                    line: 1,
-                    col: 0,
-                },
-            ],
-        };
-        let finding = DuplicateExportFinding::with_actions(inner);
-        assert_eq!(
-            action_type(&finding.actions[0]),
-            "add-to-config",
-            "position-0 must be `add-to-config` (safe `ignoreExports` path), NOT `remove-duplicate`"
-        );
-        assert_eq!(
-            action_type(&finding.actions[1]),
-            "remove-duplicate",
-            "position-1 must be the destructive `remove-duplicate` fallback"
-        );
-
-        // `set_config_fixable(true)` flips the position-0 add-to-config
-        // bool but must NOT re-order positions.
-        let mut promoted = finding;
-        promoted.set_config_fixable(true);
-        assert_eq!(action_type(&promoted.actions[0]), "add-to-config");
-        let IssueAction::AddToConfig(action) = &promoted.actions[0] else {
-            panic!("position-0 should still be AddToConfig after set_config_fixable");
-        };
-        assert!(
-            action.auto_fixable,
-            "set_config_fixable(true) must flip auto_fixable"
-        );
-    }
-
-    /// Invariant: a duplicate-exports finding with empty `locations`
-    /// degenerate input drops the `add-to-config` action entirely, so
-    /// position 0 falls through to `remove-duplicate`. Documents the
-    /// degenerate-case contract.
-    #[test]
-    fn duplicate_exports_no_locations_falls_through_to_remove_duplicate() {
-        let inner = DuplicateExport {
-            export_name: "Root".to_string(),
-            locations: Vec::new(),
-        };
-        let finding = DuplicateExportFinding::with_actions(inner);
-        assert_eq!(
-            action_type(&finding.actions[0]),
-            "remove-duplicate",
-            "with no locations there is no ignoreExports rule to suggest; the destructive remove becomes position-0"
-        );
-
-        // `set_config_fixable(true)` is a no-op on this shape.
-        let mut promoted = finding;
-        promoted.set_config_fixable(true);
-        assert_eq!(
-            action_type(&promoted.actions[0]),
-            "remove-duplicate",
-            "set_config_fixable is a no-op when position-0 is not add-to-config"
-        );
-    }
-
-    /// Invariant: misconfigured-dependency-override with empty
-    /// `target_package` AND empty `raw_key` drops the suppress action
-    /// (no usable package name for the `ignoreDependencyOverrides`
-    /// matcher; emitting `package: ""` would be silently dropped by the
-    /// config parser). Documents the suppress-omission contract.
-    #[test]
-    fn misconfigured_override_drops_suppress_when_no_package_name() {
-        let inner = MisconfiguredDependencyOverride {
-            raw_key: String::new(),
-            target_package: None,
-            raw_value: String::new(),
-            reason: crate::results::DependencyOverrideMisconfigReason::EmptyValue,
-            source: DependencyOverrideSource::PnpmWorkspaceYaml,
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 12,
-        };
-        let finding = MisconfiguredDependencyOverrideFinding::with_actions(inner);
-        // Only the primary fix-dependency-override action: no suppress.
-        assert_eq!(finding.actions.len(), 1);
-        assert_eq!(action_type(&finding.actions[0]), "fix-dependency-override");
-    }
-}
+#[path = "output_dead_code_position_0_invariants.rs"]
+mod position_0_invariants;

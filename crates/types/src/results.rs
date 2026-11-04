@@ -14,20 +14,20 @@ use crate::output::{
 use crate::output_dead_code::{
     AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
     BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
-    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    DevDependencyInProductionFinding, DuplicateExportAliasFinding, DuplicateExportFinding,
+    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedSvelteEventFinding, UnusedTypeFinding,
+    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 pub use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -39,6 +39,13 @@ pub use component_health::ERROR_ONLY_RESULT_KEYS;
 
 use crate::serde_path;
 use crate::suppress::closest_known_kind_name;
+#[path = "results_ignore_findings.rs"]
+mod ignore_findings;
+use ignore_findings::classify_ignore_findings_fields;
+
+#[path = "results_merge_parts.rs"]
+mod merge_parts;
+use merge_parts::split_merge_parts;
 
 /// Summary of detected entry points, grouped by discovery source.
 ///
@@ -288,6 +295,12 @@ pub struct AnalysisResults {
     /// `auto_fixable: false` default to reflect dependency-injection
     /// patterns.
     pub unused_class_members: Vec<UnusedClassMemberFinding>,
+    /// Exported members of an exported TypeScript namespace that no code
+    /// reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+    /// [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+    /// dotted path from the exported namespace (`Inner.x`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_namespace_members: Vec<UnusedNamespaceMemberFinding>,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -303,11 +316,20 @@ pub struct AnalysisResults {
     /// Dependencies used in code but not listed in package.json. Wrapped in
     /// [`UnlistedDependencyFinding`].
     pub unlisted_dependencies: Vec<UnlistedDependencyFinding>,
+    /// Binaries that package.json scripts or process calls run, but that no
+    /// installed or listed package provides. Wrapped in
+    /// [`UnlistedBinaryFinding`].
+    #[serde(default)]
+    pub unlisted_binaries: Vec<UnlistedBinaryFinding>,
     /// Exports with the same name across multiple modules. Wrapped in
     /// [`DuplicateExportFinding`] so each entry carries a typed `actions`
     /// array natively, with the position-0 `add-to-config` `ignoreExports`
     /// snippet wired in at wrapper construction.
     pub duplicate_exports: Vec<DuplicateExportFinding>,
+    /// One module that exports one binding under two or more names. Wrapped
+    /// in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicate_export_aliases: Vec<DuplicateExportAliasFinding>,
     /// Production dependencies only used via type-only imports (could be
     /// devDependencies). Only populated in production mode. Wrapped in
     /// [`TypeOnlyDependencyFinding`].
@@ -731,6 +753,7 @@ struct AnalysisResultsCoreMergeParts {
     deprecated_exports_in_use: Vec<DeprecatedExportInUseFinding>,
     unused_enum_members: Vec<UnusedEnumMemberFinding>,
     unused_class_members: Vec<UnusedClassMemberFinding>,
+    unused_namespace_members: Vec<UnusedNamespaceMemberFinding>,
     unused_store_members: Vec<UnusedStoreMemberFinding>,
     unresolved_imports: Vec<UnresolvedImportFinding>,
     boundary_violations: Vec<BoundaryViolationFinding>,
@@ -745,7 +768,9 @@ struct AnalysisResultsGraphMergeParts {
     unused_dev_dependencies: Vec<UnusedDevDependencyFinding>,
     unused_optional_dependencies: Vec<UnusedOptionalDependencyFinding>,
     unlisted_dependencies: Vec<UnlistedDependencyFinding>,
+    unlisted_binaries: Vec<UnlistedBinaryFinding>,
     duplicate_exports: Vec<DuplicateExportFinding>,
+    duplicate_export_aliases: Vec<DuplicateExportAliasFinding>,
     type_only_dependencies: Vec<TypeOnlyDependencyFinding>,
     test_only_dependencies: Vec<TestOnlyDependencyFinding>,
     dev_dependencies_in_production: Vec<DevDependencyInProductionFinding>,
@@ -806,178 +831,6 @@ struct AnalysisResultsMetadataMergeParts {
     semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
-/// Exhaustively destructure `other` into the five grouped merge-part structs.
-///
-/// The single exhaustive `let Self { .. }` lives here so that adding a field to
-/// [`AnalysisResults`] becomes a compile error (a field must be routed into one
-/// of the part structs) instead of being silently dropped during a merge. See
-/// issue #444.
-#[expect(
-    clippy::too_many_lines,
-    reason = "irreducible single exhaustive field-routing: the one `let Self { .. }` destructure must name every field so a newly added field is a compile error (issue #444); splitting it would defeat that exhaustiveness guarantee"
-)]
-fn split_merge_parts(
-    other: AnalysisResults,
-) -> (
-    AnalysisResultsCoreMergeParts,
-    AnalysisResultsGraphMergeParts,
-    AnalysisResultsWorkspaceMergeParts,
-    AnalysisResultsFrameworkMergeParts,
-    AnalysisResultsMetadataMergeParts,
-) {
-    let AnalysisResults {
-        unused_files,
-        unused_exports,
-        unused_types,
-        private_type_leaks,
-        deprecated_exports_in_use,
-        unused_dependencies,
-        unused_dev_dependencies,
-        unused_optional_dependencies,
-        unused_enum_members,
-        unused_class_members,
-        unused_store_members,
-        unresolved_imports,
-        unlisted_dependencies,
-        duplicate_exports,
-        type_only_dependencies,
-        test_only_dependencies,
-        dev_dependencies_in_production,
-        circular_dependencies,
-        re_export_cycles,
-        package_cycles,
-        boundary_violations,
-        boundary_coverage_violations,
-        boundary_call_violations,
-        policy_violations,
-        stale_suppressions,
-        unused_catalog_entries,
-        empty_catalog_groups,
-        unresolved_catalog_references,
-        unused_dependency_overrides,
-        misconfigured_dependency_overrides,
-        invalid_client_exports,
-        mixed_client_server_barrels,
-        misplaced_directives,
-        unprovided_injects,
-        unrendered_components,
-        route_collisions,
-        dynamic_segment_name_conflicts,
-        unused_component_props,
-        absent_component_props,
-        unused_component_emits,
-        unused_component_inputs,
-        unused_component_outputs,
-        unused_svelte_events,
-        unused_effect_layers,
-        unused_tagged_errors,
-        unproduced_catch_tags,
-        unused_server_actions,
-        unused_load_data_keys,
-        unused_load_data_keys_global_abstain,
-        prop_drilling_chains,
-        thin_wrappers,
-        duplicate_prop_shapes,
-        cascade_hidden,
-        cascade,
-        suppression_count,
-        unused_component_props_exempted,
-        active_suppressions,
-        feature_flags,
-        security_findings,
-        security_unresolved_edge_files,
-        security_unresolved_callee_sites,
-        security_unresolved_callee_diagnostics,
-        export_usages,
-        entry_point_summary,
-        render_fan_in,
-        react_component_intel,
-        semantic_reachable_files,
-        semantic_framework_contracts,
-    } = other;
-
-    (
-        AnalysisResultsCoreMergeParts {
-            unused_files,
-            unused_exports,
-            unused_types,
-            private_type_leaks,
-            deprecated_exports_in_use,
-            unused_enum_members,
-            unused_class_members,
-            unused_store_members,
-            unresolved_imports,
-            boundary_violations,
-            boundary_coverage_violations,
-            boundary_call_violations,
-            policy_violations,
-            stale_suppressions,
-        },
-        AnalysisResultsGraphMergeParts {
-            unused_dependencies,
-            unused_dev_dependencies,
-            unused_optional_dependencies,
-            unlisted_dependencies,
-            duplicate_exports,
-            type_only_dependencies,
-            test_only_dependencies,
-            dev_dependencies_in_production,
-            circular_dependencies,
-            re_export_cycles,
-            package_cycles,
-        },
-        AnalysisResultsWorkspaceMergeParts {
-            unused_catalog_entries,
-            empty_catalog_groups,
-            unresolved_catalog_references,
-            unused_dependency_overrides,
-            misconfigured_dependency_overrides,
-        },
-        AnalysisResultsFrameworkMergeParts {
-            invalid_client_exports,
-            mixed_client_server_barrels,
-            misplaced_directives,
-            unprovided_injects,
-            unrendered_components,
-            route_collisions,
-            dynamic_segment_name_conflicts,
-            unused_component_props,
-            absent_component_props,
-            unused_component_emits,
-            unused_component_inputs,
-            unused_component_outputs,
-            unused_svelte_events,
-            unused_effect_layers,
-            unused_tagged_errors,
-            unproduced_catch_tags,
-            unused_server_actions,
-            unused_load_data_keys,
-            unused_load_data_keys_global_abstain,
-            prop_drilling_chains,
-            thin_wrappers,
-            duplicate_prop_shapes,
-        },
-        AnalysisResultsMetadataMergeParts {
-            cascade_hidden,
-            cascade,
-            suppression_count,
-            unused_component_props_exempted,
-            active_suppressions,
-            feature_flags,
-            security_findings,
-            security_unresolved_edge_files,
-            security_unresolved_callee_sites,
-            security_unresolved_callee_diagnostics,
-            export_usages,
-            entry_point_summary,
-            render_fan_in,
-            react_component_intel,
-            semantic_reachable_files,
-            semantic_framework_contracts,
-        },
-    )
-}
-
 macro_rules! counted_analysis_result_fields {
     ($callback:ident $(, $arg:expr)? ) => {
         $callback! {
@@ -992,10 +845,13 @@ macro_rules! counted_analysis_result_fields {
             unused_optional_dependencies => "unused_optional_dependencies",
             unused_enum_members => "unused_enum_members",
             unused_class_members => "unused_class_members",
+            unused_namespace_members => "unused_namespace_members",
             unused_store_members => "unused_store_members",
             unresolved_imports => "unresolved_imports",
             unlisted_dependencies => "unlisted_dependencies",
+            unlisted_binaries => "unlisted_binaries",
             duplicate_exports => "duplicate_exports",
+            duplicate_export_aliases => "duplicate_export_aliases",
             type_only_dependencies => "type_only_dependencies",
             test_only_dependencies => "test_only_dependencies",
             dev_dependencies_in_production => "dev_dependencies_in_production",
@@ -1061,6 +917,7 @@ impl_single_source_dead_code! {
     DeprecatedExportInUseFinding => export.path,
     UnusedEnumMemberFinding => member.path,
     UnusedClassMemberFinding => member.path,
+    UnusedNamespaceMemberFinding => member.path,
     UnusedStoreMemberFinding => member.path,
     UnresolvedImportFinding => import.path,
     UnprovidedInjectFinding => inject.path,
@@ -1072,6 +929,7 @@ impl_single_source_dead_code! {
     UnusedComponentOutputFinding => output.path,
     UnusedSvelteEventFinding => event.path,
     UnusedEffectLayerFinding => layer.path,
+    DuplicateExportAliasFinding => alias.path,
     UnusedTaggedErrorFinding => error.path,
     UnproducedCatchTagFinding => catch_tag.path,
     UnusedServerActionFinding => action.path,
@@ -1135,6 +993,12 @@ impl FindingIgnorePolicy for UnlistedDependencyFinding {
             self.dep.imported_from.iter().map(|site| &site.path),
             predicate,
         )
+    }
+}
+
+impl FindingIgnorePolicy for UnlistedBinaryFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(self.binary.used_in.iter().map(|site| &site.path), predicate)
     }
 }
 
@@ -1214,95 +1078,6 @@ mod result_key_findings;
 /// Serialized `AnalysisResults` arrays that contribute to [`AnalysisResults::total_issues`].
 pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =
     counted_analysis_result_fields!(counted_result_key_slice);
-
-/// Compile-time coverage guard for [`AnalysisResults::remove_ignored_dead_code_findings`].
-///
-/// Every `AnalysisResults` field is destructured without a rest pattern, so a
-/// new result family fails to compile here until it is deliberately classified
-/// as hideable (a source-owned finding family routed through the ignore filter)
-/// or always visible. Without this guard a new family silently escapes
-/// `ignoreFindings`, which is the failure mode issue #2017 describes.
-fn classify_ignore_findings_fields(results: &AnalysisResults) {
-    let AnalysisResults {
-        // Hideable: counted source-owned dead-code families.
-        unused_files: _unused_files,
-        unused_exports: _unused_exports,
-        unused_types: _unused_types,
-        private_type_leaks: _private_type_leaks,
-        deprecated_exports_in_use: _deprecated_exports_in_use,
-        unused_enum_members: _unused_enum_members,
-        unused_class_members: _unused_class_members,
-        unused_store_members: _unused_store_members,
-        unresolved_imports: _unresolved_imports,
-        unlisted_dependencies: _unlisted_dependencies,
-        duplicate_exports: _duplicate_exports,
-        circular_dependencies: _circular_dependencies,
-        re_export_cycles: _re_export_cycles,
-        package_cycles: _package_cycles,
-        unprovided_injects: _unprovided_injects,
-        unrendered_components: _unrendered_components,
-        unused_component_props: _unused_component_props,
-        absent_component_props: _absent_component_props,
-        unused_component_emits: _unused_component_emits,
-        unused_component_inputs: _unused_component_inputs,
-        unused_component_outputs: _unused_component_outputs,
-        unused_svelte_events: _unused_svelte_events,
-        unused_effect_layers: _unused_effect_layers,
-        unused_tagged_errors: _unused_tagged_errors,
-        unproduced_catch_tags: _unproduced_catch_tags,
-        unused_server_actions: _unused_server_actions,
-        unused_load_data_keys: _unused_load_data_keys,
-        // Hideable: uncounted source-owned React health signals.
-        prop_drilling_chains: _prop_drilling_chains,
-        thin_wrappers: _thin_wrappers,
-        duplicate_prop_shapes: _duplicate_prop_shapes,
-        // Always visible: manifest-owned package and catalog findings.
-        unused_dependencies: _unused_dependencies,
-        unused_dev_dependencies: _unused_dev_dependencies,
-        unused_optional_dependencies: _unused_optional_dependencies,
-        type_only_dependencies: _type_only_dependencies,
-        test_only_dependencies: _test_only_dependencies,
-        dev_dependencies_in_production: _dev_dependencies_in_production,
-        unused_catalog_entries: _unused_catalog_entries,
-        empty_catalog_groups: _empty_catalog_groups,
-        unresolved_catalog_references: _unresolved_catalog_references,
-        unused_dependency_overrides: _unused_dependency_overrides,
-        misconfigured_dependency_overrides: _misconfigured_dependency_overrides,
-        // Always visible: architecture, policy, suppression hygiene, and
-        // framework-correctness findings.
-        boundary_violations: _boundary_violations,
-        boundary_coverage_violations: _boundary_coverage_violations,
-        boundary_call_violations: _boundary_call_violations,
-        policy_violations: _policy_violations,
-        stale_suppressions: _stale_suppressions,
-        invalid_client_exports: _invalid_client_exports,
-        mixed_client_server_barrels: _mixed_client_server_barrels,
-        misplaced_directives: _misplaced_directives,
-        route_collisions: _route_collisions,
-        dynamic_segment_name_conflicts: _dynamic_segment_name_conflicts,
-        // Always visible: security candidates and their blind-spot metadata. A
-        // path glob must never silence a leak candidate or turn an unresolved
-        // blind spot into a clean bill.
-        security_findings: _security_findings,
-        security_unresolved_edge_files: _security_unresolved_edge_files,
-        security_unresolved_callee_sites: _security_unresolved_callee_sites,
-        security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-        // Not findings: counters, metadata, and descriptive carriers.
-        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
-        cascade_hidden: _cascade_hidden,
-        cascade: _cascade,
-        suppression_count: _suppression_count,
-        unused_component_props_exempted: _unused_component_props_exempted,
-        active_suppressions: _active_suppressions,
-        feature_flags: _feature_flags,
-        export_usages: _export_usages,
-        entry_point_summary: _entry_point_summary,
-        render_fan_in: _render_fan_in,
-        react_component_intel: _react_component_intel,
-        semantic_reachable_files: _semantic_reachable_files,
-        semantic_framework_contracts: _semantic_framework_contracts,
-    } = results;
-}
 
 impl AnalysisResults {
     /// Remove the export and member findings whose file `covered` selects.
@@ -1451,6 +1226,8 @@ impl AnalysisResults {
             .extend(parts.deprecated_exports_in_use);
         self.unused_enum_members.extend(parts.unused_enum_members);
         self.unused_class_members.extend(parts.unused_class_members);
+        self.unused_namespace_members
+            .extend(parts.unused_namespace_members);
         self.unused_store_members.extend(parts.unused_store_members);
         self.unresolved_imports.extend(parts.unresolved_imports);
         self.boundary_violations.extend(parts.boundary_violations);
@@ -1470,7 +1247,10 @@ impl AnalysisResults {
             .extend(parts.unused_optional_dependencies);
         self.unlisted_dependencies
             .extend(parts.unlisted_dependencies);
+        self.unlisted_binaries.extend(parts.unlisted_binaries);
         self.duplicate_exports.extend(parts.duplicate_exports);
+        self.duplicate_export_aliases
+            .extend(parts.duplicate_export_aliases);
         self.type_only_dependencies
             .extend(parts.type_only_dependencies);
         self.test_only_dependencies
@@ -1662,6 +1442,15 @@ impl AnalysisResults {
         });
 
         self.unused_class_members.sort_by(|a, b| {
+            a.member
+                .path
+                .cmp(&b.member.path)
+                .then(a.member.line.cmp(&b.member.line))
+                .then(a.member.parent_name.cmp(&b.member.parent_name))
+                .then(a.member.member_name.cmp(&b.member.member_name))
+        });
+
+        self.unused_namespace_members.sort_by(|a, b| {
             a.member
                 .path
                 .cmp(&b.member.path)
@@ -1907,6 +1696,17 @@ impl AnalysisResults {
                 .sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
         }
 
+        self.unlisted_binaries
+            .sort_by(|a, b| a.binary.binary_name.cmp(&b.binary.binary_name));
+        for binary in &mut self.unlisted_binaries {
+            binary.binary.used_in.sort_by(|a, b| {
+                a.path
+                    .cmp(&b.path)
+                    .then(a.line.cmp(&b.line))
+                    .then(a.col.cmp(&b.col))
+            });
+        }
+
         self.duplicate_exports
             .sort_by(|a, b| a.export.export_name.cmp(&b.export.export_name));
         for dup in &mut self.duplicate_exports {
@@ -1914,6 +1714,14 @@ impl AnalysisResults {
                 .locations
                 .sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
         }
+        self.duplicate_export_aliases.sort_by(|a, b| {
+            a.alias
+                .path
+                .cmp(&b.alias.path)
+                .then(a.alias.line.cmp(&b.alias.line))
+                .then(a.alias.col.cmp(&b.alias.col))
+                .then_with(|| a.alias.export_names.cmp(&b.alias.export_names))
+        });
 
         self.type_only_dependencies.sort_by(|a, b| {
             a.dep
@@ -2920,18 +2728,20 @@ pub enum DependencyLocation {
     OptionalDependencies,
 }
 
-/// An unused enum or class member.
+/// An unused enum, class, store, or namespace member.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedMember {
     /// File containing the unused member.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// Name of the parent enum or class.
+    /// Name of the parent enum, class, store, or exported namespace.
     pub parent_name: String,
-    /// Name of the unused member.
+    /// Name of the unused member. A member of a nested namespace has the dotted
+    /// path from the exported namespace (`Inner.x`).
     pub member_name: String,
-    /// Whether this is an enum member, class method, or class property.
+    /// The kind of member: enum member, class method, class property, store
+    /// member, or namespace member.
     pub kind: MemberKind,
     /// 1-based line number.
     pub line: u32,
@@ -2968,6 +2778,35 @@ pub struct UnlistedDependency {
     pub imported_from: Vec<ImportSite>,
 }
 
+/// A binary that a package.json script or a process call runs, but that no
+/// installed or listed package provides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnlistedBinary {
+    /// The binary name as the command runs it (for example `ffmpeg`).
+    pub binary_name: String,
+    /// The sites that run this binary.
+    pub used_in: Vec<BinaryUseSite>,
+}
+
+/// A location that runs a binary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BinaryUseSite {
+    /// The `package.json` that declares the script, or the source file that
+    /// makes the process call.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+    /// The name of the package.json script that runs the binary. Absent for
+    /// a process call in source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_name: Option<String>,
+}
+
 /// A location where an import occurs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2998,6 +2837,43 @@ pub struct DuplicateLocation {
     /// File containing the duplicate export.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
+    /// 1-based line number.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+}
+
+/// One module that exports one binding under two or more names, for example
+/// `export const a = 1; export default a;` or `export { a, a as b }`. The
+/// finding is about the export surface of one file, not about usage, so an
+/// entry file can have it too. Value and type-only exports of one name are
+/// separate bindings. Two bindings with the same initializer are not one
+/// binding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicateExportAlias {
+    /// The module that exports the binding.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The local name of the binding. For a re-export, the name that the
+    /// source module exports.
+    pub local_name: String,
+    /// The export names of the binding, in source order.
+    pub export_names: Vec<String>,
+    /// 1-based line number of the first export of the binding.
+    pub line: u32,
+    /// 0-based byte column offset of the first export of the binding.
+    pub col: u32,
+    /// One location for each export name, in source order.
+    pub locations: Vec<DuplicateExportAliasLocation>,
+}
+
+/// One export name of a [`DuplicateExportAlias`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicateExportAliasLocation {
+    /// The export name at this location (`default` for a default export).
+    pub export_name: String,
     /// 1-based line number.
     pub line: u32,
     /// 0-based byte column offset.
@@ -4514,1457 +4390,5 @@ pub struct ReferenceLocation {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::output_dead_code::{
-        BoundaryViolationFinding, CircularDependencyFinding, UnresolvedImportFinding,
-        UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-        UnusedTypeFinding,
-    };
-
-    #[test]
-    fn empty_results_no_issues() {
-        let results = AnalysisResults::default();
-        assert_eq!(results.total_issues(), 0);
-        assert!(!results.has_issues());
-    }
-
-    #[test]
-    fn results_with_unused_file() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("test.ts"),
-            }));
-        assert_eq!(results.total_issues(), 1);
-        assert!(results.has_issues());
-    }
-
-    #[test]
-    fn results_with_unused_export() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: PathBuf::from("test.ts"),
-                export_name: "foo".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-                deprecated: false,
-                deprecated_reason: None,
-            }));
-        assert_eq!(results.total_issues(), 1);
-        assert!(results.has_issues());
-    }
-
-    #[test]
-    fn merge_into_appends_counts_and_preserves_existing_optional_metadata() {
-        let framework_contract = crate::semantic::SemanticFrameworkContract {
-            framework: "lit".to_string(),
-            package: "lit".to_string(),
-            heritage_symbol: "LitElement".to_string(),
-            heritage_names: vec!["LitElement".to_string()],
-            relation: crate::semantic::SemanticFrameworkRelation::Extends,
-            members: vec!["render".to_string()],
-        };
-        let mut target = AnalysisResults {
-            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("a.ts"),
-            })],
-            suppression_count: 2,
-            security_unresolved_edge_files: 1,
-            security_unresolved_callee_sites: 3,
-            entry_point_summary: Some(EntryPointSummary {
-                total: 1,
-                by_source: vec![("existing".to_string(), 1)],
-            }),
-            semantic_framework_contracts: vec![framework_contract.clone()],
-            ..AnalysisResults::default()
-        };
-        let source = AnalysisResults {
-            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("b.ts"),
-            })],
-            suppression_count: 4,
-            security_unresolved_edge_files: 5,
-            security_unresolved_callee_sites: 6,
-            unused_load_data_keys_global_abstain: true,
-            entry_point_summary: Some(EntryPointSummary {
-                total: 1,
-                by_source: vec![("incoming".to_string(), 1)],
-            }),
-            render_fan_in: Some(RenderFanInMetric::default()),
-            semantic_framework_contracts: vec![framework_contract],
-            ..AnalysisResults::default()
-        };
-
-        target.merge_into(source);
-
-        assert_eq!(target.unused_files.len(), 2);
-        assert_eq!(target.suppression_count, 6);
-        assert_eq!(target.security_unresolved_edge_files, 6);
-        assert_eq!(target.security_unresolved_callee_sites, 9);
-        assert!(target.unused_load_data_keys_global_abstain);
-        assert_eq!(
-            target
-                .entry_point_summary
-                .as_ref()
-                .map(|summary| summary.total),
-            Some(1)
-        );
-        assert_eq!(
-            target
-                .entry_point_summary
-                .as_ref()
-                .and_then(|summary| summary.by_source.first())
-                .map(|(name, _)| name.as_str()),
-            Some("existing")
-        );
-        assert!(target.render_fan_in.is_some());
-        assert_eq!(target.semantic_framework_contracts.len(), 1);
-    }
-
-    fn test_unused_export(path: &str, export_name: &str, is_type_only: bool) -> UnusedExport {
-        UnusedExport {
-            path: PathBuf::from(path),
-            export_name: export_name.to_string(),
-            is_type_only,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-            deprecated: false,
-            deprecated_reason: None,
-        }
-    }
-
-    fn test_unused_dependency(
-        package_name: &str,
-        location: DependencyLocation,
-    ) -> UnusedDependency {
-        UnusedDependency {
-            package_name: package_name.to_string(),
-            location,
-            path: PathBuf::from("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        }
-    }
-
-    fn test_unused_member(member_name: &str, kind: MemberKind) -> UnusedMember {
-        UnusedMember {
-            path: PathBuf::from("members.ts"),
-            parent_name: "Parent".to_string(),
-            member_name: member_name.to_string(),
-            kind,
-            line: 1,
-            col: 0,
-        }
-    }
-
-    #[test]
-    fn results_total_counts_all_types() {
-        let results = AnalysisResults {
-            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("a.ts"),
-            })],
-            unused_exports: vec![UnusedExportFinding::with_actions(test_unused_export(
-                "b.ts", "x", false,
-            ))],
-            unused_types: vec![UnusedTypeFinding::with_actions(test_unused_export(
-                "c.ts", "T", true,
-            ))],
-            unused_dependencies: vec![UnusedDependencyFinding::with_actions(
-                test_unused_dependency("dep", DependencyLocation::Dependencies),
-            )],
-            unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
-                test_unused_dependency("dev", DependencyLocation::DevDependencies),
-            )],
-            unused_enum_members: vec![UnusedEnumMemberFinding::with_actions(test_unused_member(
-                "A",
-                MemberKind::EnumMember,
-            ))],
-            unused_class_members: vec![UnusedClassMemberFinding::with_actions(test_unused_member(
-                "m",
-                MemberKind::ClassMethod,
-            ))],
-            unresolved_imports: vec![UnresolvedImportFinding::with_actions(UnresolvedImport {
-                path: PathBuf::from("f.ts"),
-                specifier: "./missing".to_string(),
-                line: 1,
-                col: 0,
-                specifier_col: 0,
-            })],
-            unlisted_dependencies: vec![UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "unlisted".to_string(),
-                    imported_from: vec![ImportSite {
-                        path: PathBuf::from("g.ts"),
-                        line: 1,
-                        col: 0,
-                    }],
-                },
-            )],
-            duplicate_exports: vec![DuplicateExportFinding::with_actions(DuplicateExport {
-                export_name: "dup".to_string(),
-                locations: vec![
-                    DuplicateLocation {
-                        path: PathBuf::from("h.ts"),
-                        line: 15,
-                        col: 0,
-                    },
-                    DuplicateLocation {
-                        path: PathBuf::from("i.ts"),
-                        line: 30,
-                        col: 0,
-                    },
-                ],
-            })],
-            unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
-                test_unused_dependency("optional", DependencyLocation::OptionalDependencies),
-            )],
-            type_only_dependencies: vec![TypeOnlyDependencyFinding::with_actions(
-                TypeOnlyDependency {
-                    package_name: "type-only".to_string(),
-                    path: PathBuf::from("package.json"),
-                    line: 8,
-                },
-            )],
-            test_only_dependencies: vec![TestOnlyDependencyFinding::with_actions(
-                TestOnlyDependency {
-                    package_name: "test-only".to_string(),
-                    path: PathBuf::from("package.json"),
-                    line: 9,
-                },
-            )],
-            circular_dependencies: vec![CircularDependencyFinding::with_actions(
-                CircularDependency {
-                    files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
-                    length: 2,
-                    line: 3,
-                    col: 0,
-                    edges: Vec::new(),
-                    is_cross_package: false,
-                },
-            )],
-            boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
-                from_path: PathBuf::from("src/ui/Button.tsx"),
-                to_path: PathBuf::from("src/db/queries.ts"),
-                from_zone: "ui".to_string(),
-                to_zone: "database".to_string(),
-                import_specifier: "../db/queries".to_string(),
-                line: 3,
-                col: 0,
-                via_path: None,
-            })],
-            ..Default::default()
-        };
-
-        // 15 categories, one of each
-        assert_eq!(results.total_issues(), 15);
-        assert!(results.has_issues());
-    }
-
-    // ── total_issues counts each category independently ─────────
-
-    #[test]
-    fn total_issues_sums_all_categories_independently() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("a.ts"),
-            }));
-        assert_eq!(results.total_issues(), 1);
-
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("b.ts"),
-            }));
-        assert_eq!(results.total_issues(), 2);
-
-        results
-            .unresolved_imports
-            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
-                path: PathBuf::from("c.ts"),
-                specifier: "./missing".to_string(),
-                line: 1,
-                col: 0,
-                specifier_col: 0,
-            }));
-        assert_eq!(results.total_issues(), 3);
-    }
-
-    // ── sort: unused_files by path ──────────────────────────────
-
-    #[test]
-    fn sort_unused_files_by_path() {
-        let mut r = AnalysisResults::default();
-        r.unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("z.ts"),
-            }));
-        r.unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("a.ts"),
-            }));
-        r.unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("m.ts"),
-            }));
-        r.sort();
-        let paths: Vec<_> = r
-            .unused_files
-            .iter()
-            .map(|f| f.file.path.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(paths, vec!["a.ts", "m.ts", "z.ts"]);
-    }
-
-    // ── sort: unused_exports by path, line, name ────────────────
-
-    #[test]
-    fn sort_unused_exports_by_path_line_name() {
-        let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, name: &str| {
-            UnusedExportFinding::with_actions(UnusedExport {
-                path: PathBuf::from(path),
-                export_name: name.to_string(),
-                is_type_only: false,
-                line,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-                deprecated: false,
-                deprecated_reason: None,
-            })
-        };
-        r.unused_exports.push(mk("b.ts", 5, "beta"));
-        r.unused_exports.push(mk("a.ts", 10, "zeta"));
-        r.unused_exports.push(mk("a.ts", 10, "alpha"));
-        r.unused_exports.push(mk("a.ts", 1, "gamma"));
-        r.sort();
-        let keys: Vec<_> = r
-            .unused_exports
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}:{}",
-                    e.export.path.to_string_lossy(),
-                    e.export.line,
-                    e.export.export_name
-                )
-            })
-            .collect();
-        assert_eq!(
-            keys,
-            vec![
-                "a.ts:1:gamma",
-                "a.ts:10:alpha",
-                "a.ts:10:zeta",
-                "b.ts:5:beta"
-            ]
-        );
-    }
-
-    // ── sort: unused_types (same sort as unused_exports) ────────
-
-    #[test]
-    fn sort_unused_types_by_path_line_name() {
-        let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, name: &str| {
-            UnusedTypeFinding::with_actions(UnusedExport {
-                path: PathBuf::from(path),
-                export_name: name.to_string(),
-                is_type_only: true,
-                line,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-                deprecated: false,
-                deprecated_reason: None,
-            })
-        };
-        r.unused_types.push(mk("z.ts", 1, "Z"));
-        r.unused_types.push(mk("a.ts", 1, "A"));
-        r.sort();
-        assert_eq!(r.unused_types[0].export.path, PathBuf::from("a.ts"));
-        assert_eq!(r.unused_types[1].export.path, PathBuf::from("z.ts"));
-    }
-
-    // ── sort: unused_dependencies by path, line, name ───────────
-
-    #[test]
-    fn sort_unused_dependencies_by_path_line_name() {
-        let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, name: &str| {
-            UnusedDependencyFinding::with_actions(UnusedDependency {
-                package_name: name.to_string(),
-                location: DependencyLocation::Dependencies,
-                path: PathBuf::from(path),
-                line,
-                used_in_workspaces: Vec::new(),
-                declared_and_imported_in: Vec::new(),
-            })
-        };
-        r.unused_dependencies.push(mk("b/package.json", 3, "zlib"));
-        r.unused_dependencies.push(mk("a/package.json", 5, "react"));
-        r.unused_dependencies.push(mk("a/package.json", 5, "axios"));
-        r.sort();
-        let names: Vec<_> = r
-            .unused_dependencies
-            .iter()
-            .map(|d| d.dep.package_name.as_str())
-            .collect();
-        assert_eq!(names, vec!["axios", "react", "zlib"]);
-    }
-
-    // ── sort: unused_dev_dependencies ───────────────────────────
-
-    #[test]
-    fn sort_unused_dev_dependencies() {
-        let mut r = AnalysisResults::default();
-        r.unused_dev_dependencies
-            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-                package_name: "vitest".to_string(),
-                location: DependencyLocation::DevDependencies,
-                path: PathBuf::from("package.json"),
-                line: 10,
-                used_in_workspaces: Vec::new(),
-                declared_and_imported_in: Vec::new(),
-            }));
-        r.unused_dev_dependencies
-            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-                package_name: "jest".to_string(),
-                location: DependencyLocation::DevDependencies,
-                path: PathBuf::from("package.json"),
-                line: 5,
-                used_in_workspaces: Vec::new(),
-                declared_and_imported_in: Vec::new(),
-            }));
-        r.sort();
-        assert_eq!(r.unused_dev_dependencies[0].dep.package_name, "jest");
-        assert_eq!(r.unused_dev_dependencies[1].dep.package_name, "vitest");
-    }
-
-    // ── sort: unused_optional_dependencies ──────────────────────
-
-    #[test]
-    fn sort_unused_optional_dependencies() {
-        let mut r = AnalysisResults::default();
-        r.unused_optional_dependencies
-            .push(UnusedOptionalDependencyFinding::with_actions(
-                UnusedDependency {
-                    package_name: "zod".to_string(),
-                    location: DependencyLocation::OptionalDependencies,
-                    path: PathBuf::from("package.json"),
-                    line: 3,
-                    used_in_workspaces: Vec::new(),
-                    declared_and_imported_in: Vec::new(),
-                },
-            ));
-        r.unused_optional_dependencies
-            .push(UnusedOptionalDependencyFinding::with_actions(
-                UnusedDependency {
-                    package_name: "ajv".to_string(),
-                    location: DependencyLocation::OptionalDependencies,
-                    path: PathBuf::from("package.json"),
-                    line: 2,
-                    used_in_workspaces: Vec::new(),
-                    declared_and_imported_in: Vec::new(),
-                },
-            ));
-        r.sort();
-        assert_eq!(r.unused_optional_dependencies[0].dep.package_name, "ajv");
-        assert_eq!(r.unused_optional_dependencies[1].dep.package_name, "zod");
-    }
-
-    // ── sort: unused_enum_members by path, line, parent, member ─
-
-    #[test]
-    fn sort_unused_enum_members_by_path_line_parent_member() {
-        let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, parent: &str, member: &str| {
-            UnusedEnumMemberFinding::with_actions(UnusedMember {
-                path: PathBuf::from(path),
-                parent_name: parent.to_string(),
-                member_name: member.to_string(),
-                kind: MemberKind::EnumMember,
-                line,
-                col: 0,
-            })
-        };
-        r.unused_enum_members.push(mk("a.ts", 5, "Status", "Z"));
-        r.unused_enum_members.push(mk("a.ts", 5, "Status", "A"));
-        r.unused_enum_members.push(mk("a.ts", 1, "Direction", "Up"));
-        r.sort();
-        let keys: Vec<_> = r
-            .unused_enum_members
-            .iter()
-            .map(|m| format!("{}:{}", m.member.parent_name, m.member.member_name))
-            .collect();
-        assert_eq!(keys, vec!["Direction:Up", "Status:A", "Status:Z"]);
-    }
-
-    // ── sort: unused_class_members by path, line, parent, member
-
-    #[test]
-    fn sort_unused_class_members() {
-        let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, parent: &str, member: &str| {
-            UnusedClassMemberFinding::with_actions(UnusedMember {
-                path: PathBuf::from(path),
-                parent_name: parent.to_string(),
-                member_name: member.to_string(),
-                kind: MemberKind::ClassMethod,
-                line,
-                col: 0,
-            })
-        };
-        r.unused_class_members.push(mk("b.ts", 1, "Foo", "z"));
-        r.unused_class_members.push(mk("a.ts", 1, "Bar", "a"));
-        r.sort();
-        assert_eq!(r.unused_class_members[0].member.path, PathBuf::from("a.ts"));
-        assert_eq!(r.unused_class_members[1].member.path, PathBuf::from("b.ts"));
-    }
-
-    // ── sort: unresolved_imports by path, line, col, specifier ──
-
-    #[test]
-    fn sort_unresolved_imports_by_path_line_col_specifier() {
-        let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, col: u32, spec: &str| {
-            UnresolvedImportFinding::with_actions(UnresolvedImport {
-                path: PathBuf::from(path),
-                specifier: spec.to_string(),
-                line,
-                col,
-                specifier_col: 0,
-            })
-        };
-        r.unresolved_imports.push(mk("a.ts", 5, 0, "./z"));
-        r.unresolved_imports.push(mk("a.ts", 5, 0, "./a"));
-        r.unresolved_imports.push(mk("a.ts", 1, 0, "./m"));
-        r.sort();
-        let specs: Vec<_> = r
-            .unresolved_imports
-            .iter()
-            .map(|i| i.import.specifier.as_str())
-            .collect();
-        assert_eq!(specs, vec!["./m", "./a", "./z"]);
-    }
-
-    // ── sort: unlisted_dependencies + inner imported_from ───────
-
-    #[test]
-    fn sort_unlisted_dependencies_by_name_and_inner_sites() {
-        let mut r = AnalysisResults::default();
-        r.unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "zod".to_string(),
-                    imported_from: vec![
-                        ImportSite {
-                            path: PathBuf::from("b.ts"),
-                            line: 10,
-                            col: 0,
-                        },
-                        ImportSite {
-                            path: PathBuf::from("a.ts"),
-                            line: 1,
-                            col: 0,
-                        },
-                    ],
-                },
-            ));
-        r.unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "axios".to_string(),
-                    imported_from: vec![ImportSite {
-                        path: PathBuf::from("c.ts"),
-                        line: 1,
-                        col: 0,
-                    }],
-                },
-            ));
-        r.sort();
-
-        // Outer sort: by package_name
-        assert_eq!(r.unlisted_dependencies[0].dep.package_name, "axios");
-        assert_eq!(r.unlisted_dependencies[1].dep.package_name, "zod");
-
-        // Inner sort: imported_from sorted by path, then line
-        let zod_sites: Vec<_> = r.unlisted_dependencies[1]
-            .dep
-            .imported_from
-            .iter()
-            .map(|s| s.path.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(zod_sites, vec!["a.ts", "b.ts"]);
-    }
-
-    // ── sort: duplicate_exports + inner locations ───────────────
-
-    #[test]
-    fn sort_duplicate_exports_by_name_and_inner_locations() {
-        let mut r = AnalysisResults::default();
-        r.duplicate_exports
-            .push(DuplicateExportFinding::with_actions(DuplicateExport {
-                export_name: "z".to_string(),
-                locations: vec![
-                    DuplicateLocation {
-                        path: PathBuf::from("c.ts"),
-                        line: 1,
-                        col: 0,
-                    },
-                    DuplicateLocation {
-                        path: PathBuf::from("a.ts"),
-                        line: 5,
-                        col: 0,
-                    },
-                ],
-            }));
-        r.duplicate_exports
-            .push(DuplicateExportFinding::with_actions(DuplicateExport {
-                export_name: "a".to_string(),
-                locations: vec![DuplicateLocation {
-                    path: PathBuf::from("b.ts"),
-                    line: 1,
-                    col: 0,
-                }],
-            }));
-        r.sort();
-
-        // Outer sort: by export_name
-        assert_eq!(r.duplicate_exports[0].export.export_name, "a");
-        assert_eq!(r.duplicate_exports[1].export.export_name, "z");
-
-        // Inner sort: locations sorted by path, then line
-        let z_locs: Vec<_> = r.duplicate_exports[1]
-            .export
-            .locations
-            .iter()
-            .map(|l| l.path.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(z_locs, vec!["a.ts", "c.ts"]);
-    }
-
-    // ── sort: type_only_dependencies ────────────────────────────
-
-    #[test]
-    fn sort_type_only_dependencies() {
-        let mut r = AnalysisResults::default();
-        r.type_only_dependencies
-            .push(TypeOnlyDependencyFinding::with_actions(
-                TypeOnlyDependency {
-                    package_name: "zod".to_string(),
-                    path: PathBuf::from("package.json"),
-                    line: 10,
-                },
-            ));
-        r.type_only_dependencies
-            .push(TypeOnlyDependencyFinding::with_actions(
-                TypeOnlyDependency {
-                    package_name: "ajv".to_string(),
-                    path: PathBuf::from("package.json"),
-                    line: 5,
-                },
-            ));
-        r.sort();
-        assert_eq!(r.type_only_dependencies[0].dep.package_name, "ajv");
-        assert_eq!(r.type_only_dependencies[1].dep.package_name, "zod");
-    }
-
-    // ── sort: test_only_dependencies ────────────────────────────
-
-    #[test]
-    fn sort_test_only_dependencies() {
-        let mut r = AnalysisResults::default();
-        r.test_only_dependencies
-            .push(TestOnlyDependencyFinding::with_actions(
-                TestOnlyDependency {
-                    package_name: "vitest".to_string(),
-                    path: PathBuf::from("package.json"),
-                    line: 15,
-                },
-            ));
-        r.test_only_dependencies
-            .push(TestOnlyDependencyFinding::with_actions(
-                TestOnlyDependency {
-                    package_name: "jest".to_string(),
-                    path: PathBuf::from("package.json"),
-                    line: 10,
-                },
-            ));
-        r.sort();
-        assert_eq!(r.test_only_dependencies[0].dep.package_name, "jest");
-        assert_eq!(r.test_only_dependencies[1].dep.package_name, "vitest");
-    }
-
-    // ── sort: circular_dependencies by files, then length ───────
-
-    #[test]
-    fn sort_circular_dependencies_by_files_then_length() {
-        let mut r = AnalysisResults::default();
-        r.circular_dependencies
-            .push(CircularDependencyFinding::with_actions(
-                CircularDependency {
-                    files: vec![PathBuf::from("b.ts"), PathBuf::from("c.ts")],
-                    length: 2,
-                    line: 1,
-                    col: 0,
-                    edges: Vec::new(),
-                    is_cross_package: false,
-                },
-            ));
-        r.circular_dependencies
-            .push(CircularDependencyFinding::with_actions(
-                CircularDependency {
-                    files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
-                    length: 2,
-                    line: 1,
-                    col: 0,
-                    edges: Vec::new(),
-                    is_cross_package: true,
-                },
-            ));
-        r.sort();
-        assert_eq!(
-            r.circular_dependencies[0].cycle.files[0],
-            PathBuf::from("a.ts")
-        );
-        assert_eq!(
-            r.circular_dependencies[1].cycle.files[0],
-            PathBuf::from("b.ts")
-        );
-    }
-
-    // ── sort: boundary_violations by from_path, line, col, to_path
-
-    #[test]
-    fn sort_boundary_violations() {
-        let mut r = AnalysisResults::default();
-        let mk = |from: &str, line: u32, col: u32, to: &str| {
-            BoundaryViolationFinding::with_actions(BoundaryViolation {
-                from_path: PathBuf::from(from),
-                to_path: PathBuf::from(to),
-                from_zone: "a".to_string(),
-                to_zone: "b".to_string(),
-                import_specifier: to.to_string(),
-                line,
-                col,
-                via_path: None,
-            })
-        };
-        r.boundary_violations.push(mk("z.ts", 1, 0, "a.ts"));
-        r.boundary_violations.push(mk("a.ts", 5, 0, "b.ts"));
-        r.boundary_violations.push(mk("a.ts", 1, 0, "c.ts"));
-        r.sort();
-        let from_paths: Vec<_> = r
-            .boundary_violations
-            .iter()
-            .map(|v| {
-                format!(
-                    "{}:{}",
-                    v.violation.from_path.to_string_lossy(),
-                    v.violation.line
-                )
-            })
-            .collect();
-        assert_eq!(from_paths, vec!["a.ts:1", "a.ts:5", "z.ts:1"]);
-    }
-
-    // ── sort: export_usages + inner reference_locations ─────────
-
-    #[test]
-    fn sort_export_usages_and_inner_reference_locations() {
-        let mut r = AnalysisResults::default();
-        r.export_usages.push(ExportUsage {
-            path: PathBuf::from("z.ts"),
-            export_name: "foo".to_string(),
-            line: 1,
-            col: 0,
-            reference_count: 2,
-            reference_locations: vec![
-                ReferenceLocation {
-                    path: PathBuf::from("c.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                ReferenceLocation {
-                    path: PathBuf::from("a.ts"),
-                    line: 5,
-                    col: 0,
-                },
-            ],
-        });
-        r.export_usages.push(ExportUsage {
-            path: PathBuf::from("a.ts"),
-            export_name: "bar".to_string(),
-            line: 1,
-            col: 0,
-            reference_count: 1,
-            reference_locations: vec![ReferenceLocation {
-                path: PathBuf::from("b.ts"),
-                line: 1,
-                col: 0,
-            }],
-        });
-        r.sort();
-
-        // Outer sort: by path, then line, then export_name
-        assert_eq!(r.export_usages[0].path, PathBuf::from("a.ts"));
-        assert_eq!(r.export_usages[1].path, PathBuf::from("z.ts"));
-
-        // Inner sort: reference_locations sorted by path, line, col
-        let refs: Vec<_> = r.export_usages[1]
-            .reference_locations
-            .iter()
-            .map(|l| l.path.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(refs, vec!["a.ts", "c.ts"]);
-    }
-
-    // ── serialization ──────────────────────────────────────────
-
-    #[test]
-    fn serialize_empty_results() {
-        let r = AnalysisResults::default();
-        let json = serde_json::to_value(&r).unwrap();
-
-        // All arrays should be present and empty
-        assert!(json["unused_files"].as_array().unwrap().is_empty());
-        assert!(json["unused_exports"].as_array().unwrap().is_empty());
-        assert!(json["circular_dependencies"].as_array().unwrap().is_empty());
-
-        // Skipped fields should be absent
-        assert!(json.get("export_usages").is_none());
-        assert!(json.get("entry_point_summary").is_none());
-    }
-
-    #[test]
-    fn serialize_unused_file_path() {
-        let r = UnusedFile {
-            path: PathBuf::from("src/utils/index.ts"),
-        };
-        let json = serde_json::to_value(&r).unwrap();
-        assert_eq!(json["path"], "src/utils/index.ts");
-    }
-
-    #[test]
-    fn serialize_dependency_location_camel_case() {
-        let dep = UnusedDependency {
-            package_name: "react".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        };
-        let json = serde_json::to_value(&dep).unwrap();
-        assert_eq!(json["location"], "devDependencies");
-
-        let dep2 = UnusedDependency {
-            package_name: "react".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: PathBuf::from("package.json"),
-            line: 3,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        };
-        let json2 = serde_json::to_value(&dep2).unwrap();
-        assert_eq!(json2["location"], "dependencies");
-
-        let dep3 = UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("package.json"),
-            line: 7,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        };
-        let json3 = serde_json::to_value(&dep3).unwrap();
-        assert_eq!(json3["location"], "optionalDependencies");
-    }
-
-    #[test]
-    fn serialize_circular_dependency_skips_false_cross_package() {
-        let cd = CircularDependency {
-            files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
-            length: 2,
-            line: 1,
-            col: 0,
-            edges: Vec::new(),
-            is_cross_package: false,
-        };
-        let json = serde_json::to_value(&cd).unwrap();
-        // skip_serializing_if = "std::ops::Not::not" means false is skipped
-        assert!(json.get("is_cross_package").is_none());
-    }
-
-    #[test]
-    fn serialize_circular_dependency_includes_true_cross_package() {
-        let cd = CircularDependency {
-            files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
-            length: 2,
-            line: 1,
-            col: 0,
-            edges: Vec::new(),
-            is_cross_package: true,
-        };
-        let json = serde_json::to_value(&cd).unwrap();
-        assert_eq!(json["is_cross_package"], true);
-    }
-
-    #[test]
-    fn serialize_unused_export_fields() {
-        let e = UnusedExport {
-            path: PathBuf::from("src/mod.ts"),
-            export_name: "helper".to_string(),
-            is_type_only: true,
-            line: 42,
-            col: 7,
-            span_start: 100,
-            is_re_export: true,
-            deprecated: false,
-            deprecated_reason: None,
-        };
-        let json = serde_json::to_value(&e).unwrap();
-        assert_eq!(json["path"], "src/mod.ts");
-        assert_eq!(json["export_name"], "helper");
-        assert_eq!(json["is_type_only"], true);
-        assert_eq!(json["line"], 42);
-        assert_eq!(json["col"], 7);
-        assert_eq!(json["span_start"], 100);
-        assert_eq!(json["is_re_export"], true);
-    }
-
-    #[test]
-    fn serialize_boundary_violation_fields() {
-        let v = BoundaryViolation {
-            from_path: PathBuf::from("src/ui/button.tsx"),
-            to_path: PathBuf::from("src/db/queries.ts"),
-            from_zone: "ui".to_string(),
-            to_zone: "db".to_string(),
-            import_specifier: "../db/queries".to_string(),
-            line: 3,
-            col: 0,
-            via_path: None,
-        };
-        let json = serde_json::to_value(&v).unwrap();
-        assert_eq!(json["from_path"], "src/ui/button.tsx");
-        assert_eq!(json["to_path"], "src/db/queries.ts");
-        assert_eq!(json["from_zone"], "ui");
-        assert_eq!(json["to_zone"], "db");
-        assert_eq!(json["import_specifier"], "../db/queries");
-    }
-
-    #[test]
-    fn serialize_unlisted_dependency_with_import_sites() {
-        let d = UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![
-                ImportSite {
-                    path: PathBuf::from("a.ts"),
-                    line: 1,
-                    col: 0,
-                },
-                ImportSite {
-                    path: PathBuf::from("b.ts"),
-                    line: 5,
-                    col: 3,
-                },
-            ],
-        };
-        let json = serde_json::to_value(&d).unwrap();
-        assert_eq!(json["package_name"], "chalk");
-        let sites = json["imported_from"].as_array().unwrap();
-        assert_eq!(sites.len(), 2);
-        assert_eq!(sites[0]["path"], "a.ts");
-        assert_eq!(sites[1]["line"], 5);
-    }
-
-    #[test]
-    fn serialize_duplicate_export_with_locations() {
-        let d = DuplicateExport {
-            export_name: "Button".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("src/a.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("src/b.ts"),
-                    line: 20,
-                    col: 5,
-                },
-            ],
-        };
-        let json = serde_json::to_value(&d).unwrap();
-        assert_eq!(json["export_name"], "Button");
-        let locs = json["locations"].as_array().unwrap();
-        assert_eq!(locs.len(), 2);
-        assert_eq!(locs[0]["line"], 10);
-        assert_eq!(locs[1]["col"], 5);
-    }
-
-    #[test]
-    fn serialize_type_only_dependency() {
-        let d = TypeOnlyDependency {
-            package_name: "@types/react".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 12,
-        };
-        let json = serde_json::to_value(&d).unwrap();
-        assert_eq!(json["package_name"], "@types/react");
-        assert_eq!(json["line"], 12);
-    }
-
-    #[test]
-    fn serialize_test_only_dependency() {
-        let d = TestOnlyDependency {
-            package_name: "vitest".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 8,
-        };
-        let json = serde_json::to_value(&d).unwrap();
-        assert_eq!(json["package_name"], "vitest");
-        assert_eq!(json["line"], 8);
-    }
-
-    #[test]
-    fn serialize_unused_member() {
-        let m = UnusedMember {
-            path: PathBuf::from("enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Pending".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 4,
-        };
-        let json = serde_json::to_value(&m).unwrap();
-        assert_eq!(json["parent_name"], "Status");
-        assert_eq!(json["member_name"], "Pending");
-        assert_eq!(json["line"], 3);
-    }
-
-    #[test]
-    fn serialize_unresolved_import() {
-        let i = UnresolvedImport {
-            path: PathBuf::from("app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 7,
-            col: 0,
-            specifier_col: 21,
-        };
-        let json = serde_json::to_value(&i).unwrap();
-        assert_eq!(json["specifier"], "./missing-module");
-        assert_eq!(json["specifier_col"], 21);
-    }
-
-    // ── deserialize: CircularDependency serde(default) fields ──
-
-    #[test]
-    fn deserialize_circular_dependency_with_defaults() {
-        // CircularDependency derives Deserialize; line/col/is_cross_package have #[serde(default)]
-        let json = r#"{"files":["a.ts","b.ts"],"length":2}"#;
-        let cd: CircularDependency = serde_json::from_str(json).unwrap();
-        assert_eq!(cd.files.len(), 2);
-        assert_eq!(cd.length, 2);
-        assert_eq!(cd.line, 0);
-        assert_eq!(cd.col, 0);
-        assert!(!cd.is_cross_package);
-    }
-
-    #[test]
-    fn deserialize_circular_dependency_with_all_fields() {
-        let json =
-            r#"{"files":["a.ts","b.ts"],"length":2,"line":5,"col":10,"is_cross_package":true}"#;
-        let cd: CircularDependency = serde_json::from_str(json).unwrap();
-        assert_eq!(cd.line, 5);
-        assert_eq!(cd.col, 10);
-        assert!(cd.is_cross_package);
-    }
-
-    // ── clone produces independent copies ───────────────────────
-
-    fn protected_architecture_findings(path: &Path) -> AnalysisResults {
-        AnalysisResults {
-            boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
-                from_path: path.to_path_buf(),
-                to_path: PathBuf::from("src/target.ts"),
-                from_zone: "ui".to_string(),
-                to_zone: "data".to_string(),
-                import_specifier: "../target".to_string(),
-                line: 1,
-                col: 0,
-                via_path: None,
-            })],
-            boundary_coverage_violations: vec![BoundaryCoverageViolationFinding::with_actions(
-                BoundaryCoverageViolation {
-                    path: path.to_path_buf(),
-                    line: 1,
-                    col: 0,
-                },
-            )],
-            boundary_call_violations: vec![BoundaryCallViolationFinding::with_actions(
-                BoundaryCallViolation {
-                    path: path.to_path_buf(),
-                    line: 1,
-                    col: 0,
-                    zone: "ui".to_string(),
-                    callee: "cp.exec".to_string(),
-                    pattern: "child_process.*".to_string(),
-                },
-            )],
-            policy_violations: vec![PolicyViolationFinding::with_actions(PolicyViolation {
-                path: path.to_path_buf(),
-                line: 1,
-                col: 0,
-                pack: "security".to_string(),
-                rule_id: "no-eval".to_string(),
-                kind: PolicyRuleKind::BannedCall,
-                matched: "eval".to_string(),
-                severity: PolicyViolationSeverity::Error,
-                message: None,
-            })],
-            stale_suppressions: vec![StaleSuppression {
-                finding_id: None,
-                path: path.to_path_buf(),
-                line: 1,
-                col: 0,
-                origin: SuppressionOrigin::Comment {
-                    issue_kind: Some("unused-file".to_string()),
-                    reason: None,
-                    is_file_level: false,
-                    kind_known: true,
-                },
-                missing_reason: false,
-                actions: StaleSuppression::actions_for(false),
-                effective_severity: None,
-            }],
-            ..AnalysisResults::default()
-        }
-    }
-
-    fn protected_framework_findings() -> AnalysisResults {
-        AnalysisResults {
-            invalid_client_exports: vec![InvalidClientExportFinding::with_actions(
-                InvalidClientExport {
-                    path: PathBuf::from("ignored/client.ts"),
-                    export_name: "metadata".to_string(),
-                    directive: "use client".to_string(),
-                    line: 1,
-                    col: 0,
-                },
-            )],
-            mixed_client_server_barrels: vec![MixedClientServerBarrelFinding::with_actions(
-                MixedClientServerBarrel {
-                    path: PathBuf::from("ignored/barrel.ts"),
-                    client_origin: "./client".to_string(),
-                    server_origin: "./server".to_string(),
-                    line: 1,
-                    col: 0,
-                },
-            )],
-            misplaced_directives: vec![MisplacedDirectiveFinding::with_actions(
-                MisplacedDirective {
-                    path: PathBuf::from("ignored/directive.ts"),
-                    directive: "use client".to_string(),
-                    line: 2,
-                    col: 0,
-                },
-            )],
-            route_collisions: vec![RouteCollisionFinding::with_actions(RouteCollision {
-                path: PathBuf::from("ignored/app/about/page.tsx"),
-                url: "/about".to_string(),
-                conflicting_paths: vec![PathBuf::from("src/app/about/page.tsx")],
-                line: 1,
-                col: 0,
-            })],
-            dynamic_segment_name_conflicts: vec![DynamicSegmentNameConflictFinding::with_actions(
-                DynamicSegmentNameConflict {
-                    path: PathBuf::from("ignored/app/shop/[id]/page.tsx"),
-                    position: "/shop".to_string(),
-                    conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
-                    conflicting_paths: vec![PathBuf::from("src/app/shop/[slug]/page.tsx")],
-                    line: 1,
-                    col: 0,
-                },
-            )],
-            ..AnalysisResults::default()
-        }
-    }
-
-    #[test]
-    fn finding_ignore_hides_dead_code_but_retains_protected_findings() {
-        let ignored_path = PathBuf::from("ignored/dead.ts");
-        let mut results = protected_architecture_findings(&ignored_path);
-        results.merge_into(protected_framework_findings());
-        results.unused_files = vec![
-            UnusedFileFinding::with_actions(UnusedFile { path: ignored_path }),
-            UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("src/visible.ts"),
-            }),
-        ];
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.unused_files.len(), 1);
-        assert_eq!(
-            results.unused_files[0].file.path,
-            PathBuf::from("src/visible.ts")
-        );
-        assert_eq!(results.boundary_violations.len(), 1);
-        assert_eq!(results.boundary_coverage_violations.len(), 1);
-        assert_eq!(results.boundary_call_violations.len(), 1);
-        assert_eq!(results.policy_violations.len(), 1);
-        assert_eq!(results.stale_suppressions.len(), 1);
-        assert_eq!(results.invalid_client_exports.len(), 1);
-        assert_eq!(results.mixed_client_server_barrels.len(), 1);
-        assert_eq!(results.misplaced_directives.len(), 1);
-        assert_eq!(results.route_collisions.len(), 1);
-        assert_eq!(results.dynamic_segment_name_conflicts.len(), 1);
-    }
-
-    #[test]
-    fn finding_ignore_requires_every_source_owner_to_match() {
-        let duplicate = |paths: &[&str]| {
-            DuplicateExportFinding::with_actions(DuplicateExport {
-                export_name: "shared".to_string(),
-                locations: paths
-                    .iter()
-                    .map(|path| DuplicateLocation {
-                        path: PathBuf::from(path),
-                        line: 1,
-                        col: 0,
-                    })
-                    .collect(),
-            })
-        };
-        let mut results = AnalysisResults {
-            duplicate_exports: vec![
-                duplicate(&["ignored/a.ts", "ignored/b.ts"]),
-                duplicate(&["ignored/a.ts", "src/b.ts"]),
-                duplicate(&[]),
-            ],
-            ..AnalysisResults::default()
-        };
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.duplicate_exports.len(), 2);
-        assert_eq!(results.duplicate_exports[0].export.locations.len(), 2);
-        assert!(results.duplicate_exports[1].export.locations.is_empty());
-    }
-
-    #[test]
-    fn finding_ignore_retains_unowned_package_issues() {
-        let mut results = AnalysisResults {
-            unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
-                package_name: "unused-package".to_string(),
-                location: DependencyLocation::Dependencies,
-                path: PathBuf::from("ignored/package.json"),
-                line: 3,
-                used_in_workspaces: vec![],
-                declared_and_imported_in: Vec::new(),
-            })],
-            ..AnalysisResults::default()
-        };
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.unused_dependencies.len(), 1);
-    }
-
-    fn thin_wrapper_finding(path: &str) -> ThinWrapperFinding {
-        ThinWrapperFinding::with_actions(ThinWrapper {
-            file: PathBuf::from(path),
-            line: 1,
-            component: "Wrapper".to_string(),
-            child_component: "Child".to_string(),
-        })
-    }
-
-    fn duplicate_prop_shape_finding(path: &str) -> DuplicatePropShapeFinding {
-        DuplicatePropShapeFinding::with_actions(DuplicatePropShape {
-            file: PathBuf::from(path),
-            line: 1,
-            component: "Card".to_string(),
-            shape: vec!["title".to_string(), "subtitle".to_string()],
-            group_size: 3,
-            sharing_components: vec![],
-        })
-    }
-
-    fn prop_drilling_chain_finding(paths: &[&str]) -> PropDrillingChainFinding {
-        PropDrillingChainFinding::with_actions(PropDrillingChain {
-            prop: "user".to_string(),
-            depth: paths.len() as u32,
-            hops: paths
-                .iter()
-                .map(|path| PropDrillHop {
-                    file: PathBuf::from(path),
-                    line: 1,
-                    component: "Hop".to_string(),
-                })
-                .collect(),
-        })
-    }
-
-    #[test]
-    fn finding_ignore_hides_thin_wrappers_by_wrapper_file() {
-        let mut results = AnalysisResults {
-            thin_wrappers: vec![
-                thin_wrapper_finding("ignored/Wrapper.tsx"),
-                thin_wrapper_finding("src/Wrapper.tsx"),
-            ],
-            ..AnalysisResults::default()
-        };
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.thin_wrappers.len(), 1);
-        assert_eq!(
-            results.thin_wrappers[0].wrapper.file,
-            PathBuf::from("src/Wrapper.tsx")
-        );
-    }
-
-    #[test]
-    fn finding_ignore_hides_duplicate_prop_shapes_by_component_file() {
-        let mut results = AnalysisResults {
-            duplicate_prop_shapes: vec![
-                duplicate_prop_shape_finding("ignored/Card.tsx"),
-                duplicate_prop_shape_finding("src/Card.tsx"),
-            ],
-            ..AnalysisResults::default()
-        };
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.duplicate_prop_shapes.len(), 1);
-        assert_eq!(
-            results.duplicate_prop_shapes[0].shape.file,
-            PathBuf::from("src/Card.tsx")
-        );
-    }
-
-    #[test]
-    fn finding_ignore_hides_prop_drilling_chains_only_when_every_hop_matches() {
-        let mut results = AnalysisResults {
-            prop_drilling_chains: vec![
-                prop_drilling_chain_finding(&["ignored/a.tsx", "ignored/b.tsx"]),
-                prop_drilling_chain_finding(&["ignored/a.tsx", "src/b.tsx"]),
-                prop_drilling_chain_finding(&[]),
-            ],
-            ..AnalysisResults::default()
-        };
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.prop_drilling_chains.len(), 2);
-        assert_eq!(results.prop_drilling_chains[0].chain.hops.len(), 2);
-        assert!(results.prop_drilling_chains[1].chain.hops.is_empty());
-    }
-
-    #[test]
-    fn finding_ignore_retains_security_findings_and_blind_spot_diagnostics() {
-        let path = PathBuf::from("ignored/leak.ts");
-        let mut results = AnalysisResults {
-            security_findings: vec![SecurityFinding {
-                finding_id: "id".to_string(),
-                kind: SecurityFindingKind::TaintedSink,
-                category: Some("dangerous-html".to_string()),
-                cwe: Some(79),
-                path: path.clone(),
-                line: 1,
-                col: 0,
-                evidence: "candidate".to_string(),
-                source_backed: false,
-                source_read: None,
-                severity: SecuritySeverity::Low,
-                trace: vec![TraceHop {
-                    path: path.clone(),
-                    line: 1,
-                    col: 0,
-                    role: TraceHopRole::Sink,
-                }],
-                actions: vec![],
-                dead_code: None,
-                reachability: None,
-                candidate: SecurityCandidate {
-                    source_kind: None,
-                    sink: SecurityCandidateSink {
-                        path: path.clone(),
-                        line: 1,
-                        col: 0,
-                        category: Some("dangerous-html".to_string()),
-                        cwe: Some(79),
-                        callee: None,
-                        url_shape: None,
-                    },
-                    boundary: SecurityCandidateBoundary::default(),
-                    network: None,
-                },
-                taint_flow: None,
-                runtime: None,
-                attack_surface: None,
-            }],
-            security_unresolved_callee_diagnostics: vec![SecurityUnresolvedCalleeDiagnostic {
-                path,
-                line: 1,
-                col: 0,
-                reason: SkippedSecurityCalleeReason::DynamicDispatch,
-                expression_kind: SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
-            }],
-            ..AnalysisResults::default()
-        };
-
-        results.remove_ignored_dead_code_findings(|path| path.starts_with("ignored"));
-
-        assert_eq!(results.security_findings.len(), 1);
-        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
-    }
-
-    // ── export_usages not counted in total_issues ───────────────
-
-    #[test]
-    fn export_usages_not_counted_in_total_issues() {
-        let mut r = AnalysisResults::default();
-        r.export_usages.push(ExportUsage {
-            path: PathBuf::from("mod.ts"),
-            export_name: "foo".to_string(),
-            line: 1,
-            col: 0,
-            reference_count: 3,
-            reference_locations: vec![],
-        });
-        // export_usages is metadata, not an issue type
-        assert_eq!(r.total_issues(), 0);
-        assert!(!r.has_issues());
-    }
-
-    // ── entry_point_summary not counted in total_issues ─────────
-
-    #[test]
-    fn entry_point_summary_not_counted_in_total_issues() {
-        let r = AnalysisResults {
-            entry_point_summary: Some(EntryPointSummary {
-                total: 10,
-                by_source: vec![("config".to_string(), 10)],
-            }),
-            ..AnalysisResults::default()
-        };
-        assert_eq!(r.total_issues(), 0);
-        assert!(!r.has_issues());
-    }
-}
+#[path = "results_tests.rs"]
+mod tests;

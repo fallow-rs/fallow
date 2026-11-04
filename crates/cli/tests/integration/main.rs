@@ -60,6 +60,7 @@ mod deprecated_export_tests;
 mod doctor_tests;
 mod dupes_tests;
 mod dupes_workspace_tests;
+mod duplicate_export_alias_tests;
 mod exit_code_tests;
 mod export_assignment_forward_tests;
 mod file_lines_tests;
@@ -150,5 +151,6 @@ mod type_aware_scope_tests;
 mod typeorm_datasource_tests;
 mod unresolved_gitignored_target_tests;
 mod workspace_config_patterns_tests;
+mod workspace_settings_tests;
 
 mod plugin_config_shapes_tests;

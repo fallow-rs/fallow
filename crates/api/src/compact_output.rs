@@ -365,6 +365,13 @@ impl<'a> CompactLineBuilder<'a> {
                 &member.reachability_caveats,
             ));
         }
+        for member in &self.results.unused_namespace_members {
+            self.lines.push(self.compact_member(
+                &member.member,
+                "unused-namespace-member",
+                &member.reachability_caveats,
+            ));
+        }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
                 "unresolved-import:{}:{}:{}",
@@ -379,6 +386,16 @@ impl<'a> CompactLineBuilder<'a> {
         for dep in &self.results.unlisted_dependencies {
             self.lines
                 .push(format!("unlisted-dep:{}", dep.dep.package_name));
+        }
+        for binary in &self.results.unlisted_binaries {
+            for site in &binary.binary.used_in {
+                self.lines.push(format!(
+                    "unlisted-binary:{}:{}:{}",
+                    self.rel(&site.path),
+                    site.line,
+                    binary.binary.binary_name
+                ));
+            }
         }
         for dup in &self.results.duplicate_exports {
             self.lines
@@ -591,6 +608,15 @@ impl<'a> CompactLineBuilder<'a> {
                 self.rel(&finding.event.path),
                 finding.event.line,
                 finding.event.event_name,
+            ));
+        }
+        for finding in &self.results.duplicate_export_aliases {
+            self.lines.push(format!(
+                "duplicate-export-alias:{}:{}:{}:{}",
+                self.rel(&finding.alias.path),
+                finding.alias.line,
+                finding.alias.local_name,
+                finding.alias.export_names.join(","),
             ));
         }
         for finding in &self.results.unused_effect_layers {

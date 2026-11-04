@@ -112,6 +112,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     unused::push_member_diagnostics(&mut map, results, &mut mapper);
     absent_props::push_absent_prop_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
+    quality::push_duplicate_export_alias_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
     structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
     structural::push_re_export_cycle_diagnostics(&mut map, results);
@@ -523,9 +524,12 @@ mod severity_gate {
             unused_enum_members: _,
             unused_class_members: _,
             unused_store_members: _,
+            unused_namespace_members: _,
             unresolved_imports: _,
             unlisted_dependencies: _,
+            unlisted_binaries: _,
             duplicate_exports: _,
+            duplicate_export_aliases: _,
             type_only_dependencies: _,
             test_only_dependencies: _,
             dev_dependencies_in_production: _,
@@ -852,6 +856,24 @@ mod severity_gate {
                 }),
             ),
             (
+                "unused-namespace-member",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_namespace_members.push(
+                        fallow_api::editor_results::UnusedNamespaceMemberFinding::with_actions(
+                            fallow_api::editor_results::UnusedMember {
+                                path: root.join("a.ts"),
+                                parent_name: "N".to_string(),
+                                member_name: "a".to_string(),
+                                kind: fallow_api::editor_extract::MemberKind::NamespaceMember,
+                                line: 9,
+                                col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
                 "unused-store-member",
                 S::HINT,
                 Box::new(|root, r| {
@@ -901,6 +923,25 @@ mod severity_gate {
                 }),
             ),
             (
+                "unlisted-binary",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.unlisted_binaries.push(
+                        fallow_types::output_dead_code::UnlistedBinaryFinding::with_actions(
+                            fallow_types::results::UnlistedBinary {
+                                binary_name: "tool".to_string(),
+                                used_in: vec![fallow_types::results::BinaryUseSite {
+                                    path: root.join("a.ts"),
+                                    line: 1,
+                                    col: 0,
+                                    script_name: None,
+                                }],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
                 "duplicate-export",
                 S::WARNING,
                 Box::new(|root, r| {
@@ -913,6 +954,30 @@ mod severity_gate {
                                     line: 1,
                                     col: 0,
                                 }],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "duplicate-export-alias",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.duplicate_export_aliases.push(
+                        fallow_api::editor_results::DuplicateExportAliasFinding::with_actions(
+                            fallow_api::editor_results::DuplicateExportAlias {
+                                path: root.join("a.ts"),
+                                local_name: "a".to_string(),
+                                export_names: vec!["a".to_string(), "b".to_string()],
+                                line: 1,
+                                col: 0,
+                                locations: vec![
+                                    fallow_api::editor_results::DuplicateExportAliasLocation {
+                                        export_name: "a".to_string(),
+                                        line: 1,
+                                        col: 0,
+                                    },
+                                ],
                             },
                         ),
                     );

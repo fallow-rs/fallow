@@ -40,6 +40,6 @@ CI runs `typos` (configured in `_typos.toml`). All code, comments, and test stri
 - `permissions: {}` deny-all baseline on all workflows
 - `git diff --exit-code` to catch uncommitted generated code
 - `--document-private-items` rustdoc check
-- `cargo-shear` for unused dependency detection
+- `cargo-fallow` for unused dependencies, visibility, crate boundaries, complexity and duplication
 - `zizmor` for GitHub Actions security scanning
 - `cargo-bloat` for binary size reports

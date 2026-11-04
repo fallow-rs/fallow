@@ -409,6 +409,39 @@ Contract rules:
   [CLI internals](cli-internals.md): a missing id is resolved only when
   `conclusive` is true.
 
+## Rust route
+
+`crates/mcp/src/tools/rust.rs` owns the Rust route. A root with a `Cargo.toml`
+and no `package.json` takes it. Without `root`, the server folder decides.
+
+- The route builds the `cargo-fallow` arguments and runs the binary through
+  `run_tool`. The timeout, the cancellation, the output cap and the exit-code
+  policy are the same as for the JavaScript route.
+- The route passes the JSON of `cargo-fallow` through unchanged. The report has
+  the shared contract fields and `language: "rust"`.
+- The route fails closed. It serializes the parameters and rejects each set
+  key that it does not map (`FALLOW_RUST_UNSUPPORTED_PARAMS`). `null` and
+  `false` count as not set. A new parameter is so rejected until someone maps
+  it.
+- `analyze` runs `check --only deps --only visibility`. `find_dupes`,
+  `check_health` and `check_architecture` run `dupes`, `complexity` and
+  `boundaries`.
+- `mutation_plan` runs `mutants --list`, and `mutation_inspect` runs
+  `mutants --inspect <id> --no-build`. Without `paths` or `changed_since`, the
+  plan covers the whole package, because `cargo-fallow` has no base-ref
+  detection. Neither compiles or runs tests. A missing
+  coverage map (`CARGO_FALLOW_NO_CACHED_MAP`) keeps the `help` of
+  `cargo-fallow`, and the route adds that the command which builds the map runs
+  the tests.
+- `project_info` gives `FALLOW_RUST_UNSUPPORTED_TOOL`. Code Mode gives the same
+  code for a Rust `root`, for a Rust server folder, and for a host call on a
+  Rust root, because its host calls build JavaScript arguments.
+- On a root with both manifests, the routed tools keep the JavaScript route and
+  add a root `warnings` entry that points to `cargo fallow`.
+- `CARGO_FALLOW_BIN`, then a `cargo-fallow` binary next to `fallow-mcp`, then
+  the `PATH` names the binary. A missing binary gives
+  `FALLOW_RUST_BINARY_NOT_FOUND`.
+
 ## Execution and telemetry
 
 The standalone tools choose typed execution or an explicit CLI fallback; the

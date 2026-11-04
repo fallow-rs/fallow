@@ -73,6 +73,7 @@ macro_rules! with_baseline_fields {
             unused_enum_members,
             unused_class_members,
             unused_store_members,
+            unused_namespace_members,
             unprovided_injects,
             unrendered_components,
             unused_component_props,
@@ -88,7 +89,9 @@ macro_rules! with_baseline_fields {
             unused_load_data_keys,
             unresolved_imports,
             unlisted_dependencies,
+            unlisted_binaries,
             duplicate_exports,
+            duplicate_export_aliases,
             type_only_dependencies,
             test_only_dependencies,
             dev_dependencies_in_production,
@@ -118,8 +121,15 @@ mod finding_counts;
 mod install_state;
 
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
+#[cfg(test)]
+mod legacy_key_builders;
 mod prune;
 mod saved_scope;
+#[cfg(test)]
+use legacy_key_builders::{
+    baseline_catalog_keys, baseline_dependency_keys, baseline_file_export_keys,
+    baseline_graph_keys, baseline_member_import_keys,
+};
 
 pub use install_state::{install_state_diagnostic, saved_node_modules_state};
 pub use prune::{
@@ -127,6 +137,10 @@ pub use prune::{
     prune_dupes_baseline, prune_health_baseline,
 };
 pub use saved_scope::{saved_finding_categories, saved_scope_reasons};
+
+#[path = "legacy_key_filter.rs"]
+mod legacy_key_filter;
+use legacy_key_filter::filter_new_issues_by_legacy_keys;
 
 /// The sorted canonical keys of `items`, one for each occurrence.
 fn canonical_keys<T: IdentifiedFinding>(items: &[T], paths: &IdentityPaths<'_>) -> Vec<String> {
@@ -599,6 +613,9 @@ pub struct BaselineData {
     /// Unused store members, keyed by `file:parent.member`.
     #[serde(default)]
     unused_store_members: Vec<String>,
+    /// Unused namespace members, keyed by `file:parent.member`.
+    #[serde(default)]
+    unused_namespace_members: Vec<String>,
     /// Unprovided injects, keyed by `file:key_name`.
     #[serde(default)]
     unprovided_injects: Vec<String>,
@@ -643,9 +660,16 @@ pub struct BaselineData {
     /// Unlisted dependencies, keyed by package name.
     #[serde(default)]
     unlisted_dependencies: Vec<String>,
+    /// Unlisted binaries, keyed by binary name.
+    #[serde(default)]
+    unlisted_binaries: Vec<String>,
     /// Duplicate exports, keyed by export name.
     #[serde(default)]
     duplicate_exports: Vec<String>,
+    /// Bindings exported under two or more names in one file, keyed by the
+    /// canonical finding key. No legacy key form exists.
+    #[serde(default)]
+    duplicate_export_aliases: Vec<String>,
     /// Type-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
     /// baselines saved by older fallow versions.
@@ -768,10 +792,7 @@ impl BaselineData {
     /// Build a baseline in the legacy key forms that fallow wrote before
     /// canonical keys. Tests use it to prove that legacy files still load.
     #[cfg(test)]
-    pub(crate) fn legacy_from_results(
-        results: &crate::results::AnalysisResults,
-        root: &Path,
-    ) -> Self {
+    fn legacy_from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
         let analysis_identity = fallow_types::semantic::SemanticAnalysisIdentity::syntactic();
         let file_exports = baseline_file_export_keys(results, root);
         let member_imports = baseline_member_import_keys(results, root);
@@ -798,6 +819,7 @@ impl BaselineData {
             unused_enum_members: member_imports.unused_enum_members,
             unused_class_members: member_imports.unused_class_members,
             unused_store_members: member_imports.unused_store_members,
+            unused_namespace_members: member_imports.unused_namespace_members,
             unprovided_injects: member_imports.unprovided_injects,
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
@@ -813,7 +835,9 @@ impl BaselineData {
             unused_load_data_keys: member_imports.unused_load_data_keys,
             unresolved_imports: member_imports.unresolved_imports,
             unlisted_dependencies: dependencies.unlisted,
+            unlisted_binaries: Vec::new(),
             duplicate_exports: member_imports.duplicate_exports,
+            duplicate_export_aliases: Vec::new(),
             type_only_dependencies: dependencies.type_only,
             test_only_dependencies: dependencies.test_only,
             dev_dependencies_in_production: dependencies.dev_in_prod,
@@ -860,6 +884,7 @@ impl BaselineData {
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
             + self.unused_store_members.len()
+            + self.unused_namespace_members.len()
             + self.unprovided_injects.len()
             + self.unrendered_components.len()
             + self.unused_component_props.len()
@@ -875,7 +900,9 @@ impl BaselineData {
             + self.unused_load_data_keys.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
+            + self.unlisted_binaries.len()
             + self.duplicate_exports.len()
+            + self.duplicate_export_aliases.len()
             + self.type_only_dependencies.len()
             + self.test_only_dependencies.len()
             + self.dev_dependencies_in_production.len()
@@ -915,175 +942,11 @@ struct BaselineFileExportKeys {
 }
 
 #[cfg(test)]
-fn baseline_file_export_keys(
-    results: &crate::results::AnalysisResults,
-    root: &Path,
-) -> BaselineFileExportKeys {
-    BaselineFileExportKeys {
-        unused_files: results
-            .unused_files
-            .iter()
-            .map(|f| relative_path(&f.file.path, root))
-            .collect(),
-        unused_exports: unused_export_baseline_keys(&results.unused_exports, root),
-        unused_types: unused_type_baseline_keys(&results.unused_types, root),
-        private_type_leaks: private_type_leak_baseline_keys(&results.private_type_leaks, root),
-        deprecated_exports_in_use: results
-            .deprecated_exports_in_use
-            .iter()
-            .map(|e| deprecated_export_key(&e.export, root))
-            .collect(),
-        invalid_client_exports: invalid_client_export_baseline_keys(
-            &results.invalid_client_exports,
-            root,
-        ),
-        mixed_client_server_barrels: barrel_baseline_keys(
-            &results.mixed_client_server_barrels,
-            root,
-        ),
-        misplaced_directives: directive_baseline_keys(&results.misplaced_directives, root),
-        route_collisions: route_collision_baseline_keys(&results.route_collisions, root),
-        dynamic_segment_name_conflicts: results
-            .dynamic_segment_name_conflicts
-            .iter()
-            .map(|c| {
-                format!(
-                    "{}:{}",
-                    relative_path(&c.conflict.path, root),
-                    c.conflict.position
-                )
-            })
-            .collect(),
-    }
-}
-
-#[cfg(test)]
-fn unused_export_baseline_keys(
-    items: &[crate::results::UnusedExportFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|e| {
-            format!(
-                "{}:{}",
-                relative_path(&e.export.path, root),
-                e.export.export_name
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn unused_type_baseline_keys(
-    items: &[crate::results::UnusedTypeFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|e| {
-            format!(
-                "{}:{}",
-                relative_path(&e.export.path, root),
-                e.export.export_name
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn invalid_client_export_baseline_keys(
-    items: &[crate::results::InvalidClientExportFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|e| {
-            format!(
-                "{}:{}",
-                relative_path(&e.export.path, root),
-                e.export.export_name
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn private_type_leak_baseline_keys(
-    items: &[crate::results::PrivateTypeLeakFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|e| {
-            format!(
-                "{}:{}->{}",
-                relative_path(&e.leak.path, root),
-                e.leak.export_name,
-                e.leak.type_name
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn barrel_baseline_keys(
-    items: &[crate::results::MixedClientServerBarrelFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|b| {
-            format!(
-                "{}:{}:{}",
-                relative_path(&b.barrel.path, root),
-                b.barrel.client_origin,
-                b.barrel.server_origin
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn directive_baseline_keys(
-    items: &[crate::results::MisplacedDirectiveFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|d| {
-            format!(
-                "{}:{}:{}",
-                relative_path(&d.directive_site.path, root),
-                d.directive_site.line,
-                d.directive_site.directive
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn route_collision_baseline_keys(
-    items: &[crate::results::RouteCollisionFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|c| {
-            format!(
-                "{}:{}",
-                relative_path(&c.collision.path, root),
-                c.collision.url
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
 struct BaselineMemberImportKeys {
     unused_enum_members: Vec<String>,
     unused_class_members: Vec<String>,
     unused_store_members: Vec<String>,
+    unused_namespace_members: Vec<String>,
     unprovided_injects: Vec<String>,
     unrendered_components: Vec<String>,
     unused_component_props: Vec<String>,
@@ -1102,51 +965,6 @@ struct BaselineMemberImportKeys {
     stale_suppressions: Vec<String>,
 }
 
-#[cfg(test)]
-fn baseline_member_import_keys(
-    results: &crate::results::AnalysisResults,
-    root: &Path,
-) -> BaselineMemberImportKeys {
-    BaselineMemberImportKeys {
-        unused_enum_members: enum_member_baseline_keys(&results.unused_enum_members, root),
-        unused_class_members: class_member_baseline_keys(&results.unused_class_members, root),
-        unused_store_members: store_member_baseline_keys(&results.unused_store_members, root),
-        unprovided_injects: inject_baseline_keys(&results.unprovided_injects, root),
-        unrendered_components: component_baseline_keys(&results.unrendered_components, root),
-        unused_component_props: component_prop_baseline_keys(&results.unused_component_props, root),
-        absent_component_props: absent_component_prop_baseline_keys(
-            &results.absent_component_props,
-            root,
-        ),
-        unused_component_emits: component_emit_baseline_keys(&results.unused_component_emits, root),
-        unused_component_inputs: component_input_baseline_keys(
-            &results.unused_component_inputs,
-            root,
-        ),
-        unused_component_outputs: component_output_baseline_keys(
-            &results.unused_component_outputs,
-            root,
-        ),
-        unused_svelte_events: svelte_event_baseline_keys(&results.unused_svelte_events, root),
-        unused_effect_layers: effect_layer_baseline_keys(&results.unused_effect_layers, root),
-        unused_tagged_errors: tagged_error_baseline_keys(&results.unused_tagged_errors, root),
-        unproduced_catch_tags: catch_tag_baseline_keys(&results.unproduced_catch_tags, root),
-        unused_server_actions: server_action_baseline_keys(&results.unused_server_actions, root),
-        unused_load_data_keys: load_data_key_baseline_keys(&results.unused_load_data_keys, root),
-        unresolved_imports: unresolved_import_baseline_keys(&results.unresolved_imports, root),
-        duplicate_exports: results
-            .duplicate_exports
-            .iter()
-            .map(|d| duplicate_export_key(&d.export, root))
-            .collect(),
-        stale_suppressions: results
-            .stale_suppressions
-            .iter()
-            .map(|s| stale_suppression_baseline_key(s, root))
-            .collect(),
-    }
-}
-
 fn stale_suppression_baseline_key(
     suppression: &crate::results::StaleSuppression,
     root: &Path,
@@ -1160,49 +978,6 @@ fn stale_suppression_baseline_key(
         "{rule_id}:{}:{}",
         relative_path(&suppression.path, root),
         suppression.line
-    )
-}
-
-#[cfg(test)]
-fn enum_member_baseline_keys(
-    items: &[crate::results::UnusedEnumMemberFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|m| unused_member_baseline_key(&m.member, root))
-        .collect()
-}
-
-#[cfg(test)]
-fn class_member_baseline_keys(
-    items: &[crate::results::UnusedClassMemberFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|m| unused_member_baseline_key(&m.member, root))
-        .collect()
-}
-
-#[cfg(test)]
-fn store_member_baseline_keys(
-    items: &[crate::results::UnusedStoreMemberFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|m| unused_member_baseline_key(&m.member, root))
-        .collect()
-}
-
-#[cfg(test)]
-fn unused_member_baseline_key(member: &crate::results::UnusedMember, root: &Path) -> String {
-    format!(
-        "{}:{}.{}",
-        relative_path(&member.path, root),
-        member.parent_name,
-        member.member_name
     )
 }
 
@@ -1360,51 +1135,6 @@ fn svelte_event_baseline_keys(
 }
 
 #[cfg(test)]
-fn server_action_baseline_keys(
-    items: &[crate::results::UnusedServerActionFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|a| {
-            format!(
-                "{}:{}",
-                relative_path(&a.action.path, root),
-                a.action.action_name
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn load_data_key_baseline_keys(
-    items: &[crate::results::UnusedLoadDataKeyFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|k| format!("{}:{}", relative_path(&k.key.path, root), k.key.key_name))
-        .collect()
-}
-
-#[cfg(test)]
-fn unresolved_import_baseline_keys(
-    items: &[crate::results::UnresolvedImportFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|i| {
-            format!(
-                "{}:{}",
-                relative_path(&i.import.path, root),
-                i.import.specifier
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
 struct BaselineDependencyKeys {
     unused: Vec<String>,
     unused_dev: Vec<String>,
@@ -1413,50 +1143,6 @@ struct BaselineDependencyKeys {
     type_only: Vec<String>,
     test_only: Vec<String>,
     dev_in_prod: Vec<String>,
-}
-
-#[cfg(test)]
-fn baseline_dependency_keys(
-    results: &crate::results::AnalysisResults,
-    root: &Path,
-) -> BaselineDependencyKeys {
-    BaselineDependencyKeys {
-        unused: results
-            .unused_dependencies
-            .iter()
-            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-            .collect(),
-        unused_dev: results
-            .unused_dev_dependencies
-            .iter()
-            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-            .collect(),
-        unused_optional: results
-            .unused_optional_dependencies
-            .iter()
-            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-            .collect(),
-        unlisted: results
-            .unlisted_dependencies
-            .iter()
-            .map(|d| d.dep.package_name.clone())
-            .collect(),
-        type_only: results
-            .type_only_dependencies
-            .iter()
-            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-            .collect(),
-        test_only: results
-            .test_only_dependencies
-            .iter()
-            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-            .collect(),
-        dev_in_prod: results
-            .dev_dependencies_in_production
-            .iter()
-            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-            .collect(),
-    }
 }
 
 #[cfg(test)]
@@ -1471,98 +1157,12 @@ struct BaselineGraphKeys {
 }
 
 #[cfg(test)]
-fn baseline_graph_keys(
-    results: &crate::results::AnalysisResults,
-    root: &Path,
-) -> BaselineGraphKeys {
-    BaselineGraphKeys {
-        circular_dependencies: results
-            .circular_dependencies
-            .iter()
-            .map(|c| circular_dep_key(&c.cycle, root))
-            .collect(),
-        re_export_cycles: results
-            .re_export_cycles
-            .iter()
-            .map(|c| re_export_cycle_key(&c.cycle, root))
-            .collect(),
-        package_cycles: results
-            .package_cycles
-            .iter()
-            .map(|c| package_cycle_key(&c.cycle))
-            .collect(),
-        boundary_violations: results
-            .boundary_violations
-            .iter()
-            .map(|v| boundary_violation_key(&v.violation, root))
-            .collect(),
-        boundary_coverage_violations: results
-            .boundary_coverage_violations
-            .iter()
-            .map(|v| relative_path(&v.violation.path, root))
-            .collect(),
-        boundary_call_violations: results
-            .boundary_call_violations
-            .iter()
-            .map(|v| boundary_call_violation_key(&v.violation, root))
-            .collect(),
-        policy_violations: results
-            .policy_violations
-            .iter()
-            .map(|v| policy_violation_key(&v.violation, root))
-            .collect(),
-    }
-}
-
-#[cfg(test)]
 struct BaselineCatalogKeys {
     unused_catalog_entries: Vec<String>,
     empty_catalog_groups: Vec<String>,
     unresolved_catalog_references: Vec<String>,
     unused_dependency_overrides: Vec<String>,
     misconfigured_dependency_overrides: Vec<String>,
-}
-
-#[cfg(test)]
-fn baseline_catalog_keys(
-    results: &crate::results::AnalysisResults,
-    root: &Path,
-) -> BaselineCatalogKeys {
-    BaselineCatalogKeys {
-        unused_catalog_entries: results
-            .unused_catalog_entries
-            .iter()
-            .map(|e| format!("{}:{}", e.entry.catalog_name, e.entry.entry_name))
-            .collect(),
-        empty_catalog_groups: results
-            .empty_catalog_groups
-            .iter()
-            .map(|g| g.group.catalog_name.clone())
-            .collect(),
-        unresolved_catalog_references: results
-            .unresolved_catalog_references
-            .iter()
-            .map(|r| {
-                format!(
-                    "{}:{}:{}:{}",
-                    relative_path(&r.reference.path, root),
-                    r.reference.line,
-                    r.reference.catalog_name,
-                    r.reference.entry_name,
-                )
-            })
-            .collect(),
-        unused_dependency_overrides: results
-            .unused_dependency_overrides
-            .iter()
-            .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
-            .collect(),
-        misconfigured_dependency_overrides: results
-            .misconfigured_dependency_overrides
-            .iter()
-            .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
-            .collect(),
-    }
 }
 
 /// Generate a stable key for a boundary violation: `from_path->to_path`.
@@ -1577,20 +1177,6 @@ fn boundary_violation_key(v: &crate::results::BoundaryViolation, root: &Path) ->
 /// Generate a stable key for a boundary call violation: `path:callee`.
 fn boundary_call_violation_key(v: &crate::results::BoundaryCallViolation, root: &Path) -> String {
     format!("{}:{}", relative_path(&v.path, root), v.callee)
-}
-
-/// Generate a stable key for a rule-pack policy violation:
-/// `path:pack/rule_id:matched`. Line numbers are deliberately excluded so a
-/// baselined finding survives unrelated edits above it.
-#[cfg(test)]
-fn policy_violation_key(v: &crate::results::PolicyViolation, root: &Path) -> String {
-    format!(
-        "{}:{}/{}:{}",
-        relative_path(&v.path, root),
-        v.pack,
-        v.rule_id,
-        v.matched
-    )
 }
 
 /// Generate a stable key for a duplicate export: `name|sorted_paths`.
@@ -1762,6 +1348,21 @@ impl BaselineFilterContext<'_> {
                 member.member.member_name
             );
             !baseline_store_members.contains(key.as_str())
+        });
+        let baseline_namespace_members: FxHashSet<&str> = self
+            .baseline
+            .unused_namespace_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_namespace_members.retain(|member| {
+            let key = format!(
+                "{}:{}.{}",
+                relative_path(&member.member.path, self.root),
+                member.member.parent_name,
+                member.member.member_name
+            );
+            !baseline_namespace_members.contains(key.as_str())
         });
     }
 
@@ -2224,78 +1825,6 @@ fn filter_new_issues_by_canonical_keys(
         };
     }
     with_baseline_fields!(retain);
-    results
-}
-
-fn filter_new_issues_by_legacy_keys(
-    mut results: crate::results::AnalysisResults,
-    baseline: &BaselineData,
-    root: &Path,
-) -> crate::results::AnalysisResults {
-    let baseline_files: FxHashSet<&str> =
-        baseline.unused_files.iter().map(String::as_str).collect();
-    let baseline_exports: FxHashSet<&str> =
-        baseline.unused_exports.iter().map(String::as_str).collect();
-    let baseline_types: FxHashSet<&str> =
-        baseline.unused_types.iter().map(String::as_str).collect();
-    let baseline_deps: FxHashSet<&str> = baseline
-        .unused_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    let baseline_dev_deps: FxHashSet<&str> = baseline
-        .unused_dev_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-
-    results
-        .unused_files
-        .retain(|f| !baseline_files.contains(relative_path(&f.file.path, root).as_str()));
-    results.unused_exports.retain(|e| {
-        let key = format!(
-            "{}:{}",
-            relative_path(&e.export.path, root),
-            e.export.export_name
-        );
-        !baseline_exports.contains(key.as_str())
-    });
-    results.unused_types.retain(|e| {
-        let key = format!(
-            "{}:{}",
-            relative_path(&e.export.path, root),
-            e.export.export_name
-        );
-        !baseline_types.contains(key.as_str())
-    });
-    filter_private_type_leaks(
-        &mut results.private_type_leaks,
-        &baseline.private_type_leaks,
-        root,
-    );
-    let baseline_deprecated: FxHashSet<&str> = baseline
-        .deprecated_exports_in_use
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results
-        .deprecated_exports_in_use
-        .retain(|e| !baseline_deprecated.contains(deprecated_export_key(&e.export, root).as_str()));
-    results.unused_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_deps, &d.dep.package_name, key.as_str())
-    });
-    results.unused_dev_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_dev_deps, &d.dep.package_name, key.as_str())
-    });
-
-    let filter = BaselineFilterContext { baseline, root };
-    filter.filter_cycles_and_members(&mut results);
-    filter.filter_dependency_variants(&mut results);
-    filter.filter_boundaries_and_suppressions(&mut results);
-    filter.filter_pnpm_entries(&mut results);
-
     results
 }
 

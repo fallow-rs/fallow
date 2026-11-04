@@ -296,10 +296,13 @@
             "unused-optional-dependencies": true,
             "unused-enum-members": true,
             "unused-class-members": true,
+            "unused-namespace-members": true,
             "unused-store-members": true,
             "unresolved-imports": true,
             "unlisted-dependencies": true,
+            "unlisted-binaries": true,
             "duplicate-exports": true,
+            "duplicate-export-aliases": true,
             "type-only-dependencies": true,
             "test-only-dependencies": true,
             "dev-dependencies-in-production": true,
@@ -365,6 +368,9 @@
             "unused-class-members": {
               "type": "boolean"
             },
+            "unused-namespace-members": {
+              "type": "boolean"
+            },
             "unused-store-members": {
               "type": "boolean"
             },
@@ -374,7 +380,13 @@
             "unlisted-dependencies": {
               "type": "boolean"
             },
+            "unlisted-binaries": {
+              "type": "boolean"
+            },
             "duplicate-exports": {
+              "type": "boolean"
+            },
+            "duplicate-export-aliases": {
               "type": "boolean"
             },
             "type-only-dependencies": {

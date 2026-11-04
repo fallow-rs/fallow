@@ -19,6 +19,7 @@ mod resolve;
 mod rules;
 mod similar_code;
 mod used_class_members;
+mod workspace_settings;
 
 #[expect(
     clippy::redundant_pub_crate,
@@ -74,6 +75,7 @@ pub use rules::{
 };
 pub use similar_code::SimilarCodeConfig;
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+pub use workspace_settings::ResolvedWorkspaceSettings;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -369,13 +371,17 @@ pub struct FallowConfig {
     #[schemars(schema_with = "extends_schema")]
     pub extends: Vec<String>,
 
-    /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. For a script that does not run in production, use a `framework[]` entry with `entryPointRole: "support"` and leave its glob out of `entry`: a file that also matches `entry` stays a runtime root. A single `*` stays within one path segment; use `**` to match across directories.
+    /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. For a script that does not run in production, use `supportEntry` and leave its glob out of `entry`: a file that also matches `entry` stays a runtime root. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub entry: Vec<String>,
 
     /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load. A `!`-prefixed entry is an exception that applies after the defaults and the positive patterns: `"!src/policy/coverage/**"` brings back hand-written source under a built-in default such as `**/coverage/**`, and `"!.config/**"` adds a hidden directory to discovery. Paths under `node_modules` or `.git` can not be lifted, and a `!` entry that names one of these segments is a config error. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
+
+    /// An array of project-root-relative glob patterns whose matching files are support entry points: dev scripts, tooling and setup files that run outside production. In default mode a support entry keeps its file and its imports reachable, the same as `entry`. In `--production` mode (or `production` for dead-code analysis), fallow leaves a file that only a support entry matches out of the analysis, so its imports credit no export, file or dependency. A file that also matches `entry`, a framework plugin or a package.json field stays an entry point, and a support file that production code imports stays a normal module. Use `entry` for the files that run in production. A single `*` stays within one path segment; use `**` to match across directories.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub support_entry: Vec<String>,
 
     /// An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A matching file that parses with errors reports no `source-parse-degraded` diagnostic, and its partial parse does not mark other findings as incomplete; use this only for files that are broken on purpose, such as syntax-error test fixtures. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -392,6 +398,10 @@ pub struct FallowConfig {
     /// A list of package names or package-name globs excluded from BOTH unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob in the `ignorePatterns` syntax matched against the package name, so `@acme/*` covers every package in the `@acme` scope.
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
+
+    /// A list of binary names or name globs that the `unlisted-binaries` rule does not report. Set it for a binary that the operating system, the CI image, or a tool outside `node_modules` provides (e.g. `["gnome-extensions", "tailscale"]`). An entry without glob characters matches the binary name exactly; an entry with `*`, `?`, `[` or `{` is a glob matched against the binary name, so `xcrun*` covers every name that starts with `xcrun`. Fallow already skips shell builtins and a fixed list of common operating-system tools (such as `git`, `ssh-keygen`, `curl`, and `ffmpeg`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_binaries: Vec<String>,
 
     /// A list of command names whose file arguments fallow does not make entry points. Fallow reads commands in package.json scripts (root and workspace packages), CI files (GitHub Actions and GitLab CI), Dockerfiles, Procfiles, and fly.toml files, and a file that a command names (such as `node scripts/seed.ts`) normally becomes an entry point. A listed command still counts as a used dependency, and its `--config` file is still tracked. Formatters and linters (ESLint, Prettier, Oxlint, Oxfmt, Biome, Stylelint, and similar tools) never make their targets entry points, so they do not need to be listed. Set it for a command whose file arguments are data, not code that runs (e.g. `["my-codegen"]`), or use `["*"]` to turn off entry points from all commands and declare real entries in `entry`. A name matches the command after environment, package-manager, and wrapper prefixes (`npx`, `pnpm exec`, `yarn run`, `varlock run --`), by exact file name; `*` is the only wildcard.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -524,7 +534,7 @@ pub struct FallowConfig {
     )]
     pub markup_extensions: Vec<String>,
 
-    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten a rule for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict). For most rules, an override cannot start a detector for a rule that is off at top level, so set the top-level rule on and use an override to set `off` for the other paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. A single `*` stays within one path segment; use `**` to match across directories.
+    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten a rule for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict). For most rules, an override cannot start a detector for a rule that is off at top level, so set the top-level rule on and use an override to set `off` for the other paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, unlisted-binaries, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 
@@ -951,6 +961,9 @@ pub struct RegressionBaseline {
     /// Baseline count of `unlisted-dependencies` findings.
     #[serde(default)]
     pub unlisted_dependencies: usize,
+    /// Baseline count of `unlisted-binaries` findings.
+    #[serde(default)]
+    pub unlisted_binaries: usize,
     /// Baseline count of `duplicate-exports` findings.
     #[serde(default)]
     pub duplicate_exports: usize,

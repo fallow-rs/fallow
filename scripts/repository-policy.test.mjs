@@ -720,12 +720,12 @@ test("Miri cfg guard runs for commits and on every pull request", () => {
 test("file-size guard runs for commits and on every pull request", () => {
   const preCommit = readFileSync("hk.pkl", "utf8");
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
-  const jsLint = /\n  js-lint:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
+  const job = /\n  cargo-fallow:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
 
-  assert.match(preCommit, /node scripts\/check-file-size\.mjs --staged/u);
+  assert.match(preCommit, /cargo fallow size --staged --fail-on-growth/u);
   // A path filter on the job would let a pull request skip the step.
-  assert.doesNotMatch(jsLint.split("steps:")[0], /^\s+if:/mu);
-  assert.match(jsLint, /node scripts\/check-file-size\.mjs --base "origin\/\$BASE_REF"/u);
+  assert.doesNotMatch(job.split("steps:")[0], /^\s+if:/mu);
+  assert.match(job, /command: size\n\s+base: auto/u);
 });
 
 test("fallow audit holds the file-length rule for .mjs and .ts files", () => {
@@ -877,7 +877,20 @@ test("a required output field cannot be dropped at a frozen schema_version", (t)
  * may carry `reachability_caveats[]`. The count drifted once already: a commit
  * added the ninth array and updated only the compatibility doc, leaving the
  * changelog telling readers that eight carry it and that the ninth stays out.
+ * The newest changelog statement must match: an unreleased fragment in
+ * `changelog.d/` comes before `CHANGELOG.md`, so a released entry keeps the
+ * count of its own release.
  */
+/** The unreleased changelog fragments, sorted by name, then `CHANGELOG.md`. */
+const newestChangelogText = () =>
+  [
+    ...readdirSync("changelog.d")
+      .filter((name) => name.endsWith(".md"))
+      .toSorted()
+      .map((name) => readFileSync(join("changelog.d", name), "utf8")),
+    readFileSync("CHANGELOG.md", "utf8"),
+  ].join("\n");
+
 test("the caveat array count in the docs matches the findings that carry one", () => {
   const findings = readFileSync("crates/types/src/output_dead_code.rs", "utf8");
   const carriers = [...findings.matchAll(/pub reachability_caveats: Vec<ReachabilityCaveat>,/gu)]
@@ -908,7 +921,7 @@ test("the caveat array count in the docs matches the findings that carry one", (
     carriers,
   );
   assert.equal(
-    counted(readFileSync("CHANGELOG.md", "utf8"), /(\w+) arrays carry it:/u, "CHANGELOG.md"),
+    counted(newestChangelogText(), /(\w+) arrays carry it:/u, "the newest changelog entry"),
     carriers,
   );
 });

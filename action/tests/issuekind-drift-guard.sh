@@ -170,10 +170,13 @@ issuekind_json_key_fallback() {
     dev-dependency-in-production) echo "dev_dependencies_in_production" ;;
     unused-enum-member) echo "unused_enum_members" ;;
     unused-class-member) echo "unused_class_members" ;;
+    unused-namespace-member) echo "unused_namespace_members" ;;
     unused-store-member) echo "unused_store_members" ;;
     unresolved-import) echo "unresolved_imports" ;;
     unlisted-dependency) echo "unlisted_dependencies" ;;
+    unlisted-binary) echo "unlisted_binaries" ;;
     duplicate-export) echo "duplicate_exports" ;;
+    duplicate-export-alias) echo "duplicate_export_aliases" ;;
     circular-dependency) echo "circular_dependencies" ;;
     re-export-cycle) echo "re_export_cycles" ;;
     boundary-violation) echo "boundary_violations" ;;

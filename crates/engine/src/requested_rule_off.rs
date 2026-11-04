@@ -57,6 +57,10 @@ const REQUESTED_RULES: &[(&str, &[RequestedRule])] = &[
         &[("unused-store-members", |r| r.unused_store_members)],
     ),
     (
+        "--unused-namespace-members",
+        &[("unused-namespace-members", |r| r.unused_namespace_members)],
+    ),
+    (
         "--unprovided-injects",
         &[("unprovided-injects", |r| r.unprovided_injects)],
     ),
@@ -113,8 +117,16 @@ const REQUESTED_RULES: &[(&str, &[RequestedRule])] = &[
         &[("unlisted-dependencies", |r| r.unlisted_dependencies)],
     ),
     (
+        "--unlisted-binaries",
+        &[("unlisted-binaries", |r| r.unlisted_binaries)],
+    ),
+    (
         "--duplicate-exports",
         &[("duplicate-exports", |r| r.duplicate_exports)],
+    ),
+    (
+        "--duplicate-export-aliases",
+        &[("duplicate-export-aliases", |r| r.duplicate_export_aliases)],
     ),
     (
         "--circular-deps",

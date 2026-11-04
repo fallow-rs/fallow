@@ -47,6 +47,8 @@ mod class_value_source_shapes;
 mod config_function_locals;
 #[path = "integration_test/config_glob_star_segment.rs"]
 mod config_glob_star_segment;
+#[path = "integration_test/config_required_dependencies.rs"]
+mod config_required_dependencies;
 #[path = "integration_test/css_in_js_styled.rs"]
 mod css_in_js_styled;
 #[path = "integration_test/css_modules.rs"]
@@ -63,6 +65,8 @@ mod deprecated_exports;
 mod directory_resolution;
 #[path = "integration_test/dotenv_plugin.rs"]
 mod dotenv_plugin;
+#[path = "integration_test/duplicate_export_aliases.rs"]
+mod duplicate_export_aliases;
 #[path = "integration_test/duplicate_prop_shape.rs"]
 mod duplicate_prop_shape;
 #[path = "integration_test/dynamic_import_glob_excludes.rs"]
@@ -356,6 +360,8 @@ mod unused_component_props;
 mod unused_enum_members;
 #[path = "integration_test/unused_load_data_keys.rs"]
 mod unused_load_data_keys;
+#[path = "integration_test/unused_namespace_members.rs"]
+mod unused_namespace_members;
 #[path = "integration_test/unused_react_props.rs"]
 mod unused_react_props;
 #[path = "integration_test/unused_server_actions.rs"]
@@ -601,6 +607,8 @@ mod playwright_test_dir;
 mod script_multiplexers;
 #[path = "integration_test/shell_command_substitution.rs"]
 mod shell_command_substitution;
+#[path = "integration_test/unlisted_binaries.rs"]
+mod unlisted_binaries;
 #[path = "integration_test/visibility_tags.rs"]
 mod visibility_tags;
 #[path = "integration_test/vue_options_api_prop_emit.rs"]
@@ -710,6 +718,8 @@ mod jasmine_plugin;
 mod mise_plugin;
 #[path = "integration_test/namespace_class_static_member.rs"]
 mod namespace_class_static_member;
+#[path = "integration_test/namespace_issue_types.rs"]
+mod namespace_issue_types;
 #[path = "integration_test/namespace_spy_call_member.rs"]
 mod namespace_spy_call_member;
 #[path = "integration_test/new_url_node_modules_package.rs"]

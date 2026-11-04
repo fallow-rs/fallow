@@ -53,10 +53,13 @@ else
     table_row("Unused optionalDependencies"; "unused_optional_dependencies"; "unused-dependencies"),
     table_row("Unused enum members"; "unused_enum_members"; "unused-enum-members"),
     table_row("Unused class members"; "unused_class_members"; "unused-class-members"),
+    table_row("Unused namespace members"; "unused_namespace_members"; "unused-namespace-members"),
     table_row("Unused store members"; "unused_store_members"; "unused-store-members"),
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
+    table_row("Unlisted binaries"; "unlisted_binaries"; "unlisted-binaries"),
     table_row("Duplicate exports"; "duplicate_exports"; "duplicate-exports"),
+    table_row("Duplicate export aliases"; "duplicate_export_aliases"; "duplicate-export-aliases"),
     table_row("Circular dependencies"; "circular_dependencies"; "circular-dependencies"),
     table_row("Re-export cycles"; "re_export_cycles"; "re-export-cycles"),
     table_row("Boundary violations"; "boundary_violations"; "boundary-violations"),
@@ -118,6 +121,9 @@ else
   section("Unused class members"; "unused_class_members";
     "Class methods or properties never referenced outside their class.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
+  section("Unused namespace members"; "unused_namespace_members";
+    "Exported members of an exported TypeScript namespace that no code reads.\n\n| File | Line | Namespace | Member |\n|------|-----:|-----------|--------|\n";
+    "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unused store members"; "unused_store_members";
     "Pinia store members (state, getter, action) never accessed by any consumer.\n\n| File | Line | Store | Member |\n|------|-----:|-------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
@@ -127,6 +133,9 @@ else
   section("Unlisted dependencies"; "unlisted_dependencies";
     "Packages imported in code but missing from `package.json`.\n\n| Package | Used in |\n|---------|--------|\n";
     "| `\(.package_name)` | \(if (.imported_from | length) > 0 then (.imported_from[:3] | map("`\(.path):\(.line)`") | join(", ")) + (if (.imported_from | length) > 3 then " *+\((.imported_from | length) - 3) more*" else "" end) else "" end) |") +
+  section("Unlisted binaries"; "unlisted_binaries";
+    "Binaries that scripts or process calls run, but that no installed package provides.\n\n| Binary | Used in |\n|--------|--------|\n";
+    "| `\(.binary_name)` | \(.used_in[:3] | map("`\(.path):\(.line)`") | join(", "))\(if (.used_in | length) > 3 then " *+\((.used_in | length) - 3) more*" else "" end) |") +
   section("Duplicate exports"; "duplicate_exports";
     "Same export name defined in multiple files \u2014 barrel re-exports may resolve ambiguously.\n\n| Export | Locations |\n|--------|-----------|\n";
     "| `\(.export_name)` | \(.locations[:3] | map("`\(.path):\(.line)`") | join(", "))\(if (.locations | length) > 3 then " *+\((.locations | length) - 3) more*" else "" end) |") +
@@ -184,6 +193,9 @@ else
   section("Unused Svelte events"; "unused_svelte_events";
     "Svelte components dispatching a `createEventDispatcher` event listened to nowhere in the project (cross-file dead-output direction).\n\n| File | Component | Event |\n|------|-----------|-------|\n";
     "| `\(.path):\(.line)` | `\(.component_name)` | `\(.event_name)` |") +
+  section("Duplicate export aliases"; "duplicate_export_aliases";
+    "One binding exported under two or more names in one file.\n\n| File | Binding | Names |\n|------|---------|-------|\n";
+    "| `\(.path):\(.line)` | `\(.local_name)` | \((.export_names // []) | map("`\(.)`") | join(", ")) |") +
   section("Unused Effect layers"; "unused_effect_layers";
     "Effect layers composed only into layers that nothing uses.\n\n| File | Layer |\n|------|-------|\n";
     "| `\(.path):\(.line)` | `\(.name)` |") +

@@ -84,7 +84,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 /// Whether an entry rule of `result` matches the project-relative `path`, as
 /// entry point discovery compiles and matches the rules.
 #[cfg(test)]
-pub(crate) fn entry_rules_match(result: &PluginResult, path: &str) -> bool {
+fn entry_rules_match(result: &PluginResult, path: &str) -> bool {
     result
         .entry_patterns
         .iter()
@@ -249,6 +249,8 @@ pub struct PluginResult {
     /// Dependencies a config credits only to the package that owns it, keyed
     /// by the path of that package's `package.json`.
     package_referenced_dependencies: Vec<(PathBuf, String)>,
+    /// Packages that a config needs installed. See [`RequiredDependency`].
+    required_dependencies: Vec<RequiredDependency>,
     /// Additional files that are always considered used.
     always_used_files: Vec<String>,
     /// Path alias mappings discovered from config (prefix -> replacement directory).
@@ -796,6 +798,7 @@ impl PluginResult {
             && self.used_class_members.is_empty()
             && self.referenced_dependencies.is_empty()
             && self.package_referenced_dependencies.is_empty()
+            && self.required_dependencies.is_empty()
             && self.always_used_files.is_empty()
             && self.path_aliases.is_empty()
             && self.setup_files.is_empty()
@@ -944,7 +947,7 @@ impl PathRule {
     /// rule matches at least the paths that the tool matches. Each negated
     /// group becomes an excluded glob.
     #[must_use]
-    pub(crate) fn from_extglob(pattern: &str) -> Self {
+    fn from_extglob(pattern: &str) -> Self {
         let rewritten = fallow_config::extglob::rewrite_include(pattern);
         Self::new(rewritten.include).with_excluded_globs(rewritten.excludes)
     }
@@ -953,7 +956,7 @@ impl PathRule {
     /// never removes more paths than the tool does, so a glob with a negated
     /// group excludes nothing.
     #[must_use]
-    pub(crate) fn with_excluded_extglobs<I, S>(self, patterns: I) -> Self
+    fn with_excluded_extglobs<I, S>(self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -1943,6 +1946,7 @@ macro_rules! define_plugin {
     };
 }
 
+mod config_dependencies;
 pub mod config_parser;
 mod config_value_credits;
 mod flue;
@@ -1962,6 +1966,8 @@ mod trace_provenance;
 mod used_export_names;
 mod used_export_rule;
 
+pub use config_dependencies::RequiredDependency;
+use config_dependencies::add_import_referenced_dependencies;
 pub(crate) use module_federation::runtime_remotes;
 pub use registry::{
     AggregatedPluginResult, PluginRegistry, PluginToolingDependencies, PluginToolingEvidence,
@@ -1974,15 +1980,6 @@ pub use trace_provenance::{ExportCredits, build_trace_provenance};
 pub use used_export_names::UsedExportNames;
 pub(crate) use used_export_rule::{ConfigExportCredit, is_export_ignored};
 pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};
-
-fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
-    let imports = config_parser::extract_imports(source, config_path);
-    for import in &imports {
-        result
-            .referenced_dependencies
-            .push(crate::resolve::extract_package_name(import));
-    }
-}
 
 /// Credit the optional peer dependencies a test environment loads at runtime.
 ///

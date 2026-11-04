@@ -463,6 +463,8 @@ pub struct DeadCodeFilters {
     pub unused_enum_members: bool,
     /// Class members never used outside their declaration.
     pub unused_class_members: bool,
+    /// Members of an exported TypeScript namespace that no code reads.
+    pub unused_namespace_members: bool,
     /// Store members (for example Pinia) never used outside the store.
     pub unused_store_members: bool,
     /// `inject` calls with no matching `provide`.
@@ -495,8 +497,12 @@ pub struct DeadCodeFilters {
     pub unresolved_imports: bool,
     /// Imported packages missing from the dependency manifest.
     pub unlisted_deps: bool,
+    /// Binaries that no installed or listed package provides.
+    pub unlisted_binaries: bool,
     /// The same symbol exported more than once.
     pub duplicate_exports: bool,
+    /// One binding that one module exports under two or more names.
+    pub duplicate_export_aliases: bool,
     /// Circular import chains.
     pub circular_deps: bool,
     /// Cycles formed through re-export chains.
@@ -538,6 +544,7 @@ impl DeadCodeFilters {
             || self.deprecated_exports_in_use
             || self.unused_enum_members
             || self.unused_class_members
+            || self.unused_namespace_members
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -554,7 +561,9 @@ impl DeadCodeFilters {
             || self.unused_load_data_keys
             || self.unresolved_imports
             || self.unlisted_deps
+            || self.unlisted_binaries
             || self.duplicate_exports
+            || self.duplicate_export_aliases
             || self.circular_deps
             || self.re_export_cycles
             || self.package_cycles
@@ -603,6 +612,7 @@ impl DeadCodeFilters {
             "--unused-deps" => self.unused_deps = true,
             "--unused-enum-members" => self.unused_enum_members = true,
             "--unused-class-members" => self.unused_class_members = true,
+            "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,
@@ -619,7 +629,9 @@ impl DeadCodeFilters {
             "--unused-load-data-keys" => self.unused_load_data_keys = true,
             "--unresolved-imports" => self.unresolved_imports = true,
             "--unlisted-deps" => self.unlisted_deps = true,
+            "--unlisted-binaries" => self.unlisted_binaries = true,
             "--duplicate-exports" => self.duplicate_exports = true,
+            "--duplicate-export-aliases" => self.duplicate_export_aliases = true,
             "--circular-deps" => self.circular_deps = true,
             "--re-export-cycles" => self.re_export_cycles = true,
             "--package-cycles" => self.package_cycles = true,

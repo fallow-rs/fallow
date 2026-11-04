@@ -81,6 +81,11 @@ fn push_summary_core_parts(
 fn push_summary_member_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
     push_summary_part(parts, results.unused_enum_members.len(), "enum members");
     push_summary_part(parts, results.unused_class_members.len(), "class members");
+    push_summary_part(
+        parts,
+        results.unused_namespace_members.len(),
+        "namespace members",
+    );
     push_summary_part(parts, results.unused_store_members.len(), "store members");
 }
 
@@ -105,6 +110,7 @@ fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResu
         results.unlisted_dependencies.len(),
         "unlisted dependencies",
     );
+    push_summary_part(parts, results.unlisted_binaries.len(), "unlisted binaries");
     push_summary_part(
         parts,
         count_duplicate_export_pairs(results),
@@ -229,6 +235,12 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
         parts,
         results.unused_effect_layers.len(),
         "unused Effect layers",
+    );
+    push_summary_part_forms(
+        parts,
+        results.duplicate_export_aliases.len(),
+        "duplicate export alias",
+        "duplicate export aliases",
     );
     push_summary_part(
         parts,

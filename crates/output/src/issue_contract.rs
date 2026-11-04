@@ -435,6 +435,7 @@ mod tests {
                     "DevDependencyInProductionFinding",
                 ),
                 ("DuplicateExport", "DuplicateExportFinding"),
+                ("DuplicateExportAlias", "DuplicateExportAliasFinding"),
                 ("EmptyCatalogGroup", "EmptyCatalogGroupFinding"),
                 (
                     "MisconfiguredDependencyOverride",
@@ -446,6 +447,7 @@ mod tests {
                 ("TestOnlyDependency", "TestOnlyDependencyFinding"),
                 ("TypeOnlyDependency", "TypeOnlyDependencyFinding"),
                 ("UnlistedDependency", "UnlistedDependencyFinding"),
+                ("UnlistedBinary", "UnlistedBinaryFinding"),
                 (
                     "UnresolvedCatalogReference",
                     "UnresolvedCatalogReferenceFinding",
@@ -463,6 +465,7 @@ mod tests {
                 ("UnusedFile", "UnusedFileFinding"),
                 ("UnusedMember", "UnusedClassMemberFinding"),
                 ("UnusedMember", "UnusedEnumMemberFinding"),
+                ("UnusedMember", "UnusedNamespaceMemberFinding"),
                 ("UnusedMember", "UnusedStoreMemberFinding"),
             ]),
             aliases

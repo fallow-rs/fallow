@@ -32,6 +32,9 @@ impl ModuleInfoExtractor {
         for callee in &mut self.callee_uses {
             callee.span_start = remap_start(callee.span_start);
         }
+        for invocation in &mut self.command_invocations {
+            invocation.span_start = remap_start(invocation.span_start);
+        }
         for site in &mut self.di_key_sites {
             site.span_start = remap_start(site.span_start);
         }

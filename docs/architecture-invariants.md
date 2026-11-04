@@ -70,10 +70,11 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
 Run the cheap crate-edge gate while changing workspace dependencies:
 
 ```bash
-npm run check:crate-boundaries
+cargo fallow boundaries --fail-on-issues
 ```
 
-The check uses `cargo metadata --no-deps` for crate dependency rules. The
+The rules are in `[workspace.metadata.fallow.boundaries]` of the root
+`Cargo.toml`. cargo-fallow reads the crate edges from `cargo metadata`. The
 `architecture_boundaries` Rust tests also guard source-level invariants such as
 backend adapter containment and shared output-helper ownership. Repository
 policy tests and contract generation guard type-aware manifest/docs drift plus

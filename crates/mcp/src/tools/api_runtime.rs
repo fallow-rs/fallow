@@ -111,7 +111,7 @@ where
 /// from the environment the server inherited, so a bad file stands down with a
 /// `not-applied` outcome, as it does on the CLI route, instead of failing the
 /// call (issue #2799).
-pub(super) fn env_diff_file() -> Option<PathBuf> {
+fn env_diff_file() -> Option<PathBuf> {
     env_path("FALLOW_DIFF_FILE")
 }
 
@@ -188,7 +188,7 @@ fn changed_since_from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Optio
 /// `--changed-since` does on the CLI, instead of failing the call. A tool's own
 /// `changed_since` or `since` argument goes into `changed_since` and keeps the
 /// hard error, and it takes precedence over this value.
-pub(super) fn env_changed_since() -> Option<String> {
+fn env_changed_since() -> Option<String> {
     changed_since_from_lookup(|name| std::env::var_os(name))
 }
 
@@ -327,6 +327,7 @@ pub(super) fn typed_type_aware(param: Option<bool>) -> fallow_api::TypeAwareOpti
 /// The typed route refused a run that only the CLI reproduces: the
 /// environment or the project config turns on type-aware analysis, or the
 /// config sets an `audit` baseline key. The tool then runs the CLI.
+// fallow-ignore-next-line unnecessary-restricted-visibility -- a doc link in audit.rs names it: https://github.com/fallow-rs/cargo-fallow/issues/72
 pub(super) fn typed_error_needs_cli(error: &ProgrammaticError) -> bool {
     matches!(
         error.code.as_deref(),

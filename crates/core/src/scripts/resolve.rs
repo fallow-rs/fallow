@@ -113,7 +113,7 @@ pub fn build_bin_to_package_map(
 
 /// The binary names that a `bin` field declares: the unscoped package name
 /// for the string form, the keys for the object form.
-fn bin_names<'a>(package: &'a str, bin: &'a serde_json::Value) -> Vec<&'a str> {
+pub(super) fn bin_names<'a>(package: &'a str, bin: &'a serde_json::Value) -> Vec<&'a str> {
     match bin {
         serde_json::Value::String(_) => vec![package.rsplit('/').next().unwrap_or(package)],
         serde_json::Value::Object(obj) => obj.keys().map(String::as_str).collect(),

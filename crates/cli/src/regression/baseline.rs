@@ -459,6 +459,7 @@ fn render_toml_import_dependency_baseline_fields(
         "unlistedDependencies = {}",
         baseline.unlisted_dependencies
     );
+    let _ = writeln!(section, "unlistedBinaries = {}", baseline.unlisted_binaries);
 }
 
 fn render_toml_graph_baseline_fields(
@@ -932,6 +933,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 1,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -948,7 +950,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 1,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,

@@ -3123,6 +3123,13 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Exported members of an exported TypeScript namespace that no code
+ * reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+ * dotted path from the exported namespace (`Inner.x`).
+ */
+unused_namespace_members?: UnusedNamespaceMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -3143,12 +3150,23 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
+ * Binaries that package.json scripts or process calls run, but that no
+ * installed or listed package provides. Wrapped in
+ * [`UnlistedBinaryFinding`].
+ */
+unlisted_binaries?: UnlistedBinaryFinding[]
+/**
  * Exports with the same name across multiple modules. Wrapped in
  * [`DuplicateExportFinding`] so each entry carries a typed `actions`
  * array natively, with the position-0 `add-to-config` `ignoreExports`
  * snippet wired in at wrapper construction.
  */
 duplicate_exports: DuplicateExportFinding[]
+/**
+ * One module that exports one binding under two or more names. Wrapped
+ * in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+ */
+duplicate_export_aliases?: DuplicateExportAliasFinding[]
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
@@ -3627,6 +3645,10 @@ unused_enum_members: number
  */
 unused_class_members: number
 /**
+ * Unused namespace members.
+ */
+unused_namespace_members?: number
+/**
  * Unused store members.
  */
 unused_store_members?: number
@@ -3693,9 +3715,18 @@ unresolved_imports: number
  */
 unlisted_dependencies: number
 /**
+ * Binaries that scripts or process calls run, but that no installed or
+ * listed package provides.
+ */
+unlisted_binaries?: number
+/**
  * Same-named exports declared in more than one module.
  */
 duplicate_exports: number
+/**
+ * Bindings that one module exports under two or more names.
+ */
+duplicate_export_aliases?: number
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode.
@@ -4533,11 +4564,12 @@ export interface UnusedEnumMemberFinding {
  */
 path: string
 /**
- * Name of the parent enum or class.
+ * Name of the parent enum, class, store, or exported namespace.
  */
 parent_name: string
 /**
- * Name of the unused member.
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
  */
 member_name: string
 kind: MemberKind
@@ -4596,11 +4628,12 @@ export interface UnusedClassMemberFinding {
  */
 path: string
 /**
- * Name of the parent enum or class.
+ * Name of the parent enum, class, store, or exported namespace.
  */
 parent_name: string
 /**
- * Name of the unused member.
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
  */
 member_name: string
 kind: MemberKind
@@ -4654,6 +4687,71 @@ reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_namespace_members` key (an exported member of an exported
+ * TypeScript namespace that no code reads). `member_name` is the dotted path
+ * from the exported namespace, for example `Inner.x`. Emits only a
+ * line-level suppress action: a member can be a multi-line function, class
+ * or nested namespace, so there is no safe one-line auto-fix.
+ */
+export interface UnusedNamespaceMemberFinding {
+/**
+ * File containing the unused member.
+ */
+path: string
+/**
+ * Name of the parent enum, class, store, or exported namespace.
+ */
+parent_name: string
+/**
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
+ */
+member_name: string
+kind: MemberKind
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A namespace
+ * member takes the member rule unchanged: any module this run analyzed
+ * incompletely can hold the access that credits it. Sorted,
+ * deduplicated, and omitted from the wire when empty. This is disclosure
+ * only, because a namespace member offers no mutation.
+ */
+reachability_caveats?: ReachabilityCaveat[]
+}
+/**
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
  * `unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or
  * a setup-store returned key, declared but never accessed by any consumer
  * project-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only
@@ -4668,11 +4766,12 @@ export interface UnusedStoreMemberFinding {
  */
 path: string
 /**
- * Name of the parent enum or class.
+ * Name of the parent enum, class, store, or exported namespace.
  */
 parent_name: string
 /**
- * Name of the unused member.
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
  */
 member_name: string
 kind: MemberKind
@@ -4834,6 +4933,68 @@ line: number
 col: number
 }
 /**
+ * Wire-shape envelope for an [`UnlistedBinary`] finding. Carries an
+ * `install-dependency` primary (non-auto-fixable) plus an `ignoreBinaries`
+ * config suppress.
+ */
+export interface UnlistedBinaryFinding {
+/**
+ * The binary name as the command runs it (for example `ffmpeg`).
+ */
+binary_name: string
+/**
+ * The sites that run this binary.
+ */
+used_in: BinaryUseSite[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * A location that runs a binary.
+ */
+export interface BinaryUseSite {
+/**
+ * The `package.json` that declares the script, or the source file that
+ * makes the process call.
+ */
+path: string
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * The name of the package.json script that runs the binary. Absent for
+ * a process call in source.
+ */
+script_name?: (string | null)
+}
+/**
  * Wire-shape envelope for a [`DuplicateExport`] finding. Carries up to
  * three actions in position-locked order: an `add-to-config` `ignoreExports`
  * snippet (only when `locations[]` carries at least one path) followed by
@@ -4889,6 +5050,81 @@ export interface DuplicateLocation {
  * File containing the duplicate export.
  */
 path: string
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+}
+/**
+ * Wire-shape envelope for a [`DuplicateExportAlias`] finding. There is no
+ * safe auto-fix: a consumer outside the project can import any of the
+ * names. Actions are manual remediation guidance plus a line-level
+ * suppress.
+ */
+export interface DuplicateExportAliasFinding {
+/**
+ * The module that exports the binding.
+ */
+path: string
+/**
+ * The local name of the binding. For a re-export, the name that the
+ * source module exports.
+ */
+local_name: string
+/**
+ * The export names of the binding, in source order.
+ */
+export_names: string[]
+/**
+ * 1-based line number of the first export of the binding.
+ */
+line: number
+/**
+ * 0-based byte column offset of the first export of the binding.
+ */
+col: number
+/**
+ * One location for each export name, in source order.
+ */
+locations: DuplicateExportAliasLocation[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the binding gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * One export name of a [`DuplicateExportAlias`].
+ */
+export interface DuplicateExportAliasLocation {
+/**
+ * The export name at this location (`default` for a default export).
+ */
+export_name: string
 /**
  * 1-based line number.
  */
@@ -15175,6 +15411,13 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Exported members of an exported TypeScript namespace that no code
+ * reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+ * dotted path from the exported namespace (`Inner.x`).
+ */
+unused_namespace_members?: UnusedNamespaceMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -15195,12 +15438,23 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
+ * Binaries that package.json scripts or process calls run, but that no
+ * installed or listed package provides. Wrapped in
+ * [`UnlistedBinaryFinding`].
+ */
+unlisted_binaries?: UnlistedBinaryFinding[]
+/**
  * Exports with the same name across multiple modules. Wrapped in
  * [`DuplicateExportFinding`] so each entry carries a typed `actions`
  * array natively, with the position-0 `add-to-config` `ignoreExports`
  * snippet wired in at wrapper construction.
  */
 duplicate_exports: DuplicateExportFinding[]
+/**
+ * One module that exports one binding under two or more names. Wrapped
+ * in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+ */
+duplicate_export_aliases?: DuplicateExportAliasFinding[]
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
@@ -16903,6 +17157,13 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Exported members of an exported TypeScript namespace that no code
+ * reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+ * dotted path from the exported namespace (`Inner.x`).
+ */
+unused_namespace_members?: UnusedNamespaceMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -16923,12 +17184,23 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
+ * Binaries that package.json scripts or process calls run, but that no
+ * installed or listed package provides. Wrapped in
+ * [`UnlistedBinaryFinding`].
+ */
+unlisted_binaries?: UnlistedBinaryFinding[]
+/**
  * Exports with the same name across multiple modules. Wrapped in
  * [`DuplicateExportFinding`] so each entry carries a typed `actions`
  * array natively, with the position-0 `add-to-config` `ignoreExports`
  * snippet wired in at wrapper construction.
  */
 duplicate_exports: DuplicateExportFinding[]
+/**
+ * One module that exports one binding under two or more names. Wrapped
+ * in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+ */
+duplicate_export_aliases?: DuplicateExportAliasFinding[]
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
@@ -21604,6 +21876,16 @@ export type DevDependencyInProduction = DevDependencyInProductionFinding;
 export type DuplicateExport = DuplicateExportFinding;
 
 /**
+ * Backwards-compat alias for the pre-#384 bare `DuplicateExportAlias` name.
+ * The wire shape is byte-identical: `DuplicateExportAliasFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `DuplicateExportAlias` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `DuplicateExportAliasFinding`.
+ */
+export type DuplicateExportAlias = DuplicateExportAliasFinding;
+
+/**
  * Backwards-compat alias for the pre-#384 bare `EmptyCatalogGroup` name.
  * The wire shape is byte-identical: `EmptyCatalogGroupFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
@@ -21672,6 +21954,16 @@ export type TestOnlyDependency = TestOnlyDependencyFinding;
  * this alias; new code should prefer `TypeOnlyDependencyFinding`.
  */
 export type TypeOnlyDependency = TypeOnlyDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnlistedBinary` name.
+ * The wire shape is byte-identical: `UnlistedBinaryFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnlistedBinary` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnlistedBinaryFinding`.
+ */
+export type UnlistedBinary = UnlistedBinaryFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `UnlistedDependency` name.
@@ -21756,14 +22048,14 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
 
 /**
  * Backwards-compat alias for the pre-#384 bare `UnusedMember` union name.
- * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedStoreMemberFinding`)
+ * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedNamespaceMemberFinding`, `UnusedStoreMemberFinding`)
  * that replaced the pre-migration bare union. The wire shape per variant
  * is byte-identical (each wrapper flattens its bare payload and adds
  * `actions[]` plus optional `introduced`). Consumers that imported
  * `UnusedMember` from `fallow/types` pre-migration continue to work via
  * this alias; new code should narrow on the specific wrapper variant.
  */
-export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedStoreMemberFinding;
+export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedNamespaceMemberFinding | UnusedStoreMemberFinding;
 
 /**
  * @deprecated Renamed to BaselineStaleness in 3.27.0, when dead-code and dupes started carrying the same shape. The members are unchanged.

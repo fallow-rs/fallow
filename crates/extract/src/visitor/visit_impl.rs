@@ -134,6 +134,9 @@ pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
 pub(super) use visit_security_sinks::SinkAliasState;
 use visit_security_sinks::flatten_callee_path;
+#[path = "visit_impl_taint_chain.rs"]
+mod taint_chain;
+use taint_chain::collect_chained_taint_idents;
 pub(super) use visit_source_paths::join_member_path;
 use visit_source_paths::{
     binding_source_path_candidates, flatten_member_path, push_unique_string, source_path_candidates,
@@ -1235,7 +1238,7 @@ impl ModuleInfoExtractor {
     /// Record a namespace-import local placed in an object literal bound to
     /// `root_name`, and exclude the placement itself from the bare-reference
     /// rule (issue #2377).
-    pub(super) fn record_object_literal_namespace_placement(
+    fn record_object_literal_namespace_placement(
         &mut self,
         root_name: &str,
         value: &IdentifierReference<'_>,
@@ -4079,6 +4082,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         if self.namespace_depth > 0 {
             self.extract_namespace_members(&decl.declaration);
+            if let Declaration::TSNamespaceDeclaration(namespace) = &decl.declaration {
+                self.exported_namespace_member = Some(namespace.span);
+            }
             if is_namespace {
                 self.namespace_depth += 1;
             }
@@ -4104,6 +4110,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if is_namespace {
             self.namespace_depth += 1;
             self.pending_namespace_members.clear();
+            self.namespace_member_path.clear();
+            if let Declaration::TSNamespaceDeclaration(namespace) = &decl.declaration {
+                self.exported_namespace_root = Some(namespace.span);
+            }
         }
         walk::walk_export_declaration(self, decl);
         if is_namespace {
@@ -4291,9 +4301,34 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // namespace nested in one of those or in `declare global`. Its inner
         // `export` statements are members of the local binding, not file
         // exports (issue #2356).
-        let is_local_namespace = self.namespace_depth == 0 && self.ambient_module_depth == 0;
+        //
+        // Inside an exported namespace body, a nested namespace is a member
+        // only when it is exported itself (or is a segment of a dotted
+        // `namespace A.B`). A nested namespace without `export` is local to
+        // the body, so its inner exports are not members of the root.
+        let in_exported_body = self.namespace_depth > 0
+            && self.ambient_module_depth == 0
+            && self.local_namespace_depth == 0;
+        let is_root = in_exported_body && self.exported_namespace_root == Some(decl.span);
+        let is_member = in_exported_body
+            && !is_root
+            && self.exported_namespace_member.take() == Some(decl.span);
+        let is_local_namespace = (self.namespace_depth == 0 && self.ambient_module_depth == 0)
+            || (in_exported_body && !is_root && !is_member);
+        if is_root {
+            self.exported_namespace_root = None;
+        }
         if is_local_namespace {
             self.local_namespace_depth += 1;
+        }
+        if is_member {
+            self.namespace_member_path.push(decl.id.name.to_string());
+        }
+        if (is_root || is_member)
+            && let TSNamespaceDeclarationBody::TSNamespaceDeclaration(child) = &decl.body
+        {
+            self.push_namespace_member(child.id.name.to_string(), child.id.span);
+            self.exported_namespace_member = Some(child.span);
         }
         let body_statements = match &decl.body {
             TSNamespaceDeclarationBody::TSModuleBlock(block) => Some(&block.body),
@@ -4302,6 +4337,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.with_module_body_binding_scope(body_statements, Some(&decl.id.name), |visitor| {
             walk::walk_ts_namespace_declaration(visitor, decl);
         });
+        if is_member {
+            self.namespace_member_path.pop();
+        }
         if is_local_namespace {
             self.local_namespace_depth -= 1;
         }
@@ -4547,9 +4585,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_vitest_do_mock(expr);
         self.record_vitest_unmock(expr);
 
-        self.try_record_pino_transport_targets(expr);
-        self.try_record_node_module_register(expr);
-        self.try_record_child_process_fork(expr);
+        self.record_node_runtime_call(expr);
         self.try_record_package_path_reference(expr);
         self.try_record_relative_require_resolve(expr);
         self.record_bare_require_call(expr);
@@ -5313,6 +5349,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     /// independently so an asset reference spanning an interpolation boundary
     /// is ignored rather than producing a garbled, unresolvable specifier.
     fn visit_tagged_template_expression(&mut self, expr: &TaggedTemplateExpression<'a>) {
+        self.try_record_command_template(expr);
         if is_html_tagged_template(&expr.tag) {
             for quasi in &expr.quasi.quasis {
                 let text = quasi
@@ -5774,64 +5811,6 @@ fn imported_callee_root<'a>(expression: &'a Expression<'a>) -> Option<&'a Identi
             imported_callee_root(&member.object)
         }
         _ => None,
-    }
-}
-
-/// Collect bare identifier references from a declarator initializer for the
-/// #1146 taint chain step, recursing through the same conservative expression
-/// shapes `collect_binding_source_path_candidates` admits (static TS wrappers,
-/// await, template substitutions, `+` concat operands, object-literal property
-/// values) plus the top-level bare-identifier alias (`const b = a`).
-///
-/// Deliberately NOT collected (each chained identifier becomes a fresh
-/// source-backed binding that can chain further, so every arm here is a
-/// false-positive amplifier):
-/// - member-expression roots (`const b = a.id`): a property read off a tainted
-///   local frequently strips taint in practice (`a.length`,
-///   `a.startsWith("/")`); unlike the sink-side `collect_idents_into` member
-///   rule (sound because the whole expression flows into a sink), re-tainting
-///   the result here would propagate boolean/length/index reads
-/// - call expressions (`const b = f(a)`): the call boundary is where
-///   sanitizers live; #878 already covers proven helper-return shapes
-/// - logical / conditional / sequence expressions (`a || "x"`, `c ? a : b`)
-fn collect_chained_taint_idents(expr: &Expression<'_>, out: &mut Vec<String>) {
-    match expr {
-        Expression::Identifier(ident) => push_ident(ident.name.as_str(), out),
-        Expression::ParenthesizedExpression(paren) => {
-            collect_chained_taint_idents(&paren.expression, out);
-        }
-        Expression::TSAsExpression(ts_as) => {
-            collect_chained_taint_idents(&ts_as.expression, out);
-        }
-        Expression::TSSatisfiesExpression(ts_sat) => {
-            collect_chained_taint_idents(&ts_sat.expression, out);
-        }
-        Expression::TSNonNullExpression(ts_non_null) => {
-            collect_chained_taint_idents(&ts_non_null.expression, out);
-        }
-        Expression::AwaitExpression(await_expr) => {
-            collect_chained_taint_idents(&await_expr.argument, out);
-        }
-        Expression::TemplateLiteral(template) => {
-            for expression in &template.expressions {
-                collect_chained_taint_idents(expression, out);
-            }
-        }
-        Expression::BinaryExpression(binary)
-            if binary.operator == oxc_ast::ast::BinaryOperator::Addition =>
-        {
-            collect_chained_taint_idents(&binary.left, out);
-            collect_chained_taint_idents(&binary.right, out);
-        }
-        Expression::ObjectExpression(object) => {
-            for property in &object.properties {
-                let ObjectPropertyKind::ObjectProperty(property) = property else {
-                    continue;
-                };
-                collect_chained_taint_idents(&property.value, out);
-            }
-        }
-        _ => {}
     }
 }
 

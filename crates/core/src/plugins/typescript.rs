@@ -17,12 +17,26 @@ use rustc_hash::FxHashSet;
 
 use super::config_parser;
 use super::registry::ConfigCandidateIndex;
-use super::{Plugin, PluginResult};
+use super::{Plugin, PluginResult, RequiredDependency};
 
 const ENABLERS: &[&str] = &["typescript"];
 const CONFIG_PATTERNS: &[&str] = &["tsconfig.json", "tsconfig.*.json"];
 const ALWAYS_USED: &[&str] = &["tsconfig.json", "tsconfig.*.json"];
 const TOOLING_DEPENDENCIES: &[&str] = &["typescript", "ts-node", "tsx", "ts-loader"];
+
+/// Language service plugins that editor extensions ship and load by name. A
+/// tsconfig entry for one of them often only configures the bundled copy, so
+/// a missing manifest entry is not proof of a missing package.
+const EDITOR_BUNDLED_PLUGINS: &[&str] = &[
+    "@angular/language-service",
+    "@astrojs/ts-plugin",
+    "@mdx-js/typescript-plugin",
+    "@styled/typescript-styled-plugin",
+    "@vue/typescript-plugin",
+    "ts-lit-plugin",
+    "typescript-styled-plugin",
+    "typescript-svelte-plugin",
+];
 
 pub struct TypeScriptPlugin;
 
@@ -161,7 +175,12 @@ impl Plugin for TypeScriptPlugin {
                 .push((normalized_find, normalized_replacement));
         }
 
-        parse_tsconfig_plugins(&parse_source, parse_path, &mut result);
+        let plugin_site = TsconfigSite {
+            config_path,
+            source,
+            wrapper_len: usize::from(is_json),
+        };
+        parse_tsconfig_plugins(&parse_source, parse_path, &plugin_site, &mut result);
 
         parse_tsconfig_content_mappers(&parse_source, parse_path, &mut result);
 
@@ -283,8 +302,25 @@ fn normalize_tsconfig_path_alias(
     Some((normalized_find, normalized_replacement))
 }
 
-/// Extract `compilerOptions.plugins[].name` from a tsconfig as referenced dependencies.
-fn parse_tsconfig_plugins(source: &str, path: &Path, result: &mut PluginResult) {
+/// The tsconfig file as written, to place a finding on a value of the parsed
+/// source. A JSON tsconfig is parsed inside a wrapper of `wrapper_len` bytes.
+struct TsconfigSite<'a> {
+    config_path: &'a Path,
+    source: &'a str,
+    wrapper_len: usize,
+}
+
+/// Extract `compilerOptions.plugins[].name` from a tsconfig as referenced
+/// dependencies.
+///
+/// TypeScript loads each plugin package by name, so a bare name is also a
+/// required dependency. A path names a local plugin file, not a package.
+fn parse_tsconfig_plugins(
+    source: &str,
+    path: &Path,
+    site: &TsconfigSite<'_>,
+    result: &mut PluginResult,
+) {
     use oxc_ast::ast::Expression;
 
     use oxc_span::SourceType;
@@ -315,7 +351,7 @@ fn parse_tsconfig_plugins(source: &str, path: &Path, result: &mut PluginResult) 
 
         for el in &plugins_arr.elements {
             if let Some(Expression::ObjectExpression(plugin_obj)) = el.as_expression() {
-                collect_tsconfig_plugin_name(plugin_obj, result);
+                collect_tsconfig_plugin_name(plugin_obj, site, result);
             }
         }
     });
@@ -351,6 +387,7 @@ fn find_object_property_object<'a>(
 /// Push the `name` field of a single tsconfig plugin object as a referenced dependency.
 fn collect_tsconfig_plugin_name(
     plugin_obj: &oxc_ast::ast::ObjectExpression,
+    site: &TsconfigSite<'_>,
     result: &mut PluginResult,
 ) {
     use oxc_ast::ast::{Expression, ObjectPropertyKind};
@@ -359,7 +396,23 @@ fn collect_tsconfig_plugin_name(
             && object_property_key_is(&p.key, "name")
             && let Expression::StringLiteral(s) = &p.value
         {
-            let dep = crate::resolve::extract_package_name(&s.value.text());
+            let name = s.value.text();
+            let dep = crate::resolve::extract_package_name(&name);
+            if config_parser::is_package_specifier(&name)
+                && !name.starts_with('.')
+                && !EDITOR_BUNDLED_PLUGINS.contains(&dep.as_str())
+            {
+                let offset = (s.span.start as usize).saturating_sub(site.wrapper_len);
+                result
+                    .required_dependencies
+                    .push(RequiredDependency::at_offset(
+                        dep.clone(),
+                        site.config_path,
+                        site.source,
+                        offset,
+                        true,
+                    ));
+            }
             result.referenced_dependencies.push(dep);
         }
     }

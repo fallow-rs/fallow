@@ -149,6 +149,11 @@ const DEAD_CODE_WIRING = {
     category: "unused-store-member",
     finding: { ...member, actions: [] },
   },
+  "unused-namespace-member": {
+    field: "unused_namespace_members",
+    category: "unused-namespace-member",
+    finding: { ...member, actions: [] },
+  },
   "unused-server-action": {
     field: "unused_server_actions",
     category: "unused-server-action",
@@ -258,12 +263,32 @@ const DEAD_CODE_WIRING = {
       actions: [],
     },
   },
+  "unlisted-binary": {
+    field: "unlisted_binaries",
+    category: "unlisted-binaries",
+    finding: {
+      binary_name: "hyprctl",
+      used_in: [{ ...loc }],
+      actions: [],
+    },
+  },
   "duplicate-export": {
     field: "duplicate_exports",
     category: "duplicate-exports",
     finding: {
       export_name: "Thing",
       locations: [{ ...loc }],
+      actions: [],
+    },
+  },
+  "duplicate-export-alias": {
+    field: "duplicate_export_aliases",
+    category: "duplicate-export-aliases",
+    finding: {
+      ...loc,
+      local_name: "layer",
+      export_names: ["layer", "default"],
+      locations: [],
       actions: [],
     },
   },

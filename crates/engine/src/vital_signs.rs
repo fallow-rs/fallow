@@ -758,7 +758,7 @@ pub(crate) fn save_snapshot(
 /// Corrupt or unreadable files are skipped with a warning to stderr.
 /// Returns an empty vec if the directory does not exist.
 #[cfg(test)]
-pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
+fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
     load_snapshots_with_paths(root)
         .into_iter()
         .map(|(_, snapshot)| snapshot)

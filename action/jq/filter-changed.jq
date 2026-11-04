@@ -32,10 +32,14 @@ def filter_check:
   (if .deprecated_exports_in_use then .deprecated_exports_in_use |= map(select(.path | in_changed)) else . end) |
   (if .unused_enum_members  then .unused_enum_members  |= map(select(.path | in_changed))      else . end) |
   (if .unused_class_members then .unused_class_members |= map(select(.path | in_changed))      else . end) |
+  (if .unused_namespace_members then .unused_namespace_members |= map(select(.path | in_changed))      else . end) |
   (if .unused_store_members then .unused_store_members |= map(select(.path | in_changed))      else . end) |
   (if .unresolved_imports   then .unresolved_imports   |= map(select(.path | in_changed))      else . end) |
   (if .unlisted_dependencies then
     .unlisted_dependencies |= map(select(.imported_from | any(.path | in_changed)))
+  else . end) |
+  (if .unlisted_binaries then
+    .unlisted_binaries |= map(select(.used_in | any(.path | in_changed)))
   else . end) |
   (if .duplicate_exports then
     .duplicate_exports |= (map(.locations |= map(select(.path | in_changed))) | map(select(.locations | length >= 2)))
@@ -118,6 +122,9 @@ def filter_check:
   (if .unused_effect_layers then
     .unused_effect_layers |= map(select(.path | in_changed))
   else . end) |
+  (if .duplicate_export_aliases then
+    .duplicate_export_aliases |= map(select(.path | in_changed))
+  else . end) |
   (if .unused_tagged_errors then
     .unused_tagged_errors |= map(select(.path | in_changed))
   else . end) |
@@ -143,9 +150,11 @@ def filter_check:
       (.unused_optional_dependencies // [] | length) +
       (.unused_enum_members // [] | length) +
       (.unused_class_members // [] | length) +
+      (.unused_namespace_members // [] | length) +
       (.unused_store_members // [] | length) +
       (.unresolved_imports // [] | length) +
       (.unlisted_dependencies // [] | length) +
+      (.unlisted_binaries // [] | length) +
       (.duplicate_exports // [] | length) +
       (.circular_dependencies // [] | length) +
       (.re_export_cycles // [] | length) +
@@ -177,6 +186,7 @@ def filter_check:
       (.unused_component_outputs // [] | length) +
       (.unused_svelte_events // [] | length) +
       (.unused_effect_layers // [] | length) +
+      (.duplicate_export_aliases // [] | length) +
       (.unused_tagged_errors // [] | length) +
       (.unproduced_catch_tags // [] | length) +
       (.unprovided_injects // [] | length) +

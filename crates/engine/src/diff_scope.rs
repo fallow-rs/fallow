@@ -106,6 +106,9 @@ fn filter_source_findings(
         .unused_store_members
         .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
     results
+        .unused_namespace_members
+        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
+    results
         .unprovided_injects
         .retain(|finding| line_in_diff(&finding.inject.path, finding.inject.line));
     results
@@ -132,6 +135,13 @@ fn filter_source_findings(
     results
         .unused_effect_layers
         .retain(|finding| line_in_diff(&finding.layer.path, finding.layer.line));
+    results.duplicate_export_aliases.retain(|finding| {
+        finding
+            .alias
+            .locations
+            .iter()
+            .any(|location| line_in_diff(&finding.alias.path, location.line))
+    });
     results
         .unused_tagged_errors
         .retain(|finding| line_in_diff(&finding.error.path, finding.error.line));
@@ -189,6 +199,15 @@ fn filter_dependency_findings(
     results
         .unlisted_dependencies
         .retain(|finding| !finding.dep.imported_from.is_empty());
+    for finding in &mut results.unlisted_binaries {
+        finding
+            .binary
+            .used_in
+            .retain(|site| line_in_diff(&site.path, site.line));
+    }
+    results
+        .unlisted_binaries
+        .retain(|finding| !finding.binary.used_in.is_empty());
 }
 
 fn filter_graph_findings(

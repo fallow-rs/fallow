@@ -5,7 +5,9 @@ mod boundary_coverage;
 mod bundle_externalization;
 mod class_member_rules;
 mod component_health;
+mod dependency_detectors;
 mod deprecated_exports;
+mod duplicate_export_aliases;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 mod effect;
@@ -13,6 +15,7 @@ pub mod feature_flags;
 mod gitignored_targets;
 mod graph_confidence;
 mod iconify;
+mod import_and_duplicate_detectors;
 mod inline_loaders;
 mod invalid_client_exports;
 mod jsx_runtime_credits;
@@ -37,6 +40,7 @@ mod security;
 mod semantic_scope;
 mod server_only;
 mod thin_wrapper;
+mod unlisted_binaries;
 mod unprovided_inject;
 mod unrendered_component;
 mod unused_catalog;
@@ -53,7 +57,7 @@ mod unused_server_action;
 mod unused_svelte_event;
 
 #[cfg(test)]
-pub(crate) mod test_support;
+mod test_support;
 
 pub use predicates::is_builtin_module;
 #[cfg(test)]
@@ -72,19 +76,20 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-    DuplicateExportFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnproducedCatchTagFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEffectLayerFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
-    UnusedTaggedErrorFinding, UnusedTypeFinding,
+    DuplicateExportAliasFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
+    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnproducedCatchTagFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEffectLayerFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTaggedErrorFinding,
+    UnusedTypeFinding,
 };
 
 use crate::results::{
@@ -95,6 +100,7 @@ use crate::suppress::{IssueKind, SuppressionContext};
 
 use class_member_rules::ClassMemberRules;
 use component_health::{populate_duplicate_prop_shape_findings, populate_thin_wrapper_findings};
+use dependency_detectors::{DependencyDetectorInput, run_dependency_detectors};
 use dynamic_segment_name_conflict::find_dynamic_segment_name_conflicts;
 use invalid_client_exports::find_invalid_client_exports;
 use members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
@@ -135,6 +141,8 @@ use unused_overrides::{
 };
 use unused_server_action::reclassify_unused_server_actions;
 use unused_svelte_event::find_unused_svelte_events;
+mod effect_findings;
+use effect_findings::populate_effect_findings;
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
@@ -154,7 +162,7 @@ struct SecurityDetectionContext<'a, 'm> {
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
 /// Falls back to `(1, byte_offset)` when no line table is available.
 #[doc(hidden)]
-pub(crate) fn byte_offset_to_line_col(
+fn byte_offset_to_line_col(
     line_offsets_map: &LineOffsetsMap<'_>,
     file_id: FileId,
     byte_offset: u32,
@@ -758,8 +766,7 @@ pub(crate) fn find_dead_code_full(
     // keeps one resolved config, and the unmatched-pattern diagnostics must
     // describe this pass only. `ignoreFindings` is consulted by the engine
     // right after this pass, so this is its start as well.
-    config.ignore_dependencies.reset_usage();
-    config.ignore_findings.reset_usage();
+    config.begin_dead_code_pass(workspaces);
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
     let class_member_rules = ClassMemberRules::new(config, plugin_result);
@@ -1600,57 +1607,6 @@ fn populate_unused_svelte_event_findings(input: &mut FrameworkSpecificFindingsIn
         .collect();
 }
 
-/// Populate the three Effect rules. Gated on the project declaring `effect`
-/// inside the detector (see [`effect::find_effect_findings`]). A line-level
-/// or file-level suppression drops a finding. A suppressed
-/// `unused-tagged-error` finding does not cover its `catchTag` handlers.
-fn populate_effect_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    let rules = &input.config.rules;
-    let layers_enabled = rules.unused_effect_layers != Severity::Off;
-    let errors_enabled = rules.unused_tagged_errors != Severity::Off;
-    let catch_tags_enabled = rules.unproduced_catch_tags != Severity::Off;
-    if !layers_enabled && !errors_enabled && !catch_tags_enabled {
-        return;
-    }
-    let effect_input = effect::EffectInput {
-        graph: input.graph,
-        modules: input.modules,
-        resolved_modules: input.resolved_modules,
-        declared_deps: input.declared_deps,
-        public_api_entry_points: input.public_api_entry_points,
-        line_offsets_by_file: input.line_offsets_by_file,
-        layers_enabled,
-        errors_enabled,
-        catch_tags_enabled,
-    };
-    let suppressions = input.suppressions;
-    let findings = effect::find_effect_findings(&effect_input, |file_id, line| {
-        suppressions.is_suppressed(file_id, line, IssueKind::UnusedTaggedError)
-            || suppressions.is_file_suppressed(file_id, IssueKind::UnusedTaggedError)
-    });
-    input.results.unused_effect_layers =
-        retain_unsuppressed(input, findings.layers, IssueKind::UnusedEffectLayer, |f| {
-            Some((f.path.as_path(), f.line))
-        })
-        .into_iter()
-        .map(UnusedEffectLayerFinding::with_actions)
-        .collect();
-    input.results.unused_tagged_errors = findings
-        .errors
-        .into_iter()
-        .map(UnusedTaggedErrorFinding::with_actions)
-        .collect();
-    input.results.unproduced_catch_tags = retain_unsuppressed(
-        input,
-        findings.catch_tags,
-        IssueKind::UnproducedCatchTag,
-        |f| Some((f.path.as_path(), f.line)),
-    )
-    .into_iter()
-    .map(UnproducedCatchTagFinding::with_actions)
-    .collect();
-}
-
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
 /// declaring `next` inside the detector (see [`find_route_collisions`]).
 fn populate_route_collision_findings(
@@ -1751,6 +1707,7 @@ struct ParallelDeadCodeDetectorResults {
     dependency_results: AnalysisResults,
     unresolved_imports: Vec<UnresolvedImportFinding>,
     duplicate_exports: Vec<DuplicateExportFinding>,
+    duplicate_export_aliases: Vec<DuplicateExportAliasFinding>,
     boundary_violations: Vec<BoundaryViolationFinding>,
     boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
     boundary_call_violations: Vec<BoundaryCallViolationFinding>,
@@ -1773,15 +1730,18 @@ impl ParallelDeadCodeDetectorResults {
             unused_enum_members: self.member_results.unused_enum_members,
             unused_class_members: self.member_results.unused_class_members,
             unused_store_members: self.member_results.unused_store_members,
+            unused_namespace_members: self.member_results.unused_namespace_members,
             unused_dependencies: self.dependency_results.unused_dependencies,
             unused_dev_dependencies: self.dependency_results.unused_dev_dependencies,
             unused_optional_dependencies: self.dependency_results.unused_optional_dependencies,
             unlisted_dependencies: self.dependency_results.unlisted_dependencies,
+            unlisted_binaries: self.dependency_results.unlisted_binaries,
             type_only_dependencies: self.dependency_results.type_only_dependencies,
             test_only_dependencies: self.dependency_results.test_only_dependencies,
             dev_dependencies_in_production: self.dependency_results.dev_dependencies_in_production,
             unresolved_imports: self.unresolved_imports,
             duplicate_exports: self.duplicate_exports,
+            duplicate_export_aliases: self.duplicate_export_aliases,
             boundary_violations: self.boundary_violations,
             boundary_coverage_violations: self.boundary_coverage_violations,
             boundary_call_violations: self.boundary_call_violations,
@@ -1811,7 +1771,7 @@ fn collect_parallel_dead_code_detector_results(
         (
             (member_results, dependency_results),
             (
-                (unresolved_imports, duplicate_exports),
+                (unresolved_imports, (duplicate_exports, duplicate_export_aliases)),
                 (
                     (
                         boundary_violations,
@@ -1831,7 +1791,11 @@ fn collect_parallel_dead_code_detector_results(
                 || run_member_and_dependency_detectors(input),
                 || {
                     rayon::join(
-                        || run_import_and_duplicate_detectors(input),
+                        || {
+                            import_and_duplicate_detectors::run_import_and_duplicate_detectors(
+                                input,
+                            )
+                        },
                         || run_boundary_cycle_and_usage_detectors(input),
                     )
                 },
@@ -1847,6 +1811,7 @@ fn collect_parallel_dead_code_detector_results(
         dependency_results,
         unresolved_imports,
         duplicate_exports,
+        duplicate_export_aliases,
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
@@ -1908,34 +1873,6 @@ fn run_member_and_dependency_detectors(
                 modules: input.modules,
                 line_offsets_by_file: input.line_offsets_by_file,
             })
-        },
-    )
-}
-
-fn run_import_and_duplicate_detectors(
-    input: DeadCodeDetectorInput<'_>,
-) -> (Vec<UnresolvedImportFinding>, Vec<DuplicateExportFinding>) {
-    rayon::join(
-        || {
-            run_unresolved_import_detector(UnresolvedImportDetectorInput {
-                resolved_modules: input.resolved_modules,
-                config: input.config,
-                suppressions: input.suppressions,
-                virtual_prefixes: input.virtual_prefixes,
-                generated_patterns: input.generated_patterns,
-                generated_type_prefixes: input.generated_type_prefixes,
-                line_offsets_by_file: input.line_offsets_by_file,
-            })
-        },
-        || {
-            run_duplicate_export_detector(
-                input.graph,
-                input.config,
-                input.suppressions,
-                input.line_offsets_by_file,
-                input.plugin_result,
-                input.resolved_modules,
-            )
         },
     )
 }
@@ -2015,41 +1952,6 @@ fn run_cycle_and_usage_detectors(
             )
         },
     )
-}
-
-fn run_duplicate_export_detector(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    resolved_modules: &[ResolvedModule],
-) -> Vec<DuplicateExportFinding> {
-    if config.rules.duplicate_exports == Severity::Off {
-        return Vec::new();
-    }
-    let duplicate_exports = if let Some(plugin_result) = plugin_result {
-        unused_exports::find_duplicate_exports_with_plugins(
-            graph,
-            config,
-            suppressions,
-            line_offsets_by_file,
-            Some(plugin_result),
-            resolved_modules,
-        )
-    } else {
-        unused_exports::find_duplicate_exports(
-            graph,
-            config,
-            suppressions,
-            line_offsets_by_file,
-            resolved_modules,
-        )
-    };
-    duplicate_exports
-        .into_iter()
-        .map(DuplicateExportFinding::with_actions)
-        .collect()
 }
 
 fn run_boundary_violation_detector(
@@ -2452,6 +2354,13 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
         store_members_active,
         member_results.store_members,
     );
+    if input.config.rules.unused_namespace_members != Severity::Off {
+        results.unused_namespace_members = member_results
+            .namespace_members
+            .into_iter()
+            .map(UnusedNamespaceMemberFinding::with_actions)
+            .collect();
+    }
     results
 }
 
@@ -2464,6 +2373,7 @@ fn lit_is_declared(declared_deps: &FxHashSet<String>) -> bool {
 fn member_rules_are_disabled(config: &ResolvedConfig, store_members_active: bool) -> bool {
     config.rules.unused_enum_members == Severity::Off
         && config.rules.unused_class_members == Severity::Off
+        && config.rules.unused_namespace_members == Severity::Off
         && !store_members_active
 }
 
@@ -2522,178 +2432,6 @@ fn populate_unused_store_member_findings(
     results.unused_store_members = store_members
         .into_iter()
         .map(UnusedStoreMemberFinding::with_actions)
-        .collect();
-}
-
-#[derive(Clone, Copy)]
-struct DependencyDetectorInput<'a> {
-    graph: &'a ModuleGraph,
-    pkg: Option<&'a PackageJson>,
-    config: &'a ResolvedConfig,
-    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-    resolved_modules: &'a [ResolvedModule],
-    modules: &'a [ModuleInfo],
-    line_offsets_by_file: &'a LineOffsetsMap<'a>,
-}
-
-fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResults {
-    let mut results = AnalysisResults::default();
-    let Some(pkg) = input.pkg else {
-        return results;
-    };
-
-    populate_unused_dependency_findings(input, pkg, &mut results);
-    populate_unlisted_dependency_findings(input, pkg, &mut results);
-    populate_type_only_dependency_findings(input, pkg, &mut results);
-    populate_test_only_dependency_findings(input, pkg, &mut results);
-    populate_dev_dependency_in_production_findings(input, pkg, &mut results);
-    unused_deps::credit_production_ignores(input.graph, pkg, input.config, input.workspaces);
-    results
-}
-
-fn populate_unlisted_dependency_findings(
-    input: DependencyDetectorInput<'_>,
-    pkg: &PackageJson,
-    results: &mut AnalysisResults,
-) {
-    if input.config.rules.unlisted_dependencies != Severity::Off {
-        results.unlisted_dependencies = find_unlisted_dependencies(UnlistedDependencyInput {
-            graph: input.graph,
-            pkg,
-            config: input.config,
-            workspaces: input.workspaces,
-            plugin_result: input.plugin_result,
-            resolved_modules: input.resolved_modules,
-            modules: input.modules,
-            line_offsets_by_file: input.line_offsets_by_file,
-        })
-        .into_iter()
-        .map(UnlistedDependencyFinding::with_actions)
-        .collect();
-    }
-}
-
-fn populate_type_only_dependency_findings(
-    input: DependencyDetectorInput<'_>,
-    pkg: &PackageJson,
-    results: &mut AnalysisResults,
-) {
-    if input.config.production {
-        results.type_only_dependencies =
-            find_type_only_dependencies(input.graph, pkg, input.config, input.workspaces)
-                .into_iter()
-                .map(TypeOnlyDependencyFinding::with_actions)
-                .collect();
-    }
-}
-
-fn populate_test_only_dependency_findings(
-    input: DependencyDetectorInput<'_>,
-    pkg: &PackageJson,
-    results: &mut AnalysisResults,
-) {
-    if !input.config.production && input.config.rules.test_only_dependencies != Severity::Off {
-        results.test_only_dependencies =
-            find_test_only_dependencies(input.graph, pkg, input.config, input.workspaces)
-                .into_iter()
-                .map(TestOnlyDependencyFinding::with_actions)
-                .collect();
-    }
-}
-
-fn populate_dev_dependency_in_production_findings(
-    input: DependencyDetectorInput<'_>,
-    pkg: &PackageJson,
-    results: &mut AnalysisResults,
-) {
-    // Unlike the test-only sibling, this rule stays ON in production mode:
-    // test files being undiscovered makes the question unanswerable for
-    // test-only, but for dev-in-prod it only makes the signal cleaner (every
-    // discovered file is production), and production CI is exactly where a
-    // `pnpm install --prod` breakage matters.
-    if input.config.rules.dev_dependencies_in_production != Severity::Off {
-        results.dev_dependencies_in_production = find_dev_dependencies_in_production(
-            input.graph,
-            pkg,
-            input.config,
-            input.workspaces,
-            input.plugin_result,
-        )
-        .into_iter()
-        .map(DevDependencyInProductionFinding::with_actions)
-        .collect();
-    }
-}
-
-/// Populate the unused-dependency family (prod / dev / optional) on `results`,
-/// each gated on its own rule severity. The three collections share one
-/// `find_unused_dependencies` computation, so they are populated together.
-fn populate_unused_dependency_findings(
-    input: DependencyDetectorInput<'_>,
-    pkg: &PackageJson,
-    results: &mut AnalysisResults,
-) {
-    if unused_dependency_rules_are_disabled(input.config) {
-        return;
-    }
-    let (deps, dev_deps, optional_deps) = find_unused_dependencies(
-        input.graph,
-        pkg,
-        input.config,
-        input.plugin_result,
-        input.workspaces,
-    );
-    populate_unused_prod_dependency_findings(results, input.config, deps);
-    populate_unused_dev_dependency_findings(results, input.config, dev_deps);
-    populate_unused_optional_dependency_findings(results, input.config, optional_deps);
-}
-
-fn unused_dependency_rules_are_disabled(config: &ResolvedConfig) -> bool {
-    config.rules.unused_dependencies == Severity::Off
-        && config.rules.unused_dev_dependencies == Severity::Off
-        && config.rules.unused_optional_dependencies == Severity::Off
-}
-
-fn populate_unused_prod_dependency_findings(
-    results: &mut AnalysisResults,
-    config: &ResolvedConfig,
-    deps: Vec<UnusedDependency>,
-) {
-    if config.rules.unused_dependencies == Severity::Off {
-        return;
-    }
-    results.unused_dependencies = deps
-        .into_iter()
-        .map(UnusedDependencyFinding::with_actions)
-        .collect();
-}
-
-fn populate_unused_dev_dependency_findings(
-    results: &mut AnalysisResults,
-    config: &ResolvedConfig,
-    dev_deps: Vec<UnusedDependency>,
-) {
-    if config.rules.unused_dev_dependencies == Severity::Off {
-        return;
-    }
-    results.unused_dev_dependencies = dev_deps
-        .into_iter()
-        .map(UnusedDevDependencyFinding::with_actions)
-        .collect();
-}
-
-fn populate_unused_optional_dependency_findings(
-    results: &mut AnalysisResults,
-    config: &ResolvedConfig,
-    optional_deps: Vec<UnusedDependency>,
-) {
-    if config.rules.unused_optional_dependencies == Severity::Off {
-        return;
-    }
-    results.unused_optional_dependencies = optional_deps
-        .into_iter()
-        .map(UnusedOptionalDependencyFinding::with_actions)
         .collect();
 }
 

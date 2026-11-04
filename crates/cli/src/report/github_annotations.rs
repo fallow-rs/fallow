@@ -536,6 +536,21 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
             );
         }
     }
+    for binary in arr(env, "unlisted_binaries") {
+        let name = s(binary, "binary_name");
+        for site in arr(binary, "used_in") {
+            push(
+                out,
+                gate_level(binary, AnnotationLevel::Warning),
+                s(site, "path"),
+                Anchor::line_col(site).with_introduced(binary),
+                "Unlisted binary".to_owned(),
+                format!(
+                    "Binary '{name}' runs here, but no installed or listed package provides it.\n\nAdd the package that provides it to devDependencies, or add '{name}' to ignoreBinaries when the system provides it.",
+                ),
+            );
+        }
+    }
     push_each(
         out,
         env,
@@ -602,6 +617,21 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         |it| {
             format!(
                 "Class member '{}.{}' is never referenced.\n\nConsider removing it or marking it as private.{}",
+                s(it, "parent_name"),
+                s(it, "member_name"),
+                caveat_note(it),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
+        "unused_namespace_members",
+        "Unused namespace member",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Namespace member '{}.{}' is never referenced.\n\nConsider removing it, or removing its export keyword when only the namespace body uses it.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
                 caveat_note(it),
@@ -1014,6 +1044,23 @@ fn collect_check_component_wiring(env: &Value, out: &mut Vec<Annotation>) {
                 "Event '{}' dispatched by component '{}' is listened to nowhere in the project.\n\nRemove the dispatched event, or listen for it. If it is part of a deliberately-stable public API, suppress this finding.",
                 s(it, "event_name"),
                 s(it, "component_name"),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
+        "duplicate_export_aliases",
+        "Duplicate export alias",
+        Anchor::line_col,
+        |it| {
+            let names = arr(it, "export_names")
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "'{}' is exported under several names: {names}.\n\nKeep one export name, or add the names to ignoreExports when they are an intentional public API.",
+                s(it, "local_name"),
             )
         },
     );

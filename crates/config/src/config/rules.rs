@@ -121,6 +121,14 @@ pub struct RulesConfig {
     /// exemptions carve out framework-invoked members. Defaults to `error`.
     #[serde(default, alias = "unused-class-member")]
     pub unused_class_members: Severity,
+    /// Exported members of an exported TypeScript namespace that no code
+    /// reads. Defaults to `warn`: a namespace often holds generated code,
+    /// and a new rule must not fail the build of a project after an upgrade.
+    /// A `warn` finding does not change the CLI exit code unless
+    /// `--fail-on-issues` is set. The dead-code count gate of the GitHub
+    /// Action counts it unless `fail-on-issues` is `false`.
+    #[serde(default = "Severity::default_warn", alias = "unused-namespace-member")]
+    pub unused_namespace_members: Severity,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Defaults to `warn`, not `error` like the closed-set
@@ -326,10 +334,20 @@ pub struct RulesConfig {
     /// Defaults to `error`.
     #[serde(default, alias = "unlisted-dependency")]
     pub unlisted_dependencies: Severity,
+    /// A binary that a package.json script or a process call runs, but that
+    /// no installed or listed package provides. Shell builtins and common
+    /// operating-system tools are skipped; `ignoreBinaries` skips more.
+    /// Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "unlisted-binary")]
+    pub unlisted_binaries: Severity,
     /// The same export name provided by multiple modules; `ignoreExports`
     /// excludes intentional barrel re-exports. Defaults to `error`.
     #[serde(default, alias = "duplicate-export")]
     pub duplicate_exports: Severity,
+    /// One module that exports one binding under two or more names, for
+    /// example `export const a = 1; export default a;`. Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "duplicate-export-alias")]
+    pub duplicate_export_aliases: Severity,
     /// A production dependency imported only via type-only imports (a
     /// `devDependencies` candidate). Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "type-only-dependency")]
@@ -505,6 +523,7 @@ impl Default for RulesConfig {
             unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Error,
             unused_class_members: Severity::Error,
+            unused_namespace_members: Severity::Warn,
             unused_store_members: Severity::Warn,
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
@@ -533,7 +552,9 @@ impl Default for RulesConfig {
             complexity_file_lines: Severity::Error,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
+            unlisted_binaries: Severity::Warn,
             duplicate_exports: Severity::Error,
+            duplicate_export_aliases: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
             dev_dependencies_in_production: Severity::Warn,
@@ -601,11 +622,14 @@ impl RulesConfig {
             IssueKind::UnusedDevDependency => self.unused_dev_dependencies,
             IssueKind::UnusedEnumMember => self.unused_enum_members,
             IssueKind::UnusedClassMember => self.unused_class_members,
+            IssueKind::UnusedNamespaceMember => self.unused_namespace_members,
             IssueKind::UnusedStoreMember => self.unused_store_members,
             IssueKind::UnprovidedInject => self.unprovided_injects,
             IssueKind::UnresolvedImport => self.unresolved_imports,
             IssueKind::UnlistedDependency => self.unlisted_dependencies,
+            IssueKind::UnlistedBinary => self.unlisted_binaries,
             IssueKind::DuplicateExport => self.duplicate_exports,
+            IssueKind::DuplicateExportAlias => self.duplicate_export_aliases,
             IssueKind::CircularDependency => self.circular_dependencies,
             IssueKind::ReExportCycle => self.re_export_cycle,
             IssueKind::PackageCycle => self.package_cycle,
@@ -703,6 +727,7 @@ impl RulesConfig {
             [
                 unused_enum_members,
                 unused_class_members,
+                unused_namespace_members,
                 unused_store_members,
                 unprovided_injects,
                 unrendered_components,
@@ -737,7 +762,9 @@ impl RulesConfig {
             [
                 unresolved_imports,
                 unlisted_dependencies,
+                unlisted_binaries,
                 duplicate_exports,
+                duplicate_export_aliases,
                 type_only_dependencies,
                 test_only_dependencies,
                 dev_dependencies_in_production,
@@ -745,12 +772,6 @@ impl RulesConfig {
                 re_export_cycle,
                 package_cycle,
                 boundary_violation,
-            ]
-        );
-        apply_partial_rules!(
-            self,
-            partial,
-            [
                 coverage_gaps,
                 feature_flags,
                 stale_suppressions,
@@ -881,6 +902,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_class_members: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_namespace_members`].
+    #[serde(
+        default,
+        alias = "unused-namespace-member",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_namespace_members: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_store_members`].
     #[serde(
         default,
@@ -1061,6 +1089,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unlisted_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::unlisted_binaries`].
+    #[serde(
+        default,
+        alias = "unlisted-binary",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unlisted_binaries: Option<Severity>,
     /// Optional override for [`RulesConfig::duplicate_exports`].
     #[serde(
         default,
@@ -1068,6 +1103,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_exports: Option<Severity>,
+    /// Optional override for [`RulesConfig::duplicate_export_aliases`].
+    #[serde(
+        default,
+        alias = "duplicate-export-alias",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duplicate_export_aliases: Option<Severity>,
     /// Optional override for [`RulesConfig::type_only_dependencies`].
     #[serde(
         default,
@@ -1288,6 +1330,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-optional-dependencies",
     "unused-enum-members",
     "unused-class-members",
+    "unused-namespace-members",
     "unused-store-members",
     "unprovided-injects",
     "unrendered-components",
@@ -1316,7 +1359,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "complexity-file-lines",
     "unresolved-imports",
     "unlisted-dependencies",
+    "unlisted-binaries",
     "duplicate-exports",
+    "duplicate-export-aliases",
     "type-only-dependencies",
     "test-only-dependencies",
     "dev-dependencies-in-production",
@@ -1353,6 +1398,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-optional-dependency",
     "unused-enum-member",
     "unused-class-member",
+    "unused-namespace-member",
     "unused-store-member",
     "unprovided-inject",
     "unrendered-component",
@@ -1369,7 +1415,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-load-data-key",
     "unresolved-import",
     "unlisted-dependency",
+    "unlisted-binary",
     "duplicate-export",
+    "duplicate-export-alias",
     "type-only-dependency",
     "test-only-dependency",
     "dev-dependency-in-production",

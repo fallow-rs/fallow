@@ -35,20 +35,20 @@ use crate::discover::StableFileKey;
 use crate::output_dead_code::{
     AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
     BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
-    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    DevDependencyInProductionFinding, DuplicateExportAliasFinding, DuplicateExportFinding,
+    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedSvelteEventFinding, UnusedTypeFinding,
+    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -451,10 +451,13 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_namespace_members,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
+        unlisted_binaries,
         duplicate_exports,
+        duplicate_export_aliases,
         type_only_dependencies,
         test_only_dependencies,
         dev_dependencies_in_production,
@@ -525,10 +528,13 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unused_optional_dependencies);
     visitor.visit(unused_enum_members);
     visitor.visit(unused_class_members);
+    visitor.visit(unused_namespace_members);
     visitor.visit(unused_store_members);
     visitor.visit(unresolved_imports);
     visitor.visit(unlisted_dependencies);
+    visitor.visit(unlisted_binaries);
     visitor.visit(duplicate_exports);
+    visitor.visit(duplicate_export_aliases);
     visitor.visit(type_only_dependencies);
     visitor.visit(test_only_dependencies);
     visitor.visit(dev_dependencies_in_production);
@@ -765,6 +771,13 @@ identified!(
 );
 
 identified!(
+    UnlistedBinaryFinding,
+    token: |_t| "unlisted-binary",
+    parts: |f, _p| vec![f.binary.binary_name.clone()],
+    position: |_g| (0, 0, 0),
+);
+
+identified!(
     UnusedEnumMemberFinding,
     token: |_t| "unused-enum-member",
     parts: |f, p| member_parts(&f.member, p),
@@ -774,6 +787,13 @@ identified!(
 identified!(
     UnusedClassMemberFinding,
     token: |_t| "unused-class-member",
+    parts: |f, p| member_parts(&f.member, p),
+    position: |g| (g.member.line, g.member.col, 0),
+);
+
+identified!(
+    UnusedNamespaceMemberFinding,
+    token: |_t| "unused-namespace-member",
     parts: |f, p| member_parts(&f.member, p),
     position: |g| (g.member.line, g.member.col, 0),
 );
@@ -1070,6 +1090,17 @@ identified!(
         f.output.output_name.clone(),
     ],
     position: |g| (g.output.line, g.output.col, 0),
+);
+
+identified!(
+    DuplicateExportAliasFinding,
+    token: |_t| "duplicate-export-alias",
+    parts: |f, p| {
+        let mut names = f.alias.export_names.clone();
+        names.sort_unstable();
+        vec![p.key(&f.alias.path), f.alias.local_name.clone(), names.join(",")]
+    },
+    position: |g| (g.alias.line, g.alias.col, 0),
 );
 
 identified!(

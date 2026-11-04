@@ -260,7 +260,7 @@ fn parse_working_directory(raw: &str) -> Vec<Segment> {
     dir
 }
 
-pub(super) fn unquote(value: &str) -> &str {
+fn unquote(value: &str) -> &str {
     ['"', '\'']
         .iter()
         .find_map(|quote| {
@@ -489,7 +489,7 @@ pub(super) struct CiCommand {
 
 /// Extract the shell commands of a CI file with their working directories.
 /// See [`extract_ci_commands`] for the recognized command forms.
-pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
+fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
     let mut commands = Vec::new();
     let mut multiline_run = MultilineRunState::default();
     let mut scope = WorkingDirectoryScope::default();
@@ -764,7 +764,7 @@ impl MultilineRunState {
 }
 
 /// Column of the `run` key itself, past any leading `- ` list indicator.
-pub(super) fn run_key_column(line: &str, trimmed: &str) -> usize {
+fn run_key_column(line: &str, trimmed: &str) -> usize {
     let base = line.len() - line.trim_start().len();
     match trimmed.strip_prefix("- ") {
         Some(rest) => base + 2 + (rest.len() - rest.trim_start().len()),
@@ -772,7 +772,7 @@ pub(super) fn run_key_column(line: &str, trimmed: &str) -> usize {
     }
 }
 
-pub(super) fn should_skip_ci_line(trimmed: &str) -> bool {
+fn should_skip_ci_line(trimmed: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with('#')
 }
 
@@ -825,7 +825,7 @@ fn yaml_run_value(trimmed: &str) -> Option<&str> {
 /// chomping indicator (`-`, `+`) and an explicit indentation indicator (`1`-`9`),
 /// in either order, matching the YAML block header grammar. A header carrying a
 /// trailing comment is still not recognized.
-pub(super) fn is_multiline_run_marker(value: &str) -> bool {
+fn is_multiline_run_marker(value: &str) -> bool {
     let mut chars = value.chars();
     if !matches!(chars.next(), Some('|' | '>')) {
         return false;
@@ -868,14 +868,14 @@ fn push_yaml_list_command(
 
 /// Strip a YAML key prefix from a line, returning the value part.
 /// Handles `key: value` and `key:` (empty value).
-pub(super) fn strip_yaml_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+fn strip_yaml_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let rest = line.strip_prefix(key)?;
     let rest = rest.strip_prefix(':')?;
     Some(rest)
 }
 
 /// Check if a string looks like a YAML mapping (key: value) rather than a shell command.
-pub(super) fn is_yaml_mapping(s: &str) -> bool {
+fn is_yaml_mapping(s: &str) -> bool {
     if let Some(first_word) = s.split_whitespace().next()
         && first_word.ends_with(':')
         && !first_word.starts_with("http")

@@ -10,13 +10,11 @@ mod pnpm_catalog;
 mod pnpm_overrides;
 mod tsconfig;
 mod undeclared;
+mod workspace_config;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 
 pub use deno_json::{
     DirManifestProbe, dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
@@ -57,26 +55,7 @@ pub use pnpm_overrides::{
 };
 pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution, tsconfig_linked_files};
 pub use undeclared::{find_undeclared_workspaces, find_undeclared_workspaces_with_ignores};
-
-/// Workspace configuration for monorepo support.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct WorkspaceConfig {
-    /// Additional workspace patterns (beyond what's in root package.json).
-    ///
-    /// `packages` is accepted as a back-compat alias: an older `fallow init --toml`
-    /// wrote `[workspaces]` with a `packages` key, and reading it as `patterns`
-    /// keeps those existing configs scoping correctly. schemars omits serde
-    /// aliases, so `schema.json` documents only `patterns`.
-    #[serde(default, alias = "packages")]
-    pub patterns: Vec<String>,
-    /// Git baseline refs keyed by workspace roots, written relative to the project root as `fallow list --workspaces` prints them. Scopes `check`, `dead-code`, `dupes` and editor diagnostics; `health`, `security` and `audit` ignore it. A global changed-since request takes precedence. Unlisted workspaces and root files remain in full scope. A key that names no workspace, or a ref that Git cannot resolve, leaves every package in full scope with a warning.
-    #[serde(
-        default,
-        rename = "changedSince",
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    pub changed_since: BTreeMap<String, String>,
-}
+pub use workspace_config::{WorkspaceConfig, WorkspaceSettings};
 
 /// Discovered workspace info from package.json, deno.json, pnpm-workspace.yaml,
 /// or tsconfig.json references.

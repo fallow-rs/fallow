@@ -136,6 +136,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-enum-members` | Unused enum members |
 | `--unused-class-members` | Unused class members |
 | `--unused-store-members` | Unused Pinia store members |
+| `--unused-namespace-members` | Namespace member is never referenced |
 | `--unprovided-injects` | inject() / getContext() reads a key that no provide() / setContext() supplies |
 | `--unrendered-components` | A Vue / Svelte component is reachable through a barrel but rendered nowhere |
 | `--unused-component-props` | A Vue defineProps prop or React component prop is referenced nowhere in its own component |
@@ -151,7 +152,9 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-load-data-keys` | A SvelteKit load() return-object key is read by no consumer |
 | `--unresolved-imports` | Unresolved imports |
 | `--unlisted-deps` | Unlisted dependencies |
+| `--unlisted-binaries` | Binary used but provided by no installed package |
 | `--duplicate-exports` | Duplicate exports |
+| `--duplicate-export-aliases` | One module exports one binding under two or more names |
 | `--circular-deps` | Circular dependencies |
 | `--re-export-cycles` | Re-export cycles (`kind: multi-node` for barrel files re-exporting from each other in a loop, `kind: self-loop` for a barrel re-exporting from itself). File-scoped finding; chain propagation through the loop is a no-op so imports may silently come up empty. Distinct from `--circular-deps` (runtime cycles). |
 | `--package-cycles` | Two or more workspace packages import each other in a loop |

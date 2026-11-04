@@ -767,7 +767,7 @@ impl CssReferenceSurfaceBuilder {
 }
 
 impl CssReferenceSurface {
-    pub(super) fn template_extensions(&self) -> &[String] {
+    fn template_extensions(&self) -> &[String] {
         &self.template_extensions
     }
 

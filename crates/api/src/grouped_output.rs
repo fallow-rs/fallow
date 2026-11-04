@@ -173,6 +173,11 @@ where
                 .unused_store_members
                 .push(item.clone());
         }
+        for item in &results.unused_namespace_members {
+            self.entry_for_path(&item.member.path)
+                .unused_namespace_members
+                .push(item.clone());
+        }
         for item in &results.unresolved_imports {
             self.entry_for_path(&item.import.path)
                 .unresolved_imports
@@ -220,6 +225,13 @@ where
             self.entry_for_key(key)
                 .unlisted_dependencies
                 .push(item.clone());
+        }
+        for item in &results.unlisted_binaries {
+            let key = item.binary.used_in.first().map_or_else(
+                || UNOWNED_GROUP_LABEL.to_string(),
+                |site| (self.key_for)(&site.path),
+            );
+            self.entry_for_key(key).unlisted_binaries.push(item.clone());
         }
         for item in &results.duplicate_exports {
             let key = item.export.locations.first().map_or_else(
@@ -353,6 +365,11 @@ where
         for item in &results.unused_svelte_events {
             self.entry_for_path(&item.event.path)
                 .unused_svelte_events
+                .push(item.clone());
+        }
+        for item in &results.duplicate_export_aliases {
+            self.entry_for_path(&item.alias.path)
+                .duplicate_export_aliases
                 .push(item.clone());
         }
         for item in &results.unused_effect_layers {

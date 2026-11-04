@@ -17,7 +17,7 @@ pnpm verify:fast     # Canonical local feedback loop
 
 [mise](https://mise.jdx.dev) is optional. `mise install` gets the versions in
 `mise.toml`: Node.js, pnpm, [hk](https://hk.jdx.dev), pkl and the cargo tools
-that the hooks call (`typos`, `cargo-shear` and others). Without mise, install
+that the hooks call (`typos`, `cargo-fallow` and others). Without mise, install
 pnpm, hk and pkl at the versions in `mise.toml`. Rustup installs Rust from
 `rust-toolchain.toml`, so `mise.toml` does not pin Rust. See
 [quality gates](docs/development/quality-gates.md#pinned-tools-with-mise-optional).
@@ -81,25 +81,19 @@ release and publish jobs, and network or real-project smoke tests remain
 CI-only. Run `npm run verify:full -- --help` to review the exact local scope and
 exclusions.
 
-### Workspace visibility audit
+### Rust structure checks
 
-[Hawk](https://github.com/astral-sh/hawk) audits Rust workspace visibility and
-dead public declarations across crate boundaries. The scheduled workflow uses
-Hawk 0.1.9 with Rust 1.97.1 and keeps the workspace `fallow-api` facade, its
-re-exported contract crates, and the cross-repo `fallow-license` surface out of
-scope.
-
-Install the matching Hawk release, then run:
+[cargo-fallow](https://github.com/fallow-rs/cargo-fallow) checks the Rust
+workspace: unused dependencies and files, visibility, crate boundaries,
+complexity and duplication. The required `Rust Structure` CI job and the
+pre-push hook run it. Install the version in `mise.toml`, then run:
 
 ```bash
-./scripts/check-hawk.sh dead-public  # Report dead public declarations
-./scripts/check-hawk.sh all          # Include visibility reduction suggestions
+cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues
+cargo fallow fix --dry-run   # Show the safe edits
 ```
 
-Hawk is experimental, so its findings are review input rather than an automatic
-fix list. Before deleting a declaration or narrowing its visibility, confirm it
-is unused by every relevant feature profile and release target. The scheduled
-workflow stores its complete output as an artifact for review.
+See [Rust structure](docs/development/quality-gates.md#rust-structure).
 
 ### Fuzzing
 
@@ -396,7 +390,28 @@ The `Commit messages` check fails a pull request that has a commit without a sig
    release collects the fragments into it.
 6. Open a pull request against `main`
 
-When the description leaves work for later ("Not in this change", "a separate change", "out of scope"), link an issue that describes each deferred task. For an intentional non-goal, write "No follow-up planned." instead. CI verifies that references to this repository identify existing issues; pull request references do not qualify. CI accepts a reference to another repository on its syntax. Reviewers check that each linked issue covers the deferred work.
+Sort each item that the change leaves open into one of three groups:
+
+- **Needed work:** a defect that the change finds or leaves, or a part of the task that is not done. Open an issue for each item and link it under a heading such as "Not in this change". The same rule applies to an inline phrase such as "a separate change" or "out of scope". CI verifies that each reference to this repository identifies an existing issue. A pull request reference does not qualify. CI accepts a reference to another repository on its syntax.
+- **Possible follow-ups:** an improvement idea with no known need, for example a small gain for a large refactor. Put it under a "Possible follow-ups" heading, with the reason in a few words. It needs no issue. The maintainer lists these ideas with `node scripts/list-possible-follow-ups.mjs` and opens an issue for each idea that is worth the work.
+- **Known limits:** intended behavior, or a limit that only a change of the design can remove. Put it under a "Known limits" heading. It needs no issue, but CI still checks its text for the deferral phrases above, so describe the limit without them.
+
+Reviewers check that each linked issue covers the deferred work, and that no needed work is under "Possible follow-ups" or "Known limits".
+
+## Contributions made with coding agents
+
+You can use any tool to write a change, including a coding agent. Reviewers judge the change, not the tool. You do not have to say which tool you used.
+
+These rules apply to every pull request:
+
+- You know what the change does and why. You know its impact on users and on other parts of fallow, and the trade-offs that you made. You can explain them in review without the tool. You do not have to know each line.
+- You are responsible for the change. Your `Signed-off-by` line is your own statement under the [DCO](#developer-certificate-of-origin). Add it only when you can stand behind the change.
+- Run the checks in [Submitting changes](#submitting-changes) yourself. Write in the pull request what you did not verify, for example a platform that you did not test.
+- Keep the description short. Remove generated filler before you post it.
+
+A maintainer can close a pull request when the author cannot explain it. A maintainer can also finish a useful pull request in its branch and merge it.
+
+Issues that an agent helped to write are welcome. Read the issue before you post it, and keep the exact command and output. When an agent used fallow and misread the output, the flags or the docs, tell us in the issue form. These reports show where the CLI, JSON or MCP contract is unclear. Maintainers mark them with the `type:agent-ux` label.
 
 ## Reporting issues
 

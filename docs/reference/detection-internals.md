@@ -136,6 +136,21 @@ error by suppressing a downstream detector.
   hide unused members in unrelated classes. A plain `value.name` read on an
   untyped value gives no credit. `Object.hasOwn` and `hasOwnProperty` are not
   probes, because they do not see a getter or a method on a class prototype.
+- A member of an exported TypeScript namespace is a `NamespaceMember` on the
+  export. A member of a nested exported namespace has the dotted path from
+  the root (`Inner.x`). A nested namespace without `export` is local to the
+  body, so its members are not recorded. The visitor records `N.a` as a
+  member access. The semantic pass (`crates/extract/src/namespace_member_uses.rs`)
+  adds a `NamespaceMemberUse` fact for each use that a member access does not
+  record: a chain of two or more links (`N.Inner.x`, the type `N.Inner.T`), a
+  value that leaves its chain (an argument, an alias, a spread), and a
+  reference inside the namespace body. Scope resolution of the semantic model
+  keeps a shadowed name from giving credit. The member pass stores a whole
+  use as the marker `*` or `Inner.*` in the accessed-member set, so the
+  re-export propagation carries it like any other member name. The marker
+  applies to namespace members only, so an escaping class or enum keeps its
+  member findings. A declaration file, an export of an entry point, and a
+  member of a namespace that is reported itself are never reported.
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the
@@ -664,6 +679,20 @@ through package-manager indirection. Projects deployed through a custom script
 name should declare the deployed file in `entry` when no manifest, framework,
 or infrastructure entry already identifies it as runtime code.
 
+The top-level `supportEntry` globs use the same mechanism without a plugin.
+Root entry discovery (`push_support_entry_matches`) adds a matching file to
+the support entries in a normal run, and to
+`EntryPointDiscovery::production_excluded` in production mode. The same final
+dedup keeps a file that another entry source seeds.
+
+`workspaces.settings` scopes `ignoreDependencies` and `includeEntryExports` to
+workspace roots. `ResolvedWorkspaceSettings::bind` maps the keys to the
+discovered workspaces at the start of each dead-code pass. A file belongs to
+its deepest bound workspace. An unused dependency uses the workspace of its
+`package.json`, and an unlisted dependency checks each import site. The global
+list runs first, so a workspace list gets credit only for a finding that the
+global list did not hide.
+
 In production mode, a file that only user entry rules with an explicit
 `"entryPointRole": "support"` match (inline `framework[]` entries and plugin
 files) takes no part in dead-code analysis (issue #4068). A plugin that sets
@@ -1025,6 +1054,15 @@ Two modules that overlay each other both stay. A module that imports `X` under
 an alias and declares its own `X` without the star re-export is a wrapper.
 Importers see two `X` exports with different behavior, so the group keeps the
 wrapper.
+`duplicate-export-alias` is a different rule: it reads the export surface of one
+file, not the names of several files. It groups the `ResolvedModule` exports by
+binding: a local export by its local name and type-only flag, a named re-export
+by its source specifier, imported name and type-only flag. A group with two or
+more distinct export names is a finding. The rule skips `export *`, exports
+with an empty span, files with CommonJS exports (`export =` turns an imported
+binding into a `default` re-export, and the module object is not one binding),
+component files, and unreachable files. Entry files are reported, because the
+finding is about the export surface, not about usage.
 Dependency ignores suppress findings without fabricating resolution edges. Raw-specifier
 unresolved-import ignores are not filesystem globs. A relative import whose
 target is missing and ignored by a repository ignore file is build output, not

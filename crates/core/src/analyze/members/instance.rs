@@ -342,7 +342,7 @@ fn resolve_type_targets(
     targets
 }
 
-pub(super) fn chained_typed_instance_targets(
+fn chained_typed_instance_targets(
     graph: &ModuleGraph,
     typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     seed_key: &ExportKey,

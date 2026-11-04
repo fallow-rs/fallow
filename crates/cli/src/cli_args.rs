@@ -12,10 +12,13 @@ use crate::dispatch::resolve_negatable_flag;
 use crate::dupes::{DupesMode, DupesOverrides};
 use crate::health::SortBy;
 use crate::runtime_support::{AnalysisKind, GroupBy};
+#[path = "cli_args_min_occurrences.rs"]
+mod min_occurrences;
 use crate::{
     audit_decision_surface, doctor, flags, mutation_cli, security, setup_hooks, similar_code_cli,
     viz,
 };
+use min_occurrences::parse_min_occurrences;
 
 const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
@@ -745,6 +748,10 @@ pub enum Command {
         #[arg(long)]
         unused_store_members: bool,
 
+        /// Only report unused namespace members
+        #[arg(long)]
+        unused_namespace_members: bool,
+
         /// Only report unprovided injects
         #[arg(long)]
         unprovided_injects: bool,
@@ -805,9 +812,17 @@ pub enum Command {
         #[arg(long)]
         unlisted_deps: bool,
 
+        /// Only report binaries that no installed package provides
+        #[arg(long)]
+        unlisted_binaries: bool,
+
         /// Only report duplicate exports
         #[arg(long)]
         duplicate_exports: bool,
+
+        /// Only report bindings that one file exports under two or more names
+        #[arg(long)]
+        duplicate_export_aliases: bool,
 
         /// Only report circular dependencies.
         /// Deprecated alias: use `fallow architecture --cycles`.
@@ -2993,39 +3008,6 @@ pub enum CiCli {
     },
 }
 
-#[derive(Subcommand)]
-pub enum RulePackCli {
-    /// Scaffold a new rule pack file and wire it into the config
-    Init {
-        /// Pack name (default: the template name, or "team-policy")
-        name: Option<String>,
-
-        /// Template: starter, ai-safe-repo, side-effect-free-domain, clean-architecture, next-app-router
-        #[arg(long, default_value = "starter")]
-        template: String,
-
-        /// Directory for the pack file, relative to the project root
-        #[arg(long, default_value = "rule-packs")]
-        dir: String,
-
-        /// Only write the pack file; do not modify the config
-        #[arg(long)]
-        no_config: bool,
-    },
-
-    /// List configured rule packs and their rules
-    List,
-
-    /// Evaluate a pack (or all configured packs) against this project and print matches
-    Test {
-        /// Path to a pack file to test in isolation (default: all configured packs)
-        pack: Option<PathBuf>,
-    },
-
-    /// Print the JSON Schema for rule pack files
-    Schema,
-}
-
 /// CLI mirror of [`fallow_engine::baseline::HealthBaselineMode`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum BaselineModeArg {
@@ -3075,58 +3057,12 @@ mod health_args;
 pub use health_args::*;
 #[path = "cli_args_cloud.rs"]
 mod cloud_args;
+#[path = "cli_args_rule_pack.rs"]
+mod rule_pack_args;
+
 pub use cloud_args::*;
+pub use rule_pack_args::RulePackCli;
 
-/// CLI mirror of [`fallow_config::AuditGate`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum AuditGateArg {
-    /// Only findings introduced by the current changeset affect the verdict.
-    NewOnly,
-    /// All findings in changed files affect the verdict.
-    All,
-}
-
-/// CLI value of `--worsened`, mirroring `fallow_config::AuditWorsened`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum AuditWorsenedArg {
-    /// A worsened finding makes the verdict at least warn.
-    Warn,
-    /// A worsened finding counts like an introduced finding.
-    Error,
-    /// Only growth of an exceeded metric is worsened (warn).
-    Off,
-}
-
-impl From<AuditWorsenedArg> for fallow_config::AuditWorsened {
-    fn from(value: AuditWorsenedArg) -> Self {
-        match value {
-            AuditWorsenedArg::Warn => Self::Warn,
-            AuditWorsenedArg::Error => Self::Error,
-            AuditWorsenedArg::Off => Self::Off,
-        }
-    }
-}
-
-impl From<AuditGateArg> for fallow_config::AuditGate {
-    fn from(value: AuditGateArg) -> Self {
-        match value {
-            AuditGateArg::NewOnly => Self::NewOnly,
-            AuditGateArg::All => Self::All,
-        }
-    }
-}
-
-/// Parse `--min-occurrences` and reject values below 2. A single occurrence
-/// is not a duplicate; silently clamping would diverge from the config-file
-/// validator, which also rejects `< 2`.
-fn parse_min_occurrences(s: &str) -> Result<usize, String> {
-    let value: usize = s
-        .parse()
-        .map_err(|_| format!("`{s}` is not a non-negative integer"))?;
-    if value < 2 {
-        return Err(format!(
-            "must be at least 2 (got {value}); a single occurrence isn't a duplicate"
-        ));
-    }
-    Ok(value)
-}
+#[path = "cli_args_audit.rs"]
+mod audit_args;
+pub use audit_args::*;

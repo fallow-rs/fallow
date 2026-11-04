@@ -1,10 +1,14 @@
 use serde_json::Value;
 
 use super::knip_fields::{
-    migrate_exclude, migrate_ignore, migrate_ignore_deps, migrate_ignore_exports_used_in_file,
-    migrate_include, migrate_rules, warn_unhandled_root_keys, warn_unmappable_fields,
+    migrate_exclude, migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps,
+    migrate_ignore_exports_used_in_file, migrate_include, migrate_rules, warn_unhandled_root_keys,
+    warn_unmappable_fields,
 };
-use super::knip_scoped::{KnipScope, migrate_entry, migrate_ignore_issues, migrate_workspaces};
+use super::knip_scoped::{
+    KnipScope, WorkspaceMigration, config_marks_production_entry, migrate_entry,
+    migrate_ignore_issues, migrate_workspaces,
+};
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
 use super::{MigrationWarning, string_or_array};
@@ -27,8 +31,9 @@ pub(super) fn migrate_knip(
     };
 
     let root = KnipScope::root();
+    let production_split = config_marks_production_entry(obj);
     if let Some(value) = obj.get("entry") {
-        migrate_entry(value, &root, config, warnings);
+        migrate_entry(value, &root, production_split, config, warnings);
     }
 
     if let Some(value) = obj.get("ignore") {
@@ -37,6 +42,10 @@ pub(super) fn migrate_knip(
 
     if let Some(ignore_deps_val) = obj.get("ignoreDependencies") {
         migrate_ignore_deps(ignore_deps_val, "ignoreDependencies", config, warnings);
+    }
+
+    if let Some(value) = obj.get("ignoreBinaries") {
+        migrate_ignore_binaries(value, "ignoreBinaries", config, warnings);
     }
 
     if let Some(value) = obj.get("ignoreExportsUsedInFile") {
@@ -73,7 +82,11 @@ pub(super) fn migrate_knip(
     warn_unhandled_root_keys(obj, warnings);
 
     if let Some(workspaces) = obj.get("workspaces") {
-        migrate_workspaces(workspaces, include_entry_exports, config, warnings);
+        let migration = WorkspaceMigration {
+            root_include_entry_exports: include_entry_exports,
+            production_split,
+        };
+        migrate_workspaces(workspaces, &migration, config, warnings);
     }
 }
 
@@ -336,17 +349,17 @@ mod tests {
     #[test]
     fn migrate_knip_rules_unmappable_warns() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"rules": {"binaries": "warn", "files": "error"}}"#).unwrap();
+            serde_json::from_str(r#"{"rules": {"catalog": "warn", "files": "error"}}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
         assert_eq!(rules.get("unused-files").unwrap(), "error");
-        assert!(!rules.contains_key("binaries"));
+        assert!(!rules.contains_key("catalog"));
 
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].field.contains("binaries"));
+        assert!(warnings[0].field.contains("catalog"));
     }
 
     #[test]
@@ -375,9 +388,9 @@ mod tests {
             "entry": ["src/root.ts"],
             "workspaces": {
                 ".": {"entry": [".github/scripts/report.cjs"]},
-                "apps/server": {"entry": ["src/bin.ts!", "./scripts/*.ts!"]},
+                "apps/server": {"entry": ["src/bin.ts", "./scripts/*.ts"]},
                 "packages/*": {"entry": "test/fixtures/*.ts"},
-                "./infra/cache/": {"entry": ["alchemy.run.ts!"]}
+                "./infra/cache/": {"entry": ["alchemy.run.ts"]}
             }
         });
         let mut config = empty_config();
@@ -460,10 +473,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_workspace_ignore_dependencies_merge_into_the_global_list() {
+    fn migrate_knip_workspace_ignore_dependencies_keep_their_workspace_scope() {
         let knip = serde_json::json!({
             "ignoreDependencies": ["lodash"],
             "workspaces": {
+                ".": {"ignoreDependencies": ["root-only"]},
                 "apps/server": {"ignoreDependencies": ["ffi-rs", "lodash", "/^@org/"]},
                 "apps/web": {"ignoreDependencies": ["^(a|b)$"]}
             }
@@ -474,17 +488,53 @@ mod tests {
 
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
-            &serde_json::json!(["lodash", "ffi-rs", "@org*"])
+            &serde_json::json!(["lodash", "root-only"]),
+            "the root workspace uses the global list"
+        );
+        assert_eq!(
+            config.get("workspaces").unwrap(),
+            &serde_json::json!({"settings": {
+                "apps/server": {"ignoreDependencies": ["ffi-rs", "lodash", "@org*"]}
+            }})
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            ["workspaces.apps/web.ignoreDependencies"]
+        );
+        assert!(warnings[0].message.contains("^(a|b)$"));
+    }
+
+    #[test]
+    fn migrate_knip_overlapping_workspace_keys_keep_the_most_specific_value() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "packages/*": {"includeEntryExports": true, "ignoreDependencies": ["a"]},
+                "packages/core": {"entry": ["src/main.ts"]},
+                "packages/util": {"includeEntryExports": true}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("workspaces").unwrap(),
+            &serde_json::json!({"settings": {
+                "packages/*": {"ignoreDependencies": ["a"], "includeEntryExports": true},
+                "packages/core": {"includeEntryExports": false},
+                "packages/util": {"includeEntryExports": true}
+            }}),
+            "a more specific section without the key keeps the root value"
         );
         assert_eq!(
             warning_fields(&warnings),
             [
-                "workspaces.apps/server.ignoreDependencies",
-                "workspaces.apps/web.ignoreDependencies"
-            ]
+                "workspaces.packages/*.ignoreDependencies",
+                "workspaces.packages/*.ignoreDependencies"
+            ],
+            "fallow merges the lists of overlapping keys"
         );
-        assert!(warnings[0].message.contains("every workspace"));
-        assert!(warnings[1].message.contains("^(a|b)$"));
+        assert!(warnings[0].message.contains("packages/core"));
     }
 
     #[test]
@@ -512,7 +562,11 @@ mod tests {
             &serde_json::json!([
                 {
                     "files": ["apps/server/**/*.graphql.ts"],
-                    "rules": {"unused-exports": "off", "unused-types": "off"}
+                    "rules": {
+                        "unused-exports": "off",
+                        "unused-types": "off",
+                        "unused-namespace-members": "off"
+                    }
                 },
                 {
                     "files": ["packages/*/src/_generated/**"],
@@ -528,15 +582,94 @@ mod tests {
         );
         assert_eq!(
             warning_fields(&warnings),
-            [
-                "workspaces.apps/server.ignoreIssues.**/*.graphql.ts.namespaceMembers",
-                "workspaces.packages/*.ignoreIssues.src/_generated/**.dependencies"
-            ]
+            ["workspaces.packages/*.ignoreIssues.src/_generated/**.dependencies"]
         );
     }
 
     #[test]
-    fn migrate_knip_ignore_issues_duplicates_without_exports_warns() {
+    fn migrate_knip_namespace_issue_types_follow_their_base_type() {
+        let knip = serde_json::json!({
+            "rules": {"types": "off", "nsTypes": "off", "nsExports": "off", "namespaceMembers": "off"},
+            "exclude": ["nsExports"],
+            "ignoreIssues": {
+                "src/ui/*.tsx": ["exports", "nsExports", "namespaceMembers"],
+                "src/api/*.ts": ["nsExports"]
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("overrides").unwrap(),
+            &serde_json::json!([
+                {
+                    "files": ["src/ui/*.tsx"],
+                    "rules": {"unused-exports": "off", "unused-namespace-members": "off"}
+                }
+            ])
+        );
+        assert_eq!(
+            config
+                .get("rules")
+                .and_then(|rules| rules.get("unused-namespace-members")),
+            Some(&serde_json::json!("off"))
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            [
+                "rules.nsExports",
+                "exclude.nsExports",
+                "ignoreIssues.src/api/*.ts.nsExports"
+            ]
+        );
+        assert!(
+            warnings[0].message.contains("`unused-exports`"),
+            "{:?}",
+            warnings[0]
+        );
+        assert!(
+            warnings[2].message.contains("`unused-exports`"),
+            "{:?}",
+            warnings[2]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_namespace_issue_types_accept_defaults_and_global_off() {
+        let knip = serde_json::json!({
+            "rules": {"nsExports": "error", "types": "off"},
+            "ignoreIssues": {"src/api/*.ts": ["nsTypes"]}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_namespace_members_map_to_unused_namespace_members() {
+        let knip = serde_json::json!({
+            "rules": {"namespaceMembers": "warn"},
+            "include": ["exports", "namespaceMembers"],
+            "exclude": ["namespaceMembers"]
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            config
+                .get("rules")
+                .and_then(|rules| rules.get("unused-namespace-members")),
+            Some(&serde_json::json!("off"))
+        );
+    }
+
+    #[test]
+    fn migrate_ignore_issues_duplicates_without_exports_turns_alias_rule_off() {
         let knip = serde_json::json!({
             "ignoreIssues": {"src/ui/*.tsx": ["duplicates"]}
         });
@@ -545,15 +678,20 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert!(!config.contains_key("ignoreExports"));
-        assert!(!config.contains_key("overrides"));
         assert_eq!(
-            warning_fields(&warnings),
-            ["ignoreIssues.src/ui/*.tsx.duplicates"]
+            config.get("overrides").unwrap(),
+            &serde_json::json!([
+                {
+                    "files": ["src/ui/*.tsx"],
+                    "rules": {"duplicate-export-aliases": "off"}
+                }
+            ])
         );
+        assert!(warnings.is_empty());
     }
 
     #[test]
-    fn migrate_knip_include_entry_exports_is_global_only() {
+    fn migrate_knip_include_entry_exports_keeps_its_workspace_scope() {
         let knip = serde_json::json!({
             "workspaces": {
                 "packages/*": {"includeEntryExports": true},
@@ -566,12 +704,16 @@ mod tests {
 
         assert!(!config.contains_key("includeEntryExports"));
         assert_eq!(
-            warning_fields(&warnings),
-            ["workspaces.packages/*.includeEntryExports"]
+            config.get("workspaces").unwrap(),
+            &serde_json::json!({"settings": {"packages/*": {"includeEntryExports": true}}}),
+            "a value equal to the root value adds nothing"
         );
-        assert!(warnings[0].message.contains("global"));
+        assert!(warnings.is_empty(), "{warnings:?}");
 
-        let knip = serde_json::json!({"includeEntryExports": true});
+        let knip = serde_json::json!({
+            "includeEntryExports": true,
+            "workspaces": {".": {"includeEntryExports": false}}
+        });
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -579,6 +721,55 @@ mod tests {
             config.get("includeEntryExports").unwrap(),
             &serde_json::json!(true)
         );
+        assert_eq!(
+            warning_fields(&warnings),
+            [r#"workspaces["."].includeEntryExports"#]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_unmarked_entries_become_support_entries_when_the_config_marks_one() {
+        let knip = serde_json::json!({
+            "entry": ["scripts/build.ts"],
+            "workspaces": {
+                "apps/server": {"entry": ["src/bin.ts!", "scripts/cli.ts"]},
+                "apps/web": {"entry": "test/fixtures/**/*.mjs"}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["apps/server/src/bin.ts"])
+        );
+        assert_eq!(
+            config.get("supportEntry").unwrap(),
+            &serde_json::json!([
+                "scripts/build.ts",
+                "apps/server/scripts/cli.ts",
+                "apps/web/test/fixtures/**/*.mjs"
+            ])
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_entries_stay_entries_when_no_entry_is_marked() {
+        let knip = serde_json::json!({
+            "entry": ["src/main.ts"],
+            "workspaces": {"apps/web": {"entry": ["scripts/a.ts"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["src/main.ts", "apps/web/scripts/a.ts"])
+        );
+        assert!(!config.contains_key("supportEntry"));
         assert!(warnings.is_empty(), "{warnings:?}");
     }
 
@@ -589,7 +780,7 @@ mod tests {
                 ".": {
                     "project": ["*.ts"],
                     "vitest": {"entry": [".github/**/*.test.cjs"]},
-                    "ignoreBinaries": ["eas"],
+                    "ignoreUnresolved": ["virtual:x"],
                     "unknownKey": true
                 }
             }
@@ -604,7 +795,7 @@ mod tests {
             [
                 "workspaces[\".\"].project",
                 "workspaces[\".\"].vitest",
-                "workspaces[\".\"].ignoreBinaries",
+                "workspaces[\".\"].ignoreUnresolved",
                 "workspaces[\".\"].unknownKey"
             ]
         );
@@ -612,12 +803,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_mixed_production_entries_warn_once_per_section() {
+    fn migrate_knip_mixed_production_entries_split_without_a_warning() {
         let knip = serde_json::json!({
-            "entry": ["src/prod.ts!", "src/dev.ts", "src/other.ts"],
+            "entry": ["src/prod.ts!", "src/dev.ts"],
             "workspaces": {
                 "apps/server": {"entry": ["src/bin.ts!", "scripts/*.ts"]},
-                "apps/web": {"entry": ["src/main.ts!"]},
                 "apps/docs": {"entry": ["scripts/build.ts"]}
             }
         });
@@ -626,16 +816,18 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(
-            warning_fields(&warnings),
-            ["entry", "workspaces.apps/server.entry"]
+            config.get("entry").unwrap(),
+            &serde_json::json!(["src/prod.ts", "apps/server/src/bin.ts"])
         );
-        assert!(
-            warnings[0]
-                .message
-                .contains("unmarked entries now also count in production mode"),
-            "{}",
-            warnings[0].message
+        assert_eq!(
+            config.get("supportEntry").unwrap(),
+            &serde_json::json!([
+                "src/dev.ts",
+                "apps/server/scripts/*.ts",
+                "apps/docs/scripts/build.ts"
+            ])
         );
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]
@@ -768,7 +960,7 @@ mod tests {
     #[test]
     fn migrate_knip_include_unmappable_warns() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"include": ["files", "binaries"]}"#).unwrap();
+            serde_json::from_str(r#"{"include": ["files", "catalog"]}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -778,7 +970,7 @@ mod tests {
             .filter(|w| w.field.starts_with("include."))
             .collect();
         assert_eq!(include_warnings.len(), 1);
-        assert!(include_warnings[0].field.contains("binaries"));
+        assert!(include_warnings[0].field.contains("catalog"));
     }
 
     #[test]
@@ -871,6 +1063,7 @@ mod tests {
         assert_eq!(rules.get("unlisted-dependencies").unwrap(), "error");
         assert_eq!(rules.get("unresolved-imports").unwrap(), "warn");
         assert_eq!(rules.get("duplicate-exports").unwrap(), "off");
+        assert_eq!(rules.get("duplicate-export-aliases").unwrap(), "off");
         assert!(warnings.is_empty());
     }
 
@@ -878,8 +1071,8 @@ mod tests {
     fn migrate_knip_exclude_all_mappable_types() {
         let knip: serde_json::Value = serde_json::from_str(
             r#"{"exclude": ["files", "dependencies", "devDependencies", "exports",
-                "types", "enumMembers", "classMembers", "unlisted", "unresolved", "duplicates",
-                "cycles"]}"#,
+                "types", "enumMembers", "classMembers", "namespaceMembers", "unlisted", "binaries",
+                "unresolved", "duplicates", "cycles"]}"#,
         )
         .unwrap();
         let mut config = empty_config();
@@ -919,10 +1112,9 @@ mod tests {
 
     #[test]
     fn migrate_knip_unmappable_without_suggestion() {
-        let knip: serde_json::Value = serde_json::from_str(
-            r#"{"ignoreBinaries": ["tsc"], "treatConfigHintsAsErrors": true}"#,
-        )
-        .unwrap();
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"tags": ["-lintignore"], "treatConfigHintsAsErrors": true}"#)
+                .unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -986,15 +1178,39 @@ mod tests {
     }
 
     #[test]
+    fn migrate_ignore_binaries_and_binaries_rule() {
+        let knip = serde_json::json!({
+            "ignoreBinaries": ["eas", "/^xcrun/"],
+            "rules": {"binaries": "off"},
+            "workspaces": {"apps/mobile": {"ignoreBinaries": ["plutil", "eas"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreBinaries").unwrap(),
+            &serde_json::json!(["eas", "xcrun*", "plutil"])
+        );
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        assert_eq!(rules.get("unlisted-binaries").unwrap(), "off");
+        assert_eq!(
+            warning_fields(&warnings),
+            ["workspaces.apps/mobile.ignoreBinaries"]
+        );
+        assert!(warnings[0].message.contains("global ignoreBinaries list"));
+    }
+
+    #[test]
     fn migrate_knip_documented_unmappable_keeps_existing_message() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"rules": {"binaries": "warn"}}"#).unwrap();
+            serde_json::from_str(r#"{"rules": {"catalog": "warn"}}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "rules.binaries");
+        assert_eq!(warnings[0].field, "rules.catalog");
         assert!(warnings[0].message.contains("no fallow equivalent"));
         assert!(warnings[0].suggestion.is_none());
     }
@@ -1145,7 +1361,7 @@ mod tests {
             r#"{
                 "project": ["src/**"],
                 "ignoreDependencies": ["^(a|b)$"],
-                "rules": {"binaries": "warn"},
+                "rules": {"catalog": "warn"},
                 "exclude": ["optionalPeerDependencies"],
                 "eslint": {},
                 "workspaces": {"pkg": {}}

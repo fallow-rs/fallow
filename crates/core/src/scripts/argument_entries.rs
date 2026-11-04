@@ -340,7 +340,7 @@ fn wrapped_program(args: &[&str]) -> Option<usize> {
 /// Return `true` when `binary` runs or loads every file argument that it
 /// gets: a test runner, a bundler, or a compiler.
 #[must_use]
-pub(super) fn takes_file_arguments(binary: &str) -> bool {
+fn takes_file_arguments(binary: &str) -> bool {
     let name = tool_name(binary);
     borp::is_borp(name) || FILE_RUNNERS.contains(&name)
 }

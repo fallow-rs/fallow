@@ -1,0 +1,843 @@
+{
+  "schema_version": 1,
+  "kind": "check",
+  "language": "rust",
+  "identity": "cargo-fallow-finding-id-v1",
+  "findings": [
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "0082fba3918fb93f"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "03833dac044557f1"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "0427ee26dc91f4be"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "0695cf8b60dbcef8"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "0974dff48536aaea"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "0abff5489e74d55a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "0ba5f49abbeb7827"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "10d02f2d53cca491"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "10e72d4367994512"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "116fdbf189ce520b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "18042870b8455892"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "1822a909af48c3f0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "18a9a412ec408e17"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "1a9dde629e8c1fbd"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "1c1252bb30c4c955"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "1cdbe5f17f805d05"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "2022d3c905d0fb0d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "21d9a0457e04fc5b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "24964d580210a3ee"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "251d72da24757438"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "264aa853e5f624c7"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "2a8fb69acb4c2da2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "347e26fb54e6d81f"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "35d5c1a11e64a3c0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "3917df6cca74c58a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "399a19b492bac2ad"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "39b5e363e5b179cb"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "3b441a4893e68bba"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "3c395c1cfc2aedb2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "3ceec18a7f2a4e00"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "3ebeca62c0872011"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "402da34283e7eb49"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "449e6458233de07d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "44ccf654a2f5add5"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "44d7f184b0e441ec"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "453c24bca5682823"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4748a7fb28b3bcaf"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "48e021658b2bb9c0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4a7b95c217adfd37"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4c411030eb9fc6e8"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4d063b95061c1ebf"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4d81cbab4a077fa3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4dbe1bad558ceae3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4dcf15cb1ee58f8e"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "4fc56254168b4b36"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "538b9788ec9f9ebc"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "546801013ca3a212"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5507f452ff0f64c2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "55278504e34cc0e0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "560b6552bc5e864e"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "56946743a2024186"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "57efce2b991c25ba"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "580d7b66ad8d1388"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5c07d13ef88d3464"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5c7870eb9e7c6c9f"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5cbf9401768227bf"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5d09de6a2de14e5c"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5e4f3849f78a7d34"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "5f7e6362572fab1b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "6159678a30f78aa5"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "63259e035312f963"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "6519f318399bb6c2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "671d54c798e0e1fa"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "676b7475b20537c4"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "67f5316aa09c82da"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "6823cea7c7ac32b4"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "69b06c6dee9105fa"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "6be93dfb8dad93c2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "6c6093ba91ceed7a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "6fb498a4d668c82a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7068787a196f1ee7"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "72a4b0bc35e7cfa3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "72c34a5a0ec60c81"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7342c56dc02c92fa"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "75e3d61596239f89"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7ac18262691ffde2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7b3ad1e3f703bcbb"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7d37b75e4e09a638"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7f7c26925dd2e8e4"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "7fb77b2a3f8ad7a4"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "80ed060008468c94"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "82898c6c945eb32a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "8289fe4301440ff9"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "8329c70baafb29b3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "83bb87d9f9671844"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "846fa99941a111d7"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "859038fef64f8bab"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "85c3a3d3775027d2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "8755c817e82eb3c2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "87d03dd4aa629022"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "87d04db16e4dabef"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "8cccc597ddb57668"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "8f5fabca069a57ca"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "8fb14660981df03b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "91dffb0ff791cd91"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "920da0d4053e1adc"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "9255ea11eff5d62c"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "9687e869a33ecfb4"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "96a81bb9f1c27cdf"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "96ef558636de2e51"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "97842b296186ab7e"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "98777c3fcf4137b1"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "997f4decfc575bca"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "99d92927e182f98d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "9b1f9fa7c12100b9"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "9bf8f4d38b6d3776"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "9da4cf75a2cb3971"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "9f7b942be2834038"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "a0624bbb6f46ccdf"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "a17f5f363dfb32f0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "a1ef5b98c379ba04"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "a354c674bd9ca7de"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "a4abb66de2b26a65"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "aa78b1cdb384fb75"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "ac3b40e394e1a94a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "adc4953eee516a2b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "b155774ef4550fa6"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "b24eb4b0ecfb54f7"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "b3fcc07c4fe34b88"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "b94395ac93d1e518"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "b951aaa9fb3f2b3e"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "b9f7250af0491b53"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "bab1873ffc4e292d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "bce469262d89da22"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "bff806c2bd8f3f84"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "c0dc2392a258dcf0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "c5271bd8216eca47"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "c6c488f7eb93a3b3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "c6c6ac29edb98f68"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "c75b20167410c162"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "c868e8af798fb425"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "ca9f2d5d3a5025de"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "ccce9b5fa3380d3d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "cd48ca4f88fbb4e3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "ce3be6512484e57b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d1abeca998e0351d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d2cc9bf08fc320e5"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d3eed29f34eeb9d5"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d47f69018d8114d0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d49af3b92a9bdd7a"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d6a29aaddb5db06e"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d8450b9dad5dff29"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d84b1d5a24b7882b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d86ba48b03d029ab"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "d9b122745e705f51"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "da4b457ad39911da"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "dd8789c5603b5d80"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "e2b085e32decfd29"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "e39828c6fcbeabc8"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "e530ef2dbe0f7f04"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "e70fbf4243cd616c"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "eb4551a78d22631f"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "eca387db0da6a3d3"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "edb757fb85a0c35d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "ee5977a9c3a05b64"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "eed64cda6c5208c0"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f140c9b4be38f0dd"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f2c3aed51d66c021"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f393f27475d38971"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f45efc2285f3a365"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f475bbc76946f6a6"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f64002e3460a722b"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f810aa806cb0978d"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f8d5093308965862"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f9715d09a41f3ca2"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "f9f7461444f46b9e"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
+      "id": "fa006b6c559dbff5"
+    }
+  ]
+}

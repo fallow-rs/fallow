@@ -20,7 +20,7 @@ const commandSignatures = (commands) => commands.map(({ command, args }) => [com
 const FAST_COMMANDS = [
   ["npm", ["run", "check:knowledge-architecture"]],
   ["npm", ["run", "check:agent-adapters"]],
-  ["node", ["scripts/check-file-size.mjs", "--base", "origin/main"]],
+  ["cargo", ["fallow", "size", "--base", "origin/main", "--fail-on-growth", "--quiet"]],
   ["node", ["scripts/changelog-fragments.mjs", "check", "--base", "origin/main"]],
   ["cargo", ["fmt", "--all", "--", "--check"]],
   ["cargo", ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]],
@@ -42,7 +42,10 @@ const FAST_COMMANDS = [
   ["npm", ["run", "fmt:js:check"]],
   ["npm", ["run", "generate:contracts:check"]],
   ["npm", ["run", "check:cargo-features"]],
-  ["npm", ["run", "check:crate-boundaries"]],
+  [
+    "cargo",
+    ["fallow", "check", "--baseline", "cargo-fallow-baseline.json", "--fail-on-issues", "--quiet"],
+  ],
   ["npm", ["run", "check:miri-cfg"]],
   ["npm", ["run", "check:parse-sites"]],
   ["npm", ["run", "check:emitted-versions"]],

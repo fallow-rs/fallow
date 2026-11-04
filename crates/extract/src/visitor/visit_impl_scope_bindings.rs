@@ -187,7 +187,7 @@ impl ModuleInfoExtractor {
 
     /// A class binding under the root of `binding` disproves the shadow that
     /// the declaring scope recorded for the root.
-    pub(in crate::visitor) fn clear_non_instance_binding(&mut self, binding: &str) {
+    fn clear_non_instance_binding(&mut self, binding: &str) {
         let root = binding.split_once('.').map_or(binding, |(root, _)| root);
         if let Some(index) = self
             .nested_declaration_stack

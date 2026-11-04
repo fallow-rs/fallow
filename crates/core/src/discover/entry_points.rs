@@ -9,8 +9,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::plugins::config_parser::lexical_normalize;
 use crate::scripts::{IgnoredCommandEntries, ScriptCatalog, WorkspacePackages};
 
+#[path = "manual_entries.rs"]
+mod manual_entries;
 #[path = "plugin_entries.rs"]
 mod plugin_entries;
+use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
 pub use plugin_entries::{
     discover_plugin_entry_point_sets, discover_plugin_entry_point_sets_timed,
     discover_plugin_entry_points,
@@ -127,6 +130,18 @@ impl CategorizedEntryPoints {
         }
     }
 
+    /// Add the entry points of the root package. Returns the runtime entry
+    /// paths from a source other than `entry` and the skipped entry counts.
+    pub(crate) fn extend_root(
+        &mut self,
+        root: EntryPointDiscovery,
+    ) -> (FxHashSet<PathBuf>, FxHashMap<String, usize>) {
+        self.extend_runtime(root.entries);
+        self.extend_support(root.support_entries);
+        self.production_excluded.extend(root.production_excluded);
+        (root.non_manual_runtime_paths, root.skipped_entries)
+    }
+
     pub(crate) fn extend(&mut self, other: Self) {
         self.all.extend(other.all);
         self.runtime.extend(other.runtime);
@@ -171,6 +186,9 @@ pub struct EntryPointDiscovery {
     pub skipped_entries: FxHashMap<String, usize>,
     /// Runtime entry paths from a source other than `entry`, before the dedup.
     pub non_manual_runtime_paths: FxHashSet<PathBuf>,
+    /// Production mode only: files that a `supportEntry` glob matches. They
+    /// are not entry points; see [`CategorizedEntryPoints::production_excluded`].
+    pub production_excluded: Vec<PathBuf>,
 }
 
 impl EntryPointDiscovery {
@@ -659,40 +677,6 @@ pub(super) fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<S
         .collect()
 }
 
-/// Push entries for files matching the user-configured manual entry glob patterns.
-#[expect(
-    clippy::expect_used,
-    reason = "entry glob patterns are validated before entry point discovery"
-)]
-fn push_manual_entry_matches(
-    entries: &mut Vec<EntryPoint>,
-    config: &ResolvedConfig,
-    relative_paths: &[String],
-    files: &[DiscoveredFile],
-) {
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in &config.entry_patterns {
-        builder.add(
-            fallow_config::compile_path_glob(pattern)
-                .expect("entry pattern was validated at config load time"),
-        );
-    }
-    let Ok(glob_set) = builder.build() else {
-        return;
-    };
-    if glob_set.is_empty() {
-        return;
-    }
-    for (idx, rel) in relative_paths.iter().enumerate() {
-        if glob_set.is_match(rel) {
-            entries.push(EntryPoint {
-                path: files[idx].path.clone(),
-                source: EntryPointSource::ManualEntry,
-            });
-        }
-    }
-}
-
 /// Push entries derived from a package.json's declared entry points and scripts.
 fn push_package_json_entries(
     discovery: &mut EntryPointDiscovery,
@@ -1065,6 +1049,7 @@ pub fn discover_root_entry_points(
 
     let relative_paths = relative_paths_for(files, &config.root);
     push_manual_entry_matches(&mut discovery.entries, config, &relative_paths, files);
+    push_support_entry_matches(&mut discovery, config, &relative_paths, files);
 
     let canonical_root = dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
     if let Some(pkg) = root_pkg {

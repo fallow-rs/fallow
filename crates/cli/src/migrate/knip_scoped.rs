@@ -7,7 +7,10 @@
 
 use serde_json::{Map, Value};
 
-use super::knip_fields::{migrate_ignore, migrate_ignore_deps, warn_unmapped_rule_key};
+use super::knip_fields::{
+    migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps, migrate_namespace_issue_type,
+    warn_unmapped_rule_key,
+};
 use super::knip_tables::{
     KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNSUPPORTED_PLUGIN_KEYS,
 };
@@ -28,6 +31,24 @@ pub(super) struct KnipScope {
     field_prefix: String,
     /// Project-root-relative path prefix with a trailing `/`, empty for the root.
     path_prefix: String,
+}
+
+/// Whether any `entry` pattern of the knip config, at the root or in a
+/// workspace, carries the production marker. Only then does the migration
+/// split the entries into `entry` and `supportEntry`.
+pub(super) fn config_marks_production_entry(obj: &JsonMap) -> bool {
+    let marks = |section: &JsonMap| {
+        section.get("entry").is_some_and(|value| {
+            string_or_array(value)
+                .iter()
+                .any(|pattern| !pattern.starts_with('!') && pattern.ends_with(PRODUCTION_MARKER))
+        })
+    };
+    marks(obj)
+        || obj
+            .get("workspaces")
+            .and_then(Value::as_object)
+            .is_some_and(|workspaces| workspaces.values().filter_map(Value::as_object).any(marks))
 }
 
 impl KnipScope {
@@ -68,6 +89,13 @@ impl KnipScope {
     /// The warning field name of `name` in this scope.
     pub(super) fn field(&self, name: &str) -> String {
         format!("{}{name}", self.field_prefix)
+    }
+
+    /// The `workspaces.settings` key of this scope, or `None` for the root
+    /// workspace, which uses the global settings.
+    fn settings_key(&self) -> Option<&str> {
+        let key = self.path_prefix.trim_end_matches('/');
+        (!key.is_empty()).then_some(key)
     }
 
     /// Rewrite a scope-relative glob as a project-root-relative glob, or
@@ -145,24 +173,24 @@ fn append_value(config: &mut JsonMap, key: &str, value: Value) {
     }
 }
 
-/// Migrate knip `entry` patterns to fallow `entry`.
+/// Migrate knip `entry` patterns to fallow `entry` and `supportEntry`.
 ///
-/// Fallow `entry` files are runtime roots in every mode, so the knip
-/// production marker (a trailing `!`) is dropped. A section that mixes marked
-/// and unmarked patterns gets one warning, because fallow has no
-/// production-only entry: `--production` only removes files that match the
-/// production exclusion patterns. Fallow `entry` has no exclusion form, so a
-/// negated pattern is reported and not written: as a literal glob it would
-/// match no file.
+/// When `production_split` is set (the knip config marks at least one entry
+/// with a trailing `!`), a marked pattern becomes an `entry` (a runtime root
+/// in every mode) and an unmarked pattern becomes a `supportEntry` (left out
+/// in production mode). Otherwise every pattern becomes an `entry`, so a
+/// project that never used the marker keeps its entries in production mode.
+/// Fallow `entry` has no exclusion form, so a negated pattern is reported and
+/// not written: as a literal glob it would match no file.
 pub(super) fn migrate_entry(
     value: &Value,
     scope: &KnipScope,
+    production_split: bool,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) {
-    let mut migrated = Vec::new();
-    let mut marked = false;
-    let mut unmarked = false;
+    let mut entries = Vec::new();
+    let mut support_entries = Vec::new();
     for pattern in string_or_array(value) {
         if pattern.starts_with('!') {
             warnings.push(MigrationWarning {
@@ -178,42 +206,32 @@ pub(super) fn migrate_entry(
             });
             continue;
         }
-        let body = match pattern.strip_suffix(PRODUCTION_MARKER) {
-            Some(body) => {
-                marked = true;
-                body
-            }
-            None => {
-                unmarked = true;
-                pattern.as_str()
-            }
+        let (body, marked) = match pattern.strip_suffix(PRODUCTION_MARKER) {
+            Some(body) => (body, true),
+            None => (pattern.as_str(), false),
         };
-        match scope.rebase(body) {
-            Some(rebased) => migrated.push(rebased),
-            None => warnings.push(traversal_warning(scope.field("entry"), &pattern)),
+        let Some(rebased) = scope.rebase(body) else {
+            warnings.push(traversal_warning(scope.field("entry"), &pattern));
+            continue;
+        };
+        if production_split && !marked {
+            support_entries.push(rebased);
+        } else {
+            entries.push(rebased);
         }
     }
-    if marked && unmarked {
-        warnings.push(MigrationWarning {
-            source: "knip",
-            field: scope.field("entry"),
-            message: "production markers (a trailing `!`) removed; fallow has no production-only entry, so the unmarked entries now also count in production mode".to_string(),
-            suggestion: Some(
-                "check the `--production` findings; remove an unmarked entry if it must not keep production code reachable"
-                    .to_string(),
-            ),
-        });
-    }
-    append_unique(config, "entry", migrated);
+    append_unique(config, "entry", entries);
+    append_unique(config, "supportEntry", support_entries);
 }
 
 /// Migrate knip `ignoreIssues` (file glob to issue types) to fallow.
 ///
 /// File-level issue types become an `overrides` entry that turns the rules
-/// off for the glob. `duplicates` becomes an `ignoreExports` entry with
-/// `exports: ["*"]` only when the same glob also ignores `exports` and unused
-/// types are ignored there too, because that rule also exempts the exports
-/// from `unused-exports` and `unused-types`.
+/// off for the glob. `duplicates` turns `duplicate-export-aliases` off for the
+/// glob. It becomes an `ignoreExports` entry with `exports: ["*"]` instead
+/// when the same glob also ignores `exports` and unused types are ignored
+/// there too, because that rule also exempts the exports from
+/// `unused-exports`, `unused-types` and `duplicate-export-aliases`.
 pub(super) fn migrate_ignore_issues(
     value: &Value,
     scope: &KnipScope,
@@ -235,6 +253,19 @@ pub(super) fn migrate_ignore_issues(
         .and_then(Value::as_str)
         == Some("off");
 
+    // A base issue type that the global rules turn off already hides its
+    // namespace findings everywhere.
+    let globally_off: Vec<&str> = KNIP_RULE_MAP
+        .iter()
+        .filter(|(_, rule)| {
+            config
+                .get("rules")
+                .and_then(|rules| rules.get(*rule))
+                .and_then(Value::as_str)
+                == Some("off")
+        })
+        .map(|(name, _)| *name)
+        .collect();
     for (glob, kinds) in issues {
         let field = scope.field(&format!("ignoreIssues.{glob}"));
         let Some(file) = scope.rebase(glob).filter(|_| !glob.starts_with('!')) else {
@@ -256,15 +287,12 @@ pub(super) fn migrate_ignore_issues(
         for kind in &kinds {
             match kind.as_str() {
                 "exports" | "types" | "duplicates" if exempt_all_exports => {}
-                "duplicates" => warnings.push(MigrationWarning {
-                    source: "knip",
-                    field: format!("{field}.duplicates"),
-                    message: "issue type `duplicates` has no file-scoped fallow equivalent"
-                        .to_string(),
-                    suggestion: Some(format!(
-                        "an ignoreExports entry for `{file}` with exports [\"*\"] also hides unused exports and unused types there; add it by hand if that is correct"
-                    )),
-                }),
+                "duplicates" => {
+                    rules.insert(
+                        "duplicate-export-aliases".to_string(),
+                        Value::String("off".to_string()),
+                    );
+                }
                 kind if PROJECT_LEVEL_ISSUE_TYPES.contains(&kind) => {
                     warnings.push(MigrationWarning {
                         source: "knip",
@@ -281,7 +309,16 @@ pub(super) fn migrate_ignore_issues(
                     Some((_, rule)) => {
                         rules.insert((*rule).to_string(), Value::String("off".to_string()));
                     }
-                    None => warn_unmapped_rule_key(&field, kind, warnings),
+                    None => {
+                        if !migrate_namespace_issue_type(
+                            &field,
+                            kind,
+                            |base| has(base) || globally_off.contains(&base),
+                            warnings,
+                        ) {
+                            warn_unmapped_rule_key(&field, kind, warnings);
+                        }
+                    }
                 },
             }
         }
@@ -303,14 +340,34 @@ pub(super) fn migrate_ignore_issues(
     }
 }
 
+/// The `workspaces.settings` values of one knip workspace section.
+#[derive(Default)]
+struct SectionSettings {
+    /// The project-root-relative key, as fallow writes it.
+    key: String,
+    /// The knip key, for warning field names.
+    scope_field_prefix: String,
+    ignore_dependencies: Vec<String>,
+    /// The `includeEntryExports` value that the section sets, if any.
+    include_entry_exports: Option<bool>,
+}
+
+/// The settings that the root and the workspace sections share.
+pub(super) struct WorkspaceMigration {
+    /// The effective root value of `includeEntryExports`.
+    pub(super) root_include_entry_exports: bool,
+    /// Whether unmarked entry patterns become `supportEntry` patterns.
+    pub(super) production_split: bool,
+}
+
 /// Migrate the knip `workspaces` map.
 ///
-/// `root_include_entry_exports` is the effective root value of
-/// `includeEntryExports`. A workspace that sets another value gets a warning,
-/// because fallow has only the global setting.
+/// File patterns become project-root-relative patterns. `ignoreDependencies`
+/// and `includeEntryExports` become `workspaces.settings` keys, except for the
+/// root workspace `.`, which uses the global settings.
 pub(super) fn migrate_workspaces(
     workspaces: &Value,
-    root_include_entry_exports: bool,
+    migration: &WorkspaceMigration,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) {
@@ -324,6 +381,7 @@ pub(super) fn migrate_workspaces(
         return;
     };
 
+    let mut sections = Vec::new();
     for (key, section) in workspaces {
         let Some(section) = section.as_object() else {
             warnings.push(MigrationWarning {
@@ -346,49 +404,86 @@ pub(super) fn migrate_workspaces(
                 continue;
             }
         };
+        let mut settings = SectionSettings {
+            key: scope.settings_key().unwrap_or_default().to_string(),
+            scope_field_prefix: scope.field(""),
+            ..SectionSettings::default()
+        };
         for (name, value) in section {
             migrate_workspace_field(
-                name,
-                value,
+                (name, value),
                 &scope,
-                root_include_entry_exports,
+                migration,
+                &mut settings,
                 config,
                 warnings,
             );
         }
+        if scope.settings_key().is_some() {
+            sections.push(settings);
+        }
     }
+    write_workspace_settings(
+        &sections,
+        migration.root_include_entry_exports,
+        config,
+        warnings,
+    );
 }
 
 fn migrate_workspace_field(
-    name: &str,
-    value: &Value,
+    (name, value): (&str, &Value),
     scope: &KnipScope,
-    root_include_entry_exports: bool,
+    migration: &WorkspaceMigration,
+    settings: &mut SectionSettings,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) {
     match name {
-        "entry" => migrate_entry(value, scope, config, warnings),
+        "entry" => migrate_entry(value, scope, migration.production_split, config, warnings),
         "ignore" => migrate_ignore(value, scope, config, warnings),
         "ignoreIssues" => migrate_ignore_issues(value, scope, config, warnings),
         "ignoreDependencies" => {
-            if migrate_ignore_deps(value, &scope.field(name), config, warnings) {
+            if scope.settings_key().is_none() {
+                migrate_ignore_deps(value, &scope.field(name), config, warnings);
+                return;
+            }
+            let mut scratch = JsonMap::new();
+            migrate_ignore_deps(value, &scope.field(name), &mut scratch, warnings);
+            settings.ignore_dependencies = scratch
+                .get("ignoreDependencies")
+                .map(string_or_array)
+                .unwrap_or_default();
+        }
+        "ignoreBinaries" => {
+            if migrate_ignore_binaries(value, &scope.field(name), config, warnings) {
                 warnings.push(MigrationWarning {
                     source: "knip",
                     field: scope.field(name),
-                    message: "merged into the global ignoreDependencies list; fallow has no per-workspace list, so the entries apply to every workspace".to_string(),
+                    message: "merged into the global ignoreBinaries list; fallow has no per-workspace list, so the entries apply to every workspace".to_string(),
                     suggestion: None,
                 });
             }
         }
         "includeEntryExports" => {
-            if value.as_bool() != Some(root_include_entry_exports) {
+            let Some(include) = value.as_bool() else {
                 warnings.push(MigrationWarning {
                     source: "knip",
                     field: scope.field(name),
-                    message: "per-workspace includeEntryExports not migrated; fallow has only the global includeEntryExports setting".to_string(),
+                    message: "expected a boolean; not migrated".to_string(),
+                    suggestion: None,
+                });
+                return;
+            };
+            if scope.settings_key().is_some() {
+                settings.include_entry_exports = Some(include);
+            } else if include != migration.root_include_entry_exports {
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: scope.field(name),
+                    message: "includeEntryExports of the root workspace not migrated; in fallow the root package uses the top-level value, which also applies to each workspace without its own value".to_string(),
                     suggestion: Some(
-                        "set includeEntryExports at the top level to apply it to every workspace"
+                        "set the top-level includeEntryExports, and set workspaces.settings values for the workspaces that need another value"
                             .to_string(),
                     ),
                 });
@@ -396,6 +491,86 @@ fn migrate_workspace_field(
         }
         _ => warn_unmapped_workspace_field(name, scope, warnings),
     }
+}
+
+/// Write the `workspaces.settings` keys.
+///
+/// Knip applies only the most specific workspace section. Fallow merges the
+/// `ignoreDependencies` lists of every matching key, and takes
+/// `includeEntryExports` from the most specific key that sets it. So a more
+/// specific section without `includeEntryExports` gets the root value
+/// explicitly, and a glob list that also reaches a more specific section gets
+/// a warning.
+fn write_workspace_settings(
+    sections: &[SectionSettings],
+    root_include_entry_exports: bool,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let mut settings = JsonMap::new();
+    for section in sections {
+        let overlapping: Vec<&SectionSettings> = sections
+            .iter()
+            .filter(|other| other.key != section.key && glob_key_selects(&other.key, &section.key))
+            .collect();
+        for other in &overlapping {
+            if !other.ignore_dependencies.is_empty() {
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: format!("{}ignoreDependencies", other.scope_field_prefix),
+                    message: format!(
+                        "fallow merges the ignoreDependencies of every matching workspaces.settings key, so `{}` now also ignores the entries of `{}`",
+                        section.key, other.key
+                    ),
+                    suggestion: Some(format!(
+                        "move the entries to the workspaces that need them if `{}` must report them",
+                        section.key
+                    )),
+                });
+            }
+        }
+        let inherits_other_value = overlapping.iter().any(|other| {
+            other
+                .include_entry_exports
+                .is_some_and(|value| value != root_include_entry_exports)
+        });
+        let include = section
+            .include_entry_exports
+            .or_else(|| inherits_other_value.then_some(root_include_entry_exports))
+            .filter(|value| *value != root_include_entry_exports || inherits_other_value);
+
+        let mut value = JsonMap::new();
+        if !section.ignore_dependencies.is_empty() {
+            value.insert(
+                "ignoreDependencies".to_string(),
+                Value::from(section.ignore_dependencies.clone()),
+            );
+        }
+        if let Some(include) = include {
+            value.insert("includeEntryExports".to_string(), Value::Bool(include));
+        }
+        if !value.is_empty() {
+            settings.insert(section.key.clone(), Value::Object(value));
+        }
+    }
+    if settings.is_empty() {
+        return;
+    }
+    let workspaces = config
+        .entry("workspaces".to_string())
+        .or_insert_with(|| Value::Object(JsonMap::new()));
+    if let Some(workspaces) = workspaces.as_object_mut() {
+        workspaces.insert("settings".to_string(), Value::Object(settings));
+    }
+}
+
+/// Whether the glob key `glob` selects the literal key `key`.
+fn glob_key_selects(glob: &str, key: &str) -> bool {
+    let is_glob = |text: &str| text.contains(['*', '?', '[', '{']);
+    if !is_glob(glob) || is_glob(key) {
+        return false;
+    }
+    fallow_config::compile_path_glob(glob).is_ok_and(|glob| glob.compile_matcher().is_match(key))
 }
 
 fn warn_unmapped_workspace_field(

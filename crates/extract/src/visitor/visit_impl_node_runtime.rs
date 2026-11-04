@@ -17,10 +17,22 @@ use super::{
     node_module_register_specifier, normalize_module_file_relative_path, pino_factory_callee_name,
 };
 
+#[path = "visit_impl_commands.rs"]
+mod visit_commands;
+
 /// The CommonJS globals that name a path of the current module.
 const MODULE_PATH_GLOBALS: &[&str] = &["__filename", "__dirname"];
 
 impl ModuleInfoExtractor {
+    /// Record the facts of a Node runtime call: pino transports, `register`
+    /// loaders, `child_process.fork` targets and process commands.
+    pub(super) fn record_node_runtime_call(&mut self, expr: &CallExpression<'_>) {
+        self.try_record_pino_transport_targets(expr);
+        self.try_record_node_module_register(expr);
+        self.try_record_child_process_fork(expr);
+        self.try_record_command_call(expr);
+    }
+
     fn is_pino_factory_binding(&self, local_name: &str) -> bool {
         let imported = self.imports.iter().any(|import| {
             import.source == super::PINO_PACKAGE
@@ -40,7 +52,7 @@ impl ModuleInfoExtractor {
         (imported || required) && !self.nested_scope_shadows(local_name)
     }
 
-    pub(super) fn try_record_pino_transport_targets(&mut self, expr: &CallExpression<'_>) {
+    fn try_record_pino_transport_targets(&mut self, expr: &CallExpression<'_>) {
         let Some(local_name) = pino_factory_callee_name(&expr.callee) else {
             return;
         };
@@ -88,7 +100,7 @@ impl ModuleInfoExtractor {
     }
 
     /// Record `register('loader', ...)` from `node:module` as a dynamic import.
-    pub(super) fn try_record_node_module_register(&mut self, expr: &CallExpression<'_>) {
+    fn try_record_node_module_register(&mut self, expr: &CallExpression<'_>) {
         let register_match = match &expr.callee {
             Expression::Identifier(ident) => {
                 self.is_node_module_register(ident.name.as_str(), false)
@@ -459,7 +471,7 @@ impl ModuleInfoExtractor {
         Some(format!("{prefix}{}", parts.join("/")))
     }
 
-    pub(super) fn try_record_child_process_fork(&mut self, expr: &CallExpression<'_>) {
+    fn try_record_child_process_fork(&mut self, expr: &CallExpression<'_>) {
         if !self.is_module_or_function_runtime_scope() {
             return;
         }

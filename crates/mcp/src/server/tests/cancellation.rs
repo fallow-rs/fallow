@@ -100,6 +100,7 @@ async fn cancel_tool_call(name: &str, arguments: serde_json::Value) -> (u32, boo
 
     let server = FallowMcp {
         binary: binary.to_string_lossy().into_owned(),
+        cargo_fallow: "cargo-fallow".to_string(),
         tool_router: FallowMcp::tool_router(),
     };
     let (client, server_io) = tokio::io::duplex(64 * 1024);
@@ -178,10 +179,15 @@ async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
 /// scope. The cancel must still reach the subprocess of a host call.
 #[tokio::test]
 async fn a_client_cancel_kills_the_subprocess_of_a_code_mode_host_call() {
+    // The test process runs in `crates/mcp`, a Rust root, where Code Mode
+    // refuses to run. A JavaScript root keeps the host call.
+    let project = tempfile::tempdir().expect("temp directory");
+    std::fs::write(project.path().join("package.json"), "{}").expect("write package.json");
     let (pid, exited) = cancel_tool_call(
         "code_execute",
         serde_json::json!({
             "code": "return fallow.analyze({});",
+            "root": project.path().to_string_lossy(),
             "timeout_ms": 30_000
         }),
     )

@@ -407,7 +407,14 @@ impl ModuleInfoExtractor {
 
     /// Push a single namespace-member entry with the shared `NamespaceMember`
     /// defaults (no decorator / static / self-return signals).
-    fn push_namespace_member(&mut self, name: String, span: oxc_span::Span) {
+    /// A member of a nested namespace gets the dotted path from the exported
+    /// root namespace (`Inner.x`).
+    pub(super) fn push_namespace_member(&mut self, name: String, span: oxc_span::Span) {
+        let name = if self.namespace_member_path.is_empty() {
+            name
+        } else {
+            format!("{}.{name}", self.namespace_member_path.join("."))
+        };
         self.pending_namespace_members.push(MemberInfo {
             name,
             kind: MemberKind::NamespaceMember,
@@ -707,7 +714,7 @@ impl ModuleInfoExtractor {
 /// exists only in type space. Any other statement, exported or not, makes the
 /// namespace a runtime object. A `const enum` and a non-type import alias count
 /// as values here, which keeps the classification conservative.
-pub(super) fn namespace_is_instantiated(namespace: &TSNamespaceDeclaration<'_>) -> bool {
+fn namespace_is_instantiated(namespace: &TSNamespaceDeclaration<'_>) -> bool {
     if namespace.declare {
         return false;
     }

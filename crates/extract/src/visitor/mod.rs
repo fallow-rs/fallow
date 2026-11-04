@@ -2,11 +2,13 @@ mod declarations;
 mod helpers;
 mod remap;
 mod requirements;
+mod ssr_load_module;
 
 use requirements::{BindingRequirements, RequirementArena};
 use std::cell::{Cell, RefCell};
 pub(crate) mod react;
 mod visit_impl;
+pub(crate) use ssr_load_module::{ssr_load_module_call, ssr_load_module_source};
 pub(crate) use visit_impl::push_member_tag_accesses;
 
 use oxc_ast::ast::{
@@ -30,17 +32,19 @@ use crate::{
 use crate::{js_text::JsText, suppress::ParsedSuppressions};
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
-    ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
-    ImportBindingReference, ImportLoadKind, ImportLoadKindOverrideFact, ImportedCallSite,
-    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
-    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    ClassHeritageInfo, CommandInvocation, ComponentFunction, ComponentProp, DiKeySite,
+    DispatchedEvent, HookUse, ImportBindingReference, ImportLoadKind, ImportLoadKindOverrideFact,
+    ImportedCallSite, LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
+    RenderEdge, SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
     SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
+mod static_imports;
+use static_imports::collect_static_import_specifiers;
 
 pub(crate) const ROUTE_LOADER_DATA_OBJECT: &str = "$fallow.routeLoaderData";
-pub(crate) const MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES: usize = 8192;
+const MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES: usize = 8192;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum RouteLoadHarvestMode {
@@ -67,7 +71,7 @@ pub(crate) fn infer_props_field_array_element_type(
 /// its references and of the references whose shape credits a precise set of
 /// exports. A reference in any other shape credits the whole target module.
 #[derive(Debug, Clone)]
-pub(crate) struct LocalImportLoader {
+struct LocalImportLoader {
     imports: Vec<LoaderImport>,
     references: usize,
     credited_references: usize,
@@ -76,7 +80,7 @@ pub(crate) struct LocalImportLoader {
 
 /// One `import()` that a local loader returns, with its static specifiers.
 #[derive(Debug, Clone)]
-pub(crate) struct LoaderImport {
+struct LoaderImport {
     span: Span,
     sources: Vec<String>,
 }
@@ -324,7 +328,7 @@ struct PendingSubclassMemberAccess {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LocalClassExportInfo {
+struct LocalClassExportInfo {
     members: Vec<MemberInfo>,
     super_class: Option<String>,
     implemented_interfaces: Vec<String>,
@@ -421,7 +425,7 @@ struct StructuralClassCallCandidate {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FactoryCallCandidate {
+struct FactoryCallCandidate {
     local_name: String,
     callee_object: String,
     callee_method: String,
@@ -431,7 +435,7 @@ pub(crate) struct FactoryCallCandidate {
 /// returns `new Class()`. Resolved against `factory_return_functions` at finalize
 /// time so `local.member` credits the constructed class. See issue #1441.
 #[derive(Debug, Clone)]
-pub(crate) struct FactoryReturnCandidate {
+struct FactoryReturnCandidate {
     local_name: String,
     callee_name: String,
     /// `const local = await callee()`: the local holds the awaited result.
@@ -455,7 +459,7 @@ pub(crate) enum ObjectPropValueRef {
 /// `strict_factory_return_object_shapes` / `factory_return_object_shapes` at finalize.
 /// See issue #1858.
 #[derive(Debug, Clone)]
-pub(crate) struct FactoryReturnObjectCandidate {
+struct FactoryReturnObjectCandidate {
     fn_name: String,
     /// Whether this function qualifies for the cross-module (strict) map: sync,
     /// non-generator, unanimous-terminal object-literal return.
@@ -526,7 +530,7 @@ enum TypedPropertyExpansion {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PendingPlaywrightFactory {
+struct PendingPlaywrightFactory {
     test_name: String,
     /// The identifier that the helper extends. `None` when the receiver is a
     /// `mergeTests(...)` call, which is always a Playwright test.
@@ -578,7 +582,7 @@ pub(crate) enum MockObjectProvenance {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PendingVitestMockOperation {
+struct PendingVitestMockOperation {
     source: String,
     /// Span of the identifier whose provenance the semantic pass must confirm
     /// (the `vi`/`jest`/alias object, or the namespace in `ns.vi.mock`).
@@ -594,7 +598,7 @@ pub(super) struct PendingVitestMockOperation {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum PendingVitestMockProof {
+enum PendingVitestMockProof {
     ClosedFactory {
         binding_requirement_spans: Vec<Span>,
         namespace_requirement_spans: Vec<Span>,
@@ -830,6 +834,19 @@ pub(crate) struct ModuleInfoExtractor {
     /// Transient visitor state; never persisted.
     local_namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
+    /// Names of the nested exported namespaces between the exported root
+    /// namespace and the body that the visitor walks. A member of a nested
+    /// namespace gets the dotted path `Inner.x`, relative to the root.
+    /// Transient visitor state; never persisted.
+    namespace_member_path: Vec<String>,
+    /// Span of the exported root namespace declaration (`export namespace N`)
+    /// that `visit_ts_namespace_declaration` reaches next. Transient visitor
+    /// state; never persisted.
+    exported_namespace_root: Option<Span>,
+    /// Span of the nested namespace declaration that is an exported member of
+    /// the namespace around it (`export namespace Inner`, or a segment of a
+    /// dotted `namespace A.B`). Transient visitor state; never persisted.
+    exported_namespace_member: Option<Span>,
     /// Spans of exported namespaces that are type-only only because their
     /// body emits no JavaScript (see `namespace_is_instantiated`). When such a
     /// namespace merges with a value export of the same name, the merged
@@ -1070,6 +1087,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// occurrence wins). Consumed by the `boundaries.calls.forbidden`
     /// detector.
     callee_uses: Vec<CalleeUse>,
+    /// Literal commands of process-spawning calls.
+    command_invocations: Vec<CommandInvocation>,
     /// Call facts paired with the root reference span until semantic admission.
     pending_imported_call_sites: Vec<(Span, ImportedCallSite)>,
     /// Runtime ESM roots precollected before the body walk.
@@ -1297,7 +1316,7 @@ pub(crate) struct ModuleInfoExtractor {
 /// Metadata for a named arrow / function-expression that may be a React
 /// component, captured at the declarator before the function body is walked.
 #[derive(Debug, Clone)]
-pub(crate) struct PendingComponentArrow {
+struct PendingComponentArrow {
     /// The binding name.
     name: String,
     /// The component kind (`Arrow`, or a `forwardRef` / `memo` wrapper).
@@ -1321,7 +1340,7 @@ pub(crate) struct PendingComponentArrow {
 /// finalize because the backing interface/type may be declared after the
 /// component (TypeScript hoists type declarations).
 #[derive(Debug, Clone)]
-pub(crate) struct PendingTypedReactProps {
+struct PendingTypedReactProps {
     /// The enclosing component name (`ComponentProp.component`).
     component: String,
     /// The bare-identifier props parameter local (e.g. `props`).
@@ -1532,6 +1551,14 @@ impl ModuleInfoExtractor {
     }
 
     /// Store the import binding references that the semantic pass found.
+    pub(crate) fn push_namespace_member_uses(
+        &mut self,
+        uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
+    ) {
+        self.semantic_facts
+            .extend(uses.into_iter().map(SemanticFact::NamespaceMemberUse));
+    }
+
     pub(crate) fn set_import_binding_references(
         &mut self,
         references: Vec<ImportBindingReference>,
@@ -1541,7 +1568,7 @@ impl ModuleInfoExtractor {
 
     /// Record the template that a `defineOgImage('Name')` or
     /// `defineOgImageComponent('Name')` call names with a static string.
-    pub(super) fn record_og_image_template_call(&mut self, call: &CallExpression<'_>) {
+    fn record_og_image_template_call(&mut self, call: &CallExpression<'_>) {
         let Expression::Identifier(callee) = &call.callee else {
             return;
         };
@@ -1999,7 +2026,7 @@ impl ModuleInfoExtractor {
     /// per nesting level (`{A.B, C}` and `{A, B}`), so namespace-import
     /// narrowing sees the same stream either way (issue #2348). `this` receivers
     /// get the same class-scope qualifier as `visit_static_member_expression`.
-    pub(crate) fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
+    fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
         let mut current = member;
         loop {
             if let Some(object_name) = visit_impl::jsx_member_object_name(&current.object)
@@ -3629,7 +3656,7 @@ impl ModuleInfoExtractor {
     }
 
     /// Record each import load-kind mark as a semantic fact, once per span.
-    pub(super) fn mark_import_load_kind(&mut self, span: Span, kind: ImportLoadKind) {
+    fn mark_import_load_kind(&mut self, span: Span, kind: ImportLoadKind) {
         self.import_load_kind_marks.push((span, kind));
     }
 
@@ -3722,6 +3749,7 @@ impl ModuleInfoExtractor {
             sanitized_sink_args: self.sanitized_sink_args,
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
+            command_invocations: self.command_invocations,
             imported_call_sites: self.imported_call_sites.into(),
             import_binding_references: self.import_binding_references.into(),
             misplaced_directives: self.misplaced_directives,
@@ -3873,6 +3901,8 @@ impl ModuleInfoExtractor {
         info.client_only_dynamic_import_spans
             .append(&mut self.client_only_dynamic_import_spans);
         info.callee_uses.append(&mut self.callee_uses);
+        info.command_invocations
+            .append(&mut self.command_invocations);
         if !self.imported_call_sites.is_empty() {
             let mut calls = std::mem::take(&mut info.imported_call_sites).to_vec();
             calls.append(&mut self.imported_call_sites);
@@ -3974,7 +4004,7 @@ fn destructured_factory_keys(obj_pat: &ObjectPattern<'_>) -> Option<Vec<String>>
 /// keeps the rest, which is what callers tracking local bindings want. A caller that
 /// must know the pattern could expose an unnamed property has to abstain instead, and
 /// wants that function.
-pub(super) fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
+fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
     if obj_pat.rest.is_some() {
         return Vec::new();
     }
@@ -4046,46 +4076,6 @@ pub(crate) fn extend_whole_object_uses(info: &mut ModuleInfo, extra: Vec<String>
     info.whole_object_uses = uses.into();
 }
 
-/// Collect every statically-resolvable module specifier from a dynamic
-/// `import()` source expression, following conditional and logical branches so
-/// `import(cond ? './a' : './b')` yields both `./a` and `./b`. String literals
-/// and no-substitution template literals resolve; genuinely runtime branches (a
-/// bare identifier, a call) are skipped, so a mixed
-/// `import(cond ? './a' : runtimeVar)` still credits the literal branch while
-/// `import(runtimeVar)` yields nothing (correctly left unresolvable). Repeated
-/// literals across branches are deduplicated so one call site never yields two
-/// identical edges (and thus duplicate unresolved-import findings).
-fn collect_static_import_specifiers(source: &Expression<'_>, out: &mut Vec<String>) {
-    match source {
-        Expression::StringLiteral(lit) => {
-            let value = lit.value.text().into_owned();
-            if !out.contains(&value) {
-                out.push(value);
-            }
-        }
-        Expression::TemplateLiteral(tpl)
-            if tpl.expressions.is_empty() && !tpl.quasis.is_empty() =>
-        {
-            let value = tpl.quasis[0].value.raw.to_string();
-            if !value.is_empty() && !out.contains(&value) {
-                out.push(value);
-            }
-        }
-        Expression::ParenthesizedExpression(paren) => {
-            collect_static_import_specifiers(&paren.expression, out);
-        }
-        Expression::ConditionalExpression(cond) => {
-            collect_static_import_specifiers(&cond.consequent, out);
-            collect_static_import_specifiers(&cond.alternate, out);
-        }
-        Expression::LogicalExpression(logical) => {
-            collect_static_import_specifiers(&logical.left, out);
-            collect_static_import_specifiers(&logical.right, out);
-        }
-        _ => {}
-    }
-}
-
 fn try_extract_property_callback_import<'a, 'b>(
     prop: &'b ObjectProperty<'a>,
 ) -> Option<(&'b ImportExpression<'a>, Vec<String>)> {
@@ -4113,7 +4103,7 @@ fn try_extract_property_callback_import<'a, 'b>(
 /// moves every later index. `Promise.allSettled` and `Promise.race` are not
 /// matched: their results do not hold the module objects at each index.
 #[must_use]
-pub(crate) fn extract_promise_all_elements<'a, 'b>(
+fn extract_promise_all_elements<'a, 'b>(
     expr: &'b Expression<'a>,
 ) -> Option<&'b [ArrayExpressionElement<'a>]> {
     let mut inner = expr;
@@ -4151,9 +4141,7 @@ pub(crate) fn extract_promise_all_elements<'a, 'b>(
 
 #[must_use]
 /// Recursively unwrap an expression until it reaches an import expression.
-pub(crate) fn extract_import_expression<'a, 'b>(
-    expr: &'b Expression<'a>,
-) -> Option<&'b ImportExpression<'a>> {
+fn extract_import_expression<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b ImportExpression<'a>> {
     match expr {
         Expression::AwaitExpression(await_expr) => extract_import_expression(&await_expr.argument),
         Expression::ImportExpression(imp) => Some(imp),
@@ -4164,56 +4152,8 @@ pub(crate) fn extract_import_expression<'a, 'b>(
 
 /// Whether `expr` is an `import()` without `await`, whose value is the
 /// promise of the namespace and not the namespace itself.
-pub(crate) fn is_unawaited_import(expr: &Expression<'_>) -> bool {
+fn is_unawaited_import(expr: &Expression<'_>) -> bool {
     matches!(expr.without_parentheses(), Expression::ImportExpression(_))
-}
-
-/// Vite dev-server method that loads a module by specifier for SSR.
-const SSR_LOAD_MODULE_METHOD: &str = "ssrLoadModule";
-
-#[must_use]
-/// Match `<receiver>.ssrLoadModule('<literal>')`, with an optional `await` or
-/// parentheses around the call, and return the call span and the specifier.
-///
-/// The Vite dev server loads the module like a dynamic `import()`. A leading
-/// `/` is relative to the Vite root, not to the file system. A computed
-/// argument is not a static edge, so it returns `None`.
-pub(crate) fn ssr_load_module_call(expr: &Expression<'_>) -> Option<(Span, String)> {
-    let call = match expr.get_inner_expression() {
-        Expression::AwaitExpression(await_expr) => {
-            match await_expr.argument.get_inner_expression() {
-                Expression::CallExpression(call) => call,
-                _ => return None,
-            }
-        }
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
-    ssr_load_module_source(call).map(|source| (call.span, source))
-}
-
-#[must_use]
-/// Return the literal specifier of a `<receiver>.ssrLoadModule('<literal>')` call.
-pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String> {
-    let Expression::StaticMemberExpression(member) = call.callee.without_parentheses() else {
-        return None;
-    };
-    if member.property.name != SSR_LOAD_MODULE_METHOD {
-        return None;
-    }
-    let source = match call.arguments.first()?.as_expression()? {
-        Expression::StringLiteral(lit) => lit.value.text().into_owned(),
-        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first()?.value.raw.to_string()
-        }
-        _ => return None,
-    };
-    // Vite resolves relative entry URLs from its root, not the caller's directory.
-    Some(
-        source
-            .strip_prefix("./")
-            .map_or_else(|| source.clone(), |relative| format!("/{relative}")),
-    )
 }
 
 fn try_extract_arrow_wrapped_import<'a, 'b>(

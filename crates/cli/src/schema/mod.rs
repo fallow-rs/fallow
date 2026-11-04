@@ -446,6 +446,7 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         | "unresolved-import"
         | "missing-suppression-reason"
         | "unused-class-member"
+        | "unused-namespace-member"
         | "unused-store-member"
         | "unprovided-inject"
         | "unrendered-component"
@@ -504,6 +505,11 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             );
         }
         "unlisted-dependency" => {}
+        "unlisted-binary" => {
+            m.note = Some(
+                "Needs installed dependencies; a project without a root node_modules reports none",
+            );
+        }
         _ => return false,
     }
     true
@@ -1529,6 +1535,11 @@ mod tests {
             "unused-store-member".to_string(),
             "UnusedMember".to_string(),
             "UnusedStoreMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-namespace-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedNamespaceMemberFinding".to_string()
         )));
         assert_eq!(
             expected, aliases,

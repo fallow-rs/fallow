@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum PlaywrightTestKey {
+enum PlaywrightTestKey {
     Export(ExportKey),
     Local { file_id: FileId, local_name: String },
 }

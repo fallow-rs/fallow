@@ -141,6 +141,7 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'deny.toml'
+              - 'cargo-fallow-baseline.json'
               - '.clippy.toml'
               - '.config/nextest.toml'
               - 'scripts/nextest-run-tmpdir.sh'
@@ -220,6 +221,7 @@ jobs:
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
+              - 'crates/mcp/src/tools/rust.rs'
               - 'crates/mcp/Cargo.toml'
               - 'crates/mcp/src/lib.rs'
               - 'crates/mcp/src/server/tests/e2e.rs'
@@ -1044,15 +1046,6 @@ jobs:
         run: node scripts/check-audit-schema-doc-sync.mjs
       - name: Agent adapter drift
         run: npm run check:agent-adapters
-      # Same rule as the file-size pre-commit step, against the merge base.
-      # It checks .rs files. The "File length" step of the "Fallow Self
-      # Analysis" job checks .mjs and .ts files. It is the last step and runs
-      # after a failed step, so a growth failure hides no other result.
-      - name: Large file growth
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: node scripts/check-file-size.mjs --base "origin/$BASE_REF"
 
   # The JS Lint job runs the companion tests on the current Node.js 26 and
   # without Bun. This job runs them on the lowest Node.js and Bun versions
@@ -1340,8 +1333,8 @@ jobs:
           fi
       # A .mjs or .ts file over 2000 lines must not grow: health.maxFileLines
       # in scripts/fallow-file-length.json. The audit fails on a new long file and on a long
-      # file that grew by 5 lines or more. scripts/check-file-size.mjs holds
-      # the same limit for .rs files in the "JS Lint and Format" job.
+      # file that grew by 5 lines or more. `cargo fallow size` holds the same
+      # limit for .rs files in the "Rust Structure" job.
       - name: File length
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: ./target/debug/fallow audit --config scripts/fallow-file-length.json --base HEAD^1 --no-css --quiet
@@ -1607,20 +1600,44 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
 
-  shear:
-    name: Unused Dependencies
-    needs: changes
-    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
+  # cargo-fallow checks the Rust workspace: unused dependencies and files,
+  # visibility, crate boundaries, complexity and duplication. The
+  # configuration is under [workspace.metadata.fallow] in Cargo.toml. See
+  # docs/development/quality-gates.md#rust-structure.
+  # The job has no path filter, so each pull request gets the growth check.
+  cargo-fallow:
+    name: Rust Structure
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
+      # The size step compares HEAD with the merge base of the pull request.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
-          tool: cargo-shear
-      - run: cargo shear
+          fetch-depth: 0
+          persist-credentials: false
+      # The action checks the signature and the checksum of the release
+      # binary before it runs it. Each clone group is a warning, and the
+      # warnings would fill the annotations. The job summary lists the errors.
+      - name: Static checks
+        uses: fallow-rs/cargo-fallow@9a2ddc756efe868de68a25d96d960db0fd32dc20 # v0.1.0
+        with:
+          install: release
+          baseline: cargo-fallow-baseline.json
+          annotations: 'false'
+      # A .rs file over 2000 lines must not grow. The "File length" step of
+      # the "Fallow Self Analysis" job checks .mjs and .ts files.
+      - name: Large file growth
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: fallow-rs/cargo-fallow@9a2ddc756efe868de68a25d96d960db0fd32dc20 # v0.1.0
+        with:
+          command: size
+          base: auto
+          install: path
+          # With `--fail-on-growth`, a base that the action cannot read exits
+          # 2. With the default `--fail-on-issues`, the gate is skipped.
+          args: --fail-on-growth
 
   zizmor:
     name: Actions Security
@@ -1827,7 +1844,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor, similar-code-sidecar]
+    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, cargo-fallow, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor, similar-code-sidecar]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}

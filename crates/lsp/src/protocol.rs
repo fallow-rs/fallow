@@ -54,6 +54,7 @@ pub struct AnalysisCompleteParams {
     pub unused_optional_dependencies: usize,
     pub unused_enum_members: usize,
     pub unused_class_members: usize,
+    pub unused_namespace_members: usize,
     pub unused_store_members: usize,
     pub unprovided_injects: usize,
     pub unrendered_components: usize,
@@ -71,7 +72,10 @@ pub struct AnalysisCompleteParams {
     pub unused_load_data_keys: usize,
     pub unresolved_imports: usize,
     pub unlisted_dependencies: usize,
+    pub unlisted_binaries: usize,
     pub duplicate_exports: usize,
+    #[serde(default)]
+    pub duplicate_export_aliases: usize,
     pub type_only_dependencies: usize,
     pub test_only_dependencies: usize,
     pub dev_dependencies_in_production: usize,
@@ -149,6 +153,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         unused_optional_dependencies: results.unused_optional_dependencies.len(),
         unused_enum_members: results.unused_enum_members.len(),
         unused_class_members: results.unused_class_members.len(),
+        unused_namespace_members: results.unused_namespace_members.len(),
         unused_store_members: results.unused_store_members.len(),
         unprovided_injects: results.unprovided_injects.len(),
         unrendered_components: results.unrendered_components.len(),
@@ -165,7 +170,9 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         unused_load_data_keys: results.unused_load_data_keys.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
+        unlisted_binaries: results.unlisted_binaries.len(),
         duplicate_exports: results.duplicate_exports.len(),
+        duplicate_export_aliases: results.duplicate_export_aliases.len(),
         type_only_dependencies: results.type_only_dependencies.len(),
         test_only_dependencies: results.test_only_dependencies.len(),
         dev_dependencies_in_production: results.dev_dependencies_in_production.len(),
@@ -187,6 +194,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
 }
 
 #[cfg(test)]
+// fallow-ignore-next-line unnecessary-public -- `pub` in a private module: https://github.com/fallow-rs/cargo-fallow/issues/67
 pub fn analysis_complete_params_for_test(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
@@ -195,6 +203,7 @@ pub fn analysis_complete_params_for_test(
 }
 
 #[cfg(test)]
+// fallow-ignore-next-line unnecessary-public -- `pub` in a private module: https://github.com/fallow-rs/cargo-fallow/issues/67
 pub fn analysis_complete_params_with_scope_for_test(
     results: &AnalysisResults,
     duplication: &DuplicationReport,

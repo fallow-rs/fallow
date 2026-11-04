@@ -1641,7 +1641,7 @@ fn unwrap_to_identifier_name<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
 ///
 /// Handles `const config = { ... }`, `const config: Type = { ... }`,
 /// and `const config = defineConfig({ ... })`.
-pub(crate) fn find_variable_init_object<'a>(
+fn find_variable_init_object<'a>(
     program: &'a Program,
     name: &str,
 ) -> Option<&'a ObjectExpression<'a>> {

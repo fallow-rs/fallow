@@ -45,6 +45,7 @@ pub struct DeadCodeOptions {
     pub deprecated_exports_in_use: Option<bool>,
     pub unused_enum_members: Option<bool>,
     pub unused_class_members: Option<bool>,
+    pub unused_namespace_members: Option<bool>,
     pub unused_store_members: Option<bool>,
     pub unprovided_injects: Option<bool>,
     pub unrendered_components: Option<bool>,
@@ -61,7 +62,9 @@ pub struct DeadCodeOptions {
     pub unused_load_data_keys: Option<bool>,
     pub unresolved_imports: Option<bool>,
     pub unlisted_deps: Option<bool>,
+    pub unlisted_binaries: Option<bool>,
     pub duplicate_exports: Option<bool>,
+    pub duplicate_export_aliases: Option<bool>,
     pub circular_deps: Option<bool>,
     pub re_export_cycles: Option<bool>,
     pub package_cycles: Option<bool>,
@@ -425,6 +428,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 deprecated_exports_in_use: value.deprecated_exports_in_use.unwrap_or(false),
                 unused_enum_members: value.unused_enum_members.unwrap_or(false),
                 unused_class_members: value.unused_class_members.unwrap_or(false),
+                unused_namespace_members: value.unused_namespace_members.unwrap_or(false),
                 unused_store_members: value.unused_store_members.unwrap_or(false),
                 unprovided_injects: value.unprovided_injects.unwrap_or(false),
                 unrendered_components: value.unrendered_components.unwrap_or(false),
@@ -441,7 +445,9 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 unused_load_data_keys: value.unused_load_data_keys.unwrap_or(false),
                 unresolved_imports: value.unresolved_imports.unwrap_or(false),
                 unlisted_deps: value.unlisted_deps.unwrap_or(false),
+                unlisted_binaries: value.unlisted_binaries.unwrap_or(false),
                 duplicate_exports: value.duplicate_exports.unwrap_or(false),
+                duplicate_export_aliases: value.duplicate_export_aliases.unwrap_or(false),
                 circular_deps: value.circular_deps.unwrap_or(false),
                 re_export_cycles: value.re_export_cycles.unwrap_or(false),
                 package_cycles: value.package_cycles.unwrap_or(false),
@@ -719,6 +725,7 @@ fn to_napi_error(env: Env, error: api::ProgrammaticError) -> napi::Error {
 
 #[derive(Debug)]
 #[doc(hidden)]
+// fallow-ignore-next-line unnecessary-public -- a #[napi] pub fn returns it: https://github.com/fallow-rs/cargo-fallow/issues/66
 pub enum ProgrammaticOutput {
     DeadCode(Box<api::DeadCodeProgrammaticOutput>),
     CircularDependencies(Box<api::CircularDependenciesProgrammaticOutput>),
@@ -760,6 +767,7 @@ type ProgrammaticWork =
     Box<dyn FnOnce() -> Result<ProgrammaticOutput, api::ProgrammaticError> + Send + 'static>;
 
 #[doc(hidden)]
+// fallow-ignore-next-line unnecessary-public -- a #[napi] pub fn returns it: https://github.com/fallow-rs/cargo-fallow/issues/66
 pub struct ProgrammaticTask {
     task: Option<ProgrammaticWork>,
     error: Option<api::ProgrammaticError>,
@@ -1024,6 +1032,7 @@ mod tests {
             deprecated_exports_in_use: Some(true),
             unused_enum_members: Some(true),
             unused_class_members: Some(true),
+            unused_namespace_members: Some(true),
             unused_store_members: Some(true),
             unprovided_injects: Some(true),
             unrendered_components: Some(true),
@@ -1040,7 +1049,9 @@ mod tests {
             unused_load_data_keys: Some(true),
             unresolved_imports: Some(true),
             unlisted_deps: Some(true),
+            unlisted_binaries: None,
             duplicate_exports: Some(true),
+            duplicate_export_aliases: Some(true),
             circular_deps: Some(true),
             re_export_cycles: Some(true),
             package_cycles: Some(true),

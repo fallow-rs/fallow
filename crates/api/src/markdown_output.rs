@@ -203,6 +203,51 @@ fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, ro
 
     markdown_section(
         out,
+        &results.unlisted_binaries,
+        "Unlisted binaries",
+        |binary| {
+            let sites: Vec<String> = binary
+                .binary
+                .used_in
+                .iter()
+                .map(|site| {
+                    markdown_code_span(&format!(
+                        "{}:{}",
+                        markdown_relative_path(&site.path, root),
+                        site.line
+                    ))
+                })
+                .collect();
+            vec![format!(
+                "- {} used in {}",
+                markdown_code_span(&binary.binary.binary_name),
+                sites.join(", ")
+            )]
+        },
+    );
+
+    markdown_section(
+        out,
+        &results.duplicate_export_aliases,
+        "Duplicate export aliases",
+        |f| {
+            vec![format!(
+                "- {}:{} {} is exported as {}",
+                markdown_code_span(&markdown_relative_path(&f.alias.path, root)),
+                f.alias.line,
+                markdown_code_span(&f.alias.local_name),
+                f.alias
+                    .export_names
+                    .iter()
+                    .map(|name| markdown_code_span(name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )]
+        },
+    );
+
+    markdown_section(
+        out,
         &results.duplicate_exports,
         "Duplicate exports",
         |dup| {
@@ -290,6 +335,14 @@ fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, ro
         root,
         |m| m.member.path.as_path(),
         |m: &UnusedStoreMemberFinding| format_member(&m.member, &m.reachability_caveats),
+    );
+    markdown_grouped_section(
+        out,
+        &results.unused_namespace_members,
+        "Unused namespace members",
+        root,
+        |m| m.member.path.as_path(),
+        |m: &UnusedNamespaceMemberFinding| format_member(&m.member, &m.reachability_caveats),
     );
 }
 
@@ -3058,256 +3111,20 @@ fn walkthrough_effort_label(effort: fallow_output::ReviewEffort) -> &'static str
 }
 
 #[cfg(test)]
-mod duplication_markdown_tests {
-    use std::path::{Path, PathBuf};
-
-    use fallow_types::duplicates::{
-        CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
-    };
-
-    use super::build_duplication_markdown;
-
-    fn capped_report(
-        shown: usize,
-        corpus_groups: usize,
-        corpus_families: usize,
-    ) -> DuplicationReport {
-        let group = |n: usize| CloneGroup {
-            instances: vec![CloneInstance {
-                is_symlink: false,
-                file: PathBuf::from(format!("/project/src/a{n}.ts")),
-                start_line: 1,
-                end_line: 4,
-                start_col: 0,
-                end_col: 10,
-                fragment: "const a = 1;".to_string(),
-            }],
-            token_count: 8,
-            line_count: 4,
-            similarity: None,
-        };
-        let family = |n: usize| CloneFamily {
-            files: vec![PathBuf::from(format!("/project/src/a{n}.ts"))],
-            groups: vec![group(n)],
-            total_duplicated_lines: 4,
-            total_duplicated_tokens: 8,
-            suggestions: Vec::new(),
-        };
-        DuplicationReport {
-            clone_groups: (0..shown).map(group).collect(),
-            clone_families: (0..shown.min(corpus_families)).map(family).collect(),
-            mirrored_directories: Vec::new(),
-            stats: DuplicationStats {
-                clone_groups: corpus_groups,
-                clone_families: corpus_families,
-                clone_instances: corpus_groups,
-                total_files: 40,
-                files_with_clones: 12,
-                total_lines: 1000,
-                duplicated_lines: 252,
-                total_tokens: 5000,
-                duplicated_tokens: 1200,
-                duplication_percentage: 25.2,
-                ..DuplicationStats::default()
-            },
-        }
-    }
-
-    // The heading and the duplication rate beside it are read as one sentence
-    // about one scope, so a capped listing must not rewrite the heading.
-    #[test]
-    fn a_capped_listing_still_names_the_measured_corpus() {
-        let md = build_duplication_markdown(&capped_report(3, 251, 163), Path::new("/project"));
-        assert!(
-            md.starts_with("## Fallow: 251 clone groups found (25.2% duplication)"),
-            "got: {md}"
-        );
-        assert!(
-            md.contains("_Listing 3 of them; 248 more clone groups and 160 more clone families withheld by a display limit._"),
-            "got: {md}"
-        );
-    }
-
-    // An untruncated run must render exactly as before, note included.
-    #[test]
-    fn an_untruncated_listing_carries_no_omission_note() {
-        let md = build_duplication_markdown(&capped_report(3, 3, 0), Path::new("/project"));
-        assert!(
-            md.starts_with("## Fallow: 3 clone groups found (25.2% duplication)"),
-            "got: {md}"
-        );
-        assert!(!md.contains("withheld by a display limit"), "got: {md}");
-    }
-}
+#[path = "markdown_output_duplication_markdown_tests.rs"]
+mod duplication_markdown_tests;
 
 #[cfg(test)]
 #[path = "markdown_output_health_tests.rs"]
 mod health_markdown_tests;
 
 #[cfg(test)]
-mod caveat_markdown_tests {
-    use std::path::{Path, PathBuf};
-
-    use fallow_types::extract::MemberKind;
-    use fallow_types::output_dead_code::{
-        ReachabilityCaveat, UnusedClassMemberFinding, UnusedDependencyFinding,
-        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedStoreMemberFinding,
-    };
-    use fallow_types::results::{
-        AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
-        UnusedMember,
-    };
-
-    use super::build_markdown;
-
-    fn caveated_results(root: &Path) -> AnalysisResults {
-        let caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
-        let mut results = AnalysisResults::default();
-
-        let mut file = UnusedFileFinding::with_actions(UnusedFile {
-            path: root.join("src/lib.ts"),
-        });
-        file.reachability_caveats.clone_from(&caveats);
-        results.unused_files.push(file);
-
-        let mut export = UnusedExportFinding::with_actions(UnusedExport {
-            path: root.join("src/api.ts"),
-            export_name: "needed".to_owned(),
-            is_type_only: false,
-            line: 3,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-            deprecated: false,
-            deprecated_reason: None,
-        });
-        export.reachability_caveats.clone_from(&caveats);
-        results.unused_exports.push(export);
-
-        let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "left-pad".to_owned(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        });
-        dep.reachability_caveats.clone_from(&caveats);
-        results.unused_dependencies.push(dep);
-
-        let member = |parent: &str, name: &str, kind| UnusedMember {
-            path: root.join("src/api.ts"),
-            parent_name: parent.to_owned(),
-            member_name: name.to_owned(),
-            kind,
-            line: 7,
-            col: 2,
-        };
-        let mut enum_member =
-            UnusedEnumMemberFinding::with_actions(member("Mode", "Legacy", MemberKind::EnumMember));
-        enum_member.reachability_caveats.clone_from(&caveats);
-        results.unused_enum_members.push(enum_member);
-
-        let mut class_member = UnusedClassMemberFinding::with_actions(member(
-            "Widget",
-            "render",
-            MemberKind::ClassMethod,
-        ));
-        class_member.reachability_caveats.clone_from(&caveats);
-        results.unused_class_members.push(class_member);
-
-        let mut store_member = UnusedStoreMemberFinding::with_actions(member(
-            "useCart",
-            "subtotal",
-            MemberKind::StoreMember,
-        ));
-        store_member.reachability_caveats.clone_from(&caveats);
-        results.unused_store_members.push(store_member);
-
-        results
-    }
-
-    /// The markdown document is the PR-comment surface, so a reader deletes
-    /// straight off this listing. Every caveated finding line has to hedge.
-    #[test]
-    fn caveated_findings_hedge_their_markdown_lines() {
-        let root = PathBuf::from("/project");
-
-        let out = build_markdown(&caveated_results(&root), &root);
-
-        assert!(
-            out.contains("- `src/lib.ts` *(caveat: incomplete import graph)*"),
-            "{out}"
-        );
-        assert!(
-            out.contains("- :3 `needed` *(caveat: incomplete import graph)*"),
-            "{out}"
-        );
-        assert!(
-            out.contains("- `left-pad` *(caveat: incomplete import graph)*"),
-            "{out}"
-        );
-        for expected in [
-            "- :7 `Mode.Legacy` *(caveat: incomplete import graph)*",
-            "- :7 `Widget.render` *(caveat: incomplete import graph)*",
-            "- :7 `useCart.subtotal` *(caveat: incomplete import graph)*",
-        ] {
-            assert!(out.contains(expected), "missing {expected}: {out}");
-        }
-    }
-
-    /// A run that read every file it discovered renders exactly as before.
-    #[test]
-    fn a_clean_run_renders_no_caveat() {
-        let root = PathBuf::from("/project");
-        let mut results = caveated_results(&root);
-        results.unused_files[0].reachability_caveats.clear();
-        results.unused_exports[0].reachability_caveats.clear();
-        results.unused_dependencies[0].reachability_caveats.clear();
-        results.unused_enum_members[0].reachability_caveats.clear();
-        results.unused_class_members[0].reachability_caveats.clear();
-        results.unused_store_members[0].reachability_caveats.clear();
-
-        let out = build_markdown(&results, &root);
-
-        assert!(!out.contains("caveat"), "{out}");
-    }
-}
+#[path = "markdown_output_caveat_tests.rs"]
+mod caveat_markdown_tests;
 
 #[cfg(test)]
-mod markdown_code_span_tests {
-    use std::path::{Path, PathBuf};
-
-    use super::markdown_grouped_section;
-
-    #[test]
-    fn grouped_paths_use_safe_code_span_delimiters_and_padding() {
-        let paths = vec![
-            PathBuf::from("src/ordinary.ts"),
-            PathBuf::from("src/one`# injected.md"),
-            PathBuf::from("src/two``ticks.ts"),
-            PathBuf::from(" leading and trailing "),
-            PathBuf::from("`leading-tick.ts"),
-        ];
-        let mut output = String::new();
-
-        markdown_grouped_section(
-            &mut output,
-            &paths,
-            "Paths",
-            Path::new("/project"),
-            PathBuf::as_path,
-            |_| "detail".to_string(),
-        );
-
-        assert!(output.contains("- `src/ordinary.ts`\n"));
-        assert!(output.contains("- ``src/one`# injected.md``\n"));
-        assert!(output.contains("- ```src/two``ticks.ts```\n"));
-        assert!(output.contains("- `  leading and trailing  `\n"));
-        assert!(output.contains("- `` `leading-tick.ts ``\n"));
-        assert!(!output.contains("\\`"));
-    }
-}
+#[path = "markdown_code_span_tests.rs"]
+mod markdown_code_span_tests;
 
 #[cfg(test)]
 mod walkthrough_markdown_tests {

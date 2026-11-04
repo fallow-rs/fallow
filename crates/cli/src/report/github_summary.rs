@@ -20,8 +20,12 @@
 
 #[path = "github_summary_component_health.rs"]
 mod component_health;
+#[path = "github_summary_fix.rs"]
+mod fix_summary;
 #[path = "github_summary_runtime_footer.rs"]
 mod runtime_footer;
+
+pub use fix_summary::render_fix_summary;
 
 use component_health::{component_shape_sections, prop_drilling_section};
 use runtime_footer::health_runtime_footer;
@@ -37,6 +41,13 @@ use serde_json::Value;
 use super::github::{PathRebase, arr, b, fmt_num, num, resolve_render_options, s, u};
 use super::github_annotations::EnvelopeKind;
 use crate::report::sink::outln;
+#[path = "github_summary_audit.rs"]
+mod audit;
+use audit::render_audit_summary;
+
+#[path = "github_summary_architecture.rs"]
+mod architecture_sections;
+use architecture_sections::check_sections_architecture;
 
 const DEAD_CODE_DOCS: &str = "https://fallow.tools/docs/explanations/dead-code/";
 const HEALTH_DOCS: &str = "https://fallow.tools/docs/explanations/health/";
@@ -294,6 +305,11 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "unused-store-members",
     ),
     (
+        "Unused namespace members",
+        "unused_namespace_members",
+        "unused-namespace-members",
+    ),
+    (
         "Unresolved imports",
         "unresolved_imports",
         "unresolved-imports",
@@ -304,9 +320,19 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "unlisted-dependencies",
     ),
     (
+        "Unlisted binaries",
+        "unlisted_binaries",
+        "unlisted-binaries",
+    ),
+    (
         "Duplicate exports",
         "duplicate_exports",
         "duplicate-exports",
+    ),
+    (
+        "Duplicate export aliases",
+        "duplicate_export_aliases",
+        "duplicate-export-aliases",
     ),
     (
         "Circular dependencies",
@@ -718,6 +744,12 @@ fn check_sections_core() -> Vec<SectionSpec> {
             row: member_row,
         },
         SectionSpec {
+            name: "Unused namespace members",
+            key: "unused_namespace_members",
+            header: "Exported members of an exported TypeScript namespace that no code reads.\n\n| File | Line | Namespace | Member |\n|------|-----:|-----------|--------|\n",
+            row: member_row,
+        },
+        SectionSpec {
             name: "Unresolved imports",
             key: "unresolved_imports",
             header: "Import paths that could not be resolved - check for missing packages or broken paths.\n\n| File | Line | Import |\n|------|-----:|--------|\n",
@@ -759,6 +791,32 @@ fn check_sections_core() -> Vec<SectionSpec> {
                     format!("{shown}{more}")
                 };
                 format!("| {} | {cell} |", code_cell(it, "package_name"))
+            },
+        },
+        SectionSpec {
+            name: "Unlisted binaries",
+            key: "unlisted_binaries",
+            header: "Binaries that scripts or process calls run, but that no installed package provides.\n\n| Binary | Used in |\n|--------|--------|\n",
+            row: |it| {
+                let sites: Vec<&Value> = arr(it, "used_in").collect();
+                let shown = sites
+                    .iter()
+                    .take(3)
+                    .map(|site| {
+                        markdown_table_code_span(&format!(
+                            "{}:{}",
+                            s(site, "path"),
+                            num(site, "line")
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let more = if sites.len() > 3 {
+                    format!(" *+{} more*", sites.len() - 3)
+                } else {
+                    String::new()
+                };
+                format!("| {} | {shown}{more} |", code_cell(it, "binary_name"))
             },
         },
         SectionSpec {
@@ -833,183 +891,6 @@ fn path_line_cell(it: &Value) -> String {
     clippy::too_many_lines,
     reason = "a flat data table of 14 per-kind row templates ported 1:1 from summary-check.jq; splitting would obscure the correspondence"
 )]
-fn check_sections_architecture() -> Vec<SectionSpec> {
-    vec![
-        SectionSpec {
-            name: "Re-export cycles",
-            key: "re_export_cycles",
-            header: "Barrel files that re-export from each other in a loop. Chain propagation through the loop is a no-op, so imports through any member may silently come up empty.\n\n| Cycle | Kind | Members |\n|-------|------|--------:|\n",
-            row: |it| {
-                let cycle = arr(it, "files")
-                    .filter_map(Value::as_str)
-                    .map(markdown_table_code_span)
-                    .collect::<Vec<_>>()
-                    .join(" <-> ");
-                format!(
-                    "| {cycle} | {} | {} |",
-                    markdown_table_text(s(it, "kind")),
-                    arr(it, "files").count()
-                )
-            },
-        },
-        SectionSpec {
-            name: "Package cycles",
-            key: "package_cycles",
-            header: "Workspace packages that import each other in a loop. Packages in a cycle cannot be built in dependency order.\n\n| Cycle | Example import | Packages |\n|-------|----------------|---------:|\n",
-            row: |it| {
-                let mut chain: Vec<String> = arr(it, "packages")
-                    .filter_map(Value::as_str)
-                    .map(markdown_table_code_span)
-                    .collect();
-                if let Some(first) = chain.first().cloned() {
-                    chain.push(first);
-                }
-                let example = arr(it, "edges")
-                    .next()
-                    .map_or_else(String::new, path_line_cell);
-                let note = if it.get("group_truncated").and_then(Value::as_bool) == Some(true) {
-                    format!(
-                        " ({})",
-                        fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
-                    )
-                } else {
-                    String::new()
-                };
-                format!(
-                    "| {}{note} | {example} | {} |",
-                    chain.join(" \u{2192} "),
-                    arr(it, "packages").count()
-                )
-            },
-        },
-        SectionSpec {
-            name: "Boundary violations",
-            key: "boundary_violations",
-            header: "Imports that cross defined architecture zone boundaries.\n\n| From | To | Zones |\n|------|-----|-------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} \u{2192} {} |",
-                    markdown_table_code_span(&format!(
-                        "{}:{}",
-                        s(it, "from_path"),
-                        num(it, "line")
-                    )),
-                    code_cell(it, "to_path"),
-                    markdown_table_code_span(s(it, "from_zone")),
-                    markdown_table_code_span(s(it, "to_zone")),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Boundary coverage",
-            key: "boundary_coverage_violations",
-            header: "Files that match no configured architecture boundary zone.\n\n| File |\n|------|\n",
-            row: |it| format!("| {} |", path_line_cell(it)),
-        },
-        SectionSpec {
-            name: "Boundary calls",
-            key: "boundary_call_violations",
-            header: "Calls from zoned files to callees forbidden for that zone.\n\n| File | Callee | Zone | Pattern |\n|------|--------|------|---------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} | {} |",
-                    path_line_cell(it),
-                    code_cell(it, "callee"),
-                    markdown_table_code_span(s(it, "zone")),
-                    code_cell(it, "pattern"),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Policy violations",
-            key: "policy_violations",
-            header: "Banned calls, imports, and catalogue-derived effects matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} | {} |",
-                    path_line_cell(it),
-                    code_cell(it, "matched"),
-                    markdown_table_code_span(&format!("{}/{}", s(it, "pack"), s(it, "rule_id"))),
-                    markdown_table_text(s(it, "severity")),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Invalid client exports",
-            key: "invalid_client_exports",
-            header: "`\"use client\"` files exporting a Next.js server-only / route-config name. Next.js rejects this at build time.\n\n| File | Export | Directive |\n|------|--------|-----------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} |",
-                    path_line_cell(it),
-                    code_cell(it, "export_name"),
-                    markdown_table_code_span(&format!("\"{}\"", s(it, "directive"))),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Mixed client/server barrels",
-            key: "mixed_client_server_barrels",
-            header: "Barrels re-exporting both a `\"use client\"` module and a server-only module. One import drags the other's directive across the boundary.\n\n| File | Client origin | Server origin |\n|------|---------------|---------------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} |",
-                    path_line_cell(it),
-                    code_cell(it, "client_origin"),
-                    code_cell(it, "server_origin"),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Misplaced directives",
-            key: "misplaced_directives",
-            header: "`\"use client\"` / `\"use server\"` directives written after a non-directive statement, so the RSC bundler ignores them. Move the directive to the top of the file.\n\n| File | Directive |\n|------|-----------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} |",
-                    path_line_cell(it),
-                    markdown_table_code_span(&format!("\"{}\"", s(it, "directive"))),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Unused server actions",
-            key: "unused_server_actions",
-            header: "Next.js Server Actions (exports of a `\"use server\"` file) that no project code references. The endpoint stays POST-able, but no code calls it (likely dead).\n\n| File | Action |\n|------|--------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} |",
-                    path_line_cell(it),
-                    code_cell(it, "action_name")
-                )
-            },
-        },
-        SectionSpec {
-            name: "Route collisions",
-            key: "route_collisions",
-            header: "Next.js App Router route files that resolve to the same URL within one app-root. Next.js fails the build because a URL can have only one owner.\n\n| File | URL |\n|------|-----|\n",
-            row: |it| format!("| {} | {} |", code_cell(it, "path"), code_cell(it, "url")),
-        },
-        SectionSpec {
-            name: "Dynamic segment conflicts",
-            key: "dynamic_segment_name_conflicts",
-            header: "Sibling Next.js dynamic route segments at one position using different slug names. Next.js requires one consistent name per dynamic path.\n\n| File | Position | Segments |\n|------|----------|----------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} |",
-                    code_cell(it, "path"),
-                    code_cell(it, "position"),
-                    markdown_table_code_span(&plain_join(it, "conflicting_segments", ", ")),
-                )
-            },
-        },
-    ]
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "a flat data table of 14 per-kind row templates ported 1:1 from summary-check.jq; splitting would obscure the correspondence"
-)]
 fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
     vec![
         SectionSpec {
@@ -1076,6 +957,23 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
             key: "unused_svelte_events",
             header: "Svelte components dispatching a `createEventDispatcher` event listened to nowhere in the project (cross-file dead-output direction).\n\n| File | Component | Event |\n|------|-----------|-------|\n",
             row: |it| component_detail_row(it, "event_name"),
+        },
+        SectionSpec {
+            name: "Duplicate export aliases",
+            key: "duplicate_export_aliases",
+            header: "One binding exported under two or more names in one file.\n\n| File | Binding | Names |\n|------|---------|-------|\n",
+            row: |it| {
+                let names = arr(it, "export_names")
+                    .filter_map(Value::as_str)
+                    .map(markdown_table_code_span)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "| {} | {} | {names} |",
+                    path_line_cell(it),
+                    code_cell(it, "local_name")
+                )
+            },
         },
         SectionSpec {
             name: "Unused Effect layers",
@@ -2109,6 +2007,11 @@ const AUDIT_EXPORT_DEP_ROWS: &[AuditRowSpec] = &[
     ),
     ("Unused enum member", "unused_enum_members", member_item),
     ("Unused class member", "unused_class_members", member_item),
+    (
+        "Unused namespace member",
+        "unused_namespace_members",
+        member_item,
+    ),
     ("Unused store member", "unused_store_members", member_item),
     ("Unresolved import", "unresolved_imports", |it| {
         code_cell(it, "specifier")
@@ -2159,6 +2062,9 @@ const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
             code_cell(it, "component_name"),
             code_cell(it, "event_name")
         )
+    }),
+    ("Duplicate export alias", "duplicate_export_aliases", |it| {
+        format!("binding {}", code_cell(it, "local_name"))
     }),
     ("Unused Effect layer", "unused_effect_layers", |it| {
         format!("layer {}", code_cell(it, "name"))
@@ -2282,6 +2188,21 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
             "Unlisted dependency",
             first_import_site(it),
             code_cell(it, "package_name"),
+            it,
+        ));
+    }
+    for it in arr(dead_code, "unlisted_binaries") {
+        let site = arr(it, "used_in").next().map_or_else(String::new, |site| {
+            markdown_table_code_span(&format!(
+                "{}:{}",
+                rel_path_absolute_only(s(site, "path")),
+                num(site, "line"),
+            ))
+        });
+        rows.push(audit_row(
+            "Unlisted binary",
+            site,
+            code_cell(it, "binary_name"),
             it,
         ));
     }
@@ -2766,113 +2687,6 @@ fn audit_worsened_note(env: &Value, attribution: &Value) -> String {
     )
 }
 
-/// Port of `summary-audit.jq`.
-#[must_use]
-fn render_audit_summary(env: &Value) -> String {
-    let verdict = str_or(env, "verdict", "pass");
-    let summary = env.get("summary").cloned().unwrap_or(Value::Null);
-    let attribution = env.get("attribution").cloned().unwrap_or(Value::Null);
-    let dead_code = env.get("dead_code").cloned().unwrap_or(Value::Null);
-    let mut dead_rows = audit_dead_code_rows(&dead_code);
-    dead_rows.sort_by(|a, b| {
-        audit_priority(env, a.severity, a.status)
-            .cmp(&audit_priority(env, b.severity, b.status))
-            .then_with(|| a.location.cmp(&b.location))
-            .then_with(|| a.kind.cmp(b.kind))
-            .then_with(|| a.item.cmp(&b.item))
-    });
-
-    let styling_count = env
-        .get("complexity")
-        .and_then(|complexity| complexity.get("styling_findings"))
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len)
-        .to_string();
-    let rows = [
-        audit_category_row(
-            "Dead code",
-            &summary,
-            "dead_code_skipped",
-            &num(&summary, "dead_code_issues"),
-            &attribution,
-            "dead_code",
-        ),
-        audit_category_row(
-            "Complexity",
-            &summary,
-            "complexity_skipped",
-            &num(&summary, "complexity_findings"),
-            &attribution,
-            "complexity",
-        ),
-        audit_category_row(
-            "Duplication",
-            &summary,
-            "duplication_skipped",
-            &num(&summary, "duplication_clone_groups"),
-            &attribution,
-            "duplication",
-        ),
-        audit_category_row(
-            "Styling",
-            &summary,
-            "complexity_skipped",
-            &styling_count,
-            &attribution,
-            "styling",
-        ),
-    ]
-    .join("\n");
-
-    let mut out = format!(
-        "## Fallow Audit\n\n> {} \u{b7} {} \u{b7} {}ms\n\n| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n{rows}\n\n",
-        audit_verdict_label(verdict),
-        plural_n(u(env, "changed_files_count") as usize, "changed file"),
-        num(env, "elapsed_ms"),
-    );
-    out.push_str(&audit_worsened_note(env, &attribution));
-    if !dead_rows.is_empty() {
-        let rows = dead_rows
-            .iter()
-            .take(10)
-            .map(|row| {
-                format!(
-                    "| {} | {} | {} | {} | {} |",
-                    row.kind, row.location, row.item, row.status, row.severity,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let tail = if dead_rows.len() > 10 {
-            format!(
-                "\n\n> {} more dead-code findings in the full audit report",
-                dead_rows.len() - 10
-            )
-        } else {
-            String::new()
-        };
-        let _ = write!(
-            out,
-            "### Dead Code\n\n| Type | Location | Item | Status | Rule severity |\n|:-----|:---------|:-----|:-------|:--------------|\n{rows}{tail}\n\n"
-        );
-    }
-    out.push_str(&audit_complexity_section(env));
-    out.push_str(&audit_duplication_section(env));
-    out.push_str(&audit_styling_section(env));
-    out.push_str(&audit_diff_risk_section(env));
-    out.push_str(match s(&attribution, "gate") {
-        "all" => "*Audit gate: all. Every finding in changed files affects the verdict.*",
-        "new-only" if worsened_gates(env) => {
-            "*Audit gate: new-only, worsened: error. Inherited findings that got worse fail the verdict like introduced findings. Other inherited findings do not fail the verdict.*"
-        }
-        "new-only" => {
-            "*Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*"
-        }
-        _ => "*Audit gate: unknown. New-versus-inherited attribution is unavailable.*",
-    });
-    out
-}
-
 // ---------------------------------------------------------------------------
 // summary-security.jq
 // ---------------------------------------------------------------------------
@@ -2981,104 +2795,6 @@ fn fix_detail_block(label: &str, entries: &[&Value], row: impl Fn(&Value) -> Str
         String::new()
     };
     format!("**{label} ({})**\n{rows}{tail}", entries.len())
-}
-
-/// Port of `summary-fix.jq`.
-#[must_use]
-pub fn render_fix_summary(env: &Value) -> String {
-    let exports = fix_entries(env, "remove_export");
-    let dependencies = fix_entries(env, "remove_dependency");
-    let fix_attempts = arr(env, "fixes").filter(|fix| !b(fix, "skipped")).count();
-    let content_changed = u(env, "skipped_content_changed") as usize;
-    let mixed_eol = u(env, "skipped_mixed_line_endings") as usize;
-    let low_confidence = u(env, "skipped_low_confidence_exports") as usize;
-    let low_confidence_deps = u(env, "skipped_low_confidence_dependencies") as usize;
-    let low_confidence_members = u(env, "skipped_low_confidence_members") as usize;
-    let dry_run = b(env, "dry_run");
-
-    if fix_attempts == 0
-        && content_changed == 0
-        && mixed_eol == 0
-        && low_confidence == 0
-        && low_confidence_deps == 0
-        && low_confidence_members == 0
-    {
-        return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
-    }
-
-    let mut out = String::from("## Fallow - Auto-fix\n\n");
-    out.push_str(if dry_run {
-        "**Dry run**: would apply"
-    } else {
-        "Applied"
-    });
-    let fix_noun = if fix_attempts == 1 { "fix" } else { "fixes" };
-    let _ = write!(out, " **{fix_attempts} {fix_noun}**");
-    if !dry_run {
-        let _ = write!(out, " ({} succeeded)", num(env, "total_fixed"));
-    }
-    if content_changed > 0 {
-        let _ = write!(
-            out,
-            ", skipped {content_changed} file(s) that changed since analysis"
-        );
-    }
-    if mixed_eol > 0 {
-        let _ = write!(out, ", skipped {mixed_eol} file(s) with mixed line endings");
-    }
-    if low_confidence > 0 {
-        let _ = write!(
-            out,
-            ", kept exports in {low_confidence} file(s) where consumers may be hidden from static analysis"
-        );
-    }
-    if low_confidence_deps > 0 {
-        let _ = write!(
-            out,
-            ", kept {low_confidence_deps} declared package(s) whose only import may sit in a file this run did not fully read"
-        );
-    }
-    if low_confidence_members > 0 {
-        let _ = write!(
-            out,
-            ", kept {low_confidence_members} unused enum member(s) whose only reference may sit in a file this run did not fully analyze"
-        );
-    }
-    out.push_str("\n\n| Type | Count |\n|------|-------|\n");
-    if !exports.is_empty() {
-        let _ = writeln!(out, "| Export removals | {} |", exports.len());
-    }
-    if !dependencies.is_empty() {
-        let _ = writeln!(out, "| Dependency removals | {} |", dependencies.len());
-    }
-    out.push_str("\n<details>\n<summary>View details</summary>\n\n");
-    if !exports.is_empty() {
-        out.push_str(&fix_detail_block("Export removals", &exports, |it| {
-            format!(
-                "- {} - {}",
-                markdown_code_span(&format!("{}:{}", s(it, "path"), num(it, "line"))),
-                markdown_code_span(s(it, "name"))
-            )
-        }));
-        out.push_str("\n\n");
-    }
-    if !dependencies.is_empty() {
-        out.push_str(&fix_detail_block(
-            "Dependency removals",
-            &dependencies,
-            |it| {
-                format!(
-                    "- {} from {} in {}",
-                    markdown_code_span(s(it, "package")),
-                    markdown_code_span(s(it, "location")),
-                    markdown_code_span(s(it, "file")),
-                )
-            },
-        ));
-        out.push('\n');
-    }
-    out.push_str("\n\n</details>");
-    out
 }
 
 // ---------------------------------------------------------------------------

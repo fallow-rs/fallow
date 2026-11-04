@@ -186,6 +186,45 @@ arg_index = 0
 import_provenance = "node:child_process"
 evidence_template = "Non-literal command passed to {callee}(). Candidate for verification: confirm the command/args are not attacker-controlled."
 
+[[matcher]]
+id = "command-injection"
+cwe = 78
+title = "OS command injection sink"
+effect = "shell"
+sink_shape = "member-call"
+callee_patterns = ["shell.exec", "shelljs.exec"]
+arg_index = 0
+import_provenance = "shelljs"
+evidence_template = "Non-literal command passed to {callee}(). Candidate for verification: confirm the command/args are not attacker-controlled."
+
+# `execFile` runs no shell, and tooling code runs computed binary paths all the
+# time. These rows therefore need untrusted input in the argument or module.
+[[matcher]]
+id = "command-injection"
+cwe = 78
+title = "OS command injection sink"
+effect = "shell"
+sink_shape = "member-call"
+callee_patterns = ["child_process.execFile", "child_process.execFileSync"]
+arg_index = 0
+import_provenance = "node:child_process"
+requires_module_source = true
+ignored_source_kinds = ["process-argv"]
+evidence_template = "Non-literal program path passed to {callee}(). Candidate for verification: confirm the program is not attacker-controlled."
+
+[[matcher]]
+id = "command-injection"
+cwe = 78
+title = "OS command injection sink"
+effect = "shell"
+sink_shape = "call"
+callee_patterns = ["execFile", "execFileSync"]
+arg_index = 0
+import_provenance = "node:child_process"
+requires_module_source = true
+ignored_source_kinds = ["process-argv"]
+evidence_template = "Non-literal program path passed to {callee}(). Candidate for verification: confirm the program is not attacker-controlled."
+
 # ── CWE-94/95: Code injection ───────────────────────────────────────────────
 [[matcher]]
 id = "code-injection"
@@ -458,8 +497,62 @@ cwe = 918
 title = "Server-side request forgery sink"
 effect = "network"
 sink_shape = "member-call"
-callee_patterns = ["axios.get", "axios.post", "http.request", "https.request", "superagent.get", "undici.request"]
+callee_patterns = [
+  "axios.get",
+  "axios.post",
+  "axios.put",
+  "axios.patch",
+  "axios.delete",
+  "axios.head",
+  "got.get",
+  "got.post",
+  "got.put",
+  "got.patch",
+  "got.delete",
+  "http.request",
+  "https.request",
+  "superagent.get",
+  "undici.request",
+]
 arg_index = 0
+evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination is not attacker-controlled."
+
+# A bare axios() call usually takes a config object, inline or in a variable,
+# so this row admits only a template, a concatenation or a call result.
+[[matcher]]
+id = "ssrf"
+cwe = 918
+title = "Server-side request forgery sink"
+effect = "network"
+sink_shape = "call"
+callee_patterns = ["axios"]
+arg_index = 0
+arg_kinds = ["template-with-subst", "concat", "call"]
+import_provenance = "axios"
+evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination is not attacker-controlled."
+
+# An Angular HttpClient is often a local named `http`, so `get` needs the Node
+# module import.
+[[matcher]]
+id = "ssrf"
+cwe = 918
+title = "Server-side request forgery sink"
+effect = "network"
+sink_shape = "member-call"
+callee_patterns = ["http.get"]
+arg_index = 0
+import_provenance = "node:http"
+evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination is not attacker-controlled."
+
+[[matcher]]
+id = "ssrf"
+cwe = 918
+title = "Server-side request forgery sink"
+effect = "network"
+sink_shape = "member-call"
+callee_patterns = ["https.get"]
+arg_index = 0
+import_provenance = "node:https"
 evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination is not attacker-controlled."
 
 [[matcher]]
@@ -525,7 +618,8 @@ evidence_template = "A non-public env secret reaches the body/options of {callee
 # that build code also imports, and a module two imports away, stay quiet,
 # because a dev server imports its config and its whole build pipeline.
 # CLI arguments do not count: the user who runs a CLI owns its file system.
-# The direct file-system rows below stay ungated.
+# The `fs.readFile` and `fs.rename` rows stay ungated. The other file-system
+# rows use this gate.
 [[matcher]]
 id = "path-traversal"
 cwe = 22
@@ -549,6 +643,62 @@ sink_shape = "member-call"
 callee_patterns = ["fs.readFile", "fs.readFileSync", "fs.writeFile", "fs.createReadStream", "fs.unlink", "fs.rename"]
 arg_index = 0
 import_provenance = "node:fs"
+evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
+
+# The rows below cover the other write and delete calls, and named imports
+# (`import { readFile } from "node:fs/promises"`). Build and CLI code calls
+# them with computed paths all the time, so they use the `path.join` source
+# gate. A bare callee must be the local binding of the `node:fs` import.
+[[matcher]]
+id = "path-traversal"
+cwe = 22
+title = "File-system path traversal sink"
+effect = "storage"
+sink_shape = "member-call"
+callee_patterns = [
+  "fs.writeFileSync",
+  "fs.appendFile",
+  "fs.appendFileSync",
+  "fs.createWriteStream",
+  "fs.unlinkSync",
+  "fs.rm",
+  "fs.rmSync",
+  "fs.copyFile",
+  "fs.copyFileSync",
+]
+arg_index = 0
+import_provenance = "node:fs"
+requires_module_source = true
+ignored_source_kinds = ["process-argv"]
+evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
+
+[[matcher]]
+id = "path-traversal"
+cwe = 22
+title = "File-system path traversal sink"
+effect = "storage"
+sink_shape = "call"
+callee_patterns = [
+  "readFile",
+  "readFileSync",
+  "writeFile",
+  "writeFileSync",
+  "appendFile",
+  "appendFileSync",
+  "createReadStream",
+  "createWriteStream",
+  "unlink",
+  "unlinkSync",
+  "rm",
+  "rmSync",
+  "rename",
+  "copyFile",
+  "copyFileSync",
+]
+arg_index = 0
+import_provenance = "node:fs"
+requires_module_source = true
+ignored_source_kinds = ["process-argv"]
 evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
 
 [[matcher]]
@@ -1157,6 +1307,17 @@ arg_index = 0
 import_provenance = "js-yaml"
 evidence_template = "js-yaml load() without a safe schema. Candidate for verification: use load with the default safe schema (js-yaml >=4) or an explicit SAFE_SCHEMA."
 
+[[matcher]]
+id = "unsafe-deserialization"
+cwe = 502
+title = "Unsafe deserialization sink"
+effect = "process"
+sink_shape = "member-call"
+callee_patterns = ["yaml.loadAll", "jsyaml.loadAll"]
+arg_index = 0
+import_provenance = "js-yaml"
+evidence_template = "js-yaml loadAll() without a safe schema. Candidate for verification: use loadAll with the default safe schema (js-yaml >=4) or an explicit SAFE_SCHEMA."
+
 # ════════════════════════════════════════════════════════════════════════════
 # FRAMEWORK-SCOPED ROWS (issue #861)
 #
@@ -1236,6 +1397,17 @@ arg_index = 0
 enabler = "jquery"
 evidence_template = "Non-literal value passed to jQuery {callee}(). Candidate for verification: jQuery .html() parses its argument as markup; confirm the value is not attacker-controlled or is sanitized."
 
+[[matcher]]
+id = "jquery-html"
+cwe = 79
+title = "jQuery parseHTML() sink"
+effect = "dom"
+sink_shape = "member-call"
+callee_patterns = ["$.parseHTML", "jQuery.parseHTML"]
+arg_index = 0
+enabler = "jquery"
+evidence_template = "Non-literal value passed to jQuery {callee}(). Candidate for verification: the parsed nodes run inline event handlers once they are inserted; confirm the value is not attacker-controlled or is sanitized."
+
 # ── Express / Fastify / Hono: res.sendFile route sink (CWE-22) ──────────────
 # A route handler that serves a file whose path is a non-literal is a path-
 # traversal candidate. One row per framework so each is gated on its own
@@ -1246,7 +1418,7 @@ cwe = 22
 title = "Route file-send path traversal sink"
 effect = "storage"
 sink_shape = "member-call"
-callee_patterns = ["*.sendFile"]
+callee_patterns = ["*.sendFile", "res.download", "response.download"]
 arg_index = 0
 enabler = "express"
 evidence_template = "Non-literal path passed to {callee}(). Candidate for verification: confirm the served path cannot escape the intended directory (reject `..`)."
@@ -1628,7 +1800,7 @@ cwe = 1336
 title = "Server-side template injection sink"
 effect = "process"
 sink_shape = "member-call"
-callee_patterns = ["handlebars.compile", "eta.render", "eta.compile", "pug.compile", "ejs.render", "nunjucks.renderString", "nunjucks.compile"]
+callee_patterns = ["handlebars.compile", "Handlebars.compile", "eta.render", "eta.compile", "pug.compile", "pug.render", "ejs.render", "nunjucks.renderString", "nunjucks.compile", "_.template", "lodash.template"]
 arg_index = 0
 arg_kinds = ["template-with-subst", "concat", "call", "other"]
 evidence_template = "Non-literal template source passed to {callee}(). Candidate for verification: confirm the template body is not attacker-controlled (SSTI executes template directives server-side)."
@@ -1647,7 +1819,7 @@ cwe = 611
 title = "XML external entity (XXE) sink"
 effect = "read"
 sink_shape = "member-call"
-callee_patterns = ["libxml.parseXml", "libxml.parseXmlString", "*.parseXmlString", "*.parseStringPromise"]
+callee_patterns = ["libxml.parseXml", "libxml.parseXmlString", "libxmljs.parseXml", "*.parseXmlString", "*.parseStringPromise"]
 arg_index = 0
 evidence_template = "Non-literal XML document passed to {callee}(). Candidate for verification: confirm the parser disables external-entity / DTD expansion (no `noent`), guarding against XXE and entity-expansion attacks."
 

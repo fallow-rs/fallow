@@ -7,5 +7,7 @@ mod manifest_sync;
 mod params;
 mod resources;
 mod run;
+#[cfg(unix)]
+mod rust_route;
 mod server_info;
 mod tool_descriptions;

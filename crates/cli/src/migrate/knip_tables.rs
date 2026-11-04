@@ -1,4 +1,7 @@
-/// Knip rule names mapped to fallow rule names.
+/// Knip rule names mapped to fallow rule names. One source rule name can
+/// map to several fallow rules: `duplicates` (one binding exported under several
+/// names) maps to `duplicate-export-aliases`, and also to `duplicate-exports`
+/// so that a migrated config keeps the severity that earlier versions wrote.
 pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("files", "unused-files"),
     ("dependencies", "unused-dependencies"),
@@ -7,9 +10,12 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("types", "unused-types"),
     ("enumMembers", "unused-enum-members"),
     ("classMembers", "unused-class-members"),
+    ("namespaceMembers", "unused-namespace-members"),
     ("unlisted", "unlisted-dependencies"),
+    ("binaries", "unlisted-binaries"),
     ("unresolved", "unresolved-imports"),
     ("duplicates", "duplicate-exports"),
+    ("duplicates", "duplicate-export-aliases"),
     ("cycles", "circular-dependencies"),
 ];
 
@@ -27,11 +33,6 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
         Some(
             "use overrides[].files with rules.unused-files = \"off\"; this keeps matching files in the analysis graph",
         ),
-    ),
-    (
-        "ignoreBinaries",
-        "Binary filtering is not configurable in fallow",
-        None,
     ),
     (
         "ignoreMembers",
@@ -74,8 +75,8 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ),
     (
         "ignoreGlobalBinaries",
-        "Binary filtering is not configurable in fallow",
-        None,
+        "Fallow has no switch for globally installed binaries",
+        Some("add the binary names to ignoreBinaries"),
     ),
     (
         "preprocessor",
@@ -98,6 +99,7 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
     "entry",
     "exclude",
     "ignore",
+    "ignoreBinaries",
     "ignoreDependencies",
     "ignoreExportsUsedInFile",
     "ignoreIssues",
@@ -108,15 +110,17 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
 ];
 
 /// Knip issue type names that have no fallow equivalent.
-pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
-    "optionalPeerDependencies",
-    "binaries",
-    "nsExports",
-    "nsTypes",
-    "catalog",
-    "catalogReferences",
-    "namespaceMembers",
-];
+pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] =
+    &["optionalPeerDependencies", "catalog", "catalogReferences"];
+
+/// Knip issue types for members of a namespace, with the knip issue type
+/// that fallow reports them under.
+///
+/// Fallow reports an unused export or type that a consumer reads through a
+/// namespace (`nsExports`, `nsTypes`) as an unused export or type of its
+/// module, so a scope controls them through `exports` and `types`.
+pub(super) const KNIP_NAMESPACE_ISSUE_TYPES: &[(&str, &str)] =
+    &[("nsExports", "exports"), ("nsTypes", "types")];
 
 /// Knip plugin config keys that a built-in fallow plugin covers. Fallow
 /// detects these frameworks and tools from the project itself, so the knip
@@ -367,12 +371,12 @@ mod tests {
     }
 
     #[test]
-    fn rule_map_has_no_duplicate_knip_keys() {
+    fn rule_map_has_no_duplicate_pairs() {
         let mut seen = FxHashSet::default();
-        for (knip, _) in KNIP_RULE_MAP {
+        for (knip, fallow) in KNIP_RULE_MAP {
             assert!(
-                seen.insert(*knip),
-                "KNIP_RULE_MAP has duplicate knip key `{knip}`"
+                seen.insert((*knip, *fallow)),
+                "KNIP_RULE_MAP has duplicate pair `{knip}` -> `{fallow}`"
             );
         }
     }

@@ -3,8 +3,8 @@ use serde_json::{Map, Value};
 use super::knip_regex::{knip_regex_source, regex_to_exact_glob};
 use super::knip_scoped::{KnipScope, append_unique};
 use super::knip_tables::{
-    KNIP_MIGRATED_FIELDS, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS,
-    KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
+    KNIP_MIGRATED_FIELDS, KNIP_NAMESPACE_ISSUE_TYPES, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP,
+    KNIP_UNMAPPABLE_FIELDS, KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
 };
 use super::{MigrationWarning, string_or_array};
 
@@ -44,6 +44,48 @@ pub(super) fn warn_unmapped_rule_key(
             )),
         });
     }
+}
+
+/// The severity of a knip issue type that `rules` does not set.
+const DEFAULT_SEVERITY: &str = "error";
+
+/// Migrate a knip namespace issue type (`nsExports`, `nsTypes`). Returns
+/// `false` when `key` is not one.
+///
+/// `has_peer(base)` tells whether the same setting gives the base issue type
+/// (`exports` for `nsExports`) the same effect. Fallow reports the namespace
+/// findings under the base type, so the entry then needs no migration. An
+/// entry without that peer gets a warning, because fallow cannot apply it to
+/// the namespace findings alone.
+pub(super) fn migrate_namespace_issue_type(
+    context: &str,
+    key: &str,
+    has_peer: impl Fn(&str) -> bool,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    let Some((_, base)) = KNIP_NAMESPACE_ISSUE_TYPES
+        .iter()
+        .find(|(name, _)| *name == key)
+    else {
+        return false;
+    };
+    if !has_peer(base) {
+        let fallow_rule = KNIP_RULE_MAP
+            .iter()
+            .find(|(name, _)| name == base)
+            .map_or(*base, |(_, rule)| *rule);
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: format!("{context}.{key}"),
+            message: format!(
+                "fallow reports issue type `{key}` as `{fallow_rule}`, together with `{base}`; not migrated on its own"
+            ),
+            suggestion: Some(format!(
+                "set `{base}` the same way to apply the setting to both"
+            )),
+        });
+    }
+    true
 }
 
 /// Migrate Knip's report-only `ignore` patterns to `ignoreFindings` without
@@ -127,11 +169,18 @@ pub(super) fn migrate_rules(
         }
     }
 
-    for key in rules_obj.keys() {
+    for (key, severity) in rules_obj {
         if KNIP_RULE_MAP.iter().any(|(k, _)| k == key) {
             continue;
         }
-        warn_unmapped_rule_key("rules", key, warnings);
+        // An unset base rule has the default severity `"error"`.
+        let has_peer = |base: &str| match rules_obj.get(base) {
+            Some(peer) => peer == severity,
+            None => severity.as_str() == Some(DEFAULT_SEVERITY),
+        };
+        if !migrate_namespace_issue_type("rules", key, has_peer, warnings) {
+            warn_unmapped_rule_key("rules", key, warnings);
+        }
     }
 
     if !fallow_rules.is_empty() {
@@ -153,9 +202,19 @@ pub(super) fn migrate_exclude(
     };
 
     for knip_name in excluded {
-        if let Some((_, fallow_name)) = KNIP_RULE_MAP.iter().find(|(k, _)| k == knip_name) {
+        let mut mapped = false;
+        for (_, fallow_name) in KNIP_RULE_MAP.iter().filter(|(k, _)| k == knip_name) {
             rules_obj.insert((*fallow_name).to_string(), Value::String("off".to_string()));
-        } else {
+            mapped = true;
+        }
+        if !mapped
+            && !migrate_namespace_issue_type(
+                "exclude",
+                knip_name,
+                |base| excluded.iter().any(|name| name == base),
+                warnings,
+            )
+        {
             warn_unmapped_rule_key("exclude", knip_name, warnings);
         }
     }
@@ -185,7 +244,14 @@ pub(super) fn migrate_include(
         if KNIP_RULE_MAP.iter().any(|(k, _)| k == name) {
             continue;
         }
-        warn_unmapped_rule_key("include", name, warnings);
+        if !migrate_namespace_issue_type(
+            "include",
+            name,
+            |base| included.iter().any(|other| other == base),
+            warnings,
+        ) {
+            warn_unmapped_rule_key("include", name, warnings);
+        }
     }
 }
 
@@ -196,6 +262,34 @@ pub(super) fn migrate_include(
 pub(super) fn migrate_ignore_deps(
     ignore_deps_val: &Value,
     field: &str,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    migrate_ignore_names(
+        ignore_deps_val,
+        field,
+        "ignoreDependencies",
+        config,
+        warnings,
+    )
+}
+
+/// Migrate the source `ignoreBinaries` list to fallow `ignoreBinaries`, with the same
+/// regex handling as [`migrate_ignore_deps`]. Returns whether at least one
+/// entry was migrated.
+pub(super) fn migrate_ignore_binaries(
+    value: &Value,
+    field: &str,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    migrate_ignore_names(value, field, "ignoreBinaries", config, warnings)
+}
+
+fn migrate_ignore_names(
+    ignore_deps_val: &Value,
+    field: &str,
+    target_key: &str,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) -> bool {
@@ -213,14 +307,14 @@ pub(super) fn migrate_ignore_deps(
         warnings.push(MigrationWarning {
             source: "knip",
             field: field.to_string(),
-            message: format!("regex pattern `{dep}` skipped (no glob matches the same packages)"),
+            message: format!("regex pattern `{dep}` skipped (no glob matches the same names)"),
             suggestion: Some(
-                "rewrite it as a glob such as `@scope/*`, or add each dependency name".to_string(),
+                "rewrite it as a glob such as `@scope/*`, or add each name".to_string(),
             ),
         });
     }
     let any = !migrated.is_empty();
-    append_unique(config, "ignoreDependencies", migrated);
+    append_unique(config, target_key, migrated);
     any
 }
 
@@ -391,14 +485,14 @@ mod tests {
 
     #[test]
     fn rules_unknown_unmappable_generates_warning() {
-        let rules_val = json!({"binaries": "warn"});
+        let rules_val = json!({"catalog": "warn"});
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_rules(&rules_val, &mut config, &mut warnings);
 
         assert!(!config.contains_key("rules"));
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "rules.binaries");
+        assert_eq!(warnings[0].field, "rules.catalog");
         assert!(warnings[0].message.contains("no fallow equivalent"));
     }
 
@@ -522,13 +616,13 @@ mod tests {
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_include(
-            &["files".to_string(), "binaries".to_string()],
+            &["files".to_string(), "catalog".to_string()],
             &mut config,
             &mut warnings,
         );
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "include.binaries");
+        assert_eq!(warnings[0].field, "include.catalog");
     }
 
     #[test]

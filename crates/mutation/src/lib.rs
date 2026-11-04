@@ -305,7 +305,7 @@ pub fn instrument(
 }
 
 /// One source text for [`instrument_text`]: a whole file or one script block.
-pub(crate) struct TextInput<'s> {
+struct TextInput<'s> {
     pub(crate) source: &'s str,
     pub(crate) path: &'s str,
     pub(crate) kind: SourceKind,
@@ -318,7 +318,7 @@ pub(crate) struct TextInput<'s> {
 /// Instruments one text. The spans, lines and columns of the result are
 /// relative to the text. `seen_ids` holds the ids of earlier texts of the
 /// same file, so that each id stays unique in the file.
-pub(crate) fn instrument_text(
+fn instrument_text(
     input: &TextInput<'_>,
     options: &MutationOptions,
     seen_ids: &mut std::collections::BTreeSet<MutantId>,

@@ -20,10 +20,13 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-optional-dependencies": true,
   "unused-enum-members": true,
   "unused-class-members": true,
+  "unused-namespace-members": true,
   "unused-store-members": true,
   "unresolved-imports": true,
   "unlisted-dependencies": true,
+  "unlisted-binaries": true,
   "duplicate-exports": true,
+  "duplicate-export-aliases": true,
   "type-only-dependencies": true,
   "test-only-dependencies": true,
   "dev-dependencies-in-production": true,
@@ -76,6 +79,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "circular-dependency": "circular-dependencies",
   "dev-dependency-in-production": "dev-dependencies-in-production",
   "duplicate-export": "duplicate-exports",
+  "duplicate-export-alias": "duplicate-export-aliases",
   "duplicate-prop-shapes": "duplicate-prop-shape",
   "dynamic-segment-name-conflicts": "dynamic-segment-name-conflict",
   "empty-catalog": "empty-catalog-groups",
@@ -97,6 +101,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "test-only-dependency": "test-only-dependencies",
   "thin-wrappers": "thin-wrapper",
   "type-only-dependency": "type-only-dependencies",
+  "unlisted-binary": "unlisted-binaries",
   "unlisted-dependency": "unlisted-dependencies",
   "unproduced-catch-tag": "unproduced-catch-tags",
   "unprovided-inject": "unprovided-injects",
@@ -119,6 +124,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "unused-export": "unused-exports",
   "unused-file": "unused-files",
   "unused-load-data-key": "unused-load-data-keys",
+  "unused-namespace-member": "unused-namespace-members",
   "unused-optional-dependency": "unused-optional-dependencies",
   "unused-optional-deps": "unused-optional-dependencies",
   "unused-override": "unused-dependency-overrides",
@@ -177,6 +183,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
     "label": "Unused Class Members"
   },
   {
+    "code": "unused-namespace-member",
+    "label": "Unused Namespace Members"
+  },
+  {
     "code": "unused-store-member",
     "label": "Unused Store Members"
   },
@@ -189,8 +199,16 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
     "label": "Unlisted Dependencies"
   },
   {
+    "code": "unlisted-binary",
+    "label": "Unlisted Binaries"
+  },
+  {
     "code": "duplicate-export",
     "label": "Duplicate Exports"
+  },
+  {
+    "code": "duplicate-export-alias",
+    "label": "Duplicate Export Aliases"
   },
   {
     "code": "type-only-dependency",

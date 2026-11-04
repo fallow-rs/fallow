@@ -19,7 +19,7 @@ pub(super) struct AppliedHealthThresholds {
     pub(super) override_index: Option<usize>,
 }
 
-pub(super) struct CompiledThresholdOverride {
+struct CompiledThresholdOverride {
     index: usize,
     matchers: globset::GlobSet,
     functions: Vec<String>,

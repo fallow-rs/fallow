@@ -717,10 +717,13 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         unused_optional_dependencies: _unused_optional_dependencies,
         unused_enum_members: _unused_enum_members,
         unused_class_members: _unused_class_members,
+        unused_namespace_members: _unused_namespace_members,
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
+        unlisted_binaries: _unlisted_binaries,
         duplicate_exports: _duplicate_exports,
+        duplicate_export_aliases: _duplicate_export_aliases,
         type_only_dependencies: _type_only_dependencies,
         test_only_dependencies: _test_only_dependencies,
         dev_dependencies_in_production: _dev_dependencies_in_production,
@@ -791,6 +794,9 @@ fn retain_basic_issue_findings_by_changed_path(
     });
     retain_by_changed_path(&mut results.unused_enum_members, scope, |m| &m.member.path);
     retain_by_changed_path(&mut results.unused_class_members, scope, |m| &m.member.path);
+    retain_by_changed_path(&mut results.unused_namespace_members, scope, |m| {
+        &m.member.path
+    });
     retain_by_changed_path(&mut results.unused_store_members, scope, |m| &m.member.path);
     retain_by_changed_path(&mut results.unresolved_imports, scope, |i| &i.import.path);
 }
@@ -800,7 +806,17 @@ fn retain_graph_findings_by_changed_files(
     scope: &impl ChangedPathScope,
 ) {
     retain_unlisted_dependencies_by_import_site(&mut results.unlisted_dependencies, scope);
+    results.unlisted_binaries.retain(|binary| {
+        binary
+            .binary
+            .used_in
+            .iter()
+            .any(|site| scope.contains(&site.path))
+    });
     retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, scope);
+    retain_by_changed_path(&mut results.duplicate_export_aliases, scope, |a| {
+        &a.alias.path
+    });
     retain_circular_dependencies_by_changed_file(&mut results.circular_dependencies, scope);
     retain_re_export_cycles_by_changed_file(&mut results.re_export_cycles, scope);
     retain_package_cycles_by_changed_file(&mut results.package_cycles, scope);

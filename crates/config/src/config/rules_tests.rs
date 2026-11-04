@@ -59,6 +59,7 @@ fn rules_default_severities() {
     assert_eq!(rules.unresolved_imports, Severity::Error);
     assert_eq!(rules.unlisted_dependencies, Severity::Error);
     assert_eq!(rules.duplicate_exports, Severity::Error);
+    assert_eq!(rules.duplicate_export_aliases, Severity::Warn);
     assert_eq!(rules.type_only_dependencies, Severity::Warn);
     assert_eq!(rules.test_only_dependencies, Severity::Warn);
     assert_eq!(rules.circular_dependencies, Severity::Error);
@@ -109,6 +110,7 @@ fn empty_rules_object_preserves_non_error_defaults() {
     // even if the wholesale equality assertion above is later relaxed.
     let rules: RulesConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(rules.coverage_gaps, Severity::Off);
+    assert_eq!(rules.unused_namespace_members, Severity::Warn);
     assert_eq!(rules.unused_store_members, Severity::Warn);
     assert_eq!(rules.unprovided_injects, Severity::Warn);
     assert_eq!(rules.unrendered_components, Severity::Warn);
@@ -386,6 +388,7 @@ fn apply_partial_all_fields_set() {
         unused_optional_dependencies: Some(Severity::Off),
         unused_enum_members: Some(Severity::Off),
         unused_class_members: Some(Severity::Off),
+        unused_namespace_members: Some(Severity::Off),
         unused_store_members: Some(Severity::Off),
         unprovided_injects: Some(Severity::Off),
         unrendered_components: Some(Severity::Off),
@@ -414,7 +417,9 @@ fn apply_partial_all_fields_set() {
         complexity_file_lines: Some(Severity::Off),
         unresolved_imports: Some(Severity::Off),
         unlisted_dependencies: Some(Severity::Off),
+        unlisted_binaries: Some(Severity::Off),
         duplicate_exports: Some(Severity::Off),
+        duplicate_export_aliases: Some(Severity::Off),
         type_only_dependencies: Some(Severity::Off),
         test_only_dependencies: Some(Severity::Off),
         dev_dependencies_in_production: Some(Severity::Off),
@@ -537,7 +542,7 @@ fn severity_from_str_invalid_returns_error() {
 /// more. See the note on [`KNOWN_RULE_NAMES`].
 #[test]
 fn known_rule_names_list_length_is_pinned() {
-    assert_eq!(KNOWN_RULE_NAMES.len(), 123);
+    assert_eq!(KNOWN_RULE_NAMES.len(), 129);
 }
 
 /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -605,8 +610,8 @@ fn known_rule_names_covers_every_serde_alias_in_source() {
 
     assert_eq!(
         aliases_found.len(),
-        126,
-        "expected 126 source-level alias attrs (63 per struct); got {}: {:?}",
+        132,
+        "expected 132 source-level alias attrs (66 per struct); got {}: {:?}",
         aliases_found.len(),
         aliases_found
     );
@@ -735,6 +740,16 @@ fn find_unknown_rule_keys_passes_aliases() {
         unknown.is_empty(),
         "documented aliases must not flag as unknown: {unknown:?}"
     );
+}
+
+#[test]
+fn find_unknown_rule_keys_passes_duplicate_export_alias_names() {
+    let v = serde_json::json!({
+        "duplicate-export-aliases": "off",
+        "duplicate-export-alias": "warn",
+    });
+    let unknown = find_unknown_rule_keys(&v, "rules");
+    assert!(unknown.is_empty(), "{unknown:?}");
 }
 
 #[test]

@@ -495,6 +495,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        command_invocations: Vec::new(),
         imported_call_sites: Arc::default(),
         import_binding_references: Arc::default(),
         misplaced_directives: Vec::new(),

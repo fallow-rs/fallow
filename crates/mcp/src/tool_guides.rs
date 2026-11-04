@@ -39,6 +39,11 @@ pub const TOOL_GUIDE_NOTE: &str = "This guide explains parameters and output for
 
 const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
+        topic: "group_by",
+        summary: "What each group recomputes.",
+        detail: r#"Each group gets its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets`, recomputed against the files of the group. The top-level metrics stay project-wide. Use it to answer per-team or per-package quality questions, such as "which workspace has the worst maintainability?", without one fallow run per package."#,
+    },
+    ToolGuideSection {
         topic: "css",
         summary: "What `css_analytics` contains and why it is opt-in.",
         detail: r"Set css=true to add a `css_analytics` section. It reports specificity hotspots, `!important` density, over-complex selectors, deep nesting, and design-token sprawl through distinct color, font-size, and z-index counts. It also reports unreferenced custom-property and `@keyframes` cleanup candidates.

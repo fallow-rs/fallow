@@ -22,7 +22,7 @@ mod value_changes;
 
 /// The maximum number of constants that one inlined value can pass through,
 /// as in `const A = {...}; const B = [A]; export default { x: B }`.
-pub(super) const MAX_INLINE_NESTING: usize = 4;
+const MAX_INLINE_NESTING: usize = 4;
 
 /// Replace each identifier in a property value or an array element that names
 /// a stable top-level constant with a literal value, and replace each object
@@ -37,7 +37,7 @@ pub(super) const MAX_INLINE_NESTING: usize = 4;
 ///
 /// The pass also replaces an array element `defineProject(value)` with
 /// `value`, also when the program has no qualifying constant.
-pub(super) fn inline_value_constants<'a>(
+fn inline_value_constants<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
     source_len: usize,
@@ -410,7 +410,7 @@ pub(super) fn holds_one_stable_object(
 /// The subset of `names` that [`holds_one_stable_object`] accepts, from one
 /// walk of the program. With `require_top_level` unset, the caller checks
 /// where the one binding of each name is.
-pub(super) fn stable_bindings<'n>(
+fn stable_bindings<'n>(
     program: &Program<'_>,
     names: impl IntoIterator<Item = &'n str>,
     allow_mutating_calls: bool,

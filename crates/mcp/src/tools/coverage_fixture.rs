@@ -13,7 +13,7 @@ use std::process::Command;
 pub(super) const COVERAGE_ROOT: &str = "/ci/workspace";
 
 /// Project-relative location of the Istanbul map.
-pub(super) const COVERAGE_FILE: &str = "artifacts/coverage-final.json";
+const COVERAGE_FILE: &str = "artifacts/coverage-final.json";
 
 /// A committed project with `branchy` introduced in `HEAD` and an Istanbul
 /// map on disk. Drop the guard to delete the directory.
@@ -81,7 +81,7 @@ impl CoverageFixture {
     }
 
     /// Write an Istanbul map for `branchy` at the project-relative `file`.
-    pub(super) fn write_coverage(&self, file: &str, covered: bool) {
+    fn write_coverage(&self, file: &str, covered: bool) {
         self.write_coverage_for(file, "src/index.ts", covered);
     }
 

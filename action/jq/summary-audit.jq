@@ -36,9 +36,11 @@ def dead_code_rows:
    [ (.dead_code.unused_optional_dependencies // [])[] | {kind:"Unused optionalDependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_enum_members // [])[] | {kind:"Unused enum member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_class_members // [])[] | {kind:"Unused class member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unused_namespace_members // [])[] | {kind:"Unused namespace member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_store_members // [])[] | {kind:"Unused store member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unresolved_imports // [])[] | {kind:"Unresolved import", location:path_line, item:("`\(.specifier)`"), introduced:.introduced} ] +
    [ (.dead_code.unlisted_dependencies // [])[] | {kind:"Unlisted dependency", location:first_import_site, item:("`\(.package_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unlisted_binaries // [])[] | {kind:"Unlisted binary", location:((.used_in // [])[:1] | map("`\(.path | rel_path):\(.line)`") | join("")), item:("`\(.binary_name)`"), introduced:.introduced} ] +
    [ (.dead_code.duplicate_exports // [])[] | {kind:"Duplicate export", location:(.locations[:3] | map("`\(.path | rel_path):\(.line)`") | join(", ")), item:("`\(.export_name)`"), introduced:.introduced} ] +
    [ (.dead_code.circular_dependencies // [])[] | {kind:"Circular dependency", location:((.files // []) | map("`\(. | rel_path)`") | join(" -> ")), item:"cycle", introduced:.introduced} ] +
    [ (.dead_code.re_export_cycles // [])[] | {kind:"Re-export cycle", location:((.files // []) | map("`\(. | rel_path)`") | join(" <-> ")), item:(.kind // "cycle"), introduced:.introduced} ] +
@@ -57,6 +59,7 @@ def dead_code_rows:
    [ (.dead_code.unused_component_emits // [])[] | {kind:"Unused component emit", location:path_line, item:("`\(.component_name)` emit `\(.emit_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_inputs // [])[] | {kind:"Unused component input", location:path_line, item:("`\(.component_name).\(.input_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_outputs // [])[] | {kind:"Unused component output", location:path_line, item:("`\(.component_name)` output `\(.output_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.duplicate_export_aliases // [])[] | {kind:"Duplicate export alias", location:path_line, item:("`\(.local_name)` as \((.export_names // []) | map("`\(.)`") | join(", "))"), introduced:.introduced} ] +
    [ (.dead_code.unused_effect_layers // [])[] | {kind:"Unused Effect layer", location:path_line, item:("`\(.name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_tagged_errors // [])[] | {kind:"Unused tagged error", location:path_line, item:("`\(.name)` tag `\(.tag)`"), introduced:.introduced} ] +
    [ (.dead_code.unproduced_catch_tags // [])[] | {kind:"Unproduced catch tag", location:path_line, item:("catchTag `\(.tag)`"), introduced:.introduced} ] +

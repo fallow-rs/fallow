@@ -13,7 +13,7 @@ use super::scanners::scan_curly_section;
 pub(super) static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
-pub(super) fn merge_expression_usage(
+fn merge_expression_usage(
     usage: &mut TemplateUsage,
     snippet: &str,
     imported_bindings: &FxHashSet<String>,

@@ -543,6 +543,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.unused_store_members {
             $visit(&finding.member.path, finding.member.line, &finding.actions);
         }
+        for finding in &results.unused_namespace_members {
+            $visit(&finding.member.path, finding.member.line, &finding.actions);
+        }
         for finding in &results.unresolved_imports {
             $visit(&finding.import.path, finding.import.line, &finding.actions);
         }
@@ -679,6 +682,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.unused_effect_layers {
             $visit(&finding.layer.path, finding.layer.line, &finding.actions);
         }
+        for finding in &results.duplicate_export_aliases {
+            $visit(&finding.alias.path, finding.alias.line, &finding.actions);
+        }
         for finding in &results.unused_tagged_errors {
             $visit(&finding.error.path, finding.error.line, &finding.actions);
         }
@@ -755,6 +761,13 @@ macro_rules! visit_suppress_line_findings_mut {
             );
         }
         for finding in &mut results.unused_store_members {
+            $visit(
+                &finding.member.path,
+                finding.member.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.unused_namespace_members {
             $visit(
                 &finding.member.path,
                 finding.member.line,
@@ -942,6 +955,13 @@ macro_rules! visit_suppress_line_findings_mut {
             $visit(
                 &finding.layer.path,
                 finding.layer.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.duplicate_export_aliases {
+            $visit(
+                &finding.alias.path,
+                finding.alias.line,
                 &mut finding.actions,
             );
         }
@@ -1217,6 +1237,7 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "unused-server-action" => 17,
         "deprecated-export-in-use" => 18,
         "package-cycle" => 19,
+        "unused-namespace-member" => 20,
         _ => usize::MAX,
     }
 }
@@ -1239,10 +1260,13 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
             + results.unused_optional_dependencies.len(),
         unused_enum_members: results.unused_enum_members.len(),
         unused_class_members: results.unused_class_members.len(),
+        unused_namespace_members: results.unused_namespace_members.len(),
         unused_store_members: results.unused_store_members.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
+        unlisted_binaries: results.unlisted_binaries.len(),
         duplicate_exports: results.duplicate_exports.len(),
+        duplicate_export_aliases: results.duplicate_export_aliases.len(),
         type_only_dependencies: results.type_only_dependencies.len(),
         test_only_dependencies: results.test_only_dependencies.len(),
         dev_dependencies_in_production: results.dev_dependencies_in_production.len(),

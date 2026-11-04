@@ -59,7 +59,7 @@ hooks {
       // staged blob. See docs/development/quality-gates.md#file-size.
       ["file-size"] {
         glob = List("**/*.rs")
-        check = "if command -v node >/dev/null 2>&1; then node scripts/check-file-size.mjs --staged; else sh scripts/hook-tool-hint.sh node; fi"
+        check = "if command -v cargo-fallow >/dev/null 2>&1; then cargo fallow size --staged --fail-on-growth --quiet; else sh scripts/hook-tool-hint.sh cargo-fallow; fi"
       }
       // The same limit for .mjs and .ts files, through `fallow audit` and
       // health.maxFileLines. The audit reads the working tree, not the staged
@@ -115,10 +115,11 @@ hooks {
         check = "cargo doc --workspace --no-deps --document-private-items"
         env { ["RUSTDOCFLAGS"] = "-D warnings" }
       }
-      // Same command as the required "Unused Dependencies" CI job. It catches
-      // a dependency whose last use a change removes.
-      ["cargo-shear"] {
-        check = "if command -v cargo-shear >/dev/null 2>&1; then cargo shear; else sh scripts/hook-tool-hint.sh cargo-shear; fi"
+      // Same command as the required "Rust Structure" CI job: unused
+      // dependencies and files, visibility, crate boundaries, complexity and
+      // duplication. See docs/development/quality-gates.md#rust-structure.
+      ["cargo-fallow"] {
+        check = "if command -v cargo-fallow >/dev/null 2>&1; then cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues --quiet; else sh scripts/hook-tool-hint.sh cargo-fallow; fi"
       }
       // Same rule as the "File length" step of the CI "Fallow Self Analysis"
       // job: a .mjs or .ts file over 2000 lines must not grow on the branch.

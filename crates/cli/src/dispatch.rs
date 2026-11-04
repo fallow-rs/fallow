@@ -34,8 +34,19 @@ use crate::{error::emit_error, exit_codes::exit_invalid_input};
 
 #[path = "dispatch_inspect.rs"]
 mod inspect_dispatch;
+#[path = "dispatch_type_aware_check.rs"]
+mod type_aware_check;
 #[path = "dispatch_type_aware.rs"]
 mod type_aware_status;
+
+use type_aware_check::validate_type_aware_check_options;
+#[path = "dispatch_baselines.rs"]
+mod baselines_dispatch;
+use baselines_dispatch::dispatch_baselines_command;
+
+#[path = "dispatch_audit_inputs.rs"]
+mod audit_inputs;
+use audit_inputs::resolve_audit_inputs;
 
 fn dispatch_mutation_command(
     dispatch: &DispatchContext<'_>,
@@ -576,6 +587,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         unresolved_imports,
         unlisted_deps,
         duplicate_exports,
+        duplicate_export_aliases,
         circular_deps,
         re_export_cycles,
         package_cycles,
@@ -601,6 +613,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         ("--unresolved-imports", *unresolved_imports),
         ("--unlisted-deps", *unlisted_deps),
         ("--duplicate-exports", *duplicate_exports),
+        ("--duplicate-export-aliases", *duplicate_export_aliases),
         ("--circular-deps", *circular_deps),
         ("--re-export-cycles", *re_export_cycles),
         ("--package-cycles", *package_cycles),
@@ -617,6 +630,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
 /// catalog, and dependency-override flags, layered onto the core `base`.
 fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> IssueFilters {
     let Command::Check {
+        unused_namespace_members,
         unused_store_members,
         unprovided_injects,
         unrendered_components,
@@ -631,6 +645,7 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
         unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
+        unlisted_binaries,
         unused_catalog_entries,
         empty_catalog_groups,
         unresolved_catalog_references,
@@ -644,6 +659,7 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
 
     let mut filters = base.clone();
     for (flag, active) in [
+        ("--unused-namespace-members", *unused_namespace_members),
         ("--unused-store-members", *unused_store_members),
         ("--unprovided-injects", *unprovided_injects),
         ("--unrendered-components", *unrendered_components),
@@ -658,6 +674,7 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
         ("--unproduced-catch-tags", *unproduced_catch_tags),
         ("--unused-server-actions", *unused_server_actions),
         ("--unused-load-data-keys", *unused_load_data_keys),
+        ("--unlisted-binaries", *unlisted_binaries),
         ("--unused-catalog-entries", *unused_catalog_entries),
         ("--empty-catalog-groups", *empty_catalog_groups),
         (
@@ -1486,101 +1503,6 @@ fn dispatch_audit_cache_command(
     }
 }
 
-fn dispatch_baselines_command(
-    dispatch: &DispatchContext<'_>,
-    subcommand: &BaselinesCli,
-) -> ExitCode {
-    let BaselinesCli::Prune {
-        check,
-        dead_code_baseline,
-        health_baseline,
-        dupes_baseline,
-        coverage,
-        coverage_root,
-    } = subcommand;
-    let cli = dispatch.cli;
-    let root = dispatch.root;
-    let output = dispatch.output;
-    if let Some(flag) = baselines::narrowing_flag(cli) {
-        return emit_error(
-            &format!(
-                "`fallow baselines prune` runs one analysis over the whole project, in production mode with --production or config, so it does not accept `{flag}`. A narrowed run would remove valid entries."
-            ),
-            2,
-            output,
-        );
-    }
-    if let Some(flag) = cli_global_baseline_flag(cli) {
-        return emit_error(
-            &format!(
-                "`fallow baselines prune` does not accept `{flag}`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config."
-            ),
-            2,
-            output,
-        );
-    }
-    let config = match load_config(
-        root,
-        &cli.config,
-        LoadConfigArgs {
-            output,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            production: false,
-            quiet: dispatch.quiet,
-            allow_remote_extends: cli.allow_remote_extends,
-        },
-    ) {
-        Ok(config) => config,
-        Err(code) => return code,
-    };
-    let targets = baselines::prune_targets(
-        root,
-        &config.audit,
-        [dead_code_baseline, health_baseline, dupes_baseline],
-    );
-    if targets.dead_code.is_none() && targets.health.is_none() && targets.dupes.is_none() {
-        return emit_error(
-            "no baseline to prune. Set `audit.deadCodeBaseline`, `audit.healthBaseline` or `audit.dupesBaseline` in the config, or pass --dead-code-baseline, --health-baseline or --dupes-baseline",
-            2,
-            output,
-        );
-    }
-    let production = match resolve_production_modes(cli, root, output, false, false, false) {
-        Ok(production) => production,
-        Err(code) => return code,
-    };
-    let coverage_inputs = match resolve_coverage_inputs(
-        coverage.as_deref(),
-        coverage_root.as_deref(),
-        output,
-        || Ok(config.health),
-    ) {
-        Ok(inputs) => inputs,
-        Err(code) => return code,
-    };
-    baselines::run_baselines_prune(&baselines::BaselinesPruneOptions {
-        root,
-        config_path: &cli.config,
-        output,
-        json_style: dispatch.json_style,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
-        quiet: dispatch.quiet,
-        allow_remote_extends: cli.allow_remote_extends,
-        check: *check,
-        targets,
-        production,
-        mode_flags: fallow_output::BaselineMode {
-            production: cli.production,
-            include_entry_exports: cli.include_entry_exports,
-        },
-        coverage: coverage_inputs.coverage.as_deref(),
-        coverage_root: coverage_inputs.coverage_root.as_deref(),
-        regression_opts: dispatch.regression_opts(true),
-    })
-}
-
 fn dispatch_flags_command(
     dispatch: &DispatchContext<'_>,
     top: Option<usize>,
@@ -2267,73 +2189,6 @@ fn dispatch_check_run(
     })
 }
 
-fn validate_type_aware_check_options(
-    dispatch: &DispatchContext<'_>,
-    args: &CheckDispatchArgs,
-) -> Option<ExitCode> {
-    let output = dispatch.output;
-    if !args.type_aware_project.is_empty() && args.type_aware != Some(true) {
-        return Some(emit_error(
-            "--type-aware-project requires --type-aware",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware_require.is_some() && args.type_aware != Some(true) {
-        return Some(emit_error(
-            "--type-aware-require requires --type-aware",
-            2,
-            output,
-        ));
-    }
-    if args.trace_opts.symbol_impact.is_some() && args.type_aware != Some(true) {
-        return Some(emit_error(
-            "--symbol-impact requires --type-aware",
-            2,
-            output,
-        ));
-    }
-    let focused_output = args.trace_opts.trace_export.is_some()
-        || args.trace_opts.trace_file.is_some()
-        || args.trace_opts.trace_dependency.is_some()
-        || args.trace_opts.impact_closure.is_some()
-        || args.trace_opts.symbol_impact.is_some();
-    if focused_output
-        && !matches!(
-            output,
-            fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
-        )
-    {
-        return Some(emit_error(
-            "focused trace and impact queries support human and JSON output",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware == Some(true)
-        && !matches!(
-            output,
-            fallow_config::OutputFormat::Human
-                | fallow_config::OutputFormat::Json
-                | fallow_config::OutputFormat::Sarif
-                | fallow_config::OutputFormat::Compact
-                | fallow_config::OutputFormat::Markdown
-                | fallow_config::OutputFormat::CodeClimate
-                | fallow_config::OutputFormat::PrCommentGithub
-                | fallow_config::OutputFormat::PrCommentGitlab
-                | fallow_config::OutputFormat::ReviewGithub
-                | fallow_config::OutputFormat::ReviewGitlab
-        )
-    {
-        return Some(emit_error(
-            "--type-aware supports human, JSON, SARIF, compact, markdown, CodeClimate, PR-comment, and review output; pair presentation formats with the JSON artifact to preserve semantic provenance",
-            2,
-            output,
-        ));
-    }
-    None
-}
-
 /// Resolve the three-state `ignoreImports` CLI override from the opt-in /
 /// opt-out flag pair. clap's `conflicts_with` guarantees the two are never both
 /// set, so this maps `--no-ignore-imports` -> `Some(false)`, `--ignore-imports`
@@ -2531,100 +2386,6 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
 
 const fn audit_renders_brief(args: &AuditDispatchArgs) -> bool {
     args.brief || args.walkthrough_guide || args.walkthrough || args.walkthrough_file.is_some()
-}
-
-fn resolve_audit_inputs(
-    dispatch: &DispatchContext<'_>,
-    args: &AuditDispatchArgs,
-) -> Result<ResolvedAuditInputs, ExitCode> {
-    let cli = dispatch.cli;
-    let root = dispatch.root;
-    let output = dispatch.output;
-    let config = load_config(
-        root,
-        &cli.config,
-        LoadConfigArgs {
-            output,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            production: cli.production,
-            quiet: dispatch.quiet,
-            allow_remote_extends: cli.allow_remote_extends,
-        },
-    )?;
-    let cache_dir = config.cache_dir.clone();
-    let audit_cfg = config.audit;
-    let file_lines_check = config.health.file_lines_check_enabled();
-    let production = resolve_production_modes(
-        cli,
-        root,
-        output,
-        args.production_dead_code,
-        args.production_health,
-        args.production_dupes,
-    )?;
-    let analyses = resolve_audit_analyses(&audit_cfg, args);
-    if !(analyses.dead_code || analyses.health || analyses.dupes) {
-        return Err(emit_error(
-            "this audit selects no sub-analysis: --skip and the audit.deadCode, audit.health and audit.dupes config keys leave nothing to run",
-            2,
-            output,
-        ));
-    }
-    // A skipped sub-analysis reads no baseline. An explicit flag for one is a
-    // mistake; a configured one is dropped so the baseline gates do not see it.
-    let baseline = |enabled: bool, flag: &str, cli_path: Option<&Path>, cfg_path: Option<&str>| {
-        if enabled {
-            return Ok(resolve_audit_baseline_path(root, cli_path, cfg_path));
-        }
-        if cli_path.is_some() {
-            return Err(emit_error(
-                &format!(
-                    "{flag} has no effect: this audit skips that sub-analysis (--only, --skip or the audit config)"
-                ),
-                2,
-                output,
-            ));
-        }
-        Ok(None)
-    };
-    let resolved_dead_code_baseline = baseline(
-        analyses.dead_code,
-        "--dead-code-baseline",
-        args.dead_code_baseline.as_deref(),
-        audit_cfg.dead_code_baseline.as_deref(),
-    )?;
-    let resolved_health_baseline = baseline(
-        analyses.health,
-        "--health-baseline",
-        args.health_baseline.as_deref(),
-        audit_cfg.health_baseline.as_deref(),
-    )?;
-    let resolved_dupes_baseline = baseline(
-        analyses.dupes,
-        "--dupes-baseline",
-        args.dupes_baseline.as_deref(),
-        audit_cfg.dupes_baseline.as_deref(),
-    )?;
-    let coverage_inputs = resolve_coverage_inputs(
-        args.coverage.as_deref(),
-        args.coverage_root.as_deref(),
-        output,
-        || Ok(config.health),
-    )?;
-
-    Ok(ResolvedAuditInputs {
-        audit_cfg,
-        analyses,
-        cache_dir,
-        production,
-        dead_code_baseline: resolved_dead_code_baseline,
-        health_baseline: resolved_health_baseline,
-        dupes_baseline: resolved_dupes_baseline,
-        coverage: coverage_inputs.coverage,
-        coverage_root: coverage_inputs.coverage_root,
-        file_lines_check,
-    })
 }
 
 /// Name the health-only flags that a skipped health sub-analysis leaves without

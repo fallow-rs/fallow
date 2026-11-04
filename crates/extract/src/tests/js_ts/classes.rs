@@ -501,7 +501,7 @@ fn ts_nested_namespace() {
         .map(|m| m.name.as_str())
         .collect();
     assert!(names.contains(&"Inner"));
-    assert!(names.contains(&"deep"));
+    assert!(names.contains(&"Inner.deep"));
 }
 
 #[test]

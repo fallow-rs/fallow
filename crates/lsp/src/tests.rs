@@ -808,10 +808,13 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unused-optional-dependency",
             "unused-enum-member",
             "unused-class-member",
+            "unused-namespace-member",
             "unused-store-member",
             "unresolved-import",
             "unlisted-dependency",
+            "unlisted-binary",
             "duplicate-export",
+            "duplicate-export-alias",
             "type-only-dependency",
             "test-only-dependency",
             "dev-dependency-in-production",
@@ -2839,7 +2842,10 @@ fn issue_type_mapping_codes_are_singular() {
             continue;
         };
         assert!(
-            !issue_type.code.ends_with('s') || issue_type.code.ends_with("ss"),
+            // `alias` is a singular word that ends in `s`.
+            !issue_type.code.ends_with('s')
+                || issue_type.code.ends_with("ss")
+                || issue_type.code.ends_with("alias"),
             "Diagnostic code '{}' for config key '{config_key}' should be singular",
             issue_type.code
         );

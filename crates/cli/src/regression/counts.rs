@@ -67,6 +67,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_class_members: usize,
     #[serde(default)]
+    pub unused_namespace_members: usize,
+    #[serde(default)]
     pub unused_store_members: usize,
     #[serde(default)]
     pub unprovided_injects: usize,
@@ -99,7 +101,11 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unlisted_dependencies: usize,
     #[serde(default)]
+    pub unlisted_binaries: usize,
+    #[serde(default)]
     pub duplicate_exports: usize,
+    #[serde(default)]
+    pub duplicate_export_aliases: usize,
     #[serde(default)]
     pub circular_dependencies: usize,
     #[serde(default)]
@@ -135,6 +141,7 @@ impl CheckCounts {
             unused_optional_dependencies: results.unused_optional_dependencies.len(),
             unused_enum_members: results.unused_enum_members.len(),
             unused_class_members: results.unused_class_members.len(),
+            unused_namespace_members: results.unused_namespace_members.len(),
             unused_store_members: results.unused_store_members.len(),
             unprovided_injects: results.unprovided_injects.len(),
             unrendered_components: results.unrendered_components.len(),
@@ -151,7 +158,9 @@ impl CheckCounts {
             unused_load_data_keys: results.unused_load_data_keys.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
+            unlisted_binaries: results.unlisted_binaries.len(),
             duplicate_exports: results.duplicate_exports.len(),
+            duplicate_export_aliases: results.duplicate_export_aliases.len(),
             circular_dependencies: results.circular_dependencies.len(),
             re_export_cycles: results.re_export_cycles.len(),
             package_cycles: results.package_cycles.len(),
@@ -180,6 +189,7 @@ impl CheckCounts {
             unused_class_members: b.unused_class_members,
             // `fallow_config::RegressionBaseline` has no `unused_store_members`
             // field; default to 0 until the config baseline schema gains one.
+            unused_namespace_members: 0,
             unused_store_members: 0,
             // `fallow_config::RegressionBaseline` has no `unprovided_injects`
             // field; default to 0 until the config baseline schema gains one.
@@ -220,7 +230,11 @@ impl CheckCounts {
             unused_load_data_keys: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
+            unlisted_binaries: b.unlisted_binaries,
             duplicate_exports: b.duplicate_exports,
+            // `fallow_config::RegressionBaseline` has no `duplicate_export_aliases`
+            // field; default to 0 until the config baseline schema gains one.
+            duplicate_export_aliases: 0,
             circular_dependencies: b.circular_dependencies,
             re_export_cycles: b.re_export_cycles,
             package_cycles: b.package_cycles,
@@ -251,6 +265,7 @@ impl CheckCounts {
             unused_class_members: self.unused_class_members,
             unresolved_imports: self.unresolved_imports,
             unlisted_dependencies: self.unlisted_dependencies,
+            unlisted_binaries: self.unlisted_binaries,
             duplicate_exports: self.duplicate_exports,
             circular_dependencies: self.circular_dependencies,
             re_export_cycles: self.re_export_cycles,
@@ -282,6 +297,7 @@ impl CheckCounts {
         push_delta!(unused_optional_dependencies);
         push_delta!(unused_enum_members);
         push_delta!(unused_class_members);
+        push_delta!(unused_namespace_members);
         push_delta!(unused_store_members);
         push_delta!(unprovided_injects);
         push_delta!(unrendered_components);
@@ -298,7 +314,9 @@ impl CheckCounts {
         push_delta!(unused_load_data_keys);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
+        push_delta!(unlisted_binaries);
         push_delta!(duplicate_exports);
+        push_delta!(duplicate_export_aliases);
         push_delta!(circular_dependencies);
         push_delta!(re_export_cycles);
         push_delta!(package_cycles);
@@ -451,6 +469,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -467,7 +486,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -509,6 +530,7 @@ mod tests {
                 unused_optional_dependencies: 0,
                 unused_enum_members: 1,
                 unused_class_members: 1,
+                unused_namespace_members: 0,
                 unused_store_members: 0,
                 unprovided_injects: 0,
                 unrendered_components: 0,
@@ -525,7 +547,9 @@ mod tests {
                 unused_load_data_keys: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
+                unlisted_binaries: 0,
                 duplicate_exports: 0,
+                duplicate_export_aliases: 0,
                 circular_dependencies: 1,
                 re_export_cycles: 0,
                 package_cycles: 0,
@@ -563,6 +587,7 @@ mod tests {
             unused_optional_dependencies: 1,
             unused_enum_members: 1,
             unused_class_members: 1,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -579,7 +604,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -622,6 +649,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -638,7 +666,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -668,6 +698,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -684,7 +715,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -712,6 +745,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -728,7 +762,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -750,6 +786,7 @@ mod tests {
             unused_optional_dependencies: 1,
             unused_enum_members: 1,
             unused_class_members: 1,
+            unused_namespace_members: 1,
             unused_store_members: 1,
             unprovided_injects: 1,
             unrendered_components: 1,
@@ -766,7 +803,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
+            unlisted_binaries: 0,
             duplicate_exports: 1,
+            duplicate_export_aliases: 0,
             circular_dependencies: 1,
             re_export_cycles: 0,
             package_cycles: 0,
@@ -779,7 +818,7 @@ mod tests {
             policy_violations: 0,
         };
         let deltas = baseline.deltas(&current);
-        assert_eq!(deltas.len(), 18);
+        assert_eq!(deltas.len(), 19);
         for (_, d) in &deltas {
             assert_eq!(*d, 1);
         }
@@ -797,6 +836,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -813,7 +853,9 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
+            duplicate_export_aliases: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
             package_cycles: 0,
