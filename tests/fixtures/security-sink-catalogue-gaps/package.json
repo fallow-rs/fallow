@@ -1,0 +1,17 @@
+{
+  "name": "security-sink-catalogue-gaps-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "axios": "1.0.0",
+    "express": "4.0.0",
+    "got": "14.0.0",
+    "handlebars": "4.0.0",
+    "jquery": "3.0.0",
+    "js-yaml": "3.0.0",
+    "libxmljs": "1.0.0",
+    "lodash": "4.0.0",
+    "pug": "3.0.0",
+    "shelljs": "0.8.0"
+  }
+}
