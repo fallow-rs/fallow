@@ -17,6 +17,7 @@ doctest = false
 
 [dependencies]
 fallow-config = { workspace = true }
+# fallow-ignore-next-line only-engine-depends-on-core -- fallow-engine is the one backend adapter of fallow-core
 fallow-core = { workspace = true }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }

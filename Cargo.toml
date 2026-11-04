@@ -291,10 +291,43 @@ rule = "output-must-not-start-analysis"
 from = ["fallow-output"]
 deny = ["@analysis-starters"]
 
+# fallow-core is the backend of fallow-engine. The fallow-core entry in
+# crates/engine/Cargo.toml has the one suppression of this rule.
 [[workspace.metadata.fallow.boundaries.crates]]
-rule = "protocol-must-use-api-or-engine"
-from = ["@protocol"]
+rule = "only-engine-depends-on-core"
+from = ["*"]
 deny = ["fallow-core"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "api-consumers-use-api"
+from = ["fallow-lsp", "fallow-mcp", "fallow-node"]
+deny = ["fallow-engine", "fallow-cli", "fallow-core"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "types-does-not-depend-upward"
+from = ["fallow-types"]
+deny = ["fallow-config", "fallow-output", "fallow-api", "fallow-engine", "fallow-cli", "fallow-core"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "config-and-security-do-not-depend-upward"
+from = ["fallow-config", "fallow-security"]
+deny = ["fallow-output", "fallow-api", "fallow-engine", "fallow-cli", "fallow-core"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "engine-does-not-depend-on-api"
+from = ["fallow-engine"]
+deny = ["fallow-api"]
+
+[[workspace.metadata.fallow.boundaries.sources]]
+rule = "explicit-type-reexports"
+paths = ["crates/engine/src", "crates/api/src"]
+deny = [
+    "pub use fallow_types::extract::*",
+    "pub use fallow_types::results::*",
+    "pub use fallow_types::output_dead_code::*",
+]
+owner = "fallow-types"
+message = "{path} must name each re-exported type of {owner}, not use a glob"
 
 [[workspace.metadata.fallow.boundaries.sources]]
 rule = "semantic-client-owned-by-api"
