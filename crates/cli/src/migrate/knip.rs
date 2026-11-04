@@ -528,11 +528,78 @@ mod tests {
         );
         assert_eq!(
             warning_fields(&warnings),
+            ["workspaces.packages/*.ignoreIssues.src/_generated/**.dependencies"]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_namespace_issue_types_follow_their_base_type() {
+        let knip = serde_json::json!({
+            "rules": {"types": "off", "nsTypes": "off", "nsExports": "off", "namespaceMembers": "off"},
+            "exclude": ["nsExports"],
+            "ignoreIssues": {
+                "src/ui/*.tsx": ["exports", "nsExports", "namespaceMembers"],
+                "src/api/*.ts": ["nsExports"]
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("overrides").unwrap(),
+            &serde_json::json!([
+                {"files": ["src/ui/*.tsx"], "rules": {"unused-exports": "off"}}
+            ])
+        );
+        assert_eq!(
+            warning_fields(&warnings),
             [
-                "workspaces.apps/server.ignoreIssues.**/*.graphql.ts.namespaceMembers",
-                "workspaces.packages/*.ignoreIssues.src/_generated/**.dependencies"
+                "rules.nsExports",
+                "exclude.nsExports",
+                "ignoreIssues.src/api/*.ts.nsExports"
             ]
         );
+        assert!(
+            warnings[0].message.contains("`unused-exports`"),
+            "{:?}",
+            warnings[0]
+        );
+        assert!(
+            warnings[2].message.contains("`unused-exports`"),
+            "{:?}",
+            warnings[2]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_namespace_issue_types_accept_defaults_and_global_off() {
+        let knip = serde_json::json!({
+            "rules": {"nsExports": "error", "types": "off"},
+            "ignoreIssues": {"src/api/*.ts": ["nsTypes"]}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_namespace_members_warn_only_when_turned_on() {
+        let knip = serde_json::json!({
+            "rules": {"namespaceMembers": "error", "exports": "warn", "nsExports": "warn"},
+            "include": ["exports", "nsExports", "namespaceMembers"]
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            warning_fields(&warnings),
+            ["rules.namespaceMembers", "include.namespaceMembers"]
+        );
+        assert!(warnings[0].message.contains("TypeScript namespace"));
     }
 
     #[test]

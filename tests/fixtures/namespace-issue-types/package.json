@@ -1,0 +1,6 @@
+{
+  "name": "namespace-issue-types",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

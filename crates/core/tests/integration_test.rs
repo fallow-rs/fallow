@@ -710,6 +710,8 @@ mod jasmine_plugin;
 mod mise_plugin;
 #[path = "integration_test/namespace_class_static_member.rs"]
 mod namespace_class_static_member;
+#[path = "integration_test/namespace_issue_types.rs"]
+mod namespace_issue_types;
 #[path = "integration_test/namespace_spy_call_member.rs"]
 mod namespace_spy_call_member;
 #[path = "integration_test/new_url_node_modules_package.rs"]

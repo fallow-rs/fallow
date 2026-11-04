@@ -3,8 +3,8 @@ use serde_json::{Map, Value};
 use super::knip_regex::{knip_regex_source, regex_to_exact_glob};
 use super::knip_scoped::{KnipScope, append_unique};
 use super::knip_tables::{
-    KNIP_MIGRATED_FIELDS, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS,
-    KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
+    KNIP_MIGRATED_FIELDS, KNIP_NAMESPACE_ISSUE_TYPES, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP,
+    KNIP_UNMAPPABLE_FIELDS, KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
 };
 use super::{MigrationWarning, string_or_array};
 
@@ -44,6 +44,68 @@ pub(super) fn warn_unmapped_rule_key(
             )),
         });
     }
+}
+
+/// The severity of a knip issue type that `rules` does not set.
+const DEFAULT_SEVERITY: &str = "error";
+
+/// Whether a knip setting turns an issue type off or on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IssueTypeEffect {
+    /// `exclude`, `ignoreIssues`, or a rule set to `"off"`.
+    Off,
+    /// `include`, or a rule set to `"warn"` or `"error"`.
+    On,
+}
+
+/// Migrate a knip namespace issue type (`nsExports`, `nsTypes`,
+/// `namespaceMembers`). Returns `false` when `key` is not one.
+///
+/// `has_peer(base)` tells whether the same setting gives the base issue type
+/// (`exports` for `nsExports`) the same effect. Fallow reports the namespace
+/// findings under the base type, so the entry then needs no migration. An
+/// entry without that peer gets a warning, because fallow cannot apply it to
+/// the namespace findings alone. `namespaceMembers` has no fallow finding, so
+/// only an entry that turns it on gets a warning.
+pub(super) fn migrate_namespace_issue_type(
+    context: &str,
+    key: &str,
+    effect: IssueTypeEffect,
+    has_peer: impl Fn(&str) -> bool,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    let Some((_, base)) = KNIP_NAMESPACE_ISSUE_TYPES
+        .iter()
+        .find(|(name, _)| *name == key)
+    else {
+        return false;
+    };
+    match base {
+        Some(base) if !has_peer(base) => {
+            let fallow_rule = KNIP_RULE_MAP
+                .iter()
+                .find(|(name, _)| name == base)
+                .map_or(*base, |(_, rule)| *rule);
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: format!("{context}.{key}"),
+                message: format!(
+                    "fallow reports issue type `{key}` as `{fallow_rule}`, together with `{base}`; not migrated on its own"
+                ),
+                suggestion: Some(format!(
+                    "set `{base}` the same way to apply the setting to both"
+                )),
+            });
+        }
+        None if effect == IssueTypeEffect::On => warnings.push(MigrationWarning {
+            source: "knip",
+            field: format!("{context}.{key}"),
+            message: format!("fallow does not report members of a TypeScript namespace (`{key}`)"),
+            suggestion: None,
+        }),
+        _ => {}
+    }
+    true
 }
 
 /// Migrate Knip's report-only `ignore` patterns to `ignoreFindings` without
@@ -127,11 +189,23 @@ pub(super) fn migrate_rules(
         }
     }
 
-    for key in rules_obj.keys() {
+    for (key, severity) in rules_obj {
         if KNIP_RULE_MAP.iter().any(|(k, _)| k == key) {
             continue;
         }
-        warn_unmapped_rule_key("rules", key, warnings);
+        let effect = if severity.as_str() == Some("off") {
+            IssueTypeEffect::Off
+        } else {
+            IssueTypeEffect::On
+        };
+        // An unset base rule has the default severity `"error"`.
+        let has_peer = |base: &str| match rules_obj.get(base) {
+            Some(peer) => peer == severity,
+            None => severity.as_str() == Some(DEFAULT_SEVERITY),
+        };
+        if !migrate_namespace_issue_type("rules", key, effect, has_peer, warnings) {
+            warn_unmapped_rule_key("rules", key, warnings);
+        }
     }
 
     if !fallow_rules.is_empty() {
@@ -155,7 +229,13 @@ pub(super) fn migrate_exclude(
     for knip_name in excluded {
         if let Some((_, fallow_name)) = KNIP_RULE_MAP.iter().find(|(k, _)| k == knip_name) {
             rules_obj.insert((*fallow_name).to_string(), Value::String("off".to_string()));
-        } else {
+        } else if !migrate_namespace_issue_type(
+            "exclude",
+            knip_name,
+            IssueTypeEffect::Off,
+            |base| excluded.iter().any(|name| name == base),
+            warnings,
+        ) {
             warn_unmapped_rule_key("exclude", knip_name, warnings);
         }
     }
@@ -185,7 +265,15 @@ pub(super) fn migrate_include(
         if KNIP_RULE_MAP.iter().any(|(k, _)| k == name) {
             continue;
         }
-        warn_unmapped_rule_key("include", name, warnings);
+        if !migrate_namespace_issue_type(
+            "include",
+            name,
+            IssueTypeEffect::On,
+            |base| included.iter().any(|other| other == base),
+            warnings,
+        ) {
+            warn_unmapped_rule_key("include", name, warnings);
+        }
     }
 }
 
