@@ -44,6 +44,8 @@ updates:
       default-days: 7
     open-pull-requests-limit: 10
 
+  # The root tools install with pnpm. The npm ecosystem also updates
+  # pnpm-lock.yaml, with the pnpm version in `engines.pnpm`.
   - package-ecosystem: npm
     directory: /
     schedule:

@@ -217,7 +217,7 @@ test("preflight names every missing install and runs no gate", () => {
 
   assert.equal(exitCode, 1);
   assert.deepEqual(executed, []);
-  assert.match(output, /oxlint missing; run `npm ci`/u);
+  assert.match(output, /oxlint missing; run `pnpm install`/u);
   assert.match(
     output,
     /json-schema-to-typescript missing; run `pnpm --dir editors\/vscode install`/u,

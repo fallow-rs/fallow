@@ -447,12 +447,12 @@ test("published Node packages and Action smoke tests use Node 22", () => {
 
 test("root repository tooling declares its exact Node floor", () => {
   const rootPackage = readJson("package.json");
-  const rootLock = readJson("package-lock.json");
   const contributing = readFileSync("CONTRIBUTING.md", "utf8");
+  const bootstrap = readFileSync("scripts/bootstrap.mjs", "utf8");
 
-  assert.equal(rootPackage.engines.node, ">=22.12.0");
-  assert.equal(rootLock.packages[""].engines.node, ">=22.12.0");
-  assert.match(contributing, /Repository tooling requires Node\.js 22\.12\.0 or later\./);
+  assert.equal(rootPackage.engines.node, ">=22.13.0");
+  assert.match(bootstrap, /^export const MIN_NODE = "22\.13\.0";$/mu);
+  assert.match(contributing, /Repository tooling requires Node\.js 22\.13\.0 or later,/);
 });
 
 test("type-aware manifest keeps every runtime and package surface in parity", () => {

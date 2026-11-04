@@ -904,7 +904,7 @@ test("fixture dependency provenance rejects a missing fixture or dependency inst
     mkdirSync(fixture, { recursive: true });
     assert.throws(
       () => fixtureDependencyEnvironment(fixture, "fixture", workspace),
-      /no installed dependencies.*npm ci/,
+      /no installed dependencies.*pnpm install/,
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });

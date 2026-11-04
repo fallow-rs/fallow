@@ -1,0 +1,21 @@
+# Settings for the root repository tools. `editors/vscode` is a separate pnpm
+# project with its own `pnpm-workspace.yaml` and `pnpm-lock.yaml`.
+
+# Keep the flat `node_modules` layout of the earlier npm install. Tools under
+# `tools/` and the type-aware corpus resolve packages from the root
+# `node_modules` through Node ancestor lookup.
+nodeLinker: hoisted
+
+# Install only package versions that are at least 7 days old (10080 minutes).
+# The Dependabot cooldown in `.github/dependabot.yml` uses the same age.
+minimumReleaseAge: 10080
+
+# Fail the install when a dependency has a build script that is not listed in
+# `allowBuilds`. No root dependency needs a build script.
+strictDepBuilds: true
+
+overrides:
+  # Keep fast-uri 3 on its patched release. See
+  # `docs/development/dependency-updates.md`.
+  "fast-uri@3": 3.1.9
+  typescript: 7.0.2

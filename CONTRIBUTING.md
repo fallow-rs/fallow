@@ -4,35 +4,42 @@ Thanks for contributing to fallow. This guide covers setup, development, and pul
 
 ## Getting started
 
-Repository tooling requires Node.js 22.12.0 or later. Published Node packages
+Repository tooling requires Node.js 22.13.0 or later, because pnpm 11 needs it. Published Node packages
 require Node.js 22 or later.
 
 ```bash
 git clone https://github.com/fallow-rs/fallow.git
 cd fallow
-mise install                           # Optional: install pinned tools, including hk
-hk install --mise                      # Enable hooks (without mise: hk install)
-npm install                            # Install repo tooling such as commitlint
-pnpm --dir editors/vscode install      # Tooling that verify:fast needs
-cargo build --workspace
-npm run verify:fast                   # Canonical local feedback loop
+mise install         # Optional: pinned Node.js, pnpm, hk, pkl and cargo tools
+pnpm bootstrap       # Install the git hooks and all dependencies
+pnpm verify:fast     # Canonical local feedback loop
 ```
 
-[hk](https://hk.jdx.dev) runs the git hooks. `hk.pkl` defines them. With
-[mise](https://mise.jdx.dev) installed, `mise install` gets the pinned versions
-of hk, pkl, Node.js and the cargo tools that the hooks call (`typos`,
-`cargo-shear` and others). Without mise, install `hk` and `pkl` at the versions
-in `mise.toml`. See
+[mise](https://mise.jdx.dev) is optional. `mise install` gets the versions in
+`mise.toml`: Node.js, pnpm, [hk](https://hk.jdx.dev), pkl and the cargo tools
+that the hooks call (`typos`, `cargo-shear` and others). Without mise, install
+pnpm, hk and pkl at the versions in `mise.toml`. Rustup installs Rust from
+`rust-toolchain.toml`, so `mise.toml` does not pin Rust. See
 [quality gates](docs/development/quality-gates.md#pinned-tools-with-mise-optional).
-The hooks skip a check with a hint when its tool is missing.
 
-`hk install --mise` starts the hooks through `mise x`, so they find hk and the
-pinned tools also when your shell does not activate mise. To skip the hooks
+`pnpm bootstrap` runs `scripts/bootstrap.mjs`. You can run it again at any
+time. It does these steps:
+
+1. It checks for Node.js 22.13.0 or later, pnpm and hk. For each missing tool,
+   it prints one install hint and stops.
+2. It removes `core.hooksPath` from the repository config when its value is
+   `.githooks`, the hooks folder of old clones. It keeps any other value, and
+   any value from your global config, and prints a warning. With git 2.54 or
+   later, git then runs the hooks in that folder in addition to the hk hooks.
+   With older git, the hk hooks do not run while the setting exists.
+3. It installs the hooks that `hk.pkl` defines. With mise on `PATH`, it runs
+   `hk install --mise`, so the hooks find the pinned tools also when your
+   shell does not activate mise. Without mise, it runs `hk install`.
+4. It runs `pnpm install --frozen-lockfile` at the root and in
+   `editors/vscode`.
+
+The hooks skip a check with a hint when its tool is missing. To skip the hooks
 for one command, use `HK=0 git commit` or `HK=0 git push`.
-
-If you set `core.hooksPath` to `.githooks` in an earlier clone, remove it
-before `hk install`: `git config --unset core.hooksPath`. While it is set, git
-runs the old folder and hk does not take over.
 
 On Windows, enable symlink checkout support before cloning. If you already
 cloned the repo, enable it and check out the repo again:
@@ -63,8 +70,7 @@ npm run verify:full                   # Fast checks plus script/npm/Rust tests, 
 cargo test -p fallow-core             # Focused single-crate test run
 ```
 
-Run `npm install` at the repository root and `pnpm install` under
-`editors/vscode` before either verification command. Full verification also
+Run `pnpm bootstrap` before either verification command. Full verification also
 requires `npm ci` under `crates/napi` and a local platform compiler. It is the
 most comprehensive local gate and is recommended before pushing substantial
 changes.
@@ -369,7 +375,7 @@ git rebase --signoff origin/main
 git push --force-with-lease
 ```
 
-The `Commit messages` check fails a pull request that has a commit without a sign-off. Pull requests from bots are exempt. After `hk install`, the `commit-msg` hook runs the same check on each commit, so a missing sign-off stops the commit before the push.
+The `Commit messages` check fails a pull request that has a commit without a sign-off. Pull requests from bots are exempt. After `pnpm bootstrap`, the `commit-msg` hook runs the same check on each commit, so a missing sign-off stops the commit before the push.
 
 ## Code style
 

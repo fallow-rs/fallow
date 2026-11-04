@@ -18,7 +18,7 @@ file adds what is specific to fallow.
 
 | Directory | Command |
 | --- | --- |
-| Root | `npm ci --no-audit --no-fund --ignore-scripts` |
+| Root | `npx -y pnpm@11.25.0 install --frozen-lockfile --ignore-scripts` |
 | `viz-frontend/` | `npm ci --ignore-scripts`, then `npm run build` |
 | `editors/vscode/` | `corepack enable`, then `pnpm install --frozen-lockfile --ignore-scripts` |
 | `crates/napi/` | `npm ci --omit=optional --ignore-scripts` |
@@ -26,7 +26,7 @@ file adds what is specific to fallow.
 
 To change a lockfile, use `npx -y npm@11 install --package-lock-only
 --ignore-scripts` in that directory, or `pnpm install --lockfile-only
---ignore-scripts` in `editors/vscode/`.
+--ignore-scripts` at the root or in `editors/vscode/`.
 
 ## Known causes and fixes
 

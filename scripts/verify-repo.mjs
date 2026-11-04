@@ -191,7 +191,7 @@ const FULL_ONLY_COMMANDS = [
   },
 ];
 
-const ROOT_INSTALL = "npm ci";
+const ROOT_INSTALL = "pnpm install";
 
 // Local installs that the gates need. The preflight checks all of them before
 // the first gate, so one run names every missing or stale install.
@@ -212,7 +212,7 @@ const FULL_ONLY_INSTALLS = [
     installCommand: "npm ci --prefix crates/napi",
   },
   {
-    // The sidecar has its own package.json, so the root `npm ci` leaves it
+    // The sidecar has its own package.json, so the root `pnpm install` leaves it
     // out. The type-aware workspace tests fail without it. `tsrs` is only in
     // the sidecar manifest, so the probe cannot resolve from the root install.
     dependency: "tsrs",
@@ -314,7 +314,7 @@ Canonical local repository verification:
           and the local NAPI build and tests
 
 Prerequisites:
-  - Node.js 22 or newer and root dependencies installed with npm install
+  - Node.js 22.12.0 or newer and root dependencies installed with pnpm install
   - A stable Rust toolchain with rustfmt and clippy
   - editors/vscode dependencies installed with pnpm install
   - Full mode also needs crates/napi and tools/type-aware-sidecar

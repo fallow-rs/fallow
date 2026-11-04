@@ -749,7 +749,7 @@ const publishDependencyEnvironment = (environment) => {
       type_declaration_tree_sha256: null,
     };
   }
-  const lockfile = resolve(environment.dependency_root, "package-lock.json");
+  const lockfile = resolve(environment.dependency_root, "pnpm-lock.yaml");
   return {
     dependency_installation: environment.dependency_installation,
     path_base: "fallow-workspace-root",

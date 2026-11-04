@@ -4,19 +4,30 @@ Use this before large changes, reviews, commits, and pushes.
 
 ## One-time local setup
 
+```bash
+mise install     # Optional: pinned Node.js, pnpm, hk, pkl and cargo tools
+pnpm bootstrap   # Install the git hooks and all dependencies
+```
+
+`pnpm bootstrap` runs `scripts/bootstrap.mjs`. The script uses only Node
+built-ins, so it runs before any install. It checks for Node.js 22.13.0 or
+later, pnpm and hk, and prints one install hint for each missing tool. It
+removes a `core.hooksPath=.githooks` setting from the repository config of an
+old clone, and warns about any other `core.hooksPath` value. Before git 2.54,
+hk installs hook files that git ignores while `core.hooksPath` is set, so the
+warning then tells you that the hk hooks do not run. Then it installs the hk hooks and runs
+`pnpm install --frozen-lockfile` at the root and in `editors/vscode`. You can
+run it again at any time.
+
 ### Git hooks with hk
 
 [hk](https://hk.jdx.dev) runs the git hooks. The root `hk.pkl` defines the
 `pre-commit`, `commit-msg` and `pre-push` hooks. hk evaluates `hk.pkl` with the
-`pkl` CLI, so install both, then run `hk install` once per clone:
+`pkl` CLI, so install both. `pnpm bootstrap` then runs `hk install --mise`
+when mise is on `PATH`, and `hk install` when it is not.
 
-```bash
-mise install
-hk install --mise
-```
-
-Without mise, install `hk` and `pkl` at the versions in `mise.toml` and run
-`hk install`. `--mise` starts the hooks through `mise x`, so a shell or git
+Without mise, install `hk` and `pkl` at the versions in `mise.toml`.
+`--mise` starts the hooks through `mise x`, so a shell or git
 client without mise activation still finds hk. `HK=0 git commit` skips the
 hooks for one command. `HK_SKIP_STEPS=<step> git commit` skips only the named
 step, for example `HK_SKIP_STEPS=file-size`.
@@ -36,7 +47,7 @@ Run one hook by hand with `hk run pre-commit` or `hk run pre-push`. Add
 ### Pinned tools with mise (optional)
 
 The root `mise.toml` pins the local tools that the hooks and quality gates
-call: hk, pkl, Node.js, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
+call: hk, pkl, Node.js, pnpm, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
 `cargo-nextest`, `cargo-llvm-cov` and `cargo-insta`. With
 [mise](https://mise.jdx.dev) installed, run `mise install` to get the pinned
 set. mise downloads prebuilt binaries, so the install does not compile tools.
@@ -51,23 +62,48 @@ Where CI pins a tool version, `mise.toml` uses the same version.
 `tool: name@version` pin changes and `mise.toml` does not follow. The test
 does not check typos and cargo-deny, because their CI actions fix the tool
 version in the action commit. A Dependabot action bump then does not fail.
-Update those two versions by hand.
+Update those two versions by hand. The same test fails when the pnpm version
+in `mise.toml` is not the lower bound of `engines.pnpm` in the root
+`package.json`,
+the `packageManager` of `editors/vscode`, or a `pnpm/action-setup` step in
+`ci.yml`, `commitlint.yml` or `contributors.yml`.
 
 ### Package installs
 
-The root `.npmrc` disables dependency lifecycle scripts by default. Keep
+The root tools and `editors/vscode` are two separate pnpm projects. Each has
+its own `pnpm-workspace.yaml` and `pnpm-lock.yaml`. The root
+`pnpm-workspace.yaml` sets a 7-day minimum release age, fails the install on
+an unapproved dependency build script, and keeps the flat `node_modules`
+layout (`nodeLinker: hoisted`) that tools under `tools/` resolve through.
+
+The root `package.json` sets `engines.pnpm` to `^11.25.0`. pnpm stops with
+`ERR_PNPM_UNSUPPORTED_ENGINE` when its version is older than 11.25.0 or is
+not pnpm 11. `mise install` gives pnpm 11.25.0. The root does not use the other
+two pin fields:
+
+- `packageManager`: `pnpm/action-setup` rejects a `packageManager` that
+  differs from its `version` input. The PGO and ecosystem jobs set up pnpm 12
+  for their public fixtures.
+- `devEngines.packageManager`: npm fails `npm run` when no entry names npm.
+  An entry that names npm makes `actions/setup-node` turn on npm caching, and
+  that step fails because the root has no npm lockfile. Corepack also ignores
+  an array value, so Dependabot then updates the lockfile with pnpm 10.
+
+Dependabot reads `engines.pnpm`, so it updates `pnpm-lock.yaml` with pnpm 11.
+
+The root `.npmrc` disables npm dependency lifecycle scripts by default. Keep
 `--ignore-scripts` explicit on CI installs, including installs with `--prefix`
 that load another package's configuration. Run required native builds and
 extension-host downloads through the existing explicit build and test commands.
 Do not turn install scripts back on for the whole dependency tree.
 
-A root-only `npm ci` is enough for the type-aware CLI test targets. The
+A root-only `pnpm install` is enough for the type-aware CLI test targets. The
 type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
 without a sidecar-local install it resolves `typescript` from ancestor
 `node_modules` directories, and the root install pins the same `typescript`
-version as the sidecar (kept in lockstep through the root `package.json`
-`overrides` entry). The sidecar's own `node --test` suite resolves
-`typescript` the same way, so it also passes after a root-only `npm ci`.
+version as the sidecar (kept in lockstep through the `overrides` entry in the
+root `pnpm-workspace.yaml`). The sidecar's own `node --test` suite resolves
+`typescript` the same way, so it also passes after a root-only `pnpm install`.
 
 The sidecar-local install is still needed in two cases:
 
@@ -107,7 +143,7 @@ versions from `crates/api/mutation-runner-protocol.json`, installs those exact
 versions, and runs the companion tests.
 
 The coverage producer corpus pins four JavaScript coverage producers in a
-package of its own, so the root `npm ci` every contributor and every CI job
+package of its own, so the root `pnpm install` every contributor and every CI job
 runs stays untouched:
 
 ```bash
@@ -147,7 +183,7 @@ branch under test.
 Install into the checkout you are working in:
 
 ```bash
-npm ci
+pnpm install
 npm ci --prefix tools/type-aware-sidecar
 npm ci --prefix crates/napi
 pnpm --dir editors/vscode install
