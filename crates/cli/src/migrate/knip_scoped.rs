@@ -8,8 +8,8 @@
 use serde_json::{Map, Value};
 
 use super::knip_fields::{
-    IssueTypeEffect, migrate_ignore, migrate_ignore_deps, migrate_namespace_issue_type,
-    warn_unmapped_rule_key,
+    IssueTypeEffect, migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps,
+    migrate_namespace_issue_type, warn_unmapped_rule_key,
 };
 use super::knip_tables::{
     KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNSUPPORTED_PLUGIN_KEYS,
@@ -401,6 +401,16 @@ fn migrate_workspace_field(
                     source: "knip",
                     field: scope.field(name),
                     message: "merged into the global ignoreDependencies list; fallow has no per-workspace list, so the entries apply to every workspace".to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+        "ignoreBinaries" => {
+            if migrate_ignore_binaries(value, &scope.field(name), config, warnings) {
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: scope.field(name),
+                    message: "merged into the global ignoreBinaries list; fallow has no per-workspace list, so the entries apply to every workspace".to_string(),
                     suggestion: None,
                 });
             }

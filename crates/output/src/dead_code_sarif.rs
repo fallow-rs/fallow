@@ -25,6 +25,10 @@ use fallow_types::{
     },
 };
 
+#[path = "dead_code_sarif_component_framework.rs"]
+mod component_framework;
+use component_framework::push_component_framework_sarif_results;
+
 fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(
         &path
@@ -1178,6 +1182,36 @@ fn push_sarif_unlisted_deps(
     }
 }
 
+/// Unlisted binaries fan out to one SARIF result per use site, like unlisted
+/// dependencies.
+fn push_sarif_unlisted_binaries(
+    sarif_results: &mut Vec<serde_json::Value>,
+    binaries: &[UnlistedBinaryFinding],
+    root: &Path,
+    rule: Severity,
+    snippets: &mut SourceSnippetCache,
+) {
+    for entry in binaries {
+        let level = finding_level(entry, rule);
+        let binary = &entry.binary;
+        for site in &binary.used_in {
+            let uri = relative_uri(&site.path, root);
+            let source_snippet = snippets.line(&site.path, site.line);
+            sarif_results.push(sarif_result_with_snippet(
+                "fallow/unlisted-binary",
+                level,
+                &format!(
+                    "Binary '{}' is used but no installed or listed package provides it",
+                    binary.binary_name
+                ),
+                &uri,
+                Some((site.line, site.col + 1)),
+                source_snippet.as_deref(),
+            ));
+        }
+    }
+}
+
 /// Duplicate exports fan out to one SARIF result per location
 /// (SARIF 2.1.0 section 3.27.12), so they do not fit `push_sarif_results`.
 fn push_sarif_duplicate_exports(
@@ -1253,6 +1287,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-store-member" => rules.unused_store_members,
         "unresolved-import" => rules.unresolved_imports,
         "unlisted-dependency" => rules.unlisted_dependencies,
+        "unlisted-binary" => rules.unlisted_binaries,
         "duplicate-export" => rules.duplicate_exports,
         "duplicate-export-alias" => rules.duplicate_export_aliases,
         "circular-dependency" => rules.circular_dependencies,
@@ -1686,6 +1721,15 @@ fn push_misc_sarif_results(
             snippets,
         );
     }
+    if !results.unlisted_binaries.is_empty() {
+        push_sarif_unlisted_binaries(
+            sarif_results,
+            &results.unlisted_binaries,
+            root,
+            rules.unlisted_binaries,
+            snippets,
+        );
+    }
     if !results.duplicate_exports.is_empty() {
         push_sarif_duplicate_exports(
             sarif_results,
@@ -1830,104 +1874,6 @@ fn push_component_member_sarif_results(
                 &o.output,
                 root,
                 finding_level(o, rules.unused_component_outputs),
-            )
-        },
-    );
-}
-
-/// Push SARIF results for Svelte events, server actions, and load-data keys.
-fn push_component_framework_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    ctx: &SarifCtx<'_>,
-    snippets: &mut SourceSnippetCache,
-) {
-    let SarifCtx {
-        results,
-        root,
-        rules,
-    } = *ctx;
-
-    push_sarif_results(
-        sarif_results,
-        &results.unused_svelte_events,
-        snippets,
-        |e| {
-            sarif_unused_svelte_event_fields(
-                &e.event,
-                root,
-                finding_level(e, rules.unused_svelte_events),
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.duplicate_export_aliases,
-        snippets,
-        |e| {
-            sarif_duplicate_export_alias_fields(
-                &e.alias,
-                root,
-                finding_level(e, rules.duplicate_export_aliases),
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.unused_effect_layers,
-        snippets,
-        |e| {
-            sarif_unused_effect_layer_fields(
-                &e.layer,
-                root,
-                finding_level(e, rules.unused_effect_layers),
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.unused_tagged_errors,
-        snippets,
-        |e| {
-            sarif_unused_tagged_error_fields(
-                &e.error,
-                root,
-                finding_level(e, rules.unused_tagged_errors),
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.unproduced_catch_tags,
-        snippets,
-        |e| {
-            sarif_unproduced_catch_tag_fields(
-                &e.catch_tag,
-                root,
-                finding_level(e, rules.unproduced_catch_tags),
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.unused_server_actions,
-        snippets,
-        |a| {
-            sarif_unused_server_action_fields(
-                &a.action,
-                root,
-                finding_level(a, rules.unused_server_actions),
-            )
-        },
-    );
-    push_sarif_results(
-        sarif_results,
-        &results.unused_load_data_keys,
-        snippets,
-        |k| {
-            sarif_unused_load_data_key_fields(
-                &k.key,
-                root,
-                finding_level(k, rules.unused_load_data_keys),
             )
         },
     );

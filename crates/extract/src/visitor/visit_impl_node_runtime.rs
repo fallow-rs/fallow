@@ -17,10 +17,22 @@ use super::{
     node_module_register_specifier, normalize_module_file_relative_path, pino_factory_callee_name,
 };
 
+#[path = "visit_impl_commands.rs"]
+mod visit_commands;
+
 /// The CommonJS globals that name a path of the current module.
 const MODULE_PATH_GLOBALS: &[&str] = &["__filename", "__dirname"];
 
 impl ModuleInfoExtractor {
+    /// Record the facts of a Node runtime call: pino transports, `register`
+    /// loaders, `child_process.fork` targets and process commands.
+    pub(super) fn record_node_runtime_call(&mut self, expr: &CallExpression<'_>) {
+        self.try_record_pino_transport_targets(expr);
+        self.try_record_node_module_register(expr);
+        self.try_record_child_process_fork(expr);
+        self.try_record_command_call(expr);
+    }
+
     fn is_pino_factory_binding(&self, local_name: &str) -> bool {
         let imported = self.imports.iter().any(|import| {
             import.source == super::PINO_PACKAGE

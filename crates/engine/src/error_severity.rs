@@ -80,6 +80,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unused_load_data_keys,
         &mut rules.unresolved_imports,
         &mut rules.unlisted_dependencies,
+        &mut rules.unlisted_binaries,
         &mut rules.duplicate_exports,
         &mut rules.duplicate_export_aliases,
         &mut rules.type_only_dependencies,

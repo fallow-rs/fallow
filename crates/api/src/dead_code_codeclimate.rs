@@ -16,6 +16,12 @@ use fallow_types::output_dead_code::{
 };
 use fallow_types::results::AnalysisResults;
 
+#[path = "dead_code_codeclimate_catalog.rs"]
+mod catalog_issues;
+use catalog_issues::{
+    push_misconfigured_dependency_override_issues, push_unresolved_catalog_reference_issues,
+};
+
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
     match s {
         Severity::Error => CodeClimateSeverity::Major,
@@ -585,6 +591,50 @@ fn push_unlisted_dep_issues(
                     description: &format!(
                         "Package '{}' is imported but not listed in package.json",
                         dep.package_name
+                    ),
+                    severity: level,
+                    category: "Bug Risk",
+                    path,
+                    begin_line: Some(*line),
+                    fingerprint: &fp,
+                },
+            ));
+        }
+    }
+}
+
+fn push_unlisted_binary_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    binaries: &[fallow_types::output_dead_code::UnlistedBinaryFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    for entry in binaries {
+        let level = finding_codeclimate(entry, severity);
+        let binary = &entry.binary;
+        let sites: Vec<(String, u32, u32)> = binary
+            .used_in
+            .iter()
+            .map(|site| (cc_path(&site.path, root), site.line, site.col))
+            .collect();
+        let discriminators = location_discriminators(&sites);
+        for ((path, line, _), discriminator) in sites.iter().zip(&discriminators) {
+            let line_str = line.to_string();
+            let discriminator: Vec<&str> = discriminator.iter().map(String::as_str).collect();
+            let fp = codeclimate_fingerprint_hash(&[
+                "fallow/unlisted-binary",
+                path,
+                &line_str,
+                &binary.binary_name,
+            ]);
+            issues.push(dead_code_issue(
+                entry.finding_id.as_deref(),
+                &discriminator,
+                CodeClimateIssueInput {
+                    check_name: "fallow/unlisted-binary",
+                    description: &format!(
+                        "Binary '{}' is used but no installed or listed package provides it",
+                        binary.binary_name
                     ),
                     severity: level,
                     category: "Bug Risk",
@@ -1759,67 +1809,6 @@ fn push_unused_catalog_entry_issues(
     }
 }
 
-fn push_unresolved_catalog_reference_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    for finding in findings {
-        let level = finding_codeclimate(finding, severity);
-        let finding_id = finding.finding_id.as_deref();
-        let finding = &finding.reference;
-        let path = cc_path(&finding.path, root);
-        let line_str = finding.line.to_string();
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/unresolved-catalog-reference",
-            &path,
-            &line_str,
-            &finding.catalog_name,
-            &finding.entry_name,
-        ]);
-        let catalog_phrase = if finding.catalog_name == "default" {
-            "the default catalog".to_string()
-        } else {
-            format!("catalog '{}'", finding.catalog_name)
-        };
-        let mut description = format!(
-            "Package '{}' is referenced via `catalog:{}` but {} does not declare it; `pnpm install` will fail",
-            finding.entry_name,
-            if finding.catalog_name == "default" {
-                ""
-            } else {
-                finding.catalog_name.as_str()
-            },
-            catalog_phrase,
-        );
-        if !finding.available_in_catalogs.is_empty() {
-            use std::fmt::Write as _;
-            let _ = write!(
-                description,
-                " (available in: {})",
-                finding.available_in_catalogs.join(", ")
-            );
-        }
-        issues.push(dead_code_issue(
-            finding_id,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/unresolved-catalog-reference",
-                description: &description,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: Some(finding.line),
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
 fn push_empty_catalog_group_issues(
     issues: &mut Vec<CodeClimateIssue>,
     groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
@@ -1892,50 +1881,6 @@ fn push_unused_dependency_override_issues(
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-dependency-override",
-                description: &description,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: Some(finding.line),
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_misconfigured_dependency_override_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    for finding in findings {
-        let level = finding_codeclimate(finding, severity);
-        let finding_id = finding.finding_id.as_deref();
-        let finding = &finding.entry;
-        let path = cc_path(&finding.path, root);
-        let line_str = finding.line.to_string();
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/misconfigured-dependency-override",
-            &path,
-            &line_str,
-            finding.source.as_label(),
-            &finding.raw_key,
-        ]);
-        let description = format!(
-            "Override `{}` -> `{}` is malformed: {}",
-            finding.raw_key,
-            finding.raw_value,
-            finding.reason.describe(),
-        );
-        issues.push(dead_code_issue(
-            finding_id,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/misconfigured-dependency-override",
                 description: &description,
                 severity: level,
                 category: "Bug Risk",
@@ -2177,6 +2122,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.unlisted_dependencies,
             self.root,
             self.rules.unlisted_dependencies,
+        );
+        push_unlisted_binary_issues(
+            &mut self.issues,
+            &self.results.unlisted_binaries,
+            self.root,
+            self.rules.unlisted_binaries,
         );
         push_duplicate_export_issues(
             &mut self.issues,

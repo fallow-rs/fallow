@@ -39,6 +39,7 @@ def dead_code_rows:
    [ (.dead_code.unused_store_members // [])[] | {kind:"Unused store member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unresolved_imports // [])[] | {kind:"Unresolved import", location:path_line, item:("`\(.specifier)`"), introduced:.introduced} ] +
    [ (.dead_code.unlisted_dependencies // [])[] | {kind:"Unlisted dependency", location:first_import_site, item:("`\(.package_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unlisted_binaries // [])[] | {kind:"Unlisted binary", location:((.used_in // [])[:1] | map("`\(.path | rel_path):\(.line)`") | join("")), item:("`\(.binary_name)`"), introduced:.introduced} ] +
    [ (.dead_code.duplicate_exports // [])[] | {kind:"Duplicate export", location:(.locations[:3] | map("`\(.path | rel_path):\(.line)`") | join(", ")), item:("`\(.export_name)`"), introduced:.introduced} ] +
    [ (.dead_code.circular_dependencies // [])[] | {kind:"Circular dependency", location:((.files // []) | map("`\(. | rel_path)`") | join(" -> ")), item:"cycle", introduced:.introduced} ] +
    [ (.dead_code.re_export_cycles // [])[] | {kind:"Re-export cycle", location:((.files // []) | map("`\(. | rel_path)`") | join(" <-> ")), item:(.kind // "cycle"), introduced:.introduced} ] +

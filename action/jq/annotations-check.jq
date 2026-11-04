@@ -65,6 +65,8 @@ def dependency_action(pkg):
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unresolved import::Import '\(.specifier | san)' could not be resolved to a file or package.\(nl)\(nl)Check for typos, missing dependencies, or incorrect path aliases."),
   (.unlisted_dependencies[]? | (.package_name | san) as $pkg | lvl("warning") as $lvl | .imported_from[]? |
     "::\($lvl) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unlisted dependency::Package '\($pkg)' is imported here but not listed in package.json.\(nl)\(nl)Run: \(add_cmd($pkg))"),
+  (.unlisted_binaries[]? | (.binary_name | san) as $bin | lvl("warning") as $lvl | .used_in[]? |
+    "::\($lvl) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unlisted binary::Binary '\($bin)' runs here, but no installed or listed package provides it.\(nl)\(nl)Add the package that provides it to devDependencies, or add '\($bin)' to ignoreBinaries when the system provides it."),
   (.duplicate_exports[]? | (.export_name | san) as $name | lvl("warning") as $lvl | .locations as $locs | .locations[]? |
     "::\($lvl) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Duplicate export::Export '\($name)' is defined in \($locs | length) modules:\(nl)\($locs | map("  \u2022 " + (.path | san) + ":" + (.line | san)) | join(nl))\(nl)\(nl)This causes ambiguity for consumers. Keep one canonical location."),
   (.circular_dependencies[]? |

@@ -28,6 +28,7 @@ export interface AnalysisCompleteParams {
   unusedClassMembers: number;
   unresolvedImports: number;
   unlistedDependencies: number;
+  unlistedBinaries: number;
   duplicateExports: number;
   typeOnlyDependencies: number;
   testOnlyDependencies: number;
@@ -82,6 +83,7 @@ export const buildParamsFromCli = (
   unusedClassMembers: check?.unused_class_members.length ?? 0,
   unresolvedImports: check?.unresolved_imports.length ?? 0,
   unlistedDependencies: check?.unlisted_dependencies.length ?? 0,
+  unlistedBinaries: check?.unlisted_binaries?.length ?? 0,
   duplicateExports: check?.duplicate_exports.length ?? 0,
   typeOnlyDependencies: check?.type_only_dependencies?.length ?? 0,
   testOnlyDependencies: check?.test_only_dependencies?.length ?? 0,
@@ -153,6 +155,11 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     count: "unlistedDependencies",
     icon: "$(warning)",
     label: "unlisted dependencies",
+  },
+  {
+    count: "unlistedBinaries",
+    icon: "$(warning)",
+    label: "unlisted binaries",
   },
   {
     count: "duplicateExports",

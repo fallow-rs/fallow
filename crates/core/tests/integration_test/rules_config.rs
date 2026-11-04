@@ -82,6 +82,7 @@ fn ignore_exports_wildcard() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_binaries: vec![],
         ignore_command_entries: vec![],
         ignore_unresolved_imports: vec![],
         ignore_exports: vec![fallow_config::IgnoreExportRule {
@@ -157,6 +158,7 @@ fn ignore_exports_specific() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_binaries: vec![],
         ignore_command_entries: vec![],
         ignore_unresolved_imports: vec![],
         ignore_exports: vec![fallow_config::IgnoreExportRule {
@@ -384,6 +386,7 @@ fn ignore_dependencies_config() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec!["unused-dep".to_string()],
+        ignore_binaries: vec![],
         ignore_command_entries: vec![],
         ignore_unresolved_imports: vec![],
         ignore_exports: vec![],

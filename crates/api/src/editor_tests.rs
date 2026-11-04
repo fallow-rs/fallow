@@ -451,6 +451,7 @@ fn merge_results_covers_all_fields() {
     assert_eq!(target.unlisted_dependencies.len(), 1);
     assert_eq!(target.duplicate_exports.len(), 1);
     assert_eq!(target.duplicate_export_aliases.len(), 1);
+    assert_eq!(target.unlisted_binaries.len(), 1);
     assert_eq!(target.type_only_dependencies.len(), 1);
     assert_eq!(target.test_only_dependencies.len(), 1);
     assert_eq!(target.circular_dependencies.len(), 1);
@@ -705,6 +706,14 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                 imported_from: vec![],
             },
         )],
+        unlisted_binaries: vec![
+            fallow_types::output_dead_code::UnlistedBinaryFinding::with_actions(
+                fallow_types::results::UnlistedBinary {
+                    binary_name: "tool".to_string(),
+                    used_in: vec![],
+                },
+            ),
+        ],
         duplicate_exports: vec![super::editor_results::DuplicateExportFinding::with_actions(
             super::editor_results::DuplicateExport {
                 export_name: "dup".to_string(),

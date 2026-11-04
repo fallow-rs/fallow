@@ -261,6 +261,7 @@ fn ts_alias_policy_is_explicit() {
             ),
             ("UnresolvedImport", "UnresolvedImportFinding"),
             ("UnlistedDependency", "UnlistedDependencyFinding"),
+            ("UnlistedBinary", "UnlistedBinaryFinding"),
             ("UnusedCatalogEntry", "UnusedCatalogEntryFinding"),
             ("UnusedDependency", "UnusedDependencyFinding"),
             ("UnusedDependency", "UnusedDevDependencyFinding"),

@@ -173,6 +173,7 @@ issuekind_json_key_fallback() {
     unused-store-member) echo "unused_store_members" ;;
     unresolved-import) echo "unresolved_imports" ;;
     unlisted-dependency) echo "unlisted_dependencies" ;;
+    unlisted-binary) echo "unlisted_binaries" ;;
     duplicate-export) echo "duplicate_exports" ;;
     duplicate-export-alias) echo "duplicate_export_aliases" ;;
     circular-dependency) echo "circular_dependencies" ;;

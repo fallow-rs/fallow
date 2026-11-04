@@ -154,6 +154,7 @@ else
       (if (.check.unused_store_members | length) > 0 then "| [Unused store members](\(docs("unused-store-members"))) | \(.check.unused_store_members | length) |" else null end),
       (if (.check.unresolved_imports | length) > 0 then "| [Unresolved imports](\(docs("unresolved-imports"))) | \(.check.unresolved_imports | length) |" else null end),
       (if (.check.unlisted_dependencies | length) > 0 then "| [Unlisted dependencies](\(docs("unlisted-dependencies"))) | \(.check.unlisted_dependencies | length) |" else null end),
+      (if ((.check.unlisted_binaries // []) | length) > 0 then "| [Unlisted binaries](\(docs("unlisted-binaries"))) | \(.check.unlisted_binaries | length) |" else null end),
       (if (.check.duplicate_exports | length) > 0 then "| [Duplicate exports](\(docs("duplicate-exports"))) | \(.check.duplicate_exports | length) |" else null end),
       (if (.check.circular_dependencies | length) > 0 then "| [Circular dependencies](\(docs("circular-dependencies"))) | \(.check.circular_dependencies | length) |" else null end),
       (if ((.check.re_export_cycles // []) | length) > 0 then "| [Re-export cycles](\(docs("re-export-cycles"))) | \(.check.re_export_cycles | length) |" else null end),

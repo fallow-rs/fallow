@@ -56,6 +56,7 @@ else
     table_row("Unused store members"; "unused_store_members"; "unused-store-members"),
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
+    table_row("Unlisted binaries"; "unlisted_binaries"; "unlisted-binaries"),
     table_row("Duplicate exports"; "duplicate_exports"; "duplicate-exports"),
     table_row("Duplicate export aliases"; "duplicate_export_aliases"; "duplicate-export-aliases"),
     table_row("Circular dependencies"; "circular_dependencies"; "circular-dependencies"),
@@ -128,6 +129,9 @@ else
   section("Unlisted dependencies"; "unlisted_dependencies";
     "Packages imported in code but missing from `package.json`.\n\n| Package | Used in |\n|---------|--------|\n";
     "| `\(.package_name)` | \(if (.imported_from | length) > 0 then (.imported_from[:3] | map("`\(.path):\(.line)`") | join(", ")) + (if (.imported_from | length) > 3 then " *+\((.imported_from | length) - 3) more*" else "" end) else "" end) |") +
+  section("Unlisted binaries"; "unlisted_binaries";
+    "Binaries that scripts or process calls run, but that no installed package provides.\n\n| Binary | Used in |\n|--------|--------|\n";
+    "| `\(.binary_name)` | \(.used_in[:3] | map("`\(.path):\(.line)`") | join(", "))\(if (.used_in | length) > 3 then " *+\((.used_in | length) - 3) more*" else "" end) |") +
   section("Duplicate exports"; "duplicate_exports";
     "Same export name defined in multiple files \u2014 barrel re-exports may resolve ambiguously.\n\n| Export | Locations |\n|--------|-----------|\n";
     "| `\(.export_name)` | \(.locations[:3] | map("`\(.path):\(.line)`") | join(", "))\(if (.locations | length) > 3 then " *+\((.locations | length) - 3) more*" else "" end) |") +

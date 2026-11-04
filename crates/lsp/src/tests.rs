@@ -811,6 +811,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unused-store-member",
             "unresolved-import",
             "unlisted-dependency",
+            "unlisted-binary",
             "duplicate-export",
             "duplicate-export-alias",
             "type-only-dependency",

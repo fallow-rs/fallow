@@ -71,6 +71,7 @@ pub struct AnalysisCompleteParams {
     pub unused_load_data_keys: usize,
     pub unresolved_imports: usize,
     pub unlisted_dependencies: usize,
+    pub unlisted_binaries: usize,
     pub duplicate_exports: usize,
     #[serde(default)]
     pub duplicate_export_aliases: usize,
@@ -167,6 +168,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         unused_load_data_keys: results.unused_load_data_keys.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
+        unlisted_binaries: results.unlisted_binaries.len(),
         duplicate_exports: results.duplicate_exports.len(),
         duplicate_export_aliases: results.duplicate_export_aliases.len(),
         type_only_dependencies: results.type_only_dependencies.len(),

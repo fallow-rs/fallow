@@ -2,11 +2,13 @@ mod declarations;
 mod helpers;
 mod remap;
 mod requirements;
+mod ssr_load_module;
 
 use requirements::{BindingRequirements, RequirementArena};
 use std::cell::{Cell, RefCell};
 pub(crate) mod react;
 mod visit_impl;
+pub(crate) use ssr_load_module::{ssr_load_module_call, ssr_load_module_source};
 pub(crate) use visit_impl::push_member_tag_accesses;
 
 use oxc_ast::ast::{
@@ -30,10 +32,10 @@ use crate::{
 use crate::{js_text::JsText, suppress::ParsedSuppressions};
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
-    ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
-    ImportBindingReference, ImportLoadKind, ImportLoadKindOverrideFact, ImportedCallSite,
-    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
-    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    ClassHeritageInfo, CommandInvocation, ComponentFunction, ComponentProp, DiKeySite,
+    DispatchedEvent, HookUse, ImportBindingReference, ImportLoadKind, ImportLoadKindOverrideFact,
+    ImportedCallSite, LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
+    RenderEdge, SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
     SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
@@ -1070,6 +1072,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// occurrence wins). Consumed by the `boundaries.calls.forbidden`
     /// detector.
     callee_uses: Vec<CalleeUse>,
+    /// Literal commands of process-spawning calls.
+    command_invocations: Vec<CommandInvocation>,
     /// Call facts paired with the root reference span until semantic admission.
     pending_imported_call_sites: Vec<(Span, ImportedCallSite)>,
     /// Runtime ESM roots precollected before the body walk.
@@ -3722,6 +3726,7 @@ impl ModuleInfoExtractor {
             sanitized_sink_args: self.sanitized_sink_args,
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
+            command_invocations: self.command_invocations,
             imported_call_sites: self.imported_call_sites.into(),
             import_binding_references: self.import_binding_references.into(),
             misplaced_directives: self.misplaced_directives,
@@ -3873,6 +3878,8 @@ impl ModuleInfoExtractor {
         info.client_only_dynamic_import_spans
             .append(&mut self.client_only_dynamic_import_spans);
         info.callee_uses.append(&mut self.callee_uses);
+        info.command_invocations
+            .append(&mut self.command_invocations);
         if !self.imported_call_sites.is_empty() {
             let mut calls = std::mem::take(&mut info.imported_call_sites).to_vec();
             calls.append(&mut self.imported_call_sites);
@@ -4166,54 +4173,6 @@ pub(crate) fn extract_import_expression<'a, 'b>(
 /// promise of the namespace and not the namespace itself.
 pub(crate) fn is_unawaited_import(expr: &Expression<'_>) -> bool {
     matches!(expr.without_parentheses(), Expression::ImportExpression(_))
-}
-
-/// Vite dev-server method that loads a module by specifier for SSR.
-const SSR_LOAD_MODULE_METHOD: &str = "ssrLoadModule";
-
-#[must_use]
-/// Match `<receiver>.ssrLoadModule('<literal>')`, with an optional `await` or
-/// parentheses around the call, and return the call span and the specifier.
-///
-/// The Vite dev server loads the module like a dynamic `import()`. A leading
-/// `/` is relative to the Vite root, not to the file system. A computed
-/// argument is not a static edge, so it returns `None`.
-pub(crate) fn ssr_load_module_call(expr: &Expression<'_>) -> Option<(Span, String)> {
-    let call = match expr.get_inner_expression() {
-        Expression::AwaitExpression(await_expr) => {
-            match await_expr.argument.get_inner_expression() {
-                Expression::CallExpression(call) => call,
-                _ => return None,
-            }
-        }
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
-    ssr_load_module_source(call).map(|source| (call.span, source))
-}
-
-#[must_use]
-/// Return the literal specifier of a `<receiver>.ssrLoadModule('<literal>')` call.
-pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String> {
-    let Expression::StaticMemberExpression(member) = call.callee.without_parentheses() else {
-        return None;
-    };
-    if member.property.name != SSR_LOAD_MODULE_METHOD {
-        return None;
-    }
-    let source = match call.arguments.first()?.as_expression()? {
-        Expression::StringLiteral(lit) => lit.value.text().into_owned(),
-        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first()?.value.raw.to_string()
-        }
-        _ => return None,
-    };
-    // Vite resolves relative entry URLs from its root, not the caller's directory.
-    Some(
-        source
-            .strip_prefix("./")
-            .map_or_else(|| source.clone(), |relative| format!("/{relative}")),
-    )
 }
 
 fn try_extract_arrow_wrapped_import<'a, 'b>(

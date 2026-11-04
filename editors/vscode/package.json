@@ -299,6 +299,7 @@
             "unused-store-members": true,
             "unresolved-imports": true,
             "unlisted-dependencies": true,
+            "unlisted-binaries": true,
             "duplicate-exports": true,
             "duplicate-export-aliases": true,
             "type-only-dependencies": true,
@@ -373,6 +374,9 @@
               "type": "boolean"
             },
             "unlisted-dependencies": {
+              "type": "boolean"
+            },
+            "unlisted-binaries": {
               "type": "boolean"
             },
             "duplicate-exports": {

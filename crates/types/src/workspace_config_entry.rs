@@ -90,6 +90,9 @@ impl WorkspaceDiagnosticKind {
             "duplicate-exports" => {
                 "project-level rule; add the file and export names to ignoreExports"
             }
+            "unlisted-binaries" => {
+                "project-level rule; add the binary to ignoreBinaries, or set the top-level rule"
+            }
             "re-export-cycle" => {
                 "project-level rule; add `// fallow-ignore-file re-export-cycle` to one file in \
                  the cycle, or set the top-level rule"

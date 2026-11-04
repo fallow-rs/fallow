@@ -99,6 +99,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unlisted_dependencies: usize,
     #[serde(default)]
+    pub unlisted_binaries: usize,
+    #[serde(default)]
     pub duplicate_exports: usize,
     #[serde(default)]
     pub duplicate_export_aliases: usize,
@@ -153,6 +155,7 @@ impl CheckCounts {
             unused_load_data_keys: results.unused_load_data_keys.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
+            unlisted_binaries: results.unlisted_binaries.len(),
             duplicate_exports: results.duplicate_exports.len(),
             duplicate_export_aliases: results.duplicate_export_aliases.len(),
             circular_dependencies: results.circular_dependencies.len(),
@@ -223,6 +226,7 @@ impl CheckCounts {
             unused_load_data_keys: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
+            unlisted_binaries: b.unlisted_binaries,
             duplicate_exports: b.duplicate_exports,
             // `fallow_config::RegressionBaseline` has no `duplicate_export_aliases`
             // field; default to 0 until the config baseline schema gains one.
@@ -257,6 +261,7 @@ impl CheckCounts {
             unused_class_members: self.unused_class_members,
             unresolved_imports: self.unresolved_imports,
             unlisted_dependencies: self.unlisted_dependencies,
+            unlisted_binaries: self.unlisted_binaries,
             duplicate_exports: self.duplicate_exports,
             circular_dependencies: self.circular_dependencies,
             re_export_cycles: self.re_export_cycles,
@@ -304,6 +309,7 @@ impl CheckCounts {
         push_delta!(unused_load_data_keys);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
+        push_delta!(unlisted_binaries);
         push_delta!(duplicate_exports);
         push_delta!(duplicate_export_aliases);
         push_delta!(circular_dependencies);
@@ -474,6 +480,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
             duplicate_export_aliases: 0,
             circular_dependencies: 0,
@@ -533,6 +540,7 @@ mod tests {
                 unused_load_data_keys: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
+                unlisted_binaries: 0,
                 duplicate_exports: 0,
                 duplicate_export_aliases: 0,
                 circular_dependencies: 1,
@@ -588,6 +596,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
             duplicate_export_aliases: 0,
             circular_dependencies: 0,
@@ -648,6 +657,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
             duplicate_export_aliases: 0,
             circular_dependencies: 0,
@@ -695,6 +705,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
             duplicate_export_aliases: 0,
             circular_dependencies: 0,
@@ -740,6 +751,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
             duplicate_export_aliases: 0,
             circular_dependencies: 0,
@@ -779,6 +791,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
+            unlisted_binaries: 0,
             duplicate_exports: 1,
             duplicate_export_aliases: 0,
             circular_dependencies: 1,
@@ -827,6 +840,7 @@ mod tests {
             unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
+            unlisted_binaries: 0,
             duplicate_exports: 0,
             duplicate_export_aliases: 0,
             circular_dependencies: 0,

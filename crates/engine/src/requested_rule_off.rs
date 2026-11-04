@@ -113,6 +113,10 @@ const REQUESTED_RULES: &[(&str, &[RequestedRule])] = &[
         &[("unlisted-dependencies", |r| r.unlisted_dependencies)],
     ),
     (
+        "--unlisted-binaries",
+        &[("unlisted-binaries", |r| r.unlisted_binaries)],
+    ),
+    (
         "--duplicate-exports",
         &[("duplicate-exports", |r| r.duplicate_exports)],
     ),

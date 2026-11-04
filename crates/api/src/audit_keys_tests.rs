@@ -202,6 +202,19 @@ fn sample_results(root: &Path) -> AnalysisResults {
         .unresolved_imports
         .push(unresolved(&source, "./missing"));
     results.unlisted_dependencies.push(unlisted(&source, "zod"));
+    results.unlisted_binaries.push(
+        fallow_types::output_dead_code::UnlistedBinaryFinding::with_actions(
+            fallow_types::results::UnlistedBinary {
+                binary_name: "hyprctl".to_owned(),
+                used_in: vec![fallow_types::results::BinaryUseSite {
+                    path: source.clone(),
+                    line: 2,
+                    col: 0,
+                    script_name: None,
+                }],
+            },
+        ),
+    );
     results
         .deprecated_exports_in_use
         .push(deprecated_export(&source, "legacyLoader"));

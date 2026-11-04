@@ -868,6 +868,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--unlisted-binaries",
+      "column": "Issue Type",
+      "seed": "Binary used but provided by no installed package"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--unlisted-deps",
       "column": "Issue Type",
       "seed": "Dependency used but not in package.json"
@@ -2407,6 +2413,12 @@
       "row": "type-only-dependency",
       "column": "Description",
       "seed": "Production dependency only used via type-only imports; Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds"
+    },
+    {
+      "section": "issue-types",
+      "row": "unlisted-binary",
+      "column": "Description",
+      "seed": "Binary used but provided by no installed package; Needs installed dependencies; a project without a root node_modules reports none"
     },
     {
       "section": "issue-types",

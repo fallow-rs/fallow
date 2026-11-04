@@ -153,6 +153,10 @@ fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static
             "Packages imported in code but missing from package.json",
             "https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies",
         )),
+        "Unlisted binaries" => Some((
+            "Binaries that scripts or process calls run, but that no installed package provides. Install the package, or add the name to ignoreBinaries when the system provides it",
+            "https://fallow.tools/docs/explanations/dead-code/#unlisted-binaries",
+        )),
         "Duplicate exports" => Some((
             "Same export name defined in multiple files; barrel re-exports may resolve ambiguously",
             "https://fallow.tools/docs/explanations/dead-code/#duplicate-exports",

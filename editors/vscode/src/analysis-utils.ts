@@ -360,6 +360,7 @@ const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
   "dynamic_segment_name_conflicts",
   "unresolved_imports",
   "unlisted_dependencies",
+  "unlisted_binaries",
   "duplicate_exports",
   "duplicate_export_aliases",
   "type_only_dependencies",

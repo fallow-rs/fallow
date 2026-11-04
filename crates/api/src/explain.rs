@@ -159,6 +159,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unlisted-dependencies",
     },
     RuleDef {
+        id: "fallow/unlisted-binary",
+        category: "Dependencies",
+        name: "Unlisted Binaries",
+        short: "Binary used but provided by no installed package",
+        full: "Binaries that package.json scripts or process calls in source (`spawn`, `execSync`, `execa`, the `$` template of zx or execa, `Bun.spawn`) run with a literal command, when no installed or listed package provides them. A binary counts as provided when a `node_modules/.bin` link exists, a declared dependency or a workspace package declares it in `bin`, or it maps to a declared dependency. Shell builtins, commands that `npx` or `pnpm dlx` download, and a fixed list of common operating-system tools are skipped. The check needs installed dependencies and reports nothing without a root `node_modules`. Defaults to warn.",
+        docs_path: "explanations/dead-code#unlisted-binaries",
+    },
+    RuleDef {
         id: "fallow/duplicate-export",
         category: "Dead code",
         name: "Duplicate Exports",
@@ -864,6 +872,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/duplicate-export-alias" => RuleGuide {
             example: "src/worker.ts has export const handler = createHandler() and export default handler, so one binding has the names handler and default.",
             how_to_fix: "Keep one export name and update the importers of the other names. If the names are an intentional public API, add them to ignoreExports, or suppress the line with // fallow-ignore-next-line duplicate-export-alias.",
+        },
+        "fallow/unlisted-binary" => RuleGuide {
+            example: "The package.json script `pack` runs `gnome-extensions pack ext`, and src/capture.ts calls `spawnSync(\"hyprctl\", [\"version\"])`. No installed package provides either binary.",
+            how_to_fix: "Add the package that provides the binary to devDependencies. When the operating system or the CI image provides it, add the name to ignoreBinaries.",
         },
         "fallow/duplicate-export" => RuleGuide {
             example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",

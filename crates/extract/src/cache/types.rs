@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 409;
+pub(super) const CACHE_VERSION: u32 = 411;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1504);
+assert_cached_type_size!(CachedModule, 1528);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
@@ -243,6 +243,8 @@ pub struct CachedModule {
     /// `boundaries.calls.forbidden` detector sees call sites on warm-cache
     /// loads.
     pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
+    /// Literal commands of process-spawning calls for `unlisted-binaries`.
+    pub command_invocations: Vec<fallow_types::extract::CommandInvocation>,
     /// Scope-resolved imported calls, preserving each occurrence and argument.
     pub imported_call_sites: Vec<fallow_types::extract::ImportedCallSite>,
     /// Import binding references for `fallow trace --dependency`. Round-trips

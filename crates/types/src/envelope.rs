@@ -187,6 +187,10 @@ pub struct CheckSummary {
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.
     pub unlisted_dependencies: usize,
+    /// Binaries that scripts or process calls run, but that no installed or
+    /// listed package provides.
+    #[serde(default)]
+    pub unlisted_binaries: usize,
     /// Same-named exports declared in more than one module.
     pub duplicate_exports: usize,
     /// Bindings that one module exports under two or more names.

@@ -15,7 +15,7 @@ type TopLevelSeverity = fn(&RulesConfig) -> Severity;
 
 /// Each row is the canonical rule name, whether `ignoreDependencies` or
 /// `--unused-deps` concerns the rule, and the override field of the rule.
-const PROJECT_LEVEL_RULES: [(&str, bool, OverrideSeverity); 10] = [
+const PROJECT_LEVEL_RULES: [(&str, bool, OverrideSeverity); 11] = [
     ("unused-dependencies", true, |r| r.unused_dependencies),
     ("unused-dev-dependencies", true, |r| {
         r.unused_dev_dependencies
@@ -24,6 +24,7 @@ const PROJECT_LEVEL_RULES: [(&str, bool, OverrideSeverity); 10] = [
         r.unused_optional_dependencies
     }),
     ("unlisted-dependencies", true, |r| r.unlisted_dependencies),
+    ("unlisted-binaries", false, |r| r.unlisted_binaries),
     ("type-only-dependencies", true, |r| r.type_only_dependencies),
     ("test-only-dependencies", true, |r| r.test_only_dependencies),
     ("dev-dependencies-in-production", true, |r| {

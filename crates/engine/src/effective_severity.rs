@@ -39,12 +39,12 @@ use fallow_types::output_dead_code::{
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -217,6 +217,7 @@ project_level! {
     UnusedDevDependencyFinding => unused_dev_dependencies;
     UnusedOptionalDependencyFinding => unused_optional_dependencies;
     UnlistedDependencyFinding => unlisted_dependencies;
+    UnlistedBinaryFinding => unlisted_binaries;
     DuplicateExportFinding => duplicate_exports;
     TypeOnlyDependencyFinding => type_only_dependencies;
     TestOnlyDependencyFinding => test_only_dependencies;
@@ -502,6 +503,7 @@ fn for_each_gated_finding(
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
+        unlisted_binaries,
         duplicate_exports,
         duplicate_export_aliases,
         type_only_dependencies,
@@ -576,6 +578,7 @@ fn for_each_gated_finding(
     visit(unused_store_members, f);
     visit(unresolved_imports, f);
     visit(unlisted_dependencies, f);
+    visit(unlisted_binaries, f);
     visit(duplicate_exports, f);
     visit(duplicate_export_aliases, f);
     visit(type_only_dependencies, f);
@@ -637,6 +640,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
+        unlisted_binaries,
         duplicate_exports,
         duplicate_export_aliases,
         type_only_dependencies,
@@ -707,6 +711,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unused_store_members)
         || tally.add(unresolved_imports)
         || tally.add(unlisted_dependencies)
+        || tally.add(unlisted_binaries)
         || tally.add(duplicate_exports)
         || tally.add(duplicate_export_aliases)
         || tally.add(type_only_dependencies)

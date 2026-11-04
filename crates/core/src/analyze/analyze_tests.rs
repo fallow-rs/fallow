@@ -198,6 +198,7 @@ mod orchestration {
         complexity_file_lines: Severity::Off,
         unresolved_imports: Severity::Off,
         unlisted_dependencies: Severity::Off,
+        unlisted_binaries: Severity::Off,
         duplicate_exports: Severity::Off,
         duplicate_export_aliases: Severity::Off,
         type_only_dependencies: Severity::Off,

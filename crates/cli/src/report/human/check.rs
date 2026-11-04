@@ -33,6 +33,14 @@ use crate::report::{
     split_dir_filename,
 };
 
+#[path = "check_config_quality.rs"]
+mod config_quality;
+use config_quality::emit_config_quality_signal;
+
+#[path = "check_framework_key_sections.rs"]
+mod framework_key_sections;
+use framework_key_sections::push_framework_key_sections;
+
 /// Minimum number of duplicate-export findings before the human section is
 /// allowed to surface the namespace-barrel orientation hint. Below this floor
 /// the hint is noise outweighing the value it provides.
@@ -523,6 +531,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Unused store members", "fallow/unused-store-member"),
         ("Unresolved imports", "fallow/unresolved-import"),
         ("Unlisted dependencies", "fallow/unlisted-dependency"),
+        ("Unlisted binaries", "fallow/unlisted-binary"),
         ("Duplicate exports", "fallow/duplicate-export"),
         ("Circular dependencies", "fallow/circular-dependency"),
         ("Re-Export Cycles", "fallow/re-export-cycle"),
@@ -1340,6 +1349,7 @@ fn has_dependency_findings(results: &AnalysisResults) -> bool {
         || !results.unused_optional_dependencies.is_empty()
         || !results.unresolved_imports.is_empty()
         || !results.unlisted_dependencies.is_empty()
+        || !results.unlisted_binaries.is_empty()
         || !results.type_only_dependencies.is_empty()
         || !results.test_only_dependencies.is_empty()
         || !results.dev_dependencies_in_production.is_empty()
@@ -1435,6 +1445,17 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         },
         |dep| vec![format!("  {}", dep.dep.package_name.bold())],
     );
+    build_human_section_ex(
+        HumanSectionInput {
+            lines,
+            items: &results.unlisted_binaries,
+            title: "Unlisted binaries",
+            level: severity_to_level(rules.unlisted_binaries),
+            max: max_items,
+            total_issues,
+        },
+        |binary| unlisted_binary_lines(binary, root),
+    );
     push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
         lines,
         items: &results.type_only_dependencies,
@@ -1462,6 +1483,42 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         total_issues,
         root,
     });
+}
+
+/// Shown use sites per unlisted binary before the rest collapse into a count.
+const UNLISTED_BINARY_SITES_SHOWN: usize = 3;
+
+fn unlisted_binary_lines(
+    finding: &fallow_types::output_dead_code::UnlistedBinaryFinding,
+    root: &Path,
+) -> Vec<String> {
+    let mut lines = vec![format!("  {}", finding.binary.binary_name.bold())];
+    for site in finding
+        .binary
+        .used_in
+        .iter()
+        .take(UNLISTED_BINARY_SITES_SHOWN)
+    {
+        let location = format!("{}:{}", format_display_path(&site.path, root), site.line);
+        let line = match &site.script_name {
+            Some(script) => format!(
+                "    {} {}",
+                location.dimmed(),
+                format!("(script {script})").dimmed()
+            ),
+            None => format!("    {}", location.dimmed()),
+        };
+        lines.push(line);
+    }
+    let hidden = finding
+        .binary
+        .used_in
+        .len()
+        .saturating_sub(UNLISTED_BINARY_SITES_SHOWN);
+    if hidden > 0 {
+        lines.push(format!("    {}", format!("... and {hidden} more").dimmed()));
+    }
+    lines
 }
 
 fn push_catalog_dependency_sections(
@@ -2138,93 +2195,6 @@ fn push_component_io_sections(
             o.output.path.as_path()
         },
         format_detail: &format_unused_component_output,
-    });
-}
-
-/// Render the framework-key policy sections (Svelte events, server actions,
-/// load data keys).
-fn push_framework_key_sections(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-) {
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_svelte_events,
-        title: "Unused Svelte events",
-        level: severity_to_level(rules.unused_svelte_events),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::UnusedSvelteEventFinding| {
-            e.event.path.as_path()
-        },
-        format_detail: &format_unused_svelte_event,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_effect_layers,
-        title: "Unused Effect layers",
-        level: severity_to_level(rules.unused_effect_layers),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::UnusedEffectLayerFinding| {
-            e.layer.path.as_path()
-        },
-        format_detail: &format_unused_effect_layer,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_tagged_errors,
-        title: "Unused tagged errors",
-        level: severity_to_level(rules.unused_tagged_errors),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::UnusedTaggedErrorFinding| {
-            e.error.path.as_path()
-        },
-        format_detail: &format_unused_tagged_error,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unproduced_catch_tags,
-        title: "Unproduced catch tags",
-        level: severity_to_level(rules.unproduced_catch_tags),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::UnproducedCatchTagFinding| {
-            e.catch_tag.path.as_path()
-        },
-        format_detail: &format_unproduced_catch_tag,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_server_actions,
-        title: "Unused server actions",
-        level: severity_to_level(rules.unused_server_actions),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |a: &fallow_types::output_dead_code::UnusedServerActionFinding| {
-            a.action.path.as_path()
-        },
-        format_detail: &format_unused_server_action,
-    });
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_load_data_keys,
-        title: "Unused load data keys",
-        level: severity_to_level(rules.unused_load_data_keys),
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |k: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding| {
-            k.key.path.as_path()
-        },
-        format_detail: &format_unused_load_data_key,
     });
 }
 
@@ -3691,6 +3661,11 @@ fn collect_dependency_rules(
             insert_matching_rule(rules, &site.path, root, resolver);
         }
     }
+    for b in &results.unlisted_binaries {
+        if let Some(site) = b.binary.used_in.first() {
+            insert_matching_rule(rules, &site.path, root, resolver);
+        }
+    }
     for d in &results.duplicate_exports {
         if let Some(location) = d.export.locations.first() {
             insert_matching_rule(rules, &location.path, root, resolver);
@@ -3951,50 +3926,6 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
             input.run_fails,
             input.failed_parse_files,
         );
-    }
-}
-
-/// Emit a config-quality advisory to stderr when unused files are dominated by one directory.
-///
-/// Called from `print_human` (not `build_human_lines`) so it respects the `quiet` flag
-/// and doesn't fire as a side effect during line-building.
-fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
-    if results.unused_files.len() <= 50 {
-        return;
-    }
-    let mut dir_counts: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
-    for f in &results.unused_files {
-        let rel = relative_path(&f.file.path, root);
-        if let Some(first) = rel.components().next() {
-            *dir_counts
-                .entry(first.as_os_str().to_string_lossy().to_string())
-                .or_insert(0) += 1;
-        }
-    }
-    let total = results.unused_files.len();
-    if let Some((dominant_dir, count)) = dir_counts.iter().max_by_key(|(_, c)| **c) {
-        let pct = (*count as f64 / total as f64) * 100.0;
-        if pct > 80.0 {
-            let is_source_dir =
-                matches!(dominant_dir.as_str(), "packages" | "src" | "lib" | "apps");
-            let summary = format!("Note: {pct:.0}% of unused files are under {dominant_dir}/.");
-            let advice: &[&str] = if is_source_dir {
-                &["Run `fallow list --entry-points` to verify entry-point detection."]
-            } else {
-                &[
-                    "Add it to ignorePatterns, or use --production to analyze only",
-                    "production entry points.",
-                ]
-            };
-            eprintln!("  {}", summary.yellow());
-            for line in advice {
-                eprintln!("  {}", line.yellow());
-            }
-            eprintln!(
-                "  {}",
-                "https://fallow.tools/docs/explanations/dead-code/#unused-files".yellow()
-            );
-        }
     }
 }
 
@@ -4261,6 +4192,11 @@ fn check_summary_dependency_categories(
             "Unlisted dependencies",
             results.unlisted_dependencies.len(),
             severity_to_level(rules.unlisted_dependencies),
+        ),
+        (
+            "Unlisted binaries",
+            results.unlisted_binaries.len(),
+            severity_to_level(rules.unlisted_binaries),
         ),
         (
             "Duplicate exports",

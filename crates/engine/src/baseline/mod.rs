@@ -88,6 +88,7 @@ macro_rules! with_baseline_fields {
             unused_load_data_keys,
             unresolved_imports,
             unlisted_dependencies,
+            unlisted_binaries,
             duplicate_exports,
             duplicate_export_aliases,
             type_only_dependencies,
@@ -132,6 +133,10 @@ pub use prune::{
     prune_dupes_baseline, prune_health_baseline,
 };
 pub use saved_scope::{saved_finding_categories, saved_scope_reasons};
+
+#[path = "legacy_key_filter.rs"]
+mod legacy_key_filter;
+use legacy_key_filter::filter_new_issues_by_legacy_keys;
 
 /// The sorted canonical keys of `items`, one for each occurrence.
 fn canonical_keys<T: IdentifiedFinding>(items: &[T], paths: &IdentityPaths<'_>) -> Vec<String> {
@@ -648,6 +653,9 @@ pub struct BaselineData {
     /// Unlisted dependencies, keyed by package name.
     #[serde(default)]
     unlisted_dependencies: Vec<String>,
+    /// Unlisted binaries, keyed by binary name.
+    #[serde(default)]
+    unlisted_binaries: Vec<String>,
     /// Duplicate exports, keyed by export name.
     #[serde(default)]
     duplicate_exports: Vec<String>,
@@ -822,6 +830,7 @@ impl BaselineData {
             unused_load_data_keys: member_imports.unused_load_data_keys,
             unresolved_imports: member_imports.unresolved_imports,
             unlisted_dependencies: dependencies.unlisted,
+            unlisted_binaries: Vec::new(),
             duplicate_exports: member_imports.duplicate_exports,
             duplicate_export_aliases: Vec::new(),
             type_only_dependencies: dependencies.type_only,
@@ -885,6 +894,7 @@ impl BaselineData {
             + self.unused_load_data_keys.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
+            + self.unlisted_binaries.len()
             + self.duplicate_exports.len()
             + self.duplicate_export_aliases.len()
             + self.type_only_dependencies.len()
@@ -2147,78 +2157,6 @@ fn filter_new_issues_by_canonical_keys(
         };
     }
     with_baseline_fields!(retain);
-    results
-}
-
-fn filter_new_issues_by_legacy_keys(
-    mut results: crate::results::AnalysisResults,
-    baseline: &BaselineData,
-    root: &Path,
-) -> crate::results::AnalysisResults {
-    let baseline_files: FxHashSet<&str> =
-        baseline.unused_files.iter().map(String::as_str).collect();
-    let baseline_exports: FxHashSet<&str> =
-        baseline.unused_exports.iter().map(String::as_str).collect();
-    let baseline_types: FxHashSet<&str> =
-        baseline.unused_types.iter().map(String::as_str).collect();
-    let baseline_deps: FxHashSet<&str> = baseline
-        .unused_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    let baseline_dev_deps: FxHashSet<&str> = baseline
-        .unused_dev_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-
-    results
-        .unused_files
-        .retain(|f| !baseline_files.contains(relative_path(&f.file.path, root).as_str()));
-    results.unused_exports.retain(|e| {
-        let key = format!(
-            "{}:{}",
-            relative_path(&e.export.path, root),
-            e.export.export_name
-        );
-        !baseline_exports.contains(key.as_str())
-    });
-    results.unused_types.retain(|e| {
-        let key = format!(
-            "{}:{}",
-            relative_path(&e.export.path, root),
-            e.export.export_name
-        );
-        !baseline_types.contains(key.as_str())
-    });
-    filter_private_type_leaks(
-        &mut results.private_type_leaks,
-        &baseline.private_type_leaks,
-        root,
-    );
-    let baseline_deprecated: FxHashSet<&str> = baseline
-        .deprecated_exports_in_use
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results
-        .deprecated_exports_in_use
-        .retain(|e| !baseline_deprecated.contains(deprecated_export_key(&e.export, root).as_str()));
-    results.unused_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_deps, &d.dep.package_name, key.as_str())
-    });
-    results.unused_dev_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_dev_deps, &d.dep.package_name, key.as_str())
-    });
-
-    let filter = BaselineFilterContext { baseline, root };
-    filter.filter_cycles_and_members(&mut results);
-    filter.filter_dependency_variants(&mut results);
-    filter.filter_boundaries_and_suppressions(&mut results);
-    filter.filter_pnpm_entries(&mut results);
-
     results
 }
 

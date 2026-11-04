@@ -447,6 +447,7 @@ mod tests {
                 ("TestOnlyDependency", "TestOnlyDependencyFinding"),
                 ("TypeOnlyDependency", "TypeOnlyDependencyFinding"),
                 ("UnlistedDependency", "UnlistedDependencyFinding"),
+                ("UnlistedBinary", "UnlistedBinaryFinding"),
                 (
                     "UnresolvedCatalogReference",
                     "UnresolvedCatalogReferenceFinding",

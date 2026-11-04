@@ -37,6 +37,9 @@ def filter_check:
   (if .unlisted_dependencies then
     .unlisted_dependencies |= map(select(.imported_from | any(.path | in_changed)))
   else . end) |
+  (if .unlisted_binaries then
+    .unlisted_binaries |= map(select(.used_in | any(.path | in_changed)))
+  else . end) |
   (if .duplicate_exports then
     .duplicate_exports |= (map(.locations |= map(select(.path | in_changed))) | map(select(.locations | length >= 2)))
   else . end) |
@@ -149,6 +152,7 @@ def filter_check:
       (.unused_store_members // [] | length) +
       (.unresolved_imports // [] | length) +
       (.unlisted_dependencies // [] | length) +
+      (.unlisted_binaries // [] | length) +
       (.duplicate_exports // [] | length) +
       (.circular_dependencies // [] | length) +
       (.re_export_cycles // [] | length) +
