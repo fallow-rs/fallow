@@ -11,7 +11,8 @@
 //! The resolver also reads `node_modules`, so an install changes import
 //! targets too. A walk of `node_modules` costs too much, so the hash reads the
 //! lockfile and the install marker that the package manager writes on each
-//! install.
+//! install. Bun writes no install marker, so for a Bun project the hash reads
+//! the package names at the top level of `node_modules`.
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -50,6 +51,15 @@ const INSTALL_STATE_FILES: &[&str] = &[
     "node_modules/.yarn-state.yml",
     "node_modules/.yarn-integrity",
 ];
+
+/// Lockfiles of Bun. Bun writes no install marker in `node_modules`, so a
+/// directory with one of these files keys the package names in its
+/// `node_modules` (see [`bun_install_listings`]).
+const BUN_LOCKFILES: &[&str] = &["bun.lock", "bun.lockb"];
+
+/// The directory in `node_modules` where the isolated linker of Bun puts one
+/// `<name>@<version>` directory for each installed package.
+const BUN_STORE_DIR: &str = ".bun";
 
 /// Hash the workspace `(name, root)` pairs and the content of every resolver
 /// input file. Every path is spelled relative to `root`, so a copy of the
@@ -99,6 +109,13 @@ pub fn resolution_inputs_hash(
         state.hash(&mut hasher);
     }
 
+    let mut bun_listings = bun_install_listings(root, workspaces);
+    bun_listings.sort_unstable();
+    bun_listings.len().hash(&mut hasher);
+    for listing in &bun_listings {
+        listing.hash(&mut hasher);
+    }
+
     hasher.finish()
 }
 
@@ -119,6 +136,58 @@ fn node_modules_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String
             (portable_key(root, &path), path.is_dir())
         })
         .collect()
+}
+
+/// Return `(path, package names)` for the `node_modules` directory next to
+/// each Bun lockfile at the project root, at a workspace root, or above the
+/// root.
+///
+/// A Bun install into an existing `node_modules` does not change the lockfile
+/// when the lockfile already lists the package, for example after a pull of a
+/// lockfile change. The names are the top-level entries, the entries of each
+/// `@scope` directory, and the `<name>@<version>` entries of the isolated
+/// store. The list does not read file content or a modification time, so a
+/// fresh install of the same packages keeps the hash. Other dot entries are
+/// tool caches such as `.cache`, so the list skips them.
+fn bun_install_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, Vec<String>)> {
+    let dirs: FxHashSet<&Path> = std::iter::once(root)
+        .chain(workspaces.iter().map(|ws| ws.root.as_path()))
+        .chain(root.ancestors().skip(1))
+        .collect();
+    dirs.into_iter()
+        .filter(|dir| BUN_LOCKFILES.iter().any(|name| dir.join(name).is_file()))
+        .filter_map(|dir| {
+            let node_modules = dir.join("node_modules");
+            let names = node_modules_package_names(&node_modules)?;
+            Some((portable_key(root, &node_modules), names))
+        })
+        .collect()
+}
+
+fn node_modules_package_names(node_modules: &Path) -> Option<Vec<String>> {
+    let mut names = Vec::new();
+    for name in dir_entry_names(node_modules)? {
+        let nested = name.starts_with('@') || name == BUN_STORE_DIR;
+        if nested {
+            for child in dir_entry_names(&node_modules.join(&name)).unwrap_or_default() {
+                names.push(format!("{name}/{child}"));
+            }
+        } else if !name.starts_with('.') {
+            names.push(name);
+        }
+    }
+    names.sort_unstable();
+    Some(names)
+}
+
+fn dir_entry_names(dir: &Path) -> Option<Vec<String>> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    Some(
+        entries
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect(),
+    )
 }
 
 /// `package.json` fields whose paths the resolver follows for a package
@@ -336,6 +405,34 @@ mod tests {
         assert_ne!(
             resolution_inputs_hash(&root, &workspaces, &[]),
             root_changed
+        );
+    }
+
+    #[test]
+    fn bun_install_with_the_same_lockfile_keys_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo");
+        write(&root.join("bun.lock"), "{}\n");
+        write(&root.join("node_modules/a/package.json"), "{}");
+        write(&root.join("node_modules/.cache/tool/data"), "1");
+        let initial = resolution_inputs_hash(&root, &[], &[]);
+
+        write(&root.join("node_modules/.cache/tool/other"), "2");
+        assert_eq!(
+            resolution_inputs_hash(&root, &[], &[]),
+            initial,
+            "a tool cache in node_modules must keep the hash"
+        );
+
+        write(&root.join("node_modules/@scope/b/package.json"), "{}");
+        let scoped = resolution_inputs_hash(&root, &[], &[]);
+        assert_ne!(scoped, initial, "a scoped package install must change it");
+
+        write(&root.join("node_modules/.bun/c@1.0.0/node_modules/c/x"), "");
+        assert_ne!(
+            resolution_inputs_hash(&root, &[], &[]),
+            scoped,
+            "a package in the isolated store must change it"
         );
     }
 

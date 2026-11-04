@@ -256,7 +256,11 @@ fn install_after_a_cached_run_reports_a_missing_query_file() {
 /// `other-pkg`. Then install `plain-pkg` the way a package manager does: the
 /// install adds the package and writes the lockfile and the install marker.
 /// The warm run must see the installed package and report the missing file.
-fn assert_install_into_existing_node_modules_misses_cache(lockfile: &str, marker: &str) {
+///
+/// Bun writes no install marker. For `marker: None` the lockfile lists
+/// `plain-pkg` before the cold run and the install does not change it, as
+/// after a pull of a lockfile change.
+fn assert_install_into_existing_node_modules_misses_cache(lockfile: &str, marker: Option<&str>) {
     let temp = tempfile::tempdir().expect("temp");
     let root = temp.path().join("project");
     write(&root, "package.json", PACKAGE_JSON);
@@ -270,8 +274,14 @@ fn assert_install_into_existing_node_modules_misses_cache(lockfile: &str, marker
         "node_modules/other-pkg/package.json",
         r#"{"name":"other-pkg","version":"1.0.0"}"#,
     );
-    write(&root, lockfile, "other-pkg@1.0.0\n");
-    write(&root, marker, "other-pkg@1.0.0\n");
+    let installed = "other-pkg@1.0.0\nplain-pkg@1.0.0\n";
+    match marker {
+        Some(marker) => {
+            write(&root, lockfile, "other-pkg@1.0.0\n");
+            write(&root, marker, "other-pkg@1.0.0\n");
+        }
+        None => write(&root, lockfile, installed),
+    }
     let mut config = create_config_with_cache(root.clone(), temp.path().join("cache"));
     config.entry_patterns = vec!["src/index.ts".to_string()];
     let before = fallow_core::analyze(&config).expect("cold analysis");
@@ -287,8 +297,10 @@ fn assert_install_into_existing_node_modules_misses_cache(lockfile: &str, marker
         "node_modules/plain-pkg/index.js",
         "module.exports = {};",
     );
-    write(&root, lockfile, "other-pkg@1.0.0\nplain-pkg@1.0.0\n");
-    write(&root, marker, "other-pkg@1.0.0\nplain-pkg@1.0.0\n");
+    if let Some(marker) = marker {
+        write(&root, lockfile, installed);
+        write(&root, marker, installed);
+    }
     let after = fallow_core::analyze(&config).expect("analysis after install");
     let unresolved: Vec<&str> = after
         .unresolved_imports
@@ -298,7 +310,7 @@ fn assert_install_into_existing_node_modules_misses_cache(lockfile: &str, marker
     assert_eq!(
         unresolved,
         vec!["plain-pkg/build/missing.mjs?url"],
-        "{lockfile} and {marker} changed, so the graph cache must miss"
+        "the install into node_modules with {lockfile} must make the graph cache miss"
     );
 }
 
@@ -306,7 +318,7 @@ fn assert_install_into_existing_node_modules_misses_cache(lockfile: &str, marker
 fn npm_install_into_existing_node_modules_misses_graph_cache() {
     assert_install_into_existing_node_modules_misses_cache(
         "package-lock.json",
-        "node_modules/.package-lock.json",
+        Some("node_modules/.package-lock.json"),
     );
 }
 
@@ -314,7 +326,7 @@ fn npm_install_into_existing_node_modules_misses_graph_cache() {
 fn pnpm_install_into_existing_node_modules_misses_graph_cache() {
     assert_install_into_existing_node_modules_misses_cache(
         "pnpm-lock.yaml",
-        "node_modules/.pnpm/lock.yaml",
+        Some("node_modules/.pnpm/lock.yaml"),
     );
 }
 
@@ -322,6 +334,11 @@ fn pnpm_install_into_existing_node_modules_misses_graph_cache() {
 fn yarn_install_into_existing_node_modules_misses_graph_cache() {
     assert_install_into_existing_node_modules_misses_cache(
         "yarn.lock",
-        "node_modules/.yarn-state.yml",
+        Some("node_modules/.yarn-state.yml"),
     );
+}
+
+#[test]
+fn bun_install_into_existing_node_modules_misses_graph_cache() {
+    assert_install_into_existing_node_modules_misses_cache("bun.lock", None);
 }
