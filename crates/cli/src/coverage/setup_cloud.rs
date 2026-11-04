@@ -26,6 +26,7 @@ use super::{
     detect_setup_members, display_member_path, member_path_prefix, prefixed_member_path,
 };
 use crate::api::{DEFAULT_API_URL, api_url};
+use crate::exit_codes::exit_invalid_input;
 
 /// Environment variable that holds the full API key in CI and on the server.
 const API_KEY_ENV: &str = "FALLOW_API_KEY";
@@ -81,7 +82,7 @@ pub(super) fn run(
         Ok(inputs) => inputs,
         Err(message) => {
             eprintln!("fallow coverage setup --cloud: {message}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
     let mut envelope = build_cloud_envelope(root, args.explain, &inputs);
@@ -93,7 +94,7 @@ pub(super) fn run(
         print_human_plan(&envelope);
     }
     let Some(cloud) = envelope.cloud.as_mut() else {
-        return ExitCode::from(2);
+        return exit_invalid_input();
     };
     let wait = wait_for_activation(args, cloud, !args.json);
     let exit = wait_exit_code(&wait);
@@ -174,7 +175,7 @@ fn print_and_exit(
         Ok(payload) => payload,
         Err(err) => {
             eprintln!("fallow coverage setup --cloud: failed to build JSON output: {err}");
-            return ExitCode::from(2);
+            return exit_invalid_input();
         }
     };
     match json_style.serialize(&payload) {
@@ -184,7 +185,7 @@ fn print_and_exit(
         }
         Err(err) => {
             eprintln!("fallow coverage setup --cloud: failed to write JSON output: {err}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }
@@ -658,7 +659,7 @@ fn wait_exit_code(wait: &CoverageSetupWait) -> ExitCode {
     match wait.outcome {
         CoverageSetupWaitOutcome::Complete => ExitCode::SUCCESS,
         CoverageSetupWaitOutcome::Timeout => ExitCode::from(WAIT_TIMEOUT_EXIT_CODE),
-        CoverageSetupWaitOutcome::Error => ExitCode::from(2),
+        CoverageSetupWaitOutcome::Error => exit_invalid_input(),
     }
 }
 

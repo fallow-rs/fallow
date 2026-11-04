@@ -7,6 +7,7 @@ use fallow_types::discover::DiscoveredFile;
 use rustc_hash::FxHashSet;
 
 use super::TraceOptions;
+use crate::exit_codes::exit_gate_failed;
 use crate::{error::emit_error, report};
 
 /// What the plugin run knows beyond the graph, which a file or dependency trace
@@ -228,7 +229,7 @@ fn semantic_completeness_exit(
     if require == fallow_config::TypeAwareRequire::Complete
         && status != fallow_types::semantic::SemanticCompleteness::Complete
     {
-        ExitCode::from(1)
+        exit_gate_failed()
     } else {
         ExitCode::SUCCESS
     }

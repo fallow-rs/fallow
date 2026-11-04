@@ -5,17 +5,23 @@
 //! - the `Schema` binding of an Effect import, with a schema constructor as
 //!   the first member (`Schema.Struct(...)`, `Schema.String`), or a class
 //!   factory in a class heritage (`Schema.Class<X>("X")({...})`), or
-//! - a module-scope binding that is already a schema (`User.pipe(...)`).
+//! - a module-scope binding that is already a schema (`User.pipe(...)`), or
+//! - a named or default import (`Imported.pipe(...)`, `Imported`). The chain
+//!   is then a derived schema: it is a schema only when the import is one,
+//!   and the analyze layer resolves the import to decide. A chain without a
+//!   `pipe` call needs no `Schema` import (`Imported.annotations({...})`),
+//!   but the collector still runs only in a module that imports Effect.
 //!
 //! Each later member must be a method that returns a schema (`pipe`,
 //! `annotations`, `extend`), and each `pipe` argument must be a `Schema`
 //! transform (`Schema.brand("Id")`, `Schema.minLength(1)`). The rule is
 //! conservative: a chain that ends in `make`, `decode*`, a field read or an
-//! arrow function is not a schema.
+//! arrow function is not a schema. A chain on a member of a namespace import
+//! (`Imported.User.pipe(...)`) is not a schema: the root is the namespace.
 
 use oxc_ast::ast::{Argument, Class, Expression, IdentifierReference};
 use oxc_semantic::{Semantic, SymbolId};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{ImportInfo, ImportedName};
 
@@ -127,13 +133,24 @@ fn unwrap<'e, 'a>(expression: &'e Expression<'a>) -> &'e Expression<'a> {
     }
 }
 
+/// The kind of schema that an expression or a class evaluates to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaShape {
+    /// The module itself proves the schema.
+    Known,
+    /// A schema only when the import with this local name is a schema.
+    Derived(String),
+}
+
 /// Schema namespace bindings and the module-scope bindings found to be
 /// schemas so far, in source order.
 pub struct SchemaShapes<'s, 'a> {
     semantic: &'s Semantic<'a>,
     namespaces: FxHashSet<SymbolId>,
-    locals: FxHashSet<SymbolId>,
-    local_names: FxHashSet<String>,
+    /// Named and default value imports that a derived chain can start at.
+    imports: FxHashMap<SymbolId, String>,
+    locals: FxHashMap<SymbolId, SchemaShape>,
+    local_names: FxHashMap<String, SchemaShape>,
 }
 
 impl<'s, 'a> SchemaShapes<'s, 'a> {
@@ -145,43 +162,64 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
                 crate::binding_references::admitted_import_symbol(semantic, import)
             })
             .collect();
+        let imports = imports
+            .iter()
+            .filter(|import| {
+                !import.is_type_only
+                    && matches!(
+                        import.imported_name,
+                        ImportedName::Named(_) | ImportedName::Default
+                    )
+                    && !is_schema_module_import(import)
+            })
+            .filter_map(|import| {
+                crate::binding_references::admitted_import_symbol(semantic, import)
+                    .map(|symbol| (symbol, import.local_name.clone()))
+            })
+            .collect();
         Self {
             semantic,
             namespaces,
-            locals: FxHashSet::default(),
-            local_names: FxHashSet::default(),
+            imports,
+            locals: FxHashMap::default(),
+            local_names: FxHashMap::default(),
         }
     }
 
-    /// Remember a module-scope binding as a schema.
-    pub fn record(&mut self, symbol: SymbolId, name: &str) {
-        self.locals.insert(symbol);
-        self.local_names.insert(name.to_string());
+    /// Remember a module-scope binding with its schema shape.
+    pub fn record(&mut self, symbol: SymbolId, name: &str, shape: SchemaShape) {
+        self.locals.insert(symbol, shape.clone());
+        self.local_names.insert(name.to_string(), shape);
     }
 
-    /// True when the module-scope binding `name` is a schema.
-    pub fn is_schema_name(&self, name: &str) -> bool {
-        self.local_names.contains(name)
+    /// The schema shape of the module-scope binding `name`.
+    pub fn name_shape(&self, name: &str) -> Option<&SchemaShape> {
+        self.local_names.get(name)
     }
 
-    /// True when the class extends a schema class factory or a schema class.
-    pub fn is_schema_class(&self, class: &Class<'a>) -> bool {
+    /// The shape when the class extends a schema class factory or a schema
+    /// class.
+    pub fn class_shape(&self, class: &Class<'a>) -> Option<SchemaShape> {
         class
             .heritage
             .as_ref()
-            .is_some_and(|heritage| self.is_schema_chain(&heritage.expression, is_class_factory))
+            .and_then(|heritage| self.schema_chain(&heritage.expression, is_class_factory))
     }
 
-    /// True when the expression evaluates to a schema.
-    pub fn is_schema_expression(&self, expression: &Expression<'a>) -> bool {
-        self.is_schema_chain(expression, is_schema_constructor)
+    /// The shape when the expression evaluates to a schema.
+    pub fn expression_shape(&self, expression: &Expression<'a>) -> Option<SchemaShape> {
+        self.schema_chain(expression, is_schema_constructor)
     }
 
     /// Walk a chain of calls and static members to its root identifier.
     /// `accepts_head` checks the member read directly off the `Schema` binding.
-    fn is_schema_chain(&self, expression: &Expression<'a>, accepts_head: fn(&str) -> bool) -> bool {
-        if self.namespaces.is_empty() {
-            return false;
+    fn schema_chain(
+        &self,
+        expression: &Expression<'a>,
+        accepts_head: fn(&str) -> bool,
+    ) -> Option<SchemaShape> {
+        if self.namespaces.is_empty() && self.imports.is_empty() {
+            return None;
         }
         let mut members: Vec<&str> = Vec::new();
         let mut current = expression;
@@ -194,7 +232,7 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
                             .iter()
                             .all(|argument| self.is_pipe_transform(argument))
                     {
-                        return false;
+                        return None;
                     }
                     &call.callee
                 }
@@ -203,20 +241,25 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
                     &member.object
                 }
                 Expression::Identifier(identifier) => break identifier,
-                _ => return false,
+                _ => return None,
             };
         };
-        let Some(symbol) = self.symbol(root) else {
-            return false;
-        };
+        let symbol = self.symbol(root)?;
         if self.namespaces.contains(&symbol) {
-            let Some((head, rest)) = members.split_last() else {
-                return false;
-            };
-            return accepts_head(head) && rest.iter().all(|method| SCHEMA_METHODS.contains(method));
+            let (head, rest) = members.split_last()?;
+            return (accepts_head(head)
+                && rest.iter().all(|method| SCHEMA_METHODS.contains(method)))
+            .then_some(SchemaShape::Known);
         }
-        self.locals.contains(&symbol)
-            && members.iter().all(|method| SCHEMA_METHODS.contains(method))
+        if !members.iter().all(|method| SCHEMA_METHODS.contains(method)) {
+            return None;
+        }
+        if let Some(shape) = self.locals.get(&symbol) {
+            return Some(shape.clone());
+        }
+        self.imports
+            .get(&symbol)
+            .map(|local| SchemaShape::Derived(local.clone()))
     }
 
     /// True when a `pipe` argument is a `Schema` transform: a call such as

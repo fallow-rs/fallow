@@ -409,7 +409,8 @@ impl ResultCache {
             if result.cached
                 || !is_cacheable(result.status)
                 || outcome.unretried.contains(id)
-                || (key.starts_with("matrix:") && !result.kill_matrix_complete)
+                || ((key.starts_with("matrix:") || key.starts_with("targets:"))
+                    && !result.kill_matrix_complete)
             {
                 continue;
             }

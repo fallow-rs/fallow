@@ -55,11 +55,18 @@ hooks {
         glob = List("**/*.rs")
         check = "if command -v node >/dev/null 2>&1; then node scripts/check-miri-cfg.mjs; else sh scripts/hook-tool-hint.sh node; fi"
       }
-      // A source file over 2000 lines must not grow. The step measures the
+      // A Rust file over 2000 lines must not grow. The step measures the
       // staged blob. See docs/development/quality-gates.md#file-size.
       ["file-size"] {
-        glob = List("**/*.rs", "**/*.mjs", "**/*.ts")
+        glob = List("**/*.rs")
         check = "if command -v node >/dev/null 2>&1; then node scripts/check-file-size.mjs --staged; else sh scripts/hook-tool-hint.sh node; fi"
+      }
+      // The same limit for .mjs and .ts files, through `fallow audit` and
+      // health.maxFileLines. The audit reads the working tree, not the staged
+      // blob. See docs/development/quality-gates.md#file-size.
+      ["file-length"] {
+        glob = List("**/*.mjs", "**/*.ts", ".fallowrc.json", "scripts/fallow-file-length.json")
+        check = "sh scripts/hook-file-length.sh HEAD"
       }
       // Changelog entries go to changelog.d/, never to [Unreleased] in
       // CHANGELOG.md. The step reads the working tree, not the staged blob,
@@ -96,7 +103,8 @@ hooks {
   //   rustup run nightly cargo miri test -p fallow-types --lib --tests -- --skip proptests
   // The old bash hook unset GIT_DIR and GIT_WORK_TREE for `cargo test`, which
   // spawns fallow in fixture folders. hk passes both variables to each step.
-  // No pre-push step calls git today. Unset them in a step that does.
+  // A pre-push step that calls git must unset them, as the file-length
+  // script does.
   ["pre-push"] {
     steps {
       ["cargo-fmt"] = cargoFmt
@@ -111,6 +119,11 @@ hooks {
       // a dependency whose last use a change removes.
       ["cargo-shear"] {
         check = "if command -v cargo-shear >/dev/null 2>&1; then cargo shear; else sh scripts/hook-tool-hint.sh cargo-shear; fi"
+      }
+      // Same rule as the "File length" step of the CI "Fallow Self Analysis"
+      // job: a .mjs or .ts file over 2000 lines must not grow on the branch.
+      ["file-length"] {
+        check = "sh scripts/hook-file-length.sh origin/main upstream/main"
       }
     }
   }

@@ -34,6 +34,8 @@ class HealthSectionItem extends vscode.TreeItem {
   ) {
     const base = HEALTH_SECTION_LABELS[section];
     super(count > 0 ? `${base} (${count})` : base, vscode.TreeItemCollapsibleState.Collapsed);
+    // A stable id keeps the expansion state when a refresh changes the count in the label.
+    this.id = `healthSection:${section}`;
     this.contextValue = `healthSection.${section}`;
     this.iconPath = new vscode.ThemeIcon(HEALTH_SECTION_ICONS[section]);
   }

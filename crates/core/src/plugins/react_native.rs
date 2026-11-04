@@ -1,9 +1,15 @@
 //! React Native plugin.
 //!
 //! Detects React Native projects and marks app entry points and
-//! Metro/Babel config files as always used.
+//! Metro/Babel config files as always used. Reads the package names that the
+//! Metro config maps with `resolver.extraNodeModules`.
 
-use super::Plugin;
+use std::path::Path;
+
+use super::{Plugin, PluginResult};
+
+#[path = "metro.rs"]
+mod metro;
 
 const ENABLERS: &[&str] = &["react-native"];
 
@@ -31,11 +37,36 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@react-native/metro-config",
 ];
 
-define_plugin! {
-    struct ReactNativePlugin => "react-native",
-    enablers: ENABLERS,
-    entry_patterns: ENTRY_PATTERNS,
-    config_patterns: CONFIG_PATTERNS,
-    always_used: ALWAYS_USED,
-    tooling_dependencies: TOOLING_DEPENDENCIES,
+pub struct ReactNativePlugin;
+
+impl Plugin for ReactNativePlugin {
+    fn name(&self) -> &'static str {
+        "react-native"
+    }
+
+    fn enablers(&self) -> &'static [&'static str] {
+        ENABLERS
+    }
+
+    fn entry_patterns(&self) -> &'static [&'static str] {
+        ENTRY_PATTERNS
+    }
+
+    fn config_patterns(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        ALWAYS_USED
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        TOOLING_DEPENDENCIES
+    }
+
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
+        let mut result = PluginResult::default();
+        metro::add_extra_node_modules(&mut result, source, config_path, root);
+        result
+    }
 }

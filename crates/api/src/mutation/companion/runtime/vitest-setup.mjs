@@ -5,6 +5,7 @@ import { installFallowMutation } from "./global.mjs";
 
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
 const OVERLAY_KEY = "fallowOverlay";
+const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const REQUIRE_HOOK = Symbol.for("fallow.mutation.vitestRequireHook");
 
 const activeMutant = () => {
@@ -54,13 +55,19 @@ const overlayEntry = (apis, overlay, url) => {
  * replaces the overlay.
  */
 const installRequireHook = async () => {
-  const state = (globalThis[REQUIRE_HOOK] ??= { overlay: {}, loaded: new Set(), ready: false });
+  const state = (globalThis[REQUIRE_HOOK] ??= {
+    overlay: {},
+    loaded: new Set(),
+    ready: false,
+    hooksReady: false,
+  });
   const overlay = inject(OVERLAY_KEY);
   state.overlay = overlay !== null && typeof overlay === "object" ? overlay : {};
   if (state.ready) return state;
   state.ready = true;
   const apis = await loadHookApis();
   if (apis === null) return state;
+  state.hooksReady = true;
   apis.registerHooks({
     load(url, context, nextLoad) {
       const result = nextLoad(url, context);
@@ -73,6 +80,32 @@ const installRequireHook = async () => {
   return state;
 };
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/**
+ * Sets the subprocess preload in NODE_OPTIONS with the active mutant, so a
+ * Node process that a test starts (spawn, exec, execFile or fork) loads the
+ * instrumented files and runs the same mutant. The function first removes
+ * the flag of an earlier file or run in this worker, because a worker that
+ * does not isolate its test files keeps its environment. The preload URL has
+ * no space or quote, so the NODE_OPTIONS parse keeps it as one argument. The
+ * existing value comes first, so a loader of the project keeps its order.
+ *
+ * Without the synchronous hook API, the preload cannot serve a file, so the
+ * value stays as it is.
+ */
+const shareWithChildProcesses = (hooksReady, active) => {
+  const preload = inject(SUBPROCESS_PRELOAD_KEY);
+  if (!hooksReady || typeof preload !== "string") return;
+  const url = new URL(preload);
+  const base = preload.split("?", 1)[0];
+  const earlier = new RegExp(`(?:^|\\s+)--import=${escapeRegExp(base)}(?:\\?\\S*)?(?=\\s|$)`, "gu");
+  const current = (process.env.NODE_OPTIONS ?? "").replace(earlier, "").trim();
+  if (active !== null) url.searchParams.set("active", active);
+  const flag = `--import=${url.href}`;
+  process.env.NODE_OPTIONS = current ? `${current} ${flag}` : flag;
+};
+
 // The setup file runs before the test file imports any source module. The
 // active mutant is set here at the top level, so a mutant in module scope
 // (a static mutant) is active when the module evaluates.
@@ -80,9 +113,12 @@ const mutation = installFallowMutation();
 mutation.startFile();
 mutation.setActive(activeMutant());
 const requireHook = await installRequireHook();
+shareWithChildProcesses(requireHook.hooksReady, activeMutant());
 
 beforeEach(() => {
-  mutation.setActive(activeMutant());
+  const active = activeMutant();
+  mutation.setActive(active);
+  shareWithChildProcesses(requireHook.hooksReady, active);
   mutation.startTest();
 });
 

@@ -317,10 +317,15 @@ jobs:
               - 'schema.json'
               - '.github/scripts/**'
               - '.github/workflows/ci.yml'
+            # The "File length" step checks each .mjs and .ts file.
             self-analyze:
               - '.github/workflows/ci.yml'
               - 'editors/vscode/**'
               - 'npm/fallow/**'
+              - '**/*.mjs'
+              - '**/*.ts'
+              - '.fallowrc.json'
+              - 'scripts/fallow-file-length.json'
             # `skills` gates the public skill contract: the public plugin must
             # match the source under npm/fallow/skills after its one declared
             # frontmatter transform.
@@ -555,7 +560,7 @@ jobs:
       - name: Install mutation runner dependencies
         run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
 
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest
 
@@ -591,8 +596,10 @@ jobs:
         # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
+      # Partition 2 runs these tests and partition 1 runs the other two extra
+      # steps. Partition 1 took about 3 minutes longer when it ran all three.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
-        if: matrix.partition == 1
+        if: matrix.partition == 2
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
@@ -762,7 +769,7 @@ jobs:
         with:
           components: clippy
           shared-key: windows-debug
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest
       # One nextest run replaces ten `cargo test` calls. The calls had no
@@ -1035,8 +1042,9 @@ jobs:
       - name: Agent adapter drift
         run: npm run check:agent-adapters
       # Same rule as the file-size pre-commit step, against the merge base.
-      # It is the last step and runs after a failed step, so a growth failure
-      # hides no other result.
+      # It checks .rs files. The "File length" step of the "Fallow Self
+      # Analysis" job checks .mjs and .ts files. It is the last step and runs
+      # after a failed step, so a growth failure hides no other result.
       - name: Large file growth
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
@@ -1277,6 +1285,8 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Depth 2: on a pull request, HEAD is the merge commit and HEAD^1 is the
+      # tip of the base branch. The "File length" step compares the two.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
@@ -1321,6 +1331,13 @@ jobs:
           if [ "$code" -gt 1 ]; then
             exit "$code"
           fi
+      # A .mjs or .ts file over 2000 lines must not grow: health.maxFileLines
+      # in scripts/fallow-file-length.json. The audit fails on a new long file and on a long
+      # file that grew by 5 lines or more. scripts/check-file-size.mjs holds
+      # the same limit for .rs files in the "JS Lint and Format" job.
+      - name: File length
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: ./target/debug/fallow audit --config scripts/fallow-file-length.json --base HEAD^1 --no-css --quiet
 
   vscode:
     name: VS Code Extension
@@ -1399,9 +1416,11 @@ jobs:
   vscode-target-host:
     name: VS Code target host (${{ matrix.target }})
     needs: [changes, vscode-package-targets]
-    # Three runners, one of them macOS. On pull requests this runs only for
-    # VSIX packaging inputs. Main runs it unless prose-only, and release
-    # validation runs it again before a release.
+    # Linux and Windows only. On pull requests this runs only for VSIX
+    # packaging inputs. Main runs it unless prose-only. The darwin-x64 leg
+    # runs only in release validation (weekly, in the release pre-flight and
+    # in each release) and in the release `vscode-host-smoke` job. On busy
+    # days the macos-15-intel queue held a CI run on main for up to two hours.
     if: needs.changes.outputs.vscode-host == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -1419,10 +1438,6 @@ jobs:
             target: win32-x64
             cli: target/debug/fallow.exe
             lsp: target/debug/fallow-lsp.exe
-          - os: macos-15-intel
-            target: darwin-x64
-            cli: target/debug/fallow
-            lsp: target/debug/fallow-lsp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1568,7 +1583,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-audit
       - run: cargo audit
@@ -1595,7 +1610,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-shear
       - run: cargo shear
@@ -1681,7 +1696,7 @@ jobs:
           rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
           cargo +"$MIRI_TOOLCHAIN" miri setup
 
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           key: miri
           save-if: ${{ github.ref == 'refs/heads/main' }}

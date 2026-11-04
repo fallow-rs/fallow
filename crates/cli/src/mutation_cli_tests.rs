@@ -130,6 +130,101 @@ fn mutation_kill_matrix_flag_reaches_the_run_options() {
 }
 
 #[test]
+fn mutation_kill_matrix_for_targets_reach_the_run_options_and_exclude_the_full_matrix() {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: MutationArgs,
+    }
+
+    let command = Command::try_parse_from([
+        "mutation",
+        "src/a.ts",
+        "--kill-matrix-for",
+        "test/a.test.ts",
+        "--kill-matrix-for",
+        "test/b.test.ts::adds, then rounds",
+    ])
+    .expect("each flag takes one target");
+    let mut args = command.args;
+    assert_eq!(
+        std::mem::take(&mut args.paths),
+        [PathBuf::from("src/a.ts")],
+        "a target does not take the positional paths"
+    );
+    let options = run_options(&input(
+        Path::new("/project"),
+        args,
+        MutationConfig::default(),
+    ))
+    .unwrap();
+    assert_eq!(
+        options.kill_matrix_targets,
+        ["test/a.test.ts", "test/b.test.ts::adds, then rounds"]
+    );
+    assert!(!options.kill_matrix);
+    assert!(
+        Command::try_parse_from(["mutation", "--kill-matrix", "--kill-matrix-for", "t.ts"])
+            .is_err(),
+        "the full matrix and the target matrix are exclusive"
+    );
+
+    let plan = MutationArgs {
+        plan: true,
+        kill_matrix_for: vec!["test/a.test.ts".to_owned()],
+        ..MutationArgs::default()
+    };
+    let error = run_inner(&input(
+        Path::new("/project"),
+        plan,
+        MutationConfig::default(),
+    ))
+    .expect_err("a plan cannot collect test outcomes");
+    assert!(
+        error.message.contains("--kill-matrix-for requires a run"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn mutation_kill_matrix_for_human_report_names_targets_and_shared_kills() {
+    use fallow_output::{MutationKillMatrixTarget, MutationTargetOnlyKill};
+
+    let mut measured = report(
+        vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
+        Vec::new(),
+    );
+    let mut matrix = kill_matrix_fixture();
+    matrix.tests.truncate(2);
+    matrix.coverage_without_kills.clear();
+    matrix.targets = Some(vec![MutationKillMatrixTarget {
+        target: "test/a.test.ts".to_owned(),
+        test_ids: vec!["test/a.test.ts::adds".to_owned()],
+    }]);
+    matrix.tests[0].subsuming_tests.clear();
+    matrix.tests[0].notes = vec!["subsumers-not-computed".to_owned()];
+    matrix.tests[0].target_only_kills = Some(vec![MutationTargetOnlyKill {
+        mutant_id: "m1".to_owned(),
+        targets: vec!["test/b.test.ts::adds".to_owned()],
+    }]);
+    matrix.tests[1].target_only_kills = Some(Vec::new());
+    measured.kill_matrix = matrix;
+    let text = run_text(&measured, &OPTIONS);
+    for expected in [
+        "Target test/a.test.ts: 1 test",
+        "Kills shared only with other targets:\n      m1 (also: test/b.test.ts::adds)",
+        "Kills shared only with other targets: none",
+        "Subsumers are not computed: the other tests stop at the first failure.",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?}: {text}");
+    }
+    assert!(!text.contains("Individual subsumers"), "{text}");
+}
+
+#[test]
 fn mutation_plan_rejects_a_kill_matrix_before_analysis() {
     let args = MutationArgs {
         plan: true,
@@ -1699,6 +1794,7 @@ fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
                 unique_kills: Vec::new(),
                 subsuming_tests: vec!["test/b.test.ts::adds".to_owned()],
                 notes: vec!["static-test-file-only-export-reach".to_owned()],
+                target_only_kills: None,
             },
             MutationTestKillRow {
                 test_id: "test/b.test.ts::adds".to_owned(),
@@ -1707,6 +1803,7 @@ fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
                 unique_kills: vec!["m2".to_owned()],
                 subsuming_tests: Vec::new(),
                 notes: Vec::new(),
+                target_only_kills: None,
             },
             MutationTestKillRow {
                 test_id: "test/c.test.ts::loads".to_owned(),
@@ -1715,8 +1812,10 @@ fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
                 unique_kills: Vec::new(),
                 subsuming_tests: Vec::new(),
                 notes: vec!["observed-instrumented-file-only-test".to_owned()],
+                target_only_kills: None,
             },
         ],
+        targets: None,
     }
 }
 

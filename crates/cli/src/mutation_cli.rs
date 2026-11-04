@@ -122,6 +122,13 @@ pub struct MutationArgs {
     /// individual review. Run every covering test without stopping at a failure.
     #[arg(long)]
     pub kill_matrix: bool,
+    /// Check whether this test is redundant: a test file (each test in it) or
+    /// a test id (`file::name`). Repeat the flag for more targets. Only the
+    /// mutants that a target covers run: first the target tests without a
+    /// stop at a failure, then the other covering tests up to the first
+    /// failure.
+    #[arg(long, value_name = "TARGET", conflicts_with = "kill_matrix")]
+    pub kill_matrix_for: Vec<String>,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -321,6 +328,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         typecheck: input.args.typecheck || input.config.typecheck == Some(true),
         resume: input.args.resume,
         kill_matrix: input.args.kill_matrix,
+        kill_matrix_targets: input.args.kill_matrix_for.clone(),
     })
 }
 
@@ -520,6 +528,11 @@ fn refuse_run_flags_in_plan(args: &MutationArgs) -> Result<(), ProgrammaticError
         Some((
             "--kill-matrix requires a run; a plan collects no test outcomes",
             "mutation.killMatrix",
+        ))
+    } else if !args.kill_matrix_for.is_empty() {
+        Some((
+            "--kill-matrix-for requires a run; a plan collects no test outcomes",
+            "mutation.killMatrixFor",
         ))
     } else if args.resume {
         Some((

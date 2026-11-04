@@ -48,10 +48,8 @@ test("isCheckedPath skips test files and test directories", () => {
   assert.equal(isCheckedPath("crates/engine/src/attestation.rs"), true);
 });
 
-test("isCheckedPath covers Rust, mjs and TypeScript but not snapshots", () => {
+test("isCheckedPath covers Rust but not snapshots", () => {
   assert.equal(isCheckedPath("crates/cli/src/main.rs"), true);
-  assert.equal(isCheckedPath("scripts/tool.mjs"), true);
-  assert.equal(isCheckedPath("npm/fallow/types/output-contract.d.ts"), true);
   assert.equal(isCheckedPath("docs/README.md"), false);
   assert.equal(isCheckedPath("crates/cli/src/snapshots/case.snap"), false);
   assert.equal(isCheckedPath("crates/cli/tests/snapshots/helper.rs"), false);
@@ -118,7 +116,7 @@ test("a file over the limit fails when it grows", () => {
 
 test("a file that crosses the limit fails", () => {
   const violation = evaluate({
-    path: "src/a.ts",
+    path: "src/a.rs",
     newText: linesOf(LINE_LIMIT + 1),
     oldText: linesOf(LINE_LIMIT),
   });
@@ -133,16 +131,26 @@ test("a file over the limit passes when it keeps its size or shrinks", () => {
 
 test("a new file over the limit fails", () => {
   const violation = evaluate({
-    path: "src/new.mjs",
+    path: "src/new.rs",
     newText: linesOf(LINE_LIMIT + 1),
     oldText: null,
   });
   assert.equal(violation?.previous, null);
 });
 
+// `fallow audit` checks the .mjs and .ts files with health.maxFileLines.
+test("the rule leaves .mjs and .ts files to fallow audit", () => {
+  assert.equal(isCheckedPath("scripts/tool.mjs"), false);
+  assert.equal(isCheckedPath("viz-frontend/src/panel.ts"), false);
+  assert.equal(isCheckedPath("npm/fallow/types/output-contract.d.ts"), false);
+  for (const path of ["src/new.mjs", "src/new.ts"]) {
+    assert.equal(evaluate({ path, newText: linesOf(LINE_LIMIT + 1), oldText: null }), null);
+  }
+});
+
 test("generated files and unchecked extensions are exempt", () => {
   const generated = `// Generated from schema.json. Do not edit.\n${linesOf(LINE_LIMIT + 5)}`;
-  assert.equal(evaluate({ path: "src/gen.ts", newText: generated, oldText: null }), null);
+  assert.equal(evaluate({ path: "src/gen.rs", newText: generated, oldText: null }), null);
   assert.equal(
     evaluate({ path: "docs/big.md", newText: linesOf(LINE_LIMIT + 5), oldText: null }),
     null,
@@ -229,11 +237,11 @@ test("--staged passes a shrunk large file and fails a new large file", (t) => {
   repo.git("add", "--all");
   assert.equal(repo.run("--staged").status, 0);
 
-  repo.write("src/fresh.ts", linesOf(LINE_LIMIT + 1));
+  repo.write("src/fresh.rs", linesOf(LINE_LIMIT + 1));
   repo.git("add", "--all");
   const result = repo.run("--staged");
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /src\/fresh\.ts: new file with 2001 lines\./u);
+  assert.match(result.stderr, /src\/fresh\.rs: new file with 2001 lines\./u);
 });
 
 test("--staged compares a renamed file with its old path", (t) => {

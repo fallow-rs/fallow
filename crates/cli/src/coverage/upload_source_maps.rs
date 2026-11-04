@@ -28,6 +28,7 @@ use crate::coverage::source_map_sources::{
 use crate::coverage::upload_common::{
     self, take_last_two_segments, to_posix_string, url_encode_path_segment,
 };
+use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 use crate::report::format_bytes;
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
@@ -72,7 +73,7 @@ impl UploadSourceMapsError {
         match self {
             Self::Validation(message) => {
                 eprintln!("{LOG_PREFIX}: {}: {message}", "error".red().bold());
-                ExitCode::from(2)
+                exit_invalid_input()
             }
             Self::Network(message) => {
                 eprintln!("{LOG_PREFIX}: {}: {message}", "error".red().bold());
@@ -80,7 +81,7 @@ impl UploadSourceMapsError {
             }
             Self::Partial(outcomes) => {
                 print_failure_summary(&outcomes);
-                ExitCode::from(1)
+                exit_gate_failed()
             }
         }
     }
@@ -1681,7 +1682,7 @@ mod tests {
     fn into_exit_maps_each_variant_to_its_exit_code() {
         assert_eq!(
             UploadSourceMapsError::Validation("x".to_owned()).into_exit(),
-            ExitCode::from(2)
+            exit_invalid_input()
         );
         assert_eq!(
             UploadSourceMapsError::Network("x".to_owned()).into_exit(),
@@ -1694,7 +1695,7 @@ mod tests {
         );
         assert_eq!(
             UploadSourceMapsError::Partial(vec![failed]).into_exit(),
-            ExitCode::from(1)
+            exit_gate_failed()
         );
     }
 
@@ -1712,7 +1713,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let missing = dir.path().join("does-not-exist");
         let code = run(&dry_run_args(&missing), dir.path());
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, exit_invalid_input());
     }
 
     #[test]
@@ -1720,7 +1721,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         // Directory exists but holds no .map files.
         let code = run(&dry_run_args(dir.path()), dir.path());
-        assert_eq!(code, ExitCode::from(2));
+        assert_eq!(code, exit_invalid_input());
     }
 
     #[test]

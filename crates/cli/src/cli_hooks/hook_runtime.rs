@@ -4,6 +4,7 @@
 use std::io::{Read, Write};
 use std::process::ExitCode;
 
+use crate::exit_codes::exit_invalid_input;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -40,7 +41,7 @@ pub fn run(operation: Operation) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let _ = writeln!(std::io::stderr().lock(), "fallow-gate: {error}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }

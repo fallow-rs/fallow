@@ -13,6 +13,7 @@ use fallow_types::suppress::IssueKind;
 
 use crate::Cli;
 use crate::cli_format::Format;
+use crate::exit_codes::exit_invalid_input;
 use crate::explain::{
     AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, SECURITY_RULES,
     rule_docs_url, rule_severity_key,
@@ -28,7 +29,7 @@ pub fn run_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
         }
         Err(e) => {
             eprintln!("Error: failed to serialize schema: {e}");
-            ExitCode::from(2)
+            exit_invalid_input()
         }
     }
 }

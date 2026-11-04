@@ -21,6 +21,7 @@ use fallow_types::flag_retirement::{
 use fallow_types::results::{FeatureFlag, FlagKind};
 
 use crate::error::emit_error;
+use crate::exit_codes::exit_gate_failed;
 use crate::regression::{
     FlagsCounts, RegressionOpts, SaveRegressionTarget, compare_flags_regression,
     print_flags_regression, save_flags_regression_baseline,
@@ -264,7 +265,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     }
 
     if gate_failed {
-        ExitCode::from(1)
+        exit_gate_failed()
     } else {
         ExitCode::SUCCESS
     }
@@ -1377,6 +1378,7 @@ fn print_flags_json(input: FlagsJsonInput<'_>, json_style: crate::json_style::Js
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::exit_invalid_input;
     use fallow_types::results::FlagConfidence;
     use std::path::PathBuf;
 
@@ -1523,7 +1525,7 @@ mod tests {
         // Badge / PR-comment / review formats are not supported by `flags`.
         assert_eq!(
             run_flags(&flags_opts(&root, OutputFormat::Badge)),
-            ExitCode::from(2)
+            exit_invalid_input()
         );
     }
 

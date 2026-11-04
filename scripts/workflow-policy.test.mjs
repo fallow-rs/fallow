@@ -414,7 +414,15 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     assert.doesNotMatch(job, /matrix\.(?!partition\b)|windows-latest|macos-latest/);
   }
   assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-26.04/);
-  assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
+  // The darwin-x64 leg runs only in release validation and in the release
+  // host smoke. The macos-15-intel queue held each CI run on main.
+  assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64/u);
+  assert.doesNotMatch(vscodeTargetHostJob, /target: darwin-x64/u);
+  assert.doesNotMatch(
+    workflow,
+    /os: macos-|runs-on: macos-/u,
+    "CI must not wait for a macOS runner",
+  );
   assert.match(windowsRustJob, /needs: changes/);
   assert.match(windowsRustJob, /if: needs\.changes\.outputs\.windows-rust == 'true'/);
   assert.match(windowsRustJob, /runs-on: windows-latest/);
@@ -578,6 +586,9 @@ test("release runs Windows correctness and lifecycle verification without creden
   );
   assert.match(vscodeTargetJob, /verify:vsix/);
   assert.match(vscodeTargetJob, /FALLOW_LSP_BIN:/);
+  // CI runs only the Linux and Windows legs, so release validation must keep
+  // the darwin-x64 leg on its own macOS runner.
+  assert.match(vscodeTargetJob, /- os: macos-15-intel\n\s+target: darwin-x64/u);
   assert.match(vscodePackageJob, /name: validation-vscode-targets/);
   assert.match(vscodePackageJob, /test:packaging/);
   assert.doesNotMatch(vscodePackageJob, /name: fallow-vscode-targets/);
@@ -1684,9 +1695,13 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
     ".github/workflows/pgo-validate.yml",
     ".github/workflows/release.yml",
     "Cargo.toml",
-    "Cargo.lock",
     "rust-toolchain.toml",
   ]);
+  assert.match(workflow, /^ {2}schedule:\n {4}- cron: '40 3 \* \* 0'$/mu);
+  assert.match(
+    train,
+    /^ {4}if: \$\{\{ !startsWith\(github\.head_ref, 'dependabot\/cargo\/'\) \}\}$/mu,
+  );
   assert.match(workflow, /^ {2}workflow_dispatch:$/mu);
   assert.match(workflow, /^permissions: \{\}$/mu);
   assert.match(train, /scripts\/pgo-train\.sh/u);
@@ -2536,6 +2551,21 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   const napi = indentedBlock(workflow, "napi", 2);
   assert.doesNotMatch(lint, /napi build/);
   assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/2/);
+  // Partition 1 runs the producer check and the schema drift gate, and
+  // partition 2 runs the runtime-coverage tests. The two partitions then take
+  // about the same time.
+  for (const [step, partition] of [
+    ["Run coverage producer conformance", 1],
+    ["Run runtime-coverage integration tests (feature-gated stub sidecar)", 2],
+    ["Run schema drift gate (feature-gated schema-emit binary)", 1],
+  ]) {
+    const escaped = escapeRegExp(step);
+    assert.match(
+      check,
+      new RegExp(`name: ${escaped}\\n\\s+if: matrix\\.partition == ${partition}\\n`, "u"),
+      `"${step}" must run in partition ${partition}`,
+    );
+  }
   assert.match(check, /partition: \[1, 2\]/);
   for (const job of [check, lint, napi]) {
     assert.match(job, /^    needs: changes$/m);
@@ -3163,7 +3193,6 @@ const PULL_REQUEST_WORKFLOWS = [
   "codeql.yml",
   "commitlint.yml",
   "dependabot-auto-merge.yml",
-  "ecosystem.yml",
   "pgo-validate.yml",
   "protocol-parity.yml",
   "signing-migration.yml",

@@ -144,11 +144,11 @@
         "decl": {
           "start": {
             "line": 7,
-            "column": 6
+            "column": 2
           },
           "end": {
             "line": 7,
-            "column": 7
+            "column": 3
           }
         },
         "loc": {
@@ -168,11 +168,11 @@
         "decl": {
           "start": {
             "line": 14,
-            "column": 6
+            "column": 2
           },
           "end": {
             "line": 14,
-            "column": 7
+            "column": 3
           }
         },
         "loc": {

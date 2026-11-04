@@ -1,7 +1,7 @@
 //! The language-neutral report contract of the fallow command-line tools.
 //!
 //! This crate holds the types that every fallow report shares: the JSON error
-//! document and the verdict of a gate. A tool that emits a fallow report
+//! document, the verdict of a gate, and the map of gate verdicts. A tool that emits a fallow report
 //! depends on this crate, so two tools cannot write a different shape for the
 //! same member.
 //!
@@ -24,7 +24,7 @@ pub mod exit_code;
 mod gate;
 
 pub use error_envelope::ErrorOutput;
-pub use gate::{GateFile, GateFileReason, GateOutcome, GateStatus};
+pub use gate::{GateFile, GateFileReason, GateOutcome, GateOutcomes, GateStatus};
 
 /// The version of the wire contract that this crate describes.
 ///

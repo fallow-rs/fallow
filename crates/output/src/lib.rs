@@ -212,6 +212,7 @@ pub use finding_id_query::{FindingIdQuery, FindingIdQueryReason};
 pub use fix::{FixJsonOutput, FixJsonOutputInput, count_applied_fixes, serialize_fix_json_output};
 pub use gate_outcomes::{
     GateFile, GateFileReason, GateName, GateOutcome, GateOutcomes, GateStatus,
+    with_gate_outcome_names,
 };
 pub use health::{
     HEALTH_SCHEMA_VERSION, HealthJsonOutputInput, HealthOutput, HealthOutputInput,
@@ -335,16 +336,16 @@ pub use mutation::{
     MutantTestReach, MutationBaselineFailure, MutationCacheOutput, MutationCompletion,
     MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
     MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
-    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationPlanCountsOutput,
-    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationPlanOutput,
-    MutationPlanSchemaVersion, MutationReport, MutationResumeOutput, MutationRunIssue,
-    MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind,
-    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationStatusCounts,
-    MutationSummary, MutationTestKillRow, MutationTimings, MutationTypecheckOutput,
-    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict, MutationVerdictInput,
-    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
-    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
-    serialize_mutation_plan_json_output,
+    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationKillMatrixTarget,
+    MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
+    MutationPlanOutput, MutationPlanSchemaVersion, MutationReport, MutationResumeOutput,
+    MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
+    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
+    MutationStatusCounts, MutationSummary, MutationTargetOnlyKill, MutationTestKillRow,
+    MutationTimings, MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason,
+    MutationVerdict, MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind,
+    MutationVerdictSchemaVersion, MutationWorktreeCheck, serialize_mutation_inspect_json_output,
+    serialize_mutation_json_output, serialize_mutation_plan_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

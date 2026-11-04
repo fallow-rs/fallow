@@ -91,6 +91,12 @@ The rule suppresses unlisted-dependency findings only. It does not change
 resolution, so a real installed package, a path alias, or a workspace package
 with the same name still wins, and the import keeps crediting that package.
 
+The React Native plugin adds such a rule for each static key of the Metro
+`resolver.extraNodeModules` object (`crates/core/src/plugins/metro.rs`).
+Metro maps the key to a folder, which is often generated output. The plugin
+reads the object as a `extraNodeModules` property value or as the right side
+of a `config.resolver.extraNodeModules = {...}` assignment.
+
 ## Advisories about a config a plugin could not use
 
 A plugin never prints an advisory about the config it read. It pushes a
@@ -545,6 +551,11 @@ that resolves to an object, as Vite merges them:
 - A single value comes from the last argument that sets it. When that value
   is not static, the reader gives no value, and an earlier static value does
   not apply.
+
+Before a reader runs, the constant inline pass replaces a list element
+`defineProject(value)` or `defineConfig(value)` with `value`. A
+`test.projects` list of such calls then gives its project objects, also when
+`value` names a local constant.
 
 The options object of another call, such as a plugin call, is not a config.
 An imported argument gives no object, because the parser does not follow

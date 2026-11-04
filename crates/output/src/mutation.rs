@@ -790,6 +790,33 @@ pub struct MutationTestKillRow {
     pub subsuming_tests: Vec<String>,
     /// Conservative evidence notes, sorted.
     pub notes: Vec<String>,
+    /// The kills that other target tests also detect and no non-target test
+    /// detects, sorted by mutant id. Only `--kill-matrix-for` sets this
+    /// field. The test stays redundant only while one of `targets` for each
+    /// entry stays in the suite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_only_kills: Option<Vec<MutationTargetOnlyKill>>,
+}
+
+/// A kill of a target test that only other target tests share.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationTargetOnlyKill {
+    /// The killed mutant.
+    pub mutant_id: String,
+    /// The other target tests that also kill the mutant, sorted.
+    pub targets: Vec<String>,
+}
+
+/// One `--kill-matrix-for` target and the dry-run tests that it selects.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationKillMatrixTarget {
+    /// The target as the caller gave it, after path normalization: a test
+    /// file or a runner test id.
+    pub target: String,
+    /// The dry-run test ids that the target selects, sorted.
+    pub test_ids: Vec<String>,
 }
 
 /// Redundancy signals over the observed mutants. Candidates need review.
@@ -807,6 +834,11 @@ pub struct MutationKillMatrix {
     pub candidates: Vec<String>,
     /// Tests with coverage and no observed kills, sorted by test id.
     pub coverage_without_kills: Vec<String>,
+    /// The `--kill-matrix-for` targets, in the given order. Absent outside
+    /// target mode. In target mode, `tests` has only target tests, and
+    /// `subsuming_tests` is empty, because bail hides the other killers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targets: Option<Vec<MutationKillMatrixTarget>>,
 }
 
 impl Default for MutationKillMatrix {
@@ -817,6 +849,7 @@ impl Default for MutationKillMatrix {
             tests: Vec::new(),
             candidates: Vec::new(),
             coverage_without_kills: Vec::new(),
+            targets: None,
         }
     }
 }

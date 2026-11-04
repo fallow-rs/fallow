@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 use fallow_output::{DoctorCheckStatus, DoctorOutput, DoctorStatus};
 
+use crate::exit_codes::exit_invalid_input;
 use crate::json_style::JsonStyle;
 use crate::report::{HumanStatus, human_status_line, sink::outln};
 
@@ -131,7 +132,7 @@ const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
 
 fn report_exit(report: &DoctorOutput) -> ExitCode {
     if report.status == DoctorStatus::Fail {
-        ExitCode::from(2)
+        exit_invalid_input()
     } else {
         ExitCode::SUCCESS
     }
@@ -147,7 +148,7 @@ mod tests {
             root: Path::new("/definitely/missing/fallow-doctor-root"),
             config_path: None,
         });
-        assert_eq!(report_exit(&report), ExitCode::from(2));
+        assert_eq!(report_exit(&report), exit_invalid_input());
         // A required failure still emits the complete envelope, in the stable
         // order the compatibility contract documents.
         assert_eq!(

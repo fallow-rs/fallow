@@ -19,7 +19,7 @@ import { releasedSkillNames } from "./released-skills.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /** The published release this branch evolves from. */
-const RELEASED_TAG = "v3.38.1";
+const RELEASED_TAG = "v3.39.0";
 
 const markdownFilesUnder = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -726,6 +726,49 @@ test("file-size guard runs for commits and on every pull request", () => {
   // A path filter on the job would let a pull request skip the step.
   assert.doesNotMatch(jsLint.split("steps:")[0], /^\s+if:/mu);
   assert.match(jsLint, /node scripts\/check-file-size\.mjs --base "origin\/\$BASE_REF"/u);
+});
+
+test("fallow audit holds the file-length rule for .mjs and .ts files", () => {
+  const hooks = readFileSync("hk.pkl", "utf8");
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const config = readJson(".fallowrc.json");
+  const gate = readJson("scripts/fallow-file-length.json");
+  const selfAnalyze = /\n  fallow-self-analyze:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
+  const filter = /\n {12}self-analyze:\n((?: {14}- .*\n)+)/u.exec(ci)?.[1] ?? "";
+
+  // The overrides live in the gate config only. In .fallowrc.json they would
+  // change each `fallow health` run in the repository, also the snapshot
+  // tests of fixtures that read the root config.
+  assert.equal(config.health?.thresholdOverrides, undefined);
+  const [limit] = gate.health.thresholdOverrides;
+  assert.deepEqual(limit.files, ["**/*.mjs", "**/*.ts"]);
+  assert.equal(limit.maxFileLines, 2000);
+  assert.equal(gate.extends, "../.fallowrc.json");
+  assert.equal(gate.audit.worsened, "error");
+
+  const preCommit = /\["pre-commit"\][\s\S]*?(?=\n  \["commit-msg"\])/u.exec(hooks)?.[0] ?? "";
+  const prePush = /\["pre-push"\][\s\S]*$/u.exec(hooks)?.[0] ?? "";
+  assert.match(preCommit, /sh scripts\/hook-file-length\.sh HEAD/u);
+  assert.match(prePush, /sh scripts\/hook-file-length\.sh origin\/main upstream\/main/u);
+
+  // The job has a path filter, so the filter must hold each file type that
+  // the rule checks and the two config files.
+  for (const pattern of [
+    "'**/*.mjs'",
+    "'**/*.ts'",
+    "'.fallowrc.json'",
+    "'scripts/fallow-file-length.json'",
+  ]) {
+    assert.ok(filter.includes(pattern), `self-analyze filter misses ${pattern}`);
+  }
+  assert.match(
+    selfAnalyze,
+    /audit --config scripts\/fallow-file-length\.json --base HEAD\^1 --no-css/u,
+  );
+  // A partial clone with full history makes the git churn of
+  // `health --targets` fetch blobs one at a time.
+  assert.match(selfAnalyze, /fetch-depth: 2/u);
+  assert.doesNotMatch(selfAnalyze, /filter: blob:none/u);
 });
 
 /**

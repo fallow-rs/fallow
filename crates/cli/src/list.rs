@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 
+use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 use crate::report::format_display_path;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 use fallow_api::{BoundaryData, ListJsonEnvelope, ListJsonOutputInput};
@@ -180,7 +181,7 @@ pub fn benchmark_list_boundaries_json(
     };
     let (data, rendered_bytes) = benchmark_list_data_json(&opts)?;
     let Some(boundary_data) = data.boundary_data else {
-        return Err(ExitCode::from(2));
+        return Err(exit_invalid_input());
     };
     let matched_file_count = boundary_data.zones.iter().map(|zone| zone.file_count).sum();
     Ok((
@@ -469,7 +470,7 @@ fn print_list_json(input: &ListJsonInput<'_>) -> Result<(), ExitCode> {
         }
         Err(err) => {
             eprintln!("Error: failed to serialize list output: {err}");
-            Err(ExitCode::from(2))
+            Err(exit_invalid_input())
         }
     }
 }
@@ -478,7 +479,7 @@ fn print_list_json(input: &ListJsonInput<'_>) -> Result<(), ExitCode> {
 /// more than the tolerance allows.
 fn gate_exit(gate_failed: bool) -> ExitCode {
     if gate_failed {
-        ExitCode::from(1)
+        exit_gate_failed()
     } else {
         ExitCode::SUCCESS
     }

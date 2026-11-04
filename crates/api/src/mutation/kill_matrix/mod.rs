@@ -5,9 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use fallow_engine::mutation::PlannedMutant;
 use fallow_output::{
     MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
-    MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationTestKillRow,
+    MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus,
+    MutationKillMatrixTarget, MutationTestKillRow,
 };
 use rustc_hash::FxHashMap;
+
+mod targets;
 
 type KillSets = BTreeMap<String, BTreeSet<String>>;
 
@@ -20,19 +23,53 @@ struct Evidence {
     missing_test_files: bool,
 }
 
+/// The kill matrix mode of a run.
+pub enum Mode<'a> {
+    /// No kill matrix: normal mode.
+    Disabled,
+    /// `--kill-matrix`: each covering test runs without bail.
+    Full,
+    /// `--kill-matrix-for`: the given targets and the dry-run tests that
+    /// they select. The selection is empty when no dry run happened.
+    Targets {
+        requested: &'a [String],
+        resolved: &'a [MutationKillMatrixTarget],
+    },
+}
+
 pub fn build(
-    enabled: bool,
+    mode: &Mode<'_>,
     results: &[MutantResult],
     baseline: &[MutationBaselineFailure],
     completion: &MutationCompletion,
     planned: &[PlannedMutant],
     test_files: Option<&FxHashMap<String, String>>,
 ) -> MutationKillMatrix {
-    if !enabled {
-        return MutationKillMatrix::default();
-    }
     let empty_files = FxHashMap::default();
     let test_files = test_files.unwrap_or(&empty_files);
+    match mode {
+        Mode::Disabled => MutationKillMatrix::default(),
+        Mode::Full => build_full(results, baseline, completion, planned, test_files),
+        Mode::Targets {
+            requested,
+            resolved,
+        } => targets::build(
+            &targets::Selection::new(requested, resolved),
+            results,
+            baseline,
+            completion,
+            test_files,
+        ),
+    }
+}
+
+fn build_full(
+    results: &[MutantResult],
+    baseline: &[MutationBaselineFailure],
+    completion: &MutationCompletion,
+    planned: &[PlannedMutant],
+    test_files: &FxHashMap<String, String>,
+) -> MutationKillMatrix {
     let evidence = observe(results, baseline, test_files);
     let mut reasons = BTreeSet::new();
     if completion.status != MutationCompletionStatus::Complete {
@@ -69,7 +106,21 @@ pub fn build(
         tests,
         candidates,
         coverage_without_kills,
+        targets: None,
     }
+}
+
+/// True when `test` of `file` failed with no active mutant, so it gives no
+/// evidence.
+pub(super) fn baseline_excluded(
+    baseline: &[MutationBaselineFailure],
+    id: &str,
+    file: &str,
+) -> bool {
+    baseline.iter().any(|failure| {
+        failure.test_id.as_deref() == Some(id)
+            || (failure.test_id.is_none() && failure.file.as_deref() == Some(file))
+    })
 }
 
 fn observe(
@@ -77,12 +128,7 @@ fn observe(
     baseline: &[MutationBaselineFailure],
     test_files: &FxHashMap<String, String>,
 ) -> Evidence {
-    let excluded = |id: &str, file: &str| {
-        baseline.iter().any(|failure| {
-            failure.test_id.as_deref() == Some(id)
-                || (failure.test_id.is_none() && failure.file.as_deref() == Some(file))
-        })
-    };
+    let excluded = |id: &str, file: &str| baseline_excluded(baseline, id, file);
     let mut evidence = Evidence::default();
     for result in results {
         if matches!(
@@ -160,6 +206,7 @@ fn rows(
                 unique_kills,
                 subsuming_tests: subsumers(id, kills, &killers_by_mutant),
                 notes: notes(id, &test_files[id], evidence, planned, complete),
+                target_only_kills: None,
             }
         })
         .collect()
@@ -240,6 +287,10 @@ mod tests {
     use super::*;
     use fallow_output::{MutantLocation, MutantStatus};
 
+    const fn mode(enabled: bool) -> Mode<'static> {
+        if enabled { Mode::Full } else { Mode::Disabled }
+    }
+
     fn build(
         enabled: bool,
         results: &[MutantResult],
@@ -253,7 +304,7 @@ mod tests {
             ("test/c.ts::c".to_owned(), "test/c.ts".to_owned()),
         ]);
         super::build(
-            enabled,
+            &mode(enabled),
             results,
             baseline,
             completion,
@@ -414,7 +465,14 @@ mod tests {
             (second.to_owned(), "test/b.ts".to_owned()),
         ]);
         let completion = MutationCompletion::from_reasons(Vec::new());
-        let valid = super::build(true, &[mutant.clone()], &[], &completion, &[], Some(&files));
+        let valid = super::build(
+            &Mode::Full,
+            &[mutant.clone()],
+            &[],
+            &completion,
+            &[],
+            Some(&files),
+        );
         assert_eq!(valid.candidates, [first, second]);
         assert_eq!(
             valid
@@ -430,7 +488,14 @@ mod tests {
             message: None,
             mutant_ids: Vec::new(),
         };
-        let excluded = super::build(true, &[mutant], &[failure], &completion, &[], Some(&files));
+        let excluded = super::build(
+            &Mode::Full,
+            &[mutant],
+            &[failure],
+            &completion,
+            &[],
+            Some(&files),
+        );
         assert_eq!(
             excluded
                 .tests
@@ -455,9 +520,16 @@ mod tests {
             (second.to_owned(), "test/b.ts".to_owned()),
         ]);
         let completion = MutationCompletion::from_reasons(Vec::new());
-        let valid = super::build(true, &[mutant.clone()], &[], &completion, &[], Some(&files));
+        let valid = super::build(
+            &Mode::Full,
+            &[mutant.clone()],
+            &[],
+            &completion,
+            &[],
+            Some(&files),
+        );
         assert_eq!(valid.candidates, [first, second]);
-        let unavailable = super::build(true, &[mutant], &[], &completion, &[], None);
+        let unavailable = super::build(&Mode::Full, &[mutant], &[], &completion, &[], None);
         assert_eq!(unavailable.status, MutationKillMatrixStatus::Incomplete);
         assert_eq!(unavailable.reasons, ["missing-test-file-metadata"]);
         assert!(unavailable.tests.is_empty());

@@ -12,8 +12,8 @@ use super::fallbacks::{
     installed_workspace_package_target, lookup_internal_file_id, nearest_package_manifest,
     normalize_path_lexically, package_imports_workspace_target, try_canonical_source_fallbacks,
     try_css_extension_fallback, try_package_imports_fallback, try_path_alias_fallback,
-    try_pnpm_workspace_fallback, try_relative_package_root_source_fallback,
-    try_relative_tsconfig_output_fallback, try_scss_include_path_fallback,
+    try_pnpm_workspace_fallback, try_relative_output_source_fallbacks,
+    try_relative_package_root_source_fallback, try_scss_include_path_fallback,
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
 };
@@ -33,6 +33,9 @@ use super::path_info::{
 use super::react_native::{build_condition_names, build_extensions};
 use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
+use super::url_suffix::{
+    resolve_failed_bare_asset_query_specifier, strip_url_suffix, strip_vite_asset_query,
+};
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
 };
@@ -469,12 +472,6 @@ fn specifier_matches_alias_prefix(specifier: &str, prefix: &str) -> bool {
         return false;
     };
     remainder.is_empty() || prefix.ends_with('/') || remainder.starts_with('/')
-}
-
-fn strip_url_suffix(specifier: &str) -> &str {
-    specifier
-        .find(['?', '#'])
-        .map_or(specifier, |idx| &specifier[..idx])
 }
 
 fn static_mount_url_path(specifier: &str) -> Option<String> {
@@ -1893,6 +1890,16 @@ fn resolve_failed_regular_specifier(
     if is_plain_css_file(from_file) && is_bare_style_subpath(specifier) {
         return ResolveResult::Unresolvable(specifier.to_string());
     }
+    if is_bare && let Some(base) = strip_vite_asset_query(specifier) {
+        return resolve_failed_bare_asset_query_specifier(
+            ctx,
+            from_file,
+            specifier,
+            base,
+            from_style || is_style_file(from_file),
+            matches_tsconfig_path_alias,
+        );
+    }
     if is_bare && is_valid_package_name(specifier) {
         return resolve_failed_bare_package_specifier(
             ctx,
@@ -1943,7 +1950,7 @@ fn try_failed_package_fallbacks(
     if let Some(result) = try_relative_package_root_source_fallback(ctx, from_file, specifier) {
         return Some(result);
     }
-    try_relative_tsconfig_output_fallback(ctx, from_file, specifier)
+    try_relative_output_source_fallbacks(ctx, from_file, specifier)
 }
 
 fn resolve_failed_alias_specifier(
@@ -2050,7 +2057,7 @@ mod tests {
         resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
         resolve_tsconfig_reference_path, serves_static_dir_mounts,
         should_preserve_node_modules_style_file, specifier_matches_alias_prefix,
-        static_dir_relative_path, static_mount_url_path, strip_url_suffix, tsconfig_extends_values,
+        static_dir_relative_path, static_mount_url_path, tsconfig_extends_values,
         with_appended_extension, with_exact_extension,
     };
 
@@ -2367,23 +2374,6 @@ mod tests {
             !specifier_matches_alias_prefix("~utils", "~"),
             "'~' prefix must NOT match '~utils' (no slash)"
         );
-    }
-
-    // ---- strip_url_suffix (lines 419-423) ----
-
-    #[test]
-    fn strip_url_suffix_removes_query_string() {
-        assert_eq!(strip_url_suffix("./style.css?inline"), "./style.css");
-    }
-
-    #[test]
-    fn strip_url_suffix_removes_hash_fragment() {
-        assert_eq!(strip_url_suffix("./page.html#section"), "./page.html");
-    }
-
-    #[test]
-    fn strip_url_suffix_passes_through_plain_specifier() {
-        assert_eq!(strip_url_suffix("react"), "react");
     }
 
     // ---- static_mount_url_path ----

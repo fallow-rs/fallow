@@ -25,7 +25,7 @@ read-only next steps. It never writes a test and never proposes a code change.
   directory as a path.
 - The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
-  `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
+  `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck` and `--resume`.
   The global `--no-cache` flag also turns off the result cache (see "Result
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
@@ -366,7 +366,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`). |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run in which no mutant has a test result has no score. It exits
@@ -498,16 +498,83 @@ The `kill_matrix` object has these fields:
 | Field | Meaning |
 |---|---|
 | `status` | `complete`, `incomplete`, or `unavailable`, separate from mutation completion. |
-| `reasons` | Evidence limitations, such as `kill-matrix-disabled`, `incomplete-mutant-results`, `baseline-failure`, `partial-mutation-run`, or `missing-test-file-metadata`. |
-| `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. |
+| `reasons` | Evidence limitations, such as `kill-matrix-disabled`, `incomplete-mutant-results`, `baseline-failure`, `partial-mutation-run`, `missing-test-file-metadata`, or `unmatched-target`. |
+| `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. In target mode, also `target_only_kills`. |
 | `candidates` | Test IDs whose observed kill sets other tests cover. |
 | `coverage_without_kills` | Test IDs with runtime coverage and no observed kills. |
+| `targets` | Only in target mode: each `--kill-matrix-for` target with the `test_ids` that it selects. |
 
 Each mutant and attempt records `killing_tests` and `kill_matrix_complete`. The existing `killed_by` field keeps the first observed killer. Outside matrix mode, `killing_tests` is empty.
 
 The result cache and outcome journal distinguish matrix mode from normal mode. Normal-mode results cannot supply complete matrix evidence.
 
 Matrix mode does not add the other tests of the covering test files to the retry of a survivor. A survivor that normal mode kills in that retry can stay `survived` in matrix mode, so the two modes can give different scores.
+
+### Named target tests
+
+`--kill-matrix-for <target>` checks whether named tests are redundant. It does
+not run the full kill matrix. Repeat the flag for each target. The flag and
+`--kill-matrix` are exclusive.
+
+```bash
+fallow mutation src/math.ts --kill-matrix-for test/math.test.ts --format json --quiet
+fallow mutation src/math.ts \
+  --kill-matrix-for "test/math.test.ts::adds" \
+  --kill-matrix-for "test/math.test.ts::adds again" --format json --quiet
+```
+
+- A target is a test file, which selects each test in the file, or a test ID
+  (`file::name`), the same string as `kill_matrix.tests[].test_id`. Fallow
+  removes a leading `./`, changes `\` to `/` in the file part, and makes an
+  absolute path inside the root relative.
+- A target that selects no test of the dry run stops the run with exit `2`
+  (`FALLOW_MUTATION_TARGET_UNMATCHED`). The dry run runs the test files that
+  reach the planned code, so the scope must include code that the target
+  tests load.
+- A mutant that no target test covers in the dry run does not run. It is
+  `pruned` with `prune_reason: "no-target-coverage"`. It does not count in
+  the score, the coverage, or the `--max-mutants` limit. The score therefore
+  describes only the mutants that the targets cover.
+- Fallow runs each other mutant against its covering target tests, with bail
+  disabled. After a kill or a survivor, it runs the other covering tests
+  with bail enabled. The first other test that fails stops that run. A
+  timeout or an error of the target run ends the attempt.
+- The mutant status has the same meaning as in normal mode: `killed` when any
+  covering test kills the mutant.
+- `killing_tests` of a mutant holds each target test that kills it, and the
+  first other test that kills it. `kill_matrix_complete` is true when the
+  target run gave an exact result for each target test and, after a target
+  kill, the other run gave a final result. Each run holds only a part of the
+  covering tests. A test can fail in such a run because it depends on the
+  order of the tests. After a target kill, Fallow runs the target tests with
+  no active mutant. When another test also kills the mutant, Fallow runs
+  those other tests with no active mutant too. When a control run does not
+  pass, the evidence of the mutant is incomplete, and the matrix gives no
+  candidates.
+
+Each target test with coverage gets a row in `kill_matrix.tests`. Other tests
+get no row.
+
+| Field | Meaning in target mode |
+|---|---|
+| `kills` | The mutants that the test kills. |
+| `unique_kills` | The kills that no other test kills, target or not. |
+| `target_only_kills` | The kills that other target tests also kill and no other test kills. Each entry has `mutant_id` and the other `targets` that kill it. |
+| `subsuming_tests` | Always empty. The note `subsumers-not-computed` says so, because bail hides the other killers. |
+
+A target with kills and no `unique_kills` is a candidate. When the candidate
+has `target_only_kills`, it stays redundant only while the suite keeps, for
+each entry, one of the `targets` of that entry. A change that adds several
+equal tests makes each of them a candidate. Keep one test of each shared
+kill.
+
+The evidence covers the planned mutants only. A test can have a unique kill
+outside the scope of the run, for example outside the changed code. Use a
+scope that holds each source file that the targets test.
+
+The cache key and the journal header include the targets. A normal or full
+matrix result never supplies target evidence, and `--resume` with other
+targets is a mismatch. The order of the targets does not matter.
 
 ## Retries
 
@@ -937,6 +1004,20 @@ test run.
 - The hook needs Node 22.15 or later. On an older Node, and in browser mode,
   a native `require` loads the original file, and the path stays in
   `unloaded_paths`. A static `import` of the file is the workaround.
+- The setup file also adds `--import` of
+  `runtime/node-subprocess-preload.mjs` to `NODE_OPTIONS` of the worker,
+  with the overlay path and the active mutant in the URL. So a Node process
+  that a test starts (`spawn`, `exec`, `execFile` or `fork`) loads the
+  instrumented files with the same mutant, as with `node:test`. The setup
+  file sets the value again before each test and removes the value of an
+  earlier run, so a worker with `isolate: false` gives each child the
+  current mutant. The adapter clears the integrity log of the overlay
+  before each run and reads it after the run, so a copy that matches more
+  than one planned file reports `overlay-incomplete`. The hits of a child
+  process do not count as coverage, so a mutant that only a child process
+  reaches stays `no_coverage`. Without the hook API (Node older than
+  22.15) and in browser mode, the value stays as it is and a child loads
+  the original files.
 
 ### `node:test` and `bun test`
 

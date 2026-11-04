@@ -157,15 +157,14 @@ export type AuditWorsened = ("warn" | "error" | "off")
 /**
  * What a gate concluded on this run.
  *
- * Four-valued rather than a boolean because audit's verdict has a warn tier
- * (`crates/cli/src/cli_report.rs` maps it onto three conclusions) and because
- * a gate can stand down without passing. Widening a published boolean later
- * would retype a required field and bump every carrying envelope, so the width
- * is decided here.
+ * The status has four values, not two. A verdict can have a warn tier that
+ * does not fail the run, and a gate can stand down without a pass. A change
+ * from a boolean to a wider type later would change the type of a required
+ * member and the version of each envelope that carries it.
  */
 export type GateStatus = ("pass" | "warn" | "fail" | "skipped")
 /**
- * Why a file counts for the `parse-error` gate, other than a parser error.
+ * Why a file counts for a parse gate, other than a parser error.
  */
 export type GateFileReason = "nesting-too-deep"
 /**
@@ -2028,27 +2027,16 @@ duplication_demoted: number
 diff_risk_introduced: number
 }
 /**
- * The verdict of every gate a run evaluated, keyed by name.
+ * The verdict of every gate that a run evaluated, keyed by gate name.
  *
- * A gate is armed by a flag or by config. The default exit rule of a command
- * is always in the object, also when no flag armed a gate:
- * `error-severity-findings` on `dead-code`, `check` and the combined run
- * (with `health-findings` when the combined run analyzed health),
- * `health-findings` on `health`, `security-advisory` on `security` and
- * `audit-verdict` on `audit`. A reader of the JSON sees a failing run without
- * the exit code. `dupes` has no default exit rule, so a `dupes` run that armed
- * no gate carries no object and always exits 0.
+ * Each tool defines its own gate names. The name of a gate is the JSON member
+ * name, and the members are in the order of the names. A tool never writes an
+ * empty object. When no gate ran, the member is absent.
  *
- * An empty object is never emitted. The typed programmatic API runs no CLI
- * gate and leaves the object absent.
+ * The key set is OPEN. A name that a consumer does not recognize means "some
+ * gate", not an error.
  *
- * The names this build can emit are `error-severity-findings`, `regression`,
- * `stale-baseline`, `baseline-growth`, `duplication-threshold`,
- * `duplication-findings`, `health-min-score`,
- * `health-min-severity`, `health-findings`, `health-coverage-gaps`,
- * `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
- * `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not
- * recognise means "some gate", not an error.
+ * The names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require` and `parse-error`. `GateName` describes each name and the default entries of each command.
  */
 export interface GateOutcomes {
 [k: string]: GateOutcome
@@ -2056,70 +2044,59 @@ export interface GateOutcomes {
 /**
  * One gate's verdict on one run.
  *
- * `status` and `enforced` answer different questions and legitimately
- * disagree. `status` is what the rule concluded; `enforced` is whether a
- * `fail` from this gate would make the run exit non-zero. A
- * `health --report-only` run is an explicit request never to fail, so a
- * failing gate there reports `status: fail` with `enforced: false`, and a
- * stale-baseline verdict published without `--fail-on-stale-baseline` reports
- * the same pair.
+ * `status` and `enforced` answer different questions, and they can disagree.
+ * `status` is what the rule concluded. `enforced` tells if a `fail` from this
+ * gate makes the run exit non-zero. A run that was told never to fail reports
+ * a failed gate as `status: fail` with `enforced: false`.
  *
  * **A gate fails the build when `status` is `fail` AND `enforced` is true.**
- * Neither member decides it alone: `enforced` is true on every armed gate,
- * including the ones that passed, so gating on it by itself fails every run
- * that armed anything. Read `status` on its own to decide what to say, and
- * remember that `warn` and `skipped` are neither a pass nor a failure.
+ * One member alone does not decide it. `enforced` is true on every armed
+ * gate, also on a gate that passed. Thus a gate rule on `enforced` alone
+ * fails every run that armed a gate. Read `status` alone to decide what to
+ * say. `warn` and `skipped` are not a pass and not a failure.
  */
 export interface GateOutcome {
 status: GateStatus
 /**
  * True when a `fail` from this gate makes the run exit non-zero. False
- * when the verdict is published for information only: the gate was never
- * armed, the run was told never to fail, or the combined machine formats
- * exit 0 for the gate (bare `fallow` without `--fail-on-issues`).
+ * when the tool publishes the verdict for information only: no flag or
+ * config armed the gate, the run was told never to fail, or the output
+ * format exits 0 for the gate.
  */
 enforced: boolean
 /**
- * The measured value the gate compared, when there is one: the duplication
- * percentage, the health score, the number of findings at or above the
- * severity floor, the number of `error` findings of `health-findings` and
- * of `error-severity-findings`, or
- * the number of files in `files`. Whole numbers are
- * carried as JSON numbers, so a count of three reads as `3.0`. Absent for
- * gates that compare no number.
+ * The measured value that the gate compared, when there is one: for
+ * example a percentage, a score, a number of findings, or the number of
+ * files in `files`. A whole number is a JSON number, so a count of three
+ * reads as `3.0`. Absent for a gate that compares no number.
  */
 observed?: (number | null)
 /**
- * The configured limit `observed` was compared against, when there is one.
- * Absent for gates that compare no number.
+ * The configured limit that the gate compared `observed` against, when
+ * there is one. Absent for a gate that compares no number.
  */
 threshold?: (number | null)
 /**
  * How the limit was spelled, for a gate whose `threshold` number does not
- * carry its own unit. `health-min-severity` sets it to the severity floor
- * (`moderate`, `high` or `critical`); `health-findings` and
- * `error-severity-findings` set it to `error`, the rule severity they
- * count; `regression` sets it to the
- * tolerance as the user wrote it (`"50%"` or `"5"`), because `threshold`
- * there is the allowance in issues and the percentage would otherwise be
- * unrecoverable on the grouped envelope, which carries no `regression`
- * object. Absent for gates whose numbers speak for themselves.
+ * carry its unit. Examples are a severity floor such as `high`, the rule
+ * severity that the gate counts such as `error`, or a tolerance as the
+ * user wrote it, such as `"50%"`. Each gate name documents its label.
+ * Absent for a gate whose numbers have a clear meaning without a label.
  */
 threshold_label?: (string | null)
 /**
- * The files the gate judged, for a gate that judges files rather than a
- * number. Only `parse-error` sets it: one item per file that did not
- * parse cleanly, sorted by path. Absent when the list is empty.
+ * The files that the gate judged, for a gate that judges files and not a
+ * number. One item for each file, sorted by path. Absent when the list is
+ * empty.
  */
 files?: GateFile[]
 }
 /**
- * One file a file-judging gate names, with the reason the gate counted it.
+ * One file that a file-judging gate names, with the reason that the gate
+ * counted it.
  *
- * Today only `parse-error` emits it. The item carries the same facts as the
- * `source-parse-degraded` entry in `workspace_diagnostics[]` for that file,
- * so a consumer can act on the gate without a join. With `reason` set, the
- * count and the parser outcome are placeholders.
+ * A gate that counts files that did not parse cleanly writes this item. When
+ * `reason` is set, `error_count` and `panicked` hold fixed values.
  */
 export interface GateFile {
 /**
@@ -2131,7 +2108,7 @@ path: string
  */
 error_count: number
 /**
- * True when the parser stopped in the file instead of recovering, so the
+ * True when the parser stopped in the file and did not recover, so the
  * analysis saw only the part before the error. `true` when `reason` is set.
  */
 panicked: boolean
@@ -20472,6 +20449,12 @@ candidates: string[]
  * Tests with coverage and no observed kills, sorted by test id.
  */
 coverage_without_kills: string[]
+/**
+ * The `--kill-matrix-for` targets, in the given order. Absent outside
+ * target mode. In target mode, `tests` has only target tests, and
+ * `subsuming_tests` is empty, because bail hides the other killers.
+ */
+targets?: (MutationKillMatrixTarget[] | null)
 }
 /**
  * The observed mutant kills of one eligible test.
@@ -20501,6 +20484,40 @@ subsuming_tests: string[]
  * Conservative evidence notes, sorted.
  */
 notes: string[]
+/**
+ * The kills that other target tests also detect and no non-target test
+ * detects, sorted by mutant id. Only `--kill-matrix-for` sets this
+ * field. The test stays redundant only while one of `targets` for each
+ * entry stays in the suite.
+ */
+target_only_kills?: (MutationTargetOnlyKill[] | null)
+}
+/**
+ * A kill of a target test that only other target tests share.
+ */
+export interface MutationTargetOnlyKill {
+/**
+ * The killed mutant.
+ */
+mutant_id: string
+/**
+ * The other target tests that also kill the mutant, sorted.
+ */
+targets: string[]
+}
+/**
+ * One `--kill-matrix-for` target and the dry-run tests that it selects.
+ */
+export interface MutationKillMatrixTarget {
+/**
+ * The target as the caller gave it, after path normalization: a test
+ * file or a runner test id.
+ */
+target: string
+/**
+ * The dry-run test ids that the target selects, sorted.
+ */
+test_ids: string[]
 }
 /**
  * The scope of a plan or a run.
@@ -21385,12 +21402,12 @@ begin: number
 end?: (number | null)
 }
 /**
- * Structured JSON error emitted on stdout when `--format json` is active and a
- * command fails. It carries no `kind` discriminator: it is distinguished from
- * the kind-tagged success envelopes by the required `error: true` field, and is
- * a document-root branch alongside `FallowOutput` and `CodeClimateOutput` in
- * `docs/output-schema.json`. Agents that pass `--format json` and observe a
- * non-zero exit code parse this shape from stdout.
+ * Structured JSON error that a tool writes to stdout when `--format json` is
+ * active and a command fails. It has no `kind` discriminator. The required
+ * `error: true` member separates it from a success envelope, which carries a
+ * `kind`. The error document is one of the root branches of the output
+ * schema. A consumer that passes `--format json` and sees a non-zero exit
+ * code parses this shape from stdout.
  */
 export interface ErrorOutput {
 /**

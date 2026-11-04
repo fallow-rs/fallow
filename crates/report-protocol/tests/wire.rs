@@ -9,8 +9,8 @@
 )]
 
 use fallow_report_protocol::{
-    ErrorOutput, GateFile, GateFileReason, GateOutcome, GateStatus, REPORT_PROTOCOL_VERSION,
-    exit_code,
+    ErrorOutput, GateFile, GateFileReason, GateOutcome, GateOutcomes, GateStatus,
+    REPORT_PROTOCOL_VERSION, exit_code,
 };
 
 fn to_json<T: serde::Serialize>(value: &T) -> String {
@@ -78,6 +78,34 @@ fn a_skipped_gate_writes_the_kebab_case_status() {
         to_json(&GateOutcome::new(GateStatus::Skipped, false)),
         r#"{"status":"skipped","enforced":false}"#
     );
+}
+
+#[test]
+fn a_gate_map_writes_each_outcome_under_the_gate_name_of_the_tool() {
+    let mut gates = GateOutcomes::new();
+    gates.insert("lint-errors", GateOutcome::new(GateStatus::Fail, false));
+    gates.insert("format", GateOutcome::new(GateStatus::Pass, true));
+    assert_eq!(
+        to_json(&gates),
+        concat!(
+            r#"{"format":{"status":"pass","enforced":true},"#,
+            r#""lint-errors":{"status":"fail","enforced":false}}"#
+        )
+    );
+    assert!(!gates.fails_run());
+    gates.insert("lint-errors", GateOutcome::new(GateStatus::Fail, true));
+    assert!(gates.fails_run());
+    assert_eq!(
+        gates.get("format").map(|gate| gate.status),
+        Some(GateStatus::Pass)
+    );
+}
+
+#[test]
+fn an_empty_gate_map_collapses_to_absent() {
+    let gates: GateOutcomes<&str> = GateOutcomes::new();
+    assert!(gates.is_empty());
+    assert!(gates.into_option().is_none());
 }
 
 #[test]

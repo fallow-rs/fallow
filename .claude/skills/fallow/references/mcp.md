@@ -134,6 +134,30 @@ An entry in `not_found` has no cloud data. Absence is not evidence that the code
 
 **Paths.** Open and edit files by `repo_path`. `file_path` is the path the runtime reported (for example `/app/src/x.ts` in a container) and often does not exist in the checkout.
 
+## Hosted Fallow Cloud MCP server
+
+Fallow Cloud also runs a hosted MCP server. It serves the production data of one organization and needs no local fallow install and no checkout. Use the local `fallow-mcp` when you also need static analysis. Use the hosted server when fallow is not installed. Also use it for the tools that only the hosted server has.
+
+- Endpoint: `POST https://api.fallow.cloud/mcp`, Streamable HTTP transport with JSON responses only, no session.
+- Auth: `Authorization: Bearer <key>`. Use a read-only key (`fallow_read_k1_`). A live key (`fallow_live_k1_`) also works, but it can write through the REST API. The server refuses an ingest-only key (`fallow_pub_k1_`) and a dashboard session.
+- Connect Claude Code: `claude mcp add --transport http fallow-cloud https://api.fallow.cloud/mcp --header "Authorization: Bearer $FALLOW_API_KEY"`.
+- Shared tools: `get_cloud_runtime_context`, `get_cloud_review_packet` and `get_cloud_deployment_changes` have the same names and arguments as the local cloud tools. The server accepts and ignores CLI-only arguments such as `root`.
+- The hosted server has no checkout, so it cannot use git defaults. Give `get_cloud_review_packet` explicit `files` or `functions`. Give `get_cloud_deployment_changes` a `sha`.
+- `list_repos` lists the repositories of the organization that have production coverage.
+- `tools/list` is the authority for the current tool set and the argument schemas.
+
+| Hosted-only tool | Use it for |
+|:-----------------|:-----------|
+| `get_file_context` | One file before an edit: per function the usage, error groups, CPU time, never-run branches and production callers. `format: "text"` gives a short text form. |
+| `verify_deployment` | After a deploy: did the listed `functions` or `files` run, do they have new error groups, are they slower or faster. Verdict `confirmed`, `attention`, `incomplete` or `awaiting_runtime`. |
+| `list_errors` | Production error groups, newest first, with a symbolicated sample stack. Filter by `file`, `stable_id` or `sha`. |
+| `get_branch_usage` | The source ranges of one file that never ran in production, for example an `if` arm or a `catch` block. |
+| `get_runtime_dependencies` | The npm packages that loaded or ran in production for one deployment. A package without call data has `calls: null`. With `declared`, each package gets `loaded`, `not_loaded` or `untracked`. |
+| `get_deployments` | The deployments of a repo, newest first. Use `git_sha` as `sha` in `get_cloud_deployment_changes` or `verify_deployment`. |
+| `get_repo_activation` | The setup step that is missing when another tool gives `repo_not_found`, `untracked` rows or `awaiting_runtime`. |
+
+The hosted data is context. It never proves that code is dead: the delete rule of "Scoped cloud reads" applies here too. `untracked` and `null` mean "no data", not zero. The server cuts a result above `max_output_bytes` (default 60000, for `get_file_context` 12000). A cut JSON result has a `truncation` object, and a paged tool gives the cursor of the first row that it did not show. When a result does not fit after every cut, the tool gives the error `output_too_large`: raise `max_output_bytes` or narrow the request.
+
 ## Runtime source-map confidence for cloud runtime tools
 
 | Values | Meaning | Agent action |

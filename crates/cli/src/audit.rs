@@ -15,8 +15,8 @@ use crate::base_worktree::git_rev_parse;
 use crate::base_worktree::{BaseWorktree, git_toplevel, sweep_old_reusable_caches};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
-use crate::error::emit_error;
 use crate::health::{HealthOptions, HealthResult};
+use crate::{error::emit_error, exit_codes::exit_invalid_input};
 
 pub use fallow_api::audit_run::{AuditKeySnapshot, DupeDemotionDiffSource, branching_keys};
 
@@ -1687,7 +1687,7 @@ fn benchmark_audit_review_brief_started_at(
         base_snapshot,
         changed_files,
         external,
-    } = corpus.state.take().ok_or_else(|| ExitCode::from(2))?;
+    } = corpus.state.take().ok_or_else(exit_invalid_input)?;
     let config_path = None;
     let cache_dir = corpus.root.join(".fallow-cache-benchmark");
     let opts = audit_review_benchmark_options(&corpus.root, &config_path, &cache_dir, 1);
@@ -1715,7 +1715,7 @@ fn benchmark_audit_review_brief_started_at(
         },
     );
     if result.verdict != AuditVerdict::Fail {
-        return Err(ExitCode::from(2));
+        return Err(exit_invalid_input());
     }
     let decision_count = result
         .decision_surface
@@ -1726,13 +1726,13 @@ fn benchmark_audit_review_brief_started_at(
     result.elapsed = Duration::ZERO;
     let output = crate::audit_brief::build_brief_json(&result, result.diff_index.as_ref())?;
     let value = fallow_output::serialize_review_brief_json_output(output, None)
-        .map_err(|_| ExitCode::from(2))?;
+        .map_err(|_| exit_invalid_input())?;
     if value.get("kind").and_then(serde_json::Value::as_str) != Some("audit-brief") {
-        return Err(ExitCode::from(2));
+        return Err(exit_invalid_input());
     }
     let rendered = crate::json_style::JsonStyle::Compact
         .serialize(&value)
-        .map_err(|_| ExitCode::from(2))?;
+        .map_err(|_| exit_invalid_input())?;
     let benchmark_result = AuditReviewBenchmarkResult {
         introduced_count: result.attribution.dead_code_introduced,
         inherited_count: result.attribution.dead_code_inherited,
@@ -1761,10 +1761,7 @@ fn benchmark_audit_review_brief_started_at(
             health: result.health.take(),
             brief_diff_evidence: None,
         },
-        base_snapshot: result
-            .base_snapshot
-            .take()
-            .ok_or_else(|| ExitCode::from(2))?,
+        base_snapshot: result.base_snapshot.take().ok_or_else(exit_invalid_input)?,
         changed_files,
         external: AuditBriefExternalData {
             // Keep only the brief-local CI signals: the next iteration projects

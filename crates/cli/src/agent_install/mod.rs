@@ -20,6 +20,7 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 
+use crate::exit_codes::exit_invalid_input;
 pub use crate::setup_hooks::Mode;
 use crate::setup_hooks::home_dir;
 
@@ -653,7 +654,7 @@ fn render(
         .iter()
         .any(|step| matches!(step.status, StepStatus::Refused | StepStatus::Failed));
     let exit = if blocked {
-        ExitCode::from(2)
+        exit_invalid_input()
     } else {
         ExitCode::SUCCESS
     };

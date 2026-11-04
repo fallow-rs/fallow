@@ -286,6 +286,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
         },
         concurrency,
         kill_matrix: false,
+        targets: Vec::new(),
         runner_timeout: Duration::from_secs(5),
         deadline: None,
         cache: None,
@@ -2615,6 +2616,7 @@ fn load_kill_job() -> Job {
     Job {
         id: "m2".to_owned(),
         tests: vec![tid("t1"), tid("t2")],
+        targets: Vec::new(),
         timeout_ms: 6000,
         setup_ms: 0,
         static_mutant: false,
@@ -3208,3 +3210,6 @@ fn a_resumed_result_skips_the_run_and_a_changed_key_runs_again() {
 
 #[path = "matrix_tests.rs"]
 mod matrix_tests;
+
+#[path = "target_tests.rs"]
+mod target_tests;

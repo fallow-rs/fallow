@@ -20,6 +20,8 @@ class CoverageGroupItem extends vscode.TreeItem {
     readonly children: ReadonlyArray<CoverageLeafItem>,
   ) {
     super(`${label} (${children.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    // A stable id keeps the expansion state when a refresh changes the count in the label.
+    this.id = `coverageGroup:${label}`;
     this.contextValue = "coverageGroup";
     this.iconPath = new vscode.ThemeIcon(icon);
   }

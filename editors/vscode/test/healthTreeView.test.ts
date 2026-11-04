@@ -247,3 +247,22 @@ describe("HealthTreeProvider file-length findings", () => {
     expect(complexityTargetOf(row as never)).toBeUndefined();
   });
 });
+
+describe("HealthTreeProvider section ids", () => {
+  it("keeps a stable section id when the section count changes", () => {
+    const provider = new HealthTreeProvider();
+    provider.update(hiddenCouplingReport());
+    const before = (provider.getChildren() as TestTreeItem[])[0];
+
+    const report = hiddenCouplingReport() as unknown as {
+      change_coupling: { total_pairs: number };
+    };
+    report.change_coupling.total_pairs = 4;
+    provider.update(report as unknown as HealthOutput);
+    const after = (provider.getChildren() as TestTreeItem[])[0];
+
+    expect(after?.label).toBe("Hidden Change Coupling (4)");
+    expect(before?.id).toBeDefined();
+    expect(after?.id).toBe(before?.id);
+  });
+});

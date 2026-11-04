@@ -176,7 +176,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("fallow-schema-emit: {err}");
-            ExitCode::from(2)
+            ExitCode::from(fallow_output::exit_code::EXIT_INVALID_INPUT)
         }
     }
 }
@@ -692,7 +692,7 @@ fn derived_definitions() -> Map<String, Value> {
 
     let mut definitions = generator.take_definitions(true);
     derive_architecture_envelope_definitions(&mut definitions);
-    definitions
+    fallow_output::with_gate_outcome_names(definitions)
 }
 
 /// The architecture envelopes that share the dead-code body:

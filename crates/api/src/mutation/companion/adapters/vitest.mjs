@@ -1,10 +1,12 @@
 // Generated from tools/mutation-runner/src/adapters/vitest.mjs. Do not edit.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
+import { overlayErrorsPath } from "../runtime/child.mjs";
+import { createWorkDir } from "./child-process.mjs";
 import {
   TEST_ID_SEPARATOR,
   attributeHits,
@@ -30,6 +32,8 @@ import {
 const RUNNER_NAME = "vitest";
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
 const OVERLAY_KEY = "fallowOverlay";
+const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
+const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", import.meta.url);
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
 /** The companion directory, with the runtime files that a test worker loads. */
 const COMPANION_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -266,6 +270,34 @@ const provideOverlay = (vitest, overlay) => {
   for (const project of vitest.projects) {
     project.provide(OVERLAY_KEY, entries);
   }
+};
+
+/**
+ * Gives each project the URL of the subprocess preload, with the path of the
+ * overlay file. The setup file adds it to NODE_OPTIONS with the active mutant,
+ * so a Node process that a test starts also loads the instrumented files.
+ */
+const provideSubprocessPreload = (vitest, overlayPath) => {
+  const url = new URL(SUBPROCESS_PRELOAD);
+  url.searchParams.set("overlay", overlayPath);
+  for (const project of vitest.projects) {
+    project.provide(SUBPROCESS_PRELOAD_KEY, url.href);
+  }
+};
+
+/**
+ * Runs `task` with an empty integrity log of the overlay file. A Node child
+ * of a test writes to the log when it cannot serve an instrumented file for
+ * certain, for example a copied source that matches two files. Such a run
+ * cannot give a trusted verdict, so an entry in the log is an error.
+ */
+const withOverlayCheck = async (overlayPath, task) => {
+  const errorsPath = overlayErrorsPath(overlayPath);
+  writeFileSync(errorsPath, "");
+  const result = await task();
+  const incomplete = readFileSync(errorsPath, "utf8").trim();
+  if (incomplete.length > 0) throw new CompanionError("overlay-incomplete", incomplete);
+  return result;
 };
 
 const hasOverlay = (project) =>
@@ -573,6 +605,8 @@ export const createAdapter = async (init) => {
   await assertOverlayInEachProject(vitest);
   forceRunnerOptions(vitest);
   provideOverlay(vitest, overlay);
+  const workDir = createWorkDir("fallow-mutation-vitest-", overlay);
+  provideSubprocessPreload(vitest, workDir.overlayPath);
   const freshModulesPerRun = vitest.projects.every((project) => project.config.isolate !== false);
   const setTimeouts = createTimeoutControl(vitest.projects);
 
@@ -588,7 +622,9 @@ export const createAdapter = async (init) => {
     provideActiveMutant(vitest, mutantId);
     setTimeouts(timeoutMs);
     setBail(vitest, bail);
-    const result = await vitest.runTestSpecifications(specifications);
+    const result = await withOverlayCheck(workDir.overlayPath, () =>
+      vitest.runTestSpecifications(specifications),
+    );
     return {
       testModules: modulesOfRun(result.testModules, specifications),
       unhandledErrors: result.unhandledErrors ?? [],
@@ -700,6 +736,12 @@ export const createAdapter = async (init) => {
     dryRun,
     run,
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),
-    close: () => vitest.close(),
+    close: async () => {
+      try {
+        await vitest.close();
+      } finally {
+        workDir.remove();
+      }
+    },
   };
 };

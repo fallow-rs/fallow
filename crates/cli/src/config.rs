@@ -127,6 +127,7 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::exit_invalid_input;
 
     #[test]
     fn run_config_no_file_prints_defaults_and_succeeds() {
@@ -202,7 +203,7 @@ mod tests {
             OutputFormat::Human,
             false,
         );
-        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+        assert_eq!(format!("{exit:?}"), format!("{:?}", exit_invalid_input()));
     }
 
     #[test]
@@ -220,6 +221,6 @@ mod tests {
         )
         .unwrap();
         let exit = run_config(dir.path(), None, false, OutputFormat::Human, false);
-        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+        assert_eq!(format!("{exit:?}"), format!("{:?}", exit_invalid_input()));
     }
 }

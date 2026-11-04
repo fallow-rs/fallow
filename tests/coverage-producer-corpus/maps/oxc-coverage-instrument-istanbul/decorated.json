@@ -39,11 +39,11 @@
         "line": 5,
         "decl": {
           "start": {
-            "line": 5,
+            "line": 4,
             "column": 2
           },
           "end": {
-            "line": 5,
+            "line": 4,
             "column": 3
           }
         },

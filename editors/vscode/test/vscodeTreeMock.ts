@@ -6,6 +6,7 @@ export interface TestCommand {
 }
 
 export interface TestTreeItem {
+  readonly id?: string;
   readonly label: string;
   readonly description?: string;
   readonly tooltip?: string;
@@ -24,6 +25,7 @@ export interface TestRange {
 
 export const createTreeViewVscodeMock = (workspacePath: string): Record<string, unknown> => {
   class FakeTreeItem {
+    public id: string | undefined;
     public description: string | undefined;
     public tooltip: string | undefined;
     public contextValue: string | undefined;

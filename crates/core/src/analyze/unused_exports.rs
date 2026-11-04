@@ -52,7 +52,7 @@ struct UnusedExportModuleContext<'a> {
     ambiguity: &'a AmbiguityParticipants,
     /// Sorted Effect schema export names per file. `Some` only when
     /// `effect.schemaExportsAsTypes` is on.
-    schema_exports: Option<&'a FxHashMap<FileId, &'a [String]>>,
+    schema_exports: Option<&'a FxHashMap<FileId, Vec<String>>>,
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
@@ -429,7 +429,7 @@ pub fn find_unused_exports(
             None
         };
 
-    let schema_exports = types::schema_exports_by_file(config, modules);
+    let schema_exports = types::schema_exports_by_file(config, graph, modules);
 
     let ambiguity = graph.ambiguity_participants();
     let module_context = UnusedExportModuleContext {
@@ -516,8 +516,8 @@ fn collect_module_unused_export_findings(
 
     let schema_exports = ctx
         .schema_exports
-        .and_then(|by_file| by_file.get(&module.file_id).copied())
-        .unwrap_or_default();
+        .and_then(|by_file| by_file.get(&module.file_id))
+        .map_or(&[][..], Vec::as_slice);
 
     for export in &module.exports {
         let is_schema = !export.is_type_only

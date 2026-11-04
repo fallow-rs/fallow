@@ -10,20 +10,18 @@ on:
       - 'rust-toolchain.toml'
       - 'tests/ecosystem/**'
       - '.github/workflows/ecosystem.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'tests/ecosystem/**'
-      - '.github/workflows/ecosystem.yml'
   workflow_dispatch:
 
-# Pull requests and ordinary pushes to main share one group per ref, so a
-# newer run cancels the older one. Main gets many merges a day, and only the
-# newest main commit needs a result. The release commit ("chore: release v")
+# This workflow does not run on pull requests. It is not a required check,
+# and the analysis step never fails the run, so a pull request run did not
+# gate a merge. It held six runner slots for about 20 minutes on each Rust
+# pull request. Main runs it one commit
+# later, and the release gate requires a successful run on the release commit.
+# To check a pull request branch, start the workflow by hand on that branch.
+#
+# Ordinary pushes to main share one group, so a newer run cancels the older
+# one. Main gets many merges a day, and only the newest main commit needs a
+# result. The release commit ("chore: release v")
 # and manual or scheduled runs get a group of their own and are never
 # cancelled: scripts/verify-release-ci.mjs reads the result for the release
 # commit before a release can start.

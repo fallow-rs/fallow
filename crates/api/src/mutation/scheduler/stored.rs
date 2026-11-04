@@ -86,7 +86,7 @@ fn stored_result(
                 .and_then(|cache| cache.get(&mutant.id, key))
                 .map(|hit| (hit, StoredSource::Cache))
         })
-        .filter(|(hit, _)| !context.kill_matrix || hit.kill_matrix_complete)
+        .filter(|(hit, _)| !context.collects_evidence() || hit.kill_matrix_complete)
 }
 
 /// The outcome of a result of an earlier run, with its covering `tests`.
@@ -115,10 +115,12 @@ fn stored_outcome(
 
 /// The key of `mutant` with these tests. The cache and the journal compute
 /// the same key. `None` without a cache and without a journal.
+/// A target-mode key also covers the target tests of the mutant, so a result
+/// with other targets never gives target evidence.
 pub(super) fn job_key(
     context: &JobContext<'_>,
     mutant: &ScheduledMutant,
-    tests: &[String],
+    (tests, targets): (&[String], &[String]),
     test_files: &[String],
 ) -> Option<String> {
     match (context.cache, context.journal) {
@@ -127,12 +129,34 @@ pub(super) fn job_key(
         (None, None) => None,
     }
     .map(|key| {
-        if context.kill_matrix {
+        if context.targets.is_some() {
+            format!("targets:{}:{key}", targets_digest(targets))
+        } else if context.kill_matrix {
             format!("matrix:{key}")
         } else {
             key
         }
     })
+}
+
+/// The SHA-256 hex digest of the sorted target tests.
+fn targets_digest(targets: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let mut sorted: Vec<&str> = targets.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    let mut hasher = Sha256::new();
+    for target in sorted {
+        hasher.update((target.len() as u64).to_le_bytes());
+        hasher.update(target.as_bytes());
+    }
+    hasher
+        .finalize()
+        .iter()
+        .fold(String::new(), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
 }
 
 /// Records the result of an earlier run for `mutant`, and returns true when
@@ -161,7 +185,7 @@ pub(super) fn record_stored(
 /// Adds a final result of `job` to the journal of `config`. A job without a
 /// key has no journal.
 fn journal_result(config: &ScheduleConfig, job: &Job, result: &CachedResult) {
-    if config.kill_matrix && !result.kill_matrix_complete {
+    if (config.kill_matrix || !config.targets.is_empty()) && !result.kill_matrix_complete {
         return;
     }
     if let (Some(journal), Some(key)) = (&config.journal, &job.cache_key) {

@@ -2557,7 +2557,7 @@ fn single_call_site(source: &str, needle: &str) -> usize {
     }
 }
 
-fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {
+pub fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {
     let source = std::fs::read_to_string(workspace_root().join(path))?;
     Ok(source
         .lines()
@@ -2608,7 +2608,7 @@ fn workspace_crate_manifests() -> Vec<String> {
     manifests
 }
 
-fn rust_sources_under<const N: usize>(roots: [&str; N]) -> Vec<String> {
+pub fn rust_sources_under<const N: usize>(roots: [&str; N]) -> Vec<String> {
     let mut sources = Vec::new();
     for root in roots {
         collect_rust_sources(&workspace_root().join(root), root, &mut sources);
