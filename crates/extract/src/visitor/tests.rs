@@ -10861,6 +10861,70 @@ fn new_url_import_meta_url_tracked() {
     );
 }
 
+fn new_url_destructured_names(source: &str, specifier: &str) -> Vec<String> {
+    let info = parse(source);
+    info.dynamic_imports
+        .iter()
+        .find(|d| d.source == specifier)
+        .map(|d| d.destructured_names.clone())
+        .expect("new URL edge")
+}
+
+#[test]
+fn new_url_module_path_credits_default_export() {
+    assert_eq!(
+        new_url_destructured_names(
+            "export const sign = new URL('./lib/sign.ts', import.meta.url);",
+            "./lib/sign.ts",
+        ),
+        ["default"]
+    );
+}
+
+#[test]
+fn new_url_worker_argument_credits_no_export() {
+    for source in [
+        "new Worker(new URL('./worker.ts', import.meta.url));",
+        "new SharedWorker(new URL('./worker.ts', import.meta.url));",
+        "new Worker((new URL('./worker.ts', import.meta.url)));",
+        "new Worker(new URL('./worker.ts', import.meta.url) as URL);",
+    ] {
+        assert!(
+            new_url_destructured_names(source, "./worker.ts").is_empty(),
+            "a worker runs the module as a script: {source}"
+        );
+    }
+}
+
+#[test]
+fn new_url_directory_credits_no_export() {
+    assert!(
+        new_url_destructured_names("new URL('./services', import.meta.url);", "./services")
+            .is_empty()
+    );
+}
+
+#[test]
+fn new_url_registered_loader_credits_only_hooks() {
+    let info = parse(
+        "import { register } from 'node:module';\n\
+         const hooks = new URL('./hooks.ts', import.meta.url);\n\
+         register(hooks);",
+    );
+    let names: Vec<&[String]> = info
+        .dynamic_imports
+        .iter()
+        .filter(|d| d.source == "./hooks.ts")
+        .map(|d| d.destructured_names.as_slice())
+        .collect();
+    assert!(
+        names
+            .iter()
+            .all(|names| !names.contains(&"default".to_string())),
+        "a registered loader edge credits only hook exports: {names:?}"
+    );
+}
+
 #[test]
 fn new_url_non_relative_not_tracked() {
     let info = parse("new URL('https://example.com', import.meta.url);");

@@ -7,7 +7,6 @@ use oxc_ast_visit::walk;
 use oxc_semantic::ScopeFlags;
 use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 
 use crate::{
     AngularComponentFieldArrayTypeFact, AngularThisSpreadFact, ComputedEnumKeyUseFact,
@@ -119,7 +118,7 @@ mod visit_taint_sources;
 pub(super) use visit_chain_names::jsx_member_object_name;
 pub use visit_chain_names::push_member_tag_accesses;
 use visit_chain_names::{call_receiver_name, static_member_object_name, type_name_member_path};
-pub(super) use visit_dynamic_imports::ComponentLoaderImport;
+pub(super) use visit_dynamic_imports::{ComponentLoaderImport, NewUrlContext};
 pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
     FactoryReturnFunctionInput, classify_factory_assigned_value, collect_self_scope_assignments,
@@ -3654,6 +3653,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_program(self, program);
         self.finish_local_import_loaders();
         self.finish_promise_import_bindings();
+        self.finish_register_loader_new_urls();
         self.record_jsx_import_source_pragma(program);
     }
 
@@ -4714,30 +4714,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_queue_worker_constructor_param_sources(expr);
         self.record_callee_use(&expr.callee, expr.span.start, true);
         self.record_new_url_package_reference(expr);
+        self.record_worker_new_url_arguments(expr);
 
-        if let Some(source) = new_url_import_source(expr) {
-            // A speculative reference credits its target when it resolves, and
-            // the resolver drops it silently when it does not. Two rules make a
-            // `new URL(specifier, import.meta.url)` speculative:
-            // - The specifier has no file extension, so it may name a directory
-            //   (`new URL("./services", import.meta.url)`). See issue #840.
-            // - The expression is a direct argument of a filesystem call or of
-            //   `fileURLToPath`, so it names a file on disk. The file can be an
-            //   output that does not exist yet, or a probe for an optional file.
-            // Other specifiers with an extension (`new URL("./worker.js", ...)`) stay
-            // not speculative, so a missing file is still an `unresolved-import`.
-            let is_speculative = PathBuf::from(&source).extension().is_none()
-                || self.filesystem_path_new_url_spans.contains(&expr.span);
-            self.dynamic_imports.push(DynamicImportInfo {
-                source,
-                span: expr.span,
-                destructured_names: Vec::new(),
-                local_name: None,
-                is_speculative,
-                value_escapes: false,
-            });
-            self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
-        }
+        self.record_new_url_edge(expr);
 
         self.capture_declarative_validation_new_expression(expr);
         self.capture_new_expression_sink(expr);

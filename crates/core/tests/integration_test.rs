@@ -714,6 +714,8 @@ mod namespace_class_static_member;
 mod namespace_spy_call_member;
 #[path = "integration_test/new_url_node_modules_package.rs"]
 mod new_url_node_modules_package;
+#[path = "integration_test/new_url_runtime_entry.rs"]
+mod new_url_runtime_entry;
 #[path = "integration_test/node_modules_bin_path.rs"]
 mod node_modules_bin_path;
 #[path = "integration_test/npm_alias_dependency_binaries.rs"]

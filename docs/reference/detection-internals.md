@@ -380,6 +380,14 @@ error by suppressing a downstream detector.
   path reference, because the consumer of the path can run the file, and
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
+- `new URL("./x.ts", import.meta.url)` names a module that a path loader can
+  run, so the edge credits the `default` export of the target and no other
+  export. The edge credits only the file in three cases: a direct argument of
+  a `Worker` or `SharedWorker` constructor, a path without an extension, and
+  a source that `module.register()` loads (the register edge credits the hook
+  exports). Do not widen the edge to the whole namespace: a config alias
+  target (`alias: { pkg: new URL("./mock.ts", import.meta.url).pathname }`)
+  must keep its unused named exports reportable.
 - `createRequire(<this file>)` gives a `require` function of this file. The
   base is `import.meta.url`, `import.meta.filename`, `__filename` or
   `fileURLToPath(import.meta.url)` (`is_this_file_create_require_call`). The
