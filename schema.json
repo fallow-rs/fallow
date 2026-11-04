@@ -35,7 +35,7 @@
       "writeOnly": true
     },
     "entry": {
-      "description": "An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `[\"src/main.ts\"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. For a script that does not run in production, use a `framework[]` entry with `entryPointRole: \"support\"` and leave its glob out of `entry`: a file that also matches `entry` stays a runtime root. A single `*` stays within one path segment; use `**` to match across directories.",
+      "description": "An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `[\"src/main.ts\"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. For a script that does not run in production, use `supportEntry` and leave its glob out of `entry`: a file that also matches `entry` stays a runtime root. A single `*` stays within one path segment; use `**` to match across directories.",
       "type": "array",
       "items": {
         "type": "string"
@@ -49,6 +49,13 @@
         "type": "string"
       },
       "default": []
+    },
+    "supportEntry": {
+      "description": "An array of project-root-relative glob patterns whose matching files are support entry points: dev scripts, tooling and setup files that run outside production. In default mode a support entry keeps its file and its imports reachable, the same as `entry`. In `--production` mode (or `production` for dead-code analysis), fallow leaves a file that only a support entry matches out of the analysis, so its imports credit no export, file or dependency. A file that also matches `entry`, a framework plugin or a package.json field stays an entry point, and a support file that production code imports stays a normal module. Use `entry` for the files that run in production. A single `*` stays within one path segment; use `**` to match across directories.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "ignoreFindings": {
       "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A matching file that parses with errors reports no `source-parse-degraded` diagnostic, and its partial parse does not mark other findings as incomplete; use this only for files that are broken on purpose, such as syntax-error test fixtures. A single `*` stays within one path segment; use `**` to match across directories.",
@@ -835,8 +842,36 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "settings": {
+          "description": "Settings that apply only to the workspace packages that a key selects. A key is a workspace root relative to the project root, as `fallow list --workspaces` prints it, or a glob such as `packages/*`. A single `*` stays within one path segment. Each value can hold `ignoreDependencies` and `includeEntryExports`. A workspace gets the global `ignoreDependencies` plus the lists of every key that selects it. For `includeEntryExports`, an exact root wins over a glob, a glob with more literal segments wins over a shorter glob, and a workspace that no key sets uses the global value. The root package uses only the global keys. A key that selects no workspace gives a warning. An older fallow version ignores this map, so pair it with `minimumVersion`.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/WorkspaceSettings"
+          }
         }
       }
+    },
+    "WorkspaceSettings": {
+      "description": "The settings of one `workspaces.settings` key.",
+      "type": "object",
+      "properties": {
+        "ignoreDependencies": {
+          "description": "Package names or package-name globs that unused-dependency and unlisted-dependency detection ignore in the selected workspaces only, in addition to the global `ignoreDependencies`. An unused dependency uses the workspace of its `package.json`. An unlisted dependency uses the deepest workspace of the file that imports it. The syntax is the same as the global `ignoreDependencies`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeEntryExports": {
+          "description": "When set, replaces the global `includeEntryExports` value for the files of the selected workspaces. A file belongs to its deepest workspace. The `--include-entry-exports` CLI flag turns the check on in every workspace and wins over this value.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "IgnoreExportRule": {
       "description": "Rule for ignoring specific exports.",

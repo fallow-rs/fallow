@@ -171,6 +171,9 @@ pub struct EntryPointDiscovery {
     pub skipped_entries: FxHashMap<String, usize>,
     /// Runtime entry paths from a source other than `entry`, before the dedup.
     pub non_manual_runtime_paths: FxHashSet<PathBuf>,
+    /// Production mode only: files that a `supportEntry` glob matches. They
+    /// are not entry points; see [`CategorizedEntryPoints::production_excluded`].
+    pub production_excluded: Vec<PathBuf>,
 }
 
 impl EntryPointDiscovery {
@@ -693,6 +696,50 @@ fn push_manual_entry_matches(
     }
 }
 
+/// Push the files that a `supportEntry` glob matches: support entry points in
+/// default mode, and files that take no part in the analysis in production
+/// mode. A file that another entry source also seeds stays an entry point,
+/// because the dedup of the categorized entry points drops it from the
+/// excluded set.
+#[expect(
+    clippy::expect_used,
+    reason = "supportEntry glob patterns are validated before entry point discovery"
+)]
+fn push_support_entry_matches(
+    discovery: &mut EntryPointDiscovery,
+    config: &ResolvedConfig,
+    relative_paths: &[String],
+    files: &[DiscoveredFile],
+) {
+    if config.support_entry_patterns.is_empty() {
+        return;
+    }
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in &config.support_entry_patterns {
+        builder.add(
+            fallow_config::compile_path_glob(pattern)
+                .expect("supportEntry pattern was validated at config load time"),
+        );
+    }
+    let Ok(glob_set) = builder.build() else {
+        return;
+    };
+    for (idx, rel) in relative_paths.iter().enumerate() {
+        if !glob_set.is_match(rel) {
+            continue;
+        }
+        let path = files[idx].path.clone();
+        if config.production {
+            discovery.production_excluded.push(path);
+        } else {
+            discovery.support_entries.push(EntryPoint {
+                path,
+                source: EntryPointSource::ManualEntry,
+            });
+        }
+    }
+}
+
 /// Push entries derived from a package.json's declared entry points and scripts.
 fn push_package_json_entries(
     discovery: &mut EntryPointDiscovery,
@@ -1065,6 +1112,7 @@ pub fn discover_root_entry_points(
 
     let relative_paths = relative_paths_for(files, &config.root);
     push_manual_entry_matches(&mut discovery.entries, config, &relative_paths, files);
+    push_support_entry_matches(&mut discovery, config, &relative_paths, files);
 
     let canonical_root = dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
     if let Some(pkg) = root_pkg {

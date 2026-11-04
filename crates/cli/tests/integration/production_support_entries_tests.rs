@@ -451,3 +451,83 @@ fn a_warm_cache_from_the_other_mode_gives_the_cold_result() {
         );
     }
 }
+
+/// `supportEntry` declares the tool scripts without a `framework[]` entry.
+fn support_entry_config() -> String {
+    r#"{ "entry": ["src/index.js"], "supportEntry": ["tools/*.js"] }"#.to_string()
+}
+
+#[test]
+fn support_entry_keeps_tool_imports_alive_in_a_normal_run() {
+    let dir = support_tools_fixture(&support_entry_config());
+    let json = dead_code(dir.path(), &[]);
+
+    let exports = unused_export_names(&json);
+    assert!(
+        !exports.iter().any(|e| e.ends_with(":onlyTools")),
+        "a normal run credits the import of a support entry: {exports:?}"
+    );
+    let files = unused_file_paths(&json);
+    assert!(
+        !files
+            .iter()
+            .any(|f| f.ends_with("tool-helper.js") || f.ends_with("report.js")),
+        "a normal run keeps the support entry and its imports: {files:?}"
+    );
+    assert!(
+        !unused_dependency_names(&json).contains(&"chalk".to_string()),
+        "a normal run credits the dependency that a support entry imports"
+    );
+}
+
+#[test]
+fn support_entry_takes_no_part_in_a_production_run() {
+    let dir = support_tools_fixture(&support_entry_config());
+    let json = dead_code(dir.path(), &["--production"]);
+
+    let exports = unused_export_names(&json);
+    assert!(
+        exports.contains(&"src/lib.js:onlyTools".to_string()),
+        "production must not credit an import of a support entry: {exports:?}"
+    );
+    let files = unused_file_paths(&json);
+    assert!(
+        files.contains(&"src/tool-helper.js".to_string()),
+        "a file that only a support entry imports is unused in production: {files:?}"
+    );
+    assert!(
+        unused_dependency_names(&json).contains(&"chalk".to_string()),
+        "a dependency that only a support entry imports is unused in production"
+    );
+    let paths = all_reported_paths(&json);
+    assert!(
+        !paths.iter().any(|p| p.ends_with("tools/report.js")),
+        "production reports no finding for the support entry itself: {paths:?}"
+    );
+}
+
+#[test]
+fn a_file_in_entry_and_support_entry_stays_a_production_entry() {
+    let dir = support_tools_fixture(
+        r#"{ "entry": ["src/index.js", "tools/*.js"], "supportEntry": ["tools/*.js"] }"#,
+    );
+    let json = dead_code(dir.path(), &["--production"]);
+    let exports = unused_export_names(&json);
+    assert!(
+        !exports.iter().any(|e| e.ends_with(":onlyTools")),
+        "`entry` wins over `supportEntry`: {exports:?}"
+    );
+}
+
+#[test]
+fn production_config_for_dead_code_excludes_support_entries() {
+    let dir = support_tools_fixture(
+        r#"{ "entry": ["src/index.js"], "supportEntry": ["tools/*.js"],
+             "production": { "deadCode": true } }"#,
+    );
+    let json = dead_code(dir.path(), &[]);
+    assert!(
+        unused_export_names(&json).contains(&"src/lib.js:onlyTools".to_string()),
+        "per-analysis production mode also excludes support entries"
+    );
+}

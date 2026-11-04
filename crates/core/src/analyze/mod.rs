@@ -768,6 +768,8 @@ pub(crate) fn find_dead_code_full(
     // right after this pass, so this is its start as well.
     config.ignore_dependencies.reset_usage();
     config.ignore_findings.reset_usage();
+    config.workspace_settings.reset_usage();
+    config.workspace_settings.bind(&config.root, workspaces);
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
     let class_member_rules = ClassMemberRules::new(config, plugin_result);

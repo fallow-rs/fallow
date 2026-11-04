@@ -2577,6 +2577,9 @@ fn discover_all_entry_points(
     let other_sources = root_discovery.non_manual_runtime_paths;
     entry_points.extend_runtime(root_discovery.entries);
     entry_points.extend_support(root_discovery.support_entries);
+    entry_points
+        .production_excluded
+        .extend(root_discovery.production_excluded);
     for (path, count) in root_discovery.skipped_entries {
         *skipped_entries.entry(path).or_insert(0) += count;
     }

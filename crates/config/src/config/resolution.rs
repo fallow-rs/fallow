@@ -185,6 +185,10 @@ pub struct ResolvedConfig {
     /// Manual entry-point globs from the `entry` config key, matched against
     /// discovered files on top of plugin- and manifest-derived entries.
     pub entry_patterns: Vec<String>,
+    /// Support entry-point globs from the `supportEntry` config key. In
+    /// production mode, a file that only these globs match takes no part in
+    /// the analysis.
+    pub support_entry_patterns: Vec<String>,
     /// Compiled union of user `ignorePatterns` and the built-in default
     /// ignores (`node_modules`, `dist`, minified bundles, ...); matching files
     /// are excluded from discovery entirely, unless a `!` entry in
@@ -229,6 +233,9 @@ pub struct ResolvedConfig {
     /// Binary names and name globs that the `unlisted-binaries` rule does
     /// not report.
     pub ignore_binaries: IgnoreDependencyMatcher,
+    /// Compiled `workspaces.settings`: per-workspace `ignoreDependencies`
+    /// and `includeEntryExports`, bound to the workspaces of each pass.
+    pub workspace_settings: super::ResolvedWorkspaceSettings,
     /// Command names whose file arguments do not become entry points; `*`
     /// matches every command.
     pub ignore_command_entries: Vec<String>,
@@ -905,6 +912,26 @@ fn compile_unused_component_props_ignore(pattern: Option<&str>) -> Option<regex:
     })
 }
 
+/// Split `workspaces` into its patterns, its per-package baselines and its
+/// compiled per-workspace settings.
+fn resolve_workspace_settings(
+    workspaces: Option<crate::WorkspaceConfig>,
+) -> (
+    Vec<String>,
+    BTreeMap<String, String>,
+    super::ResolvedWorkspaceSettings,
+) {
+    workspaces
+        .map(|workspaces| {
+            (
+                workspaces.patterns,
+                workspaces.changed_since,
+                super::ResolvedWorkspaceSettings::compile(&workspaces.settings),
+            )
+        })
+        .unwrap_or_default()
+}
+
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
     #[expect(
@@ -956,10 +983,8 @@ impl FallowConfig {
         );
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
-        let (workspace_patterns, workspace_changed_since) = self
-            .workspaces
-            .map(|workspaces| (workspaces.patterns, workspaces.changed_since))
-            .unwrap_or_default();
+        let (workspace_patterns, workspace_changed_since, workspace_settings) =
+            resolve_workspace_settings(self.workspaces);
 
         let unused_component_props_ignore = compile_unused_component_props_ignore(
             self.unused_component_props.ignore_pattern.as_deref(),
@@ -968,6 +993,7 @@ impl FallowConfig {
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
+            support_entry_patterns: self.support_entry,
             ignore_patterns: compiled_ignores.patterns,
             user_ignore_pattern_count: compiled_ignores.user_pattern_count,
             entry_pattern_effect: EntryEffectRecord::default(),
@@ -980,6 +1006,7 @@ impl FallowConfig {
             cache_config_hash: cache.config_hash,
             ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
             ignore_binaries: IgnoreDependencyMatcher::compile(&self.ignore_binaries),
+            workspace_settings,
             ignore_command_entries: self.ignore_command_entries,
             ignore_unresolved_imports: compiled_ignores.unresolved_imports,
             ignore_export_rules: self.ignore_exports,
@@ -1030,6 +1057,34 @@ impl FallowConfig {
 }
 
 impl ResolvedConfig {
+    /// Turn `includeEntryExports` on in every workspace for this run, the
+    /// way the `--include-entry-exports` flag does. It wins over a
+    /// `workspaces.settings` value of `false`.
+    pub const fn force_include_entry_exports(&mut self) {
+        self.include_entry_exports = true;
+        self.workspace_settings.force_include_entry_exports();
+    }
+
+    /// The effective `includeEntryExports` value for the file at `path`.
+    #[must_use]
+    pub fn include_entry_exports_for(&self, path: &Path) -> bool {
+        self.workspace_settings
+            .include_entry_exports_for(path, self.include_entry_exports)
+    }
+
+    /// Whether `ignoreDependencies` hides the dependency finding for
+    /// `package_name` that `path` owns: a `package.json` for an unused
+    /// dependency, or the importing file for an unlisted dependency. The
+    /// global list applies everywhere; a `workspaces.settings` list applies
+    /// in the workspaces that its key selects.
+    #[must_use]
+    pub fn suppresses_dependency_at(&self, path: &Path, package_name: &str) -> bool {
+        self.ignore_dependencies.suppresses(package_name)
+            || self
+                .workspace_settings
+                .suppresses_dependency_at(path, package_name)
+    }
+
     /// Apply a `FALLOW_PACKAGE_BASELINES` value: a false value empties
     /// `workspaces.changedSince`, so no run of the process reads the map.
     pub fn apply_package_baselines_env(&mut self, raw: Option<&OsStr>) {

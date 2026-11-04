@@ -32,6 +32,7 @@ fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         extends: vec![],
         entry: vec![],
+        support_entry: vec![],
         ignore_patterns: vec![],
         ignore_findings: vec![],
         framework: vec![],

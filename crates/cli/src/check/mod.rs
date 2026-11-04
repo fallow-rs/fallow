@@ -832,7 +832,7 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
     )?;
     config.analysis_snapshot = opts.analysis_snapshot;
     if opts.include_entry_exports {
-        config.include_entry_exports = true;
+        config.force_include_entry_exports();
     }
     if opts.show_cascade {
         config.show_cascade = true;
