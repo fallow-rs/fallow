@@ -7,6 +7,7 @@
     "@scope/assets": "1.0.0",
     "icon-pack": "1.0.0",
     "idle-dep": "1.0.0",
+    "tpl-icons": "1.0.0",
     "vite": "8.0.0"
   }
 }

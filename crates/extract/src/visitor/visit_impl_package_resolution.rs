@@ -384,16 +384,42 @@ fn is_bin_name_char(ch: char) -> bool {
 /// The directory name of installed packages.
 const NODE_MODULES: &str = "node_modules";
 
+/// A URL path that starts in the `node_modules` directory of the file.
+const NODE_MODULES_PREFIX: &str = "node_modules/";
+
+/// The static part of a `new URL()` path: the full text of a string literal,
+/// or the text of a template literal up to the last `/` before the first
+/// `${}`. A template such as `./node_modules/pkg/${name}.svg` gives
+/// `./node_modules/pkg/`, so only a complete package name is used.
+fn static_new_url_path<'a>(arg: &'a Argument<'_>) -> Option<Cow<'a, str>> {
+    match arg {
+        Argument::StringLiteral(path) => Some(path.value.text()),
+        Argument::TemplateLiteral(tpl) => {
+            let first = tpl.quasis.first()?.value.raw.as_str();
+            if tpl.expressions.is_empty() {
+                return Some(Cow::Borrowed(first));
+            }
+            let end = first.rfind('/')? + 1;
+            Some(Cow::Borrowed(&first[..end]))
+        }
+        _ => None,
+    }
+}
+
 /// The package that a relative path through `node_modules` locates, as in
-/// `./node_modules/icon-pack/svgs/` or `../node_modules/@scope/pkg/a.svg`.
+/// `./node_modules/icon-pack/svgs/`, `node_modules/icon-pack/a.svg` or
+/// `../node_modules/@scope/pkg/a.svg`.
 ///
 /// The last `node_modules` segment gives the package, so a pnpm store path
 /// (`node_modules/.pnpm/x@1/node_modules/pkg`) gives `pkg`. A name that
-/// starts with `.`, such as `.bin` or `.pnpm`, is not a package.
+/// starts with `.`, such as `.bin` or `.pnpm`, is not a package. A query or a
+/// fragment (`?raw`, `#x`) is not part of the path.
 fn package_in_node_modules_path(path: &str) -> Option<String> {
-    if !(path.starts_with("./") || path.starts_with("../")) {
+    if !(path.starts_with("./") || path.starts_with("../") || path.starts_with(NODE_MODULES_PREFIX))
+    {
         return None;
     }
+    let path = path.split(['?', '#']).next().unwrap_or(path);
     let segments: Vec<&str> = path.split('/').collect();
     let index = segments
         .iter()
@@ -413,15 +439,15 @@ fn package_in_node_modules_path(path: &str) -> Option<String> {
 
 impl ModuleInfoExtractor {
     /// Credit the package that `new URL("./node_modules/<pkg>/...", import.meta.url)`
-    /// locates. The path names a file or a directory of the installed package,
+    /// locates. The path is a string literal or a template literal. The path names a file or a directory of the installed package,
     /// so the code uses the package without an import.
     pub(super) fn record_new_url_package_reference(&mut self, expr: &NewExpression<'_>) {
         if let Expression::Identifier(callee) = &expr.callee
             && callee.name == "URL"
             && expr.arguments.len() == 2
-            && let Some(Argument::StringLiteral(path)) = expr.arguments.first()
             && is_meta_url_arg(&expr.arguments[1])
-            && let Some(package_name) = package_in_node_modules_path(&path.value.text())
+            && let Some(path) = expr.arguments.first().and_then(static_new_url_path)
+            && let Some(package_name) = package_in_node_modules_path(&path)
         {
             self.push_package_path_references(vec![package_name]);
         }
