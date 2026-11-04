@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
+use fallow_config::{FallowConfig, OutputFormat};
 
 use super::common::{create_config, fixture_path};
 
@@ -1264,55 +1264,8 @@ fn package_exports_array_fallback_resolves_self_package_source() {
 fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
     let root = fixture_path("ignore-patterns-workspace-package-json");
     let config = FallowConfig {
-        type_aware: fallow_config::TypeAwareConfig::default(),
-        schema: None,
-        minimum_version: None,
-        extends: vec![],
-        entry: vec![],
-        support_entry: vec![],
         ignore_patterns: vec!["**/dist/**".to_string()],
-        ignore_findings: vec![],
-        framework: vec![],
-        workspaces: None,
-        ignore_dependencies: vec![],
-        ignore_binaries: vec![],
-        ignore_command_entries: vec![],
-        ignore_unresolved_imports: vec![],
-        ignore_exports: vec![],
-        ignore_catalog_references: vec![],
-        ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
-        used_class_members: vec![],
-        ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
-        effect: fallow_config::EffectConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        similar_code: fallow_config::SimilarCodeConfig::default(),
-        mutation: fallow_config::MutationConfig::default(),
-        health: fallow_config::HealthConfig::default(),
-        rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
-        production: false.into(),
-        plugins: vec![],
-        rule_packs: vec![],
-        dynamically_loaded: vec![],
-        markup_extensions: vec![],
-        overrides: vec![],
-        regression: None,
-        audit: fallow_config::AuditConfig::default(),
-        codeowners: None,
-        public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
-        sealed: false,
-        include_entry_exports: false,
-        show_cascade: false,
-        auto_imports: false,
-        fail_on_parse_error: false,
-        cache: fallow_config::CacheConfig::default(),
+        ..FallowConfig::default()
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 

@@ -9,8 +9,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::plugins::config_parser::lexical_normalize;
 use crate::scripts::{IgnoredCommandEntries, ScriptCatalog, WorkspacePackages};
 
+#[path = "manual_entries.rs"]
+mod manual_entries;
 #[path = "plugin_entries.rs"]
 mod plugin_entries;
+use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
 pub use plugin_entries::{
     discover_plugin_entry_point_sets, discover_plugin_entry_point_sets_timed,
     discover_plugin_entry_points,
@@ -125,6 +128,18 @@ impl CategorizedEntryPoints {
         for entry in entries {
             self.push_support(entry);
         }
+    }
+
+    /// Add the entry points of the root package. Returns the runtime entry
+    /// paths from a source other than `entry` and the skipped entry counts.
+    pub(crate) fn extend_root(
+        &mut self,
+        root: EntryPointDiscovery,
+    ) -> (FxHashSet<PathBuf>, FxHashMap<String, usize>) {
+        self.extend_runtime(root.entries);
+        self.extend_support(root.support_entries);
+        self.production_excluded.extend(root.production_excluded);
+        (root.non_manual_runtime_paths, root.skipped_entries)
     }
 
     pub(crate) fn extend(&mut self, other: Self) {
@@ -660,84 +675,6 @@ pub(super) fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<S
                 .into_owned()
         })
         .collect()
-}
-
-/// Push entries for files matching the user-configured manual entry glob patterns.
-#[expect(
-    clippy::expect_used,
-    reason = "entry glob patterns are validated before entry point discovery"
-)]
-fn push_manual_entry_matches(
-    entries: &mut Vec<EntryPoint>,
-    config: &ResolvedConfig,
-    relative_paths: &[String],
-    files: &[DiscoveredFile],
-) {
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in &config.entry_patterns {
-        builder.add(
-            fallow_config::compile_path_glob(pattern)
-                .expect("entry pattern was validated at config load time"),
-        );
-    }
-    let Ok(glob_set) = builder.build() else {
-        return;
-    };
-    if glob_set.is_empty() {
-        return;
-    }
-    for (idx, rel) in relative_paths.iter().enumerate() {
-        if glob_set.is_match(rel) {
-            entries.push(EntryPoint {
-                path: files[idx].path.clone(),
-                source: EntryPointSource::ManualEntry,
-            });
-        }
-    }
-}
-
-/// Push the files that a `supportEntry` glob matches: support entry points in
-/// default mode, and files that take no part in the analysis in production
-/// mode. A file that another entry source also seeds stays an entry point,
-/// because the dedup of the categorized entry points drops it from the
-/// excluded set.
-#[expect(
-    clippy::expect_used,
-    reason = "supportEntry glob patterns are validated before entry point discovery"
-)]
-fn push_support_entry_matches(
-    discovery: &mut EntryPointDiscovery,
-    config: &ResolvedConfig,
-    relative_paths: &[String],
-    files: &[DiscoveredFile],
-) {
-    if config.support_entry_patterns.is_empty() {
-        return;
-    }
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in &config.support_entry_patterns {
-        builder.add(
-            fallow_config::compile_path_glob(pattern)
-                .expect("supportEntry pattern was validated at config load time"),
-        );
-    }
-    let Ok(glob_set) = builder.build() else {
-        return;
-    };
-    for (idx, rel) in relative_paths.iter().enumerate() {
-        if !glob_set.is_match(rel) {
-            continue;
-        }
-        let path = files[idx].path.clone();
-        if config.production {
-            discovery.production_excluded.push(path);
-        } else {
-            discovery.support_entries.push(EntryPoint {
-                path,
-                source: EntryPointSource::ManualEntry,
-            });
-        }
-    }
 }
 
 /// Push entries derived from a package.json's declared entry points and scripts.

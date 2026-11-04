@@ -329,6 +329,17 @@ impl ResolvedWorkspaceSettings {
     }
 }
 
+impl super::ResolvedConfig {
+    /// Start a dead-code pass: forget the pattern hits of an earlier pass and
+    /// bind `workspaces.settings` to the workspaces of this pass.
+    pub fn begin_dead_code_pass(&self, workspaces: &[WorkspaceInfo]) {
+        self.ignore_dependencies.reset_usage();
+        self.ignore_findings.reset_usage();
+        self.workspace_settings.reset_usage();
+        self.workspace_settings.bind(&self.root, workspaces);
+    }
+}
+
 fn warn_once(message: &str) {
     static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
     let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
@@ -343,6 +354,7 @@ fn warn_once(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FallowConfig;
 
     fn settings(entries: &[(&str, &[&str], Option<bool>)]) -> ResolvedWorkspaceSettings {
         let map = entries
@@ -478,5 +490,70 @@ mod tests {
         let s = settings(&[("./packages/a/", &["lodash"], None)]);
         s.bind(root, &workspaces(root, &["packages/a"]));
         assert!(s.suppresses_dependency_at(Path::new("/p/packages/a/package.json"), "lodash"));
+    }
+
+    #[test]
+    fn extends_merges_workspace_settings_key_by_key() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"workspaces": {"settings": {
+                "packages/*": {"includeEntryExports": true, "ignoreDependencies": ["a"]},
+                "apps/web": {"ignoreDependencies": ["vite"]}
+            }}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["base.json"], "workspaces": {"settings": {
+                "packages/*": {"ignoreDependencies": ["b"]}
+            }}}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let settings = config.workspaces.unwrap().settings;
+        let packages = &settings["packages/*"];
+        assert_eq!(packages.include_entry_exports, Some(true), "fields merge");
+        assert_eq!(packages.ignore_dependencies, vec!["b"], "arrays replace");
+        assert_eq!(settings["apps/web"].ignore_dependencies, vec!["vite"]);
+    }
+
+    #[test]
+    fn workspaces_keeps_the_packages_alias_and_parses_settings_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("fallow.toml"),
+            "supportEntry = [\"scripts/*.ts\"]\n\n[workspaces]\npackages = [\"libs/*\"]\n\n\
+             [workspaces.settings.\"packages/*\"]\nincludeEntryExports = true\n\
+             ignoreDependencies = [\"lodash\"]\n",
+        )
+        .unwrap();
+        let config = FallowConfig::load(&dir.path().join("fallow.toml")).unwrap();
+        assert_eq!(config.support_entry, vec!["scripts/*.ts"]);
+        let workspaces = config.workspaces.unwrap();
+        assert_eq!(workspaces.patterns, vec!["libs/*"]);
+        assert!(workspaces.unknown_keys.is_empty());
+        let packages = &workspaces.settings["packages/*"];
+        assert_eq!(packages.include_entry_exports, Some(true));
+        assert_eq!(packages.ignore_dependencies, vec!["lodash"]);
+    }
+
+    #[test]
+    fn invalid_workspace_settings_globs_fail_to_load() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"workspaces": {"settings": {"packages/a": {"ignoreDependencies": ["@x/{a"]}}}}"#,
+        )
+        .unwrap();
+        assert!(FallowConfig::load(&dir.path().join(".fallowrc.json")).is_err());
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"supportEntry": ["scripts/[a.ts"]}"#,
+        )
+        .unwrap();
+        assert!(FallowConfig::load(&dir.path().join(".fallowrc.json")).is_err());
     }
 }
