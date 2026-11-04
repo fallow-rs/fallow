@@ -15,7 +15,7 @@
 # Same major version as each `actions/setup-node` step in `ci.yml`.
 node = "26"
 
-# Same version as the `devEngines` pin in the root `package.json`, the
+# Same version as `engines.pnpm` in the root `package.json`, the
 # `packageManager` of `editors/vscode`, and the `pnpm/action-setup` steps in
 # `ci.yml`, `commitlint.yml` and `contributors.yml`.
 pnpm = "11.25.0"

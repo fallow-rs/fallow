@@ -1475,8 +1475,7 @@ test("mise.toml follows the tool versions that CI pins", () => {
   const pnpmVersion = miseVersion("pnpm");
   assert.ok(pnpmVersion, "mise.toml must pin pnpm");
   const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
-  const rootPnpm = rootPackage.devEngines.packageManager.find(({ name }) => name === "pnpm");
-  assert.equal(rootPnpm.version, pnpmVersion);
+  assert.equal(rootPackage.engines.pnpm, pnpmVersion);
   const extensionPackage = JSON.parse(readFileSync("editors/vscode/package.json", "utf8"));
   assert.equal(extensionPackage.packageManager, `pnpm@${pnpmVersion}`);
   for (const file of ["ci.yml", "commitlint.yml", "contributors.yml"]) {
@@ -2787,18 +2786,26 @@ test("workflow pnpm installs are frozen and suppress dependency lifecycle script
   }
 });
 
-test("the root manifest does not pin pnpm through packageManager", () => {
+test("the root manifest pins pnpm through engines only", () => {
   // pnpm/action-setup fails when its `version` input differs from the root
   // `packageManager`. The PGO and ecosystem jobs set up pnpm 12 for public
-  // fixtures, so the root pins pnpm through `devEngines` instead. npm 11 fails
-  // `npm run` on a `devEngines` package manager that it does not match, so a
-  // second entry lets npm run the scripts.
+  // fixtures, so the root cannot use `packageManager`.
+  // `devEngines.packageManager` is not safe either:
+  // - npm fails `npm run` when no entry names npm.
+  // - actions/setup-node turns on npm caching when an entry names npm. Each
+  //   root `setup-node` step without `cache` then fails, because the root has
+  //   no npm lockfile.
+  // - Corepack ignores an array, so Dependabot selects pnpm 10 from the
+  //   lockfile version. pnpm 10 removes the `packageManagerDependencies`
+  //   document, and the frozen pnpm 11 install in CI then fails.
+  // Dependabot reads `engines.pnpm`, and npm and setup-node ignore it.
   const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(rootPackage.packageManager, undefined);
-  assert.deepEqual(rootPackage.devEngines.packageManager, [
-    { name: "pnpm", version: rootPackage.devEngines.packageManager[0].version, onFail: "download" },
-    { name: "npm", onFail: "ignore" },
-  ]);
+  assert.equal(rootPackage.devEngines, undefined);
+  assert.match(rootPackage.engines.pnpm, /^\d+\.\d+\.\d+$/u, "pin one exact pnpm version");
+  const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
+  assert.doesNotMatch(lockfile, /^---$/mu, "the root lockfile has one YAML document");
+  assert.doesNotMatch(lockfile, /packageManagerDependencies/u);
   assert.equal(existsSync("package-lock.json"), false, "the root tools install with pnpm");
   const settings = readFileSync("pnpm-workspace.yaml", "utf8");
   assert.match(settings, /^minimumReleaseAge: 10080$/mu);
