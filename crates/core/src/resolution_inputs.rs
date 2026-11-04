@@ -7,6 +7,12 @@
 //! `oxc_resolver` discovers next to a source file, plus its `extends` and
 //! `references` chain. An edit to one of these files changes import targets
 //! without a change to any source file, so the mode must cover them.
+//!
+//! The resolver also reads `node_modules`, so an install changes import
+//! targets too. A walk of `node_modules` costs too much, so the hash reads the
+//! lockfile and the install marker that the package manager writes on each
+//! install. Bun writes no install marker, so for a Bun project the hash reads
+//! the package names at the top level of `node_modules`.
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -23,6 +29,37 @@ const PACKAGE_MANIFESTS: &[&str] = &["package.json", "deno.json", "deno.jsonc"];
 /// importing file: the nearest `package.json` (for `imports`) and the nearest
 /// owning `tsconfig.json` (automatic tsconfig discovery).
 const NEAREST_CONFIGS: &[&str] = &["package.json", "tsconfig.json"];
+
+/// Lockfiles and install markers that change when a package manager adds,
+/// removes or updates a package in `node_modules`. Each path is relative to
+/// the project root or to a workspace root.
+///
+/// The hash reads the content of each file, not the modification time. A
+/// fresh install in CI writes the same content with a new time, so a time
+/// would make each restored cache miss. `node_modules/.modules.yaml` of pnpm
+/// holds an install timestamp, so the hash reads the copy of the lockfile in
+/// `node_modules/.pnpm/lock.yaml` instead.
+const INSTALL_STATE_FILES: &[&str] = &[
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "node_modules/.package-lock.json",
+    "node_modules/.pnpm/lock.yaml",
+    "node_modules/.yarn-state.yml",
+    "node_modules/.yarn-integrity",
+];
+
+/// Lockfiles of Bun. Bun writes no install marker in `node_modules`, so a
+/// directory with one of these files keys the package names in its
+/// `node_modules` (see [`bun_install_listings`]).
+const BUN_LOCKFILES: &[&str] = &["bun.lock", "bun.lockb"];
+
+/// The directory in `node_modules` where the isolated linker of Bun puts one
+/// `<name>@<version>` directory for each installed package.
+const BUN_STORE_DIR: &str = ".bun";
 
 /// Hash the workspace `(name, root)` pairs and the content of every resolver
 /// input file. Every path is spelled relative to `root`, so a copy of the
@@ -72,6 +109,13 @@ pub fn resolution_inputs_hash(
         state.hash(&mut hasher);
     }
 
+    let mut bun_listings = bun_install_listings(root, workspaces);
+    bun_listings.sort_unstable();
+    bun_listings.len().hash(&mut hasher);
+    for listing in &bun_listings {
+        listing.hash(&mut hasher);
+    }
+
     hasher.finish()
 }
 
@@ -82,7 +126,8 @@ pub fn resolution_inputs_hash(
 /// only when the package is installed, so an install changes the result
 /// without an edit to a source file or a manifest. Only the existence keys the
 /// mode: a modification time changes on every fresh install in CI and would
-/// make each restored cache miss.
+/// make each restored cache miss. The lockfiles and install markers in
+/// [`INSTALL_STATE_FILES`] key an install into an existing `node_modules`.
 fn node_modules_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, bool)> {
     std::iter::once(root)
         .chain(workspaces.iter().map(|ws| ws.root.as_path()))
@@ -91,6 +136,58 @@ fn node_modules_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String
             (portable_key(root, &path), path.is_dir())
         })
         .collect()
+}
+
+/// Return `(path, package names)` for the `node_modules` directory next to
+/// each Bun lockfile at the project root, at a workspace root, or above the
+/// root.
+///
+/// A Bun install into an existing `node_modules` does not change the lockfile
+/// when the lockfile already lists the package, for example after a pull of a
+/// lockfile change. The names are the top-level entries, the entries of each
+/// `@scope` directory, and the `<name>@<version>` entries of the isolated
+/// store. The list does not read file content or a modification time, so a
+/// fresh install of the same packages keeps the hash. Other dot entries are
+/// tool caches such as `.cache`, so the list skips them.
+fn bun_install_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, Vec<String>)> {
+    let dirs: FxHashSet<&Path> = std::iter::once(root)
+        .chain(workspaces.iter().map(|ws| ws.root.as_path()))
+        .chain(root.ancestors().skip(1))
+        .collect();
+    dirs.into_iter()
+        .filter(|dir| BUN_LOCKFILES.iter().any(|name| dir.join(name).is_file()))
+        .filter_map(|dir| {
+            let node_modules = dir.join("node_modules");
+            let names = node_modules_package_names(&node_modules)?;
+            Some((portable_key(root, &node_modules), names))
+        })
+        .collect()
+}
+
+fn node_modules_package_names(node_modules: &Path) -> Option<Vec<String>> {
+    let mut names = Vec::new();
+    for name in dir_entry_names(node_modules)? {
+        let nested = name.starts_with('@') || name == BUN_STORE_DIR;
+        if nested {
+            for child in dir_entry_names(&node_modules.join(&name)).unwrap_or_default() {
+                names.push(format!("{name}/{child}"));
+            }
+        } else if !name.starts_with('.') {
+            names.push(name);
+        }
+    }
+    names.sort_unstable();
+    Some(names)
+}
+
+fn dir_entry_names(dir: &Path) -> Option<Vec<String>> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    Some(
+        entries
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect(),
+    )
 }
 
 /// `package.json` fields whose paths the resolver follows for a package
@@ -164,12 +261,20 @@ fn collect_input_files(
     let mut inputs = FxHashSet::default();
     let manifest_dirs = std::iter::once(root).chain(workspaces.iter().map(|ws| ws.root.as_path()));
     for dir in manifest_dirs {
-        for name in PACKAGE_MANIFESTS {
+        for name in PACKAGE_MANIFESTS.iter().chain(INSTALL_STATE_FILES) {
             insert_if_file(&mut inputs, dir.join(name));
         }
         // The output-path fallback reads every root-level `tsconfig*.json`.
         for config in root_level_tsconfigs(dir) {
             inputs.insert(config);
+        }
+    }
+
+    // The resolver also reads `node_modules` above the root, for example in a
+    // monorepo where the project root is one package of the repository.
+    for dir in root.ancestors().skip(1) {
+        for name in INSTALL_STATE_FILES {
+            insert_if_file(&mut inputs, dir.join(name));
         }
     }
 
@@ -262,6 +367,85 @@ mod tests {
             "../tsconfig.json"
         );
         assert_eq!(portable_key(root, Path::new("/repo/app")), "");
+    }
+
+    fn write(path: &Path, content: &str) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
+        std::fs::write(path, content).expect("file");
+    }
+
+    #[test]
+    fn install_markers_of_root_and_workspaces_key_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo");
+        let workspace_root = root.join("packages/ui");
+        let workspaces = vec![WorkspaceInfo {
+            root: workspace_root.clone(),
+            name: "ui".to_string(),
+            is_internal_dependency: false,
+        }];
+        let root_marker = root.join("node_modules/.package-lock.json");
+        let workspace_marker = workspace_root.join("node_modules/.yarn-state.yml");
+        write(&root_marker, "a@1\n");
+        write(&workspace_marker, "b@1\n");
+        let initial = resolution_inputs_hash(&root, &workspaces, &[]);
+
+        write(&root_marker, "a@1\n");
+        assert_eq!(
+            resolution_inputs_hash(&root, &workspaces, &[]),
+            initial,
+            "a rewrite with the same content must keep the hash"
+        );
+
+        write(&root_marker, "a@2\n");
+        let root_changed = resolution_inputs_hash(&root, &workspaces, &[]);
+        assert_ne!(root_changed, initial);
+
+        write(&workspace_marker, "b@2\n");
+        assert_ne!(
+            resolution_inputs_hash(&root, &workspaces, &[]),
+            root_changed
+        );
+    }
+
+    #[test]
+    fn bun_install_with_the_same_lockfile_keys_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo");
+        write(&root.join("bun.lock"), "{}\n");
+        write(&root.join("node_modules/a/package.json"), "{}");
+        write(&root.join("node_modules/.cache/tool/data"), "1");
+        let initial = resolution_inputs_hash(&root, &[], &[]);
+
+        write(&root.join("node_modules/.cache/tool/other"), "2");
+        assert_eq!(
+            resolution_inputs_hash(&root, &[], &[]),
+            initial,
+            "a tool cache in node_modules must keep the hash"
+        );
+
+        write(&root.join("node_modules/@scope/b/package.json"), "{}");
+        let scoped = resolution_inputs_hash(&root, &[], &[]);
+        assert_ne!(scoped, initial, "a scoped package install must change it");
+
+        write(&root.join("node_modules/.bun/c@1.0.0/node_modules/c/x"), "");
+        assert_ne!(
+            resolution_inputs_hash(&root, &[], &[]),
+            scoped,
+            "a package in the isolated store must change it"
+        );
+    }
+
+    #[test]
+    fn lockfile_above_the_root_keys_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo/packages/app");
+        std::fs::create_dir_all(&root).expect("root");
+        let lockfile = temp.path().join("repo/pnpm-lock.yaml");
+        write(&lockfile, "a: 1\n");
+        let initial = resolution_inputs_hash(&root, &[], &[]);
+        write(&lockfile, "a: 2\n");
+        assert_ne!(resolution_inputs_hash(&root, &[], &[]), initial);
     }
 
     #[test]
