@@ -10048,6 +10048,108 @@ fn local_holding_this_method_result_credits_return_type_member() {
 }
 
 #[test]
+fn local_holding_inherited_this_method_result_records_call_receiver() {
+    // Issue #4183: `const table = this.find(); table?.setVip();` in a class
+    // that inherits `find()` records `setVip` on `this.find()`, so the
+    // analysis resolves it through the return type of the base class. A local
+    // that a later declarator rebinds, and a local of a plain `function`,
+    // record nothing on the call.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        export class Viewer extends Floor {
+            mark(): void {
+                const table = this.find();
+                table?.setVip();
+                table.seat.reserve();
+                const run = function (this: unknown) {
+                    const inner = this.find();
+                    inner.innerOnly();
+                };
+            }
+            other(): void {
+                table.otherMethodOnly();
+            }
+        }
+        ",
+    );
+
+    let has_fact = |object: &str, member: &str| {
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::ClassThisMemberAccess(access)
+                    if access.class_local_name == "Viewer"
+                        && access.object == object
+                        && access.member == member
+            )
+        })
+    };
+    assert!(
+        has_fact("this.find()", "setVip"),
+        "{:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_fact("this.find().seat", "reserve"),
+        "{:?}",
+        info.semantic_facts
+    );
+    for member in ["innerOnly", "otherMethodOnly"] {
+        assert!(
+            !info.member_accesses.iter().any(|access| {
+                access.object.starts_with("this.find()") && access.member == member
+            }),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn chained_method_call_with_arguments_records_call_receiver() {
+    // Issue #4184: `local.rotate(1).translate(1, 1)` records `translate` on
+    // `local.rotate()`, as `local.rotate().translate()` does. A bare call with
+    // arguments (`make(1).paint()`) gives no call receiver.
+    let info = parse(
+        r"
+        import { Point } from './point';
+        import { make } from './make';
+
+        const local = new Point(0, 0);
+        local.rotate(1).translate(1, 1);
+        local.rotate(1).translate(2, 2).scale(3);
+        make(1).paint();
+        ",
+    );
+
+    let has = |object: &str, member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+    assert!(
+        has("local.rotate()", "translate"),
+        "{:?}",
+        info.member_accesses
+    );
+    assert!(
+        has("local.rotate().translate()", "scale"),
+        "{:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "make()"),
+        "{:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn non_angular_inject_property_does_not_record_instance_binding() {
     let info = parse(
         r"

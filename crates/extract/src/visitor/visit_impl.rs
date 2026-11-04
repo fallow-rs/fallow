@@ -118,7 +118,7 @@ mod visit_taint_sources;
 
 pub(super) use visit_chain_names::jsx_member_object_name;
 pub use visit_chain_names::push_member_tag_accesses;
-use visit_chain_names::{static_member_object_name, type_name_member_path};
+use visit_chain_names::{call_receiver_name, static_member_object_name, type_name_member_path};
 pub(super) use visit_dynamic_imports::ComponentLoaderImport;
 pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
@@ -2393,6 +2393,7 @@ impl<'a> ModuleInfoExtractor {
     /// Record `<object_name>.<member>` for a static member read whose receiver
     /// is a name path (`a`, `a.b`, `this`).
     fn record_named_member_access(&mut self, object_name: &str, member: &str) {
+        self.record_inherited_this_result_access(object_name, member);
         if self.route_loader_data_bindings.contains(object_name) {
             self.member_accesses.push(MemberAccess {
                 object: ROUTE_LOADER_DATA_OBJECT.to_string(),
@@ -3705,10 +3706,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
-        let (previous_span, previous_depth) = self.enter_method_definition(method);
+        let previous = self.enter_method_definition(method);
         walk::walk_method_definition(self, method);
-        self.independent_this_depth = previous_depth;
-        self.class_method_function_span = previous_span;
+        self.exit_method_definition(previous);
     }
 
     fn visit_property_definition(&mut self, prop: &PropertyDefinition<'a>) {
@@ -5028,7 +5028,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 object: store_factory,
                 member: expr.property.name.to_string(),
             });
-        } else if let Some(object_name) = static_member_object_name(&expr.object) {
+        } else if let Some(object_name) = call_receiver_name(&expr.object) {
             self.record_named_member_access(&object_name, expr.property.name.as_str());
         } else if let Expression::ComputedMemberExpression(receiver) = &expr.object
             && receiver.static_property_name().is_none()

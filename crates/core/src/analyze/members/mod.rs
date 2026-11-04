@@ -1254,7 +1254,6 @@ fn propagate_common_member_accesses(
         indexes,
         accessed_members,
     );
-    propagate_type_alias_surface_accesses(input.resolved_modules, indexes, accessed_members);
     propagate_member_name_probe_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_playwright_fixture_accesses(
         input.graph,
@@ -1317,6 +1316,11 @@ fn propagate_common_member_accesses(
         accessed_members,
         whole_object_used_exports,
     );
+    // After every pass above that credits a member on a type, so a member
+    // credited on a union alias (`type Table = RectTable | RoundTable`) also
+    // reaches each class of the union. The typed instance pass credits such
+    // an alias for an inherited `this.find()` (issue #4183).
+    propagate_type_alias_surface_accesses(input.resolved_modules, indexes, accessed_members);
     // Before the re-export propagation below, so a class suppressed through an
     // opaque destructure is suppressed at every name it is re-exported under.
     propagate_factory_fn_whole_object_uses(

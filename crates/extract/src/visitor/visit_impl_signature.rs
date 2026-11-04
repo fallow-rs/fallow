@@ -5,6 +5,13 @@ use super::*;
 use crate::js_text::JsText;
 use crate::{SemanticFact, TypeAliasSurfaceTargetFact};
 
+/// The visitor state that a method body replaces and its end restores.
+pub(super) struct MethodVisitState {
+    span: Option<Span>,
+    independent_this_depth: usize,
+    inherited_this_result_locals: FxHashMap<String, String>,
+}
+
 impl ModuleInfoExtractor {
     fn collect_type_alias_surface_targets(
         ty: &TSType<'_>,
@@ -604,16 +611,26 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Prepare the visit of a method body. Set the method span and reset the
-    /// independent `this` depth. Return the previous span and depth, which the
-    /// caller restores after the walk.
+    /// Prepare the visit of a method body. Set the method span, reset the
+    /// independent `this` depth, and start an empty set of inherited `this`
+    /// result locals. Return the previous state, which the caller gives to
+    /// `exit_method_definition` after the walk.
     pub(super) fn enter_method_definition(
         &mut self,
         method: &MethodDefinition<'_>,
-    ) -> (Option<Span>, usize) {
-        let previous_span = self.class_method_function_span.replace(method.value.span);
-        let previous_depth = std::mem::replace(&mut self.independent_this_depth, 0);
-        (previous_span, previous_depth)
+    ) -> MethodVisitState {
+        MethodVisitState {
+            span: self.class_method_function_span.replace(method.value.span),
+            independent_this_depth: std::mem::replace(&mut self.independent_this_depth, 0),
+            inherited_this_result_locals: std::mem::take(&mut self.inherited_this_result_locals),
+        }
+    }
+
+    /// Restore the state that `enter_method_definition` returned.
+    pub(super) fn exit_method_definition(&mut self, previous: MethodVisitState) {
+        self.class_method_function_span = previous.span;
+        self.independent_this_depth = previous.independent_this_depth;
+        self.inherited_this_result_locals = previous.inherited_this_result_locals;
     }
 
     /// Record a `this` binding for an instance method or getter that declares
@@ -678,6 +695,7 @@ impl ModuleInfoExtractor {
         let BindingPattern::BindingIdentifier(id) = &declarator.id else {
             return;
         };
+        self.inherited_this_result_locals.remove(id.name.as_str());
         if self.class_scope_stack.is_empty() || self.independent_this_depth > 0 {
             return;
         }
@@ -685,10 +703,41 @@ impl ModuleInfoExtractor {
             return;
         };
         let key = self.this_member_key(&format!("{name}()"));
-        if let Some(BindingTarget::Class(type_name)) = self.binding_target_names.get(&key) {
-            let type_name = type_name.clone();
-            self.insert_class_binding_target(id.name.to_string(), type_name);
+        match self.binding_target_names.get(&key) {
+            Some(BindingTarget::Class(type_name)) => {
+                let type_name = type_name.clone();
+                self.insert_class_binding_target(id.name.to_string(), type_name);
+            }
+            // The class does not declare a typed `name()`, so a base class
+            // can declare it (issue #4183). Keep the call spelling for the
+            // local, so the analysis resolves it through the inherited
+            // return type.
+            None => {
+                self.inherited_this_result_locals
+                    .insert(id.name.to_string(), format!("this.{name}()"));
+            }
+            Some(_) => {}
         }
+    }
+
+    /// Record a read through a local that holds an inherited `this` method
+    /// result also on the call spelling: `table.setVip` gives
+    /// `this.find().setVip` for `const table = this.find()`. The analysis
+    /// then credits `setVip` on the return type that a base class declares
+    /// for `find()` (issue #4183).
+    pub(super) fn record_inherited_this_result_access(&mut self, object_name: &str, member: &str) {
+        let (root, rest) = object_name
+            .split_once('.')
+            .map_or((object_name, None), |(root, rest)| (root, Some(rest)));
+        let Some(source) = self.inherited_this_result_locals.get(root) else {
+            return;
+        };
+        let source = match rest {
+            Some(rest) => format!("{source}.{rest}"),
+            None => source.clone(),
+        };
+        let object = self.qualify_this_scope(&source);
+        self.push_receiver_member_access(object, member.to_string());
     }
 
     pub(super) fn record_typed_binding(

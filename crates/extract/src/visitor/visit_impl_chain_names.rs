@@ -36,6 +36,27 @@ enum ChainLink<'b> {
 /// then takes seconds. The walk stops after `MAX_RECORDED_CHAIN_LINKS` links,
 /// so the cost of one call stays bounded.
 pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
+    member_chain_name(expr, false)
+}
+
+/// The receiver name of a member access, as `static_member_object_name`
+/// gives it, but a method call with arguments is also a `()` link:
+/// `local.rotate()` for `local.rotate(1)`. A call with arguments gives a name
+/// only when its callee is a member, so `f(x)` gives no name. A chain such as
+/// `local.rotate(1).translate(1, 1)` then resolves through the declared
+/// return type of `rotate` (issue #4184). Use this name only to record a
+/// member access, not to bind a local.
+pub(super) fn call_receiver_name(expr: &Expression<'_>) -> Option<String> {
+    member_chain_name(expr, true)
+}
+
+/// Build the name for `static_member_object_name` and
+/// `call_receiver_name`. With `allow_call_arguments`, a method call
+/// with arguments is a `()` link.
+fn member_chain_name(expr: &Expression<'_>, allow_call_arguments: bool) -> Option<String> {
+    let is_call_link = |call: &CallExpression<'_>| {
+        call.arguments.is_empty() || (allow_call_arguments && call.callee.is_member_expression())
+    };
     let mut links = Vec::new();
     let mut current = expr;
     let root = loop {
@@ -67,7 +88,7 @@ pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String>
                 links.push(ChainLink::PrivateField(member.field.name.as_str()));
                 current = &member.object;
             }
-            Expression::CallExpression(call) if call.arguments.is_empty() => {
+            Expression::CallExpression(call) if is_call_link(call) => {
                 links.push(ChainLink::Call);
                 current = &call.callee;
             }
@@ -76,7 +97,7 @@ pub(super) fn static_member_object_name(expr: &Expression<'_>) -> Option<String>
                 _ => return None,
             },
             Expression::ChainExpression(chain) => match &chain.expression {
-                ChainElement::CallExpression(call) if call.arguments.is_empty() => {
+                ChainElement::CallExpression(call) if is_call_link(call) => {
                     links.push(ChainLink::Call);
                     current = &call.callee;
                 }

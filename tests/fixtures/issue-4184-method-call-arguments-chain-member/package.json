@@ -1,0 +1,6 @@
+{
+  "name": "issue-4184-method-call-arguments-chain-member",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
