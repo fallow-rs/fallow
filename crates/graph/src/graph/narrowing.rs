@@ -211,7 +211,7 @@ pub(super) fn mark_all_exports_referenced_at_site(
 
 /// Mark every named export as referenced: the surface an ES `export *`
 /// forwards, which never includes `default`.
-pub(super) fn mark_star_surface_referenced_at_site(
+fn mark_star_surface_referenced_at_site(
     exports: &mut [ExportSymbol],
     context: &mut NamespaceMarkContext<'_>,
 ) {

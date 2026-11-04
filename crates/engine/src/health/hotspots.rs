@@ -346,7 +346,7 @@ fn compute_normalization_maxima(
 
 /// Check whether a file should be excluded from hotspot results
 /// based on workspace filter and ignore patterns.
-pub(super) fn is_excluded_from_hotspots(
+fn is_excluded_from_hotspots(
     path: &std::path::Path,
     root: &std::path::Path,
     ignore_set: &globset::GlobSet,

@@ -21,7 +21,7 @@ use super::diagnostics::{
 /// Test-only wrapper around [`parse_tsconfig_references_with_diagnostics`] that drops
 /// any emitted diagnostics. Production callers use the diagnostics-aware variant.
 #[cfg(test)]
-pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
+fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
     let mut diagnostics = Vec::new();
     parse_tsconfig_references_with_diagnostics(
         root,
@@ -159,7 +159,7 @@ pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
 /// drops any glob-matched-no-package.json diagnostics. Production callers use
 /// the diagnostics-aware variant.
 #[cfg(test)]
-pub(super) fn expand_workspace_glob(
+fn expand_workspace_glob(
     root: &Path,
     pattern: &str,
     canonical_root: &Path,

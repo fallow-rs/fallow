@@ -194,6 +194,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
 }
 
 #[cfg(test)]
+// fallow-ignore-next-line unnecessary-public -- `pub` in a private module: https://github.com/fallow-rs/cargo-fallow/issues/67
 pub fn analysis_complete_params_for_test(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
@@ -202,6 +203,7 @@ pub fn analysis_complete_params_for_test(
 }
 
 #[cfg(test)]
+// fallow-ignore-next-line unnecessary-public -- `pub` in a private module: https://github.com/fallow-rs/cargo-fallow/issues/67
 pub fn analysis_complete_params_with_scope_for_test(
     results: &AnalysisResults,
     duplication: &DuplicationReport,

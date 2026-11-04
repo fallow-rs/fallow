@@ -449,7 +449,7 @@ fn push_plugin_hidden_dir_scope(
 
 /// Collect plugin and script-derived hidden directory scopes.
 #[must_use]
-pub(crate) fn collect_hidden_dir_scopes(
+fn collect_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
     workspaces: &[WorkspaceInfo],
@@ -889,7 +889,7 @@ pub fn discover_files_and_config_candidates(
 
 /// The same traversal, keeping the source-discovery diagnostics it produced.
 #[must_use]
-pub(crate) fn discover_files_config_candidates_and_diagnostics(
+fn discover_files_config_candidates_and_diagnostics(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> crate::core_backend::DiscoveredSources {

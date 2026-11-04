@@ -153,7 +153,7 @@ impl fmt::Display for EngineError {
 
 impl std::error::Error for EngineError {}
 
-pub(crate) fn engine_error(err: impl fmt::Display) -> EngineError {
+fn engine_error(err: impl fmt::Display) -> EngineError {
     EngineError::new(err.to_string())
 }
 

@@ -55,7 +55,7 @@ impl SavePublishLab {
     /// `reuse` is true. With `reuse` false, each save loads a new session,
     /// as the server does with `FALLOW_LSP_REUSE_SESSION=0`.
     #[must_use]
-    pub fn with_session_reuse(root: &Path, reuse: bool) -> Self {
+    fn with_session_reuse(root: &Path, reuse: bool) -> Self {
         Self {
             root: crate::path_utils::canonicalize_for_lsp(root),
             cache: DiagnosticCache::default(),

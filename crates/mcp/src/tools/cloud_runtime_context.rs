@@ -69,7 +69,7 @@ pub(super) async fn run_cloud_tool(
 }
 
 /// Whether CLI output is the refusal of a cloud command without a key.
-pub(super) fn is_missing_key_refusal(text: &str) -> bool {
+fn is_missing_key_refusal(text: &str) -> bool {
     text.contains(MISSING_KEY_REFUSAL_START)
 }
 

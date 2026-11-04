@@ -2374,23 +2374,6 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
   }
 });
 
-// The Hawk workflow installs one toolchain and `check-hawk.sh` runs Hawk with
-// `cargo +<version>`. When the two drift, the job either fails on a missing
-// toolchain or lets rustup install the old one without notice.
-test("the Hawk workflow installs the toolchain that check-hawk.sh runs", () => {
-  const workflow = readWorkflow(".github/workflows/hawk.yml");
-  const script = readFileSync("scripts/check-hawk.sh", "utf8");
-  const installed = workflow.match(/^\s+toolchain:\s*'([^']+)'/m)?.[1];
-  const used = new Set([...script.matchAll(/cargo \+([\w.-]+) hawk/g)].map((match) => match[1]));
-
-  assert.ok(installed, "hawk.yml must pin a toolchain for setup-rust");
-  assert.deepEqual(
-    [...used],
-    [installed],
-    "check-hawk.sh must run Hawk on the toolchain that hawk.yml installs",
-  );
-});
-
 // Git 2.55 starts a detached `git repack -d` after `git commit` when two loose
 // objects share `objects/17`. The repack removes empty object directories
 // while the next `git add` of a test fixture writes into them, and the test

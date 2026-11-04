@@ -316,7 +316,7 @@ impl ModuleInfoExtractor {
         self.set_direct_binding_value(path, DirectBindingValue::default());
     }
 
-    pub(super) fn record_new_binding_proof(&mut self, path: &str, expression: &NewExpression<'_>) {
+    fn record_new_binding_proof(&mut self, path: &str, expression: &NewExpression<'_>) {
         if let Expression::Identifier(reference) = &expression.callee {
             self.record_binding_class_proof(path, reference.name.as_str(), Some(reference.span));
             self.retain_new_constructor(path, reference);

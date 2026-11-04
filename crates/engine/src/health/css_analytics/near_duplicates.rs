@@ -418,7 +418,7 @@ pub(super) fn comparable_project_vocabulary_candidates(
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct ProjectVocabularyValue {
+struct ProjectVocabularyValue {
     namespace: String,
     value: String,
     path: String,

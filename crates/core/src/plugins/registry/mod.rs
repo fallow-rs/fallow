@@ -269,7 +269,7 @@ impl PluginRegexValidationError {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct PluginRegexValidationErrorInput<'a> {
+struct PluginRegexValidationErrorInput<'a> {
     plugin_name: &'a str,
     config_path: Option<&'a Path>,
     rule_kind: &'static str,
@@ -1407,7 +1407,7 @@ fn should_warn(key: String) -> bool {
 /// subscriber. The runtime path calls [`emit_plugin_diagnostics`] to convert
 /// each variant into one `tracing::warn!` line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PluginDiagnostic {
+enum PluginDiagnostic {
     /// Two or more plugins declared an identical `config_patterns` entry.
     PatternCollision {
         pattern: String,

@@ -792,10 +792,7 @@ impl BaselineData {
     /// Build a baseline in the legacy key forms that fallow wrote before
     /// canonical keys. Tests use it to prove that legacy files still load.
     #[cfg(test)]
-    pub(crate) fn legacy_from_results(
-        results: &crate::results::AnalysisResults,
-        root: &Path,
-    ) -> Self {
+    fn legacy_from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
         let analysis_identity = fallow_types::semantic::SemanticAnalysisIdentity::syntactic();
         let file_exports = baseline_file_export_keys(results, root);
         let member_imports = baseline_member_import_keys(results, root);

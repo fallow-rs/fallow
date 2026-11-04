@@ -20,7 +20,7 @@ pub(super) struct FileTargetTool {
 }
 
 /// Every [`FileTargetTool`], sorted by first name.
-pub(super) const FILE_TARGET_TOOLS: &[FileTargetTool] = &[
+const FILE_TARGET_TOOLS: &[FileTargetTool] = &[
     FileTargetTool {
         names: &["alex"],
         loading_flags: &[],

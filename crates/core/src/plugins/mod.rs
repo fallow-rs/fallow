@@ -84,7 +84,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 /// Whether an entry rule of `result` matches the project-relative `path`, as
 /// entry point discovery compiles and matches the rules.
 #[cfg(test)]
-pub(crate) fn entry_rules_match(result: &PluginResult, path: &str) -> bool {
+fn entry_rules_match(result: &PluginResult, path: &str) -> bool {
     result
         .entry_patterns
         .iter()
@@ -947,7 +947,7 @@ impl PathRule {
     /// rule matches at least the paths that the tool matches. Each negated
     /// group becomes an excluded glob.
     #[must_use]
-    pub(crate) fn from_extglob(pattern: &str) -> Self {
+    fn from_extglob(pattern: &str) -> Self {
         let rewritten = fallow_config::extglob::rewrite_include(pattern);
         Self::new(rewritten.include).with_excluded_globs(rewritten.excludes)
     }
@@ -956,7 +956,7 @@ impl PathRule {
     /// never removes more paths than the tool does, so a glob with a negated
     /// group excludes nothing.
     #[must_use]
-    pub(crate) fn with_excluded_extglobs<I, S>(self, patterns: I) -> Self
+    fn with_excluded_extglobs<I, S>(self, patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,

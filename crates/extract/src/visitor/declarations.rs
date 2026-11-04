@@ -714,7 +714,7 @@ impl ModuleInfoExtractor {
 /// exists only in type space. Any other statement, exported or not, makes the
 /// namespace a runtime object. A `const enum` and a non-type import alias count
 /// as values here, which keeps the classification conservative.
-pub(super) fn namespace_is_instantiated(namespace: &TSNamespaceDeclaration<'_>) -> bool {
+fn namespace_is_instantiated(namespace: &TSNamespaceDeclaration<'_>) -> bool {
     if namespace.declare {
         return false;
     }

@@ -7,9 +7,10 @@
 # Keep each version in lockstep with CI. Where CI pins a version, this file
 # uses the same version. `scripts/workflow-policy.test.mjs` fails when the CI
 # node version or a `tool: name@version` pin changes and this file does not
-# follow. The typos and cargo-deny actions fix their tool version in the action
-# commit. The test does not check those two, so that a Dependabot action bump
-# does not fail. Update them here by hand when you see the action bump.
+# follow. The typos, cargo-deny and cargo-fallow actions fix their tool version
+# in the action commit. The test does not check those three, so that a
+# Dependabot action bump does not fail. Update them here by hand when you see
+# the action bump.
 
 [tools]
 # Same major version as each `actions/setup-node` step in `ci.yml`.
@@ -28,8 +29,11 @@ pnpm = "11.25.0"
 # EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 
+# Same version as the cargo-fallow action that the CI "Rust Structure" job pins:
+# fallow-rs/cargo-fallow@9a2ddc756efe868de68a25d96d960db0fd32dc20
+"github:fallow-rs/cargo-fallow" = "0.1.0"
+
 # CI installs these tools without a version, so this file pins a release.
-"github:Boshen/cargo-shear" = "1.14.0"
 # The aqua registry gives the x86_64 binary on Apple Silicon, and macOS
 # without Rosetta cannot run it ("Bad CPU type"). The github backend selects
 # the aarch64 release asset.

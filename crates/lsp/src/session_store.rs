@@ -213,7 +213,7 @@ impl EditorSessionStore {
     /// Set the limit on the estimated memory of all kept sessions.
     #[cfg(test)]
     #[must_use]
-    pub const fn with_max_retained_bytes(mut self, max_retained_bytes: u64) -> Self {
+    const fn with_max_retained_bytes(mut self, max_retained_bytes: u64) -> Self {
         self.max_retained_bytes = max_retained_bytes;
         self
     }
@@ -314,7 +314,7 @@ impl EditorSessionStore {
     }
 
     #[cfg(test)]
-    pub fn kept_session_count(&self) -> usize {
+    pub(crate) fn kept_session_count(&self) -> usize {
         self.sessions.len()
     }
 

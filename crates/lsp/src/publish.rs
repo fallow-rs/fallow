@@ -37,7 +37,7 @@ impl DiagnosticCache {
     }
 
     #[cfg(test)]
-    pub fn contains_key(&self, uri: &Uri) -> bool {
+    pub(crate) fn contains_key(&self, uri: &Uri) -> bool {
         self.entries.contains_key(uri)
     }
 

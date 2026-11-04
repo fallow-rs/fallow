@@ -1,0 +1,3 @@
+### Changed
+
+- **The repository checks its Rust workspace with cargo-fallow.** The required `Rust Structure` CI job runs `cargo fallow check` with each gate enforced: unused dependencies and files, visibility, crate boundaries, complexity and duplication. The job also runs `cargo fallow size` for the growth of large `.rs` files. cargo-fallow replaces `cargo shear`, the scheduled Hawk audit, `scripts/check-crate-boundaries.mjs` and `scripts/check-file-size.mjs`. The pre-commit and pre-push hooks and `npm run verify:fast` run the same commands. `cargo fallow fix` made the internal items that no other module uses less visible. This change affects contributors only. The released packages do not change.

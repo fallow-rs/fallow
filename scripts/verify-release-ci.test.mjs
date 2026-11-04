@@ -121,7 +121,7 @@ test("a non-required run may be skipped or neutral", () => {
   const runs = [
     ...green(),
     run("test-action.yml", { conclusion: "skipped" }),
-    run("hawk.yml", { conclusion: "neutral" }),
+    run("branch-coverage.yml", { conclusion: "neutral" }),
   ];
   assert.equal(evaluateRuns(runs, { required: REQUIRED }).state, "pass");
 });

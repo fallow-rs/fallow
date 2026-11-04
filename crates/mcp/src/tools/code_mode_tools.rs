@@ -73,7 +73,7 @@ impl CodeModeTool {
     /// shared manifest in both directions, so a variant missing here (or a
     /// manifest row whose `code_mode_alias` is missing) fails the suite.
     #[cfg(test)]
-    pub(super) const ALL: &'static [Self] = &[
+    const ALL: &'static [Self] = &[
         Self::Analyze,
         Self::Combined,
         Self::CheckChanged,

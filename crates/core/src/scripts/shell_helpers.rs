@@ -50,13 +50,13 @@ const HELPER_DIR_FORMS: &[&str] = &[
 ];
 
 /// The most helper files that one analysis reads.
-pub(super) const MAX_HELPER_FILES: usize = 256;
+const MAX_HELPER_FILES: usize = 256;
 
 /// The most helper analyses of one analysis, cache hits included.
-pub(super) const MAX_HELPER_EXPANSIONS: usize = 4096;
+const MAX_HELPER_EXPANSIONS: usize = 4096;
 
 /// The largest helper file that Fallow reads.
-pub(super) const MAX_HELPER_BYTES: u64 = 1024 * 1024;
+const MAX_HELPER_BYTES: u64 = 1024 * 1024;
 
 /// The bytes that the shebang check of a helper reads.
 const SHEBANG_BYTES: u64 = 256;

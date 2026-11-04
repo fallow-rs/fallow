@@ -768,7 +768,7 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
 /// which decides where the class-name export list comes from, so it answers
 /// "are this module's exports a class map?".
 ///
-pub(super) fn is_css_module_stylesheet(path: &std::path::Path) -> bool {
+fn is_css_module_stylesheet(path: &std::path::Path) -> bool {
     is_css_module_path(path)
 }
 
@@ -834,7 +834,7 @@ pub(super) enum NamedDefaultSpelling {
 
 impl NamedDefaultSpelling {
     /// Pick the rule for a target module from its path.
-    pub(super) fn for_target(path: &std::path::Path) -> Self {
+    fn for_target(path: &std::path::Path) -> Self {
         if is_css_module_stylesheet(path) {
             Self::IsOrdinaryName
         } else {
@@ -869,7 +869,7 @@ impl ExportNameIndex {
     /// ascending order and the named map never carries a `"default"` key.
     /// Under `IsOrdinaryName` the name keeps its string key and the slot stays
     /// empty, which is what a CSS Module target needs.
-    pub(super) fn sync(&mut self, exports: &[ExportSymbol]) {
+    fn sync(&mut self, exports: &[ExportSymbol]) {
         let folds = self.named_default.folds();
         for (idx, export) in exports.iter().enumerate().skip(self.indexed_len) {
             match &export.name {

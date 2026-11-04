@@ -30,8 +30,3 @@ napi-build = "2"
 [dev-dependencies]
 fallow-types = { workspace = true }
 tempfile = { workspace = true }
-
-[package.metadata.cargo-machete]
-ignored = [
-  "napi-build", # used from build.rs to emit NAPI build metadata; cargo-machete can miss build-script-only deps
-]

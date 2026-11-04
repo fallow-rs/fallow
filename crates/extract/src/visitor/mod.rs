@@ -44,7 +44,7 @@ mod static_imports;
 use static_imports::collect_static_import_specifiers;
 
 pub(crate) const ROUTE_LOADER_DATA_OBJECT: &str = "$fallow.routeLoaderData";
-pub(crate) const MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES: usize = 8192;
+const MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES: usize = 8192;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum RouteLoadHarvestMode {
@@ -71,7 +71,7 @@ pub(crate) fn infer_props_field_array_element_type(
 /// its references and of the references whose shape credits a precise set of
 /// exports. A reference in any other shape credits the whole target module.
 #[derive(Debug, Clone)]
-pub(crate) struct LocalImportLoader {
+struct LocalImportLoader {
     imports: Vec<LoaderImport>,
     references: usize,
     credited_references: usize,
@@ -80,7 +80,7 @@ pub(crate) struct LocalImportLoader {
 
 /// One `import()` that a local loader returns, with its static specifiers.
 #[derive(Debug, Clone)]
-pub(crate) struct LoaderImport {
+struct LoaderImport {
     span: Span,
     sources: Vec<String>,
 }
@@ -328,7 +328,7 @@ struct PendingSubclassMemberAccess {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LocalClassExportInfo {
+struct LocalClassExportInfo {
     members: Vec<MemberInfo>,
     super_class: Option<String>,
     implemented_interfaces: Vec<String>,
@@ -425,7 +425,7 @@ struct StructuralClassCallCandidate {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FactoryCallCandidate {
+struct FactoryCallCandidate {
     local_name: String,
     callee_object: String,
     callee_method: String,
@@ -435,7 +435,7 @@ pub(crate) struct FactoryCallCandidate {
 /// returns `new Class()`. Resolved against `factory_return_functions` at finalize
 /// time so `local.member` credits the constructed class. See issue #1441.
 #[derive(Debug, Clone)]
-pub(crate) struct FactoryReturnCandidate {
+struct FactoryReturnCandidate {
     local_name: String,
     callee_name: String,
     /// `const local = await callee()`: the local holds the awaited result.
@@ -459,7 +459,7 @@ pub(crate) enum ObjectPropValueRef {
 /// `strict_factory_return_object_shapes` / `factory_return_object_shapes` at finalize.
 /// See issue #1858.
 #[derive(Debug, Clone)]
-pub(crate) struct FactoryReturnObjectCandidate {
+struct FactoryReturnObjectCandidate {
     fn_name: String,
     /// Whether this function qualifies for the cross-module (strict) map: sync,
     /// non-generator, unanimous-terminal object-literal return.
@@ -530,7 +530,7 @@ enum TypedPropertyExpansion {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PendingPlaywrightFactory {
+struct PendingPlaywrightFactory {
     test_name: String,
     /// The identifier that the helper extends. `None` when the receiver is a
     /// `mergeTests(...)` call, which is always a Playwright test.
@@ -582,7 +582,7 @@ pub(crate) enum MockObjectProvenance {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PendingVitestMockOperation {
+struct PendingVitestMockOperation {
     source: String,
     /// Span of the identifier whose provenance the semantic pass must confirm
     /// (the `vi`/`jest`/alias object, or the namespace in `ns.vi.mock`).
@@ -598,7 +598,7 @@ pub(super) struct PendingVitestMockOperation {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum PendingVitestMockProof {
+enum PendingVitestMockProof {
     ClosedFactory {
         binding_requirement_spans: Vec<Span>,
         namespace_requirement_spans: Vec<Span>,
@@ -1316,7 +1316,7 @@ pub(crate) struct ModuleInfoExtractor {
 /// Metadata for a named arrow / function-expression that may be a React
 /// component, captured at the declarator before the function body is walked.
 #[derive(Debug, Clone)]
-pub(crate) struct PendingComponentArrow {
+struct PendingComponentArrow {
     /// The binding name.
     name: String,
     /// The component kind (`Arrow`, or a `forwardRef` / `memo` wrapper).
@@ -1340,7 +1340,7 @@ pub(crate) struct PendingComponentArrow {
 /// finalize because the backing interface/type may be declared after the
 /// component (TypeScript hoists type declarations).
 #[derive(Debug, Clone)]
-pub(crate) struct PendingTypedReactProps {
+struct PendingTypedReactProps {
     /// The enclosing component name (`ComponentProp.component`).
     component: String,
     /// The bare-identifier props parameter local (e.g. `props`).
@@ -1568,7 +1568,7 @@ impl ModuleInfoExtractor {
 
     /// Record the template that a `defineOgImage('Name')` or
     /// `defineOgImageComponent('Name')` call names with a static string.
-    pub(super) fn record_og_image_template_call(&mut self, call: &CallExpression<'_>) {
+    fn record_og_image_template_call(&mut self, call: &CallExpression<'_>) {
         let Expression::Identifier(callee) = &call.callee else {
             return;
         };
@@ -2026,7 +2026,7 @@ impl ModuleInfoExtractor {
     /// per nesting level (`{A.B, C}` and `{A, B}`), so namespace-import
     /// narrowing sees the same stream either way (issue #2348). `this` receivers
     /// get the same class-scope qualifier as `visit_static_member_expression`.
-    pub(crate) fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
+    fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
         let mut current = member;
         loop {
             if let Some(object_name) = visit_impl::jsx_member_object_name(&current.object)
@@ -3656,7 +3656,7 @@ impl ModuleInfoExtractor {
     }
 
     /// Record each import load-kind mark as a semantic fact, once per span.
-    pub(super) fn mark_import_load_kind(&mut self, span: Span, kind: ImportLoadKind) {
+    fn mark_import_load_kind(&mut self, span: Span, kind: ImportLoadKind) {
         self.import_load_kind_marks.push((span, kind));
     }
 
@@ -4004,7 +4004,7 @@ fn destructured_factory_keys(obj_pat: &ObjectPattern<'_>) -> Option<Vec<String>>
 /// keeps the rest, which is what callers tracking local bindings want. A caller that
 /// must know the pattern could expose an unnamed property has to abstain instead, and
 /// wants that function.
-pub(super) fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
+fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
     if obj_pat.rest.is_some() {
         return Vec::new();
     }
@@ -4103,7 +4103,7 @@ fn try_extract_property_callback_import<'a, 'b>(
 /// moves every later index. `Promise.allSettled` and `Promise.race` are not
 /// matched: their results do not hold the module objects at each index.
 #[must_use]
-pub(crate) fn extract_promise_all_elements<'a, 'b>(
+fn extract_promise_all_elements<'a, 'b>(
     expr: &'b Expression<'a>,
 ) -> Option<&'b [ArrayExpressionElement<'a>]> {
     let mut inner = expr;
@@ -4141,9 +4141,7 @@ pub(crate) fn extract_promise_all_elements<'a, 'b>(
 
 #[must_use]
 /// Recursively unwrap an expression until it reaches an import expression.
-pub(crate) fn extract_import_expression<'a, 'b>(
-    expr: &'b Expression<'a>,
-) -> Option<&'b ImportExpression<'a>> {
+fn extract_import_expression<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b ImportExpression<'a>> {
     match expr {
         Expression::AwaitExpression(await_expr) => extract_import_expression(&await_expr.argument),
         Expression::ImportExpression(imp) => Some(imp),
@@ -4154,7 +4152,7 @@ pub(crate) fn extract_import_expression<'a, 'b>(
 
 /// Whether `expr` is an `import()` without `await`, whose value is the
 /// promise of the namespace and not the namespace itself.
-pub(crate) fn is_unawaited_import(expr: &Expression<'_>) -> bool {
+fn is_unawaited_import(expr: &Expression<'_>) -> bool {
     matches!(expr.without_parentheses(), Expression::ImportExpression(_))
 }
 

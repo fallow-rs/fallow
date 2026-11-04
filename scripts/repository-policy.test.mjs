@@ -720,12 +720,12 @@ test("Miri cfg guard runs for commits and on every pull request", () => {
 test("file-size guard runs for commits and on every pull request", () => {
   const preCommit = readFileSync("hk.pkl", "utf8");
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
-  const jsLint = /\n  js-lint:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
+  const job = /\n  cargo-fallow:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
 
-  assert.match(preCommit, /node scripts\/check-file-size\.mjs --staged/u);
+  assert.match(preCommit, /cargo fallow size --staged --fail-on-growth/u);
   // A path filter on the job would let a pull request skip the step.
-  assert.doesNotMatch(jsLint.split("steps:")[0], /^\s+if:/mu);
-  assert.match(jsLint, /node scripts\/check-file-size\.mjs --base "origin\/\$BASE_REF"/u);
+  assert.doesNotMatch(job.split("steps:")[0], /^\s+if:/mu);
+  assert.match(job, /command: size\n\s+base: auto/u);
 });
 
 test("fallow audit holds the file-length rule for .mjs and .ts files", () => {

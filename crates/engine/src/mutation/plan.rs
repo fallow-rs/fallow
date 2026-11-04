@@ -372,7 +372,7 @@ fn planned_file(
     }
 }
 
-pub(super) fn lowercase_hex(bytes: &[u8]) -> String {
+fn lowercase_hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
     bytes
         .iter()

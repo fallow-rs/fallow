@@ -17,7 +17,7 @@ pnpm verify:fast     # Canonical local feedback loop
 
 [mise](https://mise.jdx.dev) is optional. `mise install` gets the versions in
 `mise.toml`: Node.js, pnpm, [hk](https://hk.jdx.dev), pkl and the cargo tools
-that the hooks call (`typos`, `cargo-shear` and others). Without mise, install
+that the hooks call (`typos`, `cargo-fallow` and others). Without mise, install
 pnpm, hk and pkl at the versions in `mise.toml`. Rustup installs Rust from
 `rust-toolchain.toml`, so `mise.toml` does not pin Rust. See
 [quality gates](docs/development/quality-gates.md#pinned-tools-with-mise-optional).
@@ -81,25 +81,19 @@ release and publish jobs, and network or real-project smoke tests remain
 CI-only. Run `npm run verify:full -- --help` to review the exact local scope and
 exclusions.
 
-### Workspace visibility audit
+### Rust structure checks
 
-[Hawk](https://github.com/astral-sh/hawk) audits Rust workspace visibility and
-dead public declarations across crate boundaries. The scheduled workflow uses
-Hawk 0.1.9 with Rust 1.97.1 and keeps the workspace `fallow-api` facade, its
-re-exported contract crates, and the cross-repo `fallow-license` surface out of
-scope.
-
-Install the matching Hawk release, then run:
+[cargo-fallow](https://github.com/fallow-rs/cargo-fallow) checks the Rust
+workspace: unused dependencies and files, visibility, crate boundaries,
+complexity and duplication. The required `Rust Structure` CI job and the
+pre-push hook run it. Install the version in `mise.toml`, then run:
 
 ```bash
-./scripts/check-hawk.sh dead-public  # Report dead public declarations
-./scripts/check-hawk.sh all          # Include visibility reduction suggestions
+cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues
+cargo fallow fix --dry-run   # Show the safe edits
 ```
 
-Hawk is experimental, so its findings are review input rather than an automatic
-fix list. Before deleting a declaration or narrowing its visibility, confirm it
-is unused by every relevant feature profile and release target. The scheduled
-workflow stores its complete output as an artifact for review.
+See [Rust structure](docs/development/quality-gates.md#rust-structure).
 
 ### Fuzzing
 

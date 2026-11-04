@@ -469,7 +469,7 @@ impl CacheStore {
 /// Constant across format bumps: only the version field beside it moves. That
 /// lets future upgrades report an explicit version mismatch; older unframed
 /// caches still report an ambiguous decode failure.
-pub(super) const CACHE_MAGIC: [u8; 4] = *b"FLWX";
+const CACHE_MAGIC: [u8; 4] = *b"FLWX";
 
 /// Bytes the framing adds ahead of the payload: the magic plus a little-endian
 /// `u32` format version.
