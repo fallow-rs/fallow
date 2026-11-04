@@ -9,7 +9,7 @@ homepage = "https://fallow.tools/docs/"
 documentation = "https://fallow.tools/docs/"
 keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
 categories = ["command-line-utilities", "development-tools"]
-description = "Codebase intelligence for TypeScript and JavaScript. Installs the fallow command of fallow-cli"
+description = "Codebase intelligence for TypeScript and JavaScript. Installs the fallow command of fallow-cli. For Rust, install cargo-fallow"
 readme = "README.md"
 
 [[bin]]
