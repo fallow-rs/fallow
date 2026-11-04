@@ -404,6 +404,21 @@ Sort each item that the change leaves open into one of three groups:
 
 Reviewers check that each linked issue covers the deferred work, and that no needed work is under "Possible follow-ups" or "Known limits".
 
+## Contributions made with coding agents
+
+You can use any tool to write a change, including a coding agent. Reviewers judge the change, not the tool. You do not have to say which tool you used.
+
+These rules apply to every pull request:
+
+- You understand each line of the change, and you can explain it in review without the tool.
+- You are responsible for the change. Your `Signed-off-by` line is your own statement under the [DCO](#developer-certificate-of-origin). Add it only after you read the full diff.
+- Run the checks in [Submitting changes](#submitting-changes) yourself. Write in the pull request what you did not verify, for example a platform that you did not test.
+- Keep the description short. Remove generated filler before you post it.
+
+A maintainer can close a pull request when the author cannot explain it. A maintainer can also finish a useful pull request in its branch and merge it.
+
+Issues that an agent helped to write are welcome. Read the issue before you post it, and keep the exact command and output. When an agent used fallow and misread the output, the flags or the docs, tell us in the issue form. These reports show where the CLI, JSON or MCP contract is unclear. Maintainers mark them with the `type:agent-ux` label.
+
 ## Reporting issues
 
 - **Bug reports**: [Open an issue](https://github.com/fallow-rs/fallow/issues/new?template=bug_report.yml) with reproduction steps

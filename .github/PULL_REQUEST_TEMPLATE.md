@@ -10,6 +10,10 @@
 
 <!-- How was this tested? -->
 
+## Checklist
+
+- [ ] I understand each line of this pull request, and I can explain it in review.
+
 ## Not in this change
 
 <!-- Optional. List needed work that this change leaves: a defect, or a part of

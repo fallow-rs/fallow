@@ -60,3 +60,23 @@ body:
       render: toml
     validations:
       required: false
+
+  - type: dropdown
+    id: usage
+    attributes:
+      label: How did you run fallow?
+      description: Reports from coding agents show where the output, flags or docs are unclear.
+      options:
+        - Myself (terminal, editor or CI)
+        - Through a coding agent (CLI, MCP server or skill)
+    validations:
+      required: false
+
+  - type: textarea
+    id: agent
+    attributes:
+      label: Agent behavior
+      description: If a coding agent ran fallow, what did the agent expect, and what did it do? Include the command it ran.
+      placeholder: "The agent ran `fallow dead-code --format json` and read `unused_exports` as a list of files."
+    validations:
+      required: false
