@@ -1475,7 +1475,8 @@ test("mise.toml follows the tool versions that CI pins", () => {
   const pnpmVersion = miseVersion("pnpm");
   assert.ok(pnpmVersion, "mise.toml must pin pnpm");
   const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
-  assert.equal(rootPackage.engines.pnpm, pnpmVersion);
+  // A caret range keeps any pnpm 11 at or above the mise pin usable.
+  assert.equal(rootPackage.engines.pnpm, `^${pnpmVersion}`);
   const extensionPackage = JSON.parse(readFileSync("editors/vscode/package.json", "utf8"));
   assert.equal(extensionPackage.packageManager, `pnpm@${pnpmVersion}`);
   for (const file of ["ci.yml", "commitlint.yml", "contributors.yml"]) {
@@ -2802,7 +2803,13 @@ test("the root manifest pins pnpm through engines only", () => {
   const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(rootPackage.packageManager, undefined);
   assert.equal(rootPackage.devEngines, undefined);
-  assert.match(rootPackage.engines.pnpm, /^\d+\.\d+\.\d+$/u, "pin one exact pnpm version");
+  // A caret range, so Dependabot selects pnpm 11 and a contributor with a
+  // newer pnpm 11 can still install.
+  assert.match(
+    rootPackage.engines.pnpm,
+    /^\^\d+\.\d+\.\d+$/u,
+    "pin a caret range of one pnpm major",
+  );
   const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
   assert.doesNotMatch(lockfile, /^---$/mu, "the root lockfile has one YAML document");
   assert.doesNotMatch(lockfile, /packageManagerDependencies/u);

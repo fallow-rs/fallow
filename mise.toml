@@ -15,7 +15,7 @@
 # Same major version as each `actions/setup-node` step in `ci.yml`.
 node = "26"
 
-# Same version as `engines.pnpm` in the root `package.json`, the
+# The lower bound of `engines.pnpm` in the root `package.json`, the same as the
 # `packageManager` of `editors/vscode`, and the `pnpm/action-setup` steps in
 # `ci.yml`, `commitlint.yml` and `contributors.yml`.
 pnpm = "11.25.0"

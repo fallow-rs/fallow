@@ -63,7 +63,8 @@ Where CI pins a tool version, `mise.toml` uses the same version.
 does not check typos and cargo-deny, because their CI actions fix the tool
 version in the action commit. A Dependabot action bump then does not fail.
 Update those two versions by hand. The same test fails when the pnpm version
-in `mise.toml` differs from `engines.pnpm` in the root `package.json`,
+in `mise.toml` is not the lower bound of `engines.pnpm` in the root
+`package.json`,
 the `packageManager` of `editors/vscode`, or a `pnpm/action-setup` step in
 `ci.yml`, `commitlint.yml` or `contributors.yml`.
 
@@ -75,9 +76,9 @@ its own `pnpm-workspace.yaml` and `pnpm-lock.yaml`. The root
 an unapproved dependency build script, and keeps the flat `node_modules`
 layout (`nodeLinker: hoisted`) that tools under `tools/` resolve through.
 
-The root `package.json` pins pnpm through `engines.pnpm`. pnpm stops with
-`ERR_PNPM_UNSUPPORTED_ENGINE` when its version is different. Use
-`mise install`, or install that pnpm version. The root does not use the other
+The root `package.json` sets `engines.pnpm` to `^11.25.0`. pnpm stops with
+`ERR_PNPM_UNSUPPORTED_ENGINE` when its version is older than 11.25.0 or is
+not pnpm 11. `mise install` gives pnpm 11.25.0. The root does not use the other
 two pin fields:
 
 - `packageManager`: `pnpm/action-setup` rejects a `packageManager` that
@@ -88,8 +89,7 @@ two pin fields:
   that step fails because the root has no npm lockfile. Corepack also ignores
   an array value, so Dependabot then updates the lockfile with pnpm 10.
 
-Dependabot reads `engines.pnpm`, so it updates `pnpm-lock.yaml` with the
-pinned pnpm.
+Dependabot reads `engines.pnpm`, so it updates `pnpm-lock.yaml` with pnpm 11.
 
 The root `.npmrc` disables npm dependency lifecycle scripts by default. Keep
 `--ignore-scripts` explicit on CI installs, including installs with `--prefix`

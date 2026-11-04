@@ -46,7 +46,7 @@
   },
   "engines": {
     "node": ">=22.13.0",
-    "pnpm": "11.25.0"
+    "pnpm": "^11.25.0"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.4",
