@@ -11,6 +11,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -86,6 +87,16 @@ export const decideHooksPath = (value) => {
   return normalized === LEGACY_HOOKS_PATH ? "unset" : "warn";
 };
 
+// From this version, hk installs hooks through git config, and git runs them
+// next to the hooks in `core.hooksPath`. Older git runs only `core.hooksPath`.
+export const CONFIG_HOOKS_GIT = "2.54.0";
+
+/** Return the warning for a `core.hooksPath` value that bootstrap keeps. */
+export const hooksPathWarning = (value, gitVersion) =>
+  isAtLeast(gitVersion, CONFIG_HOOKS_GIT)
+    ? `core.hooksPath is ${value}. Bootstrap keeps it. git runs the hooks in that folder in addition to the hk hooks.`
+    : `core.hooksPath is ${value}. Bootstrap keeps it. git ${gitVersion} runs only the hooks in that folder, so the hk hooks do not run. Remove the setting to use the hk hooks.`;
+
 /** Return the `hk` arguments that install the hooks. */
 export const hkInstallArgs = (hasMise) => (hasMise ? ["install", "--mise"] : ["install"]);
 
@@ -95,8 +106,10 @@ export const hkInstallArgs = (hasMise) => (hasMise ? ["install", "--mise"] : ["i
  * @param {object} io Side effects, injectable for tests.
  * @param {string} io.nodeVersion The running Node.js version.
  * @param {(name: string) => boolean} io.hasCommand True when the command is on PATH.
- * @param {() => string | null} io.readHooksPath The `core.hooksPath` value, or `null`.
- * @param {() => boolean} io.unsetHooksPath Remove `core.hooksPath`. True on success.
+ * @param {string} io.gitVersion The git version, for example `2.54.0`.
+ * @param {() => { local: string | null, effective: string | null }} io.readHooksPath
+ *   The `core.hooksPath` value in the repository config and in all scopes.
+ * @param {() => boolean} io.unsetHooksPath Remove `core.hooksPath` from the repository config. True on success.
  * @param {(command: string, args: string[], cwd: string) => number} io.run Run a command, return its exit status.
  * @param {(message: string) => void} io.log Print a progress line.
  * @param {(message: string) => void} io.warn Print a warning or an error line.
@@ -104,6 +117,7 @@ export const hkInstallArgs = (hasMise) => (hasMise ? ["install", "--mise"] : ["i
  */
 export const bootstrap = ({
   nodeVersion,
+  gitVersion,
   hasCommand,
   readHooksPath,
   unsetHooksPath,
@@ -117,23 +131,22 @@ export const bootstrap = ({
     return 1;
   }
 
-  const hooksPath = readHooksPath();
-  const hooksPathAction = decideHooksPath(hooksPath);
-  if (hooksPathAction === "unset") {
+  // Bootstrap removes only the repository value. A value from another scope
+  // can belong to other projects, so bootstrap only warns about it.
+  const { local } = readHooksPath();
+  if (decideHooksPath(local) === "unset") {
     if (!unsetHooksPath()) {
       warn(
-        `core.hooksPath is ${hooksPath}, but bootstrap cannot remove it. Run \`git config --unset core.hooksPath\` in the scope that sets it.`,
+        `core.hooksPath is ${local}, but bootstrap cannot remove it. Run \`git config --local --unset-all core.hooksPath\`.`,
       );
       return 1;
     }
     log(
-      `Removed core.hooksPath=${hooksPath}. hk now runs the hooks, and git no longer runs ${LEGACY_HOOKS_PATH}.`,
-    );
-  } else if (hooksPathAction === "warn") {
-    warn(
-      `core.hooksPath is ${hooksPath}. Bootstrap keeps it. git runs the hooks in that folder in addition to the hk hooks.`,
+      `Removed core.hooksPath=${local}. hk now runs the hooks, and git no longer runs ${LEGACY_HOOKS_PATH}.`,
     );
   }
+  const { effective } = readHooksPath();
+  if (decideHooksPath(effective) !== "keep") warn(hooksPathWarning(effective, gitVersion));
 
   const steps = [
     {
@@ -173,18 +186,28 @@ const spawn = (command, args, cwd, stdio) =>
     encoding: "utf8",
   });
 
+const readHooksPathValue = (scopeArgs) => {
+  const result = spawn("git", ["config", ...scopeArgs, "--get", "core.hooksPath"], ".", "pipe");
+  return result.status === 0 ? result.stdout.trim() : null;
+};
+
+const readGitVersion = () =>
+  /\d+\.\d+\.\d+/u.exec(spawn("git", ["--version"], ".", "pipe").stdout ?? "")?.[0] ?? "0.0.0";
+
 const defaultIo = () => ({
   nodeVersion: process.versions.node,
+  gitVersion: readGitVersion(),
   hasCommand: (name) => {
     const result = spawn(name, ["--version"], ".", "ignore");
     return result.error === undefined && result.status === 0;
   },
-  readHooksPath: () => {
-    const result = spawn("git", ["config", "--get", "core.hooksPath"], ".", "pipe");
-    return result.status === 0 ? result.stdout.trim() : null;
-  },
+  readHooksPath: () => ({
+    local: readHooksPathValue(["--local"]),
+    effective: readHooksPathValue([]),
+  }),
   unsetHooksPath: () =>
-    spawn("git", ["config", "--unset", "core.hooksPath"], ".", "ignore").status === 0,
+    spawn("git", ["config", "--local", "--unset-all", "core.hooksPath"], ".", "ignore").status ===
+    0,
   run: (command, args, cwd) => spawn(command, args, cwd, "inherit").status ?? 1,
   log: (message) => console.log(`bootstrap: ${message}`),
   warn: (message) => console.error(`bootstrap: ${message}`),
@@ -192,7 +215,7 @@ const defaultIo = () => ({
 
 const isDirectInvocation =
   process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+  import.meta.url === pathToFileURL(realpathSync(path.resolve(process.argv[1]))).href;
 
 if (isDirectInvocation) {
   process.exitCode = bootstrap(defaultIo());

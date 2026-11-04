@@ -212,7 +212,7 @@ const FULL_ONLY_INSTALLS = [
     installCommand: "npm ci --prefix crates/napi",
   },
   {
-    // The sidecar has its own package.json, so the root `npm ci` leaves it
+    // The sidecar has its own package.json, so the root `pnpm install` leaves it
     // out. The type-aware workspace tests fail without it. `tsrs` is only in
     // the sidecar manifest, so the probe cannot resolve from the root install.
     dependency: "tsrs",

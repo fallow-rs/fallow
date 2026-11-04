@@ -1488,6 +1488,11 @@ test("mise.toml follows the tool versions that CI pins", () => {
       (match) => match[1],
     );
     assert.ok(versions.length > 0, `${file} must set up pnpm`);
+    assert.equal(
+      versions.length,
+      workflow.match(/uses: pnpm\/action-setup@/gu).length,
+      `${file} has a pnpm/action-setup step whose version this test cannot read`,
+    );
     for (const version of versions) {
       assert.equal(version, pnpmVersion, `${file} pnpm must match mise.toml`);
     }

@@ -12,8 +12,10 @@ pnpm bootstrap   # Install the git hooks and all dependencies
 `pnpm bootstrap` runs `scripts/bootstrap.mjs`. The script uses only Node
 built-ins, so it runs before any install. It checks for Node.js 22.12.0 or
 later, pnpm and hk, and prints one install hint for each missing tool. It
-removes a `core.hooksPath=.githooks` setting from an old clone, and warns about
-any other `core.hooksPath` value. Then it installs the hk hooks and runs
+removes a `core.hooksPath=.githooks` setting from the repository config of an
+old clone, and warns about any other `core.hooksPath` value. Before git 2.54,
+hk installs hook files that git ignores while `core.hooksPath` is set, so the
+warning then tells you that the hk hooks do not run. Then it installs the hk hooks and runs
 `pnpm install --frozen-lockfile` at the root and in `editors/vscode`. You can
 run it again at any time.
 

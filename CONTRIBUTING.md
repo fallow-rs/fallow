@@ -27,9 +27,11 @@ time. It does these steps:
 
 1. It checks for Node.js 22.12.0 or later, pnpm and hk. For each missing tool,
    it prints one install hint and stops.
-2. It removes `core.hooksPath` when its value is `.githooks`, the hooks folder
-   of old clones. It keeps any other value and prints a warning, because git
-   then runs the hooks in that folder in addition to the hk hooks.
+2. It removes `core.hooksPath` from the repository config when its value is
+   `.githooks`, the hooks folder of old clones. It keeps any other value, and
+   any value from your global config, and prints a warning. With git 2.54 or
+   later, git then runs the hooks in that folder in addition to the hk hooks.
+   With older git, the hk hooks do not run while the setting exists.
 3. It installs the hooks that `hk.pkl` defines. With mise on `PATH`, it runs
    `hk install --mise`, so the hooks find the pinned tools also when your
    shell does not activate mise. Without mise, it runs `hk install`.

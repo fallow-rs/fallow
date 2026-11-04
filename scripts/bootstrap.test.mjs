@@ -15,6 +15,8 @@ const fakeIo = ({
   nodeVersion = "26.0.0",
   commands = ["pnpm", "hk", "mise"],
   hooksPath = null,
+  globalHooksPath = null,
+  gitVersion = "2.56.0",
   unsetSucceeds = true,
   failingCommand = null,
 } = {}) => {
@@ -24,10 +26,14 @@ const fakeIo = ({
   let currentHooksPath = hooksPath;
   const io = {
     nodeVersion,
+    gitVersion,
     hasCommand: (name) => commands.includes(name),
-    readHooksPath: () => currentHooksPath,
+    readHooksPath: () => ({
+      local: currentHooksPath,
+      effective: currentHooksPath ?? globalHooksPath,
+    }),
     unsetHooksPath: () => {
-      calls.push(["git", "config", "--unset", "core.hooksPath"]);
+      calls.push(["git", "config", "--local", "--unset-all", "core.hooksPath"]);
       if (unsetSucceeds) currentHooksPath = null;
       return unsetSucceeds;
     },
@@ -111,7 +117,7 @@ test("bootstrap without mise installs plain hk hooks", () => {
 test("bootstrap removes the legacy hooksPath and says so", () => {
   const fake = fakeIo({ hooksPath: ".githooks" });
   assert.equal(bootstrap(fake.io), 0);
-  assert.deepEqual(fake.calls[0], ["git", "config", "--unset", "core.hooksPath"]);
+  assert.deepEqual(fake.calls[0], ["git", "config", "--local", "--unset-all", "core.hooksPath"]);
   assert.equal(fake.hooksPath(), null);
   assert.ok(fake.logs.some((line) => /Removed core\.hooksPath=\.githooks/u.test(line)));
 
@@ -134,6 +140,27 @@ test("bootstrap keeps another hooksPath and warns", () => {
   );
   assert.equal(fake.warnings.length, 1);
   assert.match(fake.warnings[0], /core\.hooksPath is \.husky\. Bootstrap keeps it\./u);
+  assert.match(fake.warnings[0], /in addition to the hk hooks/u);
+});
+
+test("on git before 2.54 the warning says that the hk hooks do not run", () => {
+  const fake = fakeIo({ hooksPath: ".husky", gitVersion: "2.50.1" });
+  assert.equal(bootstrap(fake.io), 0);
+  assert.match(fake.warnings[0], /git 2\.50\.1 runs only the hooks in that folder/u);
+});
+
+test("bootstrap warns about a legacy hooksPath from another scope and keeps it", () => {
+  // A global value can serve other projects, so bootstrap does not remove it.
+  const fake = fakeIo({ globalHooksPath: ".githooks" });
+  assert.equal(bootstrap(fake.io), 0);
+  assert.equal(
+    fake.calls.some(([command]) => command === "git"),
+    false,
+  );
+  assert.match(fake.warnings[0], /core\.hooksPath is \.githooks\. Bootstrap keeps it\./u);
+
+  // A second run gives the same result, not a failure.
+  assert.equal(bootstrap(fake.io), 0);
 });
 
 test("bootstrap fails when it cannot remove the legacy hooksPath", () => {
