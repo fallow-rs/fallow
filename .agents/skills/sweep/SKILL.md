@@ -16,7 +16,10 @@ at the end of every objective, without a prompt from the maintainer.
 4. Re-run any weak or stale verification.
 5. Fix each in-scope omission now. A fix after the merge is a new pull
    request: send it through `review` and `ship`, and add it to the list of
-   step 6. Track each genuine separate follow-up:
+   step 6. Sort each separate follow-up into the three groups of
+   `CONTRIBUTING.md`. Add an improvement idea with no known need to the
+   "Possible follow-ups" section of the PR body, also after the merge, and
+   open no issue for it. Track each item of needed work:
    - in a `fallow-rs` repository, open a GitHub issue. When it needs a
      maintainer decision, state the question and a recommended answer in
      the issue;

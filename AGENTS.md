@@ -47,9 +47,10 @@ An objective is done only when all of these are true:
   merged commit is complete and green (armed auto-merge is not enough);
 - every companion pull request is merged to the default branch of its
   repository;
-- every follow-up that the work found is fixed, or has a GitHub issue that the
-  final report links (for a repository outside `fallow-rs`, a draft issue in
-  the final report);
+- every needed follow-up that the work found is fixed, or has a GitHub issue
+  that the final report links (for a repository outside `fallow-rs`, a draft
+  issue in the final report). An improvement idea with no known need goes
+  under "Possible follow-ups" in the PR body, not in an issue;
 - the touched branches and worktrees are clean.
 
 A note in `.plans/`, in `/tmp`, or in the chat report does not track a

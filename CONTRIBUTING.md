@@ -396,7 +396,13 @@ The `Commit messages` check fails a pull request that has a commit without a sig
    release collects the fragments into it.
 6. Open a pull request against `main`
 
-When the description leaves work for later ("Not in this change", "a separate change", "out of scope"), link an issue that describes each deferred task. For an intentional non-goal, write "No follow-up planned." instead. CI verifies that references to this repository identify existing issues; pull request references do not qualify. CI accepts a reference to another repository on its syntax. Reviewers check that each linked issue covers the deferred work.
+Sort each item that the change leaves open into one of three groups:
+
+- **Needed work:** a defect that the change finds or leaves, or a part of the task that is not done. Open an issue for each item and link it under a heading such as "Not in this change". The same rule applies to an inline phrase such as "a separate change" or "out of scope". CI verifies that each reference to this repository identifies an existing issue. A pull request reference does not qualify. CI accepts a reference to another repository on its syntax.
+- **Possible follow-ups:** an improvement idea with no known need, for example a small gain for a large refactor. Put it under a "Possible follow-ups" heading, with the reason in a few words. It needs no issue. The maintainer lists these ideas with `node scripts/list-possible-follow-ups.mjs` and opens an issue for each idea that is worth the work.
+- **Known limits:** intended behavior, or a limit that only a change of the design can remove. Put it under a "Known limits" heading. It needs no issue, but CI still checks its text for the deferral phrases above, so describe the limit without them.
+
+Reviewers check that each linked issue covers the deferred work, and that no needed work is under "Possible follow-ups" or "Known limits".
 
 ## Reporting issues
 
