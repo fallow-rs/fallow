@@ -23,6 +23,11 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    constant. A failed manual `rebase --continue` leaves commits on a
    detached HEAD. For a stacked branch after a squash merge of its parent,
    add `--upstream` (see "Serial merge of many pull requests").
+   When GitHub rejects a push with a server error (for example HTTP 500
+   or `fatal error in commit_refs`) after the pre-push hooks passed,
+   retry once with `HK=0 git push`. The hooks already passed for the same
+   commits. Then compare `git ls-remote origin <branch>` with the local
+   head, because the first push can land in spite of the error.
 2. Re-run the required checks from `docs/development/quality-gates.md`.
 3. Verify that public contracts and generated files are pushed. Merge each
    companion change into the default branch of its repository (for example
