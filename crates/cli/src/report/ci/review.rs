@@ -58,21 +58,18 @@ impl AuditGatePolicy {
     #[must_use]
     pub fn from_audit_envelope(envelope: &serde_json::Value) -> Option<Self> {
         let attribution = envelope.get("attribution")?;
-        let new_only = match attribution.get("gate")?.as_str()? {
-            "new-only" => true,
-            "all" => false,
-            _ => return None,
-        };
-        // The audit JSON omits the default `warn` mode.
-        let worsened = match attribution
+        let gate: fallow_config::AuditGate =
+            serde_json::from_value(attribution.get("gate")?.clone()).ok()?;
+        // An audit JSON from a release before `--worsened` has no
+        // `worsened` field. Those releases used the `warn` behavior.
+        let worsened = attribution
             .get("worsened")
-            .and_then(serde_json::Value::as_str)
-        {
-            Some("error") => fallow_config::AuditWorsened::Error,
-            Some("off") => fallow_config::AuditWorsened::Off,
-            _ => fallow_config::AuditWorsened::Warn,
-        };
-        Some(Self { new_only, worsened })
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default();
+        Some(Self {
+            new_only: matches!(gate, fallow_config::AuditGate::NewOnly),
+            worsened,
+        })
     }
 
     /// The effect of one finding on the gate.
@@ -696,6 +693,17 @@ mod tests {
         );
         assert_eq!(read(serde_json::json!({"attribution": {}})), None);
         assert_eq!(read(serde_json::json!({})), None);
+        assert_eq!(
+            read(serde_json::json!({"attribution": {"gate": "new-only", "worsened": "off"}})),
+            Some(AuditGatePolicy {
+                new_only: true,
+                worsened: AuditWorsened::Off,
+            })
+        );
+        assert_eq!(
+            read(serde_json::json!({"attribution": {"gate": "unknown"}})),
+            None
+        );
     }
 
     #[test]
