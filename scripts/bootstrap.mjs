@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const MIN_NODE = "22.12.0";
+export const MIN_NODE = "22.13.0";
 
 // Old clones pointed git at this folder before hk took over the hooks.
 export const LEGACY_HOOKS_PATH = ".githooks";

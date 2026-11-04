@@ -10,7 +10,7 @@ pnpm bootstrap   # Install the git hooks and all dependencies
 ```
 
 `pnpm bootstrap` runs `scripts/bootstrap.mjs`. The script uses only Node
-built-ins, so it runs before any install. It checks for Node.js 22.12.0 or
+built-ins, so it runs before any install. It checks for Node.js 22.13.0 or
 later, pnpm and hk, and prints one install hint for each missing tool. It
 removes a `core.hooksPath=.githooks` setting from the repository config of an
 old clone, and warns about any other `core.hooksPath` value. Before git 2.54,

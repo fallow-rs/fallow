@@ -4,7 +4,7 @@ Thanks for contributing to fallow. This guide covers setup, development, and pul
 
 ## Getting started
 
-Repository tooling requires Node.js 22.12.0 or later. Published Node packages
+Repository tooling requires Node.js 22.13.0 or later, because pnpm 11 needs it. Published Node packages
 require Node.js 22 or later.
 
 ```bash
@@ -25,7 +25,7 @@ pnpm, hk and pkl at the versions in `mise.toml`. Rustup installs Rust from
 `pnpm bootstrap` runs `scripts/bootstrap.mjs`. You can run it again at any
 time. It does these steps:
 
-1. It checks for Node.js 22.12.0 or later, pnpm and hk. For each missing tool,
+1. It checks for Node.js 22.13.0 or later, pnpm and hk. For each missing tool,
    it prints one install hint and stops.
 2. It removes `core.hooksPath` from the repository config when its value is
    `.githooks`, the hooks folder of old clones. It keeps any other value, and

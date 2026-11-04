@@ -66,11 +66,11 @@ test("tool check names one install hint per missing tool", () => {
 
   const problems = findToolProblems({ nodeVersion: "20.19.0", hasCommand: () => false });
   assert.equal(problems.length, 3);
-  assert.match(problems[0], /Node\.js 20\.19\.0 is too old.*22\.12\.0/u);
+  assert.match(problems[0], /Node\.js 20\.19\.0 is too old.*22\.13\.0/u);
   assert.match(problems[1], /^pnpm is missing\..*mise install/u);
   assert.match(problems[2], /^hk is missing\..*mise install/u);
 
-  const onlyHk = findToolProblems({ nodeVersion: "22.12.0", hasCommand: (name) => name !== "hk" });
+  const onlyHk = findToolProblems({ nodeVersion: "22.13.0", hasCommand: (name) => name !== "hk" });
   assert.deepEqual(onlyHk.length, 1);
   assert.match(onlyHk[0], /^hk is missing/u);
 });
