@@ -7,7 +7,7 @@
     "acorn": "8.19.0",
     "ast-v8-to-istanbul": "1.0.7",
     "istanbul-lib-instrument": "6.0.3",
-    "oxc-coverage-instrument": "0.18.0",
+    "oxc-coverage-instrument": "0.19.0",
     "v8-to-istanbul": "9.3.0"
   }
 }
