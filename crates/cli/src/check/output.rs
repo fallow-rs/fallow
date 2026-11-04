@@ -610,6 +610,7 @@ mod tests {
             threads: 1,
             no_cache: true,
             ignore_dependencies: fallow_config::IgnoreDependencyMatcher::default(),
+            ignore_binaries: fallow_config::IgnoreDependencyMatcher::default(),
             ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_export_rules: vec![],

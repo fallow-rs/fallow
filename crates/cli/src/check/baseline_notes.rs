@@ -31,6 +31,7 @@ impl IssueFilters {
             "unused_class_members" => self.unused_class_members,
             "unused_store_members" => self.unused_store_members,
             "unlisted_dependencies" => self.unlisted_deps,
+            "unlisted_binaries" => self.unlisted_binaries,
             "unprovided_injects" => self.unprovided_injects,
             "unrendered_components" => self.unrendered_components,
             "absent_component_props" => self.absent_component_props,

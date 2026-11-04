@@ -20,12 +20,12 @@ use crate::output_dead_code::{
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -39,6 +39,10 @@ pub use component_health::ERROR_ONLY_RESULT_KEYS;
 
 use crate::serde_path;
 use crate::suppress::closest_known_kind_name;
+
+#[path = "results_merge_parts.rs"]
+mod merge_parts;
+use merge_parts::split_merge_parts;
 
 /// Summary of detected entry points, grouped by discovery source.
 ///
@@ -303,6 +307,11 @@ pub struct AnalysisResults {
     /// Dependencies used in code but not listed in package.json. Wrapped in
     /// [`UnlistedDependencyFinding`].
     pub unlisted_dependencies: Vec<UnlistedDependencyFinding>,
+    /// Binaries that package.json scripts or process calls run, but that no
+    /// installed or listed package provides. Wrapped in
+    /// [`UnlistedBinaryFinding`].
+    #[serde(default)]
+    pub unlisted_binaries: Vec<UnlistedBinaryFinding>,
     /// Exports with the same name across multiple modules. Wrapped in
     /// [`DuplicateExportFinding`] so each entry carries a typed `actions`
     /// array natively, with the position-0 `add-to-config` `ignoreExports`
@@ -749,6 +758,7 @@ struct AnalysisResultsGraphMergeParts {
     unused_dev_dependencies: Vec<UnusedDevDependencyFinding>,
     unused_optional_dependencies: Vec<UnusedOptionalDependencyFinding>,
     unlisted_dependencies: Vec<UnlistedDependencyFinding>,
+    unlisted_binaries: Vec<UnlistedBinaryFinding>,
     duplicate_exports: Vec<DuplicateExportFinding>,
     duplicate_export_aliases: Vec<DuplicateExportAliasFinding>,
     type_only_dependencies: Vec<TypeOnlyDependencyFinding>,
@@ -811,180 +821,6 @@ struct AnalysisResultsMetadataMergeParts {
     semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
-/// Exhaustively destructure `other` into the five grouped merge-part structs.
-///
-/// The single exhaustive `let Self { .. }` lives here so that adding a field to
-/// [`AnalysisResults`] becomes a compile error (a field must be routed into one
-/// of the part structs) instead of being silently dropped during a merge. See
-/// issue #444.
-#[expect(
-    clippy::too_many_lines,
-    reason = "irreducible single exhaustive field-routing: the one `let Self { .. }` destructure must name every field so a newly added field is a compile error (issue #444); splitting it would defeat that exhaustiveness guarantee"
-)]
-fn split_merge_parts(
-    other: AnalysisResults,
-) -> (
-    AnalysisResultsCoreMergeParts,
-    AnalysisResultsGraphMergeParts,
-    AnalysisResultsWorkspaceMergeParts,
-    AnalysisResultsFrameworkMergeParts,
-    AnalysisResultsMetadataMergeParts,
-) {
-    let AnalysisResults {
-        unused_files,
-        unused_exports,
-        unused_types,
-        private_type_leaks,
-        deprecated_exports_in_use,
-        unused_dependencies,
-        unused_dev_dependencies,
-        unused_optional_dependencies,
-        unused_enum_members,
-        unused_class_members,
-        unused_store_members,
-        unresolved_imports,
-        unlisted_dependencies,
-        duplicate_exports,
-        duplicate_export_aliases,
-        type_only_dependencies,
-        test_only_dependencies,
-        dev_dependencies_in_production,
-        circular_dependencies,
-        re_export_cycles,
-        package_cycles,
-        boundary_violations,
-        boundary_coverage_violations,
-        boundary_call_violations,
-        policy_violations,
-        stale_suppressions,
-        unused_catalog_entries,
-        empty_catalog_groups,
-        unresolved_catalog_references,
-        unused_dependency_overrides,
-        misconfigured_dependency_overrides,
-        invalid_client_exports,
-        mixed_client_server_barrels,
-        misplaced_directives,
-        unprovided_injects,
-        unrendered_components,
-        route_collisions,
-        dynamic_segment_name_conflicts,
-        unused_component_props,
-        absent_component_props,
-        unused_component_emits,
-        unused_component_inputs,
-        unused_component_outputs,
-        unused_svelte_events,
-        unused_effect_layers,
-        unused_tagged_errors,
-        unproduced_catch_tags,
-        unused_server_actions,
-        unused_load_data_keys,
-        unused_load_data_keys_global_abstain,
-        prop_drilling_chains,
-        thin_wrappers,
-        duplicate_prop_shapes,
-        cascade_hidden,
-        cascade,
-        suppression_count,
-        unused_component_props_exempted,
-        active_suppressions,
-        feature_flags,
-        security_findings,
-        security_unresolved_edge_files,
-        security_unresolved_callee_sites,
-        security_unresolved_callee_diagnostics,
-        export_usages,
-        entry_point_summary,
-        render_fan_in,
-        react_component_intel,
-        semantic_reachable_files,
-        semantic_framework_contracts,
-    } = other;
-
-    (
-        AnalysisResultsCoreMergeParts {
-            unused_files,
-            unused_exports,
-            unused_types,
-            private_type_leaks,
-            deprecated_exports_in_use,
-            unused_enum_members,
-            unused_class_members,
-            unused_store_members,
-            unresolved_imports,
-            boundary_violations,
-            boundary_coverage_violations,
-            boundary_call_violations,
-            policy_violations,
-            stale_suppressions,
-        },
-        AnalysisResultsGraphMergeParts {
-            unused_dependencies,
-            unused_dev_dependencies,
-            unused_optional_dependencies,
-            unlisted_dependencies,
-            duplicate_exports,
-            duplicate_export_aliases,
-            type_only_dependencies,
-            test_only_dependencies,
-            dev_dependencies_in_production,
-            circular_dependencies,
-            re_export_cycles,
-            package_cycles,
-        },
-        AnalysisResultsWorkspaceMergeParts {
-            unused_catalog_entries,
-            empty_catalog_groups,
-            unresolved_catalog_references,
-            unused_dependency_overrides,
-            misconfigured_dependency_overrides,
-        },
-        AnalysisResultsFrameworkMergeParts {
-            invalid_client_exports,
-            mixed_client_server_barrels,
-            misplaced_directives,
-            unprovided_injects,
-            unrendered_components,
-            route_collisions,
-            dynamic_segment_name_conflicts,
-            unused_component_props,
-            absent_component_props,
-            unused_component_emits,
-            unused_component_inputs,
-            unused_component_outputs,
-            unused_svelte_events,
-            unused_effect_layers,
-            unused_tagged_errors,
-            unproduced_catch_tags,
-            unused_server_actions,
-            unused_load_data_keys,
-            unused_load_data_keys_global_abstain,
-            prop_drilling_chains,
-            thin_wrappers,
-            duplicate_prop_shapes,
-        },
-        AnalysisResultsMetadataMergeParts {
-            cascade_hidden,
-            cascade,
-            suppression_count,
-            unused_component_props_exempted,
-            active_suppressions,
-            feature_flags,
-            security_findings,
-            security_unresolved_edge_files,
-            security_unresolved_callee_sites,
-            security_unresolved_callee_diagnostics,
-            export_usages,
-            entry_point_summary,
-            render_fan_in,
-            react_component_intel,
-            semantic_reachable_files,
-            semantic_framework_contracts,
-        },
-    )
-}
-
 macro_rules! counted_analysis_result_fields {
     ($callback:ident $(, $arg:expr)? ) => {
         $callback! {
@@ -1002,6 +838,7 @@ macro_rules! counted_analysis_result_fields {
             unused_store_members => "unused_store_members",
             unresolved_imports => "unresolved_imports",
             unlisted_dependencies => "unlisted_dependencies",
+            unlisted_binaries => "unlisted_binaries",
             duplicate_exports => "duplicate_exports",
             duplicate_export_aliases => "duplicate_export_aliases",
             type_only_dependencies => "type_only_dependencies",
@@ -1147,6 +984,12 @@ impl FindingIgnorePolicy for UnlistedDependencyFinding {
     }
 }
 
+impl FindingIgnorePolicy for UnlistedBinaryFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(self.binary.used_in.iter().map(|site| &site.path), predicate)
+    }
+}
+
 impl FindingIgnorePolicy for DuplicateExportFinding {
     fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
         all_nonempty_paths_match(
@@ -1244,6 +1087,7 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
+        unlisted_binaries: _unlisted_binaries,
         duplicate_exports: _duplicate_exports,
         duplicate_export_aliases: _duplicate_export_aliases,
         circular_dependencies: _circular_dependencies,
@@ -1480,6 +1324,7 @@ impl AnalysisResults {
             .extend(parts.unused_optional_dependencies);
         self.unlisted_dependencies
             .extend(parts.unlisted_dependencies);
+        self.unlisted_binaries.extend(parts.unlisted_binaries);
         self.duplicate_exports.extend(parts.duplicate_exports);
         self.duplicate_export_aliases
             .extend(parts.duplicate_export_aliases);
@@ -1917,6 +1762,17 @@ impl AnalysisResults {
             dep.dep
                 .imported_from
                 .sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+        }
+
+        self.unlisted_binaries
+            .sort_by(|a, b| a.binary.binary_name.cmp(&b.binary.binary_name));
+        for binary in &mut self.unlisted_binaries {
+            binary.binary.used_in.sort_by(|a, b| {
+                a.path
+                    .cmp(&b.path)
+                    .then(a.line.cmp(&b.line))
+                    .then(a.col.cmp(&b.col))
+            });
         }
 
         self.duplicate_exports
@@ -2986,6 +2842,35 @@ pub struct UnlistedDependency {
     pub package_name: String,
     /// Import sites where this unlisted dependency is used (file path, line, column).
     pub imported_from: Vec<ImportSite>,
+}
+
+/// A binary that a package.json script or a process call runs, but that no
+/// installed or listed package provides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnlistedBinary {
+    /// The binary name as the command runs it (for example `ffmpeg`).
+    pub binary_name: String,
+    /// The sites that run this binary.
+    pub used_in: Vec<BinaryUseSite>,
+}
+
+/// A location that runs a binary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BinaryUseSite {
+    /// The `package.json` that declares the script, or the source file that
+    /// makes the process call.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+    /// The name of the package.json script that runs the binary. Absent for
+    /// a process call in source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_name: Option<String>,
 }
 
 /// A location where an import occurs.

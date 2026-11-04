@@ -699,6 +699,13 @@ fn filter_workspace_dependency_findings(
             .iter()
             .any(|source| any_under(&source.path))
     });
+    results.unlisted_binaries.retain(|finding| {
+        finding
+            .binary
+            .used_in
+            .iter()
+            .any(|site| any_under(&site.path))
+    });
     results.unused_dependency_overrides.clear();
     results.misconfigured_dependency_overrides.clear();
 }
@@ -862,6 +869,9 @@ fn apply_base_collection_rules(results: &mut AnalysisResults, rules: &RulesConfi
     }
     if rules.unlisted_dependencies == Severity::Off {
         results.unlisted_dependencies.clear();
+    }
+    if rules.unlisted_binaries == Severity::Off {
+        results.unlisted_binaries.clear();
     }
     if rules.duplicate_exports == Severity::Off {
         results.duplicate_exports.clear();

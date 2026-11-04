@@ -1,0 +1,20 @@
+{
+  "name": "unlisted-binaries-fixture",
+  "private": true,
+  "main": "src/index.ts",
+  "bin": { "my-own-bin": "bin.js" },
+  "scripts": {
+    "pack": "gnome-extensions pack ext",
+    "lint": "installed-tool src",
+    "build": "local-tool build",
+    "download": "npx create-thing && pnpm dlx other-thing",
+    "system": "git status && ffmpeg -version && ./scripts/run.sh && $TOOL x",
+    "ignored": "custom-ignored --x",
+    "declared": "declared-only run",
+    "own": "my-own-bin"
+  },
+  "devDependencies": {
+    "declared-only": "1.0.0",
+    "installed-cli": "1.0.0"
+  }
+}

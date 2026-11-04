@@ -1252,6 +1252,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unused_store_members: results.unused_store_members.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
+        unlisted_binaries: results.unlisted_binaries.len(),
         duplicate_exports: results.duplicate_exports.len(),
         duplicate_export_aliases: results.duplicate_export_aliases.len(),
         type_only_dependencies: results.type_only_dependencies.len(),

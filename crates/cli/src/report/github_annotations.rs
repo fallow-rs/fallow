@@ -536,6 +536,21 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
             );
         }
     }
+    for binary in arr(env, "unlisted_binaries") {
+        let name = s(binary, "binary_name");
+        for site in arr(binary, "used_in") {
+            push(
+                out,
+                gate_level(binary, AnnotationLevel::Warning),
+                s(site, "path"),
+                Anchor::line_col(site).with_introduced(binary),
+                "Unlisted binary".to_owned(),
+                format!(
+                    "Binary '{name}' runs here, but no installed or listed package provides it.\n\nAdd the package that provides it to devDependencies, or add '{name}' to ignoreBinaries when the system provides it.",
+                ),
+            );
+        }
+    }
     push_each(
         out,
         env,

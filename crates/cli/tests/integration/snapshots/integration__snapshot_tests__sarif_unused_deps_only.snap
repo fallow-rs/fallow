@@ -183,6 +183,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unlisted-binary",
+              "shortDescription": {
+                "text": "Binary used but provided by no installed package"
+              },
+              "fullDescription": {
+                "text": "Binaries that package.json scripts or process calls in source (`spawn`, `execSync`, `execa`, the `$` template of zx or execa, `Bun.spawn`) run with a literal command, when no installed or listed package provides them. A binary counts as provided when a `node_modules/.bin` link exists, a declared dependency or a workspace package declares it in `bin`, or it maps to a declared dependency. Shell builtins, commands that `npx` or `pnpm dlx` download, and a fixed list of common operating-system tools are skipped. The check needs installed dependencies and reports nothing without a root `node_modules`. Defaults to warn."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unlisted-binaries",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/duplicate-export",
               "shortDescription": {
                 "text": "Export name appears in multiple modules"

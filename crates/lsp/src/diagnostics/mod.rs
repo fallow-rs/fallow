@@ -526,6 +526,7 @@ mod severity_gate {
             unused_store_members: _,
             unresolved_imports: _,
             unlisted_dependencies: _,
+            unlisted_binaries: _,
             duplicate_exports: _,
             duplicate_export_aliases: _,
             type_only_dependencies: _,
@@ -897,6 +898,25 @@ mod severity_gate {
                             fallow_api::editor_results::UnlistedDependency {
                                 package_name: "unlisted".to_string(),
                                 imported_from: vec![],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unlisted-binary",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.unlisted_binaries.push(
+                        fallow_types::output_dead_code::UnlistedBinaryFinding::with_actions(
+                            fallow_types::results::UnlistedBinary {
+                                binary_name: "tool".to_string(),
+                                used_in: vec![fallow_types::results::BinaryUseSite {
+                                    path: root.join("a.ts"),
+                                    line: 1,
+                                    col: 0,
+                                    script_name: None,
+                                }],
                             },
                         ),
                     );

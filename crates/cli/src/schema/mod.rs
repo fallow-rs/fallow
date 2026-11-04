@@ -504,6 +504,11 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             );
         }
         "unlisted-dependency" => {}
+        "unlisted-binary" => {
+            m.note = Some(
+                "Needs installed dependencies; a project without a root node_modules reports none",
+            );
+        }
         _ => return false,
     }
     true

@@ -720,6 +720,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
+        unlisted_binaries: _unlisted_binaries,
         duplicate_exports: _duplicate_exports,
         duplicate_export_aliases: _duplicate_export_aliases,
         type_only_dependencies: _type_only_dependencies,
@@ -801,6 +802,13 @@ fn retain_graph_findings_by_changed_files(
     scope: &impl ChangedPathScope,
 ) {
     retain_unlisted_dependencies_by_import_site(&mut results.unlisted_dependencies, scope);
+    results.unlisted_binaries.retain(|binary| {
+        binary
+            .binary
+            .used_in
+            .iter()
+            .any(|site| scope.contains(&site.path))
+    });
     retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, scope);
     retain_by_changed_path(&mut results.duplicate_export_aliases, scope, |a| {
         &a.alias.path

@@ -393,6 +393,10 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
 
+    /// A list of binary names or name globs that the `unlisted-binaries` rule does not report. Set it for a binary that the operating system, the CI image, or a tool outside `node_modules` provides (e.g. `["gnome-extensions", "tailscale"]`). An entry without glob characters matches the binary name exactly; an entry with `*`, `?`, `[` or `{` is a glob matched against the binary name, so `xcrun*` covers every name that starts with `xcrun`. Fallow already skips shell builtins and a fixed list of common operating-system tools (such as `git`, `ssh-keygen`, `curl`, and `ffmpeg`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_binaries: Vec<String>,
+
     /// A list of command names whose file arguments fallow does not make entry points. Fallow reads commands in package.json scripts (root and workspace packages), CI files (GitHub Actions and GitLab CI), Dockerfiles, Procfiles, and fly.toml files, and a file that a command names (such as `node scripts/seed.ts`) normally becomes an entry point. A listed command still counts as a used dependency, and its `--config` file is still tracked. Formatters and linters (ESLint, Prettier, Oxlint, Oxfmt, Biome, Stylelint, and similar tools) never make their targets entry points, so they do not need to be listed. Set it for a command whose file arguments are data, not code that runs (e.g. `["my-codegen"]`), or use `["*"]` to turn off entry points from all commands and declare real entries in `entry`. A name matches the command after environment, package-manager, and wrapper prefixes (`npx`, `pnpm exec`, `yarn run`, `varlock run --`), by exact file name; `*` is the only wildcard.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_command_entries: Vec<String>,
@@ -524,7 +528,7 @@ pub struct FallowConfig {
     )]
     pub markup_extensions: Vec<String>,
 
-    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten a rule for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict). For most rules, an override cannot start a detector for a rule that is off at top level, so set the top-level rule on and use an override to set `off` for the other paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. A single `*` stays within one path segment; use `**` to match across directories.
+    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten a rule for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict). For most rules, an override cannot start a detector for a rule that is off at top level, so set the top-level rule on and use an override to set `off` for the other paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, unlisted-binaries, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 
@@ -951,6 +955,9 @@ pub struct RegressionBaseline {
     /// Baseline count of `unlisted-dependencies` findings.
     #[serde(default)]
     pub unlisted_dependencies: usize,
+    /// Baseline count of `unlisted-binaries` findings.
+    #[serde(default)]
+    pub unlisted_binaries: usize,
     /// Baseline count of `duplicate-exports` findings.
     #[serde(default)]
     pub duplicate_exports: usize,

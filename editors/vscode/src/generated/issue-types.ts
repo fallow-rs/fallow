@@ -23,6 +23,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-store-members": true,
   "unresolved-imports": true,
   "unlisted-dependencies": true,
+  "unlisted-binaries": true,
   "duplicate-exports": true,
   "duplicate-export-aliases": true,
   "type-only-dependencies": true,
@@ -99,6 +100,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "test-only-dependency": "test-only-dependencies",
   "thin-wrappers": "thin-wrapper",
   "type-only-dependency": "type-only-dependencies",
+  "unlisted-binary": "unlisted-binaries",
   "unlisted-dependency": "unlisted-dependencies",
   "unproduced-catch-tag": "unproduced-catch-tags",
   "unprovided-inject": "unprovided-injects",
@@ -189,6 +191,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "unlisted-dependency",
     "label": "Unlisted Dependencies"
+  },
+  {
+    "code": "unlisted-binary",
+    "label": "Unlisted Binaries"
   },
   {
     "code": "duplicate-export",

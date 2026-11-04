@@ -12,6 +12,7 @@
   "unused_store_members": {"path": "/f.ts", "parent_name": "S", "member_name": "a", "kind": "store_member", "line": 7, "col": 0, "actions": []},
   "unresolved_imports": {"path": "/f.ts", "specifier": "./gone", "line": 8, "col": 0, "specifier_col": 10, "actions": []},
   "unlisted_dependencies": {"package_name": "unlisted", "imported_from": [], "actions": []},
+  "unlisted_binaries": {"binary_name": "tool", "used_in": [], "actions": []},
   "duplicate_exports": {"export_name": "dup", "locations": [{"path": "/a.ts", "line": 1, "col": 0}, {"path": "/b.ts", "line": 1, "col": 0}], "actions": []},
   "type_only_dependencies": {"package_name": "type-only", "path": "/pkg.json", "line": 9, "actions": []},
   "test_only_dependencies": {"package_name": "test-only", "path": "/pkg.json", "line": 11, "actions": []},

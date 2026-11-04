@@ -292,6 +292,34 @@ pub(super) fn migrate_ignore_deps(
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) -> bool {
+    migrate_ignore_names(
+        ignore_deps_val,
+        field,
+        "ignoreDependencies",
+        config,
+        warnings,
+    )
+}
+
+/// Migrate the source `ignoreBinaries` list to fallow `ignoreBinaries`, with the same
+/// regex handling as [`migrate_ignore_deps`]. Returns whether at least one
+/// entry was migrated.
+pub(super) fn migrate_ignore_binaries(
+    value: &Value,
+    field: &str,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    migrate_ignore_names(value, field, "ignoreBinaries", config, warnings)
+}
+
+fn migrate_ignore_names(
+    ignore_deps_val: &Value,
+    field: &str,
+    target_key: &str,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
     let deps = string_or_array(ignore_deps_val);
     let mut migrated = Vec::new();
     for dep in deps {
@@ -306,14 +334,14 @@ pub(super) fn migrate_ignore_deps(
         warnings.push(MigrationWarning {
             source: "knip",
             field: field.to_string(),
-            message: format!("regex pattern `{dep}` skipped (no glob matches the same packages)"),
+            message: format!("regex pattern `{dep}` skipped (no glob matches the same names)"),
             suggestion: Some(
-                "rewrite it as a glob such as `@scope/*`, or add each dependency name".to_string(),
+                "rewrite it as a glob such as `@scope/*`, or add each name".to_string(),
             ),
         });
     }
     let any = !migrated.is_empty();
-    append_unique(config, "ignoreDependencies", migrated);
+    append_unique(config, target_key, migrated);
     any
 }
 
@@ -484,14 +512,14 @@ mod tests {
 
     #[test]
     fn rules_unknown_unmappable_generates_warning() {
-        let rules_val = json!({"binaries": "warn"});
+        let rules_val = json!({"catalog": "warn"});
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_rules(&rules_val, &mut config, &mut warnings);
 
         assert!(!config.contains_key("rules"));
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "rules.binaries");
+        assert_eq!(warnings[0].field, "rules.catalog");
         assert!(warnings[0].message.contains("no fallow equivalent"));
     }
 
@@ -615,13 +643,13 @@ mod tests {
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_include(
-            &["files".to_string(), "binaries".to_string()],
+            &["files".to_string(), "catalog".to_string()],
             &mut config,
             &mut warnings,
         );
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "include.binaries");
+        assert_eq!(warnings[0].field, "include.catalog");
     }
 
     #[test]

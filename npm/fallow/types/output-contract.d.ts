@@ -3143,6 +3143,12 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
+ * Binaries that package.json scripts or process calls run, but that no
+ * installed or listed package provides. Wrapped in
+ * [`UnlistedBinaryFinding`].
+ */
+unlisted_binaries?: UnlistedBinaryFinding[]
+/**
  * Exports with the same name across multiple modules. Wrapped in
  * [`DuplicateExportFinding`] so each entry carries a typed `actions`
  * array natively, with the position-0 `add-to-config` `ignoreExports`
@@ -3697,6 +3703,11 @@ unresolved_imports: number
  * Dependencies imported but absent from `package.json`.
  */
 unlisted_dependencies: number
+/**
+ * Binaries that scripts or process calls run, but that no installed or
+ * listed package provides.
+ */
+unlisted_binaries?: number
 /**
  * Same-named exports declared in more than one module.
  */
@@ -4841,6 +4852,68 @@ line: number
  * 0-based byte column offset.
  */
 col: number
+}
+/**
+ * Wire-shape envelope for an [`UnlistedBinary`] finding. Carries an
+ * `install-dependency` primary (non-auto-fixable) plus an `ignoreBinaries`
+ * config suppress.
+ */
+export interface UnlistedBinaryFinding {
+/**
+ * The binary name as the command runs it (for example `ffmpeg`).
+ */
+binary_name: string
+/**
+ * The sites that run this binary.
+ */
+used_in: BinaryUseSite[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * A location that runs a binary.
+ */
+export interface BinaryUseSite {
+/**
+ * The `package.json` that declares the script, or the source file that
+ * makes the process call.
+ */
+path: string
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * The name of the package.json script that runs the binary. Absent for
+ * a process call in source.
+ */
+script_name?: (string | null)
 }
 /**
  * Wire-shape envelope for a [`DuplicateExport`] finding. Carries up to
@@ -15279,6 +15352,12 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
+ * Binaries that package.json scripts or process calls run, but that no
+ * installed or listed package provides. Wrapped in
+ * [`UnlistedBinaryFinding`].
+ */
+unlisted_binaries?: UnlistedBinaryFinding[]
+/**
  * Exports with the same name across multiple modules. Wrapped in
  * [`DuplicateExportFinding`] so each entry carries a typed `actions`
  * array natively, with the position-0 `add-to-config` `ignoreExports`
@@ -17011,6 +17090,12 @@ unresolved_imports: UnresolvedImportFinding[]
  * [`UnlistedDependencyFinding`].
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
+/**
+ * Binaries that package.json scripts or process calls run, but that no
+ * installed or listed package provides. Wrapped in
+ * [`UnlistedBinaryFinding`].
+ */
+unlisted_binaries?: UnlistedBinaryFinding[]
 /**
  * Exports with the same name across multiple modules. Wrapped in
  * [`DuplicateExportFinding`] so each entry carries a typed `actions`
@@ -21776,6 +21861,16 @@ export type TestOnlyDependency = TestOnlyDependencyFinding;
  * this alias; new code should prefer `TypeOnlyDependencyFinding`.
  */
 export type TypeOnlyDependency = TypeOnlyDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnlistedBinary` name.
+ * The wire shape is byte-identical: `UnlistedBinaryFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnlistedBinary` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnlistedBinaryFinding`.
+ */
+export type UnlistedBinary = UnlistedBinaryFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `UnlistedDependency` name.

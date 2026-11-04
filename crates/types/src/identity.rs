@@ -41,12 +41,12 @@ use crate::output_dead_code::{
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -454,6 +454,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
+        unlisted_binaries,
         duplicate_exports,
         duplicate_export_aliases,
         type_only_dependencies,
@@ -529,6 +530,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unused_store_members);
     visitor.visit(unresolved_imports);
     visitor.visit(unlisted_dependencies);
+    visitor.visit(unlisted_binaries);
     visitor.visit(duplicate_exports);
     visitor.visit(duplicate_export_aliases);
     visitor.visit(type_only_dependencies);
@@ -763,6 +765,13 @@ identified!(
     UnlistedDependencyFinding,
     token: |_t| "unlisted-dependency",
     parts: |f, _p| vec![f.dep.package_name.clone()],
+    position: |_g| (0, 0, 0),
+);
+
+identified!(
+    UnlistedBinaryFinding,
+    token: |_t| "unlisted-binary",
+    parts: |f, _p| vec![f.binary.binary_name.clone()],
     position: |_g| (0, 0, 0),
 );
 

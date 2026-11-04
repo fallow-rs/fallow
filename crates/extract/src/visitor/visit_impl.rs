@@ -4547,9 +4547,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_vitest_do_mock(expr);
         self.record_vitest_unmock(expr);
 
-        self.try_record_pino_transport_targets(expr);
-        self.try_record_node_module_register(expr);
-        self.try_record_child_process_fork(expr);
+        self.record_node_runtime_call(expr);
         self.try_record_package_path_reference(expr);
         self.try_record_relative_require_resolve(expr);
         self.record_bare_require_call(expr);
@@ -5313,6 +5311,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     /// independently so an asset reference spanning an interpolation boundary
     /// is ignored rather than producing a garbled, unresolvable specifier.
     fn visit_tagged_template_expression(&mut self, expr: &TaggedTemplateExpression<'a>) {
+        self.try_record_command_template(expr);
         if is_html_tagged_template(&expr.tag) {
             for quasi in &expr.quasi.quasis {
                 let text = quasi

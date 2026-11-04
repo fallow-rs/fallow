@@ -495,6 +495,8 @@ pub struct DeadCodeFilters {
     pub unresolved_imports: bool,
     /// Imported packages missing from the dependency manifest.
     pub unlisted_deps: bool,
+    /// Binaries that no installed or listed package provides.
+    pub unlisted_binaries: bool,
     /// The same symbol exported more than once.
     pub duplicate_exports: bool,
     /// One binding that one module exports under two or more names.
@@ -556,6 +558,7 @@ impl DeadCodeFilters {
             || self.unused_load_data_keys
             || self.unresolved_imports
             || self.unlisted_deps
+            || self.unlisted_binaries
             || self.duplicate_exports
             || self.duplicate_export_aliases
             || self.circular_deps
@@ -622,6 +625,7 @@ impl DeadCodeFilters {
             "--unused-load-data-keys" => self.unused_load_data_keys = true,
             "--unresolved-imports" => self.unresolved_imports = true,
             "--unlisted-deps" => self.unlisted_deps = true,
+            "--unlisted-binaries" => self.unlisted_binaries = true,
             "--duplicate-exports" => self.duplicate_exports = true,
             "--duplicate-export-aliases" => self.duplicate_export_aliases = true,
             "--circular-deps" => self.circular_deps = true,

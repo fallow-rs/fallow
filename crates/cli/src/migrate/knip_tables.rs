@@ -11,6 +11,7 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("enumMembers", "unused-enum-members"),
     ("classMembers", "unused-class-members"),
     ("unlisted", "unlisted-dependencies"),
+    ("binaries", "unlisted-binaries"),
     ("unresolved", "unresolved-imports"),
     ("duplicates", "duplicate-exports"),
     ("duplicates", "duplicate-export-aliases"),
@@ -31,11 +32,6 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
         Some(
             "use overrides[].files with rules.unused-files = \"off\"; this keeps matching files in the analysis graph",
         ),
-    ),
-    (
-        "ignoreBinaries",
-        "Binary filtering is not configurable in fallow",
-        None,
     ),
     (
         "ignoreMembers",
@@ -78,8 +74,8 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ),
     (
         "ignoreGlobalBinaries",
-        "Binary filtering is not configurable in fallow",
-        None,
+        "Fallow has no switch for globally installed binaries",
+        Some("add the binary names to ignoreBinaries"),
     ),
     (
         "preprocessor",
@@ -102,6 +98,7 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
     "entry",
     "exclude",
     "ignore",
+    "ignoreBinaries",
     "ignoreDependencies",
     "ignoreExportsUsedInFile",
     "ignoreIssues",
@@ -112,12 +109,8 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
 ];
 
 /// Knip issue type names that have no fallow equivalent.
-pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
-    "optionalPeerDependencies",
-    "binaries",
-    "catalog",
-    "catalogReferences",
-];
+pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] =
+    &["optionalPeerDependencies", "catalog", "catalogReferences"];
 
 /// Knip issue types for members of a namespace, with the knip issue type
 /// that fallow reports them under.

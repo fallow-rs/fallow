@@ -105,6 +105,7 @@ fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResu
         results.unlisted_dependencies.len(),
         "unlisted dependencies",
     );
+    push_summary_part(parts, results.unlisted_binaries.len(), "unlisted binaries");
     push_summary_part(
         parts,
         count_duplicate_export_pairs(results),

@@ -33,6 +33,7 @@ const NON_CORE_KINDS: &[IssueKind] = &[
     IssueKind::UnusedDependency,
     IssueKind::UnusedDevDependency,
     IssueKind::UnlistedDependency,
+    IssueKind::UnlistedBinary,
     IssueKind::TypeOnlyDependency,
     IssueKind::TestOnlyDependency,
     IssueKind::DevDependencyInProduction,

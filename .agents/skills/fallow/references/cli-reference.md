@@ -151,6 +151,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-load-data-keys` | A SvelteKit load() return-object key is read by no consumer |
 | `--unresolved-imports` | Unresolved imports |
 | `--unlisted-deps` | Unlisted dependencies |
+| `--unlisted-binaries` | Binary used but provided by no installed package |
 | `--duplicate-exports` | Duplicate exports |
 | `--duplicate-export-aliases` | One module exports one binding under two or more names |
 | `--circular-deps` | Circular dependencies |

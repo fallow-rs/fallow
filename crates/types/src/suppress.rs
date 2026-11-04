@@ -41,6 +41,9 @@ pub enum IssueKind {
     UnresolvedImport,
     /// An unlisted dependency.
     UnlistedDependency,
+    /// A binary that a script or a process call runs, but that no installed
+    /// or listed package provides.
+    UnlistedBinary,
     /// A duplicate export name across modules.
     DuplicateExport,
     /// Code duplication.
@@ -253,6 +256,7 @@ impl IssueKind {
         Self::UnusedClassMember,
         Self::UnresolvedImport,
         Self::UnlistedDependency,
+        Self::UnlistedBinary,
         Self::DuplicateExport,
         Self::CodeDuplication,
         Self::CircularDependency,
@@ -385,6 +389,7 @@ impl IssueKind {
             Self::DivergedCloneSibling => 63,
             Self::AddedDependency => 64,
             Self::DuplicateExportAlias => 65,
+            Self::UnlistedBinary => 66,
         }
     }
 
@@ -457,6 +462,7 @@ impl IssueKind {
             63 => Some(Self::DivergedCloneSibling),
             64 => Some(Self::AddedDependency),
             65 => Some(Self::DuplicateExportAlias),
+            66 => Some(Self::UnlistedBinary),
             _ => None,
         }
     }
@@ -893,6 +899,7 @@ mod tests {
             (63, IssueKind::DivergedCloneSibling),
             (64, IssueKind::AddedDependency),
             (65, IssueKind::DuplicateExportAlias),
+            (66, IssueKind::UnlistedBinary),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

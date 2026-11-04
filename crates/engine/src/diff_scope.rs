@@ -196,6 +196,15 @@ fn filter_dependency_findings(
     results
         .unlisted_dependencies
         .retain(|finding| !finding.dep.imported_from.is_empty());
+    for finding in &mut results.unlisted_binaries {
+        finding
+            .binary
+            .used_in
+            .retain(|site| line_in_diff(&site.path, site.line));
+    }
+    results
+        .unlisted_binaries
+        .retain(|finding| !finding.binary.used_in.is_empty());
 }
 
 fn filter_graph_findings(

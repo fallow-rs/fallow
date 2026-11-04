@@ -51,6 +51,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "dynamic-segment-name-conflict": "git-merge",
   "unresolved-imports": "error",
   "unlisted-dependencies": "package",
+  "unlisted-binaries": "terminal",
   "duplicate-exports": "files",
   "duplicate-export-aliases": "references",
   "type-only-dependencies": "symbol-interface",
@@ -563,6 +564,16 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         d.imported_from.map(
           (site) =>
             new IssueItem(d.package_name, site.path, site.line, site.col, "unlisted-dependencies"),
+        ),
+      ),
+    );
+
+    addCategory(
+      "unlisted-binaries",
+      (this.result.unlisted_binaries ?? []).flatMap((b) =>
+        b.used_in.map(
+          (site) =>
+            new IssueItem(b.binary_name, site.path, site.line, site.col, "unlisted-binaries"),
         ),
       ),
     );

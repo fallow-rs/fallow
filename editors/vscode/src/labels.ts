@@ -37,6 +37,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "dynamic-segment-name-conflict": "dynamic-segment-name-conflict",
   "unresolved-imports": "unresolved-import",
   "unlisted-dependencies": "unlisted-dependency",
+  "unlisted-binaries": "unlisted-binary",
   "duplicate-exports": "duplicate-export",
   "duplicate-export-aliases": "duplicate-export-alias",
   "type-only-dependencies": "type-only-dependency",

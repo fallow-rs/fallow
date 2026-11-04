@@ -1,8 +1,9 @@
 use serde_json::Value;
 
 use super::knip_fields::{
-    migrate_exclude, migrate_ignore, migrate_ignore_deps, migrate_ignore_exports_used_in_file,
-    migrate_include, migrate_rules, warn_unhandled_root_keys, warn_unmappable_fields,
+    migrate_exclude, migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps,
+    migrate_ignore_exports_used_in_file, migrate_include, migrate_rules, warn_unhandled_root_keys,
+    warn_unmappable_fields,
 };
 use super::knip_scoped::{KnipScope, migrate_entry, migrate_ignore_issues, migrate_workspaces};
 #[cfg(test)]
@@ -37,6 +38,10 @@ pub(super) fn migrate_knip(
 
     if let Some(ignore_deps_val) = obj.get("ignoreDependencies") {
         migrate_ignore_deps(ignore_deps_val, "ignoreDependencies", config, warnings);
+    }
+
+    if let Some(value) = obj.get("ignoreBinaries") {
+        migrate_ignore_binaries(value, "ignoreBinaries", config, warnings);
     }
 
     if let Some(value) = obj.get("ignoreExportsUsedInFile") {
@@ -336,17 +341,17 @@ mod tests {
     #[test]
     fn migrate_knip_rules_unmappable_warns() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"rules": {"binaries": "warn", "files": "error"}}"#).unwrap();
+            serde_json::from_str(r#"{"rules": {"catalog": "warn", "files": "error"}}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
         assert_eq!(rules.get("unused-files").unwrap(), "error");
-        assert!(!rules.contains_key("binaries"));
+        assert!(!rules.contains_key("catalog"));
 
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].field.contains("binaries"));
+        assert!(warnings[0].field.contains("catalog"));
     }
 
     #[test]
@@ -661,7 +666,7 @@ mod tests {
                 ".": {
                     "project": ["*.ts"],
                     "vitest": {"entry": [".github/**/*.test.cjs"]},
-                    "ignoreBinaries": ["eas"],
+                    "ignoreUnresolved": ["virtual:x"],
                     "unknownKey": true
                 }
             }
@@ -676,7 +681,7 @@ mod tests {
             [
                 "workspaces[\".\"].project",
                 "workspaces[\".\"].vitest",
-                "workspaces[\".\"].ignoreBinaries",
+                "workspaces[\".\"].ignoreUnresolved",
                 "workspaces[\".\"].unknownKey"
             ]
         );
@@ -840,7 +845,7 @@ mod tests {
     #[test]
     fn migrate_knip_include_unmappable_warns() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"include": ["files", "binaries"]}"#).unwrap();
+            serde_json::from_str(r#"{"include": ["files", "catalog"]}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -850,7 +855,7 @@ mod tests {
             .filter(|w| w.field.starts_with("include."))
             .collect();
         assert_eq!(include_warnings.len(), 1);
-        assert!(include_warnings[0].field.contains("binaries"));
+        assert!(include_warnings[0].field.contains("catalog"));
     }
 
     #[test]
@@ -951,8 +956,8 @@ mod tests {
     fn migrate_knip_exclude_all_mappable_types() {
         let knip: serde_json::Value = serde_json::from_str(
             r#"{"exclude": ["files", "dependencies", "devDependencies", "exports",
-                "types", "enumMembers", "classMembers", "unlisted", "unresolved", "duplicates",
-                "cycles"]}"#,
+                "types", "enumMembers", "classMembers", "unlisted", "binaries", "unresolved",
+                "duplicates", "cycles"]}"#,
         )
         .unwrap();
         let mut config = empty_config();
@@ -992,10 +997,9 @@ mod tests {
 
     #[test]
     fn migrate_knip_unmappable_without_suggestion() {
-        let knip: serde_json::Value = serde_json::from_str(
-            r#"{"ignoreBinaries": ["tsc"], "treatConfigHintsAsErrors": true}"#,
-        )
-        .unwrap();
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"tags": ["-lintignore"], "treatConfigHintsAsErrors": true}"#)
+                .unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -1059,15 +1063,39 @@ mod tests {
     }
 
     #[test]
+    fn migrate_ignore_binaries_and_binaries_rule() {
+        let knip = serde_json::json!({
+            "ignoreBinaries": ["eas", "/^xcrun/"],
+            "rules": {"binaries": "off"},
+            "workspaces": {"apps/mobile": {"ignoreBinaries": ["plutil", "eas"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreBinaries").unwrap(),
+            &serde_json::json!(["eas", "xcrun*", "plutil"])
+        );
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        assert_eq!(rules.get("unlisted-binaries").unwrap(), "off");
+        assert_eq!(
+            warning_fields(&warnings),
+            ["workspaces.apps/mobile.ignoreBinaries"]
+        );
+        assert!(warnings[0].message.contains("global ignoreBinaries list"));
+    }
+
+    #[test]
     fn migrate_knip_documented_unmappable_keeps_existing_message() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"rules": {"binaries": "warn"}}"#).unwrap();
+            serde_json::from_str(r#"{"rules": {"catalog": "warn"}}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "rules.binaries");
+        assert_eq!(warnings[0].field, "rules.catalog");
         assert!(warnings[0].message.contains("no fallow equivalent"));
         assert!(warnings[0].suggestion.is_none());
     }
@@ -1218,7 +1246,7 @@ mod tests {
             r#"{
                 "project": ["src/**"],
                 "ignoreDependencies": ["^(a|b)$"],
-                "rules": {"binaries": "warn"},
+                "rules": {"catalog": "warn"},
                 "exclude": ["optionalPeerDependencies"],
                 "eslint": {},
                 "workspaces": {"pkg": {}}

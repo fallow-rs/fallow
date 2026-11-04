@@ -258,6 +258,15 @@ const DEAD_CODE_WIRING = {
       actions: [],
     },
   },
+  "unlisted-binary": {
+    field: "unlisted_binaries",
+    category: "unlisted-binaries",
+    finding: {
+      binary_name: "hyprctl",
+      used_in: [{ ...loc }],
+      actions: [],
+    },
+  },
   "duplicate-export": {
     field: "duplicate_exports",
     category: "duplicate-exports",

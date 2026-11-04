@@ -158,6 +158,7 @@ impl DeadCodeAuditLedger {
             unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
+            unlisted_binaries,
             duplicate_exports,
             duplicate_export_aliases,
             type_only_dependencies,
@@ -245,6 +246,7 @@ impl DeadCodeAuditLedger {
         annotate!(unused_store_members, "unused_store_members");
         annotate!(unresolved_imports, "unresolved_imports");
         annotate!(unlisted_dependencies, "unlisted_dependencies");
+        annotate!(unlisted_binaries, "unlisted_binaries");
         annotate!(duplicate_exports, "duplicate_exports");
         annotate!(duplicate_export_aliases, "duplicate_export_aliases");
         annotate!(type_only_dependencies, "type_only_dependencies");
@@ -641,6 +643,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
+            unlisted_binaries,
             duplicate_exports,
             duplicate_export_aliases,
             type_only_dependencies,
@@ -723,6 +726,7 @@ impl DeadCodeKeyCollector<'_> {
             mixed_client_server_barrels,
             misplaced_directives,
         );
+        self.add_unlisted_binaries(unlisted_binaries);
         self.add_dependency_findings(&DependencyFindingSlices {
             unused_dependencies,
             unused_dev_dependencies,
@@ -1252,6 +1256,13 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_items(AuditCollection::UnlistedDependencies, items);
     }
 
+    fn add_unlisted_binaries(
+        &mut self,
+        items: &[fallow_types::output_dead_code::UnlistedBinaryFinding],
+    ) {
+        self.add_items(AuditCollection::UnlistedBinaries, items);
+    }
+
     fn add_duplicate_exports(
         &mut self,
         items: &[fallow_types::output_dead_code::DuplicateExportFinding],
@@ -1433,6 +1444,7 @@ pub fn retain_introduced_dead_code(
         unused_dev_dependencies,
         unused_optional_dependencies,
         unlisted_dependencies,
+        unlisted_binaries,
         duplicate_exports,
         duplicate_export_aliases,
         type_only_dependencies,
@@ -1496,6 +1508,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
+        unlisted_binaries: _unlisted_binaries,
         duplicate_exports: _duplicate_exports,
         duplicate_export_aliases: _duplicate_export_aliases,
         type_only_dependencies: _type_only_dependencies,
@@ -1636,6 +1649,7 @@ pub fn annotate_dead_code_json(
         type_only_dependencies,
         test_only_dependencies,
         unlisted_dependencies,
+        unlisted_binaries,
         unused_enum_members,
         unused_class_members,
         unused_store_members,

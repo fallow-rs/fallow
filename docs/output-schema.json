@@ -670,6 +670,13 @@
           },
           "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
+        "unlisted_binaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnlistedBinaryFinding"
+          },
+          "description": "Binaries that package.json scripts or process calls run, but that no\ninstalled or listed package provides. Wrapped in\n[`UnlistedBinaryFinding`]."
+        },
         "duplicate_exports": {
           "type": "array",
           "items": {
@@ -1322,6 +1329,13 @@
             "$ref": "#/definitions/UnlistedDependencyFinding"
           },
           "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
+        },
+        "unlisted_binaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnlistedBinaryFinding"
+          },
+          "description": "Binaries that package.json scripts or process calls run, but that no\ninstalled or listed package provides. Wrapped in\n[`UnlistedBinaryFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -6355,6 +6369,10 @@
           "type": "integer",
           "description": "Dependencies imported but absent from `package.json`."
         },
+        "unlisted_binaries": {
+          "type": "integer",
+          "description": "Binaries that scripts or process calls run, but that no installed or\nlisted package provides."
+        },
         "duplicate_exports": {
           "type": "integer",
           "description": "Same-named exports declared in more than one module."
@@ -7134,6 +7152,13 @@
             "$ref": "#/definitions/UnlistedDependencyFinding"
           },
           "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
+        },
+        "unlisted_binaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnlistedBinaryFinding"
+          },
+          "description": "Binaries that package.json scripts or process calls run, but that no\ninstalled or listed package provides. Wrapped in\n[`UnlistedBinaryFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -31025,6 +31050,13 @@
           },
           "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
+        "unlisted_binaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnlistedBinaryFinding"
+          },
+          "description": "Binaries that package.json scripts or process calls run, but that no\ninstalled or listed package provides. Wrapped in\n[`UnlistedBinaryFinding`]."
+        },
         "duplicate_exports": {
           "type": "array",
           "items": {
@@ -36025,6 +36057,94 @@
         "col"
       ],
       "description": "One export name of a [`DuplicateExportAlias`]."
+    },
+    "UnlistedBinaryFinding": {
+      "type": "object",
+      "properties": {
+        "binary_name": {
+          "type": "string",
+          "description": "The binary name as the command runs it (for example `ffmpeg`)."
+        },
+        "used_in": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BinaryUseSite"
+          },
+          "description": "The sites that run this binary."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "binary_name",
+        "used_in",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnlistedBinary`] finding. Carries an\n`install-dependency` primary (non-auto-fixable) plus an `ignoreBinaries`\nconfig suppress."
+    },
+    "BinaryUseSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The `package.json` that declares the script, or the source file that\nmakes the process call."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "script_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the package.json script that runs the binary. Absent for\na process call in source."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "A location that runs a binary."
     }
   }
 }

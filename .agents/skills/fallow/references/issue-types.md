@@ -27,6 +27,7 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `unused-store-member` | `--unused-store-members` | - | `// fallow-ignore-next-line unused-store-member` | Pinia store state/getter/action (needs `pinia` dep) |
 | `unresolved-import` | `--unresolved-imports` | - | `// fallow-ignore-next-line unresolved-import` | Imports that can't be resolved |
 | `unlisted-dependency` | `--unlisted-deps` | - | - | Used packages missing an applicable dependency declaration. This includes root code importing an npm workspace package: a workspace link or hoisted install makes the package resolvable but does not declare it. Add runtime imports to `dependencies`, or tooling/test imports to `devDependencies`, in the owning `package.json`. Private packages and tooling may inherit ancestor declarations. Self-references need no declaration. Use `ignoreDependencies` for a deliberate ambient-package opt-out. |
+| `unlisted-binary` | `--unlisted-binaries` | - | - | Binary used but provided by no installed package; Needs installed dependencies; a project without a root node_modules reports none |
 | `duplicate-export` | `--duplicate-exports` | - | `// fallow-ignore-file duplicate-export` | Same symbol exported from multiple modules |
 | `duplicate-export-alias` | `--duplicate-export-aliases` | - | `// fallow-ignore-file duplicate-export-alias` | One module exports one binding under two or more names |
 | `circular-dependency` | `--circular-deps` | - | `// fallow-ignore-next-line circular-dependency` | Import cycles in the module graph |

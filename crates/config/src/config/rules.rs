@@ -326,6 +326,12 @@ pub struct RulesConfig {
     /// Defaults to `error`.
     #[serde(default, alias = "unlisted-dependency")]
     pub unlisted_dependencies: Severity,
+    /// A binary that a package.json script or a process call runs, but that
+    /// no installed or listed package provides. Shell builtins and common
+    /// operating-system tools are skipped; `ignoreBinaries` skips more.
+    /// Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "unlisted-binary")]
+    pub unlisted_binaries: Severity,
     /// The same export name provided by multiple modules; `ignoreExports`
     /// excludes intentional barrel re-exports. Defaults to `error`.
     #[serde(default, alias = "duplicate-export")]
@@ -537,6 +543,7 @@ impl Default for RulesConfig {
             complexity_file_lines: Severity::Error,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
+            unlisted_binaries: Severity::Warn,
             duplicate_exports: Severity::Error,
             duplicate_export_aliases: Severity::Warn,
             type_only_dependencies: Severity::Warn,
@@ -610,6 +617,7 @@ impl RulesConfig {
             IssueKind::UnprovidedInject => self.unprovided_injects,
             IssueKind::UnresolvedImport => self.unresolved_imports,
             IssueKind::UnlistedDependency => self.unlisted_dependencies,
+            IssueKind::UnlistedBinary => self.unlisted_binaries,
             IssueKind::DuplicateExport => self.duplicate_exports,
             IssueKind::DuplicateExportAlias => self.duplicate_export_aliases,
             IssueKind::CircularDependency => self.circular_dependencies,
@@ -743,6 +751,7 @@ impl RulesConfig {
             [
                 unresolved_imports,
                 unlisted_dependencies,
+                unlisted_binaries,
                 duplicate_exports,
                 duplicate_export_aliases,
                 type_only_dependencies,
@@ -1068,6 +1077,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unlisted_dependencies: Option<Severity>,
+    /// Optional override for [`RulesConfig::unlisted_binaries`].
+    #[serde(
+        default,
+        alias = "unlisted-binary",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unlisted_binaries: Option<Severity>,
     /// Optional override for [`RulesConfig::duplicate_exports`].
     #[serde(
         default,
@@ -1330,6 +1346,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "complexity-file-lines",
     "unresolved-imports",
     "unlisted-dependencies",
+    "unlisted-binaries",
     "duplicate-exports",
     "duplicate-export-aliases",
     "type-only-dependencies",
@@ -1384,6 +1401,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-load-data-key",
     "unresolved-import",
     "unlisted-dependency",
+    "unlisted-binary",
     "duplicate-export",
     "duplicate-export-alias",
     "type-only-dependency",

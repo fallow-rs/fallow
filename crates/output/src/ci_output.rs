@@ -1634,6 +1634,7 @@ mod tests {
             "fallow/unused-store-member",
             "fallow/unresolved-import",
             "fallow/unlisted-dependency",
+            "fallow/unlisted-binary",
             "fallow/duplicate-export",
             "fallow/circular-dependency",
             "fallow/re-export-cycle",

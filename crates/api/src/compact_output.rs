@@ -380,6 +380,16 @@ impl<'a> CompactLineBuilder<'a> {
             self.lines
                 .push(format!("unlisted-dep:{}", dep.dep.package_name));
         }
+        for binary in &self.results.unlisted_binaries {
+            for site in &binary.binary.used_in {
+                self.lines.push(format!(
+                    "unlisted-binary:{}:{}:{}",
+                    self.rel(&site.path),
+                    site.line,
+                    binary.binary.binary_name
+                ));
+            }
+        }
         for dup in &self.results.duplicate_exports {
             self.lines
                 .push(format!("duplicate-export:{}", dup.export.export_name));

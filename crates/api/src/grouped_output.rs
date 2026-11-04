@@ -221,6 +221,13 @@ where
                 .unlisted_dependencies
                 .push(item.clone());
         }
+        for item in &results.unlisted_binaries {
+            let key = item.binary.used_in.first().map_or_else(
+                || UNOWNED_GROUP_LABEL.to_string(),
+                |site| (self.key_for)(&site.path),
+            );
+            self.entry_for_key(key).unlisted_binaries.push(item.clone());
+        }
         for item in &results.duplicate_exports {
             let key = item.export.locations.first().map_or_else(
                 || UNOWNED_GROUP_LABEL.to_string(),

@@ -1030,6 +1030,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unused_load_data_keys
         || filters.unresolved_imports
         || filters.unlisted_deps
+        || filters.unlisted_binaries
         || filters.duplicate_exports
         || filters.duplicate_export_aliases
         || filters.circular_deps
@@ -1076,6 +1077,9 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
     }
     if !filters.unlisted_deps {
         results.unlisted_dependencies.clear();
+    }
+    if !filters.unlisted_binaries {
+        results.unlisted_binaries.clear();
     }
 }
 
