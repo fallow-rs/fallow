@@ -32,6 +32,7 @@ fn make_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         minimum_version: None,
         extends: vec![],
         entry: vec![],
+        support_entry: vec![],
         ignore_patterns: vec![],
         ignore_findings: vec![],
         framework: vec![],

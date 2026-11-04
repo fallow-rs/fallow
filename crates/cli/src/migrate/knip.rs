@@ -5,7 +5,10 @@ use super::knip_fields::{
     migrate_ignore_exports_used_in_file, migrate_include, migrate_rules, warn_unhandled_root_keys,
     warn_unmappable_fields,
 };
-use super::knip_scoped::{KnipScope, migrate_entry, migrate_ignore_issues, migrate_workspaces};
+use super::knip_scoped::{
+    KnipScope, WorkspaceMigration, config_marks_production_entry, migrate_entry,
+    migrate_ignore_issues, migrate_workspaces,
+};
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
 use super::{MigrationWarning, string_or_array};
@@ -28,8 +31,9 @@ pub(super) fn migrate_knip(
     };
 
     let root = KnipScope::root();
+    let production_split = config_marks_production_entry(obj);
     if let Some(value) = obj.get("entry") {
-        migrate_entry(value, &root, config, warnings);
+        migrate_entry(value, &root, production_split, config, warnings);
     }
 
     if let Some(value) = obj.get("ignore") {
@@ -78,7 +82,11 @@ pub(super) fn migrate_knip(
     warn_unhandled_root_keys(obj, warnings);
 
     if let Some(workspaces) = obj.get("workspaces") {
-        migrate_workspaces(workspaces, include_entry_exports, config, warnings);
+        let migration = WorkspaceMigration {
+            root_include_entry_exports: include_entry_exports,
+            production_split,
+        };
+        migrate_workspaces(workspaces, &migration, config, warnings);
     }
 }
 
@@ -380,9 +388,9 @@ mod tests {
             "entry": ["src/root.ts"],
             "workspaces": {
                 ".": {"entry": [".github/scripts/report.cjs"]},
-                "apps/server": {"entry": ["src/bin.ts!", "./scripts/*.ts!"]},
+                "apps/server": {"entry": ["src/bin.ts", "./scripts/*.ts"]},
                 "packages/*": {"entry": "test/fixtures/*.ts"},
-                "./infra/cache/": {"entry": ["alchemy.run.ts!"]}
+                "./infra/cache/": {"entry": ["alchemy.run.ts"]}
             }
         });
         let mut config = empty_config();
@@ -465,10 +473,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_workspace_ignore_dependencies_merge_into_the_global_list() {
+    fn migrate_knip_workspace_ignore_dependencies_keep_their_workspace_scope() {
         let knip = serde_json::json!({
             "ignoreDependencies": ["lodash"],
             "workspaces": {
+                ".": {"ignoreDependencies": ["root-only"]},
                 "apps/server": {"ignoreDependencies": ["ffi-rs", "lodash", "/^@org/"]},
                 "apps/web": {"ignoreDependencies": ["^(a|b)$"]}
             }
@@ -479,17 +488,53 @@ mod tests {
 
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
-            &serde_json::json!(["lodash", "ffi-rs", "@org*"])
+            &serde_json::json!(["lodash", "root-only"]),
+            "the root workspace uses the global list"
+        );
+        assert_eq!(
+            config.get("workspaces").unwrap(),
+            &serde_json::json!({"settings": {
+                "apps/server": {"ignoreDependencies": ["ffi-rs", "lodash", "@org*"]}
+            }})
+        );
+        assert_eq!(
+            warning_fields(&warnings),
+            ["workspaces.apps/web.ignoreDependencies"]
+        );
+        assert!(warnings[0].message.contains("^(a|b)$"));
+    }
+
+    #[test]
+    fn migrate_knip_overlapping_workspace_keys_keep_the_most_specific_value() {
+        let knip = serde_json::json!({
+            "workspaces": {
+                "packages/*": {"includeEntryExports": true, "ignoreDependencies": ["a"]},
+                "packages/core": {"entry": ["src/main.ts"]},
+                "packages/util": {"includeEntryExports": true}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("workspaces").unwrap(),
+            &serde_json::json!({"settings": {
+                "packages/*": {"ignoreDependencies": ["a"], "includeEntryExports": true},
+                "packages/core": {"includeEntryExports": false},
+                "packages/util": {"includeEntryExports": true}
+            }}),
+            "a more specific section without the key keeps the root value"
         );
         assert_eq!(
             warning_fields(&warnings),
             [
-                "workspaces.apps/server.ignoreDependencies",
-                "workspaces.apps/web.ignoreDependencies"
-            ]
+                "workspaces.packages/*.ignoreDependencies",
+                "workspaces.packages/*.ignoreDependencies"
+            ],
+            "fallow merges the lists of overlapping keys"
         );
-        assert!(warnings[0].message.contains("every workspace"));
-        assert!(warnings[1].message.contains("^(a|b)$"));
+        assert!(warnings[0].message.contains("packages/core"));
     }
 
     #[test]
@@ -646,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_include_entry_exports_is_global_only() {
+    fn migrate_knip_include_entry_exports_keeps_its_workspace_scope() {
         let knip = serde_json::json!({
             "workspaces": {
                 "packages/*": {"includeEntryExports": true},
@@ -659,12 +704,16 @@ mod tests {
 
         assert!(!config.contains_key("includeEntryExports"));
         assert_eq!(
-            warning_fields(&warnings),
-            ["workspaces.packages/*.includeEntryExports"]
+            config.get("workspaces").unwrap(),
+            &serde_json::json!({"settings": {"packages/*": {"includeEntryExports": true}}}),
+            "a value equal to the root value adds nothing"
         );
-        assert!(warnings[0].message.contains("global"));
+        assert!(warnings.is_empty(), "{warnings:?}");
 
-        let knip = serde_json::json!({"includeEntryExports": true});
+        let knip = serde_json::json!({
+            "includeEntryExports": true,
+            "workspaces": {".": {"includeEntryExports": false}}
+        });
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -672,6 +721,55 @@ mod tests {
             config.get("includeEntryExports").unwrap(),
             &serde_json::json!(true)
         );
+        assert_eq!(
+            warning_fields(&warnings),
+            [r#"workspaces["."].includeEntryExports"#]
+        );
+    }
+
+    #[test]
+    fn migrate_knip_unmarked_entries_become_support_entries_when_the_config_marks_one() {
+        let knip = serde_json::json!({
+            "entry": ["scripts/build.ts"],
+            "workspaces": {
+                "apps/server": {"entry": ["src/bin.ts!", "scripts/cli.ts"]},
+                "apps/web": {"entry": "test/fixtures/**/*.mjs"}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["apps/server/src/bin.ts"])
+        );
+        assert_eq!(
+            config.get("supportEntry").unwrap(),
+            &serde_json::json!([
+                "scripts/build.ts",
+                "apps/server/scripts/cli.ts",
+                "apps/web/test/fixtures/**/*.mjs"
+            ])
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn migrate_knip_entries_stay_entries_when_no_entry_is_marked() {
+        let knip = serde_json::json!({
+            "entry": ["src/main.ts"],
+            "workspaces": {"apps/web": {"entry": ["scripts/a.ts"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &serde_json::json!(["src/main.ts", "apps/web/scripts/a.ts"])
+        );
+        assert!(!config.contains_key("supportEntry"));
         assert!(warnings.is_empty(), "{warnings:?}");
     }
 
@@ -705,12 +803,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_mixed_production_entries_warn_once_per_section() {
+    fn migrate_knip_mixed_production_entries_split_without_a_warning() {
         let knip = serde_json::json!({
-            "entry": ["src/prod.ts!", "src/dev.ts", "src/other.ts"],
+            "entry": ["src/prod.ts!", "src/dev.ts"],
             "workspaces": {
                 "apps/server": {"entry": ["src/bin.ts!", "scripts/*.ts"]},
-                "apps/web": {"entry": ["src/main.ts!"]},
                 "apps/docs": {"entry": ["scripts/build.ts"]}
             }
         });
@@ -719,16 +816,18 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(
-            warning_fields(&warnings),
-            ["entry", "workspaces.apps/server.entry"]
+            config.get("entry").unwrap(),
+            &serde_json::json!(["src/prod.ts", "apps/server/src/bin.ts"])
         );
-        assert!(
-            warnings[0]
-                .message
-                .contains("unmarked entries now also count in production mode"),
-            "{}",
-            warnings[0].message
+        assert_eq!(
+            config.get("supportEntry").unwrap(),
+            &serde_json::json!([
+                "src/dev.ts",
+                "apps/server/scripts/*.ts",
+                "apps/docs/scripts/build.ts"
+            ])
         );
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]

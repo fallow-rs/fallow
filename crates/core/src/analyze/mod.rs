@@ -766,8 +766,7 @@ pub(crate) fn find_dead_code_full(
     // keeps one resolved config, and the unmatched-pattern diagnostics must
     // describe this pass only. `ignoreFindings` is consulted by the engine
     // right after this pass, so this is its start as well.
-    config.ignore_dependencies.reset_usage();
-    config.ignore_findings.reset_usage();
+    config.begin_dead_code_pass(workspaces);
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
     let class_member_rules = ClassMemberRules::new(config, plugin_result);

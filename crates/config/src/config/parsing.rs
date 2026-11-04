@@ -1190,6 +1190,31 @@ pub(super) fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(
     (result, findings)
 }
 
+/// Warn once per config file about each key under `workspaces` that fallow
+/// does not know. An error would break configs that carry a stray key today.
+fn warn_on_unknown_workspace_keys(config_path: &Path, workspaces: Option<&crate::WorkspaceConfig>) {
+    use std::sync::{Mutex, OnceLock};
+
+    static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    let Some(workspaces) = workspaces else {
+        return;
+    };
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    for key in workspaces.unknown_keys.keys() {
+        let dedupe_key = format!("{}::{key}", config_path.display());
+        if let Ok(mut set) = warned.lock()
+            && !set.insert(dedupe_key)
+        {
+            continue;
+        }
+        tracing::warn!(
+            "unknown key 'workspaces.{key}' in {}; fallow ignores it. The known keys are \
+             'patterns', 'changedSince' and 'settings'.",
+            config_path.display(),
+        );
+    }
+}
+
 /// Emit a `tracing::warn!` when `find_and_load` picked `chosen_path` while one
 /// or more lower-precedence config files (`shadowed`) coexist in the same
 /// directory. Silent precedence is the worst class of config bug: the user
@@ -1375,6 +1400,7 @@ impl FallowConfig {
             miette::miette!("{reason} in {}{hint}", path.display())
         })?;
         config.rules.private_type_leaks_configured = private_type_leaks_configured;
+        warn_on_unknown_workspace_keys(path, config.workspaces.as_ref());
 
         config.validate_user_globs().map_err(|errors| {
             let joined = errors
@@ -1472,6 +1498,21 @@ impl FallowConfig {
         };
 
         validate_user_globs(&self.entry, "entry", errors);
+        validate_user_globs(&self.support_entry, "supportEntry", errors);
+        if let Some(workspaces) = &self.workspaces {
+            for (key, settings) in &workspaces.settings {
+                validate_user_globs(
+                    std::slice::from_ref(key),
+                    "workspaces.settings (key)",
+                    errors,
+                );
+                validate_user_dependency_globs(
+                    &settings.ignore_dependencies,
+                    "workspaces.settings[].ignoreDependencies",
+                    errors,
+                );
+            }
+        }
         validate_user_ignore_pattern_globs(&self.ignore_patterns, "ignorePatterns", errors);
         validate_user_finding_ignore_globs(&self.ignore_findings, "ignoreFindings", errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);

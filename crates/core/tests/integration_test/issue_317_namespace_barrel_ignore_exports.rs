@@ -16,6 +16,7 @@ fn make_config(
         minimum_version: None,
         extends: vec![],
         entry: vec![],
+        support_entry: vec![],
         ignore_patterns: vec![],
         ignore_findings: vec![],
         framework: vec![],

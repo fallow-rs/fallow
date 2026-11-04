@@ -28,9 +28,12 @@ mod peer_closure;
 mod production_only;
 #[path = "unused_deps_required.rs"]
 mod required;
+#[path = "unused_deps_workspace_scope.rs"]
+mod workspace_scope;
 use peer_closure::{PeerDependencyResolver, PeerSeedInput, peer_closure_shared_seeds};
 pub use peer_closure::{peer_closure_seeds, peer_dependency_hosts};
 pub use production_only::{credit_production_ignores, find_type_only_dependencies};
+use workspace_scope::{collect_unlisted_dependencies, drop_workspace_ignored};
 
 /// Return `true` if a virtual-module `prefix` from the active plugin set covers
 /// `spec`. Two shapes are recognised:
@@ -1586,7 +1589,14 @@ fn collect_workspace_unused_dependencies<'a>(
         inputs.root_flagged,
     );
 
-    collect_workspace_unused_categories(&ws_pkg, &ws_shared, &usage, &ws_pkg_path, &ws_pkg_content)
+    let categories = collect_workspace_unused_categories(
+        &ws_pkg,
+        &ws_shared,
+        &usage,
+        &ws_pkg_path,
+        &ws_pkg_content,
+    );
+    drop_workspace_ignored(categories, inputs.config, &ws_pkg_path)
 }
 
 fn read_workspace_package(
@@ -2446,31 +2456,6 @@ fn build_unlisted_dependency_context_parts<'a>(
         import_spans_by_file,
         ignore_deps,
     }
-}
-
-/// Walk `package_usage`, gathering per-package import sites into findings.
-fn collect_unlisted_dependencies(ctx: &UnlistedDependencyContext<'_>) -> Vec<UnlistedDependency> {
-    let mut unlisted: FxHashMap<String, Vec<ImportSite>> = FxHashMap::default();
-
-    for (package_name, file_ids) in &ctx.graph.package_usage {
-        if should_skip_unlisted_package(package_name, ctx) {
-            continue;
-        }
-        let mut unlisted_sites = collect_unlisted_import_sites(package_name, file_ids, ctx);
-        if !unlisted_sites.is_empty() && !ctx.ignore_deps.suppresses(package_name) {
-            unlisted_sites.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
-            unlisted_sites.dedup_by(|a, b| a.path == b.path);
-            unlisted.insert(package_name.clone(), unlisted_sites);
-        }
-    }
-
-    unlisted
-        .into_iter()
-        .map(|(name, sites)| UnlistedDependency {
-            package_name: name,
-            imported_from: sites,
-        })
-        .collect()
 }
 
 struct UnlistedDependencyContext<'a> {

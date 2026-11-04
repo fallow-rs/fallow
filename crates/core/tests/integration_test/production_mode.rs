@@ -8,6 +8,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         minimum_version: None,
         extends: vec![],
         entry: vec![],
+        support_entry: vec![],
         ignore_patterns: vec![],
         ignore_findings: vec![],
         framework: vec![],

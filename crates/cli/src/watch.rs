@@ -488,7 +488,7 @@ fn reload_config_or_keep_previous(
     ) {
         Ok(mut reloaded) => {
             if opts.include_entry_exports {
-                reloaded.include_entry_exports = true;
+                reloaded.force_include_entry_exports();
             }
             if opts.show_cascade {
                 reloaded.show_cascade = true;
@@ -663,7 +663,7 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
         },
     )?;
     if opts.include_entry_exports {
-        config.include_entry_exports = true;
+        config.force_include_entry_exports();
     }
     if opts.show_cascade {
         config.show_cascade = true;
@@ -1200,6 +1200,7 @@ mod tests {
             minimum_version: None,
             extends: vec![],
             entry: vec![],
+            support_entry: vec![],
             ignore_patterns,
             ignore_findings: vec![],
             framework: vec![],

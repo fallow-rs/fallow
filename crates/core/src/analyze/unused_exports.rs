@@ -421,7 +421,10 @@ pub fn find_unused_exports(
 
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
     let plugin_matchers = compile_plugin_matchers(plugin_result);
-    let config_export_credit = ConfigExportCredit::new(plugin_result, config.include_entry_exports);
+    let config_export_credit = ConfigExportCredit::new(
+        plugin_result,
+        config.include_entry_exports || config.workspace_settings.any_include_entry_exports(),
+    );
     let module_info_by_id: Option<FxHashMap<FileId, &ModuleInfo>> =
         if config.ignore_exports_used_in_file.is_enabled() {
             Some(modules.iter().map(|m| (m.file_id, m)).collect())
@@ -479,7 +482,7 @@ fn find_unused_exports_for_module(
     if should_skip_module(
         module,
         !matching_plugin.is_empty(),
-        ctx.config.include_entry_exports,
+        ctx.config.include_entry_exports_for(&module.path),
     ) {
         return (Vec::new(), Vec::new(), stale_expected_unused);
     }
@@ -555,7 +558,7 @@ fn config_credited_exports<'a>(
     module: &ModuleNode,
     ctx: &UnusedExportModuleContext<'a>,
 ) -> Vec<&'a [String]> {
-    if ctx.config_export_credit.is_empty() {
+    if ctx.config_export_credit.is_empty() || !ctx.config.include_entry_exports_for(&module.path) {
         return Vec::new();
     }
     let relative_path = module.path.strip_prefix(&ctx.config.root);

@@ -679,6 +679,20 @@ through package-manager indirection. Projects deployed through a custom script
 name should declare the deployed file in `entry` when no manifest, framework,
 or infrastructure entry already identifies it as runtime code.
 
+The top-level `supportEntry` globs use the same mechanism without a plugin.
+Root entry discovery (`push_support_entry_matches`) adds a matching file to
+the support entries in a normal run, and to
+`EntryPointDiscovery::production_excluded` in production mode. The same final
+dedup keeps a file that another entry source seeds.
+
+`workspaces.settings` scopes `ignoreDependencies` and `includeEntryExports` to
+workspace roots. `ResolvedWorkspaceSettings::bind` maps the keys to the
+discovered workspaces at the start of each dead-code pass. A file belongs to
+its deepest bound workspace. An unused dependency uses the workspace of its
+`package.json`, and an unlisted dependency checks each import site. The global
+list runs first, so a workspace list gets credit only for a finding that the
+global list did not hide.
+
 In production mode, a file that only user entry rules with an explicit
 `"entryPointRole": "support"` match (inline `framework[]` entries and plugin
 files) takes no part in dead-code analysis (issue #4068). A plugin that sets

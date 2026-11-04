@@ -900,7 +900,7 @@ fn configure_project_for_dead_code(
     options: &DeadCodeOptions,
 ) -> ProjectConfig {
     if options.include_entry_exports {
-        project_config.config.include_entry_exports = true;
+        project_config.config.force_include_entry_exports();
     }
     if options.show_cascade {
         project_config.config.show_cascade = true;

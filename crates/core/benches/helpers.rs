@@ -29,6 +29,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         minimum_version: None,
         extends: vec![],
         entry: vec![],
+        support_entry: vec![],
         ignore_patterns: vec![],
         ignore_findings: vec![],
         framework: vec![],
