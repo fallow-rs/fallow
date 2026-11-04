@@ -15,6 +15,10 @@ Workflow:
 4. Determine whether the issue is valid, overstated, underspecified, or already covered.
 5. Recommend priority and whether the issue should be kept, split, narrowed, or closed.
 6. Give acceptance criteria tied to the current codebase.
+7. Add the `type:agent-ux` label when a coding agent misread the fallow
+   output, a flag, the docs or an MCP tool result. The issue form field
+   "How did you run fallow?" often shows this. Name the unclear part of the
+   contract in the acceptance criteria.
 
 Give each claim about cause or history one confidence level:
 - direct: you ran it, or the source shows it;
