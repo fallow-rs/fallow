@@ -57,6 +57,7 @@ def dead_code_rows:
    [ (.dead_code.unused_component_emits // [])[] | {kind:"Unused component emit", location:path_line, item:("`\(.component_name)` emit `\(.emit_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_inputs // [])[] | {kind:"Unused component input", location:path_line, item:("`\(.component_name).\(.input_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_outputs // [])[] | {kind:"Unused component output", location:path_line, item:("`\(.component_name)` output `\(.output_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.duplicate_export_aliases // [])[] | {kind:"Duplicate export alias", location:path_line, item:("`\(.local_name)` as \((.export_names // []) | map("`\(.)`") | join(", "))"), introduced:.introduced} ] +
    [ (.dead_code.unused_effect_layers // [])[] | {kind:"Unused Effect layer", location:path_line, item:("`\(.name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_tagged_errors // [])[] | {kind:"Unused tagged error", location:path_line, item:("`\(.name)` tag `\(.tag)`"), introduced:.introduced} ] +
    [ (.dead_code.unproduced_catch_tags // [])[] | {kind:"Unproduced catch tag", location:path_line, item:("catchTag `\(.tag)`"), introduced:.introduced} ] +

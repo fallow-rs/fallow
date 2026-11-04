@@ -330,6 +330,10 @@ pub struct RulesConfig {
     /// excludes intentional barrel re-exports. Defaults to `error`.
     #[serde(default, alias = "duplicate-export")]
     pub duplicate_exports: Severity,
+    /// One module that exports one binding under two or more names, for
+    /// example `export const a = 1; export default a;`. Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "duplicate-export-alias")]
+    pub duplicate_export_aliases: Severity,
     /// A production dependency imported only via type-only imports (a
     /// `devDependencies` candidate). Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "type-only-dependency")]
@@ -534,6 +538,7 @@ impl Default for RulesConfig {
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
+            duplicate_export_aliases: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
             dev_dependencies_in_production: Severity::Warn,
@@ -606,6 +611,7 @@ impl RulesConfig {
             IssueKind::UnresolvedImport => self.unresolved_imports,
             IssueKind::UnlistedDependency => self.unlisted_dependencies,
             IssueKind::DuplicateExport => self.duplicate_exports,
+            IssueKind::DuplicateExportAlias => self.duplicate_export_aliases,
             IssueKind::CircularDependency => self.circular_dependencies,
             IssueKind::ReExportCycle => self.re_export_cycle,
             IssueKind::PackageCycle => self.package_cycle,
@@ -738,6 +744,7 @@ impl RulesConfig {
                 unresolved_imports,
                 unlisted_dependencies,
                 duplicate_exports,
+                duplicate_export_aliases,
                 type_only_dependencies,
                 test_only_dependencies,
                 dev_dependencies_in_production,
@@ -1068,6 +1075,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_exports: Option<Severity>,
+    /// Optional override for [`RulesConfig::duplicate_export_aliases`].
+    #[serde(
+        default,
+        alias = "duplicate-export-alias",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duplicate_export_aliases: Option<Severity>,
     /// Optional override for [`RulesConfig::type_only_dependencies`].
     #[serde(
         default,
@@ -1317,6 +1331,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
+    "duplicate-export-aliases",
     "type-only-dependencies",
     "test-only-dependencies",
     "dev-dependencies-in-production",
@@ -1370,6 +1385,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
+    "duplicate-export-alias",
     "type-only-dependency",
     "test-only-dependency",
     "dev-dependency-in-production",

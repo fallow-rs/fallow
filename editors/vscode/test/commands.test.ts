@@ -660,6 +660,7 @@ describe("runAnalysis retry backoff", () => {
       ["unresolved-imports", ["unresolved_imports"]],
       ["unlisted-dependencies", ["unlisted_dependencies"]],
       ["duplicate-exports", ["duplicate_exports"]],
+      ["duplicate-export-aliases", ["duplicate_export_aliases"]],
       ["type-only-dependencies", ["type_only_dependencies"]],
       ["test-only-dependencies", ["test_only_dependencies"]],
       ["dev-dependencies-in-production", ["dev_dependencies_in_production"]],

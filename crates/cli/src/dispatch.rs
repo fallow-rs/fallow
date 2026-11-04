@@ -34,8 +34,12 @@ use crate::{error::emit_error, exit_codes::exit_invalid_input};
 
 #[path = "dispatch_inspect.rs"]
 mod inspect_dispatch;
+#[path = "dispatch_type_aware_check.rs"]
+mod type_aware_check;
 #[path = "dispatch_type_aware.rs"]
 mod type_aware_status;
+
+use type_aware_check::validate_type_aware_check_options;
 
 fn dispatch_mutation_command(
     dispatch: &DispatchContext<'_>,
@@ -576,6 +580,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         unresolved_imports,
         unlisted_deps,
         duplicate_exports,
+        duplicate_export_aliases,
         circular_deps,
         re_export_cycles,
         package_cycles,
@@ -601,6 +606,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         ("--unresolved-imports", *unresolved_imports),
         ("--unlisted-deps", *unlisted_deps),
         ("--duplicate-exports", *duplicate_exports),
+        ("--duplicate-export-aliases", *duplicate_export_aliases),
         ("--circular-deps", *circular_deps),
         ("--re-export-cycles", *re_export_cycles),
         ("--package-cycles", *package_cycles),
@@ -2265,73 +2271,6 @@ fn dispatch_check_run(
         explain_skipped: cli.explain_skipped,
         surface: args.surface,
     })
-}
-
-fn validate_type_aware_check_options(
-    dispatch: &DispatchContext<'_>,
-    args: &CheckDispatchArgs,
-) -> Option<ExitCode> {
-    let output = dispatch.output;
-    if !args.type_aware_project.is_empty() && args.type_aware != Some(true) {
-        return Some(emit_error(
-            "--type-aware-project requires --type-aware",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware_require.is_some() && args.type_aware != Some(true) {
-        return Some(emit_error(
-            "--type-aware-require requires --type-aware",
-            2,
-            output,
-        ));
-    }
-    if args.trace_opts.symbol_impact.is_some() && args.type_aware != Some(true) {
-        return Some(emit_error(
-            "--symbol-impact requires --type-aware",
-            2,
-            output,
-        ));
-    }
-    let focused_output = args.trace_opts.trace_export.is_some()
-        || args.trace_opts.trace_file.is_some()
-        || args.trace_opts.trace_dependency.is_some()
-        || args.trace_opts.impact_closure.is_some()
-        || args.trace_opts.symbol_impact.is_some();
-    if focused_output
-        && !matches!(
-            output,
-            fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
-        )
-    {
-        return Some(emit_error(
-            "focused trace and impact queries support human and JSON output",
-            2,
-            output,
-        ));
-    }
-    if args.type_aware == Some(true)
-        && !matches!(
-            output,
-            fallow_config::OutputFormat::Human
-                | fallow_config::OutputFormat::Json
-                | fallow_config::OutputFormat::Sarif
-                | fallow_config::OutputFormat::Compact
-                | fallow_config::OutputFormat::Markdown
-                | fallow_config::OutputFormat::CodeClimate
-                | fallow_config::OutputFormat::PrCommentGithub
-                | fallow_config::OutputFormat::PrCommentGitlab
-                | fallow_config::OutputFormat::ReviewGithub
-                | fallow_config::OutputFormat::ReviewGitlab
-        )
-    {
-        return Some(emit_error(
-            "--type-aware supports human, JSON, SARIF, compact, markdown, CodeClimate, PR-comment, and review output; pair presentation formats with the JSON artifact to preserve semantic provenance",
-            2,
-            output,
-        ));
-    }
-    None
 }
 
 /// Resolve the three-state `ignoreImports` CLI override from the opt-in /

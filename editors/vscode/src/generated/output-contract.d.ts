@@ -3150,6 +3150,11 @@ unlisted_dependencies: UnlistedDependencyFinding[]
  */
 duplicate_exports: DuplicateExportFinding[]
 /**
+ * One module that exports one binding under two or more names. Wrapped
+ * in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+ */
+duplicate_export_aliases?: DuplicateExportAliasFinding[]
+/**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
  * [`TypeOnlyDependencyFinding`].
@@ -3696,6 +3701,10 @@ unlisted_dependencies: number
  * Same-named exports declared in more than one module.
  */
 duplicate_exports: number
+/**
+ * Bindings that one module exports under two or more names.
+ */
+duplicate_export_aliases?: number
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode.
@@ -4889,6 +4898,81 @@ export interface DuplicateLocation {
  * File containing the duplicate export.
  */
 path: string
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+}
+/**
+ * Wire-shape envelope for a [`DuplicateExportAlias`] finding. There is no
+ * safe auto-fix: a consumer outside the project can import any of the
+ * names. Actions are manual remediation guidance plus a line-level
+ * suppress.
+ */
+export interface DuplicateExportAliasFinding {
+/**
+ * The module that exports the binding.
+ */
+path: string
+/**
+ * The local name of the binding. For a re-export, the name that the
+ * source module exports.
+ */
+local_name: string
+/**
+ * The export names of the binding, in source order.
+ */
+export_names: string[]
+/**
+ * 1-based line number of the first export of the binding.
+ */
+line: number
+/**
+ * 0-based byte column offset of the first export of the binding.
+ */
+col: number
+/**
+ * One location for each export name, in source order.
+ */
+locations: DuplicateExportAliasLocation[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the binding gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * One export name of a [`DuplicateExportAlias`].
+ */
+export interface DuplicateExportAliasLocation {
+/**
+ * The export name at this location (`default` for a default export).
+ */
+export_name: string
 /**
  * 1-based line number.
  */
@@ -15202,6 +15286,11 @@ unlisted_dependencies: UnlistedDependencyFinding[]
  */
 duplicate_exports: DuplicateExportFinding[]
 /**
+ * One module that exports one binding under two or more names. Wrapped
+ * in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+ */
+duplicate_export_aliases?: DuplicateExportAliasFinding[]
+/**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
  * [`TypeOnlyDependencyFinding`].
@@ -16929,6 +17018,11 @@ unlisted_dependencies: UnlistedDependencyFinding[]
  * snippet wired in at wrapper construction.
  */
 duplicate_exports: DuplicateExportFinding[]
+/**
+ * One module that exports one binding under two or more names. Wrapped
+ * in [`DuplicateExportAliasFinding`]. Default severity is `warn`.
+ */
+duplicate_export_aliases?: DuplicateExportAliasFinding[]
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
@@ -21602,6 +21696,16 @@ export type DevDependencyInProduction = DevDependencyInProductionFinding;
  * this alias; new code should prefer `DuplicateExportFinding`.
  */
 export type DuplicateExport = DuplicateExportFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `DuplicateExportAlias` name.
+ * The wire shape is byte-identical: `DuplicateExportAliasFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `DuplicateExportAlias` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `DuplicateExportAliasFinding`.
+ */
+export type DuplicateExportAlias = DuplicateExportAliasFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `EmptyCatalogGroup` name.

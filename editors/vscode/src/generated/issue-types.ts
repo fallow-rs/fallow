@@ -24,6 +24,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unresolved-imports": true,
   "unlisted-dependencies": true,
   "duplicate-exports": true,
+  "duplicate-export-aliases": true,
   "type-only-dependencies": true,
   "test-only-dependencies": true,
   "dev-dependencies-in-production": true,
@@ -76,6 +77,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "circular-dependency": "circular-dependencies",
   "dev-dependency-in-production": "dev-dependencies-in-production",
   "duplicate-export": "duplicate-exports",
+  "duplicate-export-alias": "duplicate-export-aliases",
   "duplicate-prop-shapes": "duplicate-prop-shape",
   "dynamic-segment-name-conflicts": "dynamic-segment-name-conflict",
   "empty-catalog": "empty-catalog-groups",
@@ -191,6 +193,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "duplicate-export",
     "label": "Duplicate Exports"
+  },
+  {
+    "code": "duplicate-export-alias",
+    "label": "Duplicate Export Aliases"
   },
   {
     "code": "type-only-dependency",

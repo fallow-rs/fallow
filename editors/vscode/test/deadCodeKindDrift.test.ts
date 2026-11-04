@@ -267,6 +267,17 @@ const DEAD_CODE_WIRING = {
       actions: [],
     },
   },
+  "duplicate-export-alias": {
+    field: "duplicate_export_aliases",
+    category: "duplicate-export-aliases",
+    finding: {
+      ...loc,
+      local_name: "layer",
+      export_names: ["layer", "default"],
+      locations: [],
+      actions: [],
+    },
+  },
   "type-only-dependency": {
     field: "type_only_dependencies",
     category: "type-only-dependencies",

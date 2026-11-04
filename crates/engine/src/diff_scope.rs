@@ -132,6 +132,13 @@ fn filter_source_findings(
     results
         .unused_effect_layers
         .retain(|finding| line_in_diff(&finding.layer.path, finding.layer.line));
+    results.duplicate_export_aliases.retain(|finding| {
+        finding
+            .alias
+            .locations
+            .iter()
+            .any(|location| line_in_diff(&finding.alias.path, location.line))
+    });
     results
         .unused_tagged_errors
         .retain(|finding| line_in_diff(&finding.error.path, finding.error.line));

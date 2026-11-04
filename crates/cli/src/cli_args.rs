@@ -809,6 +809,10 @@ pub enum Command {
         #[arg(long)]
         duplicate_exports: bool,
 
+        /// Only report bindings that one file exports under two or more names
+        #[arg(long)]
+        duplicate_export_aliases: bool,
+
         /// Only report circular dependencies.
         /// Deprecated alias: use `fallow architecture --cycles`.
         #[arg(long)]
@@ -2993,39 +2997,6 @@ pub enum CiCli {
     },
 }
 
-#[derive(Subcommand)]
-pub enum RulePackCli {
-    /// Scaffold a new rule pack file and wire it into the config
-    Init {
-        /// Pack name (default: the template name, or "team-policy")
-        name: Option<String>,
-
-        /// Template: starter, ai-safe-repo, side-effect-free-domain, clean-architecture, next-app-router
-        #[arg(long, default_value = "starter")]
-        template: String,
-
-        /// Directory for the pack file, relative to the project root
-        #[arg(long, default_value = "rule-packs")]
-        dir: String,
-
-        /// Only write the pack file; do not modify the config
-        #[arg(long)]
-        no_config: bool,
-    },
-
-    /// List configured rule packs and their rules
-    List,
-
-    /// Evaluate a pack (or all configured packs) against this project and print matches
-    Test {
-        /// Path to a pack file to test in isolation (default: all configured packs)
-        pack: Option<PathBuf>,
-    },
-
-    /// Print the JSON Schema for rule pack files
-    Schema,
-}
-
 /// CLI mirror of [`fallow_engine::baseline::HealthBaselineMode`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum BaselineModeArg {
@@ -3075,7 +3046,11 @@ mod health_args;
 pub use health_args::*;
 #[path = "cli_args_cloud.rs"]
 mod cloud_args;
+#[path = "cli_args_rule_pack.rs"]
+mod rule_pack_args;
+
 pub use cloud_args::*;
+pub use rule_pack_args::RulePackCli;
 
 /// CLI mirror of [`fallow_config::AuditGate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]

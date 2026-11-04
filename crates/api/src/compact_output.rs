@@ -593,6 +593,15 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.event.event_name,
             ));
         }
+        for finding in &self.results.duplicate_export_aliases {
+            self.lines.push(format!(
+                "duplicate-export-alias:{}:{}:{}:{}",
+                self.rel(&finding.alias.path),
+                finding.alias.line,
+                finding.alias.local_name,
+                finding.alias.export_names.join(","),
+            ));
+        }
         for finding in &self.results.unused_effect_layers {
             self.lines.push(format!(
                 "unused-effect-layer:{}:{}:{}",

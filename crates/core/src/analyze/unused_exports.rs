@@ -311,7 +311,7 @@ fn is_inside_export_specifier(
 }
 
 /// Pick up the subset of ignore matchers whose globs match this module's path.
-fn ignore_matchers_for_module<'a>(
+pub(super) fn ignore_matchers_for_module<'a>(
     module_path: &std::path::Path,
     config_root: &std::path::Path,
     ignore_matchers: &'a [CompiledIgnoreExportRule],

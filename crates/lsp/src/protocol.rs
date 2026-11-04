@@ -72,6 +72,8 @@ pub struct AnalysisCompleteParams {
     pub unresolved_imports: usize,
     pub unlisted_dependencies: usize,
     pub duplicate_exports: usize,
+    #[serde(default)]
+    pub duplicate_export_aliases: usize,
     pub type_only_dependencies: usize,
     pub test_only_dependencies: usize,
     pub dev_dependencies_in_production: usize,
@@ -166,6 +168,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
+        duplicate_export_aliases: results.duplicate_export_aliases.len(),
         type_only_dependencies: results.type_only_dependencies.len(),
         test_only_dependencies: results.test_only_dependencies.len(),
         dev_dependencies_in_production: results.dev_dependencies_in_production.len(),

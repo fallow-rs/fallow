@@ -213,10 +213,11 @@ pub(super) fn migrate_entry(
 /// Migrate knip `ignoreIssues` (file glob to issue types) to fallow.
 ///
 /// File-level issue types become an `overrides` entry that turns the rules
-/// off for the glob. `duplicates` becomes an `ignoreExports` entry with
-/// `exports: ["*"]` only when the same glob also ignores `exports` and unused
-/// types are ignored there too, because that rule also exempts the exports
-/// from `unused-exports` and `unused-types`.
+/// off for the glob. `duplicates` turns `duplicate-export-aliases` off for the
+/// glob. It becomes an `ignoreExports` entry with `exports: ["*"]` instead
+/// when the same glob also ignores `exports` and unused types are ignored
+/// there too, because that rule also exempts the exports from
+/// `unused-exports`, `unused-types` and `duplicate-export-aliases`.
 pub(super) fn migrate_ignore_issues(
     value: &Value,
     scope: &KnipScope,
@@ -272,15 +273,12 @@ pub(super) fn migrate_ignore_issues(
         for kind in &kinds {
             match kind.as_str() {
                 "exports" | "types" | "duplicates" if exempt_all_exports => {}
-                "duplicates" => warnings.push(MigrationWarning {
-                    source: "knip",
-                    field: format!("{field}.duplicates"),
-                    message: "issue type `duplicates` has no file-scoped fallow equivalent"
-                        .to_string(),
-                    suggestion: Some(format!(
-                        "an ignoreExports entry for `{file}` with exports [\"*\"] also hides unused exports and unused types there; add it by hand if that is correct"
-                    )),
-                }),
+                "duplicates" => {
+                    rules.insert(
+                        "duplicate-export-aliases".to_string(),
+                        Value::String("off".to_string()),
+                    );
+                }
                 kind if PROJECT_LEVEL_ISSUE_TYPES.contains(&kind) => {
                     warnings.push(MigrationWarning {
                         source: "knip",

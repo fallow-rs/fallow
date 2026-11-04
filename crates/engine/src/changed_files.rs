@@ -721,6 +721,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
         duplicate_exports: _duplicate_exports,
+        duplicate_export_aliases: _duplicate_export_aliases,
         type_only_dependencies: _type_only_dependencies,
         test_only_dependencies: _test_only_dependencies,
         dev_dependencies_in_production: _dev_dependencies_in_production,
@@ -801,6 +802,9 @@ fn retain_graph_findings_by_changed_files(
 ) {
     retain_unlisted_dependencies_by_import_site(&mut results.unlisted_dependencies, scope);
     retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, scope);
+    retain_by_changed_path(&mut results.duplicate_export_aliases, scope, |a| {
+        &a.alias.path
+    });
     retain_circular_dependencies_by_changed_file(&mut results.circular_dependencies, scope);
     retain_re_export_cycles_by_changed_file(&mut results.re_export_cycles, scope);
     retain_package_cycles_by_changed_file(&mut results.package_cycles, scope);

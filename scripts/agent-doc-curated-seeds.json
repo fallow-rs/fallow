@@ -814,6 +814,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--duplicate-export-aliases",
+      "column": "Issue Type",
+      "seed": "One module exports one binding under two or more names"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--duplicate-exports",
       "column": "Issue Type",
       "seed": "Export name appears in multiple modules"
@@ -2221,6 +2227,12 @@
       "row": "duplicate-export",
       "column": "Description",
       "seed": "Export name appears in multiple modules; fallow fix can add an ignoreExports rule to the fallow config instead of editing source"
+    },
+    {
+      "section": "issue-types",
+      "row": "duplicate-export-alias",
+      "column": "Description",
+      "seed": "One module exports one binding under two or more names"
     },
     {
       "section": "issue-types",

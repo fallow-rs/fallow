@@ -435,6 +435,7 @@ mod tests {
                     "DevDependencyInProductionFinding",
                 ),
                 ("DuplicateExport", "DuplicateExportFinding"),
+                ("DuplicateExportAlias", "DuplicateExportAliasFinding"),
                 ("EmptyCatalogGroup", "EmptyCatalogGroupFinding"),
                 (
                     "MisconfiguredDependencyOverride",

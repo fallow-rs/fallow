@@ -51,6 +51,7 @@ impl IssueFilters {
             "route_collisions" => self.route_collisions,
             "dynamic_segment_name_conflicts" => self.dynamic_segment_name_conflicts,
             "duplicate_exports" => self.duplicate_exports,
+            "duplicate_export_aliases" => self.duplicate_export_aliases,
             "circular_dependencies" => self.circular_deps,
             "re_export_cycles" => self.re_export_cycles,
             "package_cycles" => self.package_cycles,

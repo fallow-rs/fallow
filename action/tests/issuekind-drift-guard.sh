@@ -174,6 +174,7 @@ issuekind_json_key_fallback() {
     unresolved-import) echo "unresolved_imports" ;;
     unlisted-dependency) echo "unlisted_dependencies" ;;
     duplicate-export) echo "duplicate_exports" ;;
+    duplicate-export-alias) echo "duplicate_export_aliases" ;;
     circular-dependency) echo "circular_dependencies" ;;
     re-export-cycle) echo "re_export_cycles" ;;
     boundary-violation) echo "boundary_violations" ;;

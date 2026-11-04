@@ -17,6 +17,7 @@ pub(super) enum AuditCollection {
     UnresolvedImports,
     UnlistedDependencies,
     DuplicateExports,
+    DuplicateExportAliases,
     TypeOnlyDependencies,
     TestOnlyDependencies,
     DevDependenciesInProduction,
@@ -55,7 +56,7 @@ pub(super) enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 51] = [
+    pub(super) const ALL: [Self; 52] = [
         Self::PropDrillingChains,
         Self::ThinWrappers,
         Self::DuplicatePropShapes,
@@ -73,6 +74,7 @@ impl AuditCollection {
         Self::UnresolvedImports,
         Self::UnlistedDependencies,
         Self::DuplicateExports,
+        Self::DuplicateExportAliases,
         Self::TypeOnlyDependencies,
         Self::TestOnlyDependencies,
         Self::DevDependenciesInProduction,
@@ -128,6 +130,7 @@ impl AuditCollection {
             Self::UnresolvedImports => "unresolved_imports",
             Self::UnlistedDependencies => "unlisted_dependencies",
             Self::DuplicateExports => "duplicate_exports",
+            Self::DuplicateExportAliases => "duplicate_export_aliases",
             Self::TypeOnlyDependencies => "type_only_dependencies",
             Self::TestOnlyDependencies => "test_only_dependencies",
             Self::DevDependenciesInProduction => "dev_dependencies_in_production",

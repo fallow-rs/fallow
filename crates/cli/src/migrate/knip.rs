@@ -603,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_ignore_issues_duplicates_without_exports_warns() {
+    fn migrate_ignore_issues_duplicates_without_exports_turns_alias_rule_off() {
         let knip = serde_json::json!({
             "ignoreIssues": {"src/ui/*.tsx": ["duplicates"]}
         });
@@ -612,11 +612,16 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert!(!config.contains_key("ignoreExports"));
-        assert!(!config.contains_key("overrides"));
         assert_eq!(
-            warning_fields(&warnings),
-            ["ignoreIssues.src/ui/*.tsx.duplicates"]
+            config.get("overrides").unwrap(),
+            &serde_json::json!([
+                {
+                    "files": ["src/ui/*.tsx"],
+                    "rules": {"duplicate-export-aliases": "off"}
+                }
+            ])
         );
+        assert!(warnings.is_empty());
     }
 
     #[test]
@@ -938,6 +943,7 @@ mod tests {
         assert_eq!(rules.get("unlisted-dependencies").unwrap(), "error");
         assert_eq!(rules.get("unresolved-imports").unwrap(), "warn");
         assert_eq!(rules.get("duplicate-exports").unwrap(), "off");
+        assert_eq!(rules.get("duplicate-export-aliases").unwrap(), "off");
         assert!(warnings.is_empty());
     }
 

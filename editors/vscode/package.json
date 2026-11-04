@@ -300,6 +300,7 @@
             "unresolved-imports": true,
             "unlisted-dependencies": true,
             "duplicate-exports": true,
+            "duplicate-export-aliases": true,
             "type-only-dependencies": true,
             "test-only-dependencies": true,
             "dev-dependencies-in-production": true,
@@ -375,6 +376,9 @@
               "type": "boolean"
             },
             "duplicate-exports": {
+              "type": "boolean"
+            },
+            "duplicate-export-aliases": {
               "type": "boolean"
             },
             "type-only-dependencies": {

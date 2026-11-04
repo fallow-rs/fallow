@@ -203,6 +203,26 @@ fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, ro
 
     markdown_section(
         out,
+        &results.duplicate_export_aliases,
+        "Duplicate export aliases",
+        |f| {
+            vec![format!(
+                "- {}:{} {} is exported as {}",
+                markdown_code_span(&markdown_relative_path(&f.alias.path, root)),
+                f.alias.line,
+                markdown_code_span(&f.alias.local_name),
+                f.alias
+                    .export_names
+                    .iter()
+                    .map(|name| markdown_code_span(name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )]
+        },
+    );
+
+    markdown_section(
+        out,
         &results.duplicate_exports,
         "Duplicate exports",
         |dup| {
@@ -3275,39 +3295,8 @@ mod caveat_markdown_tests {
 }
 
 #[cfg(test)]
-mod markdown_code_span_tests {
-    use std::path::{Path, PathBuf};
-
-    use super::markdown_grouped_section;
-
-    #[test]
-    fn grouped_paths_use_safe_code_span_delimiters_and_padding() {
-        let paths = vec![
-            PathBuf::from("src/ordinary.ts"),
-            PathBuf::from("src/one`# injected.md"),
-            PathBuf::from("src/two``ticks.ts"),
-            PathBuf::from(" leading and trailing "),
-            PathBuf::from("`leading-tick.ts"),
-        ];
-        let mut output = String::new();
-
-        markdown_grouped_section(
-            &mut output,
-            &paths,
-            "Paths",
-            Path::new("/project"),
-            PathBuf::as_path,
-            |_| "detail".to_string(),
-        );
-
-        assert!(output.contains("- `src/ordinary.ts`\n"));
-        assert!(output.contains("- ``src/one`# injected.md``\n"));
-        assert!(output.contains("- ```src/two``ticks.ts```\n"));
-        assert!(output.contains("- `  leading and trailing  `\n"));
-        assert!(output.contains("- `` `leading-tick.ts ``\n"));
-        assert!(!output.contains("\\`"));
-    }
-}
+#[path = "markdown_code_span_tests.rs"]
+mod markdown_code_span_tests;
 
 #[cfg(test)]
 mod walkthrough_markdown_tests {

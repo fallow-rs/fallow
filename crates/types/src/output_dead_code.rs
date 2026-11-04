@@ -39,8 +39,8 @@ use crate::output::{
 use crate::results::{
     AbsentComponentProp, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
     CircularDependency, DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction,
-    DuplicateExport, DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup,
-    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    DuplicateExport, DuplicateExportAlias, DuplicatePropShape, DynamicSegmentNameConflict,
+    EmptyCatalogGroup, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
     MixedClientServerBarrel, PackageCycle, PolicyViolation, PrivateTypeLeak, PropDrillingChain,
     ReExportCycle, ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper,
     TypeOnlyDependency, UnlistedDependency, UnproducedCatchTag, UnprovidedInject,
@@ -2170,6 +2170,65 @@ impl UnusedSvelteEventFinding {
         Self {
             finding_id: None,
             event,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`DuplicateExportAlias`] finding. There is no
+/// safe auto-fix: a consumer outside the project can import any of the
+/// names. Actions are manual remediation guidance plus a line-level
+/// suppress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicateExportAliasFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub alias: DuplicateExportAlias,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the binding gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl DuplicateExportAliasFinding {
+    /// Build the wrapper from a raw [`DuplicateExportAlias`]. Emits a manual
+    /// fix action plus a line-level suppress.
+    #[must_use]
+    pub fn with_actions(alias: DuplicateExportAlias) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::RemoveDuplicate,
+                "Keep one export name for the binding and remove the other names",
+                "Manual review required: update the importers of a removed name first. Code outside the analyzed project can import any of the names. If the names are an intentional public API, add them to ignoreExports.",
+            ),
+            suppress_line("// fallow-ignore-next-line duplicate-export-alias"),
+        ];
+        Self {
+            finding_id: None,
+            alias,
             actions,
             introduced: None,
             effective_severity: None,
@@ -4391,6 +4450,7 @@ impl_gated_finding!(
     TestOnlyDependencyFinding,
     DevDependencyInProductionFinding,
     DuplicateExportFinding,
+    DuplicateExportAliasFinding,
     UnusedCatalogEntryFinding,
     EmptyCatalogGroupFinding,
     UnresolvedCatalogReferenceFinding,
@@ -4412,106 +4472,8 @@ impl_gated_finding!(
 // re-orders actions tells you what broke instead of just "the snapshot
 // changed".
 #[cfg(test)]
-mod caveat_tokens {
-    use super::*;
-
-    /// The token-side helpers must render the same words as the typed ones, so
-    /// one finding reads identically whether a surface holds the findings or
-    /// re-reads them off a serialized envelope.
-    #[test]
-    fn token_labels_match_the_typed_labels() {
-        let typed = [
-            ReachabilityCaveat::IncompleteFileAnalysis,
-            ReachabilityCaveat::IncompleteImportGraph,
-        ];
-        let tokens: Vec<&str> = typed.iter().map(|c| c.token()).collect();
-
-        assert_eq!(
-            caveat_labels_for_tokens(tokens.iter().copied()),
-            caveat_labels(&typed)
-        );
-        assert_eq!(
-            caveat_suffix_for_tokens(tokens.iter().copied()),
-            caveat_suffix(&typed)
-        );
-    }
-
-    #[test]
-    fn no_tokens_means_nothing_to_say() {
-        assert_eq!(caveat_labels_for_tokens(std::iter::empty()), None);
-        assert_eq!(caveat_suffix_for_tokens(std::iter::empty()), None);
-    }
-
-    /// The CI review formats can only see the rendered description, so the
-    /// recogniser and the renderer have to stay one pair. A description with
-    /// no caveat must not match, or the review formats would withhold the
-    /// suggestion block on every finding in a clean run.
-    #[test]
-    fn a_rendered_suffix_is_recognised_by_the_marker() {
-        for caveats in [
-            &[ReachabilityCaveat::IncompleteImportGraph][..],
-            &[
-                ReachabilityCaveat::IncompleteFileAnalysis,
-                ReachabilityCaveat::IncompleteImportGraph,
-            ][..],
-        ] {
-            let suffix = caveat_suffix(caveats).expect("a caveat renders a suffix");
-            assert!(
-                description_carries_caveat(&format!("Something is never referenced{suffix}")),
-                "the marker must match what caveat_suffix writes: {suffix}"
-            );
-        }
-        assert!(
-            description_carries_caveat(&format!(
-                "Something is never referenced{}",
-                caveat_suffix_for_tokens(["some-future-cause"]).expect("token suffix")
-            )),
-            "the token-side renderer writes the same marker"
-        );
-        assert!(
-            !description_carries_caveat("Class member 'Widget.helper' is never referenced"),
-            "a clean description must not read as caveated"
-        );
-    }
-
-    /// A caveat is a RUN-level condition covering several ways a file goes
-    /// unread: a degraded parse, an unreadable file, and three kinds of file
-    /// discovery skipped before opening. A message naming only the parse case
-    /// told a reader whose run was degraded by the size guard to go fix parse
-    /// errors that do not exist, which is the same overclaiming the caveat
-    /// itself exists to prevent.
-    #[test]
-    fn no_caveat_message_names_a_single_cause() {
-        for caveat in [
-            ReachabilityCaveat::IncompleteFileAnalysis,
-            ReachabilityCaveat::IncompleteImportGraph,
-        ] {
-            let message = caveat.message();
-            assert!(
-                !message.contains("parse cleanly") && !message.contains("parse error"),
-                "{} names the parse cause alone, but a size-skipped or unreadable \
-                 file reaches the same caveat: {message}",
-                caveat.token()
-            );
-            assert!(
-                message.contains("workspace_diagnostics"),
-                "{} must point at the list that names the actual files: {message}",
-                caveat.token()
-            );
-        }
-    }
-
-    /// The value set is open. A token a consumer build does not recognise still
-    /// means the evidence is incomplete, so it must survive into the rendered
-    /// hedge rather than being dropped back into a confident-looking finding.
-    #[test]
-    fn an_unrecognised_token_still_renders_as_a_caveat() {
-        let suffix = caveat_suffix_for_tokens(["some-future-cause"])
-            .expect("an unknown token is still a caveat");
-
-        assert_eq!(suffix, " (caveat: some future cause)");
-    }
-}
+#[path = "output_dead_code_caveat_tokens.rs"]
+mod caveat_tokens;
 
 /// The gate, pinned as one property across every finding type rather than as
 /// one test per mutation surface.
