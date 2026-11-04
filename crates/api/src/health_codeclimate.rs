@@ -238,6 +238,13 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
             issue.description =
                 format!("{} (test file: audit does not gate it)", issue.description);
         }
+        issue.audit = finding
+            .attribution
+            .map(|attribution| fallow_output::AuditReviewContext {
+                attribution,
+                gate_exemption: finding.gate_exemption,
+                gate: None,
+            });
         issues.push(issue);
     }
     for finding in &report.styling_findings {

@@ -600,3 +600,99 @@ fn markdown_row_escapes_a_pipe_in_the_path() {
     assert!(row.contains(r"src/a\|b.js:"), "{row}");
     assert_eq!(row.matches(" | ").count(), 3, "{row}");
 }
+
+/// The comment body of the inline review comment for the function `name`.
+fn review_comment_body<'a>(review: &'a serde_json::Value, name: &str) -> &'a str {
+    review["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|comment| comment["body"].as_str())
+        .find(|body| body.contains(&format!("'{name}'")))
+        .unwrap_or_else(|| panic!("no review comment for {name}: {review:#}"))
+}
+
+/// Issue #4189: an inline review comment states the attribution of a
+/// complexity finding, and states when the audit gate does not count it. The
+/// live render and the render from a saved audit give the same text, for
+/// GitHub and for GitLab.
+#[test]
+fn review_comments_carry_the_attribution_and_the_gate_context() {
+    let base = format!("{}{}", hotspot("work", 20, 2), hotspot("old", 20, 2));
+    let head = format!(
+        "{}{}{}",
+        hotspot("work", 20, 40),
+        hotspot("old", 20, 2),
+        hotspot("fresh", 20, 2)
+    );
+    let tmp = fixture(&base, &head, CONFIG);
+    let dir = tmp.path();
+    let run = audit(dir, &[]);
+    assert_eq!(run.finding("old")["attribution"], "inherited");
+    let saved = dir.join("saved-audit.json");
+    fs::write(&saved, serde_json::to_string(&run.json).unwrap()).unwrap();
+    let root = dir.to_str().unwrap();
+    let saved_path = saved.to_str().unwrap();
+    for format in ["review-github", "review-gitlab"] {
+        let live = parse_json(&run_fallow_raw(&[
+            "audit",
+            "--root",
+            root,
+            "--base",
+            "main",
+            "--format",
+            format,
+            "--quiet",
+            "--no-cache",
+            "--no-css",
+            "--skip",
+            "dupes",
+        ]));
+        let from_saved = parse_json(&run_fallow_raw(&[
+            "report", "--from", saved_path, "--root", root, "--format", format, "--quiet",
+        ]));
+        for review in [&live, &from_saved] {
+            let old = review_comment_body(review, "old");
+            assert!(
+                old.starts_with("**error** · inherited · not gated (`--gate new-only`) `"),
+                "{format}: {old}"
+            );
+            let work = review_comment_body(review, "work");
+            assert!(
+                work.starts_with("**error** · worsened · not gated (`--worsened warn`) `"),
+                "{format}: {work}"
+            );
+            let fresh = review_comment_body(review, "fresh");
+            assert!(
+                fresh.starts_with("**error** · introduced `"),
+                "{format}: {fresh}"
+            );
+        }
+    }
+}
+
+/// Under `--gate all` the audit has no attribution classes, so the inline
+/// comment keeps the plain severity label.
+#[test]
+fn review_comments_under_gate_all_keep_the_plain_label() {
+    let tmp = fixture(&hotspot("old", 20, 2), &hotspot("old", 20, 3), CONFIG);
+    let dir = tmp.path();
+    let review = parse_json(&run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "all",
+        "--format",
+        "review-github",
+        "--quiet",
+        "--no-cache",
+        "--no-css",
+        "--skip",
+        "dupes",
+    ]));
+    let old = review_comment_body(&review, "old");
+    assert!(old.starts_with("**error** `"), "{old}");
+}

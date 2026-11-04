@@ -311,6 +311,10 @@ fn print_audit_review(
         report::ci::review::ReviewSummaryNotes {
             message: note.as_deref(),
             config_patterns: audit_config_patterns(result),
+            audit_gate: Some(report::ci::review::AuditGatePolicy {
+                new_only: matches!(result.attribution.gate, AuditGate::NewOnly),
+                worsened: result.attribution.worsened,
+            }),
         },
     )
 }

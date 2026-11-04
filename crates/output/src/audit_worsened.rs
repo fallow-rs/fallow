@@ -39,6 +39,61 @@ impl AuditGateExemption {
     }
 }
 
+/// Audit facts of one finding that an inline review comment shows.
+///
+/// The CodeClimate builder sets the attribution and the gate exemption. The
+/// audit render sets `gate` from the gate policy of the run. The CodeClimate
+/// wire shape does not carry these facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuditReviewContext {
+    /// Class of the finding against the base snapshot.
+    pub attribution: AuditFindingAttribution,
+    /// Reason why the finding never gates, when it has one.
+    pub gate_exemption: Option<AuditGateExemption>,
+    /// Effect of the finding on the gate. `None` when the gate policy of the
+    /// run is not known: the comment then shows only the attribution.
+    pub gate: Option<AuditReviewGate>,
+}
+
+/// Effect of one audit finding on the gate of the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditReviewGate {
+    /// The finding counts in the gate.
+    Gated,
+    /// `--gate new-only` does not count an inherited finding.
+    NotGatedNewOnly,
+    /// `--worsened warn` gives a warning for a worsened finding, not a failure.
+    NotGatedWorsenedWarn,
+    /// `--worsened off` does not count a worsened finding.
+    NotGatedWorsenedOff,
+    /// A finding in a test file does not gate.
+    NotGatedTestFile,
+}
+
+impl AuditReviewContext {
+    /// The label text after the severity, for example
+    /// `inherited · not gated (`--gate new-only`)`.
+    #[must_use]
+    pub fn label(&self) -> String {
+        let class = match self.attribution {
+            AuditFindingAttribution::Introduced => "introduced",
+            AuditFindingAttribution::Worsened => "worsened",
+            AuditFindingAttribution::Inherited => "inherited",
+        };
+        let reason = match self.gate {
+            None | Some(AuditReviewGate::Gated) => None,
+            Some(AuditReviewGate::NotGatedNewOnly) => Some("`--gate new-only`"),
+            Some(AuditReviewGate::NotGatedWorsenedWarn) => Some("`--worsened warn`"),
+            Some(AuditReviewGate::NotGatedWorsenedOff) => Some("`--worsened off`"),
+            Some(AuditReviewGate::NotGatedTestFile) => Some("test file"),
+        };
+        reason.map_or_else(
+            || class.to_owned(),
+            |reason| format!("{class} \u{00b7} not gated ({reason})"),
+        )
+    }
+}
+
 /// A measured metric of a complexity finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

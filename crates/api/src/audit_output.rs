@@ -727,6 +727,7 @@ mod tests {
             owner: None,
             group: None,
             legacy_fingerprint: None,
+            audit: None,
         };
 
         let value = build_audit_codeclimate(AuditCodeClimateOutputInput {

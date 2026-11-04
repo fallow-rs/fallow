@@ -70,6 +70,9 @@ pub struct CiIssue {
     /// different from `fingerprint`. Review comments carry it for one
     /// release, so a thread with the older marker still matches.
     pub legacy_fingerprint: Option<String>,
+    /// Audit facts that the inline review comment shows after the severity.
+    /// `None` outside an audit with a base snapshot.
+    pub audit: Option<crate::AuditReviewContext>,
 }
 
 /// Source range attached to a normalized CI finding as supporting evidence.
@@ -248,6 +251,7 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
             .unwrap_or("")
             .to_string(),
         legacy_fingerprint: None,
+        audit: None,
         path,
         line,
         end_line,
@@ -282,6 +286,7 @@ fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
         other_locations,
         fingerprint: issue.fingerprint.clone(),
         legacy_fingerprint: issue.legacy_fingerprint.clone(),
+        audit: issue.audit,
     }
 }
 
@@ -925,10 +930,15 @@ fn build_merged_comment_content(input: &ReviewCommentRenderInput<'_, '_>) -> Str
         if index > 0 {
             content.push_str("\n\n");
         }
+        let audit_label = issue
+            .audit
+            .map(|audit| format!(" \u{00b7} {}", audit.label()))
+            .unwrap_or_default();
         write!(
             content,
-            "**{}** `{}`: {}",
+            "**{}**{} `{}`: {}",
             label,
+            audit_label,
             escape_md(&issue.rule_id),
             escape_md(&issue.description)
         )
@@ -1209,6 +1219,7 @@ mod tests {
                 owner: None,
                 group: None,
                 legacy_fingerprint: None,
+                audit: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");
@@ -1249,6 +1260,7 @@ mod tests {
             }],
             fingerprint: "instance-fingerprint".to_owned(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let comment = render_review_comment_for_group(&ReviewCommentRenderInput {
             provider: CiProvider::Gitlab,
@@ -1298,6 +1310,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: path.to_owned(),
             legacy_fingerprint: None,
+            audit: None,
         }
     }
 
@@ -1312,6 +1325,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: fingerprint.to_owned(),
             legacy_fingerprint: legacy.map(str::to_owned),
+            audit: None,
         }
     }
 

@@ -7,7 +7,7 @@ use crate::exit_codes::exit_invalid_input;
 use crate::report::emit_json;
 use fallow_output::PrDecisionConclusion;
 use fallow_output::{
-    CiIssue, CiProvider as Provider, ReviewCheckConclusion, ReviewEnvelopeOutput,
+    AuditReviewGate, CiIssue, CiProvider as Provider, ReviewCheckConclusion, ReviewEnvelopeOutput,
     ReviewEnvelopeRenderInput, ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs,
     ReviewId, issues_from_codeclimate_issues,
 };
@@ -27,6 +27,9 @@ pub struct ReviewSummaryNotes<'a> {
     /// The run diagnostics. The unmatched config patterns among them become
     /// a Markdown section, as in `--format markdown` and the sticky comment.
     pub config_patterns: &'a [fallow_config::WorkspaceDiagnostic],
+    /// The gate policy of an audit run. The inline comments use it to say
+    /// when the gate does not count a finding. `None` outside an audit.
+    pub audit_gate: Option<AuditGatePolicy>,
 }
 
 impl<'a> From<super::pr_comment::PrCommentStatus<'a>> for ReviewSummaryNotes<'a> {
@@ -34,6 +37,72 @@ impl<'a> From<super::pr_comment::PrCommentStatus<'a>> for ReviewSummaryNotes<'a>
         Self {
             message: status.message,
             config_patterns: status.config_patterns,
+            audit_gate: None,
+        }
+    }
+}
+
+/// The gate policy of an audit run: `--gate` and `--worsened`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AuditGatePolicy {
+    /// `--gate new-only`: only introduced findings (and worsened findings
+    /// under `--worsened error`) count in the gate.
+    pub new_only: bool,
+    /// How a worsened complexity finding affects the verdict.
+    pub worsened: fallow_config::AuditWorsened,
+}
+
+impl AuditGatePolicy {
+    /// Read the policy from the `attribution` object of a saved audit
+    /// envelope. `None` when the envelope has no gate mode.
+    #[must_use]
+    pub fn from_audit_envelope(envelope: &serde_json::Value) -> Option<Self> {
+        let attribution = envelope.get("attribution")?;
+        let new_only = match attribution.get("gate")?.as_str()? {
+            "new-only" => true,
+            "all" => false,
+            _ => return None,
+        };
+        // The audit JSON omits the default `warn` mode.
+        let worsened = match attribution
+            .get("worsened")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("error") => fallow_config::AuditWorsened::Error,
+            Some("off") => fallow_config::AuditWorsened::Off,
+            _ => fallow_config::AuditWorsened::Warn,
+        };
+        Some(Self { new_only, worsened })
+    }
+
+    /// The effect of one finding on the gate.
+    const fn gate(self, context: fallow_output::AuditReviewContext) -> AuditReviewGate {
+        if context.gate_exemption.is_some() {
+            return AuditReviewGate::NotGatedTestFile;
+        }
+        if !self.new_only {
+            return AuditReviewGate::Gated;
+        }
+        match context.attribution {
+            fallow_output::AuditFindingAttribution::Introduced => AuditReviewGate::Gated,
+            fallow_output::AuditFindingAttribution::Inherited => AuditReviewGate::NotGatedNewOnly,
+            fallow_output::AuditFindingAttribution::Worsened => match self.worsened {
+                fallow_config::AuditWorsened::Error => AuditReviewGate::Gated,
+                fallow_config::AuditWorsened::Warn => AuditReviewGate::NotGatedWorsenedWarn,
+                fallow_config::AuditWorsened::Off => AuditReviewGate::NotGatedWorsenedOff,
+            },
+        }
+    }
+}
+
+/// Write the gate effect of the run into the audit facts of each issue.
+fn apply_audit_gate(issues: &mut [CiIssue], policy: Option<AuditGatePolicy>) {
+    let Some(policy) = policy else {
+        return;
+    };
+    for issue in issues {
+        if let Some(context) = issue.audit.as_mut() {
+            context.gate = Some(policy.gate(*context));
         }
     }
 }
@@ -148,8 +217,9 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
     codeclimate: &[CodeClimateIssue],
     notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
-    let issues =
+    let mut issues =
         super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
+    apply_audit_gate(&mut issues, notes.audit_gate);
     print_review_envelope_from_ci_issues(command, provider, &issues, None, notes)
 }
 
@@ -161,8 +231,9 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
     conclusion: PrDecisionConclusion,
     notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
-    let issues =
+    let mut issues =
         super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
+    apply_audit_gate(&mut issues, notes.audit_gate);
     print_review_envelope_from_ci_issues(
         command,
         provider,
@@ -336,6 +407,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: fp.into(),
             legacy_fingerprint: None,
+            audit: None,
         }
     }
 
@@ -357,6 +429,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: fp.into(),
             legacy_fingerprint: None,
+            audit: None,
         }
     }
 
@@ -470,6 +543,7 @@ mod tests {
             ReviewSummaryNotes {
                 message: Some("Baseline advisory."),
                 config_patterns: &diagnostics,
+                audit_gate: None,
             },
         ));
         let body = envelope["body"].as_str().expect("body is string");
@@ -510,6 +584,118 @@ mod tests {
             false,
         ));
         assert!(comment["body"].as_str().unwrap().starts_with("**error**"));
+    }
+
+    fn audit_issue(
+        attribution: fallow_output::AuditFindingAttribution,
+        gate_exemption: Option<fallow_output::AuditGateExemption>,
+    ) -> CiIssue {
+        let mut issue = issue("fallow/high-complexity", "major", "src/a.ts", 1, "abc");
+        issue.audit = Some(fallow_output::AuditReviewContext {
+            attribution,
+            gate_exemption,
+            gate: None,
+        });
+        issue
+    }
+
+    fn audit_comment_body(issue: &CiIssue, policy: Option<AuditGatePolicy>) -> String {
+        let mut issues = vec![issue.clone()];
+        apply_audit_gate(&mut issues, policy);
+        let comment = comment_to_value(&render_merged_comment(
+            Provider::Github,
+            &[&issues[0]],
+            None,
+            None,
+            false,
+        ));
+        comment["body"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn audit_comment_label_follows_the_gate_policy() {
+        use fallow_config::AuditWorsened;
+        use fallow_output::{AuditFindingAttribution as A, AuditGateExemption};
+        let new_only = |worsened| {
+            Some(AuditGatePolicy {
+                new_only: true,
+                worsened,
+            })
+        };
+        let cases = [
+            (
+                A::Introduced,
+                None,
+                new_only(AuditWorsened::Warn),
+                "**error** · introduced `",
+            ),
+            (
+                A::Inherited,
+                None,
+                new_only(AuditWorsened::Warn),
+                "**error** · inherited · not gated (`--gate new-only`) `",
+            ),
+            (
+                A::Worsened,
+                None,
+                new_only(AuditWorsened::Error),
+                "**error** · worsened `",
+            ),
+            (
+                A::Worsened,
+                None,
+                new_only(AuditWorsened::Warn),
+                "**error** · worsened · not gated (`--worsened warn`) `",
+            ),
+            (
+                A::Worsened,
+                None,
+                new_only(AuditWorsened::Off),
+                "**error** · worsened · not gated (`--worsened off`) `",
+            ),
+            (
+                A::Introduced,
+                Some(AuditGateExemption::TestFile),
+                new_only(AuditWorsened::Warn),
+                "**error** · introduced · not gated (test file) `",
+            ),
+            (
+                A::Inherited,
+                None,
+                Some(AuditGatePolicy {
+                    new_only: false,
+                    worsened: AuditWorsened::Warn,
+                }),
+                "**error** · inherited `",
+            ),
+            (A::Inherited, None, None, "**error** · inherited `"),
+        ];
+        for (attribution, exemption, policy, expected) in cases {
+            let body = audit_comment_body(&audit_issue(attribution, exemption), policy);
+            assert!(body.starts_with(expected), "{expected} != {body}");
+        }
+    }
+
+    #[test]
+    fn audit_gate_policy_reads_the_saved_attribution() {
+        use fallow_config::AuditWorsened;
+        let read = |value: serde_json::Value| AuditGatePolicy::from_audit_envelope(&value);
+        assert_eq!(
+            read(serde_json::json!({"attribution": {"gate": "new-only"}})),
+            Some(AuditGatePolicy {
+                new_only: true,
+                worsened: AuditWorsened::Warn,
+            })
+        );
+        assert_eq!(
+            read(serde_json::json!({"attribution": {"gate": "all", "worsened": "error"}})),
+            Some(AuditGatePolicy {
+                new_only: false,
+                worsened: AuditWorsened::Error,
+            })
+        );
+        assert_eq!(read(serde_json::json!({"attribution": {}})), None);
+        assert_eq!(read(serde_json::json!({})), None);
     }
 
     #[test]
@@ -806,6 +992,7 @@ rename to src/new.ts
             other_locations: Vec::new(),
             fingerprint: "abc1234567890def".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let comment = comment_to_value(&render_merged_comment(
             Provider::Github,
@@ -867,6 +1054,7 @@ rename to src/new.ts
             other_locations: Vec::new(),
             fingerprint: "abc1234567890def".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let comment = comment_to_value(&render_merged_comment(
             Provider::Github,

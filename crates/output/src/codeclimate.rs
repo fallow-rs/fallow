@@ -55,6 +55,11 @@ pub struct CodeClimateIssue {
     #[serde(skip)]
     #[cfg_attr(feature = "schema", schemars(skip))]
     pub legacy_fingerprint: Option<String>,
+    /// Audit facts that an inline review comment shows. Never serialized:
+    /// the CodeClimate wire shape does not change.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub audit: Option<crate::AuditReviewContext>,
 }
 
 /// Discriminator value for [`CodeClimateIssue::kind`].
@@ -179,6 +184,7 @@ pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateI
         owner: None,
         group: None,
         legacy_fingerprint: None,
+        audit: None,
     }
 }
 

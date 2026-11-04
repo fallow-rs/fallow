@@ -453,6 +453,15 @@ line states exit code 0.
   lifecycle whose marker holds a comment's `legacy_fingerprint` as that
   comment (`envelope_legacy_fingerprints`, `reconcile_sets`). Remove the
   legacy field and this matching one release after the v3 marker shipped.
+- An audit review comment on a complexity finding puts the attribution after
+  the severity label, and says when the gate does not count the finding:
+  `` **error** · inherited · not gated (`--gate new-only`) ``. The health
+  CodeClimate builder copies the attribution and the gate exemption into
+  `CodeClimateIssue::audit` (in memory only, like `legacy_fingerprint`). The
+  review renderer reads the gate policy from `AuditResult::attribution` for a
+  live run, and from the `attribution` object of a saved audit envelope
+  (`AuditGatePolicy::from_audit_envelope`). `--gate all` has no attribution,
+  so the label stays plain.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.
 - Reported project paths remain relative unless an editor or protocol contract
   explicitly requires absolute paths.

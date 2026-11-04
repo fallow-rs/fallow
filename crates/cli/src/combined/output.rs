@@ -653,6 +653,7 @@ fn print_combined_review(
             message: status_note.as_deref(),
             config_patterns: check_result
                 .map_or(&[], |check| check.workspace_diagnostics.as_slice()),
+            audit_gate: None,
         },
     );
     combined_machine_success(code)
