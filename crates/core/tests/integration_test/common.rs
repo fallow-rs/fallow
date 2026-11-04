@@ -138,6 +138,21 @@ pub fn create_config_with_ignore_patterns(
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
+/// A config with `ignoreDependencies` set. Everything else defaults.
+pub fn create_config_with_ignore_deps(
+    root: PathBuf,
+    ignore_dependencies: &[&str],
+) -> fallow_config::ResolvedConfig {
+    FallowConfig {
+        ignore_dependencies: ignore_dependencies
+            .iter()
+            .map(|p| (*p).to_string())
+            .collect(),
+        ..Default::default()
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
+}
+
 /// A config with `unusedComponentProps.ignorePattern` set, used to exercise the
 /// opt-in prop-exemption knob. Everything else defaults.
 pub fn create_config_with_unused_props_ignore(

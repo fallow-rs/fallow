@@ -5,15 +5,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{IgnoreDependencyMatcher, PackageJson, ResolvedConfig};
 
-use crate::discover::FileId;
-use crate::extract::ModuleInfo;
-use crate::graph::ModuleGraph;
-use crate::resolve::ResolvedModule;
 use crate::results::{
     DependencyLocation, DevDependencyInProduction, ImportSite, TestOnlyDependency,
     TypeOnlyDependency, UnlistedDependency, UnresolvedImport, UnusedDependency,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
+use crate::{discover::FileId, extract::ModuleInfo, graph::ModuleGraph, resolve::ResolvedModule};
 
 use super::bundle_externalization::source_sets_packages_external;
 use super::gitignored_targets::GitignoredTargets;
@@ -29,9 +26,10 @@ use crate::plugins::{CompiledPathRule, ProvidedDependencyRule};
 mod peer_closure;
 #[path = "unused_deps_production_only.rs"]
 mod production_only;
-pub use peer_closure::peer_closure_seeds;
-pub use peer_closure::peer_dependency_hosts;
+#[path = "unused_deps_required.rs"]
+mod required;
 use peer_closure::{PeerDependencyResolver, PeerSeedInput, peer_closure_shared_seeds};
+pub use peer_closure::{peer_closure_seeds, peer_dependency_hosts};
 pub use production_only::{credit_production_ignores, find_type_only_dependencies};
 
 /// Return `true` if a virtual-module `prefix` from the active plugin set covers
@@ -2346,7 +2344,8 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
         workspace_ownership: &workspace_ownership,
     };
 
-    collect_unlisted_dependencies(&ctx)
+    let unlisted = collect_unlisted_dependencies(&ctx);
+    required::extend(unlisted, input.plugin_result, &ctx)
 }
 
 struct UnlistedDependencyContextParts<'a> {

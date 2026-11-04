@@ -47,6 +47,8 @@ mod class_value_source_shapes;
 mod config_function_locals;
 #[path = "integration_test/config_glob_star_segment.rs"]
 mod config_glob_star_segment;
+#[path = "integration_test/config_required_dependencies.rs"]
+mod config_required_dependencies;
 #[path = "integration_test/css_in_js_styled.rs"]
 mod css_in_js_styled;
 #[path = "integration_test/css_modules.rs"]
