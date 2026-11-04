@@ -534,7 +534,7 @@ const regenerateSteps = ({ remote, branch, oldTip, worktree }) =>
   [
     `The temporary worktree ${worktree} holds the rebased branch. Regenerate there:`,
     `  1. ${worktreeCommand(worktree, ["status"])} must be clean. Then, in that directory:`,
-    "     npm ci && pnpm --dir editors/vscode install && npm run generate:contracts",
+    "     pnpm install && pnpm --dir editors/vscode install && npm run generate:contracts",
     "  2. Commit the regenerated files.",
     "  3. Push the worktree HEAD with a lease on the old branch tip:",
     `       ${worktreeCommand(worktree, leasePushArgs({ remote, branch, oldTip }))}`,

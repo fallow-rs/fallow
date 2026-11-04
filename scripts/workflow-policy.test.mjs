@@ -167,18 +167,21 @@ test("bundled skill validation uses the root lockfile without network fallback",
   const npmPackageJob = indentedBlock(workflow, "npm-package", 2);
   const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
   const nestedPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
-  const lockfile = JSON.parse(readFileSync("package-lock.json", "utf8"));
+  const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
 
   assert.equal(rootPackage.devDependencies["@tanstack/intent"], "0.5.6");
   assert.equal(
     nestedPackage.devDependencies?.["@tanstack/intent"],
     rootPackage.devDependencies["@tanstack/intent"],
   );
-  assert.equal(lockfile.packages[""].devDependencies["@tanstack/intent"], "0.5.6");
-  assert.equal(lockfile.packages["node_modules/@tanstack/intent"].version, "0.5.6");
+  assert.match(
+    lockfile,
+    /^ {6}'@tanstack\/intent':\n {8}specifier: 0\.5\.6\n {8}version: 0\.5\.6$/mu,
+  );
+  assert.match(lockfile, /^ {2}'@tanstack\/intent@0\.5\.6':$/mu);
   assert.match(
     npmPackageJob,
-    /npm ci --no-audit --no-fund --ignore-scripts[\s\S]*npx --no-install intent validate npm\/fallow\/skills/,
+    /pnpm install --frozen-lockfile --ignore-scripts[\s\S]*npx --no-install intent validate npm\/fallow\/skills/,
   );
   assert.doesNotMatch(npmPackageJob, /npx[^\n]*@tanstack\/intent@/);
 });
@@ -1468,6 +1471,28 @@ test("mise.toml follows the tool versions that CI pins", () => {
     assert.equal(nodeVersion, version, "mise.toml node must match ci.yml setup-node");
   }
 
+  // The contributor pnpm is the pnpm of the root tools, the extension, and CI.
+  const pnpmVersion = miseVersion("pnpm");
+  assert.ok(pnpmVersion, "mise.toml must pin pnpm");
+  const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
+  const rootPnpm = rootPackage.devEngines.packageManager.find(({ name }) => name === "pnpm");
+  assert.equal(rootPnpm.version, pnpmVersion);
+  const extensionPackage = JSON.parse(readFileSync("editors/vscode/package.json", "utf8"));
+  assert.equal(extensionPackage.packageManager, `pnpm@${pnpmVersion}`);
+  for (const file of ["ci.yml", "commitlint.yml", "contributors.yml"]) {
+    const workflow = readWorkflow(join(workflowDir, file));
+    const versions = Array.from(
+      workflow.matchAll(
+        /uses: pnpm\/action-setup@[0-9a-f]{40}[^\n]*\n\s+with:\n\s+version: (\S+)/gu,
+      ),
+      (match) => match[1],
+    );
+    assert.ok(versions.length > 0, `${file} must set up pnpm`);
+    for (const version of versions) {
+      assert.equal(version, pnpmVersion, `${file} pnpm must match mise.toml`);
+    }
+  }
+
   // A tool that CI installs at an exact version must have that version in mise.toml.
   for (const [file, workflow] of workflows) {
     for (const [, tool, version] of workflow.matchAll(/^\s+tool: ([\w-]+)@([\w.-]+)$/gmu)) {
@@ -2738,6 +2763,42 @@ test("ordinary workflow npm installs suppress dependency lifecycle scripts", () 
       );
     }
   }
+});
+
+test("workflow pnpm installs are frozen and suppress dependency lifecycle scripts", () => {
+  for (const path of ["ci.yml", "commitlint.yml", "contributors.yml"]) {
+    const workflow = readWorkflow(`.github/workflows/${path}`);
+    const installs = workflow
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#") && /\bpnpm install\b/u.test(line));
+    assert.ok(installs.length > 0, `${path} must install with pnpm`);
+    for (const line of installs) {
+      assert.ok(line.includes("--frozen-lockfile"), `${path} resolves a new graph: ${line.trim()}`);
+      assert.ok(
+        line.includes("--ignore-scripts"),
+        `${path} permits dependency lifecycle scripts: ${line.trim()}`,
+      );
+    }
+  }
+});
+
+test("the root manifest does not pin pnpm through packageManager", () => {
+  // pnpm/action-setup fails when its `version` input differs from the root
+  // `packageManager`. The PGO and ecosystem jobs set up pnpm 12 for public
+  // fixtures, so the root pins pnpm through `devEngines` instead. npm 11 fails
+  // `npm run` on a `devEngines` package manager that it does not match, so a
+  // second entry lets npm run the scripts.
+  const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(rootPackage.packageManager, undefined);
+  assert.deepEqual(rootPackage.devEngines.packageManager, [
+    { name: "pnpm", version: rootPackage.devEngines.packageManager[0].version, onFail: "download" },
+    { name: "npm", onFail: "ignore" },
+  ]);
+  assert.equal(existsSync("package-lock.json"), false, "the root tools install with pnpm");
+  const settings = readFileSync("pnpm-workspace.yaml", "utf8");
+  assert.match(settings, /^minimumReleaseAge: 10080$/mu);
+  assert.match(settings, /^strictDepBuilds: true$/mu);
+  assert.doesNotMatch(settings, /^packages:/mu, "editors/vscode stays a separate pnpm project");
 });
 
 test("VSIX publishers use reviewed frozen graphs from the validated source commit", () => {

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { runCliMain } from "./cli-main.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const DEFAULT_INSTALL_COMMAND = "npm ci";
+const DEFAULT_INSTALL_COMMAND = "pnpm install";
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies"];
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 

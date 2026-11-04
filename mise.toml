@@ -15,6 +15,11 @@
 # Same major version as each `actions/setup-node` step in `ci.yml`.
 node = "26"
 
+# Same version as the `devEngines` pin in the root `package.json`, the
+# `packageManager` of `editors/vscode`, and the `pnpm/action-setup` steps in
+# `ci.yml`, `commitlint.yml` and `contributors.yml`.
+pnpm = "11.25.0"
+
 # Same version as the typos action that the CI `typos` job pins:
 # crate-ci/typos@512fc24f32f44ab01972217aaaf3dc86ec234d53
 "aqua:crate-ci/typos" = "1.50.2"
@@ -35,7 +40,7 @@ node = "26"
 # Same version as the `insta` crate in `Cargo.lock`.
 "aqua:mitsuhiko/insta" = "1.48.0"
 
-# Git hook runner. `hk.pkl` defines the hooks. Run `hk install` once per clone.
+# Git hook runner. `hk.pkl` defines the hooks. `pnpm bootstrap` installs the hooks.
 hk = "2.4.0"
 # hk evaluates `hk.pkl` with the pkl CLI.
 pkl = "0.32.1"

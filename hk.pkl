@@ -1,4 +1,4 @@
-// Git hooks for this repository. Run `hk install` once per clone.
+// Git hooks for this repository. `pnpm bootstrap` installs them.
 // docs/development/quality-gates.md#hook-parity lists the same commands for
 // agents and contributors whose hooks did not run.
 amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
@@ -87,7 +87,7 @@ hooks {
     steps {
       // A fresh worktree has no node_modules. CI still runs commitlint.
       ["commitlint"] {
-        check = "if [ -x node_modules/.bin/commitlint ]; then node_modules/.bin/commitlint --edit \"{{commit_msg_file}}\"; else echo 'commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: npm ci' >&2; fi"
+        check = "if [ -x node_modules/.bin/commitlint ]; then node_modules/.bin/commitlint --edit \"{{commit_msg_file}}\"; else echo 'commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: pnpm install' >&2; fi"
       }
       // The Commit messages workflow fails a pull request commit without a
       // Signed-off-by line for its author. Check it before the push.

@@ -15,7 +15,7 @@ if [ -z "$changed" ]; then
 fi
 
 if [ ! -d node_modules ]; then
-  echo "pre-commit: JS/TS files staged but node_modules is missing; skipping oxlint and oxfmt (CI still enforces them). Run: npm ci" >&2
+  echo "pre-commit: JS/TS files staged but node_modules is missing; skipping oxlint and oxfmt (CI still enforces them). Run: pnpm install" >&2
   exit 0
 fi
 

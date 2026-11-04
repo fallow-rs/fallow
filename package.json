@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
     "commitlint": "node scripts/assert-local-resolution.mjs @commitlint/cli && commitlint",
     "verify": "node scripts/verify-repo.mjs --fast",
     "verify:fast": "node scripts/verify-repo.mjs --fast",
@@ -46,9 +47,18 @@
   "engines": {
     "node": ">=22.12.0"
   },
-  "overrides": {
-    "fast-uri@3": "3.1.9",
-    "typescript": "7.0.2"
+  "devEngines": {
+    "packageManager": [
+      {
+        "name": "pnpm",
+        "version": "11.25.0",
+        "onFail": "download"
+      },
+      {
+        "name": "npm",
+        "onFail": "ignore"
+      }
+    ]
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.4",

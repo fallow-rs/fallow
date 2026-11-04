@@ -62,7 +62,7 @@ export const fixtureDependencyEnvironment = (
   }
   if (dependencyRoots.length === 0) {
     throw new Error(
-      `${projectId} finds no installed dependencies above ${realRoot}; run npm ci in ${realApproved} first`,
+      `${projectId} finds no installed dependencies above ${realRoot}; run pnpm install in ${realApproved} first`,
     );
   }
   return {
