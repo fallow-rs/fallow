@@ -785,6 +785,10 @@ fn merge_plugin_result_fields(
     result
         .package_referenced_dependencies
         .extend(plugin_result.package_referenced_dependencies);
+    super::push_missing(
+        &mut result.required_dependencies,
+        plugin_result.required_dependencies,
+    );
     result.discovered_always_used.extend(
         plugin_result
             .always_used_files

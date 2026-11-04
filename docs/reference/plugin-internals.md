@@ -97,6 +97,32 @@ Metro maps the key to a folder, which is often generated output. The plugin
 reads the object as a `extraNodeModules` property value or as the right side
 of a `config.resolver.extraNodeModules = {...}` assignment.
 
+## Packages that a config needs installed
+
+A plugin may push a `RequiredDependency` when a config needs a package that no
+source file imports. The check reports the package as unlisted when no
+manifest that the config can use lists it. The manifest that owns the config,
+each ancestor manifest, and the root manifest count. A sibling manifest does
+not, and `ignoreDependencies` suppresses the finding. The finding points at the
+config value.
+
+Push a requirement only for a value that names a package with certainty. A
+shorthand that a tool expands to an unknown package name, or a path, must stay
+a dependency credit only. Mark a requirement `dev_only` when only a development
+tool loads the package, so a `--production` run skips it.
+
+The current producers are:
+
+- the TypeScript plugin, for each bare `compilerOptions.plugins[].name`,
+  except the plugins that editor extensions ship (`EDITOR_BUNDLED_PLUGINS`);
+- the Expo and Expo Router plugins, for `expo-system-ui` when the app config
+  sets `userInterfaceStyle` at the top level or under `android`. iOS applies
+  its own key without `expo-system-ui`.
+
+The check also reads each `package.json` from the config directory up to the
+project root, so a manifest that owns no analyzed file still counts. A config
+that `ignorePatterns` covers gives no finding.
+
 ## Advisories about a config a plugin could not use
 
 A plugin never prints an advisory about the config it read. It pushes a

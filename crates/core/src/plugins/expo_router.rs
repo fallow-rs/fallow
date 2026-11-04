@@ -50,6 +50,7 @@ define_plugin!(
         }
 
         super::expo::add_config_plugins(&mut result, source, config_path, root);
+        super::expo::add_system_ui_requirement(&mut result, source, config_path);
 
         let route_root = extract_route_root(source, config_path, root)
             .unwrap_or_else(|| default_route_root(root).to_string());
