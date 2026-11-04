@@ -28,16 +28,16 @@ fallow-security = { version = "3.39.0", path = "crates/security" }
 fallow-types = { version = "3.39.0", path = "crates/types" }
 
 # Parsing & analysis
-oxc_allocator = "0.156"
-oxc_ast = "0.156"
-oxc_ast_visit = "0.156"
-oxc_parser = "0.156"
+oxc_allocator = "0.157"
+oxc_ast = "0.157"
+oxc_ast_visit = "0.157"
+oxc_parser = "0.157"
 oxc_resolver = { version = "11", features = ["yarn_pnp"] }
-oxc_semantic = "0.156"
-oxc_span = "0.156"
-oxc_str = "0.156"
-oxc_syntax = "0.156"
-oxc_coverage_instrument = "0.19.0"
+oxc_semantic = "0.157"
+oxc_span = "0.157"
+oxc_str = "0.157"
+oxc_syntax = "0.157"
+oxc_coverage_instrument = "0.20.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
 # brittle. Used by fallow-extract for CSS class/import extraction and analytics.
