@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { checkPrDeferrals } from "./check-pr-deferrals.mjs";
+import { checkPrDeferrals, findPossibleFollowUps } from "./check-pr-deferrals.mjs";
 
 const SCRIPT_PATH = fileURLToPath(new URL("./check-pr-deferrals.mjs", import.meta.url));
 
@@ -63,9 +63,111 @@ test("a wrapped list item counts as one deferral", () => {
   assert.deepEqual(checkPrDeferrals(body), { ok: true });
 });
 
-test("'No follow-up planned.' marks an intentional non-goal", () => {
-  const body = "## Out of scope\n\n- Program sharing between processes. No follow-up planned.";
-  assert.deepEqual(checkPrDeferrals(body), { ok: true });
+test("'No follow-up planned.' no longer clears a deferral", () => {
+  const item = "- Program sharing between processes. No follow-up planned.";
+  assert.deepEqual(checkPrDeferrals(`## Out of scope\n\n${item}`), {
+    ok: false,
+    untracked: [item],
+  });
+  const inline = "Program sharing is a separate change. No follow-up planned.";
+  assert.deepEqual(checkPrDeferrals(inline), { ok: false, untracked: [inline] });
+});
+
+test("items under a 'Possible follow-ups' heading need no issue", () => {
+  for (const heading of [
+    "## Possible follow-ups",
+    "### Possible follow-up",
+    "**Possible follow-ups**",
+    "__Possible follow-ups:__",
+  ]) {
+    const body = [
+      heading,
+      "",
+      "- Cache the parsed config. Small gain, large refactor.",
+      "- Regex aliases could be a separate change.",
+    ].join("\n");
+    assert.deepEqual(checkPrDeferrals(body), { ok: true }, heading);
+  }
+});
+
+test("a 'Possible follow-ups' section ends at the same or a higher heading", () => {
+  const item = "- Add support for regex aliases.";
+  const body = [
+    "## Possible follow-ups",
+    "",
+    "### Resolver",
+    "",
+    "- Cache the parsed config.",
+    "",
+    "## Not in this change",
+    "",
+    item,
+  ].join("\n");
+  assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] });
+  const inline = "## Possible follow-ups\n\n- An idea.\n\n## Notes\n\nThat is a separate change.";
+  assert.deepEqual(checkPrDeferrals(inline), {
+    ok: false,
+    untracked: ["That is a separate change."],
+  });
+});
+
+test("a deferral heading inside or around an exempt section still needs an issue", () => {
+  const item = "- Fix the crash in the resolver.";
+  for (const body of [
+    `## Possible follow-ups\n\n### Not in this change\n\n${item}`,
+    `## Possible follow-ups\n\n### Follow-ups\n\n${item}`,
+    `# Possible follow-ups\n\n- An idea.\n\n## Not in this change\n\n${item}`,
+    `## Not in this change\n\n### Possible follow-ups\n\n${item}`,
+  ]) {
+    assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] }, body);
+    assert.ok(!findPossibleFollowUps(body).includes(item), body);
+  }
+  const reopened =
+    "# Possible follow-ups\n\n## Not in this change\n\n- A (#1).\n\n## Ideas\n\n- B.";
+  assert.deepEqual(findPossibleFollowUps(reopened), ["- B."]);
+});
+
+test("a 'Known limits' section is ordinary prose for the check", () => {
+  for (const heading of ["## Known limits", "**Known limits**"]) {
+    const plain = `${heading}\n\n- Cross-process sharing needs a new cache design.`;
+    assert.deepEqual(checkPrDeferrals(plain), { ok: true }, heading);
+    const item = "- Cross-process sharing is a separate change.";
+    assert.deepEqual(
+      checkPrDeferrals(`${heading}\n\n${item}`),
+      { ok: false, untracked: [item] },
+      heading,
+    );
+  }
+  assert.equal(checkPrDeferrals("## Known limits outside this change\n\n- Sharing.").ok, false);
+  assert.equal(checkPrDeferrals("## Possible follow-ups (not in this PR)\n\n- An idea.").ok, false);
+});
+
+test("findPossibleFollowUps returns the items of each 'Possible follow-ups' section", () => {
+  const body = [
+    "## What",
+    "",
+    "- Fix the parser.",
+    "",
+    "## Possible follow-ups",
+    "",
+    "- Cache the parsed config.",
+    "  Small gain, large refactor.",
+    "- Share the resolver (#3320).",
+    "",
+    "```",
+    "- not an item",
+    "```",
+    "",
+    "## Test plan",
+    "",
+    "- cargo test",
+  ].join("\n");
+  assert.deepEqual(findPossibleFollowUps(body), [
+    "- Cache the parsed config. Small gain, large refactor.",
+    "- Share the resolver (#3320).",
+  ]);
+  assert.deepEqual(findPossibleFollowUps("## What\n\n- Fix it."), []);
+  assert.deepEqual(findPossibleFollowUps(undefined), []);
 });
 
 test("a back-reference to an earlier pull request is not a deferral", () => {
@@ -95,7 +197,8 @@ test("the script exits 1 and names the untracked deferral", () => {
   });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /- That is a separate change\./u);
-  assert.match(run.stderr, /No follow-up planned/u);
+  assert.match(run.stderr, /Possible follow-ups/u);
+  assert.doesNotMatch(run.stderr, /No follow-up planned/u);
 });
 
 test("the script exits 0 for a clean description", () => {
@@ -261,8 +364,8 @@ test("the CLI distinguishes missing issues from failed verification", () => {
     assert.doesNotMatch(run.stdout, /has an issue reference/u);
     assert.doesNotMatch(run.stderr, /test-token/u);
   }
-  const optedOut = runWithIssueResponses("## Follow-up\n\n- No follow-up planned.", {});
-  assert.equal(optedOut.status, 0, optedOut.stderr);
+  const possible = runWithIssueResponses("## Possible follow-ups\n\n- A separate change.", {});
+  assert.equal(possible.status, 0, possible.stderr);
 });
 
 test("nested list items need their own tracking reference", () => {
@@ -271,7 +374,6 @@ test("nested list items need their own tracking reference", () => {
     const body = `## Follow-ups\n\n- Parser follow-up (#3320):\n${indent}${item}`;
     assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] });
     assert.deepEqual(checkPrDeferrals(`${body} See #3321.`), { ok: true });
-    assert.deepEqual(checkPrDeferrals(`${body} No follow-up planned.`), { ok: true });
   }
 });
 
@@ -308,8 +410,6 @@ test("items under a heading that names work this change does not do need trackin
     assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] }, heading);
     const linked = body.replace("arguments.", "arguments (#3320).");
     assert.deepEqual(checkPrDeferrals(linked), { ok: true }, heading);
-    const optedOut = body.replace("arguments.", "arguments. No follow-up planned.");
-    assert.deepEqual(checkPrDeferrals(optedOut), { ok: true }, heading);
   }
 });
 

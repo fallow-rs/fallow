@@ -9,10 +9,15 @@
 // - a paragraph or list item that says the work is "a separate change", "left
 //   for a follow-up" or "out of scope".
 //
-// Each deferral must link an issue (`#123`, `owner/repo#123` or an issue URL),
-// or say "No follow-up planned." to record an intentional non-goal. The CLI
-// verifies references to this repository through the GitHub API. It accepts a
-// reference to another repository on its syntax.
+// Each deferral must link an issue (`#123`, `owner/repo#123` or an issue URL).
+// The CLI verifies references to this repository through the GitHub API. It
+// accepts a reference to another repository on its syntax.
+//
+// A "Possible follow-ups" section records improvement ideas that have no known
+// need. Its items need no issue: the maintainer reads them later with
+// scripts/list-possible-follow-ups.mjs and picks the ideas that become issues.
+// A deferral heading inside or around that section still needs an issue for
+// each item.
 //
 // Run: PR_BODY="..." node .github/scripts/check-pr-deferrals.mjs
 
@@ -30,7 +35,7 @@ const DEFERRAL_PHRASE =
   /\b(?:(?:a|its own) (?:separate|later|future) (?:change|pr)\b|separate change\b|left for a follow-?up\b|(?:is|as|for) a (?:possible |reasonable )?follow-?up\b(?! (?:to|of|from|for|after)\b)|(?:is|are|remains?) deferred (?:to|until|for)\b|out of scope\b)/iu;
 const ISSUE_REF =
   /(?:^|[\s(])(?:(?<repo>[\w.-]+\/[\w.-]+))?#(?<number>\d+)\b|https:\/\/github\.com\/(?<urlRepo>[\w.-]+\/[\w.-]+)\/issues\/(?<urlNumber>\d+)\b/u;
-const OPT_OUT = /\bno follow-?up planned\b/iu;
+const POSSIBLE_HEADING = /^#{1,6}\s*possible follow-?ups?\b/iu;
 const ISSUE_REFS = new RegExp(ISSUE_REF, "gu");
 const REPOSITORY_NAME = /^[\w.-]+\/[\w.-]+$/u;
 const OPEN_BLOCK_KINDS = new Set(["start", "continue"]);
@@ -100,37 +105,68 @@ const splitBlocks = (body) => {
   return blocks;
 };
 
-const isDeferralHeading = (heading) =>
-  DEFERRAL_HEADING.test(heading) || OUTSIDE_CHANGE_HEADING.test(heading);
-
-const closesSection = (level, deferralLevel) => deferralLevel !== null && level <= deferralLevel;
+const sectionKind = (heading) => {
+  if (DEFERRAL_HEADING.test(heading) || OUTSIDE_CHANGE_HEADING.test(heading)) return "deferral";
+  if (POSSIBLE_HEADING.test(heading)) return "possible";
+  return null;
+};
 
 /**
- * Returns the heading level of the open deferral section after `heading`,
- * or null when no deferral section is open.
+ * Returns the open sections after `heading`. A section includes its nested
+ * headings and ends at a heading of the same or a higher level.
  * @param {string} heading
- * @param {number | null} deferralLevel
- * @returns {number | null}
+ * @param {{ kind: string, level: number }[]} sections
+ * @returns {{ kind: string, level: number }[]}
  */
-const nextDeferralLevel = (heading, deferralLevel) => {
+const nextSections = (heading, sections) => {
   const level = /^#+/u.exec(heading)[0].length;
-  const open = closesSection(level, deferralLevel) ? null : deferralLevel;
-  if (open === null && isDeferralHeading(heading)) return level;
-  return open;
+  const open = sections.filter((section) => section.level < level);
+  const kind = sectionKind(heading);
+  return kind === null ? open : [...open, { kind, level }];
 };
 
-const isDeferral = (text, inSection) =>
-  !TABLE_ROW.test(text) && (inSection || DEFERRAL_PHRASE.test(text)) && !OPT_OUT.test(text);
+// A deferral section wins over an enclosing or nested exempt section, so an
+// exempt heading cannot hide needed work.
+const effectiveKind = (sections) => {
+  const kinds = new Set(sections.map((section) => section.kind));
+  if (kinds.has("deferral")) return "deferral";
+  return sections.at(-1)?.kind ?? null;
+};
 
-const findDeferrals = (body) => {
-  const deferrals = [];
-  let deferralLevel = null;
+/**
+ * Returns the prose blocks of a description, each with the kind of the
+ * section that contains it ("deferral", "possible" or null).
+ * @param {string} body
+ * @returns {{ text: string, kind: string | null }[]}
+ */
+const classifyBlocks = (body) => {
+  const blocks = [];
+  let sections = [];
   for (const block of splitBlocks(stripNonProse(body))) {
-    if (block.heading) deferralLevel = nextDeferralLevel(block.text, deferralLevel);
-    else if (isDeferral(block.text, deferralLevel !== null)) deferrals.push(block.text);
+    if (block.heading) sections = nextSections(block.text, sections);
+    else if (!TABLE_ROW.test(block.text))
+      blocks.push({ text: block.text, kind: effectiveKind(sections) });
   }
-  return deferrals;
+  return blocks;
 };
+
+const isDeferral = ({ text, kind }) =>
+  kind === "deferral" || (kind === null && DEFERRAL_PHRASE.test(text));
+
+const findDeferrals = (body) =>
+  classifyBlocks(body)
+    .filter(isDeferral)
+    .map((block) => block.text);
+
+/**
+ * Returns the items of every "Possible follow-ups" section of a description.
+ * @param {string} body
+ * @returns {string[]}
+ */
+export const findPossibleFollowUps = (body) =>
+  classifyBlocks(body)
+    .filter((block) => block.kind === "possible")
+    .map((block) => block.text);
 
 const toResult = (untracked) => (untracked.length === 0 ? { ok: true } : { ok: false, untracked });
 
@@ -243,7 +279,10 @@ const verifyTrackingIssues = async (body) => {
 const formatFailure = (untracked) =>
   [
     "The pull request description defers work without a tracking issue.",
-    "Open an issue for each item and link it, or add 'No follow-up planned.' to an intentional non-goal.",
+    "Each item below is needed work or an idea:",
+    "- Needed work (a defect, or a part of the task that is not done): open an issue and link it.",
+    "- An improvement idea with no known need: move it under a 'Possible follow-ups' heading.",
+    "- No work at all: describe it without a deferral heading or phrase.",
     "Then edit the pull request description. The edit starts a new run of this check.",
     "Do not re-run this job: a re-run keeps the old description and cancels the new run.",
     "",

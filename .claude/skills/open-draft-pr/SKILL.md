@@ -21,9 +21,11 @@ Workflow:
 6. Write the PR body to a file and run the CI deferral check on it:
    `PR_BODY="$(cat body.md)" GITHUB_REPOSITORY=fallow-rs/fallow node .github/scripts/check-pr-deferrals.mjs`.
    The check fails a body that defers work without an issue link, for
-   example a "Follow-up" or "Not in this change" section. Link an issue,
-   or add "No follow-up planned." to an intentional non-goal. Call a docs
-   change a companion fallow-docs PR, not a follow-up.
+   example a "Follow-up" or "Not in this change" section. Sort each open
+   item into the three groups of `CONTRIBUTING.md`: needed work gets a
+   linked issue, an idea goes under "Possible follow-ups", and an accepted
+   limit goes under "Known limits". Call a docs change a companion
+   fallow-docs PR, not a follow-up.
 7. Open a ready PR with a high-signal conventional title and that body.
    After a later body edit, do not rerun the failed commit-message job:
    the `edited` event starts a new run with the new body.
