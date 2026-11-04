@@ -733,6 +733,10 @@ pub(super) fn loader_hook_exports_for_source(source: &str) -> Vec<String> {
     }
 }
 
+/// The export that a path loader calls on a module that code names with
+/// `new URL(path, import.meta.url)`.
+pub(super) const NEW_URL_LOADER_EXPORT: &str = "default";
+
 pub(super) fn new_url_import_source(expr: &NewExpression<'_>) -> Option<String> {
     if let Expression::Identifier(callee) = &expr.callee
         && callee.name == "URL"

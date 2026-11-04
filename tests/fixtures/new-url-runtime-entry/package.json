@@ -1,0 +1,6 @@
+{
+  "name": "new-url-runtime-entry",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

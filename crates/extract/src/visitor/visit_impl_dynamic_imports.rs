@@ -15,6 +15,25 @@ pub(in crate::visitor) enum ComponentLoaderImport {
     NextDynamic,
 }
 
+/// Context of `new URL(path, import.meta.url)` edges in one file.
+#[derive(Debug, Default)]
+pub(in crate::visitor) struct NewUrlContext {
+    /// Spans of URLs passed directly to a filesystem call or to
+    /// `fileURLToPath`. The path names a file on disk, not a module the code
+    /// loads, so the reference is speculative.
+    pub(in crate::visitor) filesystem_path_spans: FxHashSet<Span>,
+    /// Spans of URLs passed directly to a `Worker` or `SharedWorker`
+    /// constructor. A worker module runs as a script, so the edge credits the
+    /// file and no export.
+    pub(in crate::visitor) worker_spans: FxHashSet<Span>,
+    /// Sources that `module.register()` loads as Node loader hooks. A URL
+    /// edge to such a source credits only the hook exports.
+    pub(in crate::visitor) register_loader_sources: FxHashSet<String>,
+}
+
+/// Constructors that run a module as a worker script.
+const WORKER_CONSTRUCTORS: &[&str] = &["Worker", "SharedWorker"];
+
 impl<'a> ModuleInfoExtractor {
     /// Record each `new URL(path, import.meta.url)` passed directly to a
     /// filesystem call, so `visit_new_expression` marks it speculative.
@@ -26,9 +45,73 @@ impl<'a> ModuleInfoExtractor {
             if let Argument::NewExpression(new_expr) = arg
                 && new_url_import_source(new_expr).is_some()
             {
-                self.filesystem_path_new_url_spans.insert(new_expr.span);
+                self.new_url_context
+                    .filesystem_path_spans
+                    .insert(new_expr.span);
             }
         }
+    }
+
+    /// Record each `new URL(path, import.meta.url)` passed directly to a
+    /// `Worker` or `SharedWorker` constructor, so `visit_new_expression`
+    /// credits the worker file and no export.
+    pub(super) fn record_worker_new_url_arguments(&mut self, expr: &NewExpression<'_>) {
+        if !matches!(&expr.callee, Expression::Identifier(callee) if WORKER_CONSTRUCTORS.contains(&callee.name.as_str()))
+        {
+            return;
+        }
+        if let Some(Expression::NewExpression(new_expr)) = expr
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .map(Expression::get_inner_expression)
+            && new_url_import_source(new_expr).is_some()
+        {
+            self.new_url_context.worker_spans.insert(new_expr.span);
+        }
+    }
+
+    /// Record the edge of a `new URL(path, import.meta.url)` expression.
+    pub(super) fn record_new_url_edge(&mut self, expr: &NewExpression<'_>) {
+        let Some(source) = new_url_import_source(expr) else {
+            return;
+        };
+        // A speculative reference credits its target when it resolves, and
+        // the resolver drops it silently when it does not. Two rules make a
+        // `new URL(specifier, import.meta.url)` speculative:
+        // - The specifier has no file extension, so it may name a directory
+        //   (`new URL("./services", import.meta.url)`). See issue #840.
+        // - The expression is a direct argument of a filesystem call or of
+        //   `fileURLToPath`, so it names a file on disk. The file can be an
+        //   output that does not exist yet, or a probe for an optional file.
+        // Other specifiers with an extension (`new URL("./worker.js", ...)`) stay
+        // not speculative, so a missing file is still an `unresolved-import`.
+        let has_extension = std::path::Path::new(&source).extension().is_some();
+        let is_speculative = !has_extension
+            || self
+                .new_url_context
+                .filesystem_path_spans
+                .contains(&expr.span);
+        // A module path with an extension can name a runtime entry: a build
+        // tool or a script runner loads the module by path and calls its
+        // default export. So the edge credits `default`. A worker module runs
+        // as a script and a directory URL names no module, so those edges
+        // credit the file only.
+        let destructured_names =
+            if has_extension && !self.new_url_context.worker_spans.contains(&expr.span) {
+                vec![NEW_URL_LOADER_EXPORT.to_string()]
+            } else {
+                Vec::new()
+            };
+        self.dynamic_imports.push(DynamicImportInfo {
+            source,
+            span: expr.span,
+            destructured_names,
+            local_name: None,
+            is_speculative,
+            value_escapes: false,
+        });
+        self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
     }
 
     fn push_relative_dynamic_import_pattern(

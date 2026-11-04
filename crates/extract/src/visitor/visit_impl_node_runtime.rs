@@ -11,10 +11,10 @@ use fallow_types::extract::ImportLoadKind;
 use super::super::ModuleInfoExtractor;
 use super::super::declarations::ModulePathBinding;
 use super::{
-    collect_pino_config_targets, extract_object_pattern_bindings, is_child_process_source,
-    is_meta_url_arg, is_node_path_source, is_node_url_source, loader_hook_exports_for_source,
-    local_fork_source, new_url_import_source, node_module_register_specifier,
-    normalize_module_file_relative_path, pino_factory_callee_name,
+    NEW_URL_LOADER_EXPORT, collect_pino_config_targets, extract_object_pattern_bindings,
+    is_child_process_source, is_meta_url_arg, is_node_path_source, is_node_url_source,
+    loader_hook_exports_for_source, local_fork_source, new_url_import_source,
+    node_module_register_specifier, normalize_module_file_relative_path, pino_factory_callee_name,
 };
 
 /// The CommonJS globals that name a path of the current module.
@@ -67,6 +67,26 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Narrow each `new URL()` edge to a registered loader hook module, so
+    /// the `register()` edge credits only the hook exports. The URL is often
+    /// bound to a local before the `register()` call, so this runs after the
+    /// walk of the program.
+    pub(super) fn finish_register_loader_new_urls(&mut self) {
+        if self.new_url_context.register_loader_sources.is_empty() {
+            return;
+        }
+        for import in &mut self.dynamic_imports {
+            if import.destructured_names == [NEW_URL_LOADER_EXPORT]
+                && self
+                    .new_url_context
+                    .register_loader_sources
+                    .contains(&import.source)
+            {
+                import.destructured_names.clear();
+            }
+        }
+    }
+
     /// Record `register('loader', ...)` from `node:module` as a dynamic import.
     pub(super) fn try_record_node_module_register(&mut self, expr: &CallExpression<'_>) {
         let register_match = match &expr.callee {
@@ -87,6 +107,11 @@ impl ModuleInfoExtractor {
         let sources = self.node_module_register_sources(expr);
         for source in sources.into_iter().filter(|source| !source.is_empty()) {
             let destructured_names = loader_hook_exports_for_source(&source);
+            if !destructured_names.is_empty() {
+                self.new_url_context
+                    .register_loader_sources
+                    .insert(source.clone());
+            }
             self.dynamic_imports.push(DynamicImportInfo {
                 source,
                 span: expr.span,
