@@ -1363,3 +1363,82 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
         "the excluded LangChain .invoke callee must not be flagged"
     );
 }
+
+// ── catalogue gaps: callee variants of existing categories ───────────────────
+
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 16] = [
+    ("src/exec-file.ts", "command-injection", 78),
+    ("src/shelljs.ts", "command-injection", 78),
+    ("src/ssti-handlebars.ts", "ssti", 1336),
+    ("src/ssti-lodash.ts", "ssti", 1336),
+    ("src/ssti-pug-render.ts", "ssti", 1336),
+    ("src/ssrf-axios-put.ts", "ssrf", 918),
+    ("src/ssrf-axios-call.ts", "ssrf", 918),
+    ("src/ssrf-got-get.ts", "ssrf", 918),
+    ("src/ssrf-https-get.ts", "ssrf", 918),
+    ("src/yaml-load-all.ts", "unsafe-deserialization", 502),
+    ("src/xxe-libxmljs.ts", "xxe", 611),
+    ("src/jquery-parse-html.ts", "jquery-html", 79),
+    ("src/send-download.ts", "route-send-file", 22),
+    ("src/fs-named-import.ts", "path-traversal", 22),
+    ("src/fs-promises-named.ts", "path-traversal", 22),
+    ("src/fs-write-sync.ts", "path-traversal", 22),
+];
+
+#[test]
+fn catalogue_gap_sinks_fire_once() {
+    let results = analyze_with_security_sink("security-sink-catalogue-gaps");
+    for (suffix, category, cwe) in CATALOGUE_GAP_SINKS {
+        assert_candidate(&results, suffix, category, cwe);
+        assert_eq!(
+            anchored_count(&results, suffix),
+            1,
+            "{suffix} should produce exactly one candidate"
+        );
+    }
+}
+
+#[test]
+fn catalogue_gap_lookalikes_do_not_fire() {
+    let results = analyze_with_security_sink("security-sink-catalogue-gaps");
+    for (suffix, reason) in [
+        (
+            "src/fs-local-helper.ts",
+            "a local readFile helper is not the node:fs binding",
+        ),
+        (
+            "src/axios-config-object.ts",
+            "an axios() config object is not a URL argument",
+        ),
+        (
+            "src/http-client-local.ts",
+            "http.get without the node:http import is not a Node request",
+        ),
+        (
+            "src/shell-local.ts",
+            "shell.exec without the shelljs import is not a shell call",
+        ),
+        (
+            "src/fs-literal.ts",
+            "a literal file path is not a candidate",
+        ),
+        (
+            "src/axios-config-variable.ts",
+            "an axios() config variable is not a URL argument",
+        ),
+        (
+            "src/download-client.ts",
+            "a storage client download is not a route file send",
+        ),
+        (
+            "src/exec-file-tooling.ts",
+            "execFile of a computed binary without untrusted input is not a candidate",
+        ),
+        (
+            "src/fs-build-path.ts",
+            "a computed path without untrusted input is not a candidate",
+        ),
+    ] {
+        assert!(!anchored_on(&results, suffix), "{suffix}: {reason}");
+    }
+}
