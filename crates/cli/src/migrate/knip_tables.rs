@@ -111,11 +111,22 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
 pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
     "optionalPeerDependencies",
     "binaries",
-    "nsExports",
-    "nsTypes",
     "catalog",
     "catalogReferences",
-    "namespaceMembers",
+];
+
+/// Knip issue types for members of a namespace, with the knip issue type
+/// that fallow reports them under.
+///
+/// Fallow reports an unused export or type that a consumer reads through a
+/// namespace (`nsExports`, `nsTypes`) as an unused export or type of its
+/// module, so a scope controls them through `exports` and `types`. Fallow
+/// does not report members of a TypeScript namespace (`namespaceMembers`),
+/// so that entry has no base type.
+pub(super) const KNIP_NAMESPACE_ISSUE_TYPES: &[(&str, Option<&str>)] = &[
+    ("nsExports", Some("exports")),
+    ("nsTypes", Some("types")),
+    ("namespaceMembers", None),
 ];
 
 /// Knip plugin config keys that a built-in fallow plugin covers. Fallow

@@ -7,7 +7,10 @@
 
 use serde_json::{Map, Value};
 
-use super::knip_fields::{migrate_ignore, migrate_ignore_deps, warn_unmapped_rule_key};
+use super::knip_fields::{
+    IssueTypeEffect, migrate_ignore, migrate_ignore_deps, migrate_namespace_issue_type,
+    warn_unmapped_rule_key,
+};
 use super::knip_tables::{
     KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNSUPPORTED_PLUGIN_KEYS,
 };
@@ -235,6 +238,19 @@ pub(super) fn migrate_ignore_issues(
         .and_then(Value::as_str)
         == Some("off");
 
+    // A base issue type that the global rules turn off already hides its
+    // namespace findings everywhere.
+    let globally_off: Vec<&str> = KNIP_RULE_MAP
+        .iter()
+        .filter(|(_, rule)| {
+            config
+                .get("rules")
+                .and_then(|rules| rules.get(*rule))
+                .and_then(Value::as_str)
+                == Some("off")
+        })
+        .map(|(name, _)| *name)
+        .collect();
     for (glob, kinds) in issues {
         let field = scope.field(&format!("ignoreIssues.{glob}"));
         let Some(file) = scope.rebase(glob).filter(|_| !glob.starts_with('!')) else {
@@ -281,7 +297,17 @@ pub(super) fn migrate_ignore_issues(
                     Some((_, rule)) => {
                         rules.insert((*rule).to_string(), Value::String("off".to_string()));
                     }
-                    None => warn_unmapped_rule_key(&field, kind, warnings),
+                    None => {
+                        if !migrate_namespace_issue_type(
+                            &field,
+                            kind,
+                            IssueTypeEffect::Off,
+                            |base| has(base) || globally_off.contains(&base),
+                            warnings,
+                        ) {
+                            warn_unmapped_rule_key(&field, kind, warnings);
+                        }
+                    }
                 },
             }
         }
