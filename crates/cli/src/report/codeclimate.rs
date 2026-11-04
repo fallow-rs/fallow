@@ -161,12 +161,11 @@ fn saved_annotation_codeclimate_issues(
             } else {
                 annotation_codeclimate_severity(annotation.level)
             };
-            let description = format!("{}: {}", annotation.title, annotation.message);
             let fingerprint = envelope_fingerprint(&rule_id, &path, line, &annotation.message);
             CodeClimateIssue {
                 kind: CodeClimateIssueKind::Issue,
                 check_name: rule_id.clone(),
-                description,
+                description: format!("{}: {}", annotation.title, annotation.message),
                 categories: vec![native_category(&rule_id).to_owned()],
                 severity,
                 fingerprint,
@@ -181,6 +180,7 @@ fn saved_annotation_codeclimate_issues(
                 owner: None,
                 group: None,
                 legacy_fingerprint: None,
+                audit: None,
             }
         })
         .collect::<Vec<_>>();

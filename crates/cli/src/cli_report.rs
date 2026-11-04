@@ -270,6 +270,9 @@ fn render_saved_ci_target(
     let review_notes = crate::report::ci::review::ReviewSummaryNotes {
         message: status_message,
         config_patterns: &config_patterns,
+        audit_gate: (kind == EnvelopeKind::Audit)
+            .then(|| crate::report::ci::review::AuditGatePolicy::from_audit_envelope(envelope))
+            .flatten(),
     };
     match target {
         ReportTarget::PrComment(_) => {

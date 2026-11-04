@@ -516,6 +516,7 @@ mod tests {
                 owner: None,
                 group: None,
                 legacy_fingerprint: None,
+                audit: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");
@@ -610,6 +611,7 @@ mod tests {
             severity: "minor".to_owned(),
             fingerprint: "abc".to_owned(),
             legacy_fingerprint: None,
+            audit: None,
         }];
         let envelope = PrCommentEnvelope {
             marker_id: "fallow-results".to_owned(),

@@ -662,6 +662,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "abc".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
         assert_eq!(kept.len(), 1, "oversize diff must fall through unfiltered");
@@ -681,6 +682,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "abc".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
         assert_eq!(kept.len(), 1, "missing diff must fall through unfiltered");
@@ -719,6 +721,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "override".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let source_level_in_diff = CiIssue {
             rule_id: "fallow/unused-export".into(),
@@ -730,6 +733,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "in-diff".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let source_level_outside_diff = CiIssue {
             rule_id: "fallow/unused-export".into(),
@@ -741,6 +745,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "out-diff".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let kept = summary_filter_with_scope(
             vec![
@@ -790,6 +795,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "dep".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
             filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3)
@@ -825,6 +831,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "dep".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
             filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3)
@@ -845,6 +852,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "a".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let b = CiIssue {
             rule_id: "fallow/unused-dependency".into(),
@@ -856,6 +864,7 @@ mod tests {
             other_locations: Vec::new(),
             fingerprint: "b".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let kept = summary_filter_with_scope(vec![a, b], SummaryScope::All, |issues| issues);
         assert_eq!(kept[0].fingerprint, "b");
@@ -1059,6 +1068,7 @@ diff --git a/src/a.ts b/src/a.ts
             other_locations: Vec::new(),
             fingerprint: "a".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let drop = CiIssue {
             line: 3,
@@ -1114,6 +1124,7 @@ diff --git a/src/a.ts b/src/a.ts
             other_locations: Vec::new(),
             fingerprint: "range".into(),
             legacy_fingerprint: None,
+            audit: None,
         };
         let outside = CiIssue {
             line: 8,
