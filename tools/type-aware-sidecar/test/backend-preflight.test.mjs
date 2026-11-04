@@ -37,14 +37,18 @@ test("preflight accepts the sidecar's own install of each backend", () => {
   }
 });
 
-test("root npm install stays in typescript lockstep with the sidecar", () => {
-  const readManifest = (manifestPath) => JSON.parse(readFileSync(manifestPath, "utf8"));
-  const repoManifest = readManifest(path.join(sidecarRoot, "..", "..", "package.json"));
-  const sidecarManifest = readManifest(path.join(sidecarRoot, "package.json"));
+test("root pnpm install stays in typescript lockstep with the sidecar", () => {
+  const sidecarManifest = JSON.parse(readFileSync(path.join(sidecarRoot, "package.json"), "utf8"));
+  // The root tools install with pnpm, so the override is in the root
+  // `pnpm-workspace.yaml`. The sidecar has no YAML parser, so the test reads
+  // the indented `typescript:` entry under the top-level `overrides:` key.
+  const settings = readFileSync(path.join(sidecarRoot, "..", "..", "pnpm-workspace.yaml"), "utf8");
+  const overrides = /^overrides:\n((?:[ \t]+.*\n|\n)*)/mu.exec(settings)?.[1] ?? "";
+  const rootOverride = /^[ \t]+["']?typescript["']?:[ \t]*["']?([^"'\s#]+)/mu.exec(overrides)?.[1];
   assert.equal(
-    repoManifest.overrides?.typescript,
+    rootOverride,
     sidecarManifest.dependencies.typescript,
-    "the repository root overrides typescript so a root-only npm ci resolves a sidecar-compatible install",
+    "the repository root overrides typescript so a root-only pnpm install resolves a sidecar-compatible install",
   );
 });
 
