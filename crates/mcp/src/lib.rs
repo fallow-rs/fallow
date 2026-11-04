@@ -24,7 +24,7 @@ mod tools;
 mod warm_session;
 
 #[cfg(all(test, windows))]
-pub(crate) mod test_support {
+mod test_support {
     /// Serializes the Windows process-tree lifecycle tests. Each one spawns a
     /// nested PowerShell tree; running them concurrently on a loaded CI runner
     /// multiplies process-spawn latency past the fixture timeouts and they

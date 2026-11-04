@@ -1238,7 +1238,7 @@ impl ModuleInfoExtractor {
     /// Record a namespace-import local placed in an object literal bound to
     /// `root_name`, and exclude the placement itself from the bare-reference
     /// rule (issue #2377).
-    pub(super) fn record_object_literal_namespace_placement(
+    fn record_object_literal_namespace_placement(
         &mut self,
         root_name: &str,
         value: &IdentifierReference<'_>,

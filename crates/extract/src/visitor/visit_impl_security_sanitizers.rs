@@ -506,7 +506,7 @@ impl ModuleInfoExtractor {
         Some(rel.name.as_str())
     }
 
-    pub(super) fn is_node_path_method_call(&self, call: &CallExpression<'_>, method: &str) -> bool {
+    fn is_node_path_method_call(&self, call: &CallExpression<'_>, method: &str) -> bool {
         let Expression::StaticMemberExpression(member) = &call.callee else {
             return false;
         };

@@ -37,7 +37,7 @@ const NODE_TEST_FILE_NAMES: &[&str] = &["*.test", "*-test", "*_test", "test-*", 
 /// The directory arguments of one test command that get default patterns.
 /// Each directory adds several patterns, and real test commands name a few
 /// directories. Later directories add no pattern.
-pub(super) const MAX_TEST_DIRECTORIES: usize = 64;
+const MAX_TEST_DIRECTORIES: usize = 64;
 
 /// The directory in which `node --test` runs every source file.
 const NODE_TEST_DIRECTORY: &str = "test";

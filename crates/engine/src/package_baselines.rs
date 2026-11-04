@@ -251,7 +251,7 @@ impl PackageChangeScope {
 
     /// Whether a finding owner path belongs to this mixed scope.
     #[must_use]
-    pub(crate) fn includes(&self, path: &Path) -> bool {
+    fn includes(&self, path: &Path) -> bool {
         let absolute = self.absolute_path(path);
         match self.owner_absolute(&absolute) {
             Some(WorkspaceBaseline::Changed { files, .. }) => files.contains(&absolute),

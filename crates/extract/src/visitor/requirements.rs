@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use super::ModuleInfoExtractor;
 use super::visit_impl::visit_projections::MAX_PROJECTION_VALUES;
 
-pub(super) const MAX_BINDING_REQUIREMENT_NODES: usize = MAX_PROJECTION_VALUES;
+const MAX_BINDING_REQUIREMENT_NODES: usize = MAX_PROJECTION_VALUES;
 const SEQUENCE_BASE: u64 = 0x9e37_79b1_85eb_ca87;
 type Condition = (Span, Span);
 

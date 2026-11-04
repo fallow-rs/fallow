@@ -57,7 +57,7 @@ mod unused_server_action;
 mod unused_svelte_event;
 
 #[cfg(test)]
-pub(crate) mod test_support;
+mod test_support;
 
 pub use predicates::is_builtin_module;
 #[cfg(test)]
@@ -162,7 +162,7 @@ struct SecurityDetectionContext<'a, 'm> {
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
 /// Falls back to `(1, byte_offset)` when no line table is available.
 #[doc(hidden)]
-pub(crate) fn byte_offset_to_line_col(
+fn byte_offset_to_line_col(
     line_offsets_map: &LineOffsetsMap<'_>,
     file_id: FileId,
     byte_offset: u32,

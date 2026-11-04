@@ -851,7 +851,7 @@ pub(super) fn normalize_module_file_relative_path(relative: &str) -> Option<Stri
 }
 
 #[derive(Default)]
-pub(super) struct PlaywrightFixtureMemberCollector {
+struct PlaywrightFixtureMemberCollector {
     fixture_by_local: FxHashMap<String, String>,
     alias_by_local: FxHashMap<String, Vec<String>>,
     shadowed_stack: Vec<FxHashSet<String>>,

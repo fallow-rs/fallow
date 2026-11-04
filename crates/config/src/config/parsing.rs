@@ -20,9 +20,9 @@ pub const CONFIG_FILE_NAMES: &[&str] = &[
 ];
 
 /// Supported config file names in priority order.
-pub(super) const CONFIG_NAMES: &[&str] = CONFIG_FILE_NAMES;
+const CONFIG_NAMES: &[&str] = CONFIG_FILE_NAMES;
 
-pub(super) const MAX_EXTENDS_DEPTH: usize = 10;
+const MAX_EXTENDS_DEPTH: usize = 10;
 
 /// Prefix for npm package specifiers in the `extends` field.
 const NPM_PREFIX: &str = "npm:";
@@ -60,7 +60,7 @@ impl ConfigFormat {
 
 /// Deep-merge two JSON values. `base` is lower-priority, `overlay` is higher.
 /// Objects: merge field by field. Arrays/scalars: overlay replaces base.
-pub(super) fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
+fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
     match (base, overlay) {
         (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
             for (key, value) in overlay_map {
@@ -970,7 +970,7 @@ fn validate_sealed_relative_extends(
 ///
 /// Delegates to [`resolve_extends_file`] with a fresh visited set.
 #[cfg(test)]
-pub(super) fn resolve_extends(
+fn resolve_extends(
     path: &Path,
     _visited: &mut FxHashSet<String>,
     depth: usize,
@@ -993,9 +993,7 @@ pub(super) fn resolve_extends(
 ///
 /// Phase 2 (a future minor release) flips both structs to
 /// `#[serde(deny_unknown_fields)]` and the warning becomes a hard error.
-pub(super) fn collect_unknown_rule_keys(
-    merged: &serde_json::Value,
-) -> Vec<super::rules::UnknownRuleKey> {
+fn collect_unknown_rule_keys(merged: &serde_json::Value) -> Vec<super::rules::UnknownRuleKey> {
     use super::rules::find_unknown_rule_keys;
 
     let mut findings = Vec::new();
@@ -1031,7 +1029,7 @@ thread_local! {
 /// emitted by every `warn_on_unknown_rule_keys` call within `body`'s call tree
 /// on the current thread, in order. Test-only.
 #[cfg(test)]
-pub(super) fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
+fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
     body: F,
 ) -> (R, Vec<super::rules::UnknownRuleKey>) {
     UNKNOWN_RULE_CAPTURE.with(|cell| {
@@ -1179,9 +1177,7 @@ thread_local! {
 /// `(chosen, shadowed)` pair emitted by `warn_on_coexisting_configs` within
 /// `body`'s call tree on the current thread, in order. Test-only.
 #[cfg(test)]
-pub(super) fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(
-    body: F,
-) -> (R, Vec<CoexistWarning>) {
+fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<CoexistWarning>) {
     COEXIST_CAPTURE.with(|cell| {
         *cell.borrow_mut() = Some(Vec::new());
     });

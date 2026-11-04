@@ -249,7 +249,7 @@ impl Edge {
     /// asset reference keeps the target in use, but reachability does not
     /// continue into the imports of the target.
     #[must_use]
-    pub(crate) fn runs_target_code(&self) -> bool {
+    fn runs_target_code(&self) -> bool {
         self.symbols.is_empty()
             || self
                 .symbols
@@ -262,7 +262,7 @@ impl Edge {
     /// edge whose every symbol is type-only gives no test reach. Dead-code
     /// reachability keeps [`Self::runs_target_code`].
     #[must_use]
-    pub(crate) fn runs_target_code_in_tests(&self) -> bool {
+    fn runs_target_code_in_tests(&self) -> bool {
         self.symbols.is_empty()
             || self
                 .symbols
@@ -339,7 +339,7 @@ impl ImportedSymbol {
     /// ambient named re-export, an `import()` type reference), credits the
     /// names it actually imports.
     #[must_use]
-    pub(crate) fn is_ambient_star(&self) -> bool {
+    fn is_ambient_star(&self) -> bool {
         self.is_type_only
             && self.local_name.is_empty()
             && matches!(
@@ -356,7 +356,7 @@ impl ImportedSymbol {
     /// erases every value meaning (issue #2375), so it credits type space
     /// only, exactly like the ambient named re-exports of issue #2349.
     #[must_use]
-    pub(crate) fn is_value_bearing_ambient_star(&self) -> bool {
+    fn is_value_bearing_ambient_star(&self) -> bool {
         self.is_ambient_star() && !self.is_type_only_star
     }
 }

@@ -720,7 +720,7 @@ fn map_value_type_from_args(args: Option<&TSTypeParameterInstantiation<'_>>) -> 
 /// (`computed<Util[]>(...)` generic arg, or a callback returning a typed array),
 /// or a direct array literal of `new Util()` elements. Returns a non-builtin
 /// class name only; the analyze layer resolves it to the defining export.
-pub(super) fn infer_array_binding_element_type(
+fn infer_array_binding_element_type(
     type_annotation: Option<&TSTypeAnnotation<'_>>,
     init: Option<&Expression<'_>>,
 ) -> Option<String> {

@@ -50,7 +50,7 @@ pub(super) fn namespace_member_credited(accessed: &FxHashSet<String>, name: &str
 
 /// The marker that `accessed_members` holds for a whole use of a namespace,
 /// or (as `Inner.*`) of a nested namespace. No member has this name.
-pub(super) const NAMESPACE_WHOLE_USE: &str = "*";
+const NAMESPACE_WHOLE_USE: &str = "*";
 
 /// Credit the namespace member uses of the semantic pass: a nested chain, a
 /// whole use, and a reference inside the namespace body.
@@ -101,7 +101,7 @@ pub(super) fn credit_namespace_member_uses(
 
 /// Credit every namespace member that an escaping namespace import can read:
 /// the namespaces of the target modules, also behind their re-exports.
-pub(super) fn credit_whole_module_namespaces(
+fn credit_whole_module_namespaces(
     graph: &ModuleGraph,
     files: &[FileId],
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
@@ -140,7 +140,7 @@ pub(super) fn credit_whole_module_namespaces(
     }
 }
 
-pub(super) fn credit_namespace_path(credited: &mut FxHashSet<String>, path: &str, whole: bool) {
+fn credit_namespace_path(credited: &mut FxHashSet<String>, path: &str, whole: bool) {
     for (index, _) in path.match_indices('.') {
         credited.insert(path[..index].to_string());
     }

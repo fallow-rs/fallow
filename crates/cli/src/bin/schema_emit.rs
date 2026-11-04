@@ -632,7 +632,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "MutationInspectCode",
 ];
 
-pub(crate) fn derived_definition_names() -> &'static [&'static str] {
+fn derived_definition_names() -> &'static [&'static str] {
     DERIVED_DEFINITION_NAMES
 }
 

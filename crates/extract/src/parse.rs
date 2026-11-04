@@ -1552,24 +1552,24 @@ pub struct SemanticUsage {
     pub import_binding_usage: ImportBindingUsage,
     pub auto_import_candidates: Vec<String>,
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
-    pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
-    pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
-    pub(crate) subclass_binding_reference_spans: rustc_hash::FxHashMap<Span, Span>,
-    pub(crate) subclass_namespace_reference_spans: rustc_hash::FxHashSet<Span>,
-    pub(crate) subclass_immutable_reference_spans: rustc_hash::FxHashSet<Span>,
+    mock_api_reference_spans: MockApiReferenceSpans,
+    module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
+    subclass_binding_reference_spans: rustc_hash::FxHashMap<Span, Span>,
+    subclass_namespace_reference_spans: rustc_hash::FxHashSet<Span>,
+    subclass_immutable_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) subclass_binding_writes: rustc_hash::FxHashMap<Span, Vec<Span>>,
-    pub(crate) builtin_container_reference_spans: rustc_hash::FxHashSet<Span>,
-    pub(crate) imported_call_reference_spans: rustc_hash::FxHashSet<Span>,
+    builtin_container_reference_spans: rustc_hash::FxHashSet<Span>,
+    imported_call_reference_spans: rustc_hash::FxHashSet<Span>,
     /// Value references to runtime ESM import bindings that are not admitted
     /// call sites, plus admitted calls that initialize a top-level declarator.
     pub(crate) import_binding_references: Vec<fallow_types::extract::ImportBindingReference>,
     /// Namespace member uses that a plain member access does not record.
-    pub(crate) namespace_member_uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
+    namespace_member_uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
     /// Non-destructured `require()` bindings nothing in the file references.
     /// Moved into `import_binding_usage.unused` by
     /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
     /// which of them the exported form declares.
-    pub(crate) unreferenced_import_equals_bindings: Vec<String>,
+    unreferenced_import_equals_bindings: Vec<String>,
     pub(crate) component_contracts: fallow_types::extract::ComponentContractFacts,
     pub(crate) effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
 }

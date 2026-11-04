@@ -245,6 +245,112 @@ non_ascii_idents = "warn"              # Prevent non-ASCII identifiers
 unit_bindings = "warn"                 # Catch useless `let _ = expr` bindings
 tail_expr_drop_order = "warn"          # Catch temporaries dropped in surprising order
 
+# cargo-fallow checks the Rust workspace: `cargo fallow check`. The CI job
+# "Rust Structure" and the hk hooks run it. See
+# docs/development/quality-gates.md#rust-structure.
+[workspace.metadata.fallow.boundaries.groups]
+foundation = [
+    "fallow-report-protocol",
+    "fallow-types",
+    "fallow-config",
+    "fallow-extract",
+    "fallow-graph",
+    "fallow-security",
+    "fallow-core",
+    "fallow-engine",
+    "fallow-output",
+    "fallow-process",
+    "fallow-mutation",
+    "fallow-api",
+]
+protocol = ["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-node"]
+analysis-starters = ["fallow-core", "fallow-engine", "fallow-api"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "process-must-remain-independent"
+from = ["fallow-process"]
+deny = ["*"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "report-protocol-must-remain-independent"
+from = ["fallow-report-protocol"]
+deny = ["*"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "mutation-must-remain-independent"
+from = ["fallow-mutation"]
+deny = ["*"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "foundation-must-not-depend-on-protocol"
+from = ["@foundation"]
+deny = ["@protocol"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "output-must-not-start-analysis"
+from = ["fallow-output"]
+deny = ["@analysis-starters"]
+
+[[workspace.metadata.fallow.boundaries.crates]]
+rule = "protocol-must-use-api-or-engine"
+from = ["@protocol"]
+deny = ["fallow-core"]
+
+[[workspace.metadata.fallow.boundaries.sources]]
+rule = "semantic-client-owned-by-api"
+paths = ["crates/cli/src", "crates/lsp/src", "crates/mcp/src", "crates/napi/src"]
+deny = [
+    "struct SemanticRequest",
+    "struct SemanticResponse",
+    "fn validate_response",
+    "fn apply_api_surface",
+    "fn run_semantic_request",
+]
+owner = "fallow-api"
+
+[[workspace.metadata.fallow.boundaries.sources]]
+rule = "process-tree-owned-by-process-crate"
+paths = ["crates/cli/src", "crates/lsp/src", "crates/mcp/src", "crates/napi/src"]
+deny = [
+    "process_group(0)",
+    "TerminateJobObject",
+    "AssignProcessToJobObject",
+    "CreateJobObjectW",
+    "CREATE_SUSPENDED",
+    "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+    "libc::waitid",
+]
+owner = "fallow-process"
+
+[workspace.metadata.fallow.visibility]
+production = [
+    "fallow-cli:fallow",
+    "fallow-lsp:fallow-lsp",
+    "fallow-mcp:fallow-mcp",
+    "fallow-multicall:fallow-multicall",
+]
+uniform-fields = true
+
+# `max-function-lines` and `max-cognitive` are the same limits as
+# `too-many-lines-threshold` and `cognitive-complexity-threshold` in
+# .clippy.toml. cargo-fallow-baseline.json holds the functions that were over
+# a complexity limit when the gate started.
+[workspace.metadata.fallow.size]
+max-file-lines = 2000
+max-function-lines = 100
+
+[workspace.metadata.fallow.complexity]
+max-cognitive = 25
+max-cyclomatic = 20
+
+# Rust code has many small clone groups, and a baseline of each group goes
+# stale on each edit. The percentage gate stops the total from growing.
+[workspace.metadata.fallow.dupes]
+threshold = 10.7
+
+[workspace.metadata.fallow.rules]
+code-duplication = "warn"
+
 # Dev profile: disable debug info for faster builds
 [profile.dev]
 debug = false

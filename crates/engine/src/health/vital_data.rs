@@ -191,7 +191,7 @@ pub(super) struct HealthSnapshotSaveInput<'a> {
 }
 
 /// Whether the run asked for a trend, through `--trend` or `--trend-from`.
-pub(super) const fn trend_requested(opts: &HealthExecutionOptions<'_>) -> bool {
+const fn trend_requested(opts: &HealthExecutionOptions<'_>) -> bool {
     opts.trend || opts.trend_from.is_some()
 }
 

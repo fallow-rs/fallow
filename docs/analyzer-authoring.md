@@ -148,7 +148,7 @@ drift gate. Do not rely on the checklist alone.
 When changing workspace crate dependencies, also run:
 
 ```bash
-npm run check:crate-boundaries
+cargo fallow boundaries --fail-on-issues
 ```
 
 This catches the clearest architecture back-edges, such as foundation crates

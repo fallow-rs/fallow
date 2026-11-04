@@ -24,10 +24,10 @@ const FAST_COMMANDS = [
     args: ["run", "check:agent-adapters"],
   },
   {
-    // CI runs the same rule for .rs files in the "JS Lint and Format" job.
+    // CI runs the same rule for .rs files in the "Rust Structure" job.
     label: "Large file growth",
-    command: "node",
-    args: ["scripts/check-file-size.mjs", "--base", BASE_REF],
+    command: "cargo",
+    args: ["fallow", "size", "--base", BASE_REF, "--fail-on-growth", "--quiet"],
     requiresRef: BASE_REF,
   },
   {
@@ -86,9 +86,17 @@ const FAST_COMMANDS = [
     args: ["run", "check:cargo-features"],
   },
   {
-    label: "Crate boundaries",
-    command: "npm",
-    args: ["run", "check:crate-boundaries"],
+    // The same command as the "Rust Structure" CI job.
+    label: "Rust structure",
+    command: "cargo",
+    args: [
+      "fallow",
+      "check",
+      "--baseline",
+      "cargo-fallow-baseline.json",
+      "--fail-on-issues",
+      "--quiet",
+    ],
   },
   {
     label: "Miri cfg gates",
@@ -308,7 +316,8 @@ export const helpText = () => `Usage: node scripts/verify-repo.mjs [--fast | --f
 Canonical local repository verification:
   --fast  Knowledge routing, adapter drift, large file growth against
           origin/main, formatting, linting, generated
-          contracts, crate boundaries, and the conformance fixtures (default)
+          contracts, Rust structure (cargo-fallow), and the conformance
+          fixtures (default)
   --full  Fast checks plus repository script tests, npm wrapper tests, workspace
           tests, the duplication accuracy floor, benchmark compilation, rustdoc,
           and the local NAPI build and tests
@@ -316,6 +325,7 @@ Canonical local repository verification:
 Prerequisites:
   - Node.js 22.12.0 or newer and root dependencies installed with pnpm install
   - A stable Rust toolchain with rustfmt and clippy
+  - cargo-fallow, at the version in mise.toml
   - editors/vscode dependencies installed with pnpm install
   - Full mode also needs crates/napi and tools/type-aware-sidecar
     dependencies installed with npm ci, and a platform compiler

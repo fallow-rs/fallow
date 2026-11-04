@@ -92,7 +92,7 @@ pub(super) fn baseline_member_import_keys(
     }
 }
 
-pub(super) fn unused_export_baseline_keys(
+fn unused_export_baseline_keys(
     items: &[crate::results::UnusedExportFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -108,7 +108,7 @@ pub(super) fn unused_export_baseline_keys(
         .collect()
 }
 
-pub(super) fn unused_type_baseline_keys(
+fn unused_type_baseline_keys(
     items: &[crate::results::UnusedTypeFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -124,7 +124,7 @@ pub(super) fn unused_type_baseline_keys(
         .collect()
 }
 
-pub(super) fn invalid_client_export_baseline_keys(
+fn invalid_client_export_baseline_keys(
     items: &[crate::results::InvalidClientExportFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -140,7 +140,7 @@ pub(super) fn invalid_client_export_baseline_keys(
         .collect()
 }
 
-pub(super) fn private_type_leak_baseline_keys(
+fn private_type_leak_baseline_keys(
     items: &[crate::results::PrivateTypeLeakFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -157,7 +157,7 @@ pub(super) fn private_type_leak_baseline_keys(
         .collect()
 }
 
-pub(super) fn barrel_baseline_keys(
+fn barrel_baseline_keys(
     items: &[crate::results::MixedClientServerBarrelFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -174,7 +174,7 @@ pub(super) fn barrel_baseline_keys(
         .collect()
 }
 
-pub(super) fn directive_baseline_keys(
+fn directive_baseline_keys(
     items: &[crate::results::MisplacedDirectiveFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -191,7 +191,7 @@ pub(super) fn directive_baseline_keys(
         .collect()
 }
 
-pub(super) fn route_collision_baseline_keys(
+fn route_collision_baseline_keys(
     items: &[crate::results::RouteCollisionFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -207,7 +207,7 @@ pub(super) fn route_collision_baseline_keys(
         .collect()
 }
 
-pub(super) fn enum_member_baseline_keys(
+fn enum_member_baseline_keys(
     items: &[crate::results::UnusedEnumMemberFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -217,7 +217,7 @@ pub(super) fn enum_member_baseline_keys(
         .collect()
 }
 
-pub(super) fn class_member_baseline_keys(
+fn class_member_baseline_keys(
     items: &[crate::results::UnusedClassMemberFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -227,7 +227,7 @@ pub(super) fn class_member_baseline_keys(
         .collect()
 }
 
-pub(super) fn store_member_baseline_keys(
+fn store_member_baseline_keys(
     items: &[crate::results::UnusedStoreMemberFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -237,7 +237,7 @@ pub(super) fn store_member_baseline_keys(
         .collect()
 }
 
-pub(super) fn namespace_member_baseline_keys(
+fn namespace_member_baseline_keys(
     items: &[crate::results::UnusedNamespaceMemberFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -247,10 +247,7 @@ pub(super) fn namespace_member_baseline_keys(
         .collect()
 }
 
-pub(super) fn unused_member_baseline_key(
-    member: &crate::results::UnusedMember,
-    root: &Path,
-) -> String {
+fn unused_member_baseline_key(member: &crate::results::UnusedMember, root: &Path) -> String {
     format!(
         "{}:{}.{}",
         relative_path(&member.path, root),
@@ -259,7 +256,7 @@ pub(super) fn unused_member_baseline_key(
     )
 }
 
-pub(super) fn server_action_baseline_keys(
+fn server_action_baseline_keys(
     items: &[crate::results::UnusedServerActionFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -275,7 +272,7 @@ pub(super) fn server_action_baseline_keys(
         .collect()
 }
 
-pub(super) fn load_data_key_baseline_keys(
+fn load_data_key_baseline_keys(
     items: &[crate::results::UnusedLoadDataKeyFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -285,7 +282,7 @@ pub(super) fn load_data_key_baseline_keys(
         .collect()
 }
 
-pub(super) fn unresolved_import_baseline_keys(
+fn unresolved_import_baseline_keys(
     items: &[crate::results::UnresolvedImportFinding],
     root: &Path,
 ) -> Vec<String> {
@@ -431,7 +428,7 @@ pub(super) fn baseline_catalog_keys(
 /// Generate a stable key for a rule-pack policy violation:
 /// `path:pack/rule_id:matched`. Line numbers are deliberately excluded so a
 /// baselined finding survives unrelated edits above it.
-pub(super) fn policy_violation_key(v: &crate::results::PolicyViolation, root: &Path) -> String {
+fn policy_violation_key(v: &crate::results::PolicyViolation, root: &Path) -> String {
     format!(
         "{}:{}/{}:{}",
         relative_path(&v.path, root),

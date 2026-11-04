@@ -47,7 +47,7 @@ Run one hook by hand with `hk run pre-commit` or `hk run pre-push`. Add
 ### Pinned tools with mise (optional)
 
 The root `mise.toml` pins the local tools that the hooks and quality gates
-call: hk, pkl, Node.js, pnpm, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
+call: hk, pkl, Node.js, pnpm, `typos`, `cargo-fallow`, `cargo-deny`, `cargo-audit`,
 `cargo-nextest`, `cargo-llvm-cov` and `cargo-insta`. With
 [mise](https://mise.jdx.dev) installed, run `mise install` to get the pinned
 set. mise downloads prebuilt binaries, so the install does not compile tools.
@@ -60,9 +60,9 @@ version through rustup, so `mise.toml` does not pin Rust.
 Where CI pins a tool version, `mise.toml` uses the same version.
 `scripts/workflow-policy.test.mjs` fails when the CI Node.js version or a
 `tool: name@version` pin changes and `mise.toml` does not follow. The test
-does not check typos and cargo-deny, because their CI actions fix the tool
-version in the action commit. A Dependabot action bump then does not fail.
-Update those two versions by hand. The same test fails when the pnpm version
+does not check typos, cargo-deny and cargo-fallow, because their CI actions
+fix the tool version in the action commit. A Dependabot action bump then does
+not fail. Update those three versions by hand. The same test fails when the pnpm version
 in `mise.toml` is not the lower bound of `engines.pnpm` in the root
 `package.json`,
 the `packageManager` of `editors/vscode`, or a `pnpm/action-setup` step in
@@ -368,8 +368,8 @@ the release pre-flight, and in each release. The release `vscode-host-smoke`
 job also loads the darwin-x64 extension before the publish jobs can start. On
 busy days, the macOS queue held a `CI` run on `main` for up to two hours.
 
-On a schedule only: `Branch Coverage`, `Ecosystem (Full)`, `Hawk`, and
-`Release Validation`. `Branch Coverage` runs every week and with
+On a schedule only: `Branch Coverage`, `Ecosystem (Full)`, and `Release
+Validation`. `Branch Coverage` runs every week and with
 `workflow_dispatch`. It runs `cargo llvm-cov --branch` on the pinned nightly of
 `Fuzz Smoke`, because `--branch` needs a nightly compiler. It writes line and
 branch coverage to the job summary. It has no floor and does not gate a
@@ -644,7 +644,7 @@ python3 scripts/scan-hidden-unicode.py --mode committed --staged
 sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
 node scripts/check-miri-cfg.mjs
-node scripts/check-file-size.mjs --staged
+cargo fallow size --staged --fail-on-growth --quiet
 sh scripts/hook-file-length.sh HEAD
 sh scripts/hook-changelog-fragments.sh
 npm run lint:js
@@ -680,7 +680,7 @@ Pre-push parity:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
-cargo shear
+cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues --quiet
 sh scripts/hook-file-length.sh origin/main upstream/main
 ```
 
@@ -688,10 +688,10 @@ The `cargo doc` step is the same command as the required `Documentation` CI
 job. A broken intra-doc link passes fmt and clippy, so the hook catches it
 before the push. With no change the step takes under 1 s.
 
-The `cargo shear` step is the same command as the required
-`Unused Dependencies` CI job. It catches a dependency whose last use a change
-removes. When `cargo-shear` is not installed, the hook skips the step and
-prints a hint with the version in `mise.toml`.
+The `cargo fallow check` step is the same command as the required
+`Rust Structure` CI job. See [Rust structure](#rust-structure). When
+`cargo-fallow` is not installed, the hook skips the step and prints a hint
+with the version in `mise.toml`.
 
 Recommended full local verification before review:
 
@@ -705,13 +705,15 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-it
 
 A source file over 2000 lines must not grow. Two checks hold this limit:
 
-- `scripts/check-file-size.mjs` checks `.rs` files.
+- `cargo fallow size` checks `.rs` files.
 - `fallow audit` checks `.mjs` and `.ts` files with `health.maxFileLines`.
 
 ### Rust files
 
-The `file-size` pre-commit step checks each staged `.rs` file. The limit is
-2000 lines (`LINE_LIMIT` in `scripts/check-file-size.mjs`). The step fails in
+The `file-size` pre-commit step runs `cargo fallow size --staged
+--fail-on-growth` on each staged `.rs` file. The limit is 2000 lines
+(`max-file-lines` in `[workspace.metadata.fallow.size]` of the root
+`Cargo.toml`). The step fails in
 these cases:
 
 - A staged file over the limit has more lines than its `HEAD` version.
@@ -725,11 +727,11 @@ does not ask a change to shrink a file.
 The step skips these files:
 
 - Generated files. One of the first 10 lines of a generated file is a
-  comment with one of the two exact headers that the repository generators
+  comment with one of the exact headers that the repository generators
   write: `AUTOGENERATED FILE. DO NOT EDIT.`, or `Generated from <source>. Do
-  not edit.` (`Generated by` is also valid). Other comments with the words
-  `generated` and `do not edit` do not match. An author can still add an exact
-  header by hand, so review a new generator header like any other change.
+  not edit.` (`Generated by` is also valid). cargo-fallow also accepts an
+  `@generated` comment. An author can still add a header by hand, so review a
+  new generator header like any other change.
 - Files in a `snapshots` or `__snapshots__` directory. Snapshot files
   (`.snap`) are not checked file types.
 - Test files. These are files in a `tests` or `test` directory, and files
@@ -740,18 +742,73 @@ To fix a failure, move the new code to a new module, or remove lines from
 the file in the same change. To skip only this step for one commit, run
 `HK_SKIP_STEPS=file-size git commit`. `HK=0 git commit` skips all hooks.
 
-The `Large file growth` step of the CI `JS Lint and Format` job runs the same
+The `Large file growth` step of the CI `Rust Structure` job runs the same
 rule on pull requests. It compares `HEAD` with the merge base of the pull
 request base branch:
 
 ```bash
-node scripts/check-file-size.mjs --base origin/main
+cargo fallow size --base origin/main --fail-on-growth
 ```
 
 The CI step has no skip route. A pull request that must grow a large file
-needs a maintainer decision. The step is the last step of the job and runs
-after a failed step. When the step cannot read the base ref, for example
-because the ref is not fetched, it exits with 2, not 1.
+needs a maintainer decision. The step runs after a failed step. When the step
+cannot read the base ref, for example because the ref is not fetched, it exits
+with 2, not 1.
+
+## Rust structure
+
+[cargo-fallow](https://github.com/fallow-rs/cargo-fallow) checks the Rust
+workspace. The configuration is in `[workspace.metadata.fallow]` of the root
+`Cargo.toml`. The required `Rust Structure` CI job, the `cargo-fallow`
+pre-push step and `npm run verify:fast` run the same command:
+
+```bash
+cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues
+```
+
+Each gate fails the run:
+
+- `deps`: a dependency that no code uses, or that only tests use. A
+  feature-only dependency goes in `ignored` of
+  `[package.metadata.fallow.deps]`, with the reason.
+- `files`: a `.rs` file that no target compiles.
+- `visibility`: a `pub`, `pub(crate)` or `pub(super)` item that can be less
+  visible. `production` lists the release binaries. cargo-fallow treats each
+  crate that a registry can publish as an external API, so it reports no dead
+  `pub` item in the published crates. Only `pub(crate)` and `pub(super)`
+  items there get a finding
+  ([cargo-fallow#70](https://github.com/fallow-rs/cargo-fallow/issues/70)). Run
+  `cargo fallow fix --dry-run`, then `cargo fallow fix --yes`, then the
+  Clippy commands. Clippy can reject an edit that `fix` accepts.
+- `boundaries`: the crate rules and the source rules in
+  `[workspace.metadata.fallow.boundaries]`. The crate rules keep the
+  dependency direction of
+  [Architecture invariants](../architecture-invariants.md). The source rules
+  keep the semantic client in `fallow-api` and the process-tree code in
+  `fallow-process`. A source rule matches tokens, so a pattern in a comment
+  or a string does not match.
+- `complexity`: a function over the cognitive limit of 25 or the cyclomatic
+  limit of 20. `cargo-fallow-baseline.json` holds the functions that were over
+  a limit when the gate started. A new function over a limit fails. When you
+  simplify a function in the baseline, save the baseline again with
+  `cargo fallow check --only complexity --save-baseline cargo-fallow-baseline.json`.
+- `dupes`: the duplication percentage over `threshold` in
+  `[workspace.metadata.fallow.dupes]`. The threshold is a ratchet just above
+  the current percentage, so a change that adds a clone can fail the gate.
+  Remove the clone, or remove another clone in the same change. The single
+  clone groups are warnings. Lower `threshold` when the percentage goes down.
+- `parse`: a target root file that does not parse.
+
+The cargo-fallow complexity model is not the Clippy model, so a function can
+pass `clippy::cognitive_complexity` and fail the cargo-fallow limit.
+
+To hide one finding, put `// fallow-ignore-next-line <rule> -- <reason>`
+above the line. Link the cargo-fallow issue when the finding is a cargo-fallow
+false positive. `cargo fallow explain <rule>` explains each rule.
+
+`scripts/check-cargo-features.mjs` stays, because cargo-fallow does not
+compare the feature sets of a member build and the workspace build yet
+([cargo-fallow#71](https://github.com/fallow-rs/cargo-fallow/issues/71)).
 
 ### JavaScript and TypeScript files
 
