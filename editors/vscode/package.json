@@ -296,6 +296,7 @@
             "unused-optional-dependencies": true,
             "unused-enum-members": true,
             "unused-class-members": true,
+            "unused-namespace-members": true,
             "unused-store-members": true,
             "unresolved-imports": true,
             "unlisted-dependencies": true,
@@ -365,6 +366,9 @@
               "type": "boolean"
             },
             "unused-class-members": {
+              "type": "boolean"
+            },
+            "unused-namespace-members": {
               "type": "boolean"
             },
             "unused-store-members": {

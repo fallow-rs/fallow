@@ -241,6 +241,9 @@ pub enum IssueKind {
     /// One module exports one binding under two or more names, for example
     /// `export const a = 1; export default a;`.
     DuplicateExportAlias,
+    /// An exported member of an exported TypeScript namespace that no code
+    /// reads (`export namespace N { export const a = 1 }`).
+    UnusedNamespaceMember,
 }
 
 impl IssueKind {
@@ -312,6 +315,7 @@ impl IssueKind {
         Self::DivergedCloneSibling,
         Self::AddedDependency,
         Self::DuplicateExportAlias,
+        Self::UnusedNamespaceMember,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -390,6 +394,7 @@ impl IssueKind {
             Self::AddedDependency => 64,
             Self::DuplicateExportAlias => 65,
             Self::UnlistedBinary => 66,
+            Self::UnusedNamespaceMember => 67,
         }
     }
 
@@ -463,6 +468,7 @@ impl IssueKind {
             64 => Some(Self::AddedDependency),
             65 => Some(Self::DuplicateExportAlias),
             66 => Some(Self::UnlistedBinary),
+            67 => Some(Self::UnusedNamespaceMember),
             _ => None,
         }
     }
@@ -900,6 +906,7 @@ mod tests {
             (64, IssueKind::AddedDependency),
             (65, IssueKind::DuplicateExportAlias),
             (66, IssueKind::UnlistedBinary),
+            (67, IssueKind::UnusedNamespaceMember),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

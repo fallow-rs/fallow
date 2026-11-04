@@ -4,8 +4,8 @@
 //!   are unused exports or unused types of `./m`.
 //! - `import * as ns` where the namespace object escapes (a call argument):
 //!   the consumer can read any export, so no export is reported.
-//! - `export namespace N { export const a }` with `a` unused: fallow does not
-//!   report members of a TypeScript namespace.
+//! - `export namespace N { export const a }` with `a` unused: fallow reports
+//!   `N.a` as an unused namespace member, not as an unused export.
 
 use super::common::{create_config, fixture_path};
 
@@ -41,4 +41,15 @@ fn namespace_members_report_through_unused_exports_and_types() {
         results.unused_class_members.is_empty() && results.unused_enum_members.is_empty(),
         "a TypeScript namespace member is not a class or enum member"
     );
+    let namespace_members: Vec<String> = results
+        .unused_namespace_members
+        .iter()
+        .map(|f| {
+            name_of(
+                &f.member.path,
+                &format!("{}.{}", f.member.parent_name, f.member.member_name),
+            )
+        })
+        .collect();
+    assert_eq!(namespace_members, ["legacy.ts:Legacy.unusedInner"]);
 }

@@ -294,6 +294,10 @@ impl<'a> GraphConfidenceContext<'a> {
             let caveats = self.member_caveats_for(&finding.member.path);
             finding.set_reachability_caveats(caveats);
         }
+        for finding in &mut results.unused_namespace_members {
+            let caveats = self.member_caveats_for(&finding.member.path);
+            finding.set_reachability_caveats(caveats);
+        }
         for finding in &mut results.unused_dependencies {
             finding.set_reachability_caveats(DEPENDENCY_CAVEATS.to_vec());
         }

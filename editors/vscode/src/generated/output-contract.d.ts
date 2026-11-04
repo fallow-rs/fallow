@@ -3123,6 +3123,13 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Exported members of an exported TypeScript namespace that no code
+ * reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+ * dotted path from the exported namespace (`Inner.x`).
+ */
+unused_namespace_members?: UnusedNamespaceMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -3637,6 +3644,10 @@ unused_enum_members: number
  * Unused class members.
  */
 unused_class_members: number
+/**
+ * Unused namespace members.
+ */
+unused_namespace_members?: number
 /**
  * Unused store members.
  */
@@ -4553,11 +4564,12 @@ export interface UnusedEnumMemberFinding {
  */
 path: string
 /**
- * Name of the parent enum or class.
+ * Name of the parent enum, class, store, or exported namespace.
  */
 parent_name: string
 /**
- * Name of the unused member.
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
  */
 member_name: string
 kind: MemberKind
@@ -4616,11 +4628,12 @@ export interface UnusedClassMemberFinding {
  */
 path: string
 /**
- * Name of the parent enum or class.
+ * Name of the parent enum, class, store, or exported namespace.
  */
 parent_name: string
 /**
- * Name of the unused member.
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
  */
 member_name: string
 kind: MemberKind
@@ -4674,6 +4687,71 @@ reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_namespace_members` key (an exported member of an exported
+ * TypeScript namespace that no code reads). `member_name` is the dotted path
+ * from the exported namespace, for example `Inner.x`. Emits only a
+ * line-level suppress action: a member can be a multi-line function, class
+ * or nested namespace, so there is no safe one-line auto-fix.
+ */
+export interface UnusedNamespaceMemberFinding {
+/**
+ * File containing the unused member.
+ */
+path: string
+/**
+ * Name of the parent enum, class, store, or exported namespace.
+ */
+parent_name: string
+/**
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
+ */
+member_name: string
+kind: MemberKind
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A namespace
+ * member takes the member rule unchanged: any module this run analyzed
+ * incompletely can hold the access that credits it. Sorted,
+ * deduplicated, and omitted from the wire when empty. This is disclosure
+ * only, because a namespace member offers no mutation.
+ */
+reachability_caveats?: ReachabilityCaveat[]
+}
+/**
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
  * `unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or
  * a setup-store returned key, declared but never accessed by any consumer
  * project-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only
@@ -4688,11 +4766,12 @@ export interface UnusedStoreMemberFinding {
  */
 path: string
 /**
- * Name of the parent enum or class.
+ * Name of the parent enum, class, store, or exported namespace.
  */
 parent_name: string
 /**
- * Name of the unused member.
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
  */
 member_name: string
 kind: MemberKind
@@ -15332,6 +15411,13 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Exported members of an exported TypeScript namespace that no code
+ * reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+ * dotted path from the exported namespace (`Inner.x`).
+ */
+unused_namespace_members?: UnusedNamespaceMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -17070,6 +17156,13 @@ unused_enum_members: UnusedEnumMemberFinding[]
  * patterns.
  */
 unused_class_members: UnusedClassMemberFinding[]
+/**
+ * Exported members of an exported TypeScript namespace that no code
+ * reads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_enum_members`. `member_name` is the
+ * dotted path from the exported namespace (`Inner.x`).
+ */
+unused_namespace_members?: UnusedNamespaceMemberFinding[]
 /**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
@@ -21955,14 +22048,14 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
 
 /**
  * Backwards-compat alias for the pre-#384 bare `UnusedMember` union name.
- * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedStoreMemberFinding`)
+ * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedNamespaceMemberFinding`, `UnusedStoreMemberFinding`)
  * that replaced the pre-migration bare union. The wire shape per variant
  * is byte-identical (each wrapper flattens its bare payload and adds
  * `actions[]` plus optional `introduced`). Consumers that imported
  * `UnusedMember` from `fallow/types` pre-migration continue to work via
  * this alias; new code should narrow on the specific wrapper variant.
  */
-export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedStoreMemberFinding;
+export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedNamespaceMemberFinding | UnusedStoreMemberFinding;
 
 /**
  * @deprecated Renamed to BaselineStaleness in 3.27.0, when dead-code and dupes started carrying the same shape. The members are unchanged.

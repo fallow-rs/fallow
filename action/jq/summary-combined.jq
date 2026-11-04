@@ -151,6 +151,7 @@ else
       (if (.check.unused_optional_dependencies | length) > 0 then "| [Unused optionalDependencies](\(docs("unused-dependencies"))) | \(.check.unused_optional_dependencies | length) |" else null end),
       (if (.check.unused_enum_members | length) > 0 then "| [Unused enum members](\(docs("unused-enum-members"))) | \(.check.unused_enum_members | length) |" else null end),
       (if (.check.unused_class_members | length) > 0 then "| [Unused class members](\(docs("unused-class-members"))) | \(.check.unused_class_members | length) |" else null end),
+      (if (.check.unused_namespace_members | length) > 0 then "| [Unused namespace members](\(docs("unused-namespace-members"))) | \(.check.unused_namespace_members | length) |" else null end),
       (if (.check.unused_store_members | length) > 0 then "| [Unused store members](\(docs("unused-store-members"))) | \(.check.unused_store_members | length) |" else null end),
       (if (.check.unresolved_imports | length) > 0 then "| [Unresolved imports](\(docs("unresolved-imports"))) | \(.check.unresolved_imports | length) |" else null end),
       (if (.check.unlisted_dependencies | length) > 0 then "| [Unlisted dependencies](\(docs("unlisted-dependencies"))) | \(.check.unlisted_dependencies | length) |" else null end),

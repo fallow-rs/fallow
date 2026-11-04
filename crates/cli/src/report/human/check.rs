@@ -37,8 +37,14 @@ use crate::report::{
 mod config_quality;
 use config_quality::emit_config_quality_signal;
 
+#[path = "check_dependency_override_sections.rs"]
+mod dependency_override_sections;
 #[path = "check_framework_key_sections.rs"]
 mod framework_key_sections;
+use dependency_override_sections::{
+    UnusedDependencyOverridesInput, push_misconfigured_dependency_overrides_section,
+    push_unused_dependency_overrides_section,
+};
 use framework_key_sections::push_framework_key_sections;
 
 /// Minimum number of duplicate-export findings before the human section is
@@ -528,6 +534,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ),
         ("Unused enum members", "fallow/unused-enum-member"),
         ("Unused class members", "fallow/unused-class-member"),
+        ("Unused namespace members", "fallow/unused-namespace-member"),
         ("Unused store members", "fallow/unused-store-member"),
         ("Unresolved imports", "fallow/unresolved-import"),
         ("Unlisted dependencies", "fallow/unlisted-dependency"),
@@ -1105,7 +1112,8 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         || !input.results.private_type_leaks.is_empty()
         || !input.results.unused_enum_members.is_empty()
         || !input.results.unused_class_members.is_empty()
-        || !input.results.unused_store_members.is_empty();
+        || !input.results.unused_store_members.is_empty()
+        || !input.results.unused_namespace_members.is_empty();
     if !has_unused_code {
         return;
     }
@@ -1287,6 +1295,18 @@ fn build_unused_member_sections(
         max_files: max_grouped_files,
         get_path: |m| m.member.path.as_path(),
         format_detail: &|m: &UnusedStoreMemberFinding| {
+            format_unused_member(&m.member, &m.reachability_caveats)
+        },
+    });
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_namespace_members,
+        title: "Unused namespace members",
+        level: severity_to_level(rules.unused_namespace_members),
+        root,
+        max_files: max_grouped_files,
+        get_path: |m| m.member.path.as_path(),
+        format_detail: &|m: &UnusedNamespaceMemberFinding| {
             format_unused_member(&m.member, &m.reachability_caveats)
         },
     });
@@ -1747,106 +1767,6 @@ fn format_unresolved_catalog_reference(
         ));
     }
     out
-}
-
-/// Render unused dependency overrides as a two-tier block: a headline row
-/// shows `raw_key  source  path:line`, then an indented detail row shows the
-/// forced version, target package, and optional CVE hint that the
-/// conservative-static algorithm flags.
-struct UnusedDependencyOverridesInput<'a, 'b> {
-    lines: &'a mut Vec<String>,
-    findings: &'b [fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
-    severity: fallow_config::Severity,
-    max_items: usize,
-    total_issues: usize,
-    root: &'b Path,
-}
-
-fn push_unused_dependency_overrides_section(input: UnusedDependencyOverridesInput<'_, '_>) {
-    let lines = input.lines;
-    if input.findings.is_empty() {
-        return;
-    }
-    let level = severity_to_level(input.severity);
-    build_human_section_ex(
-        HumanSectionInput {
-            lines,
-            items: input.findings,
-            title: "Unused dependency overrides",
-            level,
-            max: input.max_items,
-            total_issues: input.total_issues,
-        },
-        |finding| {
-            let finding = &finding.entry;
-            let path_display = input.root.join(&finding.path);
-            let row = format!(
-                "  {key}  {source}  {loc}",
-                key = finding.raw_key.bold(),
-                source = finding.source.as_label().dimmed(),
-                loc = format!(
-                    "{}:{}",
-                    format_display_path(&path_display, input.root),
-                    finding.line
-                )
-                .dimmed(),
-            );
-            let mut out = vec![row];
-            let detail = format!(
-                "forces {} to {}",
-                finding.target_package, finding.version_range
-            );
-            out.push(format!("    {}", detail.dimmed()));
-            if let Some(hint) = &finding.hint {
-                out.push(format!("    {}", hint.as_str().dimmed()));
-            }
-            out
-        },
-    );
-}
-
-/// Render misconfigured dependency overrides as a two-tier block: a
-/// headline row shows `raw_key  source  path:line`, then an indented detail
-/// row shows the parsed reason. Package managers reject or ignore these shapes, so the
-/// rule defaults to error.
-fn push_misconfigured_dependency_overrides_section(
-    lines: &mut Vec<String>,
-    findings: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
-    severity: fallow_config::Severity,
-    max_items: usize,
-    total_issues: usize,
-    root: &Path,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    let level = severity_to_level(severity);
-    build_human_section_ex(
-        HumanSectionInput {
-            lines,
-            items: findings,
-            title: "Misconfigured dependency overrides",
-            level,
-            max: max_items,
-            total_issues,
-        },
-        |finding| {
-            let finding = &finding.entry;
-            let path_display = root.join(&finding.path);
-            let row = format!(
-                "  {key}  {source}  {loc}",
-                key = finding.raw_key.bold(),
-                source = finding.source.as_label().dimmed(),
-                loc = format!(
-                    "{}:{}",
-                    format_display_path(&path_display, root),
-                    finding.line
-                )
-                .dimmed(),
-            );
-            vec![row, format!("    {}", finding.reason.describe().dimmed())]
-        },
-    );
 }
 
 fn build_structure_section(lines: &mut Vec<String>, input: &SectionInput<'_>) {
@@ -3516,6 +3436,9 @@ fn collect_dead_code_rules(
     for m in &results.unused_store_members {
         insert_matching_rule(rules, &m.member.path, root, resolver);
     }
+    for m in &results.unused_namespace_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
 }
 
 fn collect_graph_rules(
@@ -4033,6 +3956,12 @@ fn summary_caveat_rollup(results: &AnalysisResults) -> (usize, Vec<ReachabilityC
         )
         .chain(
             results
+                .unused_namespace_members
+                .iter()
+                .map(|m| m.reachability_caveats.as_slice()),
+        )
+        .chain(
+            results
                 .unused_dependencies
                 .iter()
                 .map(|d| d.reachability_caveats.as_slice()),
@@ -4174,6 +4103,11 @@ fn check_summary_member_categories(
             "Unused store members",
             results.unused_store_members.len(),
             severity_to_level(rules.unused_store_members),
+        ),
+        (
+            "Unused namespace members",
+            results.unused_namespace_members.len(),
+            severity_to_level(rules.unused_namespace_members),
         ),
         (
             "Unresolved imports",

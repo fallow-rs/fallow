@@ -8,8 +8,8 @@
 use serde_json::{Map, Value};
 
 use super::knip_fields::{
-    IssueTypeEffect, migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps,
-    migrate_namespace_issue_type, warn_unmapped_rule_key,
+    migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps, migrate_namespace_issue_type,
+    warn_unmapped_rule_key,
 };
 use super::knip_tables::{
     KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNSUPPORTED_PLUGIN_KEYS,
@@ -299,7 +299,6 @@ pub(super) fn migrate_ignore_issues(
                         if !migrate_namespace_issue_type(
                             &field,
                             kind,
-                            IssueTypeEffect::Off,
                             |base| has(base) || globally_off.contains(&base),
                             warnings,
                         ) {

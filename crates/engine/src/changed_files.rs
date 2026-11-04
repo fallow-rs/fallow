@@ -717,6 +717,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         unused_optional_dependencies: _unused_optional_dependencies,
         unused_enum_members: _unused_enum_members,
         unused_class_members: _unused_class_members,
+        unused_namespace_members: _unused_namespace_members,
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,
@@ -793,6 +794,9 @@ fn retain_basic_issue_findings_by_changed_path(
     });
     retain_by_changed_path(&mut results.unused_enum_members, scope, |m| &m.member.path);
     retain_by_changed_path(&mut results.unused_class_members, scope, |m| &m.member.path);
+    retain_by_changed_path(&mut results.unused_namespace_members, scope, |m| {
+        &m.member.path
+    });
     retain_by_changed_path(&mut results.unused_store_members, scope, |m| &m.member.path);
     retain_by_changed_path(&mut results.unresolved_imports, scope, |i| &i.import.path);
 }

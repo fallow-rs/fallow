@@ -139,6 +139,9 @@ pub struct CheckSummary {
     pub unused_enum_members: usize,
     /// Unused class members.
     pub unused_class_members: usize,
+    /// Unused namespace members.
+    #[serde(default)]
+    pub unused_namespace_members: usize,
     /// Unused store members.
     #[serde(default)]
     pub unused_store_members: usize,

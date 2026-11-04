@@ -53,6 +53,7 @@ else
     table_row("Unused optionalDependencies"; "unused_optional_dependencies"; "unused-dependencies"),
     table_row("Unused enum members"; "unused_enum_members"; "unused-enum-members"),
     table_row("Unused class members"; "unused_class_members"; "unused-class-members"),
+    table_row("Unused namespace members"; "unused_namespace_members"; "unused-namespace-members"),
     table_row("Unused store members"; "unused_store_members"; "unused-store-members"),
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
@@ -119,6 +120,9 @@ else
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unused class members"; "unused_class_members";
     "Class methods or properties never referenced outside their class.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
+    "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
+  section("Unused namespace members"; "unused_namespace_members";
+    "Exported members of an exported TypeScript namespace that no code reads.\n\n| File | Line | Namespace | Member |\n|------|-----:|-----------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unused store members"; "unused_store_members";
     "Pinia store members (state, getter, action) never accessed by any consumer.\n\n| File | Line | Store | Member |\n|------|-----:|-------|--------|\n";

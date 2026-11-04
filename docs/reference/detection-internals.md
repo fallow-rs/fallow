@@ -136,6 +136,21 @@ error by suppressing a downstream detector.
   hide unused members in unrelated classes. A plain `value.name` read on an
   untyped value gives no credit. `Object.hasOwn` and `hasOwnProperty` are not
   probes, because they do not see a getter or a method on a class prototype.
+- A member of an exported TypeScript namespace is a `NamespaceMember` on the
+  export. A member of a nested exported namespace has the dotted path from
+  the root (`Inner.x`). A nested namespace without `export` is local to the
+  body, so its members are not recorded. The visitor records `N.a` as a
+  member access. The semantic pass (`crates/extract/src/namespace_member_uses.rs`)
+  adds a `NamespaceMemberUse` fact for each use that a member access does not
+  record: a chain of two or more links (`N.Inner.x`, the type `N.Inner.T`), a
+  value that leaves its chain (an argument, an alias, a spread), and a
+  reference inside the namespace body. Scope resolution of the semantic model
+  keeps a shadowed name from giving credit. The member pass stores a whole
+  use as the marker `*` or `Inner.*` in the accessed-member set, so the
+  re-export propagation carries it like any other member name. The marker
+  applies to namespace members only, so an escaping class or enum keeps its
+  member findings. A declaration file, an export of an entry point, and a
+  member of a namespace that is reported itself are never reported.
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the

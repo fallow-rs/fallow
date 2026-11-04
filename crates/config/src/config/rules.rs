@@ -121,6 +121,14 @@ pub struct RulesConfig {
     /// exemptions carve out framework-invoked members. Defaults to `error`.
     #[serde(default, alias = "unused-class-member")]
     pub unused_class_members: Severity,
+    /// Exported members of an exported TypeScript namespace that no code
+    /// reads. Defaults to `warn`: a namespace often holds generated code,
+    /// and a new rule must not fail the build of a project after an upgrade.
+    /// A `warn` finding does not change the CLI exit code unless
+    /// `--fail-on-issues` is set. The dead-code count gate of the GitHub
+    /// Action counts it unless `fail-on-issues` is `false`.
+    #[serde(default = "Severity::default_warn", alias = "unused-namespace-member")]
+    pub unused_namespace_members: Severity,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Defaults to `warn`, not `error` like the closed-set
@@ -515,6 +523,7 @@ impl Default for RulesConfig {
             unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Error,
             unused_class_members: Severity::Error,
+            unused_namespace_members: Severity::Warn,
             unused_store_members: Severity::Warn,
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
@@ -613,6 +622,7 @@ impl RulesConfig {
             IssueKind::UnusedDevDependency => self.unused_dev_dependencies,
             IssueKind::UnusedEnumMember => self.unused_enum_members,
             IssueKind::UnusedClassMember => self.unused_class_members,
+            IssueKind::UnusedNamespaceMember => self.unused_namespace_members,
             IssueKind::UnusedStoreMember => self.unused_store_members,
             IssueKind::UnprovidedInject => self.unprovided_injects,
             IssueKind::UnresolvedImport => self.unresolved_imports,
@@ -717,6 +727,7 @@ impl RulesConfig {
             [
                 unused_enum_members,
                 unused_class_members,
+                unused_namespace_members,
                 unused_store_members,
                 unprovided_injects,
                 unrendered_components,
@@ -761,12 +772,6 @@ impl RulesConfig {
                 re_export_cycle,
                 package_cycle,
                 boundary_violation,
-            ]
-        );
-        apply_partial_rules!(
-            self,
-            partial,
-            [
                 coverage_gaps,
                 feature_flags,
                 stale_suppressions,
@@ -897,6 +902,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_class_members: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_namespace_members`].
+    #[serde(
+        default,
+        alias = "unused-namespace-member",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_namespace_members: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_store_members`].
     #[serde(
         default,
@@ -1318,6 +1330,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-optional-dependencies",
     "unused-enum-members",
     "unused-class-members",
+    "unused-namespace-members",
     "unused-store-members",
     "unprovided-injects",
     "unrendered-components",
@@ -1385,6 +1398,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-optional-dependency",
     "unused-enum-member",
     "unused-class-member",
+    "unused-namespace-member",
     "unused-store-member",
     "unprovided-inject",
     "unrendered-component",

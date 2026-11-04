@@ -9,6 +9,7 @@
   "unused_optional_dependencies": {"package_name": "opt-dep", "location": "optionalDependencies", "path": "/pkg.json", "line": 5, "actions": []},
   "unused_enum_members": {"path": "/f.ts", "parent_name": "E", "member_name": "A", "kind": "enum_member", "line": 6, "col": 0, "actions": []},
   "unused_class_members": {"path": "/f.ts", "parent_name": "C", "member_name": "m", "kind": "class_method", "line": 7, "col": 0, "actions": []},
+  "unused_namespace_members": {"path": "/f.ts", "parent_name": "N", "member_name": "a", "kind": "namespace_member", "line": 7, "col": 0, "actions": []},
   "unused_store_members": {"path": "/f.ts", "parent_name": "S", "member_name": "a", "kind": "store_member", "line": 7, "col": 0, "actions": []},
   "unresolved_imports": {"path": "/f.ts", "specifier": "./gone", "line": 8, "col": 0, "specifier_col": 10, "actions": []},
   "unlisted_dependencies": {"package_name": "unlisted", "imported_from": [], "actions": []},

@@ -20,6 +20,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-optional-dependencies": true,
   "unused-enum-members": true,
   "unused-class-members": true,
+  "unused-namespace-members": true,
   "unused-store-members": true,
   "unresolved-imports": true,
   "unlisted-dependencies": true,
@@ -123,6 +124,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "unused-export": "unused-exports",
   "unused-file": "unused-files",
   "unused-load-data-key": "unused-load-data-keys",
+  "unused-namespace-member": "unused-namespace-members",
   "unused-optional-dependency": "unused-optional-dependencies",
   "unused-optional-deps": "unused-optional-dependencies",
   "unused-override": "unused-dependency-overrides",
@@ -179,6 +181,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "unused-class-member",
     "label": "Unused Class Members"
+  },
+  {
+    "code": "unused-namespace-member",
+    "label": "Unused Namespace Members"
   },
   {
     "code": "unused-store-member",

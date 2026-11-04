@@ -10,6 +10,7 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("types", "unused-types"),
     ("enumMembers", "unused-enum-members"),
     ("classMembers", "unused-class-members"),
+    ("namespaceMembers", "unused-namespace-members"),
     ("unlisted", "unlisted-dependencies"),
     ("binaries", "unlisted-binaries"),
     ("unresolved", "unresolved-imports"),
@@ -117,14 +118,9 @@ pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] =
 ///
 /// Fallow reports an unused export or type that a consumer reads through a
 /// namespace (`nsExports`, `nsTypes`) as an unused export or type of its
-/// module, so a scope controls them through `exports` and `types`. Fallow
-/// does not report members of a TypeScript namespace (`namespaceMembers`),
-/// so that entry has no base type.
-pub(super) const KNIP_NAMESPACE_ISSUE_TYPES: &[(&str, Option<&str>)] = &[
-    ("nsExports", Some("exports")),
-    ("nsTypes", Some("types")),
-    ("namespaceMembers", None),
-];
+/// module, so a scope controls them through `exports` and `types`.
+pub(super) const KNIP_NAMESPACE_ISSUE_TYPES: &[(&str, &str)] =
+    &[("nsExports", "exports"), ("nsTypes", "types")];
 
 /// Knip plugin config keys that a built-in fallow plugin covers. Fallow
 /// detects these frameworks and tools from the project itself, so the knip

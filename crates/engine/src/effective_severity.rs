@@ -45,8 +45,8 @@ use fallow_types::output_dead_code::{
     UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
     UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
     UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedSvelteEventFinding, UnusedTypeFinding,
+    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use fallow_types::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -182,6 +182,7 @@ file_scoped! {
     DeprecatedExportInUseFinding => export.path, deprecated_exports_in_use;
     UnusedEnumMemberFinding => member.path, unused_enum_members;
     UnusedClassMemberFinding => member.path, unused_class_members;
+    UnusedNamespaceMemberFinding => member.path, unused_namespace_members;
     UnusedStoreMemberFinding => member.path, unused_store_members;
     UnprovidedInjectFinding => inject.path, unprovided_injects;
     UnresolvedImportFinding => import.path, unresolved_imports;
@@ -500,6 +501,7 @@ fn for_each_gated_finding(
         unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_namespace_members,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -575,6 +577,7 @@ fn for_each_gated_finding(
     visit(unused_optional_dependencies, f);
     visit(unused_enum_members, f);
     visit(unused_class_members, f);
+    visit(unused_namespace_members, f);
     visit(unused_store_members, f);
     visit(unresolved_imports, f);
     visit(unlisted_dependencies, f);
@@ -637,6 +640,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_namespace_members,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -708,6 +712,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unused_optional_dependencies)
         || tally.add(unused_enum_members)
         || tally.add(unused_class_members)
+        || tally.add(unused_namespace_members)
         || tally.add(unused_store_members)
         || tally.add(unresolved_imports)
         || tally.add(unlisted_dependencies)

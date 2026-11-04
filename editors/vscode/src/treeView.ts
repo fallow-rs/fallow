@@ -30,6 +30,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "package",
   "unused-enum-members": "symbol-enum-member",
   "unused-class-members": "symbol-field",
+  "unused-namespace-member": "symbol-namespace",
   "unused-store-member": "symbol-field",
   "unused-server-action": "symbol-method",
   "unused-load-data-keys": "symbol-property",
@@ -319,6 +320,21 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               m.line,
               m.col,
               "unused-store-member",
+            ),
+        ),
+      );
+    }
+    if (this.result.unused_namespace_members) {
+      addCategory(
+        "unused-namespace-member",
+        this.result.unused_namespace_members.map(
+          (m) =>
+            new IssueItem(
+              `${m.parent_name}.${m.member_name}`,
+              m.path,
+              m.line,
+              m.col,
+              "unused-namespace-member",
             ),
         ),
       );

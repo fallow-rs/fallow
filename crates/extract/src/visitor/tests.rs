@@ -7886,7 +7886,8 @@ fn namespace_nested_inside_declare_global_is_local() {
 #[test]
 fn exported_namespace_member_extraction_is_unchanged() {
     // Pin: an exported namespace still records one file export carrying its
-    // inner exported declarations as members (flattened through nesting).
+    // inner exported declarations as members. A member of a nested namespace
+    // has the dotted path from the root.
     let info = parse(
         "export namespace Foo {\n\
            export const x = 1;\n\
@@ -7901,7 +7902,7 @@ fn exported_namespace_member_extraction_is_unchanged() {
         .iter()
         .map(|m| m.name.as_str())
         .collect();
-    assert_eq!(members, ["x", "Bar", "y"]);
+    assert_eq!(members, ["x", "Bar", "Bar.y"]);
     assert!(
         info.exports[0]
             .members

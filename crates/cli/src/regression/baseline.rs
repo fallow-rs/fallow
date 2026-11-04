@@ -933,6 +933,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 1,
             unused_class_members: 0,
+            unused_namespace_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,

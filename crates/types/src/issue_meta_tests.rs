@@ -274,6 +274,7 @@ fn ts_alias_policy_is_explicit() {
             ("UnusedFile", "UnusedFileFinding"),
             ("UnusedMember", "UnusedClassMemberFinding"),
             ("UnusedMember", "UnusedEnumMemberFinding"),
+            ("UnusedMember", "UnusedNamespaceMemberFinding"),
             ("UnusedMember", "UnusedStoreMemberFinding"),
         ]),
         aliases

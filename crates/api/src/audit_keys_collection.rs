@@ -13,6 +13,7 @@ pub(super) enum AuditCollection {
     UnusedOptionalDependencies,
     UnusedEnumMembers,
     UnusedClassMembers,
+    UnusedNamespaceMembers,
     UnusedStoreMembers,
     UnresolvedImports,
     UnlistedDependencies,
@@ -57,7 +58,7 @@ pub(super) enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 53] = [
+    pub(super) const ALL: [Self; 54] = [
         Self::PropDrillingChains,
         Self::ThinWrappers,
         Self::DuplicatePropShapes,
@@ -71,6 +72,7 @@ impl AuditCollection {
         Self::UnusedOptionalDependencies,
         Self::UnusedEnumMembers,
         Self::UnusedClassMembers,
+        Self::UnusedNamespaceMembers,
         Self::UnusedStoreMembers,
         Self::UnresolvedImports,
         Self::UnlistedDependencies,
@@ -128,6 +130,7 @@ impl AuditCollection {
             Self::UnusedOptionalDependencies => "unused_optional_dependencies",
             Self::UnusedEnumMembers => "unused_enum_members",
             Self::UnusedClassMembers => "unused_class_members",
+            Self::UnusedNamespaceMembers => "unused_namespace_members",
             Self::UnusedStoreMembers => "unused_store_members",
             Self::UnresolvedImports => "unresolved_imports",
             Self::UnlistedDependencies => "unlisted_dependencies",

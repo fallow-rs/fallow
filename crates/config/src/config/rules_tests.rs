@@ -110,6 +110,7 @@ fn empty_rules_object_preserves_non_error_defaults() {
     // even if the wholesale equality assertion above is later relaxed.
     let rules: RulesConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(rules.coverage_gaps, Severity::Off);
+    assert_eq!(rules.unused_namespace_members, Severity::Warn);
     assert_eq!(rules.unused_store_members, Severity::Warn);
     assert_eq!(rules.unprovided_injects, Severity::Warn);
     assert_eq!(rules.unrendered_components, Severity::Warn);
@@ -387,6 +388,7 @@ fn apply_partial_all_fields_set() {
         unused_optional_dependencies: Some(Severity::Off),
         unused_enum_members: Some(Severity::Off),
         unused_class_members: Some(Severity::Off),
+        unused_namespace_members: Some(Severity::Off),
         unused_store_members: Some(Severity::Off),
         unprovided_injects: Some(Severity::Off),
         unrendered_components: Some(Severity::Off),
@@ -540,7 +542,7 @@ fn severity_from_str_invalid_returns_error() {
 /// more. See the note on [`KNOWN_RULE_NAMES`].
 #[test]
 fn known_rule_names_list_length_is_pinned() {
-    assert_eq!(KNOWN_RULE_NAMES.len(), 127);
+    assert_eq!(KNOWN_RULE_NAMES.len(), 129);
 }
 
 /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -608,8 +610,8 @@ fn known_rule_names_covers_every_serde_alias_in_source() {
 
     assert_eq!(
         aliases_found.len(),
-        130,
-        "expected 130 source-level alias attrs (65 per struct); got {}: {:?}",
+        132,
+        "expected 132 source-level alias attrs (66 per struct); got {}: {:?}",
         aliases_found.len(),
         aliases_found
     );

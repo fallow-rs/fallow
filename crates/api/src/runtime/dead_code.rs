@@ -1014,6 +1014,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.deprecated_exports_in_use
         || filters.unused_enum_members
         || filters.unused_class_members
+        || filters.unused_namespace_members
         || filters.unused_store_members
         || filters.unprovided_injects
         || filters.unrendered_components
@@ -1074,6 +1075,9 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
     }
     if !filters.unused_store_members {
         results.unused_store_members.clear();
+    }
+    if !filters.unused_namespace_members {
+        results.unused_namespace_members.clear();
     }
     if !filters.unlisted_deps {
         results.unlisted_dependencies.clear();

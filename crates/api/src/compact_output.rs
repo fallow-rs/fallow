@@ -365,6 +365,13 @@ impl<'a> CompactLineBuilder<'a> {
                 &member.reachability_caveats,
             ));
         }
+        for member in &self.results.unused_namespace_members {
+            self.lines.push(self.compact_member(
+                &member.member,
+                "unused-namespace-member",
+                &member.reachability_caveats,
+            ));
+        }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
                 "unresolved-import:{}:{}:{}",

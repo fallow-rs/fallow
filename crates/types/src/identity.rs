@@ -47,8 +47,8 @@ use crate::output_dead_code::{
     UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
     UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
     UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedSvelteEventFinding, UnusedTypeFinding,
+    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -451,6 +451,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_namespace_members,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -527,6 +528,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unused_optional_dependencies);
     visitor.visit(unused_enum_members);
     visitor.visit(unused_class_members);
+    visitor.visit(unused_namespace_members);
     visitor.visit(unused_store_members);
     visitor.visit(unresolved_imports);
     visitor.visit(unlisted_dependencies);
@@ -785,6 +787,13 @@ identified!(
 identified!(
     UnusedClassMemberFinding,
     token: |_t| "unused-class-member",
+    parts: |f, p| member_parts(&f.member, p),
+    position: |g| (g.member.line, g.member.col, 0),
+);
+
+identified!(
+    UnusedNamespaceMemberFinding,
+    token: |_t| "unused-namespace-member",
     parts: |f, p| member_parts(&f.member, p),
     position: |g| (g.member.line, g.member.col, 0),
 );

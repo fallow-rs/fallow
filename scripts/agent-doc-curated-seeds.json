@@ -988,6 +988,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--unused-namespace-members",
+      "column": "Issue Type",
+      "seed": "Namespace member is never referenced"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--unused-server-actions",
       "column": "Issue Type",
       "seed": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
@@ -2551,6 +2557,12 @@
       "row": "unused-load-data-key",
       "column": "Description",
       "seed": "A SvelteKit load() return-object key is read by no consumer"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-namespace-member",
+      "column": "Description",
+      "seed": "Namespace member is never referenced"
     },
     {
       "section": "issue-types",

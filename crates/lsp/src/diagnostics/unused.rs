@@ -667,6 +667,10 @@ pub fn push_member_diagnostics(
         .unused_store_members
         .iter()
         .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
+    let namespace_iter = results
+        .unused_namespace_members
+        .iter()
+        .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
     type MemberRows<'a> = Box<
         dyn Iterator<
                 Item = (
@@ -691,6 +695,11 @@ pub fn push_member_diagnostics(
             Box::new(store_iter) as MemberRows<'_>,
             "unused-store-member",
             "Store member",
+        ),
+        (
+            Box::new(namespace_iter) as MemberRows<'_>,
+            "unused-namespace-member",
+            "Namespace member",
         ),
     ] {
         for (member, caveats, finding_id) in members {

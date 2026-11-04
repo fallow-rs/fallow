@@ -808,6 +808,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unused-optional-dependency",
             "unused-enum-member",
             "unused-class-member",
+            "unused-namespace-member",
             "unused-store-member",
             "unresolved-import",
             "unlisted-dependency",

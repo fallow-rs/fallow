@@ -724,7 +724,7 @@ pub fn trace_class_member(
         MemberKind::ClassProperty => ("class-property", Some("--unused-class-members")),
         MemberKind::EnumMember => ("enum-member", Some("--unused-enum-members")),
         MemberKind::StoreMember => ("store-member", Some("--unused-store-members")),
-        MemberKind::NamespaceMember => ("namespace-member", None),
+        MemberKind::NamespaceMember => ("namespace-member", Some("--unused-namespace-members")),
     };
 
     let reason = class_member_trace_reason(

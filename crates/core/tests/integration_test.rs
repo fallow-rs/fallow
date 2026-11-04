@@ -360,6 +360,8 @@ mod unused_component_props;
 mod unused_enum_members;
 #[path = "integration_test/unused_load_data_keys.rs"]
 mod unused_load_data_keys;
+#[path = "integration_test/unused_namespace_members.rs"]
+mod unused_namespace_members;
 #[path = "integration_test/unused_react_props.rs"]
 mod unused_react_props;
 #[path = "integration_test/unused_server_actions.rs"]

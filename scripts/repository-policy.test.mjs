@@ -877,7 +877,20 @@ test("a required output field cannot be dropped at a frozen schema_version", (t)
  * may carry `reachability_caveats[]`. The count drifted once already: a commit
  * added the ninth array and updated only the compatibility doc, leaving the
  * changelog telling readers that eight carry it and that the ninth stays out.
+ * The newest changelog statement must match: an unreleased fragment in
+ * `changelog.d/` comes before `CHANGELOG.md`, so a released entry keeps the
+ * count of its own release.
  */
+/** The unreleased changelog fragments, sorted by name, then `CHANGELOG.md`. */
+const newestChangelogText = () =>
+  [
+    ...readdirSync("changelog.d")
+      .filter((name) => name.endsWith(".md"))
+      .toSorted()
+      .map((name) => readFileSync(join("changelog.d", name), "utf8")),
+    readFileSync("CHANGELOG.md", "utf8"),
+  ].join("\n");
+
 test("the caveat array count in the docs matches the findings that carry one", () => {
   const findings = readFileSync("crates/types/src/output_dead_code.rs", "utf8");
   const carriers = [...findings.matchAll(/pub reachability_caveats: Vec<ReachabilityCaveat>,/gu)]
@@ -908,7 +921,7 @@ test("the caveat array count in the docs matches the findings that carry one", (
     carriers,
   );
   assert.equal(
-    counted(readFileSync("CHANGELOG.md", "utf8"), /(\w+) arrays carry it:/u, "CHANGELOG.md"),
+    counted(newestChangelogText(), /(\w+) arrays carry it:/u, "the newest changelog entry"),
     carriers,
   );
 });
