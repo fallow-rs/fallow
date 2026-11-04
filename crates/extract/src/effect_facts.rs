@@ -25,11 +25,11 @@ use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    EffectCaughtTag, EffectFacts, EffectLayer, EffectTaggedError, ExportInfo, ExportName,
-    ImportInfo, ImportedName,
+    EffectCaughtTag, EffectDerivedSchema, EffectFacts, EffectLayer, EffectTaggedError, ExportInfo,
+    ExportName, ImportInfo, ImportedName,
 };
 
-use crate::effect_schema::SchemaShapes;
+use crate::effect_schema::{SchemaShape, SchemaShapes};
 use crate::js_text::JsText;
 
 /// `Layer` functions that return an `Effect` or a runtime, not a layer.
@@ -127,9 +127,11 @@ struct Collector<'s, 'a> {
     schema: SchemaShapes<'s, 'a>,
     /// `(local binding, export name)` for each export that names a binding.
     export_bindings: Vec<(String, String)>,
-    /// A default export without a binding: `export default Schema.Struct(...)`
-    /// or `export default class extends Schema.Class(...)`.
-    anonymous_default_schema: bool,
+    /// The shape of a default export without a binding:
+    /// `export default Schema.Struct(...)`,
+    /// `export default class extends Schema.Class(...)` or
+    /// `export default Imported.pipe(...)`.
+    anonymous_default_schema: Option<SchemaShape>,
 }
 
 impl<'s, 'a> Collector<'s, 'a> {
@@ -186,7 +188,7 @@ impl<'s, 'a> Collector<'s, 'a> {
             literal_tags: FxHashSet::default(),
             schema: SchemaShapes::new(semantic, imports),
             export_bindings,
-            anonymous_default_schema: false,
+            anonymous_default_schema: None,
         }
     }
 
@@ -195,14 +197,29 @@ impl<'s, 'a> Collector<'s, 'a> {
         layer_root_keys.sort_unstable();
         let mut literal_tags: Vec<String> = self.literal_tags.into_iter().collect();
         literal_tags.sort_unstable();
-        let mut schema_exports: Vec<String> = self
-            .export_bindings
-            .into_iter()
-            .filter(|(local, _)| self.schema.is_schema_name(local))
-            .map(|(_, exported)| exported)
-            .collect();
-        if self.anonymous_default_schema {
-            schema_exports.push("default".to_string());
+        let mut schema_exports: Vec<String> = Vec::new();
+        let mut derived_schema_exports: Vec<EffectDerivedSchema> = Vec::new();
+        for (local, exported) in self.export_bindings {
+            match self.schema.name_shape(&local) {
+                Some(SchemaShape::Known) => schema_exports.push(exported),
+                Some(SchemaShape::Derived(import_local)) => {
+                    derived_schema_exports.push(EffectDerivedSchema {
+                        export_name: exported,
+                        import_local: import_local.clone(),
+                    });
+                }
+                None => {}
+            }
+        }
+        match self.anonymous_default_schema {
+            Some(SchemaShape::Known) => schema_exports.push("default".to_string()),
+            Some(SchemaShape::Derived(import_local)) => {
+                derived_schema_exports.push(EffectDerivedSchema {
+                    export_name: "default".to_string(),
+                    import_local,
+                });
+            }
+            None => {}
         }
         schema_exports.sort_unstable();
         schema_exports.dedup();
@@ -227,13 +244,15 @@ impl<'s, 'a> Collector<'s, 'a> {
                 .collect(),
             layer_root_keys,
             schema_exports,
+            derived_schema_exports,
         };
         let empty = facts.tagged_errors.is_empty()
             && facts.caught_tags.is_empty()
             && facts.literal_tags.is_empty()
             && facts.layers.is_empty()
             && facts.layer_root_keys.is_empty()
-            && facts.schema_exports.is_empty();
+            && facts.schema_exports.is_empty()
+            && facts.derived_schema_exports.is_empty();
         (!empty).then(|| Box::new(facts))
     }
 
@@ -301,18 +320,18 @@ impl<'s, 'a> Collector<'s, 'a> {
                 // public value) but is never a tagged error candidate: an
                 // importer binds it under any local name.
                 if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &export.declaration {
-                    let is_schema = self.schema.is_schema_class(class);
+                    let shape = self.schema.class_shape(class);
                     if let Some(id) = &class.id {
                         self.default_locals.insert(id.name.to_string());
-                        if is_schema {
-                            self.schema.record(id.symbol_id(), &id.name);
+                        if let Some(shape) = shape {
+                            self.schema.record(id.symbol_id(), &id.name, shape);
                         }
                     } else {
-                        self.anonymous_default_schema |= is_schema;
+                        self.anonymous_default_schema = shape;
                     }
                     self.record_class_layers(class, true, known);
                 } else if let Some(expression) = export.declaration.as_expression() {
-                    self.anonymous_default_schema |= self.schema.is_schema_expression(expression);
+                    self.anonymous_default_schema = self.schema.expression_shape(expression);
                 }
             }
             _ => {}
@@ -331,8 +350,8 @@ impl<'s, 'a> Collector<'s, 'a> {
             else {
                 continue;
             };
-            if self.schema.is_schema_expression(init) {
-                self.schema.record(id.symbol_id(), &id.name);
+            if let Some(shape) = self.schema.expression_shape(init) {
+                self.schema.record(id.symbol_id(), &id.name, shape);
             }
             if !self.is_layer_expression(init, known) {
                 continue;
@@ -357,8 +376,8 @@ impl<'s, 'a> Collector<'s, 'a> {
         let Some(id) = &class.id else {
             return;
         };
-        if self.schema.is_schema_class(class) {
-            self.schema.record(id.symbol_id(), &id.name);
+        if let Some(shape) = self.schema.class_shape(class) {
+            self.schema.record(id.symbol_id(), &id.name, shape);
         }
         let Some(tag) = class
             .heritage
