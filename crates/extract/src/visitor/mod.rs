@@ -861,6 +861,7 @@ pub(crate) struct ModuleInfoExtractor {
     factory_property_classes: FxHashMap<Span, FxHashMap<String, BindingClassProof>>,
     independent_this_depth: usize,
     class_method_function_span: Option<Span>,
+    inherited_this_result_locals: FxHashMap<String, String>, // `table` -> `this.find()` (#4183)
     pending_subclass_member_accesses: Vec<PendingSubclassMemberAccess>,
     projected_member_accesses: Vec<ProjectedMemberAccess>,
     projection_retained_work: usize,
@@ -1690,10 +1691,9 @@ impl ModuleInfoExtractor {
     /// class's scope id (`this@<id>.<suffix>`) so two classes in one module that
     /// declare a same-named field do not collide in the module-flat map: without
     /// this, last-write-wins credits only the class declared last and falsely
-    /// reports the other class's members unused. Module-level `this` (no active
-    /// class scope) keeps the plain `this.<suffix>` spelling. The qualifier is
-    /// stripped back to `this.` by `strip_this_scope_qualifiers` before any
-    /// spelling reaches `ModuleInfo`. See issue #1821 (Fix B).
+    /// reports the other class's members unused. Module-level `this` keeps the
+    /// plain `this.<suffix>` spelling. `strip_this_scope_qualifiers` removes the
+    /// qualifier before a spelling reaches `ModuleInfo` (issue #1821, Fix B).
     fn this_member_key(&self, suffix: &str) -> String {
         match self.class_scope_stack.last() {
             Some(id) => format!("this@{id}.{suffix}"),

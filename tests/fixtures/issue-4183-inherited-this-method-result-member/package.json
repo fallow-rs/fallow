@@ -1,0 +1,6 @@
+{
+  "name": "issue-4183-inherited-this-method-result-member",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
