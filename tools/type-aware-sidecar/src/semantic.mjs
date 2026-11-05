@@ -265,12 +265,13 @@ const boundedResult = ({
   evidenceLimit,
   totalEvidenceCount,
   omissions: extraOmissions = [],
+  evidenceLimitIsGap = true,
 }) => {
   const ordered = orderedEvidence(evidence);
   const totalEvidence = totalEvidenceCount === undefined ? ordered.length : totalEvidenceCount;
   const returnedEvidenceCount = Math.min(ordered.length, evidenceLimit);
   const omissions = combineOmissions([
-    ...evidenceLimitOmission(totalEvidence, returnedEvidenceCount),
+    ...(evidenceLimitIsGap ? evidenceLimitOmission(totalEvidence, returnedEvidenceCount) : []),
     ...extraOmissions,
   ]).toSorted(compareOmissions);
   const partial = omissions.length > 0;
@@ -284,7 +285,7 @@ const boundedResult = ({
     actions: resultActions(omissions),
     evidence: ordered.slice(0, evidenceLimit),
     totalEvidenceCount: totalEvidence,
-    truncated,
+    truncated: truncated || totalEvidence > returnedEvidenceCount,
     omissions,
     data,
   };
@@ -1143,6 +1144,8 @@ const analyzeSymbolUse = (
     evidenceLimit,
     totalEvidenceCount,
     omissions,
+    // One exact reference proves a use. A negative assertion needs every reference.
+    evidenceLimitIsGap: assertion !== "confirmed-used",
     data: {
       symbol: semanticQueryIdentity(root, query, resolved),
       selected_project: resolved.state.config,

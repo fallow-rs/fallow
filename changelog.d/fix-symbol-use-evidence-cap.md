@@ -1,0 +1,3 @@
+### Fixed
+
+- **`--type-aware-require complete` no longer fails on a member with two or more exact uses.** Before, a `symbol-use` result kept one evidence item and reported the other references as an `evidence-limit` gap. A `confirmed-used` result was then `partial`, and the strict gate failed the run. One exact reference proves a use, so a `confirmed-used` result with truncated evidence is now `complete`. `total_evidence_count` and `truncated` still report the number of references. Other gaps, for example `dynamic-member-access`, still make the result `partial`. A negative assertion, for example `confirmed-no-static-references`, still needs complete evidence. (Closes [#4229](https://github.com/fallow-rs/fallow/issues/4229))
