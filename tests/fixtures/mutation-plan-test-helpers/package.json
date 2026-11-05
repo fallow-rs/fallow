@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-test-helpers",
+  "private": true,
+  "type": "module",
+  "main": "src/add.js",
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}
