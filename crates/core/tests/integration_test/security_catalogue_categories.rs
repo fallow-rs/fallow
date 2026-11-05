@@ -1366,7 +1366,22 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
 
 // ── catalogue gaps: callee variants of existing categories ───────────────────
 
-const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 16] = [
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 23] = [
+    ("src/cjs-fs-promises-temp.ts", "insecure-temp-file", 377),
+    (
+        "src/cjs-fs-promises-chmod.ts",
+        "world-writable-permission",
+        732,
+    ),
+    ("src/cjs-destructured-exec.ts", "command-injection", 78),
+    ("src/cjs-module-exec.ts", "command-injection", 78),
+    ("src/cjs-destructured-fs.ts", "path-traversal", 22),
+    ("src/fs-aliased-import.ts", "path-traversal", 22),
+    (
+        "src/cjs-destructured-chmod.ts",
+        "world-writable-permission",
+        732,
+    ),
     ("src/exec-file.ts", "command-injection", 78),
     ("src/shelljs.ts", "command-injection", 78),
     ("src/ssti-handlebars.ts", "ssti", 1336),
@@ -1433,6 +1448,10 @@ fn catalogue_gap_lookalikes_do_not_fire() {
         (
             "src/exec-file-tooling.ts",
             "execFile of a computed binary without untrusted input is not a candidate",
+        ),
+        (
+            "src/exec-local-shadow.ts",
+            "a parameter that hides the exec import is not a shell call",
         ),
         (
             "src/fs-build-path.ts",

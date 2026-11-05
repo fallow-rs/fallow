@@ -180,8 +180,8 @@ id = "command-injection"
 cwe = 78
 title = "OS command injection sink"
 effect = "shell"
-sink_shape = "call"
-callee_patterns = ["exec", "execSync", "spawn", "spawnSync"]
+sink_shape = "member-call"
+callee_patterns = ["node:child_process.exec", "node:child_process.execSync", "node:child_process.spawn", "node:child_process.spawnSync"]
 arg_index = 0
 import_provenance = "node:child_process"
 evidence_template = "Non-literal command passed to {callee}(). Candidate for verification: confirm the command/args are not attacker-controlled."
@@ -217,8 +217,8 @@ id = "command-injection"
 cwe = 78
 title = "OS command injection sink"
 effect = "shell"
-sink_shape = "call"
-callee_patterns = ["execFile", "execFileSync"]
+sink_shape = "member-call"
+callee_patterns = ["node:child_process.execFile", "node:child_process.execFileSync"]
 arg_index = 0
 import_provenance = "node:child_process"
 requires_module_source = true
@@ -648,7 +648,8 @@ evidence_template = "Non-literal file-system path passed to {callee}(). Candidat
 # The rows below cover the other write and delete calls, and named imports
 # (`import { readFile } from "node:fs/promises"`). Build and CLI code calls
 # them with computed paths all the time, so they use the `path.join` source
-# gate. A bare callee must be the local binding of the `node:fs` import.
+# gate. The extractor writes a named binding (`readFile`, also aliased or
+# destructured from `require()`) as `node:fs.readFile`.
 [[matcher]]
 id = "path-traversal"
 cwe = 22
@@ -677,23 +678,23 @@ id = "path-traversal"
 cwe = 22
 title = "File-system path traversal sink"
 effect = "storage"
-sink_shape = "call"
+sink_shape = "member-call"
 callee_patterns = [
-  "readFile",
-  "readFileSync",
-  "writeFile",
-  "writeFileSync",
-  "appendFile",
-  "appendFileSync",
-  "createReadStream",
-  "createWriteStream",
-  "unlink",
-  "unlinkSync",
-  "rm",
-  "rmSync",
-  "rename",
-  "copyFile",
-  "copyFileSync",
+  "node:fs.readFile",
+  "node:fs.readFileSync",
+  "node:fs.writeFile",
+  "node:fs.writeFileSync",
+  "node:fs.appendFile",
+  "node:fs.appendFileSync",
+  "node:fs.createReadStream",
+  "node:fs.createWriteStream",
+  "node:fs.unlink",
+  "node:fs.unlinkSync",
+  "node:fs.rm",
+  "node:fs.rmSync",
+  "node:fs.rename",
+  "node:fs.copyFile",
+  "node:fs.copyFileSync",
 ]
 arg_index = 0
 import_provenance = "node:fs"
@@ -970,8 +971,8 @@ id = "world-writable-permission"
 cwe = 732
 title = "World-writable chmod mode"
 effect = "storage"
-sink_shape = "call"
-callee_patterns = ["chmod", "chmodSync"]
+sink_shape = "member-call"
+callee_patterns = ["node:fs.chmod", "node:fs.chmodSync"]
 arg_index = 1
 arg_kinds = ["literal"]
 literal_integers = [511]
@@ -996,8 +997,8 @@ id = "insecure-temp-file"
 cwe = 377
 title = "Predictable temporary file path"
 effect = "storage"
-sink_shape = "call"
-callee_patterns = ["writeFile", "writeFileSync", "appendFile", "appendFileSync", "createWriteStream"]
+sink_shape = "member-call"
+callee_patterns = ["node:fs.writeFile", "node:fs.writeFileSync", "node:fs.appendFile", "node:fs.appendFileSync", "node:fs.createWriteStream"]
 arg_index = 0
 arg_kinds = ["literal"]
 literal_contains = ["/tmp/", "/var/tmp/"]

@@ -13220,7 +13220,7 @@ fn security_sink_arg_via_conditional_expression_collects_source_paths() {
     let sink = info
         .security_sinks
         .iter()
-        .find(|s| s.callee_path == "execSync");
+        .find(|s| s.callee_path == "node:child_process.execSync");
     assert!(
         sink.is_some(),
         "execSync with conditional arg should be captured: {:#?}",
@@ -13245,7 +13245,10 @@ fn security_sink_arg_via_await_expression_collects_source_paths() {
         }
         ",
     );
-    let sink = info.security_sinks.iter().find(|s| s.callee_path == "exec");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "node:child_process.exec");
     assert!(
         sink.is_some(),
         "exec with await-wrapped arg should be captured: {:#?}",
@@ -13268,7 +13271,7 @@ fn security_sink_arg_via_unary_expression_collects_source_paths() {
     let sink = info
         .security_sinks
         .iter()
-        .find(|s| s.callee_path == "execSync");
+        .find(|s| s.callee_path == "node:child_process.execSync");
     assert!(
         sink.is_some(),
         "execSync with source-backed arg should be captured"
@@ -13294,7 +13297,7 @@ fn security_sink_ident_collected_through_template_literal_expression() {
     let sink = info
         .security_sinks
         .iter()
-        .find(|s| s.callee_path == "execSync");
+        .find(|s| s.callee_path == "node:child_process.execSync");
     assert!(
         sink.is_some(),
         "execSync with template-literal arg should be captured"
