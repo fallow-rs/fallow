@@ -25,7 +25,7 @@ use std::process::ExitCode;
 use serde::Serialize;
 
 #[path = "setup_hooks_symlink_guard.rs"]
-mod symlink_guard;
+pub mod symlink_guard;
 pub use symlink_guard::{execute_agent_hooks, symlinked_component, symlinked_hook_target};
 
 /// Agent target for generated hook artifacts.

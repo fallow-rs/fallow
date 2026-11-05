@@ -140,7 +140,8 @@ pub enum Reason {
     NotAnObject,
     /// Fallow markers exist but not as a start-then-end pair.
     ManagedBlockMalformed,
-    /// In project scope, the path or a directory on the way to it is a symlink.
+    /// In project scope, the path or a directory on the way to it is a
+    /// symlink that resolves outside the project root, or a dangling link.
     SymlinkedPath,
 }
 
@@ -262,13 +263,16 @@ impl StepReport {
     }
 
     /// Turn the row into a skip because its path goes through the symlink
-    /// `link`. The row keeps its own path, and `detail` names the link.
+    /// `link`, which resolves outside the project root. The row keeps its own
+    /// path, and `detail` names the link.
     pub fn symlinked(mut self, ctx: &Ctx, link: &Path) -> Self {
         self.status = StepStatus::Skipped;
         self.reason = Some(Reason::SymlinkedPath);
         self.detail = Some(format!(
-            "{} is a symlink, and fallow does not write, back up or delete through a symlink in the project; replace it with a regular file or directory",
-            display_path(&ctx.root, ctx.home.as_deref(), link)
+            "{} {}; {}",
+            display_path(&ctx.root, ctx.home.as_deref(), link),
+            crate::setup_hooks::symlink_guard::OUTSIDE_LINK,
+            crate::setup_hooks::symlink_guard::OUTSIDE_LINK_REMEDY
         ));
         self
     }
@@ -363,7 +367,8 @@ impl Ctx {
     }
 
     /// In project scope, the first symlink on the way from the root to one
-    /// of `paths`. Always `None` under `--user`, because dotfile managers
+    /// of `paths` that resolves outside the root. Always `None` under
+    /// `--user`, because dotfile managers
     /// link the files in the home directory.
     pub fn symlink_on<'a>(&self, paths: impl IntoIterator<Item = &'a Path>) -> Option<PathBuf> {
         if self.user {

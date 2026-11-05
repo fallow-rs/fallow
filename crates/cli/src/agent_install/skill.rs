@@ -17,6 +17,7 @@ use crate::setup_hooks::read_optional_text;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_skill.rs"));
 
+const NODE_MODULES_PACKAGE: &str = "node_modules/fallow";
 const NODE_MODULES_SKILLS: &str = "node_modules/fallow/skills";
 
 /// One skill that the npm package ships and `agent install` writes.
@@ -197,23 +198,38 @@ enum Source {
 
 impl Source {
     fn resolve(root: &Path, skill: &'static ReleasedSkill) -> Result<Self, Reason> {
-        let shipped = root.join(skill.node_modules_dir());
-        if let Ok(Some(text)) = read_optional_text(&shipped.join("SKILL.md"))
-            && let Some(frontmatter) = frontmatter_block(&text)
-        {
-            let openai_yaml = read_optional_text(&shipped.join("agents").join("openai.yaml"))
-                .ok()
-                .flatten();
-            return Ok(Self::Stub {
-                skill,
-                frontmatter: frontmatter.to_string(),
-                openai_yaml,
-            });
+        if let Some(stub) = Self::shipped(root, skill) {
+            return Ok(stub);
         }
         skill
             .embedded()
             .map(Self::Embedded)
             .ok_or(Reason::SkillNotEmbedded)
+    }
+
+    /// The stub source from `node_modules/fallow`, or `None` when the package
+    /// has no usable `SKILL.md`. pnpm and `npm link` make the package directory
+    /// a link, so the check resolves it first and then accepts only files whose
+    /// real path stays inside it. A file that links out of the package could
+    /// otherwise copy any readable file into the working tree.
+    fn shipped(root: &Path, skill: &'static ReleasedSkill) -> Option<Self> {
+        let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
+        let shipped = root.join(skill.node_modules_dir());
+        let PackageFile::Text(text) = read_package_file(&package, &shipped.join("SKILL.md")) else {
+            return None;
+        };
+        let frontmatter = frontmatter_block(&text)?;
+        let openai_yaml =
+            match read_package_file(&package, &shipped.join("agents").join("openai.yaml")) {
+                PackageFile::Missing => None,
+                PackageFile::Text(yaml) => Some(yaml),
+                PackageFile::Refused => return None,
+            };
+        Some(Self::Stub {
+            skill,
+            frontmatter: frontmatter.to_string(),
+            openai_yaml,
+        })
     }
 
     const fn flavor(&self) -> Flavor {
@@ -258,6 +274,30 @@ impl Source {
                 })
                 .collect(),
         }
+    }
+}
+
+enum PackageFile {
+    Missing,
+    Text(String),
+    /// The file resolves outside the package, dangles, or cannot be read.
+    Refused,
+}
+
+fn read_package_file(package: &Path, path: &Path) -> PackageFile {
+    if path.symlink_metadata().is_err() {
+        return PackageFile::Missing;
+    }
+    let Ok(real) = dunce::canonicalize(path) else {
+        return PackageFile::Refused;
+    };
+    if !real.starts_with(package) {
+        return PackageFile::Refused;
+    }
+    match read_optional_text(&real) {
+        Ok(Some(text)) => PackageFile::Text(text),
+        Ok(None) => PackageFile::Missing,
+        Err(_) => PackageFile::Refused,
     }
 }
 

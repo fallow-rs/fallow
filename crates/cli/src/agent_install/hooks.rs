@@ -39,11 +39,11 @@ fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
         uninstall: ctx.mode == Mode::Uninstall,
     };
     match symlinked_hook_target(&opts, ctx.mode) {
-        Ok(Some(link)) => {
+        Ok(Some(target)) => {
             return vec![
                 StepReport::new(Some(harness), Step::Hooks, StepStatus::Skipped, ctx.scope())
-                    .path(ctx, &link)
-                    .symlinked(ctx, &link),
+                    .path(ctx, &target.path)
+                    .symlinked(ctx, &target.link),
             ];
         }
         Ok(None) => {}
