@@ -166,10 +166,19 @@ fn a_project_prefixed_test_id_maps_to_its_static_test_file() {
         &[
             "web::test/math.test.ts::adds".to_owned(),
             "test/other.test.ts::x".to_owned(),
+            "api::test/api.test.ts::y".to_owned(),
+            "no file here::x".to_owned(),
         ],
         &["test/math.test.ts".to_owned()],
     );
-    assert_eq!(files, ["test/math.test.ts", "test/other.test.ts"]);
+    assert_eq!(
+        files,
+        [
+            "test/api.test.ts",
+            "test/math.test.ts",
+            "test/other.test.ts"
+        ]
+    );
 }
 
 #[test]

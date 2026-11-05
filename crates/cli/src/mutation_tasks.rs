@@ -115,7 +115,8 @@ fn task(
 /// The test files of the covering test ids, sorted and unique. A test id is
 /// `<file>::<name>`, or `<project>::<file>::<name>` in a Vitest workspace
 /// with more than one project. A static test file that the id names wins;
-/// otherwise the file is the part before the first `::`.
+/// otherwise the file is the first `::` part with a JavaScript or
+/// TypeScript extension. An id without such a part gives no file.
 fn covering_test_files(test_ids: &[String], static_test_files: &[String]) -> Vec<String> {
     let mut files: Vec<String> = test_ids
         .iter()
@@ -126,12 +127,28 @@ fn covering_test_files(test_ids: &[String], static_test_files: &[String]) -> Vec
                     id.starts_with(&format!("{file}::")) || id.contains(&format!("::{file}::"))
                 })
                 .cloned()
-                .or_else(|| id.split_once("::").map(|(file, _)| file.to_owned()))
+                .or_else(|| {
+                    id.split("::")
+                        .find(|part| is_script_path(part))
+                        .map(str::to_owned)
+                })
         })
         .collect();
     files.sort();
     files.dedup();
     files
+}
+
+/// The extensions of a test file that a supported runner loads.
+const SCRIPT_EXTENSIONS: &[&str] = &[
+    "js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts", "vue", "svelte",
+];
+
+fn is_script_path(part: &str) -> bool {
+    Path::new(part)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension))
 }
 
 fn summary(tasks: &[MutationTask]) -> MutationTasksSummary {

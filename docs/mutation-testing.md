@@ -1448,7 +1448,8 @@ person or a coding agent writes. `tasks` runs no code.
   same search as `inspect`. A `mutation-plan` document has no test results,
   so `tasks` exits with code 2 and `FALLOW_MUTATION_REPORT_INVALID`.
 - Each task has the `mutant_id`, `file`, `line`, `column`, `operator`,
-  `function` and `status`, the source lines before and after the change
+  `function` and `status` (the status of the mutant in the report), the
+  source lines before and after the change
   (`original_lines`, `mutated_lines`), and the `covering_test_files`. A task
   holds no other source text. `inspect` gives the test ids and the static
   test files of one mutant.
@@ -1460,7 +1461,8 @@ person or a coding agent writes. `tasks` runs no code.
   `report_completion` is the completion status of the report: a `partial`
   report can miss tasks, because a `pending` mutant is not a task.
 - The exit code is `0`, also when the batch has tasks. The gate of a run is
-  `--min-score`.
+  `--min-score`. A task path outside the project root fails the command with
+  code 2 and `FALLOW_MUTATION_REPORT_INVALID`, as for `inspect`.
 
 The human and the markdown output start with a short header, then one item
 for each task:
