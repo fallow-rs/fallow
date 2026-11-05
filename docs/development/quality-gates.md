@@ -75,6 +75,9 @@ its own `pnpm-workspace.yaml` and `pnpm-lock.yaml`. The root
 `pnpm-workspace.yaml` sets a 7-day minimum release age, fails the install on
 an unapproved dependency build script, and keeps the flat `node_modules`
 layout (`nodeLinker: hoisted`) that tools under `tools/` resolve through.
+`editors/vscode/pnpm-workspace.yaml` sets the same 7-day minimum release age.
+pnpm 11 ignores pnpm keys in `.npmrc`, so `editors/vscode/.npmrc` holds only
+npm settings.
 
 The root `package.json` sets `engines.pnpm` to `^11.25.0`. pnpm stops with
 `ERR_PNPM_UNSUPPORTED_ENGINE` when its version is older than 11.25.0 or is
