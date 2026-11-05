@@ -135,9 +135,12 @@ for a reader who did not see the session. Do not put the conversation, the
 prompt, discarded attempts, or the edit history into them. Describe the code
 as it is now. For a regression, state what breaks without the code, and link
 the issue. `scripts/check-comment-quality.mjs` blocks narration and history
-comments in commits, CI, and Claude edits. Before you finish, read each
-changed comment, doc, and PR text as a reader with no access to the session.
-Remove or explain each part that would confuse that reader.
+comments in commits, CI, and Claude edits.
+
+Before you open or update a pull request, read each changed comment, doc,
+commit message, and PR text as a reader with no access to the session.
+Remove each reference to the session. Explain each term that a new reader
+does not know.
 
 ## Knowledge and publication boundaries
 

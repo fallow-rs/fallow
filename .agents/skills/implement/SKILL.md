@@ -10,8 +10,10 @@ Deliver the requested change through the native Fallow lifecycle.
 1. Read `AGENTS.md`, `docs/README.md`, and
    `docs/development/task-context-map.md`.
 2. Inspect the live branch, worktree, open pull requests, and `origin/main`.
-   When an open pull request already does the task, stop and report it.
-   Do not open a competing one. Check this again before you open your PR.
+   When an open pull request of another author or session already makes the
+   same change, do not open a competing one. Report its URL to the
+   maintainer as an open decision, with a recommended answer. A pull request
+   of this objective does not count.
 3. Write the acceptance criteria and verification plan to the gitignored
    `.plans/<task>.md`.
 4. Resolve open decisions before editing. Sort each open question:
