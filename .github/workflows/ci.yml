@@ -236,6 +236,7 @@ jobs:
               - 'crates/api/src/similar_code/transport.rs'
               - 'crates/api/src/type_aware/client/mod.rs'
               - 'crates/api/tests/integration/common.rs'
+              - 'crates/graph/src/missed_probes.rs'
               - 'crates/graph/src/resolve/fallbacks.rs'
               - 'crates/graph/src/resolve/specifier.rs'
               - 'crates/graph/src/resolve/tests.rs'

@@ -14,12 +14,6 @@
 //! The oracle skips these paths:
 //!
 //! - an existing directory, and a missing path below an existing file;
-//! - a missing module candidate: a path that the resolver tries for a
-//!   specifier, with an extension or as an extensionless file, that is not a
-//!   config or install file. The key does not record these probes yet, so
-//!   a new non-source file at such a path (a `.json` file, an extensionless
-//!   file, or build output in an ignored directory) can change a resolution
-//!   with no change to the key (#4233);
 //! - a path below `__fallow_ws_self_resolve__`, the directory name that the
 //!   resolver uses for a synthetic importer of a workspace package.
 //!
@@ -205,34 +199,15 @@ fn perturbation_for(path: &Path, kinds: &FxHashSet<ReadKind>) -> Option<Perturba
     if path.ancestors().skip(1).any(Path::is_file) {
         return None;
     }
-    if kinds.contains(&ReadKind::Dir) {
-        return Some(Perturbation::CreateDir);
-    }
-    is_config_name(path).then_some(Perturbation::CreateFile)
+    Some(if kinds.contains(&ReadKind::Dir) {
+        Perturbation::CreateDir
+    } else {
+        Perturbation::CreateFile
+    })
 }
 
 /// The directory name of the synthetic importer for a workspace package.
 const SELF_RESOLVE_DIR: &str = "__fallow_ws_self_resolve__";
-
-/// True for the name of a config or install file that a resolver reads,
-/// as opposed to a module candidate.
-fn is_config_name(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let json = path.extension().is_some_and(|extension| {
-        extension.eq_ignore_ascii_case("json") || extension.eq_ignore_ascii_case("jsonc")
-    });
-    let tsconfig = json && (name.starts_with("tsconfig") || name.starts_with("jsconfig"));
-    tsconfig
-        || matches!(
-            name,
-            "package.json" | "deno.json" | "deno.jsonc" | ".pnp.cjs" | ".pnp.data.json"
-        )
-        || INSTALL_STATE_FILES
-            .iter()
-            .any(|state| Path::new(state).file_name() == Some(name.as_ref()))
-}
 
 /// Apply `perturbation` again and compare a warm run with a cache-free run.
 fn stale_after(
@@ -413,4 +388,17 @@ fn graph_cache_key_covers_bun_reads() {
 #[test]
 fn graph_cache_key_covers_deno_reads() {
     assert_key_covers_read_set("deno project", &DENO, &[]);
+}
+
+#[test]
+fn graph_cache_key_covers_reads_of_files_that_discovery_does_not_list() {
+    assert_key_covers_read_set(
+        "node workspace with files at missed candidate paths",
+        &NODE,
+        &[
+            Step::ToggleExtensionlessUtil,
+            Step::ToggleDataJson,
+            Step::ToggleBuildOutput,
+        ],
+    );
 }

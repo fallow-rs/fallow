@@ -201,6 +201,9 @@ pub fn resolve_all_imports_with_session(
     input: &ResolveAllImportsInput<'_>,
     session: &ResolverSession,
 ) -> ResolvedProject {
+    // `ResolverSession::new` reads only the root, the workspace roots and
+    // their manifests, which the graph cache key covers by name.
+    let missed_probes = crate::missed_probes::MissRecorder::start(input.root);
     let root_is_canonical = session.root_is_canonical;
     let workspace_roots = build_workspace_roots(input.workspaces, &session.canonical_ws_roots);
     let canonical_paths = build_canonical_file_paths(input.files, root_is_canonical);
@@ -304,6 +307,7 @@ pub fn resolve_all_imports_with_session(
         modules: resolved,
         replaced_module_targets,
         work,
+        missed_probes: missed_probes.finish(),
     }
 }
 

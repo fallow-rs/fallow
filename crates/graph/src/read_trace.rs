@@ -13,11 +13,16 @@
 //! the `tsconfig.json` chains), or the read of `.pnp.cjs` in the `pnp` crate.
 //! The resolver input hash reads each of these files by name.
 //!
-//! Without the feature, the helpers call the file system directly and record
-//! nothing, so a release build pays no cost.
+//! Without the feature, the trace records nothing, so a release build pays
+//! no cost for it. The helpers report missed paths to
+//! [`crate::missed_probes`] in every build.
 
 use std::io;
 use std::path::{Path, PathBuf};
+
+use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveError};
+
+use crate::missed_probes;
 
 /// What a resolution step learned from a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -31,11 +36,9 @@ pub enum ReadKind {
 }
 
 /// The file system of the `oxc_resolver` instances that resolution builds.
-#[cfg(feature = "read-trace")]
-pub(crate) type ResolverFs = recording::TracingFs;
-/// The file system of the `oxc_resolver` instances that resolution builds.
-#[cfg(not(feature = "read-trace"))]
-pub(crate) type ResolverFs = oxc_resolver::FileSystemOs;
+/// It reports each missed path to [`crate::missed_probes`], and with the
+/// `read-trace` feature each call to the read trace.
+pub(crate) type ResolverFs = ProbeFs;
 
 /// The resolver type of the resolution stage.
 pub(crate) type Resolver = oxc_resolver::ResolverGeneric<ResolverFs>;
@@ -63,24 +66,32 @@ pub(crate) trait TracedPath {
 impl TracedPath for Path {
     fn traced_is_file(&self) -> bool {
         note(self, ReadKind::File);
-        self.is_file()
+        checked_metadata(self).is_ok_and(|metadata| metadata.is_file())
     }
 
     fn traced_is_dir(&self) -> bool {
         note(self, ReadKind::Dir);
-        self.is_dir()
+        checked_metadata(self).is_ok_and(|metadata| metadata.is_dir())
     }
 
     fn traced_exists(&self) -> bool {
         note(self, ReadKind::File);
-        self.exists()
+        checked_metadata(self).is_ok()
     }
+}
+
+/// [`std::fs::metadata`], with a missing path reported as a missed probe.
+fn checked_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
+    let result = std::fs::metadata(path);
+    missed_probes::note_if_missing(path, &result);
+    result
 }
 
 /// [`std::fs::read_to_string`], recorded as a content read.
 pub(crate) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     let path = path.as_ref();
     let result = std::fs::read_to_string(path);
+    missed_probes::note_if_missing(path, &result);
     note(path, content_kind(result.is_ok()));
     result
 }
@@ -89,7 +100,60 @@ pub(crate) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 pub(crate) fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let path = path.as_ref();
     note(path, ReadKind::File);
-    dunce::canonicalize(path)
+    let result = dunce::canonicalize(path);
+    missed_probes::note_if_missing(path, &result);
+    result
+}
+
+/// The operating system file system of the resolver. Each call that finds
+/// no path reports it as a missed probe, and each call goes to the read
+/// trace.
+pub(crate) struct ProbeFs(FileSystemOs);
+
+impl FileSystem for ProbeFs {
+    fn new(yarn_pnp: bool) -> Self {
+        Self(FileSystemOs::new(yarn_pnp))
+    }
+
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let result = self.0.read(path);
+        missed_probes::note_if_missing(path, &result);
+        note(path, content_kind(result.is_ok()));
+        result
+    }
+
+    fn read_to_string(&self, path: &Path) -> io::Result<String> {
+        let result = self.0.read_to_string(path);
+        missed_probes::note_if_missing(path, &result);
+        note(path, content_kind(result.is_ok()));
+        result
+    }
+
+    fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+        note(path, ReadKind::File);
+        let result = self.0.metadata(path);
+        missed_probes::note_if_missing(path, &result);
+        result
+    }
+
+    fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+        note(path, ReadKind::File);
+        let result = self.0.symlink_metadata(path);
+        missed_probes::note_if_missing(path, &result);
+        result
+    }
+
+    fn read_link(&self, path: &Path) -> Result<PathBuf, ResolveError> {
+        note(path, ReadKind::File);
+        self.0.read_link(path)
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        note(path, ReadKind::File);
+        let result = self.0.canonicalize(path);
+        missed_probes::note_if_missing(path, &result);
+        result
+    }
 }
 
 /// A content read of a missing file only learned that the file is absent.
@@ -103,15 +167,13 @@ const fn content_kind(found: bool) -> ReadKind {
 
 #[cfg(feature = "read-trace")]
 mod recording {
-    use std::io;
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-    use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveError};
     use rustc_hash::FxHashSet;
 
-    use super::{ReadKind, content_kind};
+    use super::ReadKind;
 
     /// One recorded read.
     #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -210,47 +272,6 @@ mod recording {
                     kind,
                 });
             }
-        }
-    }
-
-    /// The operating system file system, with each call noted in the trace.
-    pub struct TracingFs(FileSystemOs);
-
-    impl FileSystem for TracingFs {
-        fn new(yarn_pnp: bool) -> Self {
-            Self(FileSystemOs::new(yarn_pnp))
-        }
-
-        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-            let result = self.0.read(path);
-            note(path, content_kind(result.is_ok()));
-            result
-        }
-
-        fn read_to_string(&self, path: &Path) -> io::Result<String> {
-            let result = self.0.read_to_string(path);
-            note(path, content_kind(result.is_ok()));
-            result
-        }
-
-        fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
-            note(path, ReadKind::File);
-            self.0.metadata(path)
-        }
-
-        fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
-            note(path, ReadKind::File);
-            self.0.symlink_metadata(path)
-        }
-
-        fn read_link(&self, path: &Path) -> Result<PathBuf, ResolveError> {
-            note(path, ReadKind::File);
-            self.0.read_link(path)
-        }
-
-        fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-            note(path, ReadKind::File);
-            self.0.canonicalize(path)
         }
     }
 }

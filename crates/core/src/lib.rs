@@ -1222,7 +1222,7 @@ fn restore_cached_resolved_project(
         // debug for the reason `CacheRejection::discarded_existing_work`
         // documents.
         tracing::debug!(
-            "Graph cache decoded but its resolver payload no longer maps to the discovered files"
+            "Graph cache decoded but its resolver payload no longer maps to the project files"
         );
         Some(CacheRejection::FileSetChanged)
     })

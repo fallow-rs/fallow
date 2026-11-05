@@ -1,0 +1,3 @@
+### Fixed
+
+- **The graph cache now misses when a file appears at a path that import resolution tried and did not find.** Before this fix, a warm run could keep a stale import target after a new extensionless file, a new `.json` file, or new build output in an ignored directory. For example, a new file `src/util` changes the target of `./util` from `src/util.ts`, but discovery does not list it. The graph cache now stores the paths that resolution checked and did not find, and the resolved targets that discovery does not list. A warm run rebuilds the graph when one of these paths appears or is removed. (#4233)
