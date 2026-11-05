@@ -1191,6 +1191,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn a_changed_probed_path_takes_the_cache_miss_path() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();

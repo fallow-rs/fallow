@@ -280,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn records_missed_paths_below_the_root_only() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("project");
@@ -295,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn a_missed_path_that_appears_is_seen() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
@@ -311,6 +313,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn a_dangling_symlink_is_a_missing_path() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
@@ -325,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn only_a_not_found_error_is_a_miss() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
