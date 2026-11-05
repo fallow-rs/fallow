@@ -3395,7 +3395,7 @@ mod tests {
         // was simply still held).
         //
         // Retrying is honest rather than a mask because production never needs
-        // the guarantee this used to assert. Both callers of `try_acquire`
+        // an immediate release. Both callers of `try_acquire`
         // (`trim_spool_if_oversized` and the drain) treat contention as "skip,
         // the next run picks it up", so a release that becomes visible a
         // moment later costs nothing. What still matters, and is still

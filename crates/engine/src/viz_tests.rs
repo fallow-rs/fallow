@@ -372,9 +372,9 @@ fn clone_preview_windows_context_around_the_block() {
 fn clone_preview_keeps_leading_context_when_the_block_fills_the_cap() {
     use std::io::Write as _;
 
-    // A block far larger than the cap. The old logic zeroed the context
-    // and highlighted the whole (truncated) window; the fix keeps the
-    // leading context dimmed so the highlight still reads against it.
+    // A block far larger than the cap. The preview keeps the leading context
+    // dimmed instead of a whole highlighted (truncated) window, so the
+    // highlight still reads against it.
     let mut file = tempfile::NamedTempFile::new().expect("temp file");
     let body = (1..=200)
         .map(|i| format!("line {i}"))

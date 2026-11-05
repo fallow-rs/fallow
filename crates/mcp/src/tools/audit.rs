@@ -404,8 +404,8 @@ mod tests {
 
     /// #2699: called without a `base` on a repository that has remote-tracking
     /// refs, the typed route must auto-detect the base and return a verdict.
-    /// It used to fail before analysis because the auto-detected ref reached
-    /// the diff with the line ending git printed.
+    /// The route fails before analysis when the auto-detected ref reaches the
+    /// diff with the line ending that git printed.
     #[test]
     fn typed_route_auto_detects_the_base_without_a_base_parameter() {
         let fixture = CoverageFixture::new(false);

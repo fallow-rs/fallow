@@ -19,7 +19,8 @@ set -euo pipefail
 # The gate writes that report to .fallow/gate-report.json in the audited
 # tree. Set FALLOW_GATE_REPORT to write it to another path (a relative path
 # resolves against the audited tree). Set FALLOW_GATE_OUTPUT=json to print the
-# full JSON report on stderr instead, as gates before this change did.
+# full JSON report on stderr instead, which is the output of older fallow
+# versions.
 # The gate does not write through a symbolic link. When the report path or a
 # directory of a relative report path is a link, the block message names a
 # temporary copy of the report. When .fallow/.gitignore is a link, the gate

@@ -2194,9 +2194,9 @@ fn finding_generated_tag(finding: &fallow_output::ComplexityViolation) -> String
 /// Render the CRAP row.
 ///
 /// The CRAP value is highlighted only when CRAP is one of the dimensions that
-/// produced the finding. It used to render red unconditionally, which made a
-/// benign CRAP look identical to a breaching one and left the colour channel
-/// carrying no information (issue #2163).
+/// produced the finding. A value that is always red makes a benign CRAP look
+/// identical to a breaching one and leaves the colour channel carrying no
+/// information (issue #2163).
 fn finding_crap_line(finding: &fallow_output::ComplexityViolation, root: &Path) -> Option<String> {
     let crap = finding.crap?;
     let breached = finding.exceeded.includes_crap();

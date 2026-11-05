@@ -508,9 +508,9 @@ pub enum WorkspaceDiagnosticKind {
     /// surface as an unlisted dependency.
     ///
     /// Recorded by the plugin stage, which runs before analysis and is not
-    /// cached, so the entry is present on a warm cache too. It used to be a
-    /// bare `tracing::warn!` from inside the plugin, so it reached no envelope
-    /// and no CI consumer (issue #2736).
+    /// cached, so the entry is present on a warm cache too. A bare
+    /// `tracing::warn!` from inside the plugin reaches no envelope and no CI
+    /// consumer (issue #2736).
     ///
     /// A source file that calls the Module Federation runtime API gets the same
     /// entry: `path` names the source file, `key` names the runtime function

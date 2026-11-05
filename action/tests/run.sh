@@ -4970,8 +4970,8 @@ else
   fail "gate: an unenforced parse-error entry exits 0" "got $GATE_EXIT: $GATE_STDOUT"
 fi
 
-# #2685: the security gate keeps its documented exit 8, and it used to be
-# unreachable because the whole branch sat inside the fail-on-issues conditional.
+# #2685: the security gate keeps its documented exit 8. It must stay reachable
+# when the gate branch is not inside the fail-on-issues conditional.
 run_gate_analyze "$(gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":2}')" \
   INPUT_COMMAND="security" INPUT_FAIL_ON_ISSUES="false" INPUT_SECURITY_GATE="new"
 assert_contains "$GATE_STDOUT" "::error::Fallow security gate failed" \

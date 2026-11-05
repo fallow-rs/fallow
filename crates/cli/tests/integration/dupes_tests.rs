@@ -45,9 +45,8 @@ fn has_clone_group_with_files(json: &serde_json::Value, expected: &[&str]) -> bo
         })
 }
 
-/// `fallow dupes --performance` was previously a no-op: the global flag was
-/// parsed but never wired through to `DupesOptions`, so users got nothing.
-/// This pins the behaviour: human format renders a stderr "Duplication
+/// `fallow dupes --performance` is a no-op unless the global flag is wired
+/// through to `DupesOptions`. This pins the behaviour: human format renders a stderr "Duplication
 /// Performance" panel; structured formats (JSON / SARIF / CodeClimate) stay
 /// silent so the machine envelope is uncorrupted.
 #[test]
@@ -291,8 +290,8 @@ fn dupes_top_flag() {
 
 /// `--top` and `--group-by` are refused together instead of one being dropped.
 ///
-/// The pair used to be accepted and `--top` silently ignored: the run exited 0
-/// and reported every clone group after being asked for N, with
+/// If the pair were accepted, `--top` would be silently ignored: the run would
+/// exit 0 and report every clone group after being asked for N, with
 /// `clone_groups_omitted` at 0 to confirm nothing had been withheld. A refusal
 /// costs one flag and cannot be mistaken for a measurement.
 #[test]

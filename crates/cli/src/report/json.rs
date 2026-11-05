@@ -3368,10 +3368,9 @@ mod tests {
 
     /// Drift guard: every action `type` value emitted by the action builder
     /// must appear in `docs/output-schema.json`'s `HealthFindingAction.type`
-    /// enum. Previously the schema listed only `[refactor-function,
-    /// suppress-line]` while the code emitted `add-tests` for CRAP findings,
-    /// silently producing schema-invalid output for any consumer using the
-    /// schema for validation.
+    /// enum. Without this guard the code can emit a type, such as `add-tests` for
+    /// CRAP findings, that the schema does not list, and every consumer that
+    /// validates against the schema silently gets schema-invalid output.
     #[test]
     fn every_emitted_health_action_type_is_in_schema_enum() {
         let cases = [

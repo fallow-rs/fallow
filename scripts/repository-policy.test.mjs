@@ -695,13 +695,15 @@ test("the analysis clock env var is documented where users look for it", () => {
   );
 });
 
-test("narrator comment guard runs for commits, Claude, and CI", () => {
+test("comment quality guard runs for commits, Claude edits, and CI", () => {
   const preCommit = readFileSync("hk.pkl", "utf8");
   const claudeSettings = readFileSync(".claude/settings.json", "utf8");
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
   assert.match(preCommit, /check-comment-quality\.mjs --staged/u);
   assert.match(claudeSettings, /check-comment-quality\.mjs.*--working-tree.*--claude-hook/u);
+  assert.match(claudeSettings, /"matcher": "Edit\|Write\|MultiEdit"/u);
+  assert.match(claudeSettings, /check-comment-quality\.mjs\\" --claude-pre-tool/u);
   assert.match(ci, /node scripts\/check-comment-quality\.mjs --all/u);
 });
 

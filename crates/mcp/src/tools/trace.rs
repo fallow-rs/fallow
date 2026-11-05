@@ -669,9 +669,8 @@ mod tests {
 
     /// An empty `trace` is a refused input, and every other refusal on this
     /// tool (the oversized trace beside it, the sibling trace tools) carries a
-    /// `code`, a `help` and a `context`. It used to be the one that did not,
-    /// because MCP validated the field itself and never reached the API's
-    /// typed error.
+    /// `code`, a `help` and a `context`. If MCP validates the field itself, the
+    /// call never reaches the API's typed error and loses that shape.
     #[tokio::test]
     async fn empty_trace_is_refused_with_the_typed_error_shape() {
         let params: TraceErrorParams = serde_json::from_value(serde_json::json!({

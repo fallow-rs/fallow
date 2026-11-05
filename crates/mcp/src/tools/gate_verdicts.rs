@@ -1228,10 +1228,10 @@ mod tests {
     /// the diagnostics sit under `dead_code` and the only staleness object
     /// audit publishes sits under `complexity.summary`, with
     /// `change_scoped: true` because every audit is change-scoped. So a real
-    /// audit reports its degraded run, and now also reports the baseline no
-    /// audit can judge. A change-scoped run cannot judge a whole-project
-    /// baseline, which used to be stated as silence; a baseline every run
-    /// stands down on rots without a word, so it gets the unjudged sentence.
+    /// audit reports its degraded run, and also reports the baseline no audit
+    /// can judge. A change-scoped run cannot judge a whole-project baseline.
+    /// Silence there is wrong: a baseline every run stands down on rots
+    /// without a word, so it gets the unjudged sentence.
     #[test]
     fn an_audit_envelope_reports_its_degraded_run_and_its_unjudged_baseline() {
         let warnings = warnings_of(&serde_json::json!({
@@ -1439,7 +1439,7 @@ mod tests {
     }
 
     /// Every CLI-backed tool spawns the CLI with `--quiet`, which removes the
-    /// stderr line that used to be the only trace of a stand-down. Without
+    /// stderr line that is otherwise the only trace of a stand-down. Without
     /// this sentence an agent is handed a whole-project report in answer to a
     /// question about a change.
     #[test]

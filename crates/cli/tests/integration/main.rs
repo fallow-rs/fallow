@@ -1,7 +1,7 @@
 //! CLI integration tests, built as one test binary.
 //!
-//! Each module used to be a test binary of its own. Every binary linked the
-//! whole CLI, so the build linked it once per file. One binary links it once.
+//! A separate test binary per file links the whole CLI once per file. One
+//! binary links it once.
 //! Three targets stay separate. `runtime_coverage_tests` and
 //! `audit_brief_runtime_focus_tests` need the `test-sidecar-key` feature, and
 //! the `drift` harness has its own ignored cases. CI runs each one by name.

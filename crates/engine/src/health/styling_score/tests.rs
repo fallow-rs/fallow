@@ -108,8 +108,8 @@ fn dead_surface_token_death_term_is_per_population() {
 
     // LOW death-ratio with MANY tokens defined -> low token term, EVEN with a
     // declaration-sparse project. 8 unused out of 400 defined = 0.02 -> 0.3pt.
-    // (Under the old `total_declarations` denominator this same input would have
-    // been 8/24*150 = 50pt, capped at 20: the explosion this fix removes.)
+    // (A `total_declarations` denominator would give 8/24*150 = 50pt, capped at
+    // 20, for this same input, so a sparse project gets the maximum penalty.)
     let styling = compute_styling_health(&report, 400);
     approx(styling.penalties.dead_surface, 0.3);
 

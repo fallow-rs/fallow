@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SOURCE_EXTENSIONS = new Set([
@@ -49,6 +49,25 @@ const TOOL_DIRECTIVE =
   /\b(?:fallow-ignore|eslint|oxlint|prettier|rustfmt|clippy|ts-expect-error|ts-ignore|istanbul ignore|c8 ignore)\b/iu;
 const EXPLANATION_SIGNAL =
   /\b(?:because|since|so that|otherwise|avoid|prevent|workaround|compatib\w*|invariant|safety|performance|protocol)\b/iu;
+// Each phrase only makes sense to a reader who saw the edit happen. Fallow
+// analyzes diffs, so "the change adds", "this commit fixes" and "the old
+// version" are domain prose and stay out of this list. The lookbehinds keep
+// "X is used to be Y" and sentence-initial "Used to".
+const HISTORY_PHRASES = [
+  String.raw`(?<!\b(?:is|are|be|been|data|value|values)\s)(?<![.!?]\s|^)\bused to be\b`,
+  String.raw`\b(?:it|this|they|these|we) used to \w+`,
+  String.raw`\bpreviously,? (?:this|it|we|the|these|those|a|an)\b`,
+  String.raw`\boriginally,? (?:this|it|we)\b`,
+  String.raw`\bwe changed\b`,
+  String.raw`\bthe (?:old|previous) (?:behavior|code|implementation|logic)\b`,
+  String.raw`\b(?:keeps?|preserves?|retains?) the (?:old|previous) behavior\b`,
+  String.raw`\bas (?:requested|discussed|suggested|agreed)(?: (?:in|by|during) (?:the )?(?:review|reviewer|user|maintainer|chat|thread|discussion)\b|\s*[.!]?$)`,
+  String.raw`\bper (?:the )?(?:review|reviewer|maintainer|user)(?:'s)? (?:feedback|request|comment|suggestion)s?\b`,
+  String.raw`\bas per (?:the )?review\b`,
+  String.raw`\bthis (?:change|fix|PR|pull request|commit|patch) exists to\b`,
+  String.raw`\b(?:before|after|until) this (?:change|fix|PR|pull request|commit|patch)\b`,
+];
+const HISTORY_PHRASE = new RegExp(HISTORY_PHRASES.join("|"), "iu");
 const JAVASCRIPT_EXTENSIONS = new Set([
   ".astro",
   ".cjs",
@@ -183,7 +202,7 @@ const isRustLifetime = (line, index) => {
   return previous === "&" || previous === "<" || previous === ",";
 };
 
-const lineCommentBodies = (line) => {
+const lineCommentBodies = (line, includeDocs) => {
   const bodies = [];
   let quote = null;
 
@@ -209,10 +228,12 @@ const lineCommentBodies = (line) => {
 
     if (character === "/" && line[index + 1] === "/") {
       const directComment = line.slice(0, index).trim().length === 0;
-      if (directComment && (line.startsWith("///", index) || line.startsWith("//!", index))) {
+      const docComment =
+        directComment && (line.startsWith("///", index) || line.startsWith("//!", index));
+      if (docComment && !includeDocs) {
         return [];
       }
-      bodies.push(line.slice(index + 2).trim());
+      bodies.push(line.slice(index + (docComment ? 3 : 2)).trim());
       index += 1;
     }
   }
@@ -220,14 +241,16 @@ const lineCommentBodies = (line) => {
   return bodies;
 };
 
-const commentBodies = (line) => {
+const commentBodies = (line, includeDocs) => {
   const trimmed = line.trimStart();
-  if (trimmed.startsWith("/**") || trimmed.startsWith("/*!") || trimmed.startsWith("*")) {
+  const docBlock =
+    trimmed.startsWith("/**") || trimmed.startsWith("/*!") || trimmed.startsWith("*");
+  if (docBlock && !includeDocs) {
     return [];
   }
 
-  const direct = trimmed.match(/^(?:#|\/\*+|<!--)\s*(.*?)(?:\s*\*\/|\s*-->)?$/u);
-  return [...(direct === null ? [] : [direct[1].trim()]), ...lineCommentBodies(line)];
+  const direct = trimmed.match(/^(?:#|\/\*+!?|\*|<!--)\s*(.*?)(?:\s*\*\/|\s*-->)?$/u);
+  return [...(direct === null ? [] : [direct[1].trim()]), ...lineCommentBodies(line, includeDocs)];
 };
 
 const isNarratorBody = (body) => {
@@ -238,7 +261,16 @@ const isNarratorBody = (body) => {
   return !KEEPER_KEYWORD.test(body) && !TOOL_DIRECTIVE.test(body) && !EXPLANATION_SIGNAL.test(body);
 };
 
-const isNarratorComment = (line) => commentBodies(line).some(isNarratorBody);
+const isHistoryBody = (body) => HISTORY_PHRASE.test(body) && !TOOL_DIRECTIVE.test(body);
+
+// Narration checks skip rustdoc and JSDoc, which may walk through API usage.
+// History checks include them, because a contract must describe the present.
+const commentKind = (line) => {
+  if (commentBodies(line, false).some(isNarratorBody)) {
+    return "narration";
+  }
+  return commentBodies(line, true).some(isHistoryBody) ? "history" : null;
+};
 
 export const scanSourceText = (path, source) => {
   if (!isSourcePath(path)) {
@@ -250,8 +282,9 @@ export const scanSourceText = (path, source) => {
   for (const [index, line] of source.split(/\r?\n/u).entries()) {
     const masked = maskMultilineStrings(path, line, multilineState);
     multilineState = masked.state;
-    if (isNarratorComment(masked.line)) {
-      findings.push({ path, line: index + 1, text: line.trim() });
+    const kind = commentKind(masked.line);
+    if (kind !== null) {
+      findings.push({ path, line: index + 1, text: line.trim(), kind });
     }
   }
   return findings;
@@ -276,8 +309,9 @@ export const scanUnifiedDiff = (diff) => {
     }
 
     if (line.startsWith("+") && !line.startsWith("+++")) {
-      if (path !== null && isNarratorComment(line.slice(1)) && isSourcePath(path)) {
-        findings.push({ path, line: newLine, text: line.slice(1).trim() });
+      const kind = path !== null && isSourcePath(path) ? commentKind(line.slice(1)) : null;
+      if (kind !== null) {
+        findings.push({ path, line: newLine, text: line.slice(1).trim(), kind });
       }
       newLine += 1;
       continue;
@@ -332,6 +366,143 @@ const usage = () => {
   console.error(
     "Usage: node scripts/check-comment-quality.mjs (--all | --staged | --working-tree) [--claude-hook]",
   );
+  console.error(
+    "       node scripts/check-comment-quality.mjs --claude-pre-tool < hook-input.json",
+  );
+};
+
+const FINDING_GUIDANCE = {
+  narration: {
+    title: "Narrator-style comments found:",
+    advice: "Remove routine narration or replace it with non-obvious rationale.",
+  },
+  history: {
+    title: "Comments that describe the edit history found:",
+    advice:
+      "Describe the code as it is now, for a reader who did not see the edit. For a regression, state what breaks without the code. Put history in the commit message.",
+  },
+};
+
+const reportFindings = (findings, formatLocation) => {
+  for (const kind of Object.keys(FINDING_GUIDANCE)) {
+    const matching = findings.filter((finding) => finding.kind === kind);
+    if (matching.length === 0) {
+      continue;
+    }
+    console.error(FINDING_GUIDANCE[kind].title);
+    for (const finding of matching) {
+      console.error(`  ${formatLocation(finding)}${finding.text}`);
+    }
+    console.error(FINDING_GUIDANCE[kind].advice);
+  }
+};
+
+const readHookInput = () => {
+  try {
+    return JSON.parse(readFileSync(0, "utf8"));
+  } catch {
+    return null;
+  }
+};
+
+// Returns the file content after the edit, or null when the edit cannot apply.
+// The tool itself rejects such an edit, so the guard has nothing to judge.
+const applyProposedEdit = (toolInput, current) => {
+  if (typeof toolInput.content === "string") {
+    return toolInput.content;
+  }
+  if (current === null) {
+    return null;
+  }
+  const edits = Array.isArray(toolInput.edits) ? toolInput.edits : [toolInput];
+  let result = current;
+  for (const edit of edits) {
+    if (typeof edit?.old_string !== "string" || typeof edit.new_string !== "string") {
+      return null;
+    }
+    if (!result.includes(edit.old_string)) {
+      return null;
+    }
+    result =
+      edit.replace_all === true
+        ? result.split(edit.old_string).join(edit.new_string)
+        : result.replace(edit.old_string, () => edit.new_string);
+  }
+  return result;
+};
+
+const findingCounts = (findings) => {
+  const counts = new Map();
+  for (const { text } of findings) {
+    counts.set(text, (counts.get(text) ?? 0) + 1);
+  }
+  return counts;
+};
+
+// The guard scans the whole file before and after the edit, so string
+// masking sees the full context, and only comments that the edit adds count.
+// Malformed input passes, because a guard must not stop unrelated tool use.
+export const scanProposedEdit = (hookInput, readCurrent) => {
+  const toolInput = hookInput?.tool_input;
+  const path = toolInput?.file_path;
+  if (typeof path !== "string" || !isSourcePath(path)) {
+    return [];
+  }
+  const current = readCurrent(path);
+  const after = applyProposedEdit(toolInput, current);
+  if (after === null) {
+    return [];
+  }
+  const existing = findingCounts(current === null ? [] : scanSourceText(path, current));
+  return scanSourceText(path, after).filter(({ text }) => {
+    const remaining = existing.get(text) ?? 0;
+    existing.set(text, remaining - 1);
+    return remaining <= 0;
+  });
+};
+
+const readIfPresent = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+
+// Git reports the root through symbolic links, for example `/tmp` as
+// `/private/tmp` on macOS. A new file has no real path yet, so resolve its
+// nearest existing ancestor.
+const realPath = (path) => {
+  if (existsSync(path)) {
+    return realpathSync(path);
+  }
+  const parent = dirname(path);
+  return parent === path ? path : join(realPath(parent), basename(path));
+};
+
+// The guard covers tracked and untracked repository files, the same scope as
+// the Stop hook. Ignored scratch files and other repositories stay out.
+const isGuardedPath = (path) => {
+  try {
+    const root = git(["rev-parse", "--show-toplevel"]).trim();
+    const absolute = realPath(resolve(path));
+    const inside = relative(root, absolute);
+    if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+      return false;
+    }
+    execFileSync("git", ["check-ignore", "--quiet", "--", absolute], { stdio: "ignore" });
+    return false;
+  } catch (error) {
+    return error?.status === 1;
+  }
+};
+
+const runPreTool = () => {
+  const hookInput = readHookInput();
+  const path = hookInput?.tool_input?.file_path;
+  if (typeof path !== "string" || !isGuardedPath(path)) {
+    return;
+  }
+  const findings = scanProposedEdit(hookInput, readIfPresent);
+  if (findings.length === 0) {
+    return;
+  }
+  reportFindings(findings, () => "");
+  process.exitCode = 2;
 };
 
 const repeatedClaudeStop = () => {
@@ -345,6 +516,10 @@ const repeatedClaudeStop = () => {
 
 const run = () => {
   const args = new Set(process.argv.slice(2));
+  if (args.size === 1 && args.has("--claude-pre-tool")) {
+    runPreTool();
+    return;
+  }
   const modes = ["--all", "--staged", "--working-tree"].filter((mode) => args.has(mode));
   const allowed = new Set([...modes, "--claude-hook"]);
   const unknown = [...args].filter((arg) => !allowed.has(arg));
@@ -375,11 +550,7 @@ const run = () => {
     return;
   }
 
-  console.error("Narrator-style comments found:");
-  for (const finding of findings) {
-    console.error(`  ${finding.path}:${finding.line}: ${finding.text}`);
-  }
-  console.error("Remove routine narration or replace it with non-obvious rationale.");
+  reportFindings(findings, (finding) => `${finding.path}:${finding.line}: `);
   process.exitCode = args.has("--claude-hook") ? 2 : 1;
 };
 

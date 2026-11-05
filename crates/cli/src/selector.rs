@@ -1,10 +1,9 @@
 //! The shared `FILE:SYMBOL` selector parser.
 //!
 //! `inspect --symbol`, `trace <target>`, `check --trace` and
-//! `check --symbol-impact` all address a symbol the same way. They used to each
-//! carry their own split, which let the emptiness guard drift between them.
-//! This module owns the single answer so a selector accepted by one command is
-//! accepted by every other.
+//! `check --symbol-impact` all address a symbol the same way. A split per
+//! command lets the emptiness guard drift between them. This module owns the single answer
+//! so a selector accepted by one command is accepted by every other.
 
 /// Split a `FILE:SYMBOL` selector into its two halves.
 ///

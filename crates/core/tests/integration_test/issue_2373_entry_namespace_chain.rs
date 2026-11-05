@@ -74,9 +74,10 @@ fn entry_namespace_chain_credits_nested_star_and_namespace_sources() {
 
     // index.ts `export * from './barrel'`; barrel.ts `export * as sub`: the
     // entry surface forwards `sub`, whose namespace object exposes sub.ts's
-    // direct exports (credited before this fix), the named exports of its
-    // `export *` source, and every export of its `export * as sub2` source,
-    // recursively through sub2.ts's own `export *` and `export * as sub3`.
+    // direct exports (credited by the direct-export path), the named exports
+    // of its `export *` source, and every export of its `export * as sub2`
+    // source, recursively through sub2.ts's own `export *` and
+    // `export * as sub3`.
     for name in ["subOne", "sub2", "default"] {
         assert_credited(&unused, "src/sub.ts", name, "`sub` is on the entry surface");
     }

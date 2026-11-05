@@ -223,7 +223,7 @@ fn ambient_named_and_type_only_forms_keep_type_space_credit() {
     // space only: the type half of each pair carries a named-import
     // reference in the type namespace, the value half carries no value-space
     // reference and keeps reporting as an unused export (never as an unused
-    // type), exactly as before this change.
+    // type).
     for (path, name) in [
         ("src/named-impl.ts", "Pair"),
         ("src/typed-impl.ts", "TypedPair"),

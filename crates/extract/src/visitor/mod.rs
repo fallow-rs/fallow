@@ -2933,8 +2933,7 @@ impl ModuleInfoExtractor {
     /// `const { a, ...rest } = f()` and `const { [k]: v } = f()` can read ANY property
     /// of the factory result, so no set of visible keys describes what is used.
     /// Credit the returned class wholesale rather than credit the keys we happen to
-    /// see: crediting only `a` would leave every other live member reported as dead,
-    /// the exact false positive this change removes.
+    /// see: crediting only `a` would leave every other live member reported as dead.
     fn resolve_factory_whole_object_candidates(&mut self) {
         if self.factory_whole_object_candidates.is_empty() {
             return;

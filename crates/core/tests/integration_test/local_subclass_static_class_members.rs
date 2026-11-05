@@ -74,7 +74,7 @@ fn local_subclass_credits_members_on_the_declaring_class() {
 /// `class Sub extends mixin(Base) {}` records no superclass, because a mixin call is
 /// not a bare identifier. The walk abstains and `viaMixin` stays reported.
 ///
-/// This is a known, pre-existing false positive, not one this change introduces:
+/// This is a known false positive:
 /// crediting through a mixin would be a guess, since the mixin may redefine what the
 /// subclass exposes. Pinned here so a future change to superclass extraction has to
 /// decide this case deliberately rather than by accident.

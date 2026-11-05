@@ -105,8 +105,8 @@ fn a_non_factory_callee_credits_nothing() {
 /// `const { named, ...rest } = useApi()` can read ANY property through `rest`, so no
 /// set of visible keys describes what is used.
 ///
-/// Crediting only `named` would leave every other live member reported as dead --
-/// the exact false positive this change removes. The returned class is marked wholly
+/// Crediting only `named` would leave every other live member reported as dead,
+/// which is the false positive this test guards against. The returned class is marked wholly
 /// used instead, so nothing is reported for it. That is a deliberate false negative:
 /// under-reporting is safe, over-reporting is not.
 #[test]

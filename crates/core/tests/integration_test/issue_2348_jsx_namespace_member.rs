@@ -6,11 +6,11 @@ use crate::common::{create_config, fixture_path};
 /// reporting.
 ///
 /// The fixture pins three consumer shapes:
-/// - the entry point itself renders `<SC.UsedStyle />` (the reported repro,
-///   previously the `is_entry_with_no_access` false positive),
-/// - a non-entry component renders `<S.Wrapper />` (previously conservatively
-///   credited every export via mark-all; now narrows, so `UnusedSibling`
-///   starts reporting, a deliberate semantics widening),
+/// - the entry point itself renders `<SC.UsedStyle />` (the reported repro of
+///   the `is_entry_with_no_access` false positive),
+/// - a non-entry component renders `<S.Wrapper />` (the credit narrows to the
+///   accessed member instead of mark-all, so `UnusedSibling` reports, a
+///   deliberate semantics widening),
 /// - a non-entry component renders `<UI.Button />` through a barrel that only
 ///   star-re-exports it, exercising the synthetic star re-export path.
 #[test]
