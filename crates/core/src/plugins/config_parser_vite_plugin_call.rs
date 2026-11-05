@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 
 use super::{

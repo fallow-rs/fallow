@@ -1,4 +1,3 @@
-#[allow(clippy::wildcard_imports, reason = "many AST helper types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::ScopeFlags;

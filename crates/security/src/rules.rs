@@ -66,7 +66,7 @@ pub fn security_rules_can_error(config: &ResolvedConfig) -> bool {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "fixture setup asserts its own invariants directly"
 )]

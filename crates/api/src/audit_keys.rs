@@ -548,10 +548,6 @@ fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String
 /// The six dependency-related finding slices, bundled so the dependency
 /// dispatcher takes one parameter instead of six.
 #[derive(Clone, Copy)]
-#[allow(
-    clippy::struct_field_names,
-    reason = "field names mirror the AnalysisResults field names so the destructure stays shorthand"
-)]
 struct DependencyFindingSlices<'a> {
     unused_dependencies: &'a [fallow_types::output_dead_code::UnusedDependencyFinding],
     unused_dev_dependencies: &'a [fallow_types::output_dead_code::UnusedDevDependencyFinding],

@@ -114,7 +114,7 @@ fn dispatch_mutation_command(
     })
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "the command router is intentionally an exhaustive top-level dispatch table"
 )]

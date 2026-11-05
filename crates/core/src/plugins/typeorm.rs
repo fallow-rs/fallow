@@ -5,7 +5,6 @@
 //! loads the matching files at runtime without an import.
 
 use fallow_extract::JsText;
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 
 use super::config_parser;

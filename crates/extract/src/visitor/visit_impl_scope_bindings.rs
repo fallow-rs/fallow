@@ -1,6 +1,5 @@
 //! Scope-local binding state helpers for the visitor implementation.
 
-#[allow(clippy::wildcard_imports, reason = "many scope helper AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_semantic::ScopeFlags;

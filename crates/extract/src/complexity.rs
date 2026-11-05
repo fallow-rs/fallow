@@ -32,7 +32,6 @@ const SPAN_NAMED_ARGUMENTS: std::ops::Range<usize> = 0..1;
 /// argument: every argument after that literal.
 const STRING_KEYED_ARGUMENTS: std::ops::RangeFrom<usize> = 1..;
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;

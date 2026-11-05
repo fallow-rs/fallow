@@ -2,7 +2,6 @@
 
 use std::borrow::Cow;
 
-#[allow(clippy::wildcard_imports, reason = "many AST node variants used")]
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 

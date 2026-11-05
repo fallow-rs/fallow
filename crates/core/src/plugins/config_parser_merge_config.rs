@@ -7,7 +7,6 @@
 //! the inline base object, and the fields of the override are lost. The
 //! readers here give each object argument instead.
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 

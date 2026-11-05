@@ -127,7 +127,7 @@ pub fn is_major_bump(from: &str, to: &str) -> bool {
 /// in manifest order. Importer counts come from the graph's package usage; a
 /// package the graph never saw counts zero.
 #[must_use]
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "fallow standardizes on FxHashMap; the importer map is always built by the engine with the fallow hasher"
 )]

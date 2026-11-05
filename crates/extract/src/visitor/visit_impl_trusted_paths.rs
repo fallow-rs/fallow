@@ -10,7 +10,6 @@
 //! `new URL(value, import.meta.url)` stay untrusted unless `value` itself is a
 //! literal or a trusted path.
 
-#[allow(clippy::wildcard_imports, reason = "many AST node types used")]
 use oxc_ast::ast::*;
 
 use fallow_types::extract::SinkLiteralValue;

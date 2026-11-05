@@ -145,7 +145,7 @@ pub enum Reason {
 impl Reason {
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "read by the documentation drift test")
+        expect(dead_code, reason = "read by the documentation drift test")
     )]
     pub const ALL: [Self; 15] = [
         Self::SkillNameTaken,

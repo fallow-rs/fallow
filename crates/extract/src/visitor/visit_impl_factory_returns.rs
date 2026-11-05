@@ -1,9 +1,5 @@
 //! Factory return and assignment proof helpers for the visitor implementation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "many factory-return AST types used"
-)]
 use oxc_ast::ast::*;
 use oxc_span::Span;
 

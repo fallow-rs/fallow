@@ -385,7 +385,7 @@ fn restrict_license_permissions(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-#[allow(
+#[expect(
     clippy::unnecessary_wraps,
     reason = "mirrors Unix variant's Result signature for API consistency"
 )]

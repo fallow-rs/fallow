@@ -79,6 +79,5 @@ pub enum FrameworkHealthDetectorStatus {
     /// Detector ran but declined to report for this project.
     Abstained,
     /// Detector applicability could not be evaluated.
-    #[allow(dead_code, reason = "reserved for analysis paths that skip a detector")]
     NotChecked,
 }

@@ -1,9 +1,5 @@
 //! Security control classifier and declarative validation capture helpers.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "many declarative validation AST types used"
-)]
 use oxc_ast::ast::*;
 use oxc_span::Span;
 

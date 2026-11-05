@@ -1,9 +1,5 @@
 //! Svelte event-dispatch and load-data whole-use capture.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "many Svelte visitor AST types used"
-)]
 use oxc_ast::ast::*;
 
 use fallow_types::extract::DispatchedEvent;

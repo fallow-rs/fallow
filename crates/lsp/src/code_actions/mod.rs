@@ -5,7 +5,6 @@ mod suppress;
 use std::path::Path;
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
-#[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 
 pub use absent_props::*;

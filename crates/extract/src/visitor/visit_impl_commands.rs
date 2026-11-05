@@ -5,7 +5,6 @@
 //! `require()` binding of a known process API, or the `Bun` global. A binding
 //! that a nested scope shadows is not a process API.
 
-#[allow(clippy::wildcard_imports, reason = "many process call AST types used")]
 use oxc_ast::ast::*;
 
 use crate::js_text::JsText;

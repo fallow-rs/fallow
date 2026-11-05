@@ -13,7 +13,6 @@
 //! value of the local.
 
 use oxc_allocator::{Allocator, CloneIn};
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 

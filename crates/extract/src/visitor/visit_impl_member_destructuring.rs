@@ -5,7 +5,6 @@
 //! plain local, so no later `m` access resolves to the class. These helpers
 //! record the access at the destructure site.
 
-#[allow(clippy::wildcard_imports, reason = "many destructure AST types used")]
 use oxc_ast::ast::*;
 
 use std::borrow::Cow;

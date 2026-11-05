@@ -586,10 +586,6 @@ pub const FILE_LINES_FINDING_NAME: &str = "<file>";
 /// Resolved thresholds used to evaluate a health finding.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    clippy::struct_field_names,
-    reason = "target-dependent clippy lint; wire fields mirror max_* config keys"
-)]
 pub struct HealthEffectiveThresholds {
     /// Effective cyclomatic-complexity ceiling for the matched file.
     pub max_cyclomatic: u16,
@@ -606,10 +602,6 @@ pub struct HealthEffectiveThresholds {
 /// Threshold values configured by a single override entry.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    clippy::struct_field_names,
-    reason = "target-dependent clippy lint; wire fields mirror max_* config keys"
-)]
 pub struct HealthConfiguredThresholds {
     /// Cyclomatic ceiling set by the override, when it sets one.
     #[serde(default, skip_serializing_if = "Option::is_none")]

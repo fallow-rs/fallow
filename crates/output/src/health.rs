@@ -18,7 +18,7 @@ pub const HEALTH_SCHEMA_VERSION: u32 = 13;
 
 /// Exact schema version for [`HealthOutput`].
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = HEALTH_SCHEMA_VERSION))]
 struct HealthSchemaVersion(u32);

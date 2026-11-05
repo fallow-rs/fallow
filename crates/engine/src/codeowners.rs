@@ -229,10 +229,6 @@ impl CodeOwners {
     /// named section, `Some(None)` when the rule appears before any section
     /// header, or `None` when no rule matches or the last match is a
     /// GitLab-style exclusion.
-    #[allow(
-        clippy::option_option,
-        reason = "three distinct states: no match, matched pre-section, matched in named section"
-    )]
     pub fn section_of(&self, relative_path: &Path) -> Option<Option<&str>> {
         self.last_matching_rule(relative_path).and_then(|idx| {
             if self.is_negation[idx] {

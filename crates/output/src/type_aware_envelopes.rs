@@ -9,7 +9,7 @@ pub const TYPE_AWARE_STATUS_SCHEMA_VERSION: u32 = 8;
 
 /// Schema projection for the type-aware status envelope's exact version.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = TYPE_AWARE_STATUS_SCHEMA_VERSION))]
 struct TypeAwareStatusSchemaVersion(u32);

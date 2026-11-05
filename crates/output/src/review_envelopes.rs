@@ -256,10 +256,6 @@ pub struct ReviewEnvelopeSummary {
 impl ReviewEnvelopeSummary {
     /// Empty-default factory for [`ReviewEnvelopeOutput::summary`].
     #[must_use]
-    #[allow(
-        dead_code,
-        reason = "referenced via serde default attr; no direct callsite until Deserialize is derived"
-    )]
     pub fn empty_default() -> Self {
         Self::default()
     }
@@ -347,10 +343,6 @@ pub struct GitLabReviewComment {
 
 /// Helper for `skip_serializing_if = "is_false"` on `truncated` fields.
 #[must_use]
-#[allow(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde's skip_serializing_if requires fn(&T) -> bool"
-)]
 pub fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -408,10 +400,6 @@ pub struct ReviewEnvelopeMeta {
 pub enum ReviewEnvelopeSchema {
     /// Historical first release of the review envelope format.
     #[serde(rename = "fallow-review-envelope/v1")]
-    #[allow(
-        dead_code,
-        reason = "kept for forward-compat with v1 historical inputs once Deserialize is derived"
-    )]
     V1,
     /// Issue #528 review envelope format.
     #[serde(rename = "fallow-review-envelope/v2")]

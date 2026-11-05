@@ -21,14 +21,14 @@ pub const COMBINED_SCHEMA_VERSION: u32 = 15;
 
 /// Schema projection for the audit envelope's exact version.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = AUDIT_SCHEMA_VERSION))]
 struct AuditSchemaVersion(u32);
 
 /// Schema projection for the combined envelope's exact version.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = COMBINED_SCHEMA_VERSION))]
 struct CombinedSchemaVersion(u32);
@@ -350,10 +350,6 @@ pub struct CombinedMeta {
     schemars(title = "fallow --format json (typed root)")
 )]
 #[serde(tag = "kind")]
-#[allow(
-    dead_code,
-    reason = "some variants are schema-emit only, but runtime roots serialize through this enum where practical"
-)]
 pub enum FallowOutput<
     Audit,
     Explain,

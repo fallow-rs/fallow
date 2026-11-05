@@ -1,6 +1,5 @@
 //! Dotted names of class heritage and type references.
 
-#[allow(clippy::wildcard_imports, reason = "many AST node variants used")]
 use oxc_ast::ast::*;
 
 use crate::visitor::visit_impl::join_member_path;

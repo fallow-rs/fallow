@@ -4,10 +4,6 @@
 #[serde(rename_all = "snake_case")]
 pub enum CoverageModel {
     /// Legacy binary tested/untested static model; no longer produced.
-    #[allow(
-        dead_code,
-        reason = "retained for backwards-compatible JSON deserialization"
-    )]
     StaticBinary,
     /// Coverage estimated from static test reachability.
     StaticEstimated,

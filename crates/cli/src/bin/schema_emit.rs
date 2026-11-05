@@ -665,10 +665,6 @@ fn finding_augmentation(_name: &str) -> FindingAugmentation {
 }
 
 /// Build derived schemas for every in-scope type using one shared generator.
-#[allow(
-    clippy::too_many_lines,
-    reason = "this function is fundamentally a registration list: one `subschema_for::<T>()` call per type in the public output contract. Splitting by module obscures the registration set; the linear list is the cleanest representation."
-)]
 fn derived_definitions() -> Map<String, Value> {
     let mut generator = SchemaSettings::draft07().into_generator();
 

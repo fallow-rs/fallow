@@ -3,6 +3,10 @@
     clippy::expect_used,
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
+#![allow(
+    dead_code,
+    reason = "each bench target includes this module and uses a different subset of the helpers"
+)]
 
 use std::path::PathBuf;
 
@@ -13,10 +17,6 @@ use tempfile::TempDir;
 mod threads;
 
 #[must_use]
-#[allow(
-    dead_code,
-    reason = "shared helper is used by analysis but not every bench target"
-)]
 pub fn create_test_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     make_config(root, true)
 }
@@ -87,10 +87,6 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
 /// Generate a synthetic project with `file_count` source files.
 /// Half of the exports are consumed by the entry point, the other half are "dead".
 #[must_use]
-#[allow(
-    dead_code,
-    reason = "shared helper is used by analysis but not every bench target"
-)]
 pub fn create_synthetic_project(
     name: &str,
     file_count: usize,

@@ -1,6 +1,5 @@
 //! Dotted source paths of member chains for the taint-source bindings.
 
-#[allow(clippy::wildcard_imports, reason = "many AST node variants used")]
 use oxc_ast::ast::*;
 
 use rustc_hash::FxHashSet;

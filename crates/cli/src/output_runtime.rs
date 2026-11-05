@@ -81,10 +81,6 @@ pub fn loaded_baseline_for(command: &str) -> Option<LoadedBaselineRecheck> {
         .filter(|loaded| loaded.command == command)
 }
 
-#[allow(
-    dead_code,
-    reason = "used by the CLI binary and output contract tests; the library target only reads runtime output state"
-)]
 pub fn set_telemetry_analysis_run_id(run_id: Option<String>) {
     if let Ok(mut current) = TELEMETRY_ANALYSIS_RUN_ID.lock() {
         *current = run_id;

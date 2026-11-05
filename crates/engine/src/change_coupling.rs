@@ -444,7 +444,7 @@ pub fn health_ignore_set(patterns: &[String]) -> globset::GlobSet {
 /// shared revisions (both descending), then by changed file and partner, so a
 /// cap keeps the strongest gaps.
 #[must_use]
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "callers pass the audit changed-file FxHashSet"
 )]

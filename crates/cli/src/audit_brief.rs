@@ -44,10 +44,6 @@ const COORDINATION_GAP_NOTE: &str = "syntactic attention pointer, not a correctn
 
 /// Build the deltas from head sets vs a base set, sorted for determinism.
 #[must_use]
-#[allow(
-    clippy::implicit_hasher,
-    reason = "callers always pass the audit FxHashSet key sets; generalizing the hasher adds noise"
-)]
 pub fn build_review_deltas(
     head_boundary: &FxHashSet<String>,
     base_boundary: &FxHashSet<String>,

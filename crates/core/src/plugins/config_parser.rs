@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 
 use fallow_extract::{JsText, visitor::extract_import_from_callable};
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;

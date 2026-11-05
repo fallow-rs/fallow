@@ -1,6 +1,5 @@
 //! Shared object and callee helpers for visitor extraction.
 
-#[allow(clippy::wildcard_imports, reason = "many AST node variants used")]
 use oxc_ast::ast::*;
 
 pub(super) fn callee_leaf_name(callee: &Expression<'_>) -> Option<String> {

@@ -1420,7 +1420,7 @@ fn css_output_path_in_changed_scope(
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "tests use unwrap to keep token-consumer assertions concise"
 )]

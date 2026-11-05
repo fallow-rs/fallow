@@ -1,10 +1,6 @@
 //! Source-time property receivers of strict object-returning factories.
 
 use fallow_types::extract::{FactoryPropertySource, FactoryReturnObjectPropertySourceFact};
-#[allow(
-    clippy::wildcard_imports,
-    reason = "factory acquisition matches AST forms"
-)]
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 

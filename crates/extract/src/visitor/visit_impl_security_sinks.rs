@@ -1,4 +1,3 @@
-#[allow(clippy::wildcard_imports, reason = "many sink helper AST types used")]
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};

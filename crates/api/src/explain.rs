@@ -1565,7 +1565,7 @@ pub fn coverage_analyze_meta() -> Value {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "registry tests intentionally index fixture JSON"
 )]

@@ -10,7 +10,6 @@
 //! The helpers apply only where the visitor would emit a placeholder. A name
 //! that the visitor gives today never changes.
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 
 use crate::js_text::JsText;

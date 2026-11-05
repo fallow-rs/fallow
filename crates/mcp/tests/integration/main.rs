@@ -13,7 +13,7 @@ mod warm_session;
 
 use std::path::PathBuf;
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "a test binary without its own path cannot run the tests"
 )]

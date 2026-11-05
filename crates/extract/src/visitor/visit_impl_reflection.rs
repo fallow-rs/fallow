@@ -10,7 +10,6 @@
 //! A runtime probe for a static member name (`"name" in value`,
 //! `Reflect.has(value, "name")`) is recorded as a member name probe.
 
-#[allow(clippy::wildcard_imports, reason = "many call AST types used")]
 use oxc_ast::ast::*;
 
 use fallow_types::extract::{ImportedName, MemberNameProbeFact, SemanticFact};

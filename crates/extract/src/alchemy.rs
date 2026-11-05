@@ -39,7 +39,6 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;

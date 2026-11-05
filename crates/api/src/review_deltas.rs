@@ -86,7 +86,7 @@ pub fn public_export_keys_for(
 
 /// Compute the head-minus-base delta key set, sorted for deterministic output.
 #[must_use]
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "callers always pass FxHashSet; generalizing the hasher adds noise for no in-tree benefit"
 )]

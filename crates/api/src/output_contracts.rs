@@ -111,10 +111,6 @@ pub enum ImpactOutput {
 }
 
 /// Concrete review-brief wire envelope with every typed section filled in.
-#[allow(
-    clippy::type_complexity,
-    reason = "the concrete review brief contract names every typed wire section"
-)]
 pub type ReviewBriefWireOutput = fallow_output::ReviewBriefWireOutput<
     fallow_output::FocusMap,
     fallow_output::WeakeningSignal,
@@ -151,10 +147,6 @@ pub type SimilarCodeVerdictInput = fallow_output::SimilarCodeVerdictInput;
 
 /// Concrete root output union covering every fallow command payload; this is
 /// the top-level shape the published JSON schema is generated from.
-#[allow(
-    clippy::type_complexity,
-    reason = "concrete root union intentionally fills every output payload slot"
-)]
 pub type FallowOutput = fallow_output::FallowOutput<
     AuditOutput,
     fallow_output::ExplainOutput,

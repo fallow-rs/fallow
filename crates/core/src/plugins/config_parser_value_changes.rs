@@ -12,7 +12,6 @@
 //! function does not count. A missed change can only hide an unused file, but
 //! a change that is not real reports a used file as unused.
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::scope::ScopeFlags;

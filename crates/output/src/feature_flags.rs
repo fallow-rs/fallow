@@ -22,7 +22,7 @@ pub const FEATURE_FLAGS_SCHEMA_VERSION: u32 = 8;
 
 /// Schema projection for the feature-flags envelope's exact version.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = FEATURE_FLAGS_SCHEMA_VERSION))]
 struct FeatureFlagsSchemaVersion(u32);

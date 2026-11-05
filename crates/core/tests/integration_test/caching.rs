@@ -185,7 +185,7 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
 }
 
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "roundtrip fixture enumerates cache fields"
 )]

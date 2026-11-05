@@ -14,14 +14,14 @@ pub const DOCTOR_SCHEMA_VERSION: u32 = 2;
 
 /// Schema projection for the exact doctor envelope version.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = DOCTOR_SCHEMA_VERSION))]
 struct DoctorSchemaVersion(u32);
 
 /// Schema projection for `.` as the privacy-safe diagnosed project root.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = "."))]
 struct DoctorProjectRoot(String);

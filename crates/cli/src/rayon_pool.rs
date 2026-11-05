@@ -1,10 +1,6 @@
 /// Build the global analysis pool and register the stack of the main thread.
 /// A project with few files parses on the main thread, and a bounded parse on
 /// a thread with an unknown stack runs on a new thread each time.
-#[allow(
-    dead_code,
-    reason = "used by the CLI binary; the library build uses per-call pools"
-)]
 pub fn configure_global_pool(threads: usize) {
     let _ = fallow_api::configure_global_analysis_pool(threads);
     // The size is the stack of the process main thread. Another thread that

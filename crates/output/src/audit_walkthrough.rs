@@ -49,10 +49,6 @@ pub fn is_judgment_action(action: &str) -> bool {
 /// consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    clippy::struct_field_names,
-    reason = "change_anchor / previous_change_anchor are load-bearing wire keys"
-)]
 pub struct ChangeAnchor {
     /// Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
     /// normalized added text (line numbers are NOT hashed, so an edit above the

@@ -938,7 +938,7 @@ fn path_to_cache_bytes(path: &Path) -> Vec<u8> {
 }
 
 #[cfg(unix)]
-#[allow(
+#[expect(
     clippy::unnecessary_wraps,
     reason = "Windows rejects truncated UTF-16 bytes through this shared fallible contract"
 )]

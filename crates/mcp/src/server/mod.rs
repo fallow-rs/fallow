@@ -87,7 +87,7 @@ fn resolve_binary_from(override_bin: Option<String>) -> String {
     "fallow".to_string()
 }
 
-#[allow(
+#[expect(
     rustdoc::invalid_html_tags,
     reason = "tool method doc attributes are runtime MCP descriptions that must stay byte-identical"
 )]

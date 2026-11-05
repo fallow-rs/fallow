@@ -34,7 +34,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-#[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 use tokio::sync::RwLock;
 use tower_lsp_server::jsonrpc::Result;

@@ -1,6 +1,5 @@
 //! Pinia `defineStore` member harvesting helpers.
 
-#[allow(clippy::wildcard_imports, reason = "many Pinia helper AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::GetSpan;

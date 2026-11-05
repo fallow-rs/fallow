@@ -74,13 +74,6 @@ impl CloneDetector {
     ///
     /// `file_data` is a list of `(path, hashed_tokens, file_tokens)` tuples,
     /// one per analyzed file.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "direct detector entry point is exercised by tests"
-        )
-    )]
     pub fn detect(
         &self,
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,

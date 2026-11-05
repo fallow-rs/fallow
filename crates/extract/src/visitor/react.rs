@@ -10,7 +10,6 @@
 //! `.jsx`/`.tsx` parses), so it is a no-op on non-JSX files and never regresses
 //! the `audit` hot path on non-React repos.
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
