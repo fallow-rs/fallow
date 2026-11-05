@@ -333,20 +333,22 @@ pub use list_envelopes::{
 };
 pub use mutation::{
     MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION, MUTATION_SCHEMA_VERSION,
-    MutantAttempt, MutantChange, MutantFailureKind, MutantLocation, MutantResult, MutantStatus,
-    MutantTestReach, MutationBaselineFailure, MutationCacheOutput, MutationCompletion,
-    MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
+    MUTATION_TASKS_SCHEMA_VERSION, MutantAttempt, MutantChange, MutantFailureKind, MutantLocation,
+    MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure, MutationCacheOutput,
+    MutationCompletion, MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
     MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
     MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationKillMatrixTarget,
     MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
     MutationPlanOutput, MutationPlanSchemaVersion, MutationReport, MutationResumeOutput,
     MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
     MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
-    MutationStatusCounts, MutationSummary, MutationTargetOnlyKill, MutationTestKillRow,
+    MutationStatusCounts, MutationSummary, MutationTargetOnlyKill, MutationTask,
+    MutationTasksOutput, MutationTasksSchemaVersion, MutationTasksSummary, MutationTestKillRow,
     MutationTimings, MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason,
     MutationVerdict, MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind,
     MutationVerdictSchemaVersion, MutationWorktreeCheck, serialize_mutation_inspect_json_output,
     serialize_mutation_json_output, serialize_mutation_plan_json_output,
+    serialize_mutation_tasks_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

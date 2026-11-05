@@ -80,7 +80,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"trace_error".to_string()));
     assert!(names.contains(&"mutation_plan".to_string()));
     assert!(names.contains(&"mutation_inspect".to_string()));
-    assert_eq!(tools.len(), 43);
+    assert!(names.contains(&"mutation_tasks".to_string()));
+    assert_eq!(tools.len(), 44);
 }
 
 #[test]
@@ -95,6 +96,7 @@ fn read_only_tools_have_annotations() {
         "inspect_similar_code",
         "mutation_plan",
         "mutation_inspect",
+        "mutation_tasks",
         "inspect_target",
         "guard",
         "fix_preview",

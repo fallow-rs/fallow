@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field. A `--lean` document is not a root branch: it validates against `LeanOutput`.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`, `mutation-tasks`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field. A `--lean` document is not a root branch: it validates against `LeanOutput`.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -122,6 +122,8 @@ kind: "mutation"
 kind: "mutation-plan"
 }) | (MutationInspectOutput & {
 kind: "mutation-inspect"
+}) | (MutationTasksOutput & {
+kind: "mutation-tasks"
 }))
 /**
  * Schema projection for the audit envelope's exact version.
@@ -1850,6 +1852,10 @@ export type MutationInspectStatus = ("fresh" | "stale")
  * Why an inspect packet is stale.
  */
 export type MutationStaleReason = ("file-missing" | "no-digest" | "source-changed" | "mutant-not-reproduced")
+/**
+ * Version singleton for the open tasks of a mutation report.
+ */
+export type MutationTasksSchemaVersion = "1"
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -21619,6 +21625,98 @@ original_lines: string
  * The same lines with the replacement applied.
  */
 mutated_lines: string
+}
+/**
+ * The envelope of `fallow mutation tasks`: the open tasks of one saved
+ * report, as one batch. It runs no user code.
+ */
+export interface MutationTasksOutput {
+schema_version: MutationTasksSchemaVersion
+version: ToolVersion
+/**
+ * The completion status of the report. A `partial` report can miss
+ * tasks: a `pending` mutant is not a task.
+ */
+report_completion?: (MutationCompletionStatus | null)
+summary: MutationTasksSummary
+/**
+ * The tasks, sorted by file, line, column and mutant id.
+ */
+tasks: MutationTask[]
+}
+/**
+ * The number of tasks for each status.
+ */
+export interface MutationTasksSummary {
+/**
+ * The number of tasks.
+ */
+tasks: number
+/**
+ * The tasks with the status `survived`.
+ */
+survived: number
+/**
+ * The tasks with the status `no_coverage`.
+ */
+no_coverage: number
+/**
+ * The tasks whose file changed after the report. They have no code.
+ */
+stale: number
+}
+/**
+ * One open task: a `survived` or `no_coverage` mutant of a saved report.
+ * A task holds no source text other than the source lines of the mutant.
+ */
+export interface MutationTask {
+/**
+ * The id of the mutant. `fallow mutation inspect` takes this id.
+ */
+mutant_id: string
+/**
+ * The project-root-relative path of the mutated file.
+ */
+file: string
+/**
+ * The 1-based line of the mutant.
+ */
+line: number
+/**
+ * The 1-based column of the mutant.
+ */
+column: number
+/**
+ * The operator, kebab-case.
+ */
+operator: string
+/**
+ * The name of the enclosing function. Absent at the top level of a
+ * module and for an anonymous function.
+ */
+function?: (string | null)
+status: MutantStatus
+/**
+ * The source lines that contain the mutant, from the current file.
+ * `null` when the task is stale.
+ */
+original_lines?: (string | null)
+/**
+ * The same lines with the mutation applied. `null` when the task is
+ * stale.
+ */
+mutated_lines?: (string | null)
+/**
+ * Why the current file no longer gives the mutant. Absent for a fresh
+ * task.
+ */
+stale_reason?: (MutationStaleReason | null)
+/**
+ * The test files of the tests that reached the mutant in the dry run,
+ * sorted. Empty for `no_coverage`. `fallow mutation inspect` gives the
+ * test ids and the static test files of one mutant.
+ */
+covering_test_files: string[]
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

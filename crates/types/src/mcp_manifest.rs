@@ -242,6 +242,17 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         code_mode_alias: None,
     },
     McpToolInfo {
+        name: "mutation_tasks",
+        kind: "trace",
+        description: "The open tasks of a saved mutation report (default: the last run report) as one batch: each survived or uncovered mutant with its source lines before and after the change; runs no tests",
+        cli_command: Some("fallow mutation tasks [--report <report.json>] --format json --quiet"),
+        key_params: &["report"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
         name: "inspect_target",
         kind: "analysis",
         description: "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates",
@@ -1111,7 +1122,7 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         napi_export: None,
         mcp_tool: None,
         omission_note: Some(
-            "Mutation testing runs the project's own tests, so it is available through the CLI (`fallow mutation`) and the Rust api only. A test run is a host permission decision: no napi export, and no MCP run tool in version 1. The read-only plan and inspect halves are the mutation_plan and mutation_inspect MCP tools.",
+            "Mutation testing runs the project's own tests, so it is available through the CLI (`fallow mutation`) and the Rust api only. A test run is a host permission decision: no napi export, and no MCP run tool in version 1. The read-only plan, inspect and tasks views are the mutation_plan, mutation_inspect and mutation_tasks MCP tools.",
         ),
     },
     CapabilityParityRow {
@@ -1139,6 +1150,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         mcp_tool: Some("mutation_inspect"),
         omission_note: Some(
             "One mutant of a saved mutation report, with a stale status when the source changed. MCP shells out to `fallow mutation inspect`; no run_* API runner and no napi export.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "mutation tasks",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("mutation_tasks"),
+        omission_note: Some(
+            "The open tasks of a saved mutation report as one batch. MCP shells out to `fallow mutation tasks`; no run_* API runner and no napi export.",
         ),
     },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi
@@ -1539,6 +1559,7 @@ mod tests {
             "inspect_similar_code",
             "mutation_plan",
             "mutation_inspect",
+            "mutation_tasks",
         ] {
             let tool = MCP_TOOLS
                 .iter()

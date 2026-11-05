@@ -391,6 +391,7 @@ pub enum FallowOutput<
     Mutation,
     MutationPlan,
     MutationInspect,
+    MutationTasks,
 > {
     /// `fallow audit --format json`.
     #[serde(rename = "audit")]
@@ -512,6 +513,9 @@ pub enum FallowOutput<
     /// `fallow mutation inspect --format json`.
     #[serde(rename = "mutation-inspect")]
     MutationInspect(MutationInspect),
+    /// `fallow mutation tasks --format json`.
+    #[serde(rename = "mutation-tasks")]
+    MutationTasks(MutationTasks),
 }
 
 #[cfg(test)]

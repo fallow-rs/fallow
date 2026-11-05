@@ -2860,6 +2860,12 @@
     },
     {
       "section": "mcp-tools",
+      "row": "mutation_tasks",
+      "column": "Description",
+      "seed": "The open tasks of a saved mutation report (default: the last run report) as one batch: each survived or uncovered mutant with its source lines before and after the change; runs no tests"
+    },
+    {
+      "section": "mcp-tools",
       "row": "project_info",
       "column": "Description",
       "seed": "Project metadata: active framework plugins, discovered files, entry points, and boundary zones"

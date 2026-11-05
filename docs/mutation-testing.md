@@ -13,6 +13,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation --plan` | no | `mutation-plan` |
 | `fallow mutation` | yes | `mutation` |
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
+| `fallow mutation tasks [--report <file>]` | no | `mutation-tasks` |
 | `fallow health --mutation-report <file>` | no | `health` |
 
 - The default scope is the changed code against the detected base ref, the same
@@ -30,7 +31,8 @@ read-only next steps. It never writes a test and never proposes a code change.
   The global `--no-cache` flag also turns off the result cache (see "Result
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
   journal and resume").
-- Only `--format human` and `--format json` are valid. Version 1 has no SARIF,
+- Only `--format human` and `--format json` are valid. `tasks` also accepts
+  `--format markdown`. Version 1 has no SARIF,
   CodeClimate, LSP, gate, GitHub Action or GitLab surface.
 - Each run saves its full JSON report to
   `<cache dir>/mutation/last-report.json` (by default `.fallow/mutation/`).
@@ -491,7 +493,7 @@ Survivors and timeouts do not count as kills. Baseline-failing tests do not qual
 
 Sole-file notes describe observed runtime coverage of instrumented files. Public-export notes use static test-file reach, which does not prove per-test export coverage.
 
-The `mutation` and `mutation-inspect` JSON envelopes use schema version `"2"`. The `mutation-plan` envelope and verdict document keep schema version `"1"`.
+The `mutation` and `mutation-inspect` JSON envelopes use schema version `"2"`. The `mutation-plan` and `mutation-tasks` envelopes and the verdict document use schema version `"1"`.
 
 The `kill_matrix` object has these fields:
 
@@ -1457,6 +1459,48 @@ and span.
 The run report lists a digest for each mutated file. The plan lists digests
 only for the files that it instruments, so a plan mutant in a file that no test
 reaches inspects as `no-digest`.
+
+## Tasks
+
+`tasks` reads a saved `mutation` report and lists its open tasks as one
+batch. A task is a `survived` or `no_coverage` mutant: a small change to the
+code that made no test fail. The batch is the input for the next tests that a
+person or a coding agent writes. `tasks` runs no code.
+
+- The report comes from `--report <file>`, or else from the last run, with the
+  same search as `inspect`. A `mutation-plan` document has no test results,
+  so `tasks` exits with code 2 and `FALLOW_MUTATION_REPORT_INVALID`.
+- Each task has the `mutant_id`, `file`, `line`, `column`, `operator`,
+  `function` and `status` (the status of the mutant in the report), the
+  source lines before and after the change
+  (`original_lines`, `mutated_lines`), and the `covering_test_files`. A task
+  holds no other source text. `inspect` gives the test ids and the static
+  test files of one mutant.
+- The source lines come from the current file, with the freshness rule of
+  `inspect`. A task whose file changed after the run has a `stale_reason` and
+  no lines.
+- The tasks are sorted by file, line, column and mutant id. `summary` counts
+  the tasks, the `survived` and `no_coverage` tasks, and the stale tasks.
+  `report_completion` is the completion status of the report: a `partial`
+  report can miss tasks, because a `pending` mutant is not a task.
+- The exit code is `0`, also when the batch has tasks. The gate of a run is
+  `--min-score`. A task path outside the project root fails the command with
+  code 2 and `FALLOW_MUTATION_REPORT_INVALID`, as for `inspect`.
+
+The human and the markdown output start with a short header, then one item
+for each task:
+
+```text
+1. src/math/inRange.ts:48, function inRange (survived)
+   current: if (minimum >= maximum) {
+   changed: if (minimum > maximum) {
+   tests: src/math/inRange.spec.ts
+```
+
+The header says that one test can cover several items, and that an item that
+no input can detect can be skipped. The markdown output puts the two lines in
+a fenced block. The MCP tool `mutation_tasks` returns the JSON batch. It runs
+no mutants.
 
 ## Health join
 

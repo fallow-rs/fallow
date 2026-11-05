@@ -177,11 +177,15 @@ Contract rules:
   whitespace is trimmed. Without `report`, the CLI reads
   `<cache dir>/mutation/last-report.json`, and `root`, `config` and
   `allow_remote_extends` select that cache directory. A plan document is a
-  valid `report` input. No MCP tool runs
+  valid `report` input. `mutation_tasks` runs
+  `fallow mutation tasks [--report <file>]` as a subprocess, with the same
+  `report`, `root`, `config` and `allow_remote_extends` rules. It refuses a
+  plan document, and it refuses a Rust root with
+  `FALLOW_RUST_UNSUPPORTED_TOOL`. No MCP tool runs
   mutants in version 1: a run executes the tests of the project, so the agent
-  host decides it through the CLI. Both descriptions name `fallow mutation`
-  for that reason. Code Mode refuses both tools and names the standalone
-  tools.
+  host decides it through the CLI. The descriptions name `fallow mutation`
+  for that reason. Code Mode refuses the three tools and names the
+  standalone tools.
 - The `analyze` description keeps the routing summary and the `finding_id`
   contract. The `fallow://tools/analyze` guide (`crates/mcp/src/tool_guides.rs`)
   holds the per-flag prose: the `boundary_violations` alias, the `group_by`

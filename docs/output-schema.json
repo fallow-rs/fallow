@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field. A `--lean` document is not a root branch: it validates against `LeanOutput`.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`, `mutation-tasks`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field. A `--lean` document is not a root branch: it validates against `LeanOutput`.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -10527,6 +10527,26 @@
                 "kind": {
                   "type": "string",
                   "const": "mutation-inspect"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow mutation tasks --format json`. The open tasks of a saved report as one\nbatch: each `survived` and `no_coverage` mutant with its source lines before\nand after the mutation. Runs no project code.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MutationTasksOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "mutation-tasks"
                 }
               },
               "required": [
@@ -36264,6 +36284,164 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_namespace_members` key (an exported member of an exported\nTypeScript namespace that no code reads). `member_name` is the dotted path\nfrom the exported namespace, for example `Inner.x`. Emits only a\nline-level suppress action: a member can be a multi-line function, class\nor nested namespace, so there is no safe one-line auto-fix."
+    },
+    "MutationTasksOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Independent schema version.",
+          "$ref": "#/definitions/MutationTasksSchemaVersion"
+        },
+        "version": {
+          "description": "The Fallow version.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "report_completion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationCompletionStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The completion status of the report. A `partial` report can miss\ntasks: a `pending` mutant is not a task."
+        },
+        "summary": {
+          "description": "The counts of the tasks.",
+          "$ref": "#/definitions/MutationTasksSummary"
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationTask"
+          },
+          "description": "The tasks, sorted by file, line, column and mutant id."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "summary",
+        "tasks"
+      ],
+      "description": "The envelope of `fallow mutation tasks`: the open tasks of one saved\nreport, as one batch. It runs no user code."
+    },
+    "MutationTasksSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "The first version."
+        }
+      ],
+      "description": "Version singleton for the open tasks of a mutation report."
+    },
+    "MutationTask": {
+      "type": "object",
+      "properties": {
+        "mutant_id": {
+          "type": "string",
+          "description": "The id of the mutant. `fallow mutation inspect` takes this id."
+        },
+        "file": {
+          "type": "string",
+          "description": "The project-root-relative path of the mutated file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "The 1-based line of the mutant."
+        },
+        "column": {
+          "type": "integer",
+          "description": "The 1-based column of the mutant."
+        },
+        "operator": {
+          "type": "string",
+          "description": "The operator, kebab-case."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the enclosing function. Absent at the top level of a\nmodule and for an anonymous function."
+        },
+        "status": {
+          "description": "`survived` or `no_coverage`.",
+          "$ref": "#/definitions/MutantStatus"
+        },
+        "original_lines": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The source lines that contain the mutant, from the current file.\n`null` when the task is stale."
+        },
+        "mutated_lines": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The same lines with the mutation applied. `null` when the task is\nstale."
+        },
+        "stale_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationStaleReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the current file no longer gives the mutant. Absent for a fresh\ntask."
+        },
+        "covering_test_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The test files of the tests that reached the mutant in the dry run,\nsorted. Empty for `no_coverage`. `fallow mutation inspect` gives the\ntest ids and the static test files of one mutant."
+        }
+      },
+      "required": [
+        "mutant_id",
+        "file",
+        "line",
+        "column",
+        "operator",
+        "status",
+        "covering_test_files"
+      ],
+      "description": "One open task: a `survived` or `no_coverage` mutant of a saved report.\nA task holds no source text other than the source lines of the mutant."
+    },
+    "MutationTasksSummary": {
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "integer",
+          "description": "The number of tasks."
+        },
+        "survived": {
+          "type": "integer",
+          "description": "The tasks with the status `survived`."
+        },
+        "no_coverage": {
+          "type": "integer",
+          "description": "The tasks with the status `no_coverage`."
+        },
+        "stale": {
+          "type": "integer",
+          "description": "The tasks whose file changed after the report. They have no code."
+        }
+      },
+      "required": [
+        "tasks",
+        "survived",
+        "no_coverage",
+        "stale"
+      ],
+      "description": "The number of tasks for each status."
     }
   }
 }
