@@ -2303,7 +2303,7 @@ pub enum SemanticFact {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NamespaceMemberUseFact {
     /// The local name of the root binding: an import binding, or a namespace
-    /// that the module declares.
+    /// that the module declares, or the key of an inline import type.
     pub object: String,
     /// The dotted member path after the root. Empty for a bare root.
     pub path: String,

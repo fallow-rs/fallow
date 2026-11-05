@@ -17,7 +17,9 @@ use fallow_types::extract::{
     ExportInfo, ImportInfo, ImportedName, MemberKind, NamespaceMemberUseFact,
 };
 use oxc_ast::AstKind;
-use oxc_ast::ast::{BinaryOperator, BindingPattern, Expression, PropertyKey};
+use oxc_ast::ast::{
+    BinaryOperator, BindingPattern, Expression, PropertyKey, TSImportTypeQualifier,
+};
 use oxc_semantic::{AstNodes, NodeId, ScopeId, Scoping, Semantic, SymbolId};
 use oxc_span::{GetSpan, Span};
 
@@ -73,6 +75,13 @@ pub fn collect(
             };
             record_root_references(scoping, nodes, &root, &mut uses);
         }
+    }
+
+    if imports
+        .iter()
+        .any(|import| import.local_name.is_empty() && import.is_type_only)
+    {
+        record_import_type_uses(nodes, &mut uses);
     }
 
     for export in exports {
@@ -162,6 +171,44 @@ fn record_root_references(
                     uses.insert((object.to_string(), join_path(&path, &key), false));
                 }
             }
+        }
+    }
+}
+
+/// Record the qualifier of each inline import type as a use under the key of
+/// its source: `import("./x").N.T` reads `N.T`. The import has no local
+/// binding, so the reference walk above cannot see it. A `typeof` hands the
+/// value on, as `typeof N.a` does for a binding.
+fn record_import_type_uses(nodes: &AstNodes<'_>, uses: &mut FxHashSet<(String, String, bool)>) {
+    for node in nodes.iter() {
+        let AstKind::TSImportType(import_type) = node.kind() else {
+            continue;
+        };
+        let Some(qualifier) = &import_type.qualifier else {
+            continue;
+        };
+        let mut segments = Vec::new();
+        qualifier_segments(qualifier, &mut segments);
+        let whole = matches!(nodes.parent_kind(node.id()), AstKind::TSTypeQuery(_));
+        if segments.len() < 2 && !whole {
+            continue;
+        }
+        uses.insert((
+            NamespaceMemberUseFact::import_type_object(&import_type.source.value.text()),
+            segments.join("."),
+            whole,
+        ));
+    }
+}
+
+fn qualifier_segments(qualifier: &TSImportTypeQualifier<'_>, segments: &mut Vec<String>) {
+    match qualifier {
+        TSImportTypeQualifier::Identifier(identifier) => {
+            segments.push(identifier.name.to_string());
+        }
+        TSImportTypeQualifier::QualifiedName(name) => {
+            qualifier_segments(&name.left, segments);
+            segments.push(name.right.name.to_string());
         }
     }
 }
@@ -405,6 +452,23 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn inline_import_type_records_its_qualifier() {
+        assert_eq!(
+            uses(
+                "export type A = typeof import('./x').N.a;\n\
+                 export type B = import('./x').N.M.T;\n\
+                 export type C = typeof import('./x').N;\n\
+                 export type D = import('./x').T;\n"
+            ),
+            [
+                "import(./x)|N|true",
+                "import(./x)|N.M.T|false",
+                "import(./x)|N.a|true"
+            ]
+        );
     }
 
     #[test]

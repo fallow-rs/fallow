@@ -73,3 +73,20 @@ fn re_exported_namespace_import_credits_the_whole_module() {
         ["src/other.ts:Other.unread"]
     );
 }
+
+/// An inline import type has no local binding, so its qualifier is the only
+/// record of the member read: `typeof import("./lib").Legacy.used` reads
+/// `Legacy.used`, and `import("./lib").Shapes.Point` reads the type
+/// `Shapes.Point`, also through a barrel. A `typeof` of a nested namespace
+/// counts as a whole use.
+#[test]
+fn inline_import_type_credits_the_qualified_member() {
+    assert_eq!(
+        unused_namespace_members("unused-namespace-members-import-type"),
+        [
+            "src/lib.ts:Legacy.unread",
+            "src/lib.ts:Outer.Inner.unusedDeep",
+            "src/lib.ts:Shapes.Unused",
+        ]
+    );
+}
