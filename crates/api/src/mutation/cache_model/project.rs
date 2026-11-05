@@ -37,8 +37,8 @@ fn on_path(program: &str) -> bool {
 
 /// The Vitest package of the companion, or `None` after a skip.
 pub fn vitest_package() -> Option<PathBuf> {
-    let package = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tools/mutation-runner/node_modules/vitest");
+    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")?;
+    let package = Path::new(&manifest_dir).join("../../tools/mutation-runner/node_modules/vitest");
     if package.join("package.json").is_file() && on_path("node") {
         return Some(dunce::canonicalize(package).expect("vitest path"));
     }

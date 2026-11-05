@@ -55,7 +55,7 @@ define_plugin! {
 /// Bun runs them before the tests of each `bun test` run, also when no
 /// package enables this plugin. A missing or invalid file gives none.
 #[must_use]
-pub fn preload_files(root: &Path) -> Vec<PathBuf> {
+pub(super) fn preload_files(root: &Path) -> Vec<PathBuf> {
     let config_path = root.join(CONFIG_PATTERNS[0]);
     let Ok(source) = std::fs::read_to_string(&config_path) else {
         return Vec::new();

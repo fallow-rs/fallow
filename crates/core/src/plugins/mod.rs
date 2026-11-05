@@ -2041,7 +2041,7 @@ mod ava;
 mod babel;
 mod biome;
 mod browser_extension;
-pub mod bun;
+mod bun;
 mod c8;
 mod capacitor;
 mod changesets;

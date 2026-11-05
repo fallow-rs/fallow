@@ -24,7 +24,6 @@ use crate::{
 
 // External-plugin dry-run primitives surfaced through the engine boundary for
 // the CLI's `plugin-check` command (read-only; no analysis pipeline).
-pub use fallow_core::plugins::bun::preload_files as bun_preload_files;
 pub use fallow_core::plugins::manifest_entries::{
     CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
 };
@@ -516,6 +515,12 @@ impl BackendUsedExportNames {
     pub fn names_for(&self, rel_path: &str) -> BTreeSet<&str> {
         self.inner.names_for(rel_path)
     }
+}
+
+/// The preload files of the root `bunfig.toml`. Bun runs them before the
+/// tests, also when no package enables the Bun plugin.
+pub fn bun_preload_files(root: &Path) -> Vec<PathBuf> {
+    fallow_core::plugins::PluginRegistry::bun_preload_files(root)
 }
 
 pub struct BackendPluginRegistry {

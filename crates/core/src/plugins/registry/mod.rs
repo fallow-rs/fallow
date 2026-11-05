@@ -692,6 +692,14 @@ impl PluginRegistry {
         }
     }
 
+    /// The preload files of the `bunfig.toml` at `root`, as absolute paths.
+    /// Bun runs them before the tests of each `bun test` run, also when no
+    /// package enables the Bun plugin.
+    #[must_use]
+    pub fn bun_preload_files(root: &Path) -> Vec<PathBuf> {
+        super::bun::preload_files(root)
+    }
+
     /// Hidden directory names that should be traversed before full plugin execution.
     ///
     /// Source discovery runs before plugin config parsing, so this helper only uses
