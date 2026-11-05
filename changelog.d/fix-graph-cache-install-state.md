@@ -1,4 +1,0 @@
-### Fixed
-
-- **The graph cache now misses after a package install into an existing `node_modules`.** Before this fix, a run after `npm install`, `pnpm install` or `yarn install` could use the import resolutions of the run before the install. The graph cache key now includes the content of the lockfile and of the install marker that the package manager writes in `node_modules` (`.package-lock.json`, `.pnpm/lock.yaml`, `.yarn-state.yml`, `.yarn-integrity`). Bun writes no install marker, so for a project with `bun.lock` or `bun.lockb` the key also includes the package names in `node_modules`. Fallow reads these files for the project root, for each workspace root, and for each directory above the root. Fallow does not walk `node_modules`, and a fresh install with the same content keeps the cache.
-  (Closes [#4188](https://github.com/fallow-rs/fallow/issues/4188))
