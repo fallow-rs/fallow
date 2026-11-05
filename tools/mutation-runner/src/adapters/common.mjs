@@ -133,10 +133,15 @@ export const buildOverlay = (root, runDir, pathMap) => {
   return overlay;
 };
 
-/** Names each test. A repeated full name gets a ` (n)` suffix. */
+/**
+ * Names each test. A repeated full name gets a ` (n)` suffix. A lone UTF-16
+ * surrogate becomes U+FFFD before the suffix, because the protocol carries
+ * only well-formed text. A run request then sends back the same name.
+ */
 export const uniqueNames = (fullNames) => {
   const seen = new Map();
-  return fullNames.map((fullName) => {
+  return fullNames.map((rawName) => {
+    const fullName = rawName.toWellFormed();
     const count = (seen.get(fullName) ?? 0) + 1;
     seen.set(fullName, count);
     return count === 1 ? fullName : `${fullName} (${count})`;
