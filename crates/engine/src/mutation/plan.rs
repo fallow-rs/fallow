@@ -906,8 +906,13 @@ const BENCH_FILE_MARKERS: &[&str] = &[".bench.", ".benchmark."];
 /// marker is a test helper when another test entry point imports it.
 const JEST_TEST_DIR_NAME: &str = "__tests__";
 
-/// File-name markers of a runner test file below [`JEST_TEST_DIR_NAME`].
-const TEST_FILE_MARKERS: &[&str] = &[".test.", ".spec."];
+/// File-name markers of a test file in the default patterns of Vitest,
+/// `node --test` and `bun test`.
+const TEST_FILE_MARKERS: &[&str] = &[".test.", ".spec.", "_test.", "-test.", "_spec."];
+
+/// File-name prefixes of a test file in the default patterns of
+/// `node --test` (`test.js`, `test-name.js`).
+const TEST_FILE_PREFIXES: &[&str] = &["test.", "test-"];
 
 /// True when a test runner executes the test entry point. A type test, a
 /// bench file and a test helper module are entry points of the module graph,
@@ -921,12 +926,24 @@ fn is_runner_test_entry(graph: &ModuleGraph, root: &Path, entry: FileId) -> bool
     !is_type_test_path(&path) && !is_bench_path(&path) && !is_test_helper(graph, entry, &path)
 }
 
+/// True for a bench file that is not also a test file. `perf.bench.test.ts`
+/// matches the Vitest default include, so `vitest run` runs it.
 fn is_bench_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let name = lower.rsplit('/').next().unwrap_or_default();
     BENCH_FILE_MARKERS
         .iter()
         .any(|marker| name.contains(marker))
+        && !has_test_file_marker(name)
+}
+
+/// True when a lowercase file name matches a default test pattern of a
+/// supported runner.
+fn has_test_file_marker(name: &str) -> bool {
+    TEST_FILE_MARKERS.iter().any(|marker| name.contains(marker))
+        || TEST_FILE_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
 }
 
 /// True for a module below `__tests__` that has no test-file marker and that
@@ -937,7 +954,7 @@ fn is_test_helper(graph: &ModuleGraph, entry: FileId, path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let mut segments = lower.split('/').rev();
     let name = segments.next().unwrap_or_default();
-    !TEST_FILE_MARKERS.iter().any(|marker| name.contains(marker))
+    !has_test_file_marker(name)
         && segments.any(|segment| segment == JEST_TEST_DIR_NAME)
         && !graph.importers_of(entry).is_empty()
 }
@@ -1037,6 +1054,28 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bench_file_with_a_test_marker_stays_a_test_file() {
+        assert!(is_bench_path("benchmarks/add.bench.ts"));
+        assert!(is_bench_path("src/Add.Benchmark.js"));
+        assert!(!is_bench_path("src/perf.bench.test.ts"));
+        assert!(!is_bench_path("src/add.test.ts"));
+        for name in [
+            "a.test.js",
+            "a.spec.ts",
+            "a_test.js",
+            "a-test.mjs",
+            "a_spec.ts",
+            "test.js",
+            "test-a.js",
+        ] {
+            assert!(has_test_file_marker(name), "{name}");
+        }
+        for name in ["utils.ts", "setup.js", "contest.ts", "latest.js"] {
+            assert!(!has_test_file_marker(name), "{name}");
+        }
+    }
 
     #[test]
     fn type_tests_are_named_by_marker_or_test_d_directory() {

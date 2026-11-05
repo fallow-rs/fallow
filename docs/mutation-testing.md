@@ -1121,10 +1121,12 @@ Two other kinds of test entry points are not test files of the plan, because
 `vitest run`, `node --test` and `bun test` do not run them:
 
 - a Vitest bench file (`*.bench.*` or `*.benchmark.*`). `vitest bench` runs
-  it;
-- a test helper: a module below a `__tests__` directory, without `.test.` or
-  `.spec.` in its name, that another module imports. An example is
-  `src/__tests__/utils.ts`.
+  it. A bench file with a test marker, such as `perf.bench.test.ts`, stays a
+  test file;
+- a test helper: a module below a `__tests__` directory that another module
+  imports, and whose name has no test marker of a supported runner (`.test.`,
+  `.spec.`, `_test.`, `-test.`, `_spec.`, or a `test.` or `test-` prefix). An
+  example is `src/__tests__/utils.ts`.
 
 Without this rule the runner did not list these files, and each run was
 `partial` with `test-files-not-discovered`. A test file that a custom
