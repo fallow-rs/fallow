@@ -81,7 +81,6 @@ import {
   readVersionMarker,
   releaseApiUrlForVersion,
   sweepOrphanTempFiles,
-  verifyBinaryDigest,
   verifyBinarySignature,
   writeVersionMarker,
 } from "../src/download.js";
@@ -246,25 +245,6 @@ describe("verifyBinarySignature", () => {
   });
 });
 
-describe("verifyBinaryDigest", () => {
-  beforeEach(() => {
-    mockFiles = {};
-    mockHashInput = "";
-  });
-
-  it("returns true when the stored digest matches the binary", () => {
-    mockFiles[lspPath] = binaryBytes;
-
-    expect(verifyBinaryDigest(lspPath, digestHex)).toBe(true);
-  });
-
-  it("returns false when the digest does not match", () => {
-    mockFiles[lspPath] = binaryBytes;
-
-    expect(verifyBinaryDigest(lspPath, "0".repeat(64))).toBe(false);
-  });
-});
-
 describe("platformTargetFor", () => {
   it("maps Windows arm64 to the MSVC target", () => {
     expect(platformTargetFor("win32", "arm64")).toBe("win32-arm64-msvc");
@@ -364,12 +344,14 @@ describe("getInstalledBinaryPath", () => {
     expect(mockFiles[lspPath]).toBeUndefined();
   });
 
-  it("reuses a digest-verified binary when no signature file exists", async () => {
+  it("does not reuse a binary that has only a matching digest marker", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
 
-    expect(await getInstalledBinaryPath(fakeContext)).toBe(lspPath);
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(mockFiles[lspPath]).toBeUndefined();
+    expect(mockFiles[lspDigestPath]).toBeUndefined();
   });
 
   it("treats invalid signature as stale and purges only that binary", async () => {
@@ -399,7 +381,7 @@ describe("getInstalledBinaryPath", () => {
     expect(mockFiles[lspDigestPath]).toBeUndefined();
   });
 
-  it("purges only the failing binary when both signature and digest verification fail", async () => {
+  it("purges only the unsigned binary when a digest marker does not match either", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspDigestPath] = "0".repeat(64);
     mockFiles[cliPath] = binaryBytes;
@@ -431,13 +413,14 @@ describe("getInstalledCliPath", () => {
     expect(await getInstalledCliPath(fakeContext)).toBe(cliPath);
   });
 
-  it("returns the CLI path when the managed install is digest-verified and current", async () => {
+  it("does not reuse a CLI binary that has only a matching digest marker", async () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
     mockExecOutput = "fallow 2.26.0\n";
 
-    expect(await getInstalledCliPath(fakeContext)).toBe(cliPath);
+    expect(await getInstalledCliPath(fakeContext)).toBeNull();
+    expect(mockFiles[cliPath]).toBeUndefined();
   });
 
   it("treats a stale CLI binary as stale even when the shared marker is current", async () => {
