@@ -15,7 +15,8 @@ const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash"];
 /// - `npx ts-node path/to/script.ts`
 /// - Bare file paths ending in `.js`, `.ts`, `.mjs`, `.cjs`, `.mts`, `.cts`
 ///
-/// Script values are split by `&&`, `||`, and `;` to handle chained commands.
+/// Script values are split on `&&`, `||`, `;`, `|` and `&` to handle chained
+/// commands. An operator in quotes does not split the script.
 /// A segment that invokes a formatter or linter (`eslint src/a.ts`) yields no
 /// references for its targets, because the tool reads them but does not
 /// execute them. A module that such a tool loads through a flag, such as
@@ -90,7 +91,7 @@ fn collect_script_file_refs(
         scripts: depth.scripts + 1,
         ..depth
     };
-    for segment in script.split(&['&', '|', ';'][..]) {
+    for segment in crate::scripts::split_shell_operators(script) {
         let segment = segment.trim();
         if segment.is_empty() {
             continue;
@@ -185,7 +186,8 @@ fn collect_script_file_refs(
 }
 
 /// Return the quoted command of `sh -c "watchee app/a.js"`. The shell runs
-/// it, so it is read as a command of its own and the same rules apply.
+/// it, so it is read as a command list of its own and the same rules apply.
+/// The command can chain more commands, as in `sh -c "cd app && node a.js"`.
 fn shell_command_body<'a>(
     cmd: &str,
     tokens: &[&str],
@@ -206,7 +208,27 @@ fn shell_command_body<'a>(
         }
     }
     let (_, body) = segment.split_once(" -c ")?;
-    Some(body.trim().trim_matches(|ch| ch == '"' || ch == '\''))
+    Some(command_string(body.trim()))
+}
+
+/// Return the text of the `-c` value `value` without its quotes. A quoted
+/// value ends at its closing quote, and later words are the arguments of the
+/// command. An unquoted value is returned as it is.
+fn command_string(value: &str) -> &str {
+    let Some(quote) = value.bytes().next().filter(|b| matches!(b, b'"' | b'\'')) else {
+        return value;
+    };
+    let inner = &value[1..];
+    let bytes = inner.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if quote == b'"' => i += 2,
+            byte if byte == quote => return &inner[..i],
+            _ => i += 1,
+        }
+    }
+    inner
 }
 
 /// The arguments of the command `cmd` at `start` that name script files. A
@@ -466,6 +488,40 @@ mod tests {
             refs("bash -eu -c \"watchee app/data.js\""),
             vec!["app/data.js"]
         );
+    }
+
+    #[test]
+    fn shell_command_body_keeps_every_chained_command() {
+        let cases: &[(&str, &[&str])] = &[
+            ("sh -c \"echo start && node tool.js\"", &["tool.js"]),
+            ("sh -c \"echo start; node tool.js\"", &["tool.js"]),
+            ("sh -c 'echo start || node tool.js'", &["tool.js"]),
+            ("bash -c \"cd . && node tool.js\"", &["tool.js"]),
+            ("bash -e -c \"cd . && node tool.js\"", &["tool.js"]),
+            ("sh -c \"node tool.js; echo done\"", &["tool.js"]),
+            ("sh -c \"node tool.js && echo done\"", &["tool.js"]),
+            ("sh -c 'cat data.txt | node tool.js'", &["tool.js"]),
+            ("sh -c \"node a.js && node b.js\"", &["a.js", "b.js"]),
+            (
+                "sh -c 'node a.js; node b.js' && node c.js",
+                &["a.js", "b.js", "c.js"],
+            ),
+            ("sh -c 'node a.js' extra && node b.js", &["a.js", "b.js"]),
+        ];
+        let failures: Vec<String> = cases
+            .iter()
+            .filter(|(script, expected)| refs(script) != *expected)
+            .map(|(script, expected)| {
+                format!("{script}: expected {expected:?}, got {:?}", refs(script))
+            })
+            .collect();
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn quoted_operator_does_not_split_the_command() {
+        assert_eq!(refs("node a.js \"x; node b.js\""), vec!["a.js"]);
+        assert_eq!(refs("node a.js 'x && node b.js | node c.js'"), vec!["a.js"]);
     }
 
     #[test]

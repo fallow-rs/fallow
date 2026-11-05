@@ -45,8 +45,8 @@ pub use resolve::{
     DependencyBinaries, all_dependency_names, build_bin_to_package_map, credit_npm_aliases,
     project_bin_map, resolve_binary_to_packages, resolve_known_dependency_binary,
 };
-pub use shell::command_substitutions;
 use shell::is_builtin_command;
+pub use shell::{command_substitutions, split_shell_operators};
 pub use workspace_selection::WorkspacePackages;
 use workspace_selection::{PackageSelector, WorkspacePackage, relative_dir};
 
