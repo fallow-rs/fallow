@@ -7,7 +7,10 @@ description: Iteratively improve Fallow analysis accuracy by comparing it with c
 # Conformance loop
 
 1. Define the capability and stable project corpus.
-2. Run Fallow and comparison tools with documented equivalent settings.
+2. Run Fallow and comparison tools with documented equivalent settings. Run
+   each comparison tool as the project's CI or `package.json` script runs it,
+   with the same flags and preprocessors. A bare run can report a very
+   different result set.
 3. Manually verify disagreements against source.
 4. Classify true positive, false positive, false negative, or model difference.
 5. Record the classification in `tests/conformance/adjudications.json` before
