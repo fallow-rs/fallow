@@ -1347,3 +1347,81 @@ fn scope_glob_single_star_stays_within_one_segment() {
     assert!(matches("src/a.ts"));
     assert!(!matches("src/nested/a.ts"));
 }
+
+/// Run one `banned-effect` rule over a module and return the matched texts.
+fn banned_effect_matches(effect: EffectKind, module: ModuleInfo) -> Vec<String> {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect("no-effect", &[effect])])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+    find_policy_violations(&graph, &[module], &config, &suppressions, &line_offsets)
+        .into_iter()
+        .map(|violation| violation.matched)
+        .collect()
+}
+
+#[test]
+fn banned_effect_matches_a_named_node_module_import() {
+    let module = module(
+        0,
+        vec![callee("exec", 0)],
+        vec![import(
+            "node:child_process",
+            ImportedName::Named("exec".to_string()),
+            "exec",
+            false,
+        )],
+    );
+
+    assert_eq!(
+        banned_effect_matches(EffectKind::Shell, module),
+        ["shell: exec"]
+    );
+}
+
+#[test]
+fn banned_effect_matches_a_destructured_node_module_require() {
+    let mut shell = module(0, vec![callee("execSync", 0)], Vec::new());
+    shell
+        .require_calls
+        .push(require_call("child_process", None, &["execSync"]));
+    let mut storage = module(0, vec![callee("unlinkSync", 0)], Vec::new());
+    storage
+        .require_calls
+        .push(require_call("node:fs", None, &["unlinkSync"]));
+
+    assert_eq!(
+        banned_effect_matches(EffectKind::Shell, shell),
+        ["shell: execSync"]
+    );
+    assert_eq!(
+        banned_effect_matches(EffectKind::Storage, storage),
+        ["storage: unlinkSync"]
+    );
+}
+
+#[test]
+fn banned_effect_ignores_a_local_with_the_name_of_a_node_module_member() {
+    let module = module(0, vec![callee("exec", 0)], Vec::new());
+
+    assert!(banned_effect_matches(EffectKind::Shell, module).is_empty());
+}
+
+#[test]
+fn banned_effect_matches_fs_promises_on_a_module_import() {
+    let module = module(
+        0,
+        vec![callee("fs.promises.rm", 0)],
+        vec![import("node:fs", ImportedName::Default, "fs", false)],
+    );
+
+    assert_eq!(
+        banned_effect_matches(EffectKind::Storage, module),
+        ["storage: fs.promises.rm"]
+    );
+}

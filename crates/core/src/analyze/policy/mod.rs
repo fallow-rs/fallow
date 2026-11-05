@@ -8,6 +8,7 @@ use fallow_types::extract::{ImportedName, ModuleInfo};
 use fallow_types::output::IssueAction;
 use fallow_types::output_dead_code::PolicyViolationFinding;
 use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
+use fallow_types::security_sinks::node_binding_module;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -719,11 +720,67 @@ fn effect_for_callee(
     if written.is_some() {
         return written;
     }
-    let canonical = canonical_callee_path(module, callee_path)?;
-    catalogue_matchers()
+    [
+        canonical_callee_path(module, callee_path),
+        node_binding_callee_path(module, callee_path),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|path| {
+        catalogue_matchers()
+            .iter()
+            .find(|matcher| matcher_matches_callee(matcher, module, &path, declared_deps))
+            .map(|matcher| matcher.effect)
+    })
+}
+
+/// The `node:<module>.<member>` path of a callee whose leading identifier an
+/// ES import or a `require()` binds to a module in
+/// [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES).
+/// The extractor writes the same path for a sink site, and the catalogue
+/// rows of those modules match only that path.
+fn node_binding_callee_path(module: &ModuleInfo, callee_path: &str) -> Option<String> {
+    let (head, rest) = match callee_path.split_once('.') {
+        Some((head, rest)) => (head, Some(rest)),
+        None => (callee_path, None),
+    };
+    // `fs.promises.<member>` takes the path of an `fs/promises` import, as in
+    // the extractor.
+    let join = |root: String, member: Option<&str>| -> Option<String> {
+        let path = match (member, rest) {
+            (Some(member), Some(rest)) => format!("{root}.{member}.{rest}"),
+            (Some(member), None) => format!("{root}.{member}"),
+            (None, Some(rest)) => format!("{root}.{rest}"),
+            (None, None) => return None,
+        };
+        Some(match path.strip_prefix("node:fs.promises.") {
+            Some(member) => format!("node:fs.{member}"),
+            None => path,
+        })
+    };
+    if let Some(import) = module
+        .imports
         .iter()
-        .find(|matcher| matcher_matches_callee(matcher, module, &canonical, declared_deps))
-        .map(|matcher| matcher.effect)
+        .find(|import| import.local_name == head && !import.is_type_only)
+    {
+        let root = node_binding_module(&import.source)?;
+        return match &import.imported_name {
+            ImportedName::Named(imported) => join(root, Some(imported)),
+            ImportedName::Namespace | ImportedName::Default => join(root, None),
+            ImportedName::SideEffect => None,
+        };
+    }
+    let call = module.require_calls.iter().find(|call| {
+        !call.is_type_only
+            && (call.local_name.as_deref() == Some(head)
+                || call.destructured_names.iter().any(|name| name == head))
+    })?;
+    let root = node_binding_module(&call.source)?;
+    if call.local_name.as_deref() == Some(head) {
+        join(root, None)
+    } else {
+        join(root, Some(head))
+    }
 }
 
 fn matcher_matches_callee(

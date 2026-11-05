@@ -88,8 +88,10 @@ fn coexists_with_security_sink_capture() {
         "callee-use capture should coexist with sink capture"
     );
     assert!(
-        info.security_sinks.iter().any(|s| s.callee_path == "exec"),
-        "security sink capture should be unaffected"
+        info.security_sinks
+            .iter()
+            .any(|s| s.callee_path == "node:child_process.exec"),
+        "security sink capture should trace the named import"
     );
 }
 

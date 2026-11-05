@@ -6,7 +6,7 @@
 //! name such as `get` never counts as `https.get` in a module that does not
 //! import `node:https`.
 
-use fallow_types::extract::{ModuleInfo, SinkShape};
+use fallow_types::extract::ModuleInfo;
 
 use crate::Matcher;
 
@@ -53,10 +53,6 @@ impl Matcher {
     pub fn requires_binding_trace(&self) -> bool {
         BINDING_TRACE_ROWS.contains(&self.id.as_str())
             || (self.id == "weak-crypto" && self.is_literal_aware())
-            // A bare `readFile(path)` is a file-system call only when it is the
-            // named import. The member rows keep the looser source match,
-            // because a module can pass its `node:fs` import on as `fs`.
-            || (self.id == "path-traversal" && self.sink_shape == SinkShape::Call)
     }
 
     /// Whether the module satisfies the row's import provenance for the

@@ -8,7 +8,7 @@ use fallow_types::extract::{
     SecurityControlSite, SinkArgKind, SinkLiteralValue, SinkShape, SinkSite,
     SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason, SkippedSecurityCalleeSite,
 };
-use fallow_types::security_sinks::JSX_SPREAD_SINK_PROPS;
+use fallow_types::security_sinks::{JSX_SPREAD_SINK_PROPS, node_binding_module};
 
 use super::super::ModuleInfoExtractor;
 use super::visit_security_controls::security_control_kind_for_callee;
@@ -62,11 +62,6 @@ enum SinkBinding {
     /// A `<script>` element (`document.createElement("script")`).
     ScriptElement,
 }
-
-/// Node.js built-in modules whose named and CommonJS bindings resolve to a
-/// `node:<module>.<member>` callee path. The `node:` root is not a valid
-/// identifier, so the path proves the import provenance on its own.
-const NODE_BINDING_MODULES: &[&str] = &["vm"];
 
 /// Properties of a `<script>` element whose value the browser loads or runs
 /// as code.
@@ -156,15 +151,6 @@ fn set_sink_binding(
             bindings.remove(name);
         }
     }
-}
-
-/// The `node:` path of an import source when the module is in
-/// [`NODE_BINDING_MODULES`] (`vm` and `node:vm` both give `node:vm`).
-fn node_binding_module(source: &str) -> Option<String> {
-    let module = source.strip_prefix("node:").unwrap_or(source);
-    NODE_BINDING_MODULES
-        .contains(&module)
-        .then(|| format!("node:{module}"))
 }
 
 /// Whether `expr` is `<object>.createElement("script")`.
@@ -370,7 +356,7 @@ fn is_string_code_callee(callee_path: &str) -> bool {
 fn is_chmod_literal_callee(callee_path: &str) -> bool {
     matches!(
         callee_path,
-        "fs.chmod" | "fs.chmodSync" | "fs.promises.chmod" | "chmod" | "chmodSync"
+        "fs.chmod" | "fs.chmodSync" | "fs.promises.chmod" | "node:fs.chmod" | "node:fs.chmodSync"
     )
 }
 
@@ -384,11 +370,11 @@ fn is_temp_file_literal_callee(callee_path: &str) -> bool {
             | "fs.createWriteStream"
             | "fs.promises.writeFile"
             | "fs.promises.appendFile"
-            | "writeFile"
-            | "writeFileSync"
-            | "appendFile"
-            | "appendFileSync"
-            | "createWriteStream"
+            | "node:fs.writeFile"
+            | "node:fs.writeFileSync"
+            | "node:fs.appendFile"
+            | "node:fs.appendFileSync"
+            | "node:fs.createWriteStream"
     )
 }
 
@@ -1217,9 +1203,12 @@ impl ModuleInfoExtractor {
     /// On top of [`Self::static_callee_path`], this maps a global-object prefix
     /// on a code-executing global (`window.eval`) and a local alias of one
     /// (`const e = eval; e(code)`) to the bare global. A binding of a Node.js
-    /// built-in module in [`NODE_BINDING_MODULES`] resolves to its `node:`
-    /// path (`runInNewContext(code)` after `import { runInNewContext } from
-    /// "vm"` becomes `node:vm.runInNewContext`).
+    /// built-in module in
+    /// [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES)
+    /// resolves to its `node:` path (`runInNewContext(code)` after
+    /// `import { runInNewContext } from "vm"` becomes
+    /// `node:vm.runInNewContext`). `fs.promises.<member>` on a module binding
+    /// becomes `node:fs.<member>`, the path of an `fs/promises` import.
     fn security_callee_path(&self, expr: &Expression<'_>) -> Option<String> {
         let path = normalize_global_code_exec_path(self.static_callee_path(expr)?);
         let (root, rest) = match path.split_once('.') {
@@ -1230,7 +1219,13 @@ impl ModuleInfoExtractor {
             (Some(SinkBinding::CodeExec(target) | SinkBinding::NodeModuleMember(target)), None) => {
                 Some(target.clone())
             }
-            (Some(SinkBinding::NodeModule(module)), Some(rest)) => Some(format!("{module}.{rest}")),
+            (Some(SinkBinding::NodeModule(module)), Some(rest)) => {
+                let rest = match rest.strip_prefix("promises.") {
+                    Some(member) if module == "node:fs" => member,
+                    _ => rest,
+                };
+                Some(format!("{module}.{rest}"))
+            }
             _ => None,
         };
         Some(resolved.unwrap_or(path))
@@ -1521,7 +1516,7 @@ impl ModuleInfoExtractor {
 
     /// The sink binding that a value gives to `name`: an alias of a
     /// code-executing global or of a Node.js module binding, a `require()` of
-    /// a module in [`NODE_BINDING_MODULES`], or a new `<script>` element.
+    /// a module in [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES), or a new `<script>` element.
     fn sink_binding_of_value(&self, name: &str, value: &Expression<'_>) -> Option<SinkBinding> {
         if is_create_script_element_call(value) {
             return Some(SinkBinding::ScriptElement);
@@ -1553,7 +1548,7 @@ impl ModuleInfoExtractor {
     }
 
     /// The `node:` path of `require("<module>")` for a module in
-    /// [`NODE_BINDING_MODULES`].
+    /// [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES).
     fn node_binding_module_of_require(&self, value: &Expression<'_>) -> Option<String> {
         let (_, source) = self.try_extract_require(unwrap_static_expr(value))?;
         node_binding_module(&source)
