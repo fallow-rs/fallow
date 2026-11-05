@@ -33,9 +33,25 @@ const takeSessionToken = () => {
 const writeProtocol = process.stdout.write.bind(process.stdout);
 process.stdout.write = process.stderr.write.bind(process.stderr);
 
+// JSON.stringify writes a lone UTF-16 surrogate as an escape such as
+// `\ud800`. The API parses each line with a strict JSON parser that rejects
+// this escape, so each string and each object key becomes well-formed text
+// first. Test names, error messages and paths come from user code and can
+// hold such a surrogate.
+const wellFormedKeys = (value) =>
+  Object.keys(value).every((key) => key.isWellFormed())
+    ? value
+    : Object.fromEntries(Object.entries(value).map(([key, item]) => [key.toWellFormed(), item]));
+
+const wellFormed = (_key, value) => {
+  if (typeof value === "string") return value.toWellFormed();
+  if (isPlainObject(value)) return wellFormedKeys(value);
+  return value;
+};
+
 const createSender = (token) => (message) =>
   new Promise((resolve) => {
-    writeProtocol(`${token} ${JSON.stringify(message)}\n`, () => resolve());
+    writeProtocol(`${token} ${JSON.stringify(message, wellFormed)}\n`, () => resolve());
   });
 
 const loadAdapter = async (runner) => {

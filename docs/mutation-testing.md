@@ -830,6 +830,9 @@ at least `--setup-timeout`. The scheduler uses control runs in two places:
    - Each case of a parameterized test (`it.each`, `describe.each`,
      `test.each`) and each `node:test` subtest is its own test id, so the
      self-check counts it once.
+   - A lone UTF-16 surrogate in a test name becomes U+FFFD in the test id,
+     because the protocol carries only well-formed text. Two names that then
+     match get the ` (2)` suffix, as two equal names do.
    - The check needs no run when no job exists: no mutant is covered, or
      each covered mutant has a result from the cache. The check also needs
      no run when the time budget ended before it.
