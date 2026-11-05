@@ -1,0 +1,109 @@
+name: Oracle Seeds
+
+# Runs the oracle tests over a wide range of generated inputs, once a day and
+# on demand. An oracle test compares two runs that must agree, for example a
+# warm cache run and a cache-free run. Pull request CI runs the same tests
+# with fixed seeds only, so this workflow adds no pull request time. It does
+# not run on push to main, so scripts/verify-release-ci.mjs does not need it
+# in REQUIRED_WORKFLOWS, and a failure does not block a release.
+#
+# Each run searches new seed numbers: the first seed number moves by
+# SEED_STRIDE with each run number. A failure prints the template and the
+# steps of the failing sequence. Add that sequence to REGRESSIONS in
+# crates/engine/tests/integration/cache_model/sequences.rs when you fix the
+# cause.
+on:
+  schedule:
+    - cron: '40 2 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: 'The number of seeds to run'
+        type: number
+        default: 400
+      start:
+        description: 'The first seed number (0: run number times SEED_STRIDE)'
+        type: number
+        default: 0
+
+concurrency:
+  group: oracle-seeds
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  SEED_STRIDE: 400
+  # A background git repack after a fixture commit races the next git add.
+  # See scripts/workflow-policy.test.mjs.
+  GIT_CONFIG_COUNT: '2'
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: 'false'
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: '0'
+
+jobs:
+  cache-model-seeds:
+    name: Cache model wide seed range
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: oracle-seeds
+
+      - name: Build the cache model tests
+        run: cargo test --locked -p fallow-engine --test integration cache_model --no-run
+
+      - name: Run the wide seed range
+        shell: bash
+        env:
+          INPUT_SEEDS: ${{ inputs.seeds }}
+          INPUT_START: ${{ inputs.start }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          count="${INPUT_SEEDS:-$SEED_STRIDE}"
+          start="${INPUT_START:-0}"
+          case "$count:$start" in
+            *[!0-9:]* | :* | *:) echo "::error::seeds and start must be whole numbers"; exit 2 ;;
+          esac
+          if [ "$count" -lt 1 ]; then
+            echo "::error::seeds must be 1 or more"
+            exit 2
+          fi
+          if [ "$start" = 0 ]; then
+            start=$(( (RUN_NUMBER - 1) * SEED_STRIDE + 1 ))
+          fi
+          export FALLOW_CACHE_MODEL_SEEDS="$count"
+          export FALLOW_CACHE_MODEL_SEED_START="$start"
+          echo "Seed numbers $start to $(( start + count - 1 ))"
+          status=0
+          cargo test --locked -p fallow-engine --test integration cache_model::sequences::seed_sweep_matches_cache_free_runs \
+            -- --ignored --exact 2>&1 | tee seeds.log || status=$?
+          {
+            echo "## Cache model wide seed range"
+            echo
+            echo "Seed numbers $start to $(( start + count - 1 )). Run again with \`FALLOW_CACHE_MODEL_SEED_START=$start FALLOW_CACHE_MODEL_SEEDS=$count\`."
+            echo
+            if [ "$status" = 0 ]; then
+              echo "Each warm run matched the cache-free run."
+            elif grep -q 'the warm run differs from the cache-free run' seeds.log; then
+              echo "A warm run differs from the cache-free run. Add this sequence to \`REGRESSIONS\` when you fix the cause:"
+              echo
+              echo '```text'
+              sed -n '/panicked at/,/^$/p' seeds.log | head -80
+              echo '```'
+            else
+              echo "The run failed before it compared a sequence. Read the log of this step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
