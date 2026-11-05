@@ -5,7 +5,7 @@
 use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
 use crate::setup_hooks::{
     AgentsBlockReport, AgentsOutcome, GateReport, HookAgentArg, ScriptOutcome, SettingsOutcome,
-    SetupHooksOptions, execute_agent_hooks,
+    SetupHooksOptions, execute_agent_hooks, symlinked_hook_target,
 };
 
 pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
@@ -38,6 +38,24 @@ fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
         gitignore_claude: ctx.gitignore_claude,
         uninstall: ctx.mode == Mode::Uninstall,
     };
+    match symlinked_hook_target(&opts, ctx.mode) {
+        Ok(Some(target)) => {
+            return vec![
+                StepReport::new(Some(harness), Step::Hooks, StepStatus::Skipped, ctx.scope())
+                    .path(ctx, &target.path)
+                    .symlinked(ctx, &target.link),
+            ];
+        }
+        Ok(None) => {}
+        Err(message) => {
+            return vec![StepReport::failed(
+                Some(harness),
+                Step::Hooks,
+                ctx.scope(),
+                message,
+            )];
+        }
+    }
     let report = match execute_agent_hooks(&opts, ctx.mode) {
         Ok(Some(report)) => report,
         Ok(None) => return Vec::new(),

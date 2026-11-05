@@ -24,6 +24,10 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 
+#[path = "setup_hooks_symlink_guard.rs"]
+pub mod symlink_guard;
+pub use symlink_guard::{execute_agent_hooks, symlinked_component, symlinked_hook_target};
+
 /// Agent target for generated hook artifacts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum HookAgentArg {
@@ -214,20 +218,6 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
 
     print_summary(&report, opts, mode, command_label);
     ExitCode::SUCCESS
-}
-
-/// Resolve and execute the agent-hook plan without printing a summary.
-/// `fallow agent install` renders its own combined report from the returned
-/// [`Report`]. Returns `Ok(None)` when no surface is selected.
-pub fn execute_agent_hooks(
-    opts: &SetupHooksOptions<'_>,
-    mode: Mode,
-) -> Result<Option<Report>, String> {
-    let plan = Plan::resolve(opts, mode)?;
-    if plan.is_empty() {
-        return Ok(None);
-    }
-    plan.execute(opts, mode).map(Some)
 }
 
 /// Render read-only status for all supported hook surfaces.
@@ -468,6 +458,7 @@ impl Plan {
     }
 
     fn execute(&self, opts: &SetupHooksOptions<'_>, mode: Mode) -> Result<Report, String> {
+        self.refuse_symlinks(opts, mode)?;
         let mut report = Report::default();
         if let Some(claude) = &self.claude {
             report.claude = Some(claude.execute(opts, mode)?);

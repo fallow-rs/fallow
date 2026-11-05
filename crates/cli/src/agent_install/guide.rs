@@ -66,6 +66,9 @@ fn install_agents_guide(ctx: &Ctx) -> StepReport {
     let path = ctx.root.join(AGENTS_FILE);
     let base =
         StepReport::new(None, Step::Guide, StepStatus::Written, Scope::Shared).path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let existing = match read_optional_text(&path) {
         Ok(existing) => existing,
         Err(error) => return failed(ctx, &path, error),
@@ -114,6 +117,14 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
         Scope::Shared,
     )
     .path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
+    if claude_file_is_agents_file(ctx) {
+        return base
+            .with_status(StepStatus::Unchanged)
+            .detail(CLAUDE_LINKS_TO_AGENTS);
+    }
     let existing = match read_optional_text(&path) {
         Ok(existing) => existing,
         Err(error) => return failed(ctx, &path, error),
@@ -167,6 +178,9 @@ fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
     let path = ctx.root.join(AGENTS_FILE);
     let base =
         StepReport::new(None, Step::Guide, StepStatus::Removed, Scope::Shared).path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let existing = match read_optional_text(&path) {
         Ok(Some(existing)) => existing,
         Ok(None) => {
@@ -205,6 +219,14 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
         Scope::Shared,
     )
     .path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
+    if claude_file_is_agents_file(ctx) {
+        return base
+            .with_status(StepStatus::Unchanged)
+            .detail(CLAUDE_LINKS_TO_AGENTS);
+    }
     let existing = match read_optional_text(&path) {
         Ok(Some(existing)) => existing,
         Ok(None) => {
@@ -241,6 +263,16 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
         Ok(()) => base.detail("@AGENTS.md import block removed; file kept"),
         Err(error) => failed(ctx, &path, error),
     }
+}
+
+const CLAUDE_LINKS_TO_AGENTS: &str =
+    "CLAUDE.md links to AGENTS.md; Claude Code reads the guide through the link";
+
+/// Whether `CLAUDE.md` and `AGENTS.md` resolve to one file. An import block
+/// would then land in `AGENTS.md` and make it import itself.
+fn claude_file_is_agents_file(ctx: &Ctx) -> bool {
+    let resolve = |name: &str| dunce::canonicalize(ctx.root.join(name)).ok();
+    resolve(CLAUDE_FILE).is_some_and(|claude| resolve(AGENTS_FILE) == Some(claude))
 }
 
 fn import_block() -> String {
