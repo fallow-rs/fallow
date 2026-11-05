@@ -1066,6 +1066,41 @@ fn issue_882_catalogue_sinks_fire() {
     }
 }
 
+/// A raw SQL method on a query-builder call chain (`db("t").whereRaw(x)`),
+/// on a call result (`getPrisma().$queryRawUnsafe(x)`) or on a `this` field
+/// (`this.prisma.$queryRawUnsafe(x)`) gives a candidate. A literal argument
+/// and a non-raw method on the same chain give none.
+#[test]
+fn issue_4225_raw_sql_on_call_chain_receiver_fires() {
+    const FILE: &str = "src/raw-sql-call-chain.ts";
+    let results = analyze_with_security_sink("security-catalogue-sinks-882");
+    let source = std::fs::read_to_string(fixture_path("security-catalogue-sinks-882").join(FILE))
+        .expect("raw SQL fixture should be readable");
+    for (index, line) in source.lines().enumerate() {
+        let expected = if line.ends_with("// candidate") {
+            1
+        } else if line.ends_with("// none") {
+            0
+        } else {
+            continue;
+        };
+        let candidates = results
+            .security_findings
+            .iter()
+            .filter(|finding| {
+                finding
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with(FILE)
+                    && finding.line == u32::try_from(index + 1).expect("fixture line fits u32")
+            })
+            .count();
+        assert_eq!(candidates, expected, "unexpected candidate count: {line}");
+    }
+    assert_eq!(anchored_count(&results, FILE), 6);
+}
+
 #[test]
 fn issue_882_literals_and_source_free_mass_assignment_do_not_fire() {
     let results = analyze_with_security_sink("security-catalogue-sinks-882");
