@@ -639,7 +639,8 @@ fn effective_type_aware_config(
 /// The package manager that a suggested install command names. npm is the
 /// default when the project declares none and has no lockfile.
 fn project_package_manager(root: &Path) -> fallow_config::PackageManager {
-    fallow_config::PackageManager::detect(root).unwrap_or(fallow_config::PackageManager::Npm)
+    fallow_config::PackageManager::detect_nearest(root)
+        .unwrap_or(fallow_config::PackageManager::Npm)
 }
 
 fn remediation(command: &str, mutating: bool) -> DoctorRemediation {
@@ -919,7 +920,6 @@ mod tests {
     #[test]
     fn dependency_remediation_defaults_to_npm_without_a_signal() {
         let root = tempfile::tempdir().expect("temp root");
-        std::fs::create_dir(root.path().join(".git")).expect("create .git");
         assert_eq!(dependency_remediation_command(root.path()), "npm install");
     }
 
@@ -930,6 +930,7 @@ mod tests {
         let root = tempfile::tempdir().expect("temp root");
         let package = root.path().join("packages").join("app");
         std::fs::create_dir_all(&package).expect("create package");
+        std::fs::create_dir(root.path().join(".git")).expect("create .git");
         std::fs::write(
             root.path().join("package.json"),
             r#"{"private":true,"packageManager":"pnpm@10.0.0"}"#,

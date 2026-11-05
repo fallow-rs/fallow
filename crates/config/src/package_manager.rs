@@ -16,27 +16,30 @@ pub enum PackageManager {
 }
 
 impl PackageManager {
-    /// Detect the package manager of `root`.
+    /// Detect the package manager from the files in `root` only.
     ///
-    /// The search starts at `root` and goes up through its parent directories,
-    /// so a workspace package finds the lockfile of its monorepo root. The
-    /// nearest directory with a signal decides. In that directory, the
-    /// `packageManager` field of `package.json` wins over a lockfile, and
-    /// lockfiles count in the order Bun, pnpm, Yarn, npm. The search stops
-    /// after a directory that contains `.git`, so it does not read files
-    /// outside the repository. Returns `None` when no signal exists.
+    /// The `packageManager` field of `package.json` wins over a lockfile, and
+    /// lockfiles count in the order Bun, pnpm, Yarn, npm. Returns `None` when
+    /// neither signal exists. Use this variant when the result selects a
+    /// command that Fallow runs: files outside `root` must not choose it.
     #[must_use]
     pub fn detect(root: &Path) -> Option<Self> {
-        for dir in root.ancestors() {
-            let found = Self::from_package_json_field(dir).or_else(|| Self::from_lockfile(dir));
-            if found.is_some() {
-                return found;
-            }
-            if dir.join(".git").exists() {
-                break;
-            }
-        }
-        None
+        Self::from_package_json_field(root).or_else(|| Self::from_lockfile(root))
+    }
+
+    /// Detect the package manager for a command that Fallow only suggests.
+    ///
+    /// When `root` is inside a git repository, the search goes up from `root`
+    /// to the repository root, so a workspace package finds the signal of its
+    /// monorepo root. The nearest directory with a signal decides, by the
+    /// rules of [`Self::detect`]. Outside a git repository, only `root` counts.
+    /// Never use the result to select a command that Fallow runs.
+    #[must_use]
+    pub fn detect_nearest(root: &Path) -> Option<Self> {
+        let Some(repo_depth) = root.ancestors().position(|dir| dir.join(".git").exists()) else {
+            return Self::detect(root);
+        };
+        root.ancestors().take(repo_depth + 1).find_map(Self::detect)
     }
 
     /// The executable name, which is also the `packageManager` field prefix.
@@ -145,7 +148,6 @@ mod tests {
     #[test]
     fn no_signal_is_none() {
         let root = tempfile::tempdir().expect("temp root");
-        std::fs::create_dir(root.path().join(".git")).expect("create .git");
         assert_eq!(PackageManager::detect(root.path()), None);
     }
 
@@ -156,8 +158,33 @@ mod tests {
         std::fs::create_dir_all(&package).expect("create package");
         std::fs::write(package.join("package.json"), r#"{"name":"app"}"#)
             .expect("write package.json");
+        std::fs::create_dir(root.path().join(".git")).expect("create .git");
         std::fs::write(root.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
-        assert_eq!(PackageManager::detect(&package), Some(PackageManager::Pnpm));
+        assert_eq!(
+            PackageManager::detect_nearest(&package),
+            Some(PackageManager::Pnpm)
+        );
+    }
+
+    /// Security review finding: a file above the project root must not select
+    /// a command that Fallow runs.
+    #[test]
+    fn detect_ignores_parent_directories() {
+        let root = tempfile::tempdir().expect("temp root");
+        let package = root.path().join("packages").join("app");
+        std::fs::create_dir_all(&package).expect("create package");
+        std::fs::create_dir(root.path().join(".git")).expect("create .git");
+        std::fs::write(root.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
+        assert_eq!(PackageManager::detect(&package), None);
+    }
+
+    #[test]
+    fn detect_nearest_outside_a_repository_reads_only_the_root() {
+        let outer = tempfile::tempdir().expect("temp root");
+        let project = outer.path().join("project");
+        std::fs::create_dir(&project).expect("create project");
+        std::fs::write(outer.path().join("yarn.lock"), "").expect("write outer lockfile");
+        assert_eq!(PackageManager::detect_nearest(&project), None);
     }
 
     #[test]
@@ -166,8 +193,12 @@ mod tests {
         let nested = root.path().join("tools");
         std::fs::create_dir(&nested).expect("create nested");
         std::fs::write(root.path().join("pnpm-lock.yaml"), "").expect("write root lockfile");
+        std::fs::create_dir(root.path().join(".git")).expect("create .git");
         std::fs::write(nested.join("yarn.lock"), "").expect("write nested lockfile");
-        assert_eq!(PackageManager::detect(&nested), Some(PackageManager::Yarn));
+        assert_eq!(
+            PackageManager::detect_nearest(&nested),
+            Some(PackageManager::Yarn)
+        );
     }
 
     #[test]
@@ -176,7 +207,7 @@ mod tests {
         let repo = outer.path().join("repo");
         std::fs::create_dir_all(repo.join(".git")).expect("create repo");
         std::fs::write(outer.path().join("yarn.lock"), "").expect("write outer lockfile");
-        assert_eq!(PackageManager::detect(&repo), None);
+        assert_eq!(PackageManager::detect_nearest(&repo), None);
     }
 
     #[test]
