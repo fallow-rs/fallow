@@ -26,6 +26,7 @@ pub(crate) mod errors;
 mod external_style_usage;
 pub mod extract;
 pub mod git_env;
+mod graph_cache_key;
 mod package_assets;
 mod package_credits;
 pub mod plugins;
@@ -1644,15 +1645,11 @@ fn resolve_analysis_imports(
         modules,
         files,
         workspaces,
-        active_plugins: &plugin_result.active_plugins,
-        path_aliases: &plugin_result.path_aliases,
-        auto_imports: &plugin_result.auto_imports,
-        jsx_import_sources: &plugin_result.jsx_import_sources,
-        scss_include_paths: &plugin_result.scss_include_paths,
-        static_dir_mappings: &plugin_result.static_dir_mappings,
-        framework_static_dir_mappings: &plugin_result.framework_static_dir_mappings,
-        root: &config.root,
-        extra_conditions: &config.resolve.conditions,
+        ..graph_cache_key::plugin_resolve_input(
+            plugin_result,
+            &config.root,
+            &config.resolve.conditions,
+        )
     });
     external_style_usage::augment_external_style_package_usage(
         &mut project.modules,
@@ -1807,14 +1804,14 @@ fn build_graph_cache_manifest(
         unseeded_declaration_files,
     } = *input;
     let mode = graph_cache::GraphCacheMode::new(
-        resolver_options_hash(config, workspaces, files),
-        entry_points_hash(
+        graph_cache_key::resolver_options_hash(config, workspaces, files),
+        graph_cache_key::entry_points_hash(
             entry_points,
             files,
             unseeded_declaration_files,
             &config.root,
         ),
-        plugin_config_hash(plugin_result, &config.root),
+        graph_cache_key::plugin_config_hash(plugin_result, &config.root),
     );
     // The parse stage already hashed every file it read, so keying the manifest
     // on content costs nothing and does not inherit mtime's blind spot for a
@@ -1832,250 +1829,6 @@ fn build_graph_cache_manifest(
             .copied()
             .unwrap_or_default()
     })
-}
-
-/// Hash the resolver-affecting options: the extraction config hash, the
-/// user-supplied resolve `conditions`, and the resolver input files and
-/// workspace names (see [`resolution_inputs::resolution_inputs_hash`]).
-///
-/// The source manifest fingerprints source files only. A `package.json`
-/// `imports` map, a workspace rename, a Deno import map or a discovered
-/// `tsconfig.json` can move an import target without a source edit, so their
-/// content keys the mode too. A config above the root is keyed with `../`
-/// steps, so its path does not bring the absolute root back into the hash.
-///
-/// The project root is deliberately NOT hashed. It is not a resolver option:
-/// it is where the project happens to sit, and hashing it meant a container
-/// job, a matrix over roots, or a copied worktree could never reuse a cache it
-/// had fully decoded. Every path this mode covers is hashed root-relative
-/// instead.
-///
-/// `cache_config_hash` does NOT fold tsconfig `paths`, despite what this
-/// comment used to claim: it hashes extraction-affecting config plus external
-/// plugin names. tsconfig-derived aliases reach the mode through
-/// [`hash_path_aliases`].
-///
-/// `production` and `ignore_patterns` intentionally stay out of this hash:
-/// they shape discovery, so changed file sets already miss through stable file
-/// keys and source fingerprints in the manifest.
-fn resolver_options_hash(
-    config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    files: &[discover::DiscoveredFile],
-) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = rustc_hash::FxHasher::default();
-    config.cache_config_hash.hash(&mut hasher);
-    config.resolve.conditions.hash(&mut hasher);
-    resolution_inputs::resolution_inputs_hash(&config.root, workspaces, files).hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Render `path` the way every graph-cache mode hash spells a path: relative to
-/// the project root where possible, with forward slashes, so an identical
-/// project under a different absolute path hashes identically.
-fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-/// Hash the entry-point set (sorted root-relative paths per role) so any change
-/// in reachability roots misses the cache. The declaration files the graph
-/// does not seed are reachability roots too: they depend on package.json,
-/// tsconfig and sibling files the manifest does not track.
-fn entry_points_hash(
-    entry_points: &discover::CategorizedEntryPoints,
-    files: &[discover::DiscoveredFile],
-    unseeded_declaration_files: &FxHashSet<discover::FileId>,
-    root: &std::path::Path,
-) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = rustc_hash::FxHasher::default();
-    for role in [&entry_points.all, &entry_points.runtime, &entry_points.test] {
-        let mut keys: Vec<String> = role
-            .iter()
-            .map(|ep| root_relative_key(root, &ep.path))
-            .collect();
-        keys.sort_unstable();
-        keys.len().hash(&mut hasher);
-        for key in keys {
-            key.hash(&mut hasher);
-        }
-    }
-    let excluded = entry_points.production_excluded();
-    excluded.len().hash(&mut hasher);
-    for path in excluded {
-        root_relative_key(root, path).hash(&mut hasher);
-    }
-    let mut unseeded: Vec<String> = files
-        .iter()
-        .filter(|file| unseeded_declaration_files.contains(&file.id))
-        .map(|file| root_relative_key(root, &file.path))
-        .collect();
-    unseeded.sort_unstable();
-    unseeded.len().hash(&mut hasher);
-    for key in unseeded {
-        key.hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-/// Hash the plugin-derived graph-affecting configuration, with every path
-/// spelled root-relative.
-fn plugin_config_hash(
-    plugin_result: &plugins::AggregatedPluginResult,
-    root: &std::path::Path,
-) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = rustc_hash::FxHasher::default();
-
-    hash_active_plugins(plugin_result, &mut hasher);
-    hash_path_aliases(plugin_result, root, &mut hasher);
-
-    let mut auto_imports: Vec<AutoImportHashKey<'_>> = plugin_result
-        .auto_imports
-        .iter()
-        .map(|rule| {
-            let mut scope: Vec<String> = rule
-                .scope
-                .iter()
-                .map(|scope_root| root_relative_key(root, scope_root))
-                .collect();
-            scope.sort_unstable();
-            (
-                rule.name.as_str(),
-                root_relative_key(root, &rule.source),
-                auto_import_kind_rank(rule.kind),
-                scope,
-            )
-        })
-        .collect();
-    auto_imports.sort_unstable();
-    auto_imports.len().hash(&mut hasher);
-    for key in &auto_imports {
-        key.hash(&mut hasher);
-    }
-
-    fn sorted(patterns: &[String]) -> Vec<&str> {
-        let mut patterns: Vec<&str> = patterns.iter().map(String::as_str).collect();
-        patterns.sort_unstable();
-        patterns
-    }
-    let mut jsx_import_sources: Vec<(&str, String, Vec<&str>, Vec<&str>)> = plugin_result
-        .jsx_import_sources
-        .iter()
-        .map(|rule| {
-            (
-                rule.source.as_str(),
-                root_relative_key(root, &rule.config_dir),
-                sorted(&rule.include),
-                sorted(&rule.exclude),
-            )
-        })
-        .collect();
-    jsx_import_sources.sort_unstable();
-    jsx_import_sources.dedup();
-    jsx_import_sources.len().hash(&mut hasher);
-    for key in &jsx_import_sources {
-        key.hash(&mut hasher);
-    }
-
-    let mut scss_include_paths: Vec<String> = plugin_result
-        .scss_include_paths
-        .iter()
-        .map(|path| root_relative_key(root, path))
-        .collect();
-    scss_include_paths.sort_unstable();
-    scss_include_paths.len().hash(&mut hasher);
-    for path in scss_include_paths {
-        path.hash(&mut hasher);
-    }
-
-    hash_static_dir_mappings(&plugin_result.static_dir_mappings, root, &mut hasher);
-    hash_static_dir_mappings(
-        &plugin_result.framework_static_dir_mappings,
-        root,
-        &mut hasher,
-    );
-
-    hasher.finish()
-}
-
-/// Hash `(directory, mount)` pairs sorted, with each directory root-relative.
-fn hash_static_dir_mappings(
-    mappings: &[(std::path::PathBuf, String)],
-    root: &std::path::Path,
-    hasher: &mut rustc_hash::FxHasher,
-) {
-    use std::hash::Hash;
-    let mut keys: Vec<(String, &str)> = mappings
-        .iter()
-        .map(|(from_dir, mount)| (root_relative_key(root, from_dir), mount.as_str()))
-        .collect();
-    keys.sort_unstable();
-    keys.len().hash(hasher);
-    for (from_dir, mount) in keys {
-        from_dir.hash(hasher);
-        mount.hash(hasher);
-    }
-}
-
-fn hash_active_plugins(
-    plugin_result: &plugins::AggregatedPluginResult,
-    hasher: &mut rustc_hash::FxHasher,
-) {
-    use std::hash::Hash;
-    let mut active: Vec<&str> = plugin_result
-        .active_plugins
-        .iter()
-        .map(String::as_str)
-        .collect();
-    active.sort_unstable();
-    active.len().hash(hasher);
-    for name in active {
-        name.hash(hasher);
-    }
-}
-
-/// Hash tsconfig- and plugin-derived path aliases. Replacements are absolute
-/// filesystem paths, so they are spelled root-relative like every other path in
-/// the mode hash.
-fn hash_path_aliases(
-    plugin_result: &plugins::AggregatedPluginResult,
-    root: &std::path::Path,
-    hasher: &mut rustc_hash::FxHasher,
-) {
-    use std::hash::Hash;
-    let mut aliases: Vec<(&str, String)> = plugin_result
-        .path_aliases
-        .iter()
-        .map(|(prefix, replacement)| {
-            (
-                prefix.as_str(),
-                root_relative_key(root, std::path::Path::new(replacement)),
-            )
-        })
-        .collect();
-    aliases.sort_unstable();
-    aliases.len().hash(hasher);
-    for (prefix, replacement) in aliases {
-        prefix.hash(hasher);
-        replacement.hash(hasher);
-    }
-}
-
-/// The fields of one auto-import rule that decide its graph edges: name,
-/// root-relative source, kind rank, and sorted root-relative scope.
-type AutoImportHashKey<'a> = (&'a str, String, u8, Vec<String>);
-
-fn auto_import_kind_rank(kind: fallow_config::AutoImportKind) -> u8 {
-    match kind {
-        fallow_config::AutoImportKind::Named => 0,
-        fallow_config::AutoImportKind::Default => 1,
-        fallow_config::AutoImportKind::DefaultComponent => 2,
-    }
 }
 
 fn collect_file_hashes(
@@ -3320,9 +3073,10 @@ mod tests {
         AnalysisSession, bucket_files_by_workspace, bucket_files_by_workspace_roots,
         collect_config_search_roots, credit_workspace_package_usage, default_config,
         format_undeclared_workspace_warning, gate_auto_import_entry_patterns,
-        parse_analysis_modules, plugin_config_hash, resolver_options_hash,
-        settings_for_entry_pattern, warn_undeclared_workspaces, workspace_prefix,
+        parse_analysis_modules, settings_for_entry_pattern, warn_undeclared_workspaces,
+        workspace_prefix,
     };
+    use crate::graph_cache_key::{plugin_config_hash, resolver_options_hash};
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 

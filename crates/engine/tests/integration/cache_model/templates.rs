@@ -59,6 +59,19 @@ pub enum Step {
     /// selects the other target of the `#db` entry of `package.json`
     /// `imports`.
     ToggleCondition,
+    /// Point the `resolve.alias` entry of `vite.config.ts` to the other
+    /// directory. With `keep_mtime`, the length and the modification time
+    /// stay the same.
+    SwapViteAlias { keep_mtime: bool },
+    /// Point the Vitest `setupFiles` entry to the other setup file.
+    SwapVitestSetup,
+    /// Point the Vitest `include` glob to the other test file suffix.
+    SwapVitestInclude,
+    /// Point the Sass `includePaths` entry of `angular.json` to the other
+    /// theme directory.
+    SwapAngularIncludePath,
+    /// Point the `main` entry of `angular.json` to the other file.
+    SwapAngularMain,
 }
 
 const SOURCE_STEPS: [Step; 7] = [
@@ -224,7 +237,115 @@ pub const DENO: Template = Template {
     ],
 };
 
-pub const TEMPLATES: [&Template; 3] = [&NODE, &BUN, &DENO];
+const VITE_ENTRY_ALPHA: &str = "import { alpha } from './util';\nimport { value } from '@v/value';\n\nexport const run = (): unknown[] => [alpha(), value];\n";
+
+/// A Vite and Vitest project. The graph depends on a `resolve.alias` entry,
+/// a `setupFiles` entry and an `include` glob, which only the plugin stage
+/// reads. Both configs are source files, so the content fingerprint of the
+/// manifest also sees each edit.
+pub const VITE: Template = Template {
+    name: "vite",
+    files: &[
+        (
+            "package.json",
+            r#"{"name":"vite-app","private":true,"main":"src/index.ts","devDependencies":{"vite":"*","vitest":"*"}}"#,
+        ),
+        (
+            "vite.config.ts",
+            "import { defineConfig } from 'vite';\n\nexport default defineConfig({ resolve: { alias: { '@v': './src/a' } } });\n",
+        ),
+        (
+            "vitest.config.ts",
+            "import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({ test: { include: ['test/**/*.spec.ts'], setupFiles: ['./test/setup-a.ts'] } });\n",
+        ),
+        ("src/index.ts", VITE_ENTRY_ALPHA),
+        ("src/util.ts", UTIL),
+        ("src/a/value.ts", "export const value = 'a';\n"),
+        ("src/b/value.ts", "export const value = 'b';\n"),
+        ("src/orphan.ts", "export const orphan = 1;\n"),
+        ("src/dupe-a.ts", CLONE_A),
+        ("src/dupe-b.ts", CLONE_B),
+        (
+            "test/setup-a.ts",
+            "import { alpha } from '../src/util';\nexport const setupA = alpha;\n",
+        ),
+        (
+            "test/setup-b.ts",
+            "import { bravo } from '../src/util';\nexport const setupB = bravo;\n",
+        ),
+        (
+            "test/one.spec.ts",
+            "import { orphan } from '../src/orphan';\nexport const one = orphan;\n",
+        ),
+        (
+            "test/two.case.ts",
+            "import { sumA } from '../src/dupe-a';\nexport const two = sumA;\n",
+        ),
+    ],
+    steps: &[
+        SOURCE_STEPS[0],
+        SOURCE_STEPS[1],
+        SOURCE_STEPS[2],
+        SOURCE_STEPS[3],
+        SOURCE_STEPS[4],
+        SOURCE_STEPS[5],
+        SOURCE_STEPS[6],
+        Step::SwapViteAlias { keep_mtime: false },
+        Step::SwapViteAlias { keep_mtime: true },
+        Step::SwapVitestSetup,
+        Step::SwapVitestInclude,
+        Step::ToggleProduction,
+        Step::ToggleIgnoreOrphan,
+    ],
+};
+
+/// An Angular project. `angular.json` is not a source file, so the manifest
+/// does not fingerprint it. An edit of its Sass include path reaches the
+/// graph cache key only through the plugin results, and an edit of its
+/// `main` entry only through the entry points.
+pub const ANGULAR: Template = Template {
+    name: "angular",
+    files: &[
+        (
+            "package.json",
+            r#"{"name":"ng-app","private":true,"dependencies":{"@angular/core":"*"}}"#,
+        ),
+        (
+            "angular.json",
+            r#"{"projects":{"app":{"architect":{"build":{"options":{"main":"src/index.ts","styles":["src/styles.scss"],"stylePreprocessorOptions":{"includePaths":["src/theme-a"]}}}}}}}"#,
+        ),
+        ("src/index.ts", ENTRY_ALPHA_PLAIN),
+        (
+            "src/other.ts",
+            "import { bravo } from './util';\nexport const other = bravo();\n",
+        ),
+        ("src/util.ts", UTIL),
+        ("src/styles.scss", "@use 'tokens';\n"),
+        ("src/theme-a/_tokens.scss", "$color: red;\n"),
+        ("src/theme-b/_tokens.scss", "$color: blue;\n"),
+        ("src/orphan.ts", "export const orphan = 1;\n"),
+        ("src/dupe-a.ts", CLONE_A),
+        ("src/dupe-b.ts", CLONE_B),
+    ],
+    steps: &[
+        SOURCE_STEPS[0],
+        SOURCE_STEPS[1],
+        SOURCE_STEPS[2],
+        SOURCE_STEPS[3],
+        SOURCE_STEPS[4],
+        SOURCE_STEPS[5],
+        SOURCE_STEPS[6],
+        Step::SwapAngularIncludePath,
+        Step::SwapAngularMain,
+        Step::ToggleProduction,
+        Step::ToggleIgnoreOrphan,
+    ],
+};
+
+const ENTRY_ALPHA_PLAIN: &str =
+    "import { alpha } from './util';\n\nexport const run = (): unknown[] => [alpha()];\n";
+
+pub const TEMPLATES: [&Template; 5] = [&NODE, &BUN, &DENO, &VITE, &ANGULAR];
 
 /// The file that the template uses as its entry.
 fn entry_file(project: &Project) -> &'static str {
@@ -327,6 +448,33 @@ pub fn apply(project: &mut Project, step: Step) {
         }
         Step::ToggleCondition => {
             toggle_option(&mut project.options.conditions, "react-server");
+        }
+        Step::SwapViteAlias { keep_mtime } => {
+            swap_in_file(
+                project,
+                "vite.config.ts",
+                "./src/a'",
+                "./src/b'",
+                keep_mtime,
+            );
+        }
+        Step::SwapVitestSetup => {
+            swap_in_file(project, "vitest.config.ts", "setup-a", "setup-b", false);
+        }
+        Step::SwapVitestInclude => {
+            swap_in_file(project, "vitest.config.ts", "*.spec.ts", "*.case.ts", false);
+        }
+        Step::SwapAngularIncludePath => {
+            swap_in_file(project, "angular.json", "theme-a", "theme-b", false);
+        }
+        Step::SwapAngularMain => {
+            swap_in_file(
+                project,
+                "angular.json",
+                "src/index.ts",
+                "src/other.ts",
+                false,
+            );
         }
         manifest => apply_manifest_step(project, manifest),
     }

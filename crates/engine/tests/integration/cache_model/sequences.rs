@@ -10,7 +10,7 @@
 //! [`REGRESSIONS`] when you fix the cause.
 
 use super::project::{Observation, Project};
-use super::templates::{BUN, DENO, NODE, Step, TEMPLATES, Template, apply};
+use super::templates::{ANGULAR, BUN, DENO, NODE, Step, TEMPLATES, Template, VITE, apply};
 
 /// The seeds of the generated sequences in PR CI.
 const PR_SEEDS: [u64; 4] = [0x5eed_0001, 0x5eed_0002, 0x5eed_0003, 0x5eed_0004];
@@ -99,6 +99,36 @@ const REGRESSIONS: &[Regression] = &[
         name: "same-length clone edit with the old modification time",
         template: &NODE,
         steps: &[Step::EditClone { keep_mtime: true }],
+    },
+    Regression {
+        name: "vite resolve alias (#4243)",
+        template: &VITE,
+        steps: &[Step::SwapViteAlias { keep_mtime: false }],
+    },
+    Regression {
+        name: "same-length vite alias edit with the old modification time (#4243)",
+        template: &VITE,
+        steps: &[Step::SwapViteAlias { keep_mtime: true }],
+    },
+    Regression {
+        name: "vitest setup file (#4243)",
+        template: &VITE,
+        steps: &[Step::SwapVitestSetup],
+    },
+    Regression {
+        name: "vitest include glob (#4243)",
+        template: &VITE,
+        steps: &[Step::SwapVitestInclude],
+    },
+    Regression {
+        name: "angular sass include path (#4243)",
+        template: &ANGULAR,
+        steps: &[Step::SwapAngularIncludePath],
+    },
+    Regression {
+        name: "angular main entry (#4243)",
+        template: &ANGULAR,
+        steps: &[Step::SwapAngularMain],
     },
 ];
 
