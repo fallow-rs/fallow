@@ -1,3 +1,0 @@
-### Fixed
-
-- **`unused-namespace-members` now credits a member that an inline import type reads.** Before, fallow reported `Legacy.used` as unused when the only read was `type T = typeof import("./lib").Legacy.used`. Fallow now counts the qualifier of an inline import type as a member read, for a value (`typeof import("./lib").N.a`), a type (`import("./lib").N.T`) and a nested namespace (`import("./lib").N.M.T`). A `typeof` of a namespace, for example `typeof import("./lib").Outer.Inner`, counts as a use of every member below it, as `typeof Outer.Inner` does. The parse cache version changes, so the first run after the upgrade parses every file again. (Closes [#4215](https://github.com/fallow-rs/fallow/issues/4215))
