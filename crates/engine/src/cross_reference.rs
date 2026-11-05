@@ -61,8 +61,8 @@ impl CrossReferenceResult {
     }
 
     /// Get clone groups that have at least one combined finding.
-    #[must_use]
-    pub fn affected_group_indices(&self) -> FxHashSet<usize> {
+    #[cfg(test)]
+    fn affected_group_indices(&self) -> FxHashSet<usize> {
         self.combined_findings
             .iter()
             .map(|finding| finding.group_index)

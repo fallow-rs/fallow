@@ -68,7 +68,7 @@ Use these boundaries when adding new product flows:
 | `find_unused_members` | `fallow_api::run_dead_code` |
 | Catalog and dependency-override finders | `fallow_api::run_dead_code` |
 | `find_boundary_violations` | `fallow_api::run_boundary_violations` |
-| `collect_feature_flags`, `correlate_with_dead_code` | `fallow_api::run_feature_flags` for typed output before serialization. The `guarded_dead_exports` field on each flag carries the dead-code correlation. |
+| Removed `collect_feature_flags` and `correlate_with_dead_code` | `fallow_api::run_feature_flags` for typed output before serialization. The `guarded_dead_exports` field on each flag carries the dead-code correlation. |
 
 For duplication clone detection, use
 `fallow_api::run_duplication`. For health, complexity, hotspots, targets, and

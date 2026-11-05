@@ -32,7 +32,7 @@ impl<'b> JsText<'b> for &'b StaticPropertyName<'_> {
 /// The text of a static property name, as [`JsText::text`] gives it, without a
 /// borrow of the name.
 #[must_use]
-pub fn static_name_text(name: StaticPropertyName<'_>) -> Cow<'_, str> {
+pub(crate) fn static_name_text(name: StaticPropertyName<'_>) -> Cow<'_, str> {
     match name {
         StaticPropertyName::Borrowed(name) => name.text(),
         StaticPropertyName::Owned(name) => Cow::Owned(name.into_string()),

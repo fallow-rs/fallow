@@ -24,7 +24,7 @@ thread_local! {
 
 /// Return the bytes hashed on this thread since the last call.
 #[cfg(test)]
-pub fn take_hashed_bytes() -> usize {
+fn take_hashed_bytes() -> usize {
     HASHED_BYTES.with(|hashed| hashed.replace(0))
 }
 

@@ -22,7 +22,7 @@ const DIRECTORY_PREFIXES: &[&str] = &["OgImageCommunity", "OgImageTemplate", "Og
 
 /// Whether `callee` is a call that names an OG image template.
 #[must_use]
-pub fn is_template_call(callee: &str) -> bool {
+pub(crate) fn is_template_call(callee: &str) -> bool {
     TEMPLATE_CALLS.contains(&callee)
 }
 

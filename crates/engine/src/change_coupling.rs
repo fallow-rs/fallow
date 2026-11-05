@@ -19,16 +19,16 @@ use crate::churn::ChurnCommit;
 /// Default maximum number of analyzed files in one commit. A larger commit
 /// is a bulk change (a rename, a format pass, a dependency bump) and creates
 /// pairs that are not real coupling.
-pub const DEFAULT_MAX_FILES_PER_COMMIT: usize = 30;
+const DEFAULT_MAX_FILES_PER_COMMIT: usize = 30;
 /// Default minimum number of commits for each file of a pair.
-pub const DEFAULT_MIN_REVISIONS: u32 = 5;
+const DEFAULT_MIN_REVISIONS: u32 = 5;
 /// Default minimum number of commits that change both files of a pair.
-pub const DEFAULT_MIN_SHARED_REVISIONS: u32 = 5;
+const DEFAULT_MIN_SHARED_REVISIONS: u32 = 5;
 /// Default minimum coupling degree, as a ratio in `[0, 1]`.
-pub const DEFAULT_MIN_DEGREE: f64 = 0.3;
+const DEFAULT_MIN_DEGREE: f64 = 0.3;
 /// Coupling degree at or above which a hidden pair is strong. A strong pair
 /// becomes a refactoring target.
-pub const STRONG_COUPLING_DEGREE: f64 = 0.5;
+pub(crate) const STRONG_COUPLING_DEGREE: f64 = 0.5;
 
 /// Thresholds for change coupling.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -86,13 +86,13 @@ pub struct CoChangePair {
 impl CoChangePair {
     /// True when the degree reaches [`STRONG_COUPLING_DEGREE`].
     #[must_use]
-    pub fn is_strong(&self) -> bool {
+    pub(crate) fn is_strong(&self) -> bool {
         self.degree >= STRONG_COUPLING_DEGREE
     }
 
     /// The other file of the pair, when `path` is one of the two files.
     #[must_use]
-    pub fn partner_of(&self, path: &Path) -> Option<&Path> {
+    fn partner_of(&self, path: &Path) -> Option<&Path> {
         if self.path_a == path {
             Some(&self.path_b)
         } else if self.path_b == path {
@@ -129,7 +129,7 @@ pub struct ChangeHistoryAnalysis {
 
 impl ChangeHistoryAnalysis {
     /// Hidden partners of `path`, strongest first.
-    pub fn partners_of<'a>(
+    pub(crate) fn partners_of<'a>(
         &'a self,
         path: &'a Path,
     ) -> impl Iterator<Item = (&'a Path, &'a CoChangePair)> {
@@ -190,9 +190,9 @@ impl StaticLinkIndex {
         }
     }
 
-    /// Build an index from explicit links, for tests and embedders.
-    #[must_use]
-    pub fn from_links(
+    /// Build an index from explicit links.
+    #[cfg(test)]
+    fn from_links(
         files: &[PathBuf],
         imports: &[(usize, usize)],
         re_exports: &[(usize, usize)],
@@ -232,7 +232,7 @@ impl StaticLinkIndex {
 
     /// True when a static edge connects `a` and `b` in either direction.
     #[must_use]
-    pub fn linked(&self, a: &Path, b: &Path) -> bool {
+    fn linked(&self, a: &Path, b: &Path) -> bool {
         let (Some(&a), Some(&b)) = (self.ids.get(a), self.ids.get(b)) else {
             return false;
         };

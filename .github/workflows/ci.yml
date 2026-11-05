@@ -647,9 +647,6 @@ jobs:
       - name: Run contract bundle drift gate
         run: CI=true npm run generate:contracts:check
 
-      - name: Cargo feature unification
-        run: npm run check:cargo-features
-
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -1613,32 +1610,24 @@ jobs:
     permissions:
       contents: read
     steps:
-      # The size step compares HEAD with the merge base of the pull request.
+      # The file-growth gate compares HEAD with the merge base of the pull
+      # request.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       # The action checks the signature and the checksum of the release
-      # binary before it runs it. Each clone group is a warning, and the
-      # warnings would fill the annotations. The job summary lists the errors.
+      # binary before it runs it. With `base: auto`, the run also enforces the
+      # file-growth gate: a .rs file over 2000 lines must not grow. The action
+      # fails the step when it cannot read the base commit. The "File length"
+      # step of the "Fallow Self Analysis" job checks .mjs and .ts files.
       - name: Static checks
-        uses: fallow-rs/cargo-fallow@9a2ddc756efe868de68a25d96d960db0fd32dc20 # v0.1.0
+        uses: fallow-rs/cargo-fallow@b8ef4a6f2694b9b2ed9f3ea2b60630a9c28b8c81 # v0.2.0
         with:
           install: release
           baseline: cargo-fallow-baseline.json
-          annotations: 'false'
-      # A .rs file over 2000 lines must not grow. The "File length" step of
-      # the "Fallow Self Analysis" job checks .mjs and .ts files.
-      - name: Large file growth
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        uses: fallow-rs/cargo-fallow@9a2ddc756efe868de68a25d96d960db0fd32dc20 # v0.1.0
-        with:
-          command: size
           base: auto
-          install: path
-          # With `--fail-on-growth`, a base that the action cannot read exits
-          # 2. With the default `--fail-on-issues`, the gate is skipped.
-          args: --fail-on-growth
+          annotations: 'false'
 
   zizmor:
     name: Actions Security

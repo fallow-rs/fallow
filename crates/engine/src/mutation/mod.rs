@@ -139,7 +139,7 @@ impl FrameworkConfigExports {
     /// Records that the root-relative `file` is a tool config file. The tool
     /// reads its default export, and a top-level `module.exports = ...`
     /// statement counts as that default export.
-    pub fn insert_config_file(&mut self, file: impl Into<String>) {
+    fn insert_config_file(&mut self, file: impl Into<String>) {
         let file = file.into();
         self.insert(file.clone(), DEFAULT_EXPORT);
         self.config_files.insert(file);
@@ -148,13 +148,13 @@ impl FrameworkConfigExports {
     /// True when [`Self::insert_config_file`] recorded the root-relative
     /// `file`.
     #[must_use]
-    pub fn is_config_file(&self, file: &str) -> bool {
+    fn is_config_file(&self, file: &str) -> bool {
         self.config_files.contains(file)
     }
 
     /// The framework config export names of one root-relative file.
     #[must_use]
-    pub fn exports_for(&self, file: &str) -> Option<&BTreeSet<String>> {
+    fn exports_for(&self, file: &str) -> Option<&BTreeSet<String>> {
         self.files.get(file)
     }
 }
@@ -396,10 +396,11 @@ pub struct MutationPlan {
     pub unmatched_paths: Vec<String>,
 }
 
+#[cfg(test)]
 impl MutationPlan {
     /// The files that `test_file` reaches through static imports, sorted.
     /// Empty for a file that is not a test file of the plan.
-    pub fn test_file_reach_paths<'a>(&'a self, test_file: &str) -> impl Iterator<Item = &'a str> {
+    fn test_file_reach_paths<'a>(&'a self, test_file: &str) -> impl Iterator<Item = &'a str> {
         self.test_file_reach
             .get(test_file)
             .into_iter()
@@ -446,10 +447,7 @@ impl From<EngineError> for MutationPlanError {
 
 /// Builds the mutation plan from the facts of one analysis.
 #[must_use]
-pub fn plan_mutations(
-    inputs: &MutationPlanInputs<'_>,
-    request: &MutationPlanRequest,
-) -> MutationPlan {
+fn plan_mutations(inputs: &MutationPlanInputs<'_>, request: &MutationPlanRequest) -> MutationPlan {
     plan::build(inputs, request)
 }
 

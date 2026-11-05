@@ -42,7 +42,7 @@ impl AnalysisClock {
     /// Resolve the clock for `root`: the environment override first, then
     /// HEAD's committer timestamp, then the system wall clock.
     #[must_use]
-    pub fn for_repo(root: &Path) -> Self {
+    pub(crate) fn for_repo(root: &Path) -> Self {
         if let Some(epoch_secs) = env_epoch_secs() {
             return Self {
                 epoch_secs,
@@ -85,13 +85,13 @@ impl AnalysisClock {
 
     /// True when two runs over the same commit resolve the same epoch.
     #[must_use]
-    pub const fn is_reproducible(self) -> bool {
+    pub(crate) const fn is_reproducible(self) -> bool {
         !matches!(self.source, AnalysisClockSource::WallClock)
     }
 
     /// The epoch `days` days before the clock.
     #[must_use]
-    pub const fn minus_days(self, days: u64) -> u64 {
+    pub(crate) const fn minus_days(self, days: u64) -> u64 {
         self.epoch_secs
             .saturating_sub(days.saturating_mul(SECS_PER_DAY))
     }
@@ -100,14 +100,14 @@ impl AnalysisClock {
     /// day-of-month that the earlier month does not have clamps to its last
     /// day, so "1 month before March 31" is February 28 rather than March 3.
     #[must_use]
-    pub fn minus_months(self, months: u64) -> u64 {
+    pub(crate) fn minus_months(self, months: u64) -> u64 {
         self.shift_months(i64::try_from(months).unwrap_or(i64::MAX))
     }
 
     /// The epoch `years` years before the clock, in UTC. February 29 clamps to
     /// February 28 in a non-leap year.
     #[must_use]
-    pub fn minus_years(self, years: u64) -> u64 {
+    pub(crate) fn minus_years(self, years: u64) -> u64 {
         self.shift_months(
             i64::try_from(years)
                 .unwrap_or(i64::MAX / 12)
@@ -139,7 +139,7 @@ impl AnalysisClock {
 /// the same `--since 2025-06-01` covered a different span on two machines. UTC
 /// makes the window mean one thing everywhere.
 #[must_use]
-pub fn utc_midnight_epoch(iso_date: &str) -> Option<u64> {
+pub(crate) fn utc_midnight_epoch(iso_date: &str) -> Option<u64> {
     let mut parts = iso_date.split('-');
     let year: i64 = parts.next()?.parse().ok()?;
     let month: i64 = parts.next()?.parse().ok()?;
@@ -157,7 +157,7 @@ pub fn utc_midnight_epoch(iso_date: &str) -> Option<u64> {
 
 /// The UTC calendar date of a unix epoch, as `YYYY-MM-DD`.
 #[must_use]
-pub fn utc_date(epoch_secs: u64) -> String {
+pub(crate) fn utc_date(epoch_secs: u64) -> String {
     let days = i64::try_from(epoch_secs / SECS_PER_DAY).unwrap_or(0);
     let (year, month, day) = civil_from_days(days);
     format!("{year:04}-{month:02}-{day:02}")
@@ -165,7 +165,7 @@ pub fn utc_date(epoch_secs: u64) -> String {
 
 /// A unix epoch as an RFC 3339 UTC timestamp, `YYYY-MM-DDTHH:MM:SSZ`.
 #[must_use]
-pub fn utc_timestamp(epoch_secs: u64) -> String {
+pub(crate) fn utc_timestamp(epoch_secs: u64) -> String {
     let time_of_day = epoch_secs % SECS_PER_DAY;
     format!(
         "{}T{:02}:{:02}:{:02}Z",

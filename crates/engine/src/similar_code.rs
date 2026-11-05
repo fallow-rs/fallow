@@ -372,12 +372,6 @@ impl SimilarCodeVectorCache {
         true
     }
 
-    /// Bytes represented by cached vector payloads.
-    #[must_use]
-    pub const fn used_payload_bytes(&self) -> usize {
-        self.used_payload_bytes
-    }
-
     /// Number of cached vectors.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -1651,6 +1645,6 @@ mod tests {
         assert_eq!(cache.get(&key(2, "model@a")), Some([0.0, 1.0].as_slice()));
         assert_eq!(cache.get(&key(3, "model@b")), Some([0.5, 0.5].as_slice()));
         assert_eq!(cache.len(), 2);
-        assert_eq!(cache.used_payload_bytes(), 4 * size_of::<f32>());
+        assert_eq!(cache.used_payload_bytes, 4 * size_of::<f32>());
     }
 }

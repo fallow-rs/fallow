@@ -586,7 +586,7 @@ const fn is_word_byte(byte: u8) -> bool {
 /// it. Matches in comments and strings count, because a text search finds
 /// them too.
 #[must_use]
-pub fn contains_whole_word(source: &str, word: &str) -> bool {
+fn contains_whole_word(source: &str, word: &str) -> bool {
     if word.is_empty() {
         return false;
     }
@@ -623,7 +623,7 @@ fn strip_keyword<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
 /// `export default Name;` and the `Name as default` export specifier.
 /// Returns `None` for an anonymous declaration or an expression.
 #[must_use]
-pub fn default_declaration_name(source: &str, start: usize) -> Option<&str> {
+fn default_declaration_name(source: &str, start: usize) -> Option<&str> {
     let text = source.get(start..)?.trim_start();
     let Some(after_export) = strip_keyword(text, "export") else {
         let name = identifier_prefix(text);
@@ -671,16 +671,10 @@ pub struct ExportDeclaration {
     pub is_re_export: bool,
 }
 
-/// The 1-based line range of the top-level statement that declares each
-/// export of a source file, keyed by the byte offset of the export span.
-///
-/// An `export { name }` specifier maps to the statement that declares `name`
-/// in the same file. For a Vue or Svelte SFC, an Astro component or an MDX
-/// document, only the script sections are parsed, and the statement offsets
-/// map back to the file. A file that does not parse maps to nothing, and the
-/// caller falls back to the export line.
-#[must_use]
-pub fn declaration_line_ranges(
+/// The 1-based line range of the declaring statement of each export, keyed
+/// by the byte offset of the export span.
+#[cfg(test)]
+fn declaration_line_ranges(
     path: &Path,
     source: &str,
     export_starts: &[u32],
@@ -691,12 +685,17 @@ pub fn declaration_line_ranges(
         .collect()
 }
 
-/// The declaring statement of each export of a source file, keyed by the
-/// byte offset of the export span. One parse gives the line range and the
-/// literal-initializer flag. See [`declaration_line_ranges`] for the mapping
-/// rules.
+/// The declaring top-level statement of each export of a source file, keyed
+/// by the byte offset of the export span. One parse gives the 1-based line
+/// range and the literal-initializer flag.
+///
+/// An `export { name }` specifier maps to the statement that declares `name`
+/// in the same file. For a Vue or Svelte SFC, an Astro component or an MDX
+/// document, only the script sections are parsed, and the statement offsets
+/// map back to the file. A file that does not parse maps to nothing, and the
+/// caller falls back to the export line.
 #[must_use]
-pub fn export_declarations(
+pub(crate) fn export_declarations(
     path: &Path,
     source: &str,
     export_starts: &[u32],

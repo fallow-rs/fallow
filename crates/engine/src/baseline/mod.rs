@@ -131,7 +131,9 @@ use legacy_key_builders::{
     baseline_graph_keys, baseline_member_import_keys,
 };
 
-pub use install_state::{install_state_diagnostic, saved_node_modules_state};
+pub use install_state::install_state_diagnostic;
+#[cfg(test)]
+pub(crate) use install_state::saved_node_modules_state;
 pub use prune::{
     BaselinePrune, BaselinePruneRefusal, PrunedEntry, prune_dead_code_baseline,
     prune_dupes_baseline, prune_health_baseline,
@@ -181,7 +183,7 @@ const STALE_WARN_PERCENT: usize = 25;
 /// The threshold alone; [`BaselineStaleness::warning`] owns the surrounding
 /// guards and is what commands call.
 #[must_use]
-pub const fn stale_share_warrants_warning(baseline_entries: usize, stale_entries: usize) -> bool {
+const fn stale_share_warrants_warning(baseline_entries: usize, stale_entries: usize) -> bool {
     stale_entries > 0 && stale_entries * 100 >= baseline_entries * STALE_WARN_PERCENT
 }
 
@@ -413,7 +415,7 @@ impl BaselineKind {
     /// The kind a `kind` token names, or `None` for a token this version does
     /// not know (for example one that only a newer fallow writes).
     #[must_use]
-    pub fn from_token(token: &str) -> Option<Self> {
+    fn from_token(token: &str) -> Option<Self> {
         [Self::DeadCode, Self::Dupes, Self::Health]
             .into_iter()
             .find(|kind| kind.as_str() == token)
@@ -421,7 +423,7 @@ impl BaselineKind {
 
     /// The keys that identify this format in a file carrying no `kind`.
     #[must_use]
-    pub const fn declared_keys(self) -> &'static [&'static str] {
+    const fn declared_keys(self) -> &'static [&'static str] {
         match self {
             Self::DeadCode => BaselineData::REQUIRED_KEYS,
             Self::Dupes => DuplicationBaselineData::DECLARED_KEYS,
@@ -510,10 +512,7 @@ pub fn classify_baseline_file(json: &str, expected: BaselineKind) -> BaselineFil
 /// its format is the one with required fields, so it parses once into a value and
 /// asks here rather than paying for a second parse of the same bytes.
 #[must_use]
-pub fn classify_baseline_value(
-    value: &serde_json::Value,
-    expected: BaselineKind,
-) -> BaselineFileKind {
+fn classify_baseline_value(value: &serde_json::Value, expected: BaselineKind) -> BaselineFileKind {
     let Some(object) = value.as_object() else {
         return BaselineFileKind::NotAnObject;
     };
@@ -746,7 +745,7 @@ impl BaselineData {
     /// them, and a file carrying none of them is not a dead-code baseline
     /// however it is spelled. Deliberately a subset of what the format writes:
     /// the rest are optional and say nothing about which command wrote the file.
-    pub const REQUIRED_KEYS: &'static [&'static str] = &[
+    const REQUIRED_KEYS: &'static [&'static str] = &[
         "unused_files",
         "unused_exports",
         "unused_types",
@@ -755,7 +754,8 @@ impl BaselineData {
     ];
 
     /// Build baseline keys from analysis results under the syntactic identity.
-    pub fn from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
+    #[cfg(test)]
+    fn from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
         Self::from_results_with_identity(
             results,
             root,
@@ -869,7 +869,7 @@ impl BaselineData {
     }
 
     /// Total number of entries across all categories.
-    pub fn total_entries(&self) -> usize {
+    fn total_entries(&self) -> usize {
         self.unused_files.len()
             + self.unused_exports.len()
             + self.unused_types.len()
@@ -1801,7 +1801,7 @@ impl BaselineFilterContext<'_> {
 ///
 /// A baseline with an `identity` matches canonical keys by count. A legacy
 /// baseline matches each entry in its old form, as older fallow versions did.
-pub fn filter_new_issues(
+fn filter_new_issues(
     results: crate::results::AnalysisResults,
     baseline: &BaselineData,
     root: &Path,
@@ -1957,12 +1957,12 @@ pub struct DuplicationBaselineData {
     pub clone_fingerprints: Vec<String>,
     /// Normalized content keys used by current binaries.
     #[serde(default)]
-    pub normalized_clone_fingerprints: Vec<String>,
+    pub(crate) normalized_clone_fingerprints: Vec<String>,
 }
 
 impl DuplicationBaselineData {
     /// The keys this format writes, for [`declares_baseline_format`].
-    pub const DECLARED_KEYS: &'static [&'static str] = &[
+    const DECLARED_KEYS: &'static [&'static str] = &[
         "clone_groups",
         "clone_fingerprints",
         "normalized_clone_fingerprints",
@@ -2249,7 +2249,7 @@ impl HealthBaselineData {
     /// The keys this format writes, for [`declares_baseline_format`]. A health
     /// baseline omits the buckets it has nothing for, so a file carrying any
     /// one of these is health's own.
-    pub const DECLARED_KEYS: &'static [&'static str] = &[
+    const DECLARED_KEYS: &'static [&'static str] = &[
         "findings",
         "finding_counts",
         "identity_finding_counts",

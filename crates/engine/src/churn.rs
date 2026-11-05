@@ -123,7 +123,7 @@ impl ChurnWindow {
     /// Stable cache key for this window. Absolute for a date, the duration
     /// token (`"1y"`, `"90d"`) for a relative span.
     #[must_use]
-    pub fn cache_token(&self) -> String {
+    fn cache_token(&self) -> String {
         match self {
             Self::Relative { count, unit } => format!("{count}{}", unit.token()),
             Self::Date(date) => date.clone(),
@@ -134,7 +134,7 @@ impl ChurnWindow {
     /// The oldest commit timestamp this window includes, resolved against
     /// `clock`. `None` for imported churn, which has no cutoff to apply.
     #[must_use]
-    pub fn cutoff_secs(&self, clock: &crate::clock::AnalysisClock) -> Option<u64> {
+    fn cutoff_secs(&self, clock: &crate::clock::AnalysisClock) -> Option<u64> {
         match self {
             Self::Relative { count, unit } => Some(match unit {
                 ChurnWindowUnit::Days => clock.minus_days(*count),
@@ -293,16 +293,6 @@ pub fn parse_since(input: &str) -> Result<SinceDuration, String> {
         unit,
         format!("{num} {label}{plural}"),
     ))
-}
-
-/// Analyze git churn for files in the given root directory.
-///
-/// Returns `None` if git is not available or the directory is not a git repository.
-pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
-    let clock = crate::clock::AnalysisClock::for_repo(root);
-    let shallow = is_shallow_clone(root);
-    let state = analyze_churn_events(root, since, None, &clock)?;
-    Some(build_churn_result(state, shallow, clock))
 }
 
 /// A `fallow-churn/v1` import document: a normalized, VCS-agnostic stand-in for
@@ -1465,6 +1455,15 @@ fn split_number_unit(input: &str) -> Result<(&str, &str), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Analyze git churn for the files in `root`. `None` means no git or no repository.
+    #[cfg(unix)]
+    fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
+        let clock = crate::clock::AnalysisClock::for_repo(root);
+        let shallow = is_shallow_clone(root);
+        let state = analyze_churn_events(root, since, None, &clock)?;
+        Some(build_churn_result(state, shallow, clock))
+    }
 
     #[test]
     fn parse_since_months_short() {

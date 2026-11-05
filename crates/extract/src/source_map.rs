@@ -20,14 +20,14 @@ pub struct ExtractionResult {
 impl ExtractionResult {
     /// Build a mapped result for one contiguous slice.
     #[must_use]
-    pub fn contiguous(body: &str, original_start: usize) -> Self {
+    pub(crate) fn contiguous(body: &str, original_start: usize) -> Self {
         let mut result = Self::default();
         result.push_mapped(body, original_start);
         result
     }
 
     /// Append original source text to the extracted body.
-    pub fn push_mapped(&mut self, text: &str, original_start: usize) {
+    pub(crate) fn push_mapped(&mut self, text: &str, original_start: usize) {
         if text.is_empty() {
             return;
         }

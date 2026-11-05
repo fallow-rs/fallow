@@ -12,11 +12,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "03833dac044557f1"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "0427ee26dc91f4be"
     },
     {
@@ -57,27 +52,12 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "18042870b8455892"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "1822a909af48c3f0"
     },
     {
       "check": "complexity",
       "rule": "complexity",
       "id": "18a9a412ec408e17"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "1a9dde629e8c1fbd"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "1c1252bb30c4c955"
     },
     {
       "check": "complexity",
@@ -122,11 +102,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "35d5c1a11e64a3c0"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "3917df6cca74c58a"
     },
     {
@@ -157,22 +132,12 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "3ebeca62c0872011"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "402da34283e7eb49"
     },
     {
       "check": "complexity",
       "rule": "complexity",
       "id": "449e6458233de07d"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "44ccf654a2f5add5"
     },
     {
       "check": "complexity",
@@ -208,11 +173,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "4d063b95061c1ebf"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "4d81cbab4a077fa3"
     },
     {
       "check": "complexity",
@@ -302,11 +262,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "6159678a30f78aa5"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "63259e035312f963"
     },
     {
@@ -342,11 +297,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "6be93dfb8dad93c2"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "6c6093ba91ceed7a"
     },
     {
@@ -358,11 +308,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "7068787a196f1ee7"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "72a4b0bc35e7cfa3"
     },
     {
       "check": "complexity",
@@ -383,11 +328,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "7ac18262691ffde2"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "7b3ad1e3f703bcbb"
     },
     {
       "check": "complexity",
@@ -418,16 +358,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "8289fe4301440ff9"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "8329c70baafb29b3"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "83bb87d9f9671844"
     },
     {
       "check": "complexity",
@@ -527,11 +457,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "9b1f9fa7c12100b9"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "9bf8f4d38b6d3776"
     },
     {
@@ -567,17 +492,7 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "a4abb66de2b26a65"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "aa78b1cdb384fb75"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "ac3b40e394e1a94a"
     },
     {
       "check": "complexity",
@@ -597,17 +512,7 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "b3fcc07c4fe34b88"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "b94395ac93d1e518"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "b951aaa9fb3f2b3e"
     },
     {
       "check": "complexity",
@@ -687,11 +592,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "d2cc9bf08fc320e5"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "d3eed29f34eeb9d5"
     },
     {
@@ -727,11 +627,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "d9b122745e705f51"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "da4b457ad39911da"
     },
     {
@@ -743,11 +638,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "e2b085e32decfd29"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "e39828c6fcbeabc8"
     },
     {
       "check": "complexity",
@@ -807,11 +697,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "f475bbc76946f6a6"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "f64002e3460a722b"
     },
     {
@@ -822,22 +707,7 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "f8d5093308965862"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "f9715d09a41f3ca2"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "f9f7461444f46b9e"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "fa006b6c559dbff5"
     }
   ]
 }

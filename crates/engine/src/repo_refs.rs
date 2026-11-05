@@ -23,7 +23,7 @@ pub use crate::base_worktree_registration::*;
 const RAW_MATERIALIZATION_MARKER: &str = "fallow-raw-materialized-v1";
 
 /// Host directories shared with detached audit base views.
-pub const AUDIT_MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
+const AUDIT_MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
 const AUDIT_WORKSPACE_GENERATED_CONTEXT_DIRS: &[&str] = &[".nuxt", ".astro"];
 
 const AUDIT_LOCKFILES: &[&str] = &[

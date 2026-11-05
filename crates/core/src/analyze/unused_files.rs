@@ -7,7 +7,7 @@ use super::predicates::{is_barrel_with_reachable_sources, is_config_file, is_htm
 
 /// The reported unused files only. Tests read this shape.
 #[cfg(test)]
-pub fn find_unused_files(
+fn find_unused_files(
     graph: &ModuleGraph,
     suppressions: &SuppressionContext<'_>,
 ) -> Vec<UnusedFile> {

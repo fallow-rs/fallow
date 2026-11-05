@@ -49,7 +49,7 @@ const REMOTE_NAME_KEYS: &[&str] = &["name", "alias"];
 /// Returns an empty list without parsing when the source does not name a
 /// runtime package, which is the case for almost every file.
 #[must_use]
-pub fn extract_federation_runtime_facts(path: &Path, source: &str) -> Vec<SemanticFact> {
+pub(crate) fn extract_federation_runtime_facts(path: &Path, source: &str) -> Vec<SemanticFact> {
     if !RUNTIME_PACKAGES
         .iter()
         .any(|package| source.contains(package))

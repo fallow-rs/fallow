@@ -20,7 +20,8 @@ mod analysis_data;
 mod assembly;
 mod baseline_io;
 mod branching;
-pub use branching::{BranchingByFile, branching_by_file};
+pub use branching::BranchingByFile;
+use branching::branching_by_file;
 mod change_coupling_section;
 mod churn_file;
 mod component_rollup;
@@ -688,83 +689,6 @@ fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> b
         && !options.hotspots
         && !options.targets
         && !options.trend
-}
-
-/// Input for deriving effective programmatic complexity sections.
-#[derive(Debug, Clone)]
-pub struct ComplexitySectionOptions {
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    ownership: bool,
-    targets: bool,
-    css: bool,
-    score: bool,
-}
-
-/// Derived section selection for programmatic health / complexity runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DerivedComplexityOptions {
-    any_section: bool,
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    ownership: bool,
-    targets: bool,
-    force_full: bool,
-    score_only_output: bool,
-    score: bool,
-}
-
-/// Derive effective programmatic health / complexity section flags.
-#[must_use]
-pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> DerivedComplexityOptions {
-    let requested_hotspots = options.hotspots || options.ownership;
-    let sections = derive_health_sections(&HealthSectionOptions {
-        output: OutputFormat::Human,
-        complexity: options.complexity,
-        file_scores: options.file_scores,
-        coverage_gaps: options.coverage_gaps,
-        hotspots: requested_hotspots,
-        targets: options.targets,
-        css: options.css,
-        score: options.score,
-        score_gate: false,
-        snapshot_requested: false,
-        trend: false,
-    });
-
-    DerivedComplexityOptions {
-        any_section: sections.any_section,
-        complexity: sections.complexity,
-        file_scores: sections.file_scores,
-        coverage_gaps: sections.coverage_gaps,
-        hotspots: sections.hotspots,
-        ownership: options.ownership && sections.hotspots,
-        targets: sections.targets,
-        force_full: sections.force_full,
-        score_only_output: sections.score_only_output,
-        score: sections.score,
-    }
-}
-
-/// Normalized programmatic complexity / health inputs shared by API, NAPI, and
-/// engine-backed runners.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ComplexityRunOptions<'a> {
-    thresholds: HealthThresholdOverrides,
-    top: Option<usize>,
-    sort: HealthSort,
-    complexity_breakdown: bool,
-    sections: DerivedComplexityOptions,
-    ownership_emails: Option<EmailMode>,
-    effort: Option<EffortEstimate>,
-    css: bool,
-    since: Option<&'a str>,
-    min_commits: Option<u32>,
-    coverage_inputs: HealthCoverageInputs<'a>,
 }
 
 /// Command-neutral runtime coverage input for health analysis.

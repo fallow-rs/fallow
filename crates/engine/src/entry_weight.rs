@@ -21,7 +21,7 @@ use rustc_hash::FxHashMap;
 use crate::session::AnalysisSession;
 
 /// Dominating imports reported per entry.
-pub const DOMINATING_IMPORT_LIMIT: usize = 10;
+const DOMINATING_IMPORT_LIMIT: usize = 10;
 
 /// Stylesheet extensions whose bytes also count as `eager_css_bytes`.
 const STYLESHEET_EXTENSIONS: &[&str] = &["css", "scss", "sass", "less"];
@@ -57,7 +57,7 @@ pub fn compute_entry_weight(
 
 /// Build the listing from a module graph and the discovered files.
 #[must_use]
-pub fn entry_weight_listing(
+fn entry_weight_listing(
     graph: &ModuleGraph,
     files: &[DiscoveredFile],
     entry_points: &[EntryPoint],

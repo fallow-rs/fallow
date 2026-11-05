@@ -276,7 +276,7 @@ const SPRAWL_TERM_CAP: f64 = 5.0;
 /// non-atomic counts equal the summary aggregates and `atomic_declarations` is 0,
 /// so the grade is byte-identical to the pre-object-CSS-in-JS behavior.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct StylingScoringInputs {
+pub(crate) struct StylingScoringInputs {
     /// Total Tailwind `@theme` tokens DEFINED across the project (the population
     /// from which `summary.unused_theme_tokens` is a subset). Denominator for the
     /// per-population token-death ratio in `dead_surface`.
@@ -298,9 +298,10 @@ pub struct StylingScoringInputs {
 impl StylingScoringInputs {
     /// Build inputs for a report with no atomic object CSS-in-JS: the non-atomic
     /// surface IS the whole summary, so the grade matches the pre-3c behavior.
-    /// Used by the back-compat [`compute_styling_health`] entry and unit tests.
+    /// Only the unit tests use it.
+    #[cfg(test)]
     #[must_use]
-    pub fn from_report(report: &CssAnalyticsReport, theme_tokens_defined: u32) -> Self {
+    fn from_report(report: &CssAnalyticsReport, theme_tokens_defined: u32) -> Self {
         let s = &report.summary;
         Self {
             theme_tokens_defined,
@@ -322,11 +323,9 @@ impl StylingScoringInputs {
 /// `theme_tokens_defined` is the total number of Tailwind `@theme` tokens DEFINED
 /// across the project. It is an internal scoring input only, NOT a serialized
 /// field, so the wire contract / schema is unchanged.
+#[cfg(test)]
 #[must_use]
-pub fn compute_styling_health(
-    report: &CssAnalyticsReport,
-    theme_tokens_defined: u32,
-) -> StylingHealth {
+fn compute_styling_health(report: &CssAnalyticsReport, theme_tokens_defined: u32) -> StylingHealth {
     compute_styling_health_with_inputs(
         report,
         &StylingScoringInputs::from_report(report, theme_tokens_defined),

@@ -119,7 +119,7 @@ impl PackageChangeScope {
 
     /// Authored workspace keys and their refs. A key is project-relative and
     /// uses the path that discovery reports, also for a symlinked workspace.
-    pub fn configured_baselines(&self) -> impl Iterator<Item = (&str, &str)> {
+    pub(crate) fn configured_baselines(&self) -> impl Iterator<Item = (&str, &str)> {
         self.workspaces.values().filter_map(|baseline| {
             if let WorkspaceBaseline::Changed { key, reference, .. } = baseline {
                 Some((key.as_str(), reference.as_str()))

@@ -32,15 +32,14 @@ pub type DefaultIgnoreSkips = fallow_types::duplicates::DefaultIgnoreSkips;
 pub type DuplicationReport = fallow_types::duplicates::DuplicationReport;
 /// Engine alias for [`fallow_types::duplicates::DuplicationStats`].
 pub type DuplicationStats = fallow_types::duplicates::DuplicationStats;
-/// Engine alias for [`fallow_types::duplicates::RefactoringKind`].
-pub type RefactoringKind = fallow_types::duplicates::RefactoringKind;
 /// Engine alias for [`fallow_types::duplicates::RefactoringSuggestion`].
 pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
 
 pub use detector::{
     CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
-    dominant_identifier, group_refactoring_suggestion, is_unparsed_collision_key,
+    dominant_identifier,
 };
+pub(crate) use detector::{group_refactoring_suggestion, is_unparsed_collision_key};
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.
 pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
@@ -55,7 +54,7 @@ pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
 /// A scope filter (`--changed-since`, `--workspace`, a diff) narrows the corpus,
 /// so `stats` describes the narrowed corpus after this call. A presentation cap
 /// such as `--top` must not call this.
-pub fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
+pub(crate) fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
     refresh_clone_families(report, root);
     report.stats = recompute_stats(report);
     report.sort();

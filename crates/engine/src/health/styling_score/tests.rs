@@ -125,7 +125,7 @@ fn dead_surface_token_death_term_is_per_population() {
     // `.min(TOKEN_DEATH_TERM_CAP)` bounds the term even when a caller passes a
     // population smaller than the unused count and the ratio exceeds 1.0;
     // production cannot reach that state (both counts derive from the same
-    // `theme_token_definers` map), but `compute_styling_health` is `pub`.
+    // `theme_token_definers` map), but the scoring function takes any counts.
     report.summary.unused_theme_tokens = 50;
     let styling = compute_styling_health(&report, 20);
     approx(styling.penalties.dead_surface, TOKEN_DEATH_TERM_CAP);

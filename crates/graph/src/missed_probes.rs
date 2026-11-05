@@ -138,7 +138,7 @@ impl MissedProbes {
 
     /// True when a missed path exists below `root` now.
     #[must_use]
-    pub fn any_exists(&self, root: &Path) -> bool {
+    pub(crate) fn any_exists(&self, root: &Path) -> bool {
         let check = |entry: &MissedDir| {
             let dir = root.join(&entry.dir);
             // A missing directory holds none of the names, and the creation
@@ -257,7 +257,7 @@ fn is_below_node_modules(relative: &Path) -> bool {
 /// True when a path of `found` (root-relative) does not exist below `root`
 /// now.
 #[must_use]
-pub fn any_missing(root: &Path, found: &[String]) -> bool {
+pub(crate) fn any_missing(root: &Path, found: &[String]) -> bool {
     let check = |relative: &String| root.join(relative).metadata().is_err();
     if found.len() < PARALLEL_MIN {
         return found.iter().any(check);

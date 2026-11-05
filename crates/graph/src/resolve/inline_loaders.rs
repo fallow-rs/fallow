@@ -249,7 +249,7 @@ impl<'a> InlineLoaderRequest<'a> {
 
     /// Whether the request must use the loader syntax (it has a prefix).
     #[must_use]
-    pub const fn has_prefix(&self) -> bool {
+    pub(crate) const fn has_prefix(&self) -> bool {
         self.has_prefix
     }
 
@@ -260,7 +260,7 @@ impl<'a> InlineLoaderRequest<'a> {
     /// reads the resource file. In `raw-loader!sass-loader!./a.scss` Sass
     /// compiles the file and follows its imports first.
     #[must_use]
-    pub fn reads_resource_as_asset(&self) -> bool {
+    pub(crate) fn reads_resource_as_asset(&self) -> bool {
         self.loaders
             .last()
             .is_some_and(|loader| ASSET_LOADERS.contains(&loader_package_name(loader)))
@@ -273,7 +273,7 @@ impl<'a> InlineLoaderRequest<'a> {
     /// the rest of the request as a separate bundle, and the loaders to its
     /// left only see its output.
     #[must_use]
-    pub fn runs_resource_in_another_thread(&self) -> bool {
+    pub(crate) fn runs_resource_in_another_thread(&self) -> bool {
         self.loaders
             .iter()
             .any(|loader| THREAD_LOADERS.contains(&loader_package_name(loader)))

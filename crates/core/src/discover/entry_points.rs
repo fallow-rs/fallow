@@ -14,10 +14,9 @@ mod manual_entries;
 #[path = "plugin_entries.rs"]
 mod plugin_entries;
 use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
-pub use plugin_entries::{
-    discover_plugin_entry_point_sets, discover_plugin_entry_point_sets_timed,
-    discover_plugin_entry_points,
-};
+#[cfg(test)]
+use plugin_entries::discover_plugin_entry_point_sets;
+pub use plugin_entries::{discover_plugin_entry_point_sets_timed, discover_plugin_entry_points};
 
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
 
@@ -121,7 +120,7 @@ impl CategorizedEntryPoints {
         }
     }
 
-    pub fn extend_support<I>(&mut self, entries: I)
+    pub(crate) fn extend_support<I>(&mut self, entries: I)
     where
         I: IntoIterator<Item = EntryPoint>,
     {
@@ -1430,21 +1429,6 @@ pub fn discover_dynamically_loaded_entry_points(
     entries
 }
 
-/// Pre-compile a set of glob patterns for efficient matching against many paths.
-#[must_use]
-pub fn compile_glob_set(patterns: &[String]) -> Option<globset::GlobSet> {
-    if patterns.is_empty() {
-        return None;
-    }
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in patterns {
-        if let Ok(glob) = fallow_config::compile_path_glob(pattern) {
-            builder.add(glob);
-        }
-    }
-    builder.build().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1475,41 +1459,6 @@ mod tests {
             );
         }
 
-        /// compile_glob_set should never panic on arbitrary well-formed glob patterns.
-        #[test]
-        fn compile_glob_set_no_panic(
-            patterns in prop::collection::vec("[a-zA-Z0-9_*/.]{1,30}", 0..10),
-        ) {
-            let _ = compile_glob_set(&patterns);
-        }
-    }
-
-    #[test]
-    fn compile_glob_set_empty_input() {
-        assert!(
-            compile_glob_set(&[]).is_none(),
-            "empty patterns should return None"
-        );
-    }
-
-    #[test]
-    fn compile_glob_set_valid_patterns() {
-        let patterns = vec!["**/*.ts".to_string(), "src/**/*.js".to_string()];
-        let set = compile_glob_set(&patterns);
-        assert!(set.is_some(), "valid patterns should compile");
-        let set = set.unwrap();
-        assert!(set.is_match("src/foo.ts"));
-        assert!(set.is_match("src/bar.js"));
-        assert!(!set.is_match("src/bar.py"));
-    }
-
-    #[test]
-    fn compile_glob_set_keeps_star_within_a_single_path_segment() {
-        let patterns = vec!["composables/*.{ts,js}".to_string()];
-        let set = compile_glob_set(&patterns).expect("pattern should compile");
-
-        assert!(set.is_match("composables/useFoo.ts"));
-        assert!(!set.is_match("composables/nested/useFoo.ts"));
     }
 
     #[test]

@@ -327,7 +327,6 @@ pub(super) fn typed_type_aware(param: Option<bool>) -> fallow_api::TypeAwareOpti
 /// The typed route refused a run that only the CLI reproduces: the
 /// environment or the project config turns on type-aware analysis, or the
 /// config sets an `audit` baseline key. The tool then runs the CLI.
-// fallow-ignore-next-line unnecessary-restricted-visibility -- a doc link in audit.rs names it: https://github.com/fallow-rs/cargo-fallow/issues/72
 pub(super) fn typed_error_needs_cli(error: &ProgrammaticError) -> bool {
     matches!(
         error.code.as_deref(),

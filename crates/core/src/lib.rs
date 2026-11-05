@@ -25,7 +25,6 @@ pub mod discover;
 pub(crate) mod errors;
 mod external_style_usage;
 pub mod extract;
-pub mod git_env;
 mod graph_cache_key;
 mod package_assets;
 mod package_credits;
@@ -38,6 +37,7 @@ pub(crate) mod scripts;
 /// Public hook for the fuzz harness (fuzz/fuzz_targets/fuzz_scripts.rs) only;
 /// not a supported API. The module itself stays crate-private.
 #[doc(hidden)]
+// fallow-ignore-next-line unnecessary-public -- fuzz/ calls it: https://github.com/fallow-rs/cargo-fallow/issues/128
 pub use scripts::parse_script;
 pub mod suppress;
 
@@ -633,7 +633,7 @@ impl<'a> AnalysisSession<'a> {
         );
         trace_pipeline_profile(&profile);
 
-        let trace_provenance = plugins::build_trace_provenance(
+        let trace_provenance = plugins::trace_provenance::build_trace_provenance(
             &self.config.root,
             self.files(),
             self.workspaces(),
@@ -778,7 +778,7 @@ impl DeadCodeBackendPrelude<'_> {
         modules: &[extract::ModuleInfo],
         retain_graph: bool,
     ) -> fallow_types::trace::TraceProvenance {
-        plugins::build_trace_provenance(
+        plugins::trace_provenance::build_trace_provenance(
             &self.config.root,
             self.discovery.files(),
             self.discovery.workspaces(),

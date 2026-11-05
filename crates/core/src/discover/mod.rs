@@ -12,14 +12,14 @@ use fallow_config::{PackageJson, ResolvedConfig};
 use rustc_hash::FxHashSet;
 
 pub use entry_points::{
-    CategorizedEntryPoints, compile_glob_set, discover_dynamically_loaded_entry_points,
-    discover_entry_points, discover_plugin_entry_point_sets, discover_plugin_entry_points,
+    CategorizedEntryPoints, discover_entry_points, discover_plugin_entry_points,
 };
 pub(crate) use entry_points::{
     DiscoveredPaths, EntryPointDiscovery, ScriptWorkspaces, collect_workspace_packages,
-    discover_plugin_entry_point_sets_timed, discover_root_entry_points,
-    discover_workspace_package_entry_points, resolve_entry_path_with_discovered,
-    resolve_entry_path_with_tracking, warn_skipped_entry_summary, workspace_runtime_script_seeds,
+    discover_dynamically_loaded_entry_points, discover_plugin_entry_point_sets_timed,
+    discover_root_entry_points, discover_workspace_package_entry_points,
+    resolve_entry_path_with_discovered, resolve_entry_path_with_tracking,
+    warn_skipped_entry_summary, workspace_runtime_script_seeds,
 };
 pub(crate) use entry_report::{record_entry_pattern_effect, summarize_entry_points};
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -27,11 +27,11 @@ pub(crate) use infrastructure::discover_infrastructure_entry_points;
 pub(crate) use orphan_declarations::find_orphan_module_declaration_files;
 pub(crate) use output_entry_source::output_entry_source_file;
 pub(crate) use parse_scripts::CommandRefContext;
+pub(crate) use walk::discover_files_with_additional_hidden_dirs;
 pub use walk::{
     DiscoveredSources, HiddenDirMatch, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS,
     SOURCE_EXTENSIONS, discover_files, discover_files_and_config_candidates,
-    discover_files_config_candidates_and_diagnostics, discover_files_with_additional_hidden_dirs,
-    is_allowed_hidden_dir,
+    discover_files_config_candidates_and_diagnostics, is_allowed_hidden_dir,
 };
 
 /// Collect package-scoped hidden directory traversal rules for active plugins.
