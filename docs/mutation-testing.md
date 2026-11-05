@@ -1115,6 +1115,25 @@ detection read its imports. A project whose only test entry points are type
 tests has `no_test_files: true`. A file that only type tests reach has no
 coverage, and its mutants get the test reach `none-file`.
 
+### Bench files and test helpers
+
+Two other kinds of test entry points are not test files of the plan, because
+`vitest run`, `node --test` and `bun test` do not run them:
+
+- a Vitest bench file (`*.bench.*` or `*.benchmark.*`). `vitest bench` runs
+  it. A bench file with a test marker, such as `perf.bench.test.ts`, stays a
+  test file;
+- a test helper: a module below a `__tests__` directory that another module
+  imports, and whose name has no test marker of a supported runner (`.test.`,
+  `.spec.`, `_test.`, `-test.`, `_spec.`, or a `test.` or `test-` prefix). An
+  example is `src/__tests__/utils.ts`.
+
+Without this rule the runner did not list these files, and each run was
+`partial` with `test-files-not-discovered`. A test file that a custom
+`include` selects is never imported, so it stays a test file. The rules of
+type tests for `no_test_files` and for a file that only these entry points
+reach apply the same way.
+
 ## Runner notes
 
 `runner.notes` lists facts of the runner setup that limit the result. The key

@@ -102,9 +102,10 @@ struct Context<'a> {
     /// The test entry points that reach each selected test-reachable file,
     /// with the `vi.mock` replacement mask of each test applied.
     test_entries: FxHashMap<FileId, Vec<FileId>>,
-    /// The test-reachable files that only type tests reach. No runner test
-    /// covers them.
-    type_test_only: FxHashSet<FileId>,
+    /// The test-reachable files that only entry points reach that no test
+    /// runner executes: type tests, bench files and test helper modules. No
+    /// runner test covers them.
+    runner_unreached: FxHashSet<FileId>,
     /// The files that load a database client package.
     database_files: FxHashSet<FileId>,
 }
@@ -151,7 +152,7 @@ pub(super) fn build(
             ranges: None,
         },
         test_entries: FxHashMap::default(),
-        type_test_only: FxHashSet::default(),
+        runner_unreached: FxHashSet::default(),
         database_files: database_files(graph),
     };
     let (candidates, unmatched_paths) = select_files(&context);
@@ -163,9 +164,9 @@ pub(super) fn build(
     context.test_entries = graph.test_entry_points_reaching(&reachable);
     for (&file_id, entries) in &mut context.test_entries {
         let before = entries.len();
-        entries.retain(|&entry| !is_type_test_entry(graph, inputs.root, entry));
+        entries.retain(|&entry| is_runner_test_entry(graph, inputs.root, entry));
         if before > 0 && entries.is_empty() {
-            context.type_test_only.insert(file_id);
+            context.runner_unreached.insert(file_id);
         }
     }
     let outcomes: Vec<FileOutcome> = candidates
@@ -208,7 +209,7 @@ pub(super) fn build(
         no_test_files: graph
             .test_entry_points
             .iter()
-            .all(|&entry| is_type_test_entry(graph, inputs.root, entry)),
+            .all(|&entry| !is_runner_test_entry(graph, inputs.root, entry)),
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,
         unmatched_paths,
@@ -337,7 +338,7 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         Err(MutationError::TooLarge) => return skipped(SkipReason::TooLarge),
     };
     let covered = context.graph.is_test_reachable(candidate.file_id)
-        && !context.type_test_only.contains(&candidate.file_id);
+        && !context.runner_unreached.contains(&candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
     attach_test_reach(context, candidate, source, covered, &mut mutants);
@@ -610,7 +611,7 @@ fn attach_test_reach(
         return;
     }
     // No test that runs loads a file that only type tests reach.
-    if context.type_test_only.contains(&candidate.file_id) {
+    if context.runner_unreached.contains(&candidate.file_id) {
         for entry in mutants
             .iter_mut()
             .filter(|entry| !matches!(entry.planned.disposition, MutantDisposition::Pruned(_)))
@@ -897,6 +898,67 @@ fn static_test_files(context: &Context<'_>, file_id: FileId) -> Vec<String> {
     tests.into_iter().collect()
 }
 
+/// File-name markers of a Vitest benchmark file (`add.bench.ts`). `vitest
+/// bench` runs these files, and `vitest run` never does.
+const BENCH_FILE_MARKERS: &[&str] = &[".bench.", ".benchmark."];
+
+/// The directory of Jest-style tests. A file below it without a test-file
+/// marker is a test helper when another test entry point imports it.
+const JEST_TEST_DIR_NAME: &str = "__tests__";
+
+/// File-name markers of a test file in the default patterns of Vitest,
+/// `node --test` and `bun test`.
+const TEST_FILE_MARKERS: &[&str] = &[".test.", ".spec.", "_test.", "-test.", "_spec."];
+
+/// File-name prefixes of a test file in the default patterns of
+/// `node --test` (`test.js`, `test-name.js`).
+const TEST_FILE_PREFIXES: &[&str] = &["test.", "test-"];
+
+/// True when a test runner executes the test entry point. A type test, a
+/// bench file and a test helper module are entry points of the module graph,
+/// but `vitest run`, `node --test` and `bun test` do not run them, so they
+/// never cover a mutant and the runner never lists them.
+fn is_runner_test_entry(graph: &ModuleGraph, root: &Path, entry: FileId) -> bool {
+    let Some(node) = graph.modules.get(entry.0 as usize) else {
+        return false;
+    };
+    let path = relative_key_path(&node.path, root);
+    !is_type_test_path(&path) && !is_bench_path(&path) && !is_test_helper(graph, entry, &path)
+}
+
+/// True for a bench file that is not also a test file. `perf.bench.test.ts`
+/// matches the Vitest default include, so `vitest run` runs it.
+fn is_bench_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let name = lower.rsplit('/').next().unwrap_or_default();
+    BENCH_FILE_MARKERS
+        .iter()
+        .any(|marker| name.contains(marker))
+        && !has_test_file_marker(name)
+}
+
+/// True when a lowercase file name matches a default test pattern of a
+/// supported runner.
+fn has_test_file_marker(name: &str) -> bool {
+    TEST_FILE_MARKERS.iter().any(|marker| name.contains(marker))
+        || TEST_FILE_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+}
+
+/// True for a module below `__tests__` that has no test-file marker and that
+/// another module imports, for example `src/__tests__/utils.ts`. The Vitest
+/// default include does not match it. A test file that a custom include
+/// selects is never imported, so it stays a test.
+fn is_test_helper(graph: &ModuleGraph, entry: FileId, path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let mut segments = lower.split('/').rev();
+    let name = segments.next().unwrap_or_default();
+    !has_test_file_marker(name)
+        && segments.any(|segment| segment == JEST_TEST_DIR_NAME)
+        && !graph.importers_of(entry).is_empty()
+}
+
 /// File-name markers of a type test (`index.test-d.ts`, `a.spec-d.ts`).
 const TYPE_TEST_FILE_MARKERS: &[&str] = &[".test-d.", ".spec-d."];
 
@@ -906,16 +968,6 @@ const TYPE_TEST_DIR_NAME: &str = "test-d";
 /// The extensions of a type test below [`TYPE_TEST_DIR_NAME`]. `tsd` reads
 /// TypeScript files only.
 const TYPE_TEST_DIR_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".mts", ".cts"];
-
-/// True when the test entry point is a type test (`tsd`, `expect-type`, the
-/// Vitest type-check files). A compiler checks a type test, and no test
-/// runner executes it, so it never covers a mutant.
-fn is_type_test_entry(graph: &ModuleGraph, root: &Path, entry: FileId) -> bool {
-    graph
-        .modules
-        .get(entry.0 as usize)
-        .is_some_and(|node| is_type_test_path(&relative_key_path(&node.path, root)))
-}
 
 fn is_type_test_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
@@ -1002,6 +1054,28 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bench_file_with_a_test_marker_stays_a_test_file() {
+        assert!(is_bench_path("benchmarks/add.bench.ts"));
+        assert!(is_bench_path("src/Add.Benchmark.js"));
+        assert!(!is_bench_path("src/perf.bench.test.ts"));
+        assert!(!is_bench_path("src/add.test.ts"));
+        for name in [
+            "a.test.js",
+            "a.spec.ts",
+            "a_test.js",
+            "a-test.mjs",
+            "a_spec.ts",
+            "test.js",
+            "test-a.js",
+        ] {
+            assert!(has_test_file_marker(name), "{name}");
+        }
+        for name in ["utils.ts", "setup.js", "contest.ts", "latest.js"] {
+            assert!(!has_test_file_marker(name), "{name}");
+        }
+    }
 
     #[test]
     fn type_tests_are_named_by_marker_or_test_d_directory() {

@@ -406,6 +406,23 @@ fn a_test_that_mocks_the_file_is_not_a_static_test_of_it() {
 }
 
 #[test]
+fn a_test_helper_module_and_a_bench_file_are_not_static_test_files() {
+    let plan = plan_all(&fixture("mutation-plan-test-helpers"));
+    let add = plan
+        .files
+        .iter()
+        .find(|file| file.path == "src/add.js")
+        .expect("add is planned");
+    assert_eq!(add.static_test_files, vec!["src/__tests__/add.test.js"]);
+    assert_eq!(plan.test_files, vec!["src/__tests__/add.test.js"]);
+    assert_eq!(
+        dispositions(&plan).get("src/fast.js"),
+        Some(&set(&[NO_COVERAGE])),
+        "only the bench file reaches it"
+    );
+}
+
+#[test]
 fn test_code_and_test_support_are_never_mutated() {
     let plan = plan_all(&fixture("mutation-plan"));
     let files: BTreeSet<&str> = plan
