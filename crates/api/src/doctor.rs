@@ -232,7 +232,10 @@ fn dependencies_check(root: &Path) -> DoctorCheck {
         false,
         "No node_modules directory. Package exports, plugin activation, and dependency \
          classification degrade until dependencies are installed.",
-        Some(remediation("npm install", true)),
+        Some(remediation(
+            &project_package_manager(root).install_command(),
+            true,
+        )),
     )
 }
 
@@ -594,10 +597,10 @@ where
                 required,
                 "Type-aware analysis is enabled, but no trusted companion is discoverable.",
                 Some(remediation(
-                    &format!(
-                        "npm install --save-dev fallow-type-aware@{}",
+                    &project_package_manager(root).add_dev_command(&format!(
+                        "fallow-type-aware@{}",
                         env!("CARGO_PKG_VERSION")
-                    ),
+                    )),
                     true,
                 )),
             )
@@ -631,6 +634,13 @@ fn effective_type_aware_config(
         }
     };
     Ok((enabled, require))
+}
+
+/// The package manager that a suggested install command names. npm is the
+/// default when the project declares none and has no lockfile.
+fn project_package_manager(root: &Path) -> fallow_config::PackageManager {
+    fallow_config::PackageManager::detect_nearest(root)
+        .unwrap_or(fallow_config::PackageManager::Npm)
 }
 
 fn remediation(command: &str, mutating: bool) -> DoctorRemediation {
@@ -856,6 +866,111 @@ mod tests {
                 .as_ref()
                 .is_some_and(|remediation| remediation.mutating),
             "installing dependencies mutates the project"
+        );
+    }
+
+    fn dependency_remediation_command(root: &Path) -> String {
+        run_doctor_with_discovery(
+            &DoctorOptions {
+                root,
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        )
+        .checks
+        .into_iter()
+        .find(|check| check.id == DoctorCheckId::Dependencies)
+        .and_then(|check| check.remediation)
+        .map(|remediation| remediation.command)
+        .expect("dependencies remediation is reported")
+    }
+
+    /// Issue: doctor told pnpm, Yarn and Bun projects to run `npm install`,
+    /// which writes a foreign lockfile.
+    #[test]
+    fn dependency_remediation_uses_the_project_package_manager() {
+        for (lockfile, expected) in [
+            ("pnpm-lock.yaml", "pnpm install"),
+            ("yarn.lock", "yarn install"),
+            ("bun.lock", "bun install"),
+            ("package-lock.json", "npm install"),
+        ] {
+            let root = tempfile::tempdir().expect("temp root");
+            std::fs::write(root.path().join(lockfile), "").expect("write lockfile");
+            assert_eq!(
+                dependency_remediation_command(root.path()),
+                expected,
+                "{lockfile}"
+            );
+        }
+    }
+
+    #[test]
+    fn dependency_remediation_prefers_the_package_manager_field() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"packageManager":"yarn@4.5.0"}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(root.path().join("package-lock.json"), "").expect("write lockfile");
+        assert_eq!(dependency_remediation_command(root.path()), "yarn install");
+    }
+
+    #[test]
+    fn dependency_remediation_defaults_to_npm_without_a_signal() {
+        let root = tempfile::tempdir().expect("temp root");
+        assert_eq!(dependency_remediation_command(root.path()), "npm install");
+    }
+
+    /// Review finding: a workspace package root fell back to `npm install`
+    /// although the monorepo root declares pnpm.
+    #[test]
+    fn dependency_remediation_finds_the_monorepo_package_manager() {
+        let root = tempfile::tempdir().expect("temp root");
+        let package = root.path().join("packages").join("app");
+        std::fs::create_dir_all(&package).expect("create package");
+        std::fs::create_dir(root.path().join(".git")).expect("create .git");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private":true,"packageManager":"pnpm@10.0.0"}"#,
+        )
+        .expect("write root package.json");
+        std::fs::write(package.join("package.json"), r#"{"name":"app"}"#)
+            .expect("write package.json");
+        assert_eq!(dependency_remediation_command(&package), "pnpm install");
+    }
+
+    #[test]
+    fn type_aware_remediation_uses_the_project_package_manager() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"typeAware":{"enabled":true}}"#,
+        )
+        .expect("write config");
+        std::fs::write(root.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        assert_eq!(
+            output.checks[4]
+                .remediation
+                .as_ref()
+                .map(|remediation| remediation.command.as_str()),
+            Some(
+                format!(
+                    "pnpm add -D fallow-type-aware@{}",
+                    env!("CARGO_PKG_VERSION")
+                )
+                .as_str()
+            )
         );
     }
 

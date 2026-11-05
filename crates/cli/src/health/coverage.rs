@@ -582,35 +582,12 @@ fn find_package_manager_sidecar(root: &Path) -> Option<PathBuf> {
 }
 
 fn detect_package_manager(root: &Path) -> Option<LocalPackageManager> {
-    detect_package_manager_from_field(root).or_else(|| {
-        if root.join("bun.lockb").exists() || root.join("bun.lock").exists() {
-            Some(LocalPackageManager::Bun)
-        } else if root.join("pnpm-lock.yaml").exists() {
-            Some(LocalPackageManager::Pnpm)
-        } else if root.join("yarn.lock").exists() {
-            Some(LocalPackageManager::Yarn)
-        } else if root.join("package-lock.json").exists()
-            || root.join("npm-shrinkwrap.json").exists()
-        {
-            Some(LocalPackageManager::Npm)
-        } else {
-            None
-        }
+    fallow_config::PackageManager::detect(root).map(|manager| match manager {
+        fallow_config::PackageManager::Npm => LocalPackageManager::Npm,
+        fallow_config::PackageManager::Pnpm => LocalPackageManager::Pnpm,
+        fallow_config::PackageManager::Yarn => LocalPackageManager::Yarn,
+        fallow_config::PackageManager::Bun => LocalPackageManager::Bun,
     })
-}
-
-fn detect_package_manager_from_field(root: &Path) -> Option<LocalPackageManager> {
-    let content = fs::read_to_string(root.join("package.json")).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let field = value.get("packageManager")?.as_str()?;
-    let name = field.split('@').next().unwrap_or(field);
-    match name {
-        "npm" => Some(LocalPackageManager::Npm),
-        "pnpm" => Some(LocalPackageManager::Pnpm),
-        "yarn" => Some(LocalPackageManager::Yarn),
-        "bun" => Some(LocalPackageManager::Bun),
-        _ => None,
-    }
 }
 
 impl LocalPackageManager {
