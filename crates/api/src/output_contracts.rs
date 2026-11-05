@@ -188,4 +188,5 @@ pub type FallowOutput = fallow_output::FallowOutput<
     fallow_output::MutationReport,
     fallow_output::MutationPlanOutput,
     fallow_output::MutationInspectOutput,
+    fallow_output::MutationTasksOutput,
 >;

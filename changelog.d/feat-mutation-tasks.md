@@ -1,0 +1,3 @@
+### Added
+
+- **`fallow mutation tasks` lists the open tasks of a mutation report as one batch.** A task is a `survived` or `no_coverage` mutant with its file, line, function, operator, the source lines before and after the change, and the covering test files. The human and `--format markdown` output is a numbered list that a person or a coding agent can use to write the missing tests. `--format json` gives the new `mutation-tasks` envelope. Without `--report`, the command reads the report of the last run. It runs no code. The new MCP tool `mutation_tasks` returns the same batch and runs no mutants.

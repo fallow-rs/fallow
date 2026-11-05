@@ -55,16 +55,17 @@ use fallow_output::{
     InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
     InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
     InspectTargetDescriptor, LargeFunctionEntry, MutationInspectOutput, MutationPlanOutput,
-    MutationReport, MutationVerdictInput, OwnershipMetrics, RecommendationCategory,
-    RefactoringTarget, RefactoringTargetFinding, RejectedJudgment, RequestName, ResolutionEvent,
-    ReviewBriefSchemaVersion, ReviewCheckConclusion, ReviewComment, ReviewDirection, ReviewEffort,
-    ReviewEnvelopeEvent, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput,
-    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, RiskClass, RiskProfile,
-    RuntimeCoverageReport, SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
-    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
-    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
-    SecuritySeverityCounts, SecuritySummary, SecuritySurvivor, SecuritySurvivorsOutput,
-    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    MutationReport, MutationTasksOutput, MutationVerdictInput, OwnershipMetrics,
+    RecommendationCategory, RefactoringTarget, RefactoringTargetFinding, RejectedJudgment,
+    RequestName, ResolutionEvent, ReviewBriefSchemaVersion, ReviewCheckConclusion, ReviewComment,
+    ReviewDirection, ReviewEffort, ReviewEnvelopeEvent, ReviewEnvelopeSchema,
+    ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewProvider, ReviewReconcileOutput,
+    ReviewReconcileSchema, RiskClass, RiskProfile, RuntimeCoverageReport, SecurityBlindSpotFile,
+    SecurityBlindSpotGroup, SecurityBlindSpotsOutput, SecurityBlindSpotsSchemaVersion,
+    SecurityBlindSpotsSummary, SecurityGateVerdict, SecurityReachabilityCounts,
+    SecurityRuntimeStateCounts, SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary,
+    SecuritySurvivor, SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion,
+    SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
     SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
     SimilarCodeCacheClearOutput, SimilarCodeCacheClearSchemaVersion, SimilarCodeInspectOutput,
@@ -595,45 +596,20 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "SimilarCodeVerdictMatch",
     "SimilarCodeReviewedCandidate",
     "SimilarCodeReviewProvenance",
-    "MutationReport",
-    "MutationPlanOutput",
-    "MutationInspectOutput",
-    "MutationVerdictInput",
-    "MutationSchemaVersion",
-    "MutationPlanSchemaVersion",
-    "MutationInspectSchemaVersion",
-    "MutationVerdictSchemaVersion",
-    "MutantStatus",
-    "MutationStatusCounts",
-    "MutationCompletion",
-    "MutationCompletionStatus",
-    "MutationIncompleteReason",
-    "MutationScopeKind",
-    "MutationScopeOutput",
-    "MutationRunnerOutput",
-    "MutationRuntimeOutput",
-    "MutantResult",
-    "MutationFunctionResult",
-    "MutationSummary",
-    "MutationBaselineFailure",
-    "MutationSkippedFile",
-    "MutationWorktreeCheck",
-    "MutationRunIssue",
-    "MutationTimings",
-    "MutationPlanFile",
-    "MutationVerdictJoin",
-    "MutationVerdict",
-    "MutationVerdictKind",
-    "MutationPlanDisposition",
-    "MutationPlanMutant",
-    "MutationPlanCountsOutput",
-    "MutationInspectStatus",
-    "MutationStaleReason",
-    "MutationInspectCode",
 ];
 
+#[path = "schema_emit_parts/mutation.rs"]
+mod mutation_names;
+
 fn derived_definition_names() -> &'static [&'static str] {
-    DERIVED_DEFINITION_NAMES
+    static NAMES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        [
+            DERIVED_DEFINITION_NAMES,
+            mutation_names::MUTATION_DEFINITION_NAMES,
+        ]
+        .concat()
+    });
+    NAMES.as_slice()
 }
 
 /// Finding definitions that get `actions` and optional `introduced` grafts.
@@ -1047,6 +1023,7 @@ fn register_mutation_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<MutationReport>();
     let _ = generator.subschema_for::<MutationPlanOutput>();
     let _ = generator.subschema_for::<MutationInspectOutput>();
+    let _ = generator.subschema_for::<MutationTasksOutput>();
     let _ = generator.subschema_for::<MutationVerdictInput>();
 }
 
@@ -1481,6 +1458,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "mutation-inspect",
         &["MutationInspectOutput"],
         "`fallow mutation inspect --format json`. One mutant of a saved report against\nthe current file, with a fresh or stale status. Runs no project code.",
+    ),
+    (
+        "mutation-tasks",
+        &["MutationTasksOutput"],
+        "`fallow mutation tasks --format json`. The open tasks of a saved report as one\nbatch: each `survived` and `no_coverage` mutant with its source lines before\nand after the mutation. Runs no project code.",
     ),
 ];
 
@@ -1961,6 +1943,7 @@ mod drift_tests {
         ("Mutation", "MutationReport"),
         ("MutationPlan", "MutationPlanOutput"),
         ("MutationInspect", "MutationInspectOutput"),
+        ("MutationTasks", "MutationTasksOutput"),
     ];
 
     #[expect(
@@ -2009,6 +1992,7 @@ mod drift_tests {
             FallowOutput::Mutation(_) => "Mutation",
             FallowOutput::MutationPlan(_) => "MutationPlan",
             FallowOutput::MutationInspect(_) => "MutationInspect",
+            FallowOutput::MutationTasks(_) => "MutationTasks",
         }
     }
 

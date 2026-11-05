@@ -610,6 +610,65 @@ fn inspect_shows_the_mutated_line_when_fresh_and_a_stale_status_after_an_edit() 
 }
 
 #[test]
+fn tasks_list_the_open_mutants_of_the_last_run_in_json_text_and_markdown() {
+    let project = untested_project();
+    let (_, report) = json_mutation(project.path(), &["--all"]);
+    let open = report["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|mutant| mutant["status"] == "no_coverage" || mutant["status"] == "survived")
+        .count();
+    assert!(open > 0, "the untested project has open mutants");
+
+    let (output, batch) = json_mutation(project.path(), &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(batch["kind"], "mutation-tasks");
+    assert_eq!(batch["schema_version"], "1");
+    assert_eq!(batch["summary"]["tasks"], open);
+    let add = batch["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["operator"] == "arithmetic-operator" && task["function"] == "add")
+        .expect("an arithmetic task in add");
+    assert_eq!(add["status"], "no_coverage");
+    assert_eq!(add["original_lines"], "  return a + b;");
+    assert_eq!(add["mutated_lines"], "  return a - b;");
+
+    let text = mutation(project.path(), &["tasks"]);
+    assert_eq!(text.code, 0, "{}", text.stderr);
+    assert!(
+        text.stdout.starts_with("Mutation tasks: "),
+        "{}",
+        text.stdout
+    );
+    assert!(
+        text.stdout.contains("   changed: return a - b;"),
+        "{}",
+        text.stdout
+    );
+
+    let markdown = mutation(project.path(), &["tasks", "--format", "markdown"]);
+    assert_eq!(markdown.code, 0, "{}", markdown.stderr);
+    assert!(
+        markdown.stdout.starts_with("## Mutation tasks"),
+        "{}",
+        markdown.stdout
+    );
+
+    let plan = project.path().join("plan.json");
+    let (_, plan_value) = json_mutation(project.path(), &["--all", "--plan"]);
+    fs::write(&plan, serde_json::to_string(&plan_value).unwrap()).expect("plan");
+    let (refused, error) = json_mutation(
+        project.path(),
+        &["tasks", "--report", plan.to_str().unwrap()],
+    );
+    assert_eq!(refused.code, 2);
+    assert_eq!(error["code"], "FALLOW_MUTATION_REPORT_INVALID");
+}
+
+#[test]
 fn typecheck_without_a_companion_exits_2_before_the_tests_run() {
     let project = untested_project();
     let missing = project.path().join("no-such-companion");

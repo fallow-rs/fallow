@@ -7940,6 +7940,19 @@
         "code_mode_alias": null
       },
       {
+        "name": "mutation_tasks",
+        "kind": "trace",
+        "description": "The open tasks of a saved mutation report (default: the last run report) as one batch: each survived or uncovered mutant with its source lines before and after the change; runs no tests",
+        "cli_command": "fallow mutation tasks [--report <report.json>] --format json --quiet",
+        "key_params": [
+          "report"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true,
+        "code_mode_alias": null
+      },
+      {
         "name": "inspect_target",
         "kind": "analysis",
         "description": "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates",

@@ -29,22 +29,29 @@ const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 #[derive(Debug, Deserialize)]
 pub struct SavedReport {
     #[serde(default)]
-    kind: Option<String>,
-    mutants: Vec<SavedMutant>,
+    pub kind: Option<String>,
+    pub mutants: Vec<SavedMutant>,
     #[serde(default)]
-    files: Vec<SavedFile>,
+    pub files: Vec<SavedFile>,
+    #[serde(default)]
+    pub completion: Option<SavedCompletion>,
 }
 
 #[derive(Debug, Deserialize)]
-struct SavedMutant {
-    mutant_id: String,
-    file: String,
-    line: u32,
-    column: u32,
-    span: (u32, u32),
-    operator: String,
+pub struct SavedCompletion {
+    pub status: fallow_output::MutationCompletionStatus,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SavedMutant {
+    pub mutant_id: String,
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub span: (u32, u32),
+    pub operator: String,
     #[serde(default)]
-    function: Option<String>,
+    pub function: Option<String>,
     #[serde(default)]
     function_line: Option<u32>,
     #[serde(default)]
@@ -52,9 +59,9 @@ struct SavedMutant {
     #[serde(default)]
     change: Option<MutantChange>,
     #[serde(default)]
-    status: Option<MutantStatus>,
+    pub status: Option<MutantStatus>,
     #[serde(default)]
-    covering_tests: Vec<String>,
+    pub covering_tests: Vec<String>,
     #[serde(default)]
     killed_by: Option<String>,
     #[serde(default)]
@@ -64,11 +71,11 @@ struct SavedMutant {
 }
 
 #[derive(Debug, Deserialize)]
-struct SavedFile {
-    path: String,
-    source_sha256: String,
+pub struct SavedFile {
+    pub path: String,
+    pub source_sha256: String,
     #[serde(default)]
-    static_test_files: Vec<String>,
+    pub static_test_files: Vec<String>,
 }
 
 /// An invalid-report error: exit code 2, `FALLOW_MUTATION_REPORT_INVALID`.
@@ -202,6 +209,59 @@ pub fn mutated_lines(source: &str, span: (u32, u32), replacement: &str) -> (Stri
     )
 }
 
+impl SavedReport {
+    /// The file entry of `path`, with its digest and static test files.
+    pub fn saved_file(&self, path: &str) -> Option<&SavedFile> {
+        self.files.iter().find(|file| file.path == path)
+    }
+}
+
+/// The report path of a mutant as a relative path below the project root.
+///
+/// # Errors
+///
+/// Returns an invalid-report error for an absolute path or a path with `..`.
+pub fn report_relative_path(file: &str) -> Result<&Path, fallow_api::ProgrammaticError> {
+    let relative = Path::new(file);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(report_input_error(format!(
+            "the report path `{file}` is not inside the project root"
+        )));
+    }
+    Ok(relative)
+}
+
+/// The code of `mutant` from the current file bytes. The file must have the
+/// digest of the report, and its instrumentation must give the mutant.
+pub fn mutant_code(
+    current: Option<&[u8]>,
+    current_sha256: Option<&str>,
+    report_sha256: Option<&str>,
+    mutant: &SavedMutant,
+) -> Result<MutationInspectCode, MutationStaleReason> {
+    let bytes = current.ok_or(MutationStaleReason::FileMissing)?;
+    let expected = report_sha256.ok_or(MutationStaleReason::NoDigest)?;
+    if current_sha256 != Some(expected) {
+        return Err(MutationStaleReason::SourceChanged);
+    }
+    let source =
+        std::str::from_utf8(bytes).map_err(|_| MutationStaleReason::MutantNotReproduced)?;
+    let reproduced = reproduce(source, &mutant.file, &mutant.mutant_id, mutant.span)
+        .ok_or(MutationStaleReason::MutantNotReproduced)?;
+    let (original_lines, mutated_lines) =
+        mutated_lines(source, mutant.span, &reproduced.replacement);
+    Ok(MutationInspectCode {
+        original: reproduced.original,
+        replacement: reproduced.replacement,
+        original_lines,
+        mutated_lines,
+    })
+}
+
 fn location(mutant: &SavedMutant) -> MutantLocation {
     MutantLocation {
         mutant_id: mutant.mutant_id.clone(),
@@ -240,41 +300,18 @@ pub fn inspect(
                     "without --report, inspect reads the report of the last run for this project, and each run replaces it; pass --report <file> to read another saved report",
                 )
         })?;
-    let relative = Path::new(&mutant.file);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(report_input_error(format!(
-            "the report path `{}` is not inside the project root",
-            mutant.file
-        )));
-    }
-    let saved_file = report.files.iter().find(|file| file.path == mutant.file);
+    let relative = report_relative_path(&mutant.file)?;
+    let saved_file = report.saved_file(&mutant.file);
     let report_sha256 = saved_file.map(|file| file.source_sha256.clone());
     let current = std::fs::read(root.join(relative)).ok();
     let current_sha256 = current.as_deref().map(sha256_hex);
-    let code = || -> Result<MutationInspectCode, MutationStaleReason> {
-        let bytes = current.as_deref().ok_or(MutationStaleReason::FileMissing)?;
-        let expected = report_sha256
-            .as_deref()
-            .ok_or(MutationStaleReason::NoDigest)?;
-        if current_sha256.as_deref() != Some(expected) {
-            return Err(MutationStaleReason::SourceChanged);
-        }
-        let source =
-            std::str::from_utf8(bytes).map_err(|_| MutationStaleReason::MutantNotReproduced)?;
-        let reproduced = reproduce(source, &mutant.file, mutant_id, mutant.span)
-            .ok_or(MutationStaleReason::MutantNotReproduced)?;
-        let (original_lines, mutated_lines) =
-            mutated_lines(source, mutant.span, &reproduced.replacement);
-        Ok(MutationInspectCode {
-            original: reproduced.original,
-            replacement: reproduced.replacement,
-            original_lines,
-            mutated_lines,
-        })
+    let code = || {
+        mutant_code(
+            current.as_deref(),
+            current_sha256.as_deref(),
+            report_sha256.as_deref(),
+            mutant,
+        )
     };
     let (status, stale_reason, code) = match code() {
         Ok(code) => (MutationInspectStatus::Fresh, None, Some(code)),

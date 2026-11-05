@@ -21,6 +21,7 @@ use fallow_config::{MutationConfig, OutputFormat};
 use fallow_output::{
     MutantStatus, MutationPlanOutput, MutationReport, serialize_mutation_inspect_json_output,
     serialize_mutation_json_output, serialize_mutation_plan_json_output,
+    serialize_mutation_tasks_json_output,
 };
 
 use crate::json_style::JsonStyle;
@@ -48,6 +49,19 @@ pub enum MutationSubcommand {
         mutant_id: String,
         /// A saved `fallow mutation --format json` report or `--plan` document
         /// (default: the report of the last run).
+        #[arg(long, value_name = "PATH")]
+        report: Option<PathBuf>,
+    },
+    /// List the open tasks of a saved report as one batch. Runs no code.
+    ///
+    /// A task is a `survived` or `no_coverage` mutant with the source lines
+    /// before and after the change. The human and markdown output is a list
+    /// that an agent or a person can use to write the missing tests. Without
+    /// `--report`, it reads the report that the last run saved in the Fallow
+    /// cache.
+    Tasks {
+        /// A saved `fallow mutation --format json` report (default: the report
+        /// of the last run).
         #[arg(long, value_name = "PATH")]
         report: Option<PathBuf>,
     },
@@ -479,6 +493,9 @@ fn code_lookup(report: &MutationReport, root: &Path) -> CodeLookup {
 
 pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
     let (output, style) = (input.output, input.json_style);
+    if let Some(MutationSubcommand::Tasks { report }) = &input.subcommand {
+        return run_tasks(input, report.as_deref());
+    }
     if !matches!(output, OutputFormat::Human | OutputFormat::Json) {
         return crate::error::emit_error_with_style(
             "`fallow mutation` supports only human and json output",
@@ -833,6 +850,65 @@ fn run_inspect(input: &MutationCliInput<'_>, mutant_id: &str, report: Option<&Pa
         for line in render_inspect(&packet).lines() {
             crate::report::sink::outln!("{line}");
         }
+    }
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::finalize_report_file(path, input.quiet, output)
+    {
+        return code;
+    }
+    ExitCode::SUCCESS
+}
+
+#[path = "mutation_tasks.rs"]
+mod tasks;
+
+fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
+    let (output, style) = (input.output, input.json_style);
+    if !matches!(
+        output,
+        OutputFormat::Human | OutputFormat::Json | OutputFormat::Markdown
+    ) {
+        return crate::error::emit_error_with_style(
+            "`fallow mutation tasks` supports only human, json and markdown output",
+            INPUT_EXIT_CODE,
+            output,
+            style,
+        );
+    }
+    let batch = inspect_report_path(input, report).and_then(|(path, root)| {
+        let saved = crate::mutation_inspect::read_saved_report(&path)?;
+        tasks::tasks(&saved, &root)
+    });
+    let batch = match batch {
+        Ok(batch) => batch,
+        Err(error) => return crate::error::emit_programmatic_error(&error, output, style),
+    };
+    crate::telemetry::note_result_count(batch.tasks.len());
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::redirect_report_to_file(path, output)
+    {
+        return code;
+    }
+    let text = match output {
+        OutputFormat::Json => {
+            let result = serialize_mutation_tasks_json_output(batch)
+                .map_err(|error| {
+                    ProgrammaticError::new(
+                        format!("failed to serialize the mutation tasks: {error}"),
+                        INPUT_EXIT_CODE,
+                    )
+                })
+                .and_then(|value| emit_json(&value, style));
+            if let Err(error) = result {
+                return crate::error::emit_programmatic_error(&error, output, style);
+            }
+            None
+        }
+        OutputFormat::Markdown => Some(tasks::render_markdown(&batch)),
+        _ => Some(tasks::render_text(&batch)),
+    };
+    for line in text.iter().flat_map(|text| text.lines()) {
+        crate::report::sink::outln!("{line}");
     }
     if let Some(path) = input.output_file
         && let Err(code) = crate::finalize_report_file(path, input.quiet, output)

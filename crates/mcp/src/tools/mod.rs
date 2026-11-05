@@ -79,7 +79,7 @@ pub use impact::{
 };
 pub use inspect_target::inspect_target;
 pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
-pub use mutation::{run_mutation_inspect, run_mutation_plan};
+pub use mutation::{run_mutation_inspect, run_mutation_plan, run_mutation_tasks};
 pub use project_info::{build_project_info_args, run_project_info};
 pub use recommend::run_recommend;
 pub use rust::{

@@ -15,9 +15,10 @@ use crate::params::{
     FindSimilarCodeParams, FixParams, GetTokenBlastRadiusParams, GuardParams, HealthParams,
     ImpactAllParams, ImpactClosureParams, ImpactParams, InspectSimilarCodeParams,
     InspectTargetParams, ListBoundariesParams, ListSuppressionsParams, MutationInspectParams,
-    MutationPlanParams, ProjectInfoParams, RecommendParams, SecurityCandidatesParams,
-    SemanticImpactParams, SemanticSymbolParams, TraceCloneParams, TraceDependencyParams,
-    TraceErrorParams, TraceExportParams, TraceFileParams, TraceImportPathParams,
+    MutationPlanParams, MutationTasksParams, ProjectInfoParams, RecommendParams,
+    SecurityCandidatesParams, SemanticImpactParams, SemanticSymbolParams, TraceCloneParams,
+    TraceDependencyParams, TraceErrorParams, TraceExportParams, TraceFileParams,
+    TraceImportPathParams,
 };
 use crate::tools::{
     analyze_call, architecture_call, dupes_call, execute_code_mode, health_call, inspect_target,
@@ -28,11 +29,11 @@ use crate::tools::{
     run_get_cloud_deployment_changes, run_get_cloud_review_packet, run_get_cloud_runtime_context,
     run_get_hot_paths, run_get_importance, run_get_token_blast_radius, run_guard, run_health,
     run_impact, run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
-    run_list_suppressions, run_mutation_inspect, run_mutation_plan, run_project_info,
-    run_recommend, run_rust_call, run_security_candidates, run_symbol_impact, run_symbol_trace,
-    run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool, run_trace_export_tool,
-    run_trace_file_tool, run_trace_import_path_tool, rust_manifest, unsupported_tool_body,
-    with_mixed_root_warning, with_request_cancellation,
+    run_list_suppressions, run_mutation_inspect, run_mutation_plan, run_mutation_tasks,
+    run_project_info, run_recommend, run_rust_call, run_security_candidates, run_symbol_impact,
+    run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool,
+    run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool, rust_manifest,
+    unsupported_tool_body, with_mixed_root_warning, with_request_cancellation,
 };
 
 #[cfg(test)]
@@ -41,6 +42,9 @@ mod tests;
 /// The help of the `project_info` error on a Rust workspace.
 const PROJECT_INFO_RUST_HELP: &str =
     "Call analyze for the dependency and visibility findings of the Rust workspace.";
+
+const MUTATION_TASKS_RUST_HELP: &str =
+    "Call mutation_inspect for one mutant of `cargo fallow mutants` instead.";
 
 #[derive(Clone)]
 pub struct FallowMcp {
@@ -222,6 +226,24 @@ impl FallowMcp {
         with_mixed_root_warning(
             root.as_deref(),
             run_mutation_inspect(&self.binary, params.0).await,
+        )
+    }
+
+    /// List the open tasks of a saved `fallow mutation` JSON report as one batch (default: the report that the last run saved in the Fallow cache). A task is a survived or no_coverage mutant: a small change to the code that no test detected. Each task has the mutant_id, file, line, function, operator, status, the source lines before and after the change (original_lines, mutated_lines), and the covering test files. Write tests that pass on the current code and fail on the changed code; one test can cover several tasks, and a task that no input can detect can be skipped. A task whose file changed after the report is stale and has no code. This tool never runs tests. A report needs the CLI command `fallow mutation`, which executes the project's tests, so ask your host first. A Rust root is not supported yet.
+    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    async fn mutation_tasks(
+        &self,
+        params: Parameters<MutationTasksParams>,
+    ) -> Result<CallToolResult, McpError> {
+        if rust_manifest(params.0.root.as_deref()).is_some() {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                unsupported_tool_body("mutation_tasks", MUTATION_TASKS_RUST_HELP),
+            )]));
+        }
+        let root = params.0.root.clone();
+        with_mixed_root_warning(
+            root.as_deref(),
+            run_mutation_tasks(&self.binary, params.0).await,
         )
     }
 
@@ -557,7 +579,7 @@ impl ServerHandler for FallowMcp {
             .with_instructions(
                 "Fallow MCP server: deterministic codebase analysis for TypeScript and JavaScript projects. \
                  Every tool description states what it returns and when to use it; read tools/list rather than guessing from names. \
-                 On a root with Cargo.toml and no package.json (a Rust root), analyze, find_dupes, check_health, check_architecture, mutation_plan and mutation_inspect run cargo fallow and return language: \"rust\" reports; project_info and code_execute refuse it with FALLOW_RUST_UNSUPPORTED_TOOL. \
+                 On a root with Cargo.toml and no package.json (a Rust root), analyze, find_dupes, check_health, check_architecture, mutation_plan and mutation_inspect run cargo fallow and return language: \"rust\" reports; project_info, mutation_tasks and code_execute refuse it with FALLOW_RUST_UNSUPPORTED_TOOL. \
                  Two routing rules: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want dead-in-production verdicts, and check_health for complexity, hotspot, and CRAP analysis without one; read a fallow:// resource instead of calling fallow_explain when you only need reference material. \
                  Resources are read-only, run no analysis, and are safe to cache per server version: fallow://tools, fallow://issue-types, fallow://explain and fallow://explain/{issue_type}, fallow://task-matrix, and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack, fallow://schema/similar-code-snapshot (JSON Schemas). \
                  Every analysis result is JSON in a single text block: parse it. The root warnings array restates this run's verdicts with their remedy: gate_outcomes entries, baseline staleness, and a degraded analysis. An absent gate_outcomes is not proof of a pass, because audit and the combined analyses publish none on the in-process route.",
