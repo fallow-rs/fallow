@@ -471,7 +471,33 @@ fn retain_non_crediting_evidence(
     summary.status = SemanticCompleteness::Partial;
     summary.reason_code = None;
     summary.actions = vec![action.to_string()];
+    if decision.truncated {
+        // A reference that the evidence limit dropped can be a reachable read.
+        record_evidence_limit_gap(&mut decision, summary);
+    }
     decision
+}
+
+fn record_evidence_limit_gap(
+    decision: &mut SemanticCandidateDecision,
+    summary: &mut SemanticQuerySummary,
+) {
+    let omission = SemanticOmission {
+        reason_code: SemanticGapReason::EvidenceLimit,
+        count: decision
+            .total_evidence_count
+            .saturating_sub(decision.evidence.len()),
+    };
+    decision.reason_code = Some(SemanticGapReason::EvidenceLimit);
+    summary.reason_code = Some(SemanticGapReason::EvidenceLimit);
+    for omissions in [&mut decision.omissions, &mut summary.omissions] {
+        if !omissions
+            .iter()
+            .any(|existing| existing.reason_code == SemanticGapReason::EvidenceLimit)
+        {
+            omissions.push(omission.clone());
+        }
+    }
 }
 
 pub(super) const fn semantic_only_candidate_stays_hidden(
@@ -558,6 +584,36 @@ mod tests {
             SemanticCandidateDecisionKind::RetainedAbstained
         );
         assert_eq!(decision.reason_code, None);
+        assert_eq!(query_summary.status, SemanticCompleteness::Partial);
+    }
+
+    #[test]
+    fn capped_unreachable_evidence_reports_the_evidence_limit() {
+        let reachable = BTreeSet::from([PathBuf::from("src/index.ts")]);
+        let mut candidate = confirmed_used("src/orphan.ts");
+        candidate.total_evidence_count = 3;
+        candidate.truncated = true;
+        let mut query_summary = summary();
+        query_summary.total_evidence_count = 3;
+        query_summary.truncated = true;
+
+        let decision = retain_non_crediting_evidence(candidate, &reachable, &mut query_summary);
+
+        let omission = SemanticOmission {
+            reason_code: SemanticGapReason::EvidenceLimit,
+            count: 2,
+        };
+        assert_eq!(
+            decision.decision,
+            SemanticCandidateDecisionKind::RetainedAbstained
+        );
+        assert_eq!(decision.reason_code, Some(SemanticGapReason::EvidenceLimit));
+        assert_eq!(decision.omissions, vec![omission.clone()]);
+        assert_eq!(
+            query_summary.reason_code,
+            Some(SemanticGapReason::EvidenceLimit)
+        );
+        assert_eq!(query_summary.omissions, vec![omission]);
         assert_eq!(query_summary.status, SemanticCompleteness::Partial);
     }
 

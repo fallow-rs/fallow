@@ -104,6 +104,51 @@ for (const callCount of [1, 2, REQUEST_EVIDENCE_LIMIT + 1]) {
   });
 }
 
+const callerModule = (callCount) =>
+  [
+    'import { Worker } from "./worker";',
+    "function identity<T>(value: T): T { return value; }",
+    ...Array.from(
+      { length: callCount },
+      () => "export const call = (): number => identity(new Worker()).run();",
+    ).map((line, index) => line.replace("call", `call${index}`)),
+    "",
+  ].join("\n");
+
+// The client accepts a use only from a reachable file. The result must therefore
+// show each file that references the member, not only the first file.
+test("symbol-use returns one evidence item for each referencing file", () => {
+  withWorkerProject(1, [], (root) => {
+    write(root, "src/a-orphan.ts", callerModule(3));
+    const result = runMemberQuery(root);
+    assert.equal(result.assertion, "confirmed-used");
+    assert.equal(result.status, "complete");
+    assert.equal(result.total_evidence_count, 4);
+    assert.equal(result.truncated, true);
+    assert.deepEqual(
+      result.evidence.map((item) => item.path),
+      ["src/a-orphan.ts", "src/main.ts"],
+    );
+  });
+});
+
+test("symbol-use evidence for more files than the limit stays a complete use", () => {
+  withWorkerProject(0, [], (root) => {
+    const fileCount = REQUEST_EVIDENCE_LIMIT + 1;
+    for (let index = 0; index < fileCount; index += 1) {
+      write(root, `src/caller-${String(index).padStart(2, "0")}.ts`, callerModule(1));
+    }
+    const result = runMemberQuery(root);
+    assert.equal(result.assertion, "confirmed-used");
+    assert.equal(result.status, "complete");
+    assert.deepEqual(result.omissions, []);
+    assert.equal(result.total_evidence_count, fileCount);
+    assert.equal(result.evidence.length, REQUEST_EVIDENCE_LIMIT);
+    assert.equal(new Set(result.evidence.map((item) => item.path)).size, REQUEST_EVIDENCE_LIMIT);
+    assert.equal(result.truncated, true);
+  });
+});
+
 test("symbol-use keeps an unrelated dynamic member access as a partial use", () => {
   const dynamicAccess = [
     "const unrelated: Record<string, number> = {};",

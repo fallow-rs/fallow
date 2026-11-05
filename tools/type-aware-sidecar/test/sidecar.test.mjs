@@ -612,7 +612,8 @@ test("protocol v7 batches exact export and type-use queries through one Program"
       response.results.map((result) => result.assertion),
       ["confirmed-used", "confirmed-used", "references-found"],
     );
-    assert.ok(response.results[0].evidence.length <= 1);
+    const userPaths = response.results[0].evidence.map((entry) => entry.path);
+    assert.equal(new Set(userPaths).size, userPaths.length);
     assert.ok(response.results[0].total_evidence_count >= response.results[0].evidence.length);
     assert.equal(response.results[0].data.symbol.namespace, "type");
     assert.ok(response.results[2].evidence.some((entry) => entry.role === "declaration"));

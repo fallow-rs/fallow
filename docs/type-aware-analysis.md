@@ -193,14 +193,23 @@ A type-coupling result is one report for the whole project, so it can carry up
 to 10,000 evidence items. Symbol, impact, and API-surface results keep the
 limit of 40 items. Above the limit, the report is `partial` with the
 `evidence-limit` reason, and `--type-aware-require complete` fails the run.
+`symbol-use` has a different rule for a `confirmed-used` result, as the next
+paragraph tells.
 
-A `symbol-use` result keeps one evidence item, because one exact reference
-proves a use. `total_evidence_count` gives the number of exact references, and
+A `symbol-use` result keeps one evidence item for each file that references the
+symbol, up to the limit of 40 items. In each file, Fallow keeps a read before a
+re-export. `total_evidence_count` gives the number of exact references, and
 `truncated` is `true` when the result returns fewer items than that number. A
-`confirmed-used` result with truncated evidence stays `complete`. The
+`confirmed-used` result with truncated evidence stays `complete`, because the
 `evidence-limit` reason does not apply to it. Other gaps, for example
 `dynamic-member-access`, still make the result `partial`. A negative assertion,
 for example `confirmed-no-static-references`, still needs complete evidence.
+
+Fallow credits a use only when a returned evidence item is a read in a reachable
+file. When every returned item is in an unreachable file or is a re-export, the
+candidate is `retained-abstained` and `partial`. When the evidence limit also
+dropped references, the result has the `evidence-limit` reason, because a
+dropped reference can be a reachable read.
 
 Preview and apply class-member cleanup only when Fallow has complete
 closed-world evidence and an exact declaration guard:
