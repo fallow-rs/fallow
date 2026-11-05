@@ -1,7 +1,3 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "many Node runtime helper AST types used"
-)]
 use oxc_ast::ast::*;
 
 use crate::js_text::JsText;

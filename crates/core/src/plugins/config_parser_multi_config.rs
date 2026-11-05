@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 

@@ -1,6 +1,5 @@
 //! `Visit` trait implementation for `ModuleInfoExtractor`.
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;

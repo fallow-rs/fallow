@@ -169,6 +169,7 @@ self_named_module_files = "warn"        # Prefer mod.rs style
 pathbuf_init_then_push = "warn"         # Use PathBuf::from() directly
 excessive_nesting = "warn"              # Catch deeply nested control flow (threshold in .clippy.toml)
 allow_attributes_without_reason = "warn" # Force reason on #[allow] to catch unjustified suppressions
+allow_attributes = "warn"                 # Use #[expect] so a stale suppression fails the build
 unimplemented = "warn"                  # Catch leftover unimplemented!() calls
 filetype_is_file = "warn"               # FileType::is_file() misses symlinks, use !is_dir()
 rest_pat_in_fully_bound_structs = "warn" # Catch `..` in patterns where all fields are already bound

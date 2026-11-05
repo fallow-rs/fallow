@@ -1,9 +1,5 @@
 //! Callback arguments and deferred property ownership inside the shared value arena.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "callback acquisition matches AST forms"
-)]
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 

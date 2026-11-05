@@ -6,10 +6,6 @@
 /// Exposed in JSON output so consumers can interpret scores in context.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    clippy::struct_field_names,
-    reason = "triggered in bin but not lib, #[expect] would be unfulfilled in lib"
-)]
 pub struct TargetThresholds {
     /// Fan-in saturation point for priority formula (p95, floor 5).
     pub fan_in_p95: f64,
@@ -299,7 +295,7 @@ pub struct RefactoringTarget {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "tests use unwrap to keep serialization assertions concise"
 )]

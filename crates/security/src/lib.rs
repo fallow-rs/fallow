@@ -1023,7 +1023,7 @@ pub fn catalogue() -> &'static Catalogue {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::expect_used,
     clippy::unwrap_used,
     reason = "catalogue parser tests assert fixture invariants directly"

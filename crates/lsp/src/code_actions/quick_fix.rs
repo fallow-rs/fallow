@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-#[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;

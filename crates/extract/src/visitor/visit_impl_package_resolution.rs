@@ -1,7 +1,3 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "package-resolution helpers use many AST node shapes"
-)]
 use std::borrow::Cow;
 
 use oxc_ast::ast::*;

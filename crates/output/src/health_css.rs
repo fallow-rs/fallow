@@ -1181,7 +1181,7 @@ pub struct CssAnalyticsSummary {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "tests use unwrap to keep serialization assertions concise"
 )]

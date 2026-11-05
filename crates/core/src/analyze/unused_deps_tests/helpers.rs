@@ -1,30 +1,20 @@
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use std::path::{Path, PathBuf};
 
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use rustc_hash::{FxHashMap, FxHashSet};
 
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
+#[expect(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use fallow_config::{
     BoundaryConfig, FallowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo,
 };
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use fallow_types::extract::{ImportInfo, ImportedName, ReExportInfo};
 
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::graph::ModuleGraph;
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::plugins::AggregatedPluginResult;
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::results::*;
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::suppress::{self, Suppression, SuppressionContext};
 
-#[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use super::super::{
     DepCategoryConfig, LineOffsetsMap, SharedDepSets, UnlistedDependencyInput,
     collect_unused_for_category, find_dev_dependencies_in_production, find_test_only_dependencies,

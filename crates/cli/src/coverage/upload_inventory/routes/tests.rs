@@ -10,7 +10,7 @@ fn pattern(plugin: &str, rel: &str) -> Option<(String, MethodRule)> {
     derive_route(plugin, rel).map(|r| (r.pattern, r.methods))
 }
 
-#[allow(
+#[expect(
     clippy::unnecessary_wraps,
     reason = "the helper builds the expected value of `derive_route`, which is an Option"
 )]

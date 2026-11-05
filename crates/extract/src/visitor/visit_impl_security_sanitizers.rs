@@ -1,7 +1,3 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "many sanitizer helper AST types used"
-)]
 use oxc_ast::ast::*;
 
 use fallow_types::extract::{

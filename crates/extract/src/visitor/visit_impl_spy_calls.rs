@@ -4,7 +4,6 @@
 //! namespace object. Without this recognizer the namespace is a bare call
 //! argument, which credits every export of the module.
 
-#[allow(clippy::wildcard_imports, reason = "many spy call AST types used")]
 use oxc_ast::ast::*;
 
 use super::super::ModuleInfoExtractor;

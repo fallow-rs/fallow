@@ -1,6 +1,5 @@
 //! Framework DI and Angular render-entry capture.
 
-#[allow(clippy::wildcard_imports, reason = "many DI visitor AST types used")]
 use oxc_ast::ast::*;
 
 use crate::js_text::JsText;

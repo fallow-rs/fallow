@@ -10,7 +10,6 @@
 //! and `CallExpression` nodes). Custom SDK patterns, env prefixes, and config
 //! object heuristics from the `flags` config section apply in the same pass.
 
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::ContentEq;

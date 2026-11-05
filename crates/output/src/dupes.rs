@@ -23,7 +23,7 @@ pub const DUPES_PROGRAMMATIC_SCHEMA_VERSION: u32 = 4;
 /// Schema projection for the duplication envelope's CLI and programmatic
 /// version lineages.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend(
     "enum" = [DUPES_PROGRAMMATIC_SCHEMA_VERSION, DUPES_SCHEMA_VERSION]

@@ -9,7 +9,6 @@
 //! the check is conservative: an export that it cannot classify counts as a
 //! non-action export.
 
-#[allow(clippy::wildcard_imports, reason = "many module-level AST types used")]
 use oxc_ast::ast::*;
 use rustc_hash::FxHashMap;
 

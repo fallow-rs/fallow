@@ -136,7 +136,7 @@ fn strip_node_prefix(value: &str) -> &str {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the tests look up catalogue rows that the catalogue must contain"
 )]

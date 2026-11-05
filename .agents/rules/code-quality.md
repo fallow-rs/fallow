@@ -12,7 +12,7 @@ paths:
 - Restriction lints including `excessive_nesting` (threshold 7 in `.clippy.toml`), `allow_attributes_without_reason`, `unimplemented`; see `[workspace.lints.clippy]` in `Cargo.toml` for the full list
 - SIG-aligned thresholds live in `.clippy.toml` (`too-many-lines-threshold`, `too-many-arguments-threshold`, `cognitive-complexity-threshold`) and map to SIG Unit Size, Unit Interfacing, and Unit Complexity respectively. Read the file for the current values.
 - Compiler lints: `unsafe_op_in_unsafe_fn`, `unused_unsafe`, `non_ascii_idents`, `tail_expr_drop_order`
-- All suppressions use `#[expect(clippy::..., reason = "...")]` — warns when unnecessary, preventing dead annotations. Every `#[allow]` and `#[expect]` must include a `reason` attribute. Use `#[allow]` only for pedantic-only or target-dependent lints where `#[expect]` would be unfulfilled.
+- Suppress a lint with `#[expect(lint, reason = "...")]`. An `#[expect]` fails the build when the lint no longer fires, so dead suppressions cannot stay. The `clippy::allow_attributes` lint rejects an outer `#[allow]`. When a lint fires only in some targets, features or platforms, put a module-level `#![allow(lint, reason = "...")]` on the smallest module, or use `#[cfg_attr(<cfg>, expect(...))]`. Every suppression needs a `reason`.
 
 ## Size assertions
 Compile-time size assertions (`const _: () = assert!(...)` in `crates/types/src/extract.rs`) pin the graph structs so a field addition cannot silently bloat them. Read the assertions for the current sizes before changing those structs.

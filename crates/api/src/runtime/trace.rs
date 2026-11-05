@@ -351,7 +351,7 @@ pub fn run_trace_clone(
 /// Returns a structured error when a fixture target is missing or compact JSON
 /// serialization fails.
 #[doc(hidden)]
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "the engine trace boundary intentionally accepts the workspace-standard FxHashSet"
 )]

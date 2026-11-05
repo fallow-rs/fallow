@@ -1,7 +1,3 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "object binding helpers use AST node shapes"
-)]
 use oxc_ast::ast::*;
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};

@@ -205,10 +205,6 @@ pub struct RenderFanInTopComponent {
 /// Percentages sum to approximately 100.0 (subject to rounding).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    clippy::struct_field_names,
-    reason = "risk suffix conveys that higher values are worse"
-)]
 pub struct RiskProfile {
     /// Percentage of functions in the low-risk bin.
     pub low_risk: f64,
@@ -333,7 +329,7 @@ pub struct GroupSnapshot {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "tests use unwrap to keep serialization assertions concise"
 )]

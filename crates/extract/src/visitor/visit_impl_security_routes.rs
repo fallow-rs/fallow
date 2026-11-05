@@ -1,6 +1,5 @@
 //! Route and procedure callback helpers for security source extraction.
 
-#[allow(clippy::wildcard_imports, reason = "many route helper AST types used")]
 use oxc_ast::ast::*;
 
 use super::unwrap_parens;

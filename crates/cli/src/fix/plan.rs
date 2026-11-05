@@ -122,10 +122,6 @@ pub(super) struct SkippedFile {
 /// Outcome of [`FixPlan::commit`].
 pub(super) struct CommitOutcome {
     /// Absolute paths whose new content landed on disk.
-    #[allow(
-        dead_code,
-        reason = "test-only reader; `#[expect]` is unfulfilled under `--all-targets` because the test cfg satisfies dead_code while the lib cfg would fire it"
-    )]
     pub written: FxHashSet<PathBuf>,
     /// Per-path errors.
     pub failed: Vec<(PathBuf, std::io::Error)>,

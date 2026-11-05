@@ -352,7 +352,7 @@ pub fn collect_inline_complexity(
 }
 
 /// Filter inline complexity findings to the changed-file set.
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "editor analysis changed-file sets use the workspace FxHashSet convention"
 )]

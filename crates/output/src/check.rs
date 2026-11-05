@@ -20,7 +20,7 @@ pub const CHECK_SCHEMA_VERSION: u32 = 10;
 
 /// Schema projection for the dead-code envelope's exact version.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = CHECK_SCHEMA_VERSION))]
 struct CheckSchemaVersion(u32);
@@ -36,7 +36,7 @@ pub const ARCHITECTURE_SCHEMA_VERSION: u32 = 1;
 /// The schema emitter registers this type by name and points the
 /// `ArchitectureOutput` and `ArchitectureGroupedOutput` definitions at it.
 #[cfg(feature = "schema")]
-#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
 #[derive(schemars::JsonSchema)]
 #[schemars(extend("const" = ARCHITECTURE_SCHEMA_VERSION))]
 pub struct ArchitectureSchemaVersion(u32);

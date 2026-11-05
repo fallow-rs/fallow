@@ -277,10 +277,6 @@ fn extract_count(text: &str, marker: &str) -> u32 {
 /// proportional to risk, its per-file `out_of_diff` consumers, and the
 /// `concern_lens`. Non-source churn is excluded. Units with out-of-diff consumers
 /// sort first (load-bearing definitions before mechanical churn), then by budget.
-#[allow(
-    clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashMap; fires on the lib target only, so #[expect] is unfulfilled on the bin"
-)]
 #[must_use]
 pub fn build_direction(
     focus: &FocusMap,
@@ -394,10 +390,6 @@ pub fn build_walkthrough_guide(
 ///    an unanchored id is REJECTED (`unanchored-signal-id`). Accepted judgments
 ///    carry the agent's framing FENCED as non-deterministic.
 #[must_use]
-#[allow(
-    clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet; the change-anchor allowlist is always built with the fallow hasher"
-)]
 pub fn validate_walkthrough(
     agent: &AgentWalkthrough,
     surface: &DecisionSurface,

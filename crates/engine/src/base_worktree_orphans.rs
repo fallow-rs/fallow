@@ -265,7 +265,7 @@ pub fn audit_worktree_pid(name: &str) -> Option<u32> {
 /// another user) mean alive. Only `ESRCH` means dead.
 #[cfg(unix)]
 #[must_use]
-#[allow(
+#[expect(
     unsafe_code,
     reason = "kill(2) with signal 0 is the liveness probe; it has no memory preconditions"
 )]
@@ -298,7 +298,7 @@ pub fn process_is_alive(_pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-#[allow(
+#[expect(
     unsafe_code,
     reason = "Win32 process-query API (OpenProcess / WaitForSingleObject / CloseHandle / GetLastError) requires unsafe FFI"
 )]

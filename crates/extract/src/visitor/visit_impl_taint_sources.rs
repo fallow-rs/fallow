@@ -1,7 +1,3 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "many taint source helper AST types used"
-)]
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 

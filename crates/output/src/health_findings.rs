@@ -102,10 +102,6 @@ impl From<ComplexityViolation> for HealthFinding {
 impl HealthFinding {
     /// Construct a wrapper around a pre-computed action list.
     #[must_use]
-    #[allow(
-        dead_code,
-        reason = "intentional public constructor for audit / test paths that supply their own actions; with_actions is the production constructor"
-    )]
     pub fn new(
         violation: ComplexityViolation,
         actions: Vec<HealthFindingAction>,

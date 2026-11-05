@@ -41,7 +41,7 @@ pub fn audit_churn(root: &Path, config: &ResolvedConfig) -> Option<ChurnResult> 
 /// with no history). CODEOWNERS is consulted when present: the configured
 /// `codeowners` path when set, else the standard locations.
 #[must_use]
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "callers always pass the audit changed-file FxHashSet; generalizing the hasher adds noise"
 )]
@@ -58,7 +58,7 @@ pub fn compute_routing(
 /// [`compute_routing`] over a churn pass that the caller already read with
 /// [`audit_churn`], so the audit brief reads the history once.
 #[must_use]
-#[allow(
+#[expect(
     clippy::implicit_hasher,
     reason = "callers always pass the audit changed-file FxHashSet; generalizing the hasher adds noise"
 )]

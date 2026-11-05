@@ -30,10 +30,6 @@ static WORKSPACE_MARKER: OnceLock<String> = OnceLock::new();
 /// list, prefixed with `w-`. Sort + join is deterministic so the same
 /// selection produces the same suffix across runs; two jobs with disjoint
 /// selections get distinct markers and don't race.
-#[allow(
-    dead_code,
-    reason = "called from main.rs bin target; lib target sees no caller"
-)]
 pub fn set_workspace_marker_from_list(values: &[String]) {
     let trimmed: Vec<&str> = values
         .iter()

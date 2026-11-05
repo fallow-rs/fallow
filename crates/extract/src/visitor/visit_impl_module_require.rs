@@ -11,7 +11,6 @@
 
 use std::borrow::Cow;
 
-#[allow(clippy::wildcard_imports, reason = "many AST node types used")]
 use oxc_ast::ast::*;
 
 use fallow_types::extract::RequireCallInfo;

@@ -3289,7 +3289,7 @@ fn resolve_user_config(
 /// are silently dropped.
 #[cfg_attr(
     not(test),
-    allow(
+    expect(
         dead_code,
         reason = "config resolution fallback is exercised by session tests"
     )

@@ -11,7 +11,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use oxc_allocator::{Allocator, CloneIn};
-#[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, VisitMut, walk, walk_mut};
 use rustc_hash::{FxHashMap, FxHashSet};
