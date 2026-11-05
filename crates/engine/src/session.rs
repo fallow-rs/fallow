@@ -299,7 +299,7 @@ impl AnalysisSession {
     /// Use `store` for parsed modules across sessions, in place of the store
     /// that the process installed with [`crate::warm_parse::install`].
     /// `None` makes the session parse through the persisted cache only.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn with_warm_parse(mut self, store: Option<Arc<WarmParseStore>>) -> Self {
         self.warm_parse = store;
         self

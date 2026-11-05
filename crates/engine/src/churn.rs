@@ -1456,9 +1456,8 @@ fn split_number_unit(input: &str) -> Result<(&str, &str), String> {
 mod tests {
     use super::*;
 
-    /// Analyze git churn for files in the given root directory.
-    ///
-    /// Returns `None` if git is not available or the directory is not a git repository.
+    /// Analyze git churn for the files in `root`. `None` means no git or no repository.
+    #[cfg(unix)]
     fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
         let clock = crate::clock::AnalysisClock::for_repo(root);
         let shallow = is_shallow_clone(root);
