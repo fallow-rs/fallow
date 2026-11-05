@@ -18,11 +18,15 @@ const LSP_BINARY_NAME = "fallow-lsp";
 const CLI_BINARY_NAME = "fallow";
 const VERSION_FILE = ".fallow-version";
 const SIGNATURE_SUFFIX = ".sig";
+// An untrusted SHA-256 marker that older installs carry. The extension only
+// deletes it, so a stale marker never sits next to a signed binary.
 const SHA256_SUFFIX = ".sha256";
 // Records the release target of the installed binary, so a host that needs
 // another target (an Alpine host with a glibc binary from an earlier version)
 // downloads the matching binary instead of reusing one that cannot start.
 const TARGET_SUFFIX = ".target";
+const UNTRUSTED_BINARY_HINT =
+  " Fallow does not install it. Set fallow.lspPath to a fallow-lsp binary that you trust (the extension uses the fallow CLI next to it), then reload the window.";
 
 // Cross-process install lock. Multiple VS Code windows share one global-storage
 // `bin/` directory, so a simultaneous post-release restore would otherwise have
@@ -53,7 +57,6 @@ const ED25519_SPKI_HEADER = Buffer.from([
 interface GithubRelease {
   readonly tag_name: string;
   readonly assets: ReadonlyArray<{
-    readonly digest?: string;
     readonly name: string;
     readonly browser_download_url: string;
   }>;
@@ -383,7 +386,7 @@ const uniqueTempPath = (dir: string, name: string): string => {
 const fileDigestHex = (filePath: string): string =>
   createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 
-/** Publish a small sidecar (signature / digest marker) by replacing any prior copy. */
+/** Publish a small sidecar (signature / target marker) by replacing any prior copy. */
 const publishSidecar = (tempPath: string, finalPath: string): void => {
   try {
     if (fs.existsSync(finalPath)) {
@@ -502,28 +505,6 @@ export const verifyBinarySignature = (binaryPath: string): boolean => {
   }
 };
 
-const normalizeSha256Digest = (digest: string | undefined): string | null => {
-  if (!digest) {
-    return null;
-  }
-
-  const lower = digest.trim().toLowerCase();
-  if (!lower.startsWith("sha256:")) {
-    return null;
-  }
-
-  const value = lower.slice("sha256:".length);
-  return /^[0-9a-f]{64}$/.test(value) ? value : null;
-};
-
-const writeDigestMarker = (binaryPath: string, digest: string): void => {
-  try {
-    fs.writeFileSync(getDigestPath(binaryPath), digest, "utf-8");
-  } catch {
-    // Best-effort. A missing digest marker forces a re-download later.
-  }
-};
-
 /**
  * The release target of an installed binary. A binary without a target marker
  * comes from a version that downloaded only glibc binaries on Linux.
@@ -540,60 +521,21 @@ const readInstalledTarget = (binaryPath: string): string | null => {
   return platformTargetFor(os.platform(), os.arch(), "gnu");
 };
 
-const readDigestMarker = (binaryPath: string): string | null => {
-  try {
-    return normalizeSha256Digest(
-      `sha256:${fs.readFileSync(getDigestPath(binaryPath), "utf-8").trim()}`,
-    );
-  } catch {
-    return null;
-  }
-};
-
-export const verifyBinaryDigest = (binaryPath: string, expectedDigest: string): boolean => {
-  try {
-    const normalized = normalizeSha256Digest(`sha256:${expectedDigest}`);
-    if (!normalized) {
-      return false;
-    }
-
-    const binaryBytes = fs.readFileSync(binaryPath);
-    const actual = createHash("sha256").update(binaryBytes).digest("hex");
-    return actual === normalized;
-  } catch {
-    return false;
-  }
-};
-
 const ensureManagedBinaryTrusted = (
   binaryPath: string,
   label: string,
   outputChannel?: vscode.OutputChannel,
 ): boolean => {
-  const signaturePath = getSignaturePath(binaryPath);
-  if (fs.existsSync(signaturePath)) {
-    if (verifyBinarySignature(binaryPath)) {
-      return true;
-    }
-
-    outputChannel?.appendLine(
-      `Fallow: installed ${label} binary failed Ed25519 signature verification. Re-downloading.`,
-    );
-    purgeManagedBinary(binaryPath);
-    return false;
-  }
-
-  const expectedDigest = readDigestMarker(binaryPath);
-  if (expectedDigest && verifyBinaryDigest(binaryPath, expectedDigest)) {
-    outputChannel?.appendLine(
-      `Fallow: installed ${label} binary reused via stored SHA-256 digest verification.`,
-    );
+  if (verifyBinarySignature(binaryPath)) {
     return true;
   }
 
-  outputChannel?.appendLine(
-    `Fallow: installed ${label} binary is neither signature-verified nor digest-verified. Re-downloading.`,
-  );
+  // A `.sha256` marker is not trusted: the GitHub release digest it holds
+  // proves nothing against someone who can upload release assets.
+  const reason = fs.existsSync(getSignaturePath(binaryPath))
+    ? "failed Ed25519 signature verification"
+    : "has no Ed25519 signature";
+  outputChannel?.appendLine(`Fallow: installed ${label} binary ${reason}. Re-downloading.`);
   purgeManagedBinary(binaryPath);
   return false;
 };
@@ -649,7 +591,7 @@ export const matchesExtensionVersion = async (
   outputChannel?.appendLine(
     `Fallow: installed ${label} binary is v${binaryVersion ?? markerVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
   );
-  // The stale binary stays on disk: it is still signature- or digest-verified,
+  // The stale binary stays on disk: it is still signature-verified,
   // a successful download replaces it and its sidecars atomically, and it is
   // the fallback while the GitHub Release for this extension version does not
   // exist yet (the VSIX is published minutes before that release). Purging
@@ -657,7 +599,7 @@ export const matchesExtensionVersion = async (
   return false;
 };
 
-/** An installed managed binary that passed signature or digest verification, whatever its version. */
+/** An installed managed binary that passed signature verification, whatever its version. */
 const getTrustedManagedBinaryPath = (
   context: vscode.ExtensionContext,
   binaryName: string,
@@ -877,7 +819,15 @@ const downloadAsset = async (
   const signatureAsset = release.assets.find(
     (candidate) => candidate.name === `${assetName}${SIGNATURE_SUFFIX}`,
   );
-  const expectedDigest = normalizeSha256Digest(asset.digest);
+  // Every release since v2.45.1 signs each binary, and the extension only
+  // downloads its own release version (or `latest`), so a missing signature
+  // means the asset did not come from the release workflow. The GitHub asset
+  // `digest` is no substitute: anyone who can upload the asset sets it.
+  if (!signatureAsset) {
+    throw new Error(
+      `${assetName} has no Ed25519 signature in release ${release.tag_name}.${UNTRUSTED_BINARY_HINT}`,
+    );
+  }
 
   const destPath = path.join(dir, `${binaryName}${extension}`);
   const signaturePath = getSignaturePath(destPath);
@@ -890,7 +840,6 @@ const downloadAsset = async (
   // binary, which is the Windows EPERM/EBUSY trigger from issue #1091.
   const tempBinary = uniqueTempPath(dir, binaryName);
   const tempSignature = getSignaturePath(tempBinary);
-  const tempDigest = getDigestPath(tempBinary);
   const tempTarget = getTargetPath(tempBinary);
   // Track whether we replaced the final sidecars so a later failure can roll
   // them back instead of leaving a sidecar that points at a missing binary.
@@ -899,22 +848,13 @@ const downloadAsset = async (
   try {
     await httpsDownload(asset.browser_download_url, tempBinary, signal);
 
-    if (signatureAsset) {
-      await httpsDownload(signatureAsset.browser_download_url, tempSignature, signal);
+    await httpsDownload(signatureAsset.browser_download_url, tempSignature, signal);
 
-      // verifyBinarySignature reads `${tempBinary}.sig`, i.e. tempSignature.
-      if (!verifyBinarySignature(tempBinary)) {
-        throw new Error(`${assetName} failed Ed25519 signature verification`);
-      }
-    } else if (expectedDigest) {
-      if (!verifyBinaryDigest(tempBinary, expectedDigest)) {
-        throw new Error(`${assetName} failed SHA-256 digest verification`);
-      }
-      // Stage the digest marker next to the temp binary so it publishes the
-      // same way the signature does.
-      writeDigestMarker(tempBinary, expectedDigest);
-    } else {
-      throw new Error(`${assetName} is missing both a signature asset and a GitHub release digest`);
+    // verifyBinarySignature reads `${tempBinary}.sig`, i.e. tempSignature.
+    if (!verifyBinarySignature(tempBinary)) {
+      throw new Error(
+        `${assetName} failed Ed25519 signature verification.${UNTRUSTED_BINARY_HINT}`,
+      );
     }
 
     if (os.platform() !== "win32") {
@@ -923,17 +863,10 @@ const downloadAsset = async (
 
     // Publish sidecars to their final paths BEFORE the binary, then rename the
     // binary last. A reader in another window gates on the binary existing, so
-    // it never observes a binary without its signature/digest.
-    if (signatureAsset) {
-      publishSidecar(tempSignature, signaturePath);
-      if (fs.existsSync(digestPath)) {
-        fs.unlinkSync(digestPath);
-      }
-    } else {
-      publishSidecar(tempDigest, digestPath);
-      if (fs.existsSync(signaturePath)) {
-        fs.unlinkSync(signaturePath);
-      }
+    // it never observes a binary without its signature.
+    publishSidecar(tempSignature, signaturePath);
+    if (fs.existsSync(digestPath)) {
+      fs.unlinkSync(digestPath);
     }
     fs.writeFileSync(tempTarget, target, "utf-8");
     publishSidecar(tempTarget, targetPath);
@@ -941,12 +874,12 @@ const downloadAsset = async (
 
     renameIntoPlace(tempBinary, destPath);
   } catch (error) {
-    const candidates = [tempBinary, tempSignature, tempDigest, tempTarget];
+    const candidates = [tempBinary, tempSignature, tempTarget];
     // If we published sidecars but the binary never landed, the final sidecars
     // now describe a missing binary; roll them back so the next activation does
     // not reuse or trip over an orphan marker.
     if (sidecarsPublished) {
-      candidates.push(signaturePath, digestPath, targetPath);
+      candidates.push(signaturePath, targetPath);
     }
     for (const candidate of candidates) {
       try {

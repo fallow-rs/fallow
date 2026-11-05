@@ -46,7 +46,7 @@ Do not duplicate the full setting list in durable prose.
   process still holds open for writing, and the extension chmods, renames,
   and spawns what it just downloaded.
 - A version mismatch is not a trust failure. A managed binary that passed
-  signature or digest verification but reports another version stays on disk
+  Ed25519 signature verification but reports another version stays on disk
   until a download of the matching version replaces it atomically; only a
   failed verification purges. The extension downloads from the GitHub Release
   of its own version, and that release is created after the VSIX is public,
