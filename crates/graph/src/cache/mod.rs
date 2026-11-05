@@ -40,7 +40,7 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// Never reuse a version number that a published build wrote, even from a
 /// development commit. Git history and the CHANGELOG record the reason for
 /// each bump.
-pub const GRAPH_CACHE_VERSION: u32 = 102;
+pub const GRAPH_CACHE_VERSION: u32 = 103;
 
 /// Cached form of a resolved target.
 ///
@@ -401,6 +401,63 @@ impl CachedResolvedReplacedModuleTarget {
 pub struct CachedResolvedProject {
     modules: Vec<CachedResolvedModule>,
     replaced_module_targets: Vec<CachedResolvedReplacedModuleTarget>,
+    /// The paths that the resolution checked and did not find (see
+    /// [`ResolvedProject::missed_probes`]).
+    missed_probes: crate::missed_probes::MissedProbes,
+    /// The resolved targets below the root that are not discovered files
+    /// and not below `node_modules`, root-relative and sorted.
+    external_targets: Vec<String>,
+}
+
+impl CachedResolvedProject {
+    /// True when the files that the cached resolution depends on, but that
+    /// discovery does not list, changed: a file now exists at a path that the
+    /// resolution checked and did not find, or a resolved target outside the
+    /// discovered files is gone. Discovery does not list an extensionless
+    /// file, a `.json` file, or a file in an ignored directory, so the
+    /// manifest cannot show these changes.
+    #[must_use]
+    fn probed_paths_changed(&self, root: &Path) -> bool {
+        let start = std::time::Instant::now();
+        let changed = self.missed_probes.any_exists(root)
+            || crate::missed_probes::any_missing(root, &self.external_targets);
+        tracing::debug!(
+            missed_probes = self.missed_probes.len(),
+            external_targets = self.external_targets.len(),
+            elapsed_ms = start.elapsed().as_secs_f64() * 1000.0,
+            changed,
+            "checked the probed paths of the graph cache"
+        );
+        changed
+    }
+}
+
+/// The root-relative paths of the [`ResolveResult::ExternalFile`] targets
+/// below `root` and not below `node_modules`.
+fn external_targets(root: &Path, resolved: &ResolvedProject) -> Vec<String> {
+    // The resolver can spell a target with the canonical root. Most projects
+    // have no external target, so the root is canonicalized only on demand.
+    let canonical_root = std::cell::OnceCell::new();
+    let mut targets: Vec<String> = resolved
+        .modules
+        .iter()
+        .flat_map(ResolvedModule::all_resolved_source_edges)
+        .filter_map(|edge| match edge.target() {
+            ResolveResult::ExternalFile(path) => crate::missed_probes::project_relative(root, path)
+                .or_else(|| {
+                    canonical_root
+                        .get_or_init(|| dunce::canonicalize(root).ok())
+                        .as_deref()
+                        .and_then(|canonical| {
+                            crate::missed_probes::project_relative(canonical, path)
+                        })
+                }),
+            _ => None,
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
 }
 
 /// Convert a resolved project into the compact graph-cache resolver payload.
@@ -425,6 +482,8 @@ pub fn cache_resolved_project(
     Some(CachedResolvedProject {
         modules,
         replaced_module_targets,
+        missed_probes: resolved.missed_probes.clone(),
+        external_targets: external_targets(root, resolved),
     })
 }
 
@@ -433,6 +492,11 @@ pub fn cache_resolved_project(
 /// Returns `None` if the payload no longer aligns with the current parse result.
 /// A normal graph-cache manifest hit should keep these aligned; this extra check
 /// keeps corrupt or hand-edited cache files on the safe miss path.
+///
+/// Also returns `None` when a file that the cached resolution probed, and that
+/// discovery does not list, appeared or was removed. The caller restores the
+/// payload only after the manifest compare, so a run that misses on the
+/// manifest pays no file system call for the probes.
 #[must_use]
 pub fn restore_resolved_project(
     root: &Path,
@@ -440,7 +504,7 @@ pub fn restore_resolved_project(
     files: &[DiscoveredFile],
     cached: &CachedResolvedProject,
 ) -> Option<ResolvedProject> {
-    if modules.len() != cached.modules.len() {
+    if modules.len() != cached.modules.len() || cached.probed_paths_changed(root) {
         return None;
     }
 
@@ -463,6 +527,7 @@ pub fn restore_resolved_project(
         modules: resolved_modules,
         replaced_module_targets,
         work: crate::resolve::ResolveWork::default(),
+        missed_probes: cached.missed_probes.clone(),
     })
 }
 
@@ -1127,6 +1192,55 @@ mod tests {
                 current.as_slice()
             );
         }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_changed_probed_path_takes_the_cache_miss_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/data.json"), "{}\n").unwrap();
+        let app = root.join("src/app.ts");
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: app.clone(),
+            size_bytes: 1,
+        }];
+        let module = ModuleInfo {
+            imports: vec![import_info("./data")],
+            ..ModuleInfo::empty(FileId(0))
+        };
+        let resolved = ResolvedProject {
+            modules: vec![ResolvedModule {
+                file_id: FileId(0),
+                path: app,
+                resolved_imports: vec![ResolvedImport {
+                    info: import_info("./data"),
+                    target: ResolveResult::ExternalFile(root.join("src/data.json")),
+                }],
+                ..ResolvedModule::default()
+            }],
+            missed_probes: crate::missed_probes::MissedProbes::from_paths(vec![
+                "src/data".to_string(),
+            ]),
+            ..ResolvedProject::default()
+        };
+        let cached = cache_resolved_project(root, &files, &resolved).expect("stable keys");
+        let restore =
+            || restore_resolved_project(root, std::slice::from_ref(&module), &files, &cached);
+        assert!(restore().is_some(), "no probed path changed");
+
+        std::fs::write(root.join("src/data"), "export {};\n").unwrap();
+        assert!(restore().is_none(), "a file appeared at a missed path");
+        std::fs::remove_file(root.join("src/data")).unwrap();
+        assert!(restore().is_some());
+
+        std::fs::remove_file(root.join("src/data.json")).unwrap();
+        assert!(
+            restore().is_none(),
+            "a resolved target outside discovery is gone"
+        );
     }
 
     #[test]

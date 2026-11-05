@@ -72,6 +72,16 @@ pub enum Step {
     SwapAngularIncludePath,
     /// Point the `main` entry of `angular.json` to the other file.
     SwapAngularMain,
+    /// Add or remove the extensionless file `src/util`. The resolver tries
+    /// this path for `./util` before `src/util.ts`, and discovery does not
+    /// list it.
+    ToggleExtensionlessUtil,
+    /// Add or remove `src/data.json`, the target of the unresolved import
+    /// `./data`. Discovery does not list a `.json` file.
+    ToggleDataJson,
+    /// Add or remove `dist/gen.js`, the target of the unresolved import
+    /// `../dist/gen`. The default ignore patterns exclude `dist`.
+    ToggleBuildOutput,
 }
 
 const SOURCE_STEPS: [Step; 7] = [
@@ -88,7 +98,7 @@ const CLONE_A: &str = "export const sumA = (items: number[]): number => {\n  let
 const CLONE_B: &str = "export const sumB = (items: number[]): number => {\n  let total = 0;\n  for (const item of items) {\n    total += item * 2;\n    total -= 1;\n  }\n  return total;\n};\n";
 const CLONE_B_BROKEN: &str = "export const sumB = (items: number[]): number => {\n  let total = 0;\n  while (items.length>0) {\n    total = items.pop() ?? 10;\n    break;\n  }\n  return total;\n};\n";
 
-const ENTRY_ALPHA: &str = "import { db } from '#db';\nimport { alias } from '@alias';\nimport { alpha } from './util';\nimport { value } from '@demo/lib/src/util';\nimport { nested } from '../nested/entry';\nimport asset from 'plain-pkg/build/missing.mjs?url';\n\nexport const run = (): unknown[] => [db, alias, alpha(), value, nested, asset];\n";
+const ENTRY_ALPHA: &str = "import { db } from '#db';\nimport { alias } from '@alias';\nimport { alpha } from './util';\nimport { value } from '@demo/lib/src/util';\nimport { nested } from '../nested/entry';\nimport asset from 'plain-pkg/build/missing.mjs?url';\nimport data from './data';\nimport { gen } from '../dist/gen';\n\nexport const run = (): unknown[] => [db, alias, alpha(), value, nested, asset, data, gen];\n";
 const BUN_ENTRY_ALPHA: &str = "import { alpha } from './util';\nimport asset from 'plain-pkg/build/missing.mjs?url';\n\nexport const run = (): unknown[] => [alpha(), asset];\n";
 const DENO_ENTRY_ALPHA: &str = "import { db } from 'db';\nimport { alpha } from './src/util.ts';\n\nexport const run = (): unknown[] => [db, alpha()];\n";
 
@@ -168,6 +178,9 @@ pub const NODE: Template = Template {
         Step::ToggleProduction,
         Step::ToggleIgnoreOrphan,
         Step::ToggleCondition,
+        Step::ToggleExtensionlessUtil,
+        Step::ToggleDataJson,
+        Step::ToggleBuildOutput,
     ],
 };
 
@@ -204,6 +217,7 @@ pub const BUN: Template = Template {
         Step::NodeModulesNoise,
         Step::ToggleProduction,
         Step::ToggleIgnoreOrphan,
+        Step::ToggleExtensionlessUtil,
     ],
 };
 
@@ -379,6 +393,14 @@ fn swap_in_file(project: &mut Project, file: &str, from: &str, to: &str, keep_mt
     }
 }
 
+fn toggle_file(project: &mut Project, file: &str, content: &str) {
+    if project.exists(file) {
+        project.remove(file);
+    } else {
+        project.write(file, content);
+    }
+}
+
 fn toggle_option(values: &mut Vec<String>, value: &str) {
     if let Some(index) = values.iter().position(|existing| existing == value) {
         values.remove(index);
@@ -475,6 +497,13 @@ pub fn apply(project: &mut Project, step: Step) {
                 "src/other.ts",
                 false,
             );
+        }
+        Step::ToggleExtensionlessUtil => {
+            toggle_file(project, "src/util", "export const alpha = () => 3;\n");
+        }
+        Step::ToggleDataJson => toggle_file(project, "src/data.json", "{\"data\": 1}\n"),
+        Step::ToggleBuildOutput => {
+            toggle_file(project, "dist/gen.js", "export const gen = 1;\n");
         }
         manifest => apply_manifest_step(project, manifest),
     }

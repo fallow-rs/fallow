@@ -147,6 +147,10 @@ pub struct ResolvedProject {
     /// Deterministic work counts of the resolution that built this project.
     /// Zero for a project restored from the graph cache.
     pub work: super::ResolveWork,
+    /// The paths below the root that the resolution checked and did not
+    /// find. A file that appears at one of them can change a resolution, so
+    /// the graph cache stores them (see [`crate::missed_probes`]).
+    pub missed_probes: crate::missed_probes::MissedProbes,
 }
 
 /// One project-internal module replacement resolved from its declaring source file.

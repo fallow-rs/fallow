@@ -130,6 +130,21 @@ const REGRESSIONS: &[Regression] = &[
         template: &ANGULAR,
         steps: &[Step::SwapAngularMain],
     },
+    Regression {
+        name: "extensionless file at a missed candidate path (#4233)",
+        template: &NODE,
+        steps: &[Step::ToggleExtensionlessUtil, Step::ToggleExtensionlessUtil],
+    },
+    Regression {
+        name: "json file at a missed candidate path (#4233)",
+        template: &NODE,
+        steps: &[Step::ToggleDataJson, Step::ToggleDataJson],
+    },
+    Regression {
+        name: "build output in an ignored directory (#4233)",
+        template: &NODE,
+        steps: &[Step::ToggleBuildOutput, Step::ToggleBuildOutput],
+    },
 ];
 
 /// The facts of one sequence run.
