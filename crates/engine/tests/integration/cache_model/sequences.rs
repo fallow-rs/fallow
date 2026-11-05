@@ -58,7 +58,7 @@ const REGRESSIONS: &[Regression] = &[
     Regression {
         name: "resolve condition",
         template: &NODE,
-        steps: &[Step::ToggleLibExports, Step::ToggleCondition],
+        steps: &[Step::ToggleCondition],
     },
     Regression {
         name: "package.json imports (#3477)",
@@ -270,9 +270,10 @@ fn run_seeds(seeds: impl IntoIterator<Item = u64>) -> Outcome {
 fn regression_sequences_match_cache_free_runs() {
     for regression in REGRESSIONS {
         let outcome = run_sequence(regression.name, regression.template, regression.steps);
-        assert!(
-            outcome.changed > 0,
-            "{}: no step changed the cache-free result, so the sequence proves nothing",
+        assert_eq!(
+            outcome.changed,
+            regression.steps.len(),
+            "{}: each step must change the cache-free result, or that step proves nothing",
             regression.name
         );
     }

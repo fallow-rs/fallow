@@ -1,6 +1,5 @@
 //! Dependency credit for imports that resolve, or point, into `node_modules`.
 
-use crate::read_trace::TracedPath;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
@@ -14,6 +13,7 @@ use super::specifier::{
     tsconfig_paths_base_dir,
 };
 use super::types::ResolveContext;
+use crate::read_trace::TracedPath;
 
 /// Package-usage key for an import from `from_file` that resolved into
 /// `node_modules`.

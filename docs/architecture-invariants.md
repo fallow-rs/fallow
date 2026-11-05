@@ -88,6 +88,14 @@ protocol and package parity.
   must not crawl arbitrary project files to complete a report.
 - Cache expansion needs invalidation tests and visible fallback behavior before
   it becomes part of a public workflow.
+- A warm run of a persisted cache must give the same result as a
+  `--no-cache` run. The cache model tests in
+  `crates/engine/tests/integration/cache_model` check this for the graph,
+  extract and dupes caches over edit sequences. They also check that the
+  graph cache key covers each path that import resolution reads, through the
+  `read-trace` feature of `fallow-graph`. A new resolver read of a file goes
+  through `crate::read_trace`, so that the check sees it. A new kind of
+  resolver input needs a step in the templates of these tests.
 - Runtime and cloud data must enter through explicit options or typed evidence
   fields. Static analyzers should not hide network or filesystem side effects.
 

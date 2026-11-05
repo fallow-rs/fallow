@@ -38,7 +38,8 @@ pub enum Step {
     ToggleBunInstall,
     /// Write a tool cache file and a package readme in `node_modules`.
     NodeModulesNoise,
-    /// Point the `#db` entry of `package.json` `imports` to the other file.
+    /// Swap the two targets of the conditional `#db` entry of `package.json`
+    /// `imports`.
     SwapPackageImports,
     /// Swap the names of two workspace packages.
     SwapWorkspaceNames,
@@ -54,7 +55,9 @@ pub enum Step {
     ToggleProduction,
     /// Add or remove an ignore pattern for the orphan file.
     ToggleIgnoreOrphan,
-    /// Add or remove the `react-server` resolve condition.
+    /// Add or remove the `react-server` resolve condition. The condition
+    /// selects the other target of the `#db` entry of `package.json`
+    /// `imports`.
     ToggleCondition,
 }
 
@@ -88,7 +91,7 @@ pub const NODE: Template = Template {
     files: &[
         (
             "package.json",
-            r##"{"name":"app","private":true,"workspaces":["packages/*"],"main":"src/index.ts","imports":{"#db":"./src/db-a.ts"},"dependencies":{"plain-pkg":"1.0.0","other-pkg":"1.0.0","@demo/lib":"*"},"devDependencies":{"vite":"*"}}"##,
+            r##"{"name":"app","private":true,"workspaces":["packages/*"],"main":"src/index.ts","imports":{"#db":{"react-server":"./src/db-b.ts","default":"./src/db-a.ts"}},"dependencies":{"plain-pkg":"1.0.0","other-pkg":"1.0.0","@demo/lib":"*"},"devDependencies":{"vite":"*"}}"##,
         ),
         ("package-lock.json", NPM_LOCK),
         ("node_modules/.package-lock.json", NPM_LOCK),
@@ -232,16 +235,17 @@ fn entry_file(project: &Project) -> &'static str {
     }
 }
 
-/// Replace `from` with `to` in a file, or `to` with `from` when `from` is
-/// absent. The two spellings must have the same length when `keep_mtime` is
-/// set, so the metadata cannot show the edit.
+/// Swap each `from` with `to` in a file, and each `to` with `from`. The two
+/// spellings must have the same length when `keep_mtime` is set, so the
+/// metadata cannot show the edit.
 fn swap_in_file(project: &mut Project, file: &str, from: &str, to: &str, keep_mtime: bool) {
     let content = project.read(file).expect("swap target exists");
-    let next = if content.contains(from) {
-        content.replace(from, to)
-    } else {
-        content.replace(to, from)
-    };
+    const MARK: &str = "\u{0}";
+    let next = content
+        .replace(from, MARK)
+        .replace(to, from)
+        .replace(MARK, to);
+    assert_ne!(next, content, "{file}: the swap must change the file");
     if keep_mtime {
         assert_eq!(
             next.len(),

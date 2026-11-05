@@ -2,10 +2,16 @@
 //!
 //! The persisted graph cache stores import resolutions. A warm run can only
 //! reuse them when the cache key covers each path that the resolution read.
-//! With the `read-trace` feature, every file system call of the resolution
-//! stage reports its path here, and [`ReadRecorder`] collects the paths below
-//! a scope directory. Tests use the recorded read set to check that the cache
-//! key covers each path.
+//! With the `read-trace` feature, the file system calls of `oxc_resolver` and
+//! the direct path checks of the resolution fallbacks report their paths
+//! here, and [`ReadRecorder`] collects the paths below a scope directory.
+//! Tests use the recorded read set to check that the cache key covers each
+//! path.
+//!
+//! The trace does not see the manifest loads in `fallow_config` (the
+//! `package.json` and Deno configs of the project and workspace roots, and
+//! the `tsconfig.json` chains), or the read of `.pnp.cjs` in the `pnp` crate.
+//! The resolver input hash reads each of these files by name.
 //!
 //! Without the feature, the helpers call the file system directly and record
 //! nothing, so a release build pays no cost.
@@ -165,18 +171,31 @@ mod recording {
         /// Stop the recorder and return its reads, sorted by path and kind.
         #[must_use]
         pub fn finish(self) -> Vec<ReadEvent> {
-            let active = {
-                let mut recorders = RECORDERS.lock().unwrap_or_else(|e| e.into_inner());
-                let Some(index) = recorders.iter().position(|active| active.id == self.id) else {
-                    return Vec::new();
-                };
-                recorders.swap_remove(index)
+            let Some(active) = remove(self.id) else {
+                return Vec::new();
             };
-            OPEN.fetch_sub(1, Ordering::SeqCst);
             let mut events: Vec<ReadEvent> = active.events.into_iter().collect();
             events.sort_unstable();
             events
         }
+    }
+
+    /// A test that panics before [`ReadRecorder::finish`] must not leave the
+    /// recorder open, or each later file system call takes the lock.
+    impl Drop for ReadRecorder {
+        fn drop(&mut self) {
+            let _ = remove(self.id);
+        }
+    }
+
+    fn remove(id: u64) -> Option<Active> {
+        let active = {
+            let mut recorders = RECORDERS.lock().unwrap_or_else(|e| e.into_inner());
+            let index = recorders.iter().position(|active| active.id == id)?;
+            recorders.swap_remove(index)
+        };
+        OPEN.fetch_sub(1, Ordering::SeqCst);
+        Some(active)
     }
 
     pub fn note(path: &Path, kind: ReadKind) {

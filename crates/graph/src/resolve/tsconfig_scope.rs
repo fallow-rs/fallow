@@ -1,13 +1,13 @@
 //! Match file paths against the `files`, `include` and `exclude` entries of a
 //! tsconfig, relative to the directory of that tsconfig.
 
-use crate::read_trace::TracedPath;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
 
 use super::fallbacks::normalize_path_lexically;
+use crate::read_trace::TracedPath;
 
 pub(super) fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
     let mut builder = GlobSetBuilder::new();

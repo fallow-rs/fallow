@@ -19,7 +19,7 @@
 //!   config or install file. The key does not record these probes yet, so
 //!   a new non-source file at such a path (a `.json` file, an extensionless
 //!   file, or build output in an ignored directory) can change a resolution
-//!   with no change to the key;
+//!   with no change to the key (#4233);
 //! - a path below `__fallow_ws_self_resolve__`, the directory name that the
 //!   resolver uses for a synthetic importer of a workspace package.
 //!
@@ -97,6 +97,13 @@ fn assert_key_covers_read_set(name: &str, template: &Template, setup: &[Step]) {
     );
 
     let baseline = project.cache_snapshot();
+    let unchanged = project.graph_cache_bytes();
+    run_analysis(&project);
+    assert_eq!(
+        project.graph_cache_bytes(),
+        unchanged,
+        "{name}: a warm run with no change must keep graph-cache.bin, or a rewrite proves nothing"
+    );
     let mut proxies: FxHashMap<PathBuf, bool> = FxHashMap::default();
     let mut gaps = Vec::new();
     let mut checked = 0usize;
@@ -118,7 +125,7 @@ fn assert_key_covers_read_set(name: &str, template: &Template, setup: &[Step]) {
         }
         gaps.push(Gap {
             path: display_path(&project, path),
-            kinds: kinds.iter().copied().collect(),
+            kinds: sorted(kinds),
             perturbation,
             stale: stale_after(&project, &baseline, path, perturbation),
         });
@@ -135,6 +142,12 @@ fn assert_key_covers_read_set(name: &str, template: &Template, setup: &[Step]) {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+fn sorted(kinds: &FxHashSet<ReadKind>) -> Vec<ReadKind> {
+    let mut kinds: Vec<ReadKind> = kinds.iter().copied().collect();
+    kinds.sort_unstable();
+    kinds
 }
 
 #[expect(

@@ -3,11 +3,11 @@
 //! Entry point discovery (`fallow-core`) and the public API entry set
 //! (`fallow-engine`) share these helpers, so both apply the same rule.
 
-use crate::read_trace::TracedPath;
 use std::path::{Component, Path, PathBuf};
 
 use super::fallbacks::{is_declaration_file_name, output_source_stem};
 use super::types::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
+use crate::read_trace::TracedPath;
 
 /// Map an output directory entry to its same-stem source file.
 ///

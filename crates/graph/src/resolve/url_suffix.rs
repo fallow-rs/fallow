@@ -1,12 +1,12 @@
 //! Query and fragment suffixes of import specifiers (`./a.css?inline`,
 //! `pkg/a.wasm?url`, `./page.html#top`).
 
-use crate::read_trace::TracedPath;
 use std::path::Path;
 
 use super::path_info::is_valid_package_name;
 use super::types::{ResolveContext, ResolveResult};
 use super::workspace_alias::resolve_failed_bare_package_specifier;
+use crate::read_trace::TracedPath;
 
 /// Return the specifier without its query string or hash fragment.
 pub(super) fn strip_url_suffix(specifier: &str) -> &str {

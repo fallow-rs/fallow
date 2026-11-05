@@ -3,13 +3,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::read_trace::Resolver;
 use dashmap::DashMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
 use fallow_config::TsconfigOutputMap;
 use fallow_types::discover::FileId;
+
+use crate::read_trace::Resolver;
 
 /// Result of resolving an import specifier.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -444,7 +445,7 @@ pub(super) struct CanonicalizeCache {
 }
 
 impl CanonicalizeCache {
-    /// Return the cached `crate::read_trace::canonicalize(path)` outcome, computing it on
+    /// Return the cached `dunce::canonicalize(path)` outcome, computing it on
     /// first miss. `None` (a path that fails to canonicalize) is cached too so a
     /// repeated probe of the same missing path does not re-issue the syscall.
     pub fn get(&self, path: &Path) -> Option<PathBuf> {

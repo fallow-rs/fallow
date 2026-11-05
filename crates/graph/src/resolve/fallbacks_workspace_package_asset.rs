@@ -1,10 +1,10 @@
 //! Workspace package subpaths that name a file on disk that discovery does
 //! not collect, such as `<pkg>/package.json`.
 
-use crate::read_trace::TracedPath;
 use std::path::Path;
 
 use super::{PackageManifestInfo, ResolveResult, package_map_target_path};
+use crate::read_trace::TracedPath;
 
 /// Extensions of files that discovery analyzes (`SOURCE_EXTENSIONS` in
 /// `fallow_core::discover`). A workspace package target with one of these
