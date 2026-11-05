@@ -10,10 +10,10 @@ use super::project::{Project, available_runners, vitest_package};
 use super::template::{Runner, append_neutral_edit};
 use super::trace::trace;
 
-/// The exact set that each trace must give. A smaller set means that the
-/// trace stopped to see a read, and the oracle would check too little. A
-/// larger set means that the runner reads a new file: add it here, so the
-/// change gets a review.
+/// The files that each trace must hold. A missing file means that the trace
+/// stopped to see a read, and the oracle would check too little. A runner
+/// release can read more files: the oracle checks each extra file too, so
+/// the set is a lower bound, not an exact list.
 fn expected_reads(runner: Runner) -> Vec<&'static str> {
     let mut reads = vec![
         "package.json",
@@ -34,6 +34,9 @@ fn expected_reads(runner: Runner) -> Vec<&'static str> {
     reads
 }
 
+/// A project file that no runner reads. The negative control edits it.
+const UNREAD_FILE: &str = "README.md";
+
 fn check_read_set(runner: Runner) {
     let Some(vitest) = vitest_package() else {
         return;
@@ -43,10 +46,13 @@ fn check_read_set(runner: Runner) {
     }
     let project = Project::new(runner, &vitest);
     let traced = trace(&project.root, runner);
-    assert_eq!(
-        traced.iter().map(String::as_str).collect::<Vec<_>>(),
-        expected_reads(runner),
-        "the {runner:?} trace"
+    let missing: Vec<&str> = expected_reads(runner)
+        .into_iter()
+        .filter(|path| !traced.contains(*path))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the {runner:?} trace misses {missing:?}: {traced:?}"
     );
 
     let first = project.run(true);
@@ -59,6 +65,16 @@ fn check_read_set(runner: Runner) {
     assert_eq!(
         control.hits, first.stored,
         "a run with no edit reuses each stored result"
+    );
+    append_neutral_edit(&project.root, UNREAD_FILE);
+    assert!(
+        !traced.contains(UNREAD_FILE),
+        "the runner reads {UNREAD_FILE}"
+    );
+    assert_eq!(
+        project.run(true).hits,
+        first.stored,
+        "an edit of a file that the runner does not read keeps each stored result, so a key that hashes the whole tree fails this oracle"
     );
 
     let uncovered: Vec<&String> = traced

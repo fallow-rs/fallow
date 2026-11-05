@@ -46,7 +46,7 @@ test("adds", () => {
 });
 "#;
 
-const FILES: [(&str, &str); 14] = [
+const FILES: [(&str, &str); 15] = [
     (
         "package.json",
         "{\"name\":\"result-cache-model\",\"private\":true,\"type\":\"module\",\"devDependencies\":{\"@types/bun\":\"1.3.0\"},\"dependencies\":{\"mode-pkg\":\"1.0.0\"}}\n",
@@ -64,6 +64,7 @@ const FILES: [(&str, &str); 14] = [
         "export const installed = true;\n",
     ),
     (".gitignore", "node_modules\n.fallow\n"),
+    ("README.md", "# Result cache model\n"),
     (
         "vitest.config.mjs",
         "export default { test: { include: [\"test/**/*.test.ts\"], setupFiles: [\"./test/setup.ts\"] } };\n",
@@ -227,7 +228,7 @@ pub fn append_neutral_edit(root: &Path, path: &str) {
         Some("ts" | "mts" | "cts" | "tsx" | "js" | "mjs" | "cjs" | "jsx") => {
             "\n// result cache model edit\n"
         }
-        Some("toml") => "\n# result cache model edit\n",
+        Some("toml" | "md") => "\n# result cache model edit\n",
         Some("json") => "\n",
         _ => panic!("the read-set oracle has no neutral edit for {path}"),
     };

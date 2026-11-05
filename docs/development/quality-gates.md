@@ -397,9 +397,8 @@ An oracle is a test that compares two results that must agree, for example a
 warm cache run and a `--no-cache` run. The cache model tests in
 `crates/engine/tests/integration/cache_model` are an oracle, and the result
 cache model tests in `crates/api/src/mutation/cache_model` are another. Each
-oracle must
-fail on the parent of a named fix commit and pass on the fix commit, or it does
-not catch that bug class. `node scripts/oracle-proof.mjs <oracle>` shows this.
+oracle must fail on the parent of a named fix commit and pass on the fix
+commit, or it does not catch that bug class. `node scripts/oracle-proof.mjs <oracle>` shows this.
 It checks out `fix^` and `fix` in temporary worktrees, puts the current oracle
 on each commit, builds it, and runs it. A build failure is a tool error (exit
 2), not a failing oracle. `--list` names the oracles and their fix commits. A

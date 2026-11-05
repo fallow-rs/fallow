@@ -1170,9 +1170,10 @@ The key hashes these parts:
   mutant key combines the digests of its covering test files;
 - the content of the runner setup files (Vitest `setupFiles`, the `preload`
   files of the root `bunfig.toml`, also when no `@types/bun` or `bun-types`
-  package enables the Bun plugin, and also for a Vitest run, because Bun
-  runs a top-level preload before each script), of the runner config
-  modules at the root
+  package enables the Bun plugin. A Vitest run keys on them too, because a
+  project can start Vitest through `bun run`, and Bun then runs a top-level
+  preload first. A Vitest project with such a file gets more misses, never a
+  stale hit), of the runner config modules at the root
   (`vitest.config.*`, `vite.config.*` and `vitest.workspace.*`), and of the
   files that they reach through static imports (`MutationPlan::support_files`).
   A change to a config fragment that the runner config imports changes the

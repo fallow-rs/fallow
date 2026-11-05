@@ -35,15 +35,30 @@ fn on_path(program: &str) -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
+/// True when `node` is on `PATH` and has `module.registerHooks`, which the
+/// runner trace uses.
+fn node_has_sync_hooks() -> bool {
+    Command::new("node")
+        .args([
+            "-e",
+            "process.exit(typeof require('node:module').registerHooks === 'function' ? 0 : 1)",
+        ])
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
 /// The Vitest package of the companion, or `None` after a skip.
 pub fn vitest_package() -> Option<PathBuf> {
-    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")?;
+    let Some(manifest_dir) = std::env::var_os("CARGO_MANIFEST_DIR") else {
+        skip("the result cache model needs CARGO_MANIFEST_DIR, which cargo sets");
+        return None;
+    };
     let package = Path::new(&manifest_dir).join("../../tools/mutation-runner/node_modules/vitest");
-    if package.join("package.json").is_file() && on_path("node") {
+    if package.join("package.json").is_file() && node_has_sync_hooks() {
         return Some(dunce::canonicalize(package).expect("vitest path"));
     }
     skip(&format!(
-        "the result cache model needs `node` on PATH and `npm ci` in {}",
+        "the result cache model needs `node` 22.15 or later on PATH (for `module.registerHooks`) and `npm ci` in {}",
         package.display()
     ));
     None
