@@ -2,6 +2,7 @@
 //! namespace member uses of the semantic pass, and the report filters.
 
 use super::*;
+use fallow_types::extract::NamespaceMemberUseFact;
 
 /// Drop a member of a nested namespace that is reported itself: removing
 /// `Inner` removes `Inner.x` too, so one finding is enough.
@@ -65,7 +66,9 @@ pub(super) fn credit_namespace_member_uses(
             continue;
         };
         let namespace_files: Vec<FileId> =
-            namespace_import_targets(resolved, &namespace_use.object).collect();
+            namespace_import_targets(resolved, &namespace_use.object)
+                .chain(import_type_targets(resolved, &namespace_use.object))
+                .collect();
         let targets: Vec<(ExportKey, &str)> = if namespace_files.is_empty() {
             local_to_export_keys
                 .get(namespace_use.object.as_str())
@@ -97,6 +100,24 @@ pub(super) fn credit_namespace_member_uses(
             credit_namespace_path(credited, path, namespace_use.whole);
         }
     }
+}
+
+/// Project files that an inline import type `import("./x").N.a` names. The
+/// semantic pass keys such a use by its source, not by a local binding.
+fn import_type_targets<'r>(
+    resolved: &'r ResolvedModule,
+    object: &'r str,
+) -> impl Iterator<Item = FileId> + 'r {
+    let is_import_type_key = object.starts_with("import(");
+    resolved
+        .all_resolved_imports()
+        .filter(move |import| {
+            is_import_type_key
+                && import.info.local_name.is_empty()
+                && import.info.is_type_only
+                && NamespaceMemberUseFact::import_type_object(&import.info.source) == object
+        })
+        .filter_map(|import| import.target.internal_file_id())
 }
 
 /// Credit every namespace member that an escaping namespace import can read:

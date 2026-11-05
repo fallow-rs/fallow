@@ -145,7 +145,11 @@ error by suppressing a downstream detector.
   record: a chain of two or more links (`N.Inner.x`, the type `N.Inner.T`), a
   value that leaves its chain (an argument, an alias, a spread), and a
   reference inside the namespace body. Scope resolution of the semantic model
-  keeps a shadowed name from giving credit. The member pass stores a whole
+  keeps a shadowed name from giving credit. An inline import type
+  (`import("./x").N.a`) has no local binding, so the pass keys its qualifier
+  by the source (`import(./x)`), and the member pass reads that key as a
+  namespace import of the target module. A `typeof` import type is a whole
+  use of the qualifier. The member pass stores a whole
   use as the marker `*` or `Inner.*` in the accessed-member set, so the
   re-export propagation carries it like any other member name. The marker
   applies to namespace members only, so an escaping class or enum keeps its
