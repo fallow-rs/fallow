@@ -24,6 +24,7 @@ use crate::{
 
 // External-plugin dry-run primitives surfaced through the engine boundary for
 // the CLI's `plugin-check` command (read-only; no analysis pipeline).
+pub use fallow_core::plugins::bun::preload_files as bun_preload_files;
 pub use fallow_core::plugins::manifest_entries::{
     CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
 };

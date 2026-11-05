@@ -14,9 +14,13 @@ import { fileURLToPath } from "node:url";
 
 import { cargoTargetDir } from "./cargo-target.mjs";
 import { cacheModel } from "./oracle-proof/cache-model.mjs";
+import { mutationCache } from "./oracle-proof/mutation-cache.mjs";
 
 /** The registered oracles, by name. */
-export const ORACLES = Object.freeze({ [cacheModel.name]: cacheModel });
+export const ORACLES = Object.freeze({
+  [cacheModel.name]: cacheModel,
+  [mutationCache.name]: mutationCache,
+});
 
 const EXIT_HOLDS = 0;
 const EXIT_DOES_NOT_HOLD = 1;

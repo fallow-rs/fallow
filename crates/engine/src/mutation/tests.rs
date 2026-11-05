@@ -1273,3 +1273,20 @@ fn direct_export_test_files_are_retained_without_changing_public_reach_fields() 
     assert_eq!(value["export_name"], "add");
     assert_eq!(value["tests"], serde_json::json!([]));
 }
+
+#[test]
+fn bun_preload_files_and_their_imports_are_support_files_without_bun_types() {
+    let root = fixture("mutation-bun-preload");
+    let session = session(&root);
+    let plan = plan_mutations_for_session(&session, &MutationPlanRequest::new(MutationScope::All))
+        .expect("plan");
+    assert_eq!(
+        plan.support_files,
+        vec![
+            "test/global.ts".to_owned(),
+            "test/mode.ts".to_owned(),
+            "test/preload.ts".to_owned(),
+        ],
+        "bun runs each preload file of bunfig.toml before the tests, also when no package enables the Bun plugin, so the result cache keys on each preload file and its imports"
+    );
+}

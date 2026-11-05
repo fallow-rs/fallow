@@ -384,11 +384,20 @@ seed range that runs them again. Add the sequence to `REGRESSIONS` in
 `crates/engine/tests/integration/cache_model/sequences.rs` when you fix the
 cause. The sweep does not gate a release.
 
+A second job runs the seed sweep of the mutation result cache model in
+`crates/api/src/mutation/cache_model`. Each of its steps runs the real Vitest
+or `bun test` runner, so a step costs much more than an analysis run. Pull
+request CI runs its regression sequences, two fixed seeds, and the read-set
+tests in the `Test` job, which installs Node, Bun and the
+`tools/mutation-runner` packages. The scheduled job runs 100 new seeds a day.
+
 ### Oracle proof
 
 An oracle is a test that compares two results that must agree, for example a
 warm cache run and a `--no-cache` run. The cache model tests in
-`crates/engine/tests/integration/cache_model` are an oracle. Each oracle must
+`crates/engine/tests/integration/cache_model` are an oracle, and the result
+cache model tests in `crates/api/src/mutation/cache_model` are another. Each
+oracle must
 fail on the parent of a named fix commit and pass on the fix commit, or it does
 not catch that bug class. `node scripts/oracle-proof.mjs <oracle>` shows this.
 It checks out `fix^` and `fix` in temporary worktrees, puts the current oracle

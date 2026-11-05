@@ -178,6 +178,39 @@ test("the oracle seeds workflow runs the wide seed range on a schedule, outside 
   );
 });
 
+test("the oracle seeds workflow runs the mutation result cache seeds with the real runners", () => {
+  const workflow = readWorkflow(".github/workflows/oracle-seeds.yml");
+  const sequences = readFileSync("crates/api/src/mutation/cache_model/sequences.rs", "utf8");
+  const job = indentedBlock(workflow, "mutation-cache-model-seeds", 2);
+
+  assert.match(job, /permissions:\n      contents: read/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(job, /actions\/setup-node@/);
+  assert.match(job, /oven-sh\/setup-bun@/);
+  assert.match(job, /npm ci --prefix tools\/mutation-runner/);
+  assert.match(job, /FALLOW_MUTATION_E2E_REQUIRED: '1'/, "a missing runner fails the run");
+  assert.match(sequences, /#\[ignore = [^\]]*\]\nfn seed_sweep_matches_cache_free_runs\(\)/);
+  assert.match(sequences, /"FALLOW_MUTATION_CACHE_MODEL_SEEDS"/);
+  assert.match(sequences, /"FALLOW_MUTATION_CACHE_MODEL_SEED_START"/);
+  assert.match(
+    job,
+    /mutation::cache_model::sequences::seed_sweep_matches_cache_free_runs[\s\S]*-- --ignored --exact/,
+  );
+  assert.match(job, /export FALLOW_MUTATION_CACHE_MODEL_SEEDS=/);
+  assert.match(job, /export FALLOW_MUTATION_CACHE_MODEL_SEED_START=/);
+  assert.match(
+    job,
+    /panicked at[\s\S]*GITHUB_STEP_SUMMARY/,
+    "a failure prints the failing sequence",
+  );
+  assert.match(job, /exit "\$status"/);
+  assert.doesNotMatch(
+    readWorkflow(".github/workflows/ci.yml"),
+    /FALLOW_MUTATION_CACHE_MODEL_SEEDS/,
+    "pull request CI keeps the fixed seeds",
+  );
+});
+
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);

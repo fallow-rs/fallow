@@ -9,6 +9,7 @@
     "fuzz/corpus/**",
     "crates/cli/viz-assets/**",
     "crates/api/src/mutation/companion/**",
+    "crates/api/src/mutation/cache_model/runner-trace/**",
     "tools/mutation-runner/test/fixtures/**",
     "assets/demo-project/**",
     "tests/benchmark-corpus/**",
