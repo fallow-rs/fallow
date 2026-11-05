@@ -1,3 +1,0 @@
-### Fixed
-
-- **`effect.schemaExportsAsTypes` now covers re-exported and derived schemas.** A module that exports a schema of another module again (`import { User } from "./schemas"; export { User }`, or `export { User } from "./schemas"`) now reports it as an unused type, also through `export *` barrels. In a module that imports Effect, a chain on an imported schema (`export const UserId = User.pipe(Schema.brand("UserId"))`, `User.annotations({...})`) and an alias (`export const Copy = User`) also count as schemas, also as a default export. A re-export of a value that is not a schema stays an unused export.

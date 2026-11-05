@@ -1,4 +1,0 @@
-### Fixed
-
-- **Audit review comments state the attribution and the gate effect of a complexity finding.** `review-github` and `review-gitlab` now put the attribution after the severity label of an audit complexity finding: `introduced`, `worsened` or `inherited`. When the gate does not count the finding, the label says why, for example `` **error** · inherited · not gated (`--gate new-only`) ``. The other reasons are `--worsened warn`, `--worsened off` and a test file. The live audit run and `fallow report --from` on a saved audit give the same text. Under `--gate all` the audit has no attribution, so the label does not change. The GitHub Action and the GitLab template render the comments with this binary, so they show the same text.
-  (Closes [#4189](https://github.com/fallow-rs/fallow/issues/4189))
