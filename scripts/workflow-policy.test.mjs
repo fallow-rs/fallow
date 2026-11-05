@@ -136,6 +136,48 @@ test("branch coverage reports weekly on the Fuzz Smoke nightly without gating re
   assert.doesNotMatch(job, /exit 1|FLOOR=/, "branch coverage only reports and has no floor");
 });
 
+test("the oracle seeds workflow runs the wide seed range on a schedule, outside pull request CI", async () => {
+  const workflow = readWorkflow(".github/workflows/oracle-seeds.yml");
+  const sequences = readFileSync(
+    "crates/engine/tests/integration/cache_model/sequences.rs",
+    "utf8",
+  );
+  const triggers = indentedBlock(workflow, "on", 0);
+  const job = indentedBlock(workflow, "cache-model-seeds", 2);
+  const { REQUIRED_WORKFLOWS } = await import("./verify-release-ci.mjs");
+
+  assert.match(triggers, /^  schedule:\n    - cron: '40 2 \* \* \*'$/m);
+  assert.match(triggers, /^  workflow_dispatch:$/m);
+  assert.doesNotMatch(triggers, /^  (push|pull_request|pull_request_target):/m);
+  assert.ok(
+    !REQUIRED_WORKFLOWS.some(({ file }) => file === "oracle-seeds.yml"),
+    "a scheduled seed run must not gate releases",
+  );
+  assert.match(workflow, /^permissions: \{\}$/m);
+  assert.match(job, /permissions:\n      contents: read/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(sequences, /#\[ignore = [^\]]*\]\nfn seed_sweep_matches_cache_free_runs\(\)/);
+  assert.match(sequences, /"FALLOW_CACHE_MODEL_SEEDS"/);
+  assert.match(sequences, /"FALLOW_CACHE_MODEL_SEED_START"/);
+  assert.match(
+    job,
+    /cache_model::sequences::seed_sweep_matches_cache_free_runs[\s\S]*-- --ignored --exact/,
+  );
+  assert.match(job, /export FALLOW_CACHE_MODEL_SEEDS=/);
+  assert.match(job, /export FALLOW_CACHE_MODEL_SEED_START=/);
+  assert.match(
+    job,
+    /panicked at[\s\S]*GITHUB_STEP_SUMMARY/,
+    "a failure prints the failing sequence",
+  );
+  assert.match(job, /exit "\$status"/);
+  assert.doesNotMatch(
+    readWorkflow(".github/workflows/ci.yml"),
+    /seed_sweep_matches_cache_free_runs|FALLOW_CACHE_MODEL_SEEDS/,
+    "pull request CI keeps the fixed seeds",
+  );
+});
+
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);

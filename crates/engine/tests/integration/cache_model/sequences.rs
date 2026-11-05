@@ -253,12 +253,13 @@ fn generate(seed: u64, template: &Template) -> Vec<Step> {
         .collect()
 }
 
-fn run_seeds(seeds: impl IntoIterator<Item = u64>) -> Outcome {
+/// Run each template over each `(label, seed)` pair.
+fn run_seeds(seeds: impl IntoIterator<Item = (String, u64)>) -> Outcome {
     let mut total = Outcome::default();
-    for seed in seeds {
+    for (label, seed) in seeds {
         for template in TEMPLATES {
             let steps = generate(seed, template);
-            let outcome = run_sequence(&format!("seed {seed:#x}"), template, &steps);
+            let outcome = run_sequence(&label, template, &steps);
             total.changed += outcome.changed;
             total.graph_hits += outcome.graph_hits;
         }
@@ -266,9 +267,21 @@ fn run_seeds(seeds: impl IntoIterator<Item = u64>) -> Outcome {
     total
 }
 
+/// The regression sequences. `FALLOW_CACHE_MODEL_REGRESSIONS=<text>` runs only
+/// the sequences whose name contains the text, so a proof of one fix commit
+/// can leave out the sequences of later fixes.
 #[test]
 fn regression_sequences_match_cache_free_runs() {
-    for regression in REGRESSIONS {
+    let filter = std::env::var("FALLOW_CACHE_MODEL_REGRESSIONS").unwrap_or_default();
+    let selected: Vec<&Regression> = REGRESSIONS
+        .iter()
+        .filter(|regression| regression.name.contains(filter.as_str()))
+        .collect();
+    assert!(
+        !selected.is_empty(),
+        "no regression sequence name contains {filter:?}"
+    );
+    for regression in selected {
         let outcome = run_sequence(regression.name, regression.template, regression.steps);
         assert_eq!(
             outcome.changed,
@@ -281,7 +294,7 @@ fn regression_sequences_match_cache_free_runs() {
 
 #[test]
 fn generated_sequences_match_cache_free_runs() {
-    let outcome = run_seeds(PR_SEEDS);
+    let outcome = run_seeds(PR_SEEDS.map(|seed| (format!("seed {seed:#x}"), seed)));
     assert!(
         outcome.changed > 0,
         "no generated step changed the cache-free result"
@@ -292,15 +305,31 @@ fn generated_sequences_match_cache_free_runs() {
     );
 }
 
-/// The wide seed sweep. Run it with
+/// The wide seed sweep over seed numbers `start..start + count`. Run it with
 /// `FALLOW_CACHE_MODEL_SEEDS=200 cargo test -p fallow-engine --test integration
-/// cache_model -- --ignored`.
+/// cache_model -- --ignored`. `FALLOW_CACHE_MODEL_SEED_START` (default 1) sets
+/// the first seed number, so a scheduled run can search seeds that earlier
+/// runs did not. A failure names the seed number, and the same start and
+/// count run it again.
 #[test]
 #[ignore = "wide seed sweep, run by hand or on a schedule"]
 fn seed_sweep_matches_cache_free_runs() {
-    let count: u64 = std::env::var("FALLOW_CACHE_MODEL_SEEDS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(50);
-    run_seeds((1..=count).map(|n| n.wrapping_mul(0x9e37_79b9_7f4a_7c15)));
+    let count = seed_env("FALLOW_CACHE_MODEL_SEEDS", 50);
+    let start = seed_env("FALLOW_CACHE_MODEL_SEED_START", 1);
+    run_seeds((start..start.saturating_add(count)).map(|n| {
+        let seed = n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        (format!("seed number {n} (seed {seed:#x})"), seed)
+    }));
+}
+
+/// A `u64` from the environment variable `name`. An unset variable gives
+/// `default`, and a value that is not a number fails the test.
+fn seed_env(name: &str, default: u64) -> u64 {
+    match std::env::var(name) {
+        Ok(value) => value
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{name} must be a whole number, found {value:?}")),
+        Err(_) => default,
+    }
 }

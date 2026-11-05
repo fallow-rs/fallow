@@ -368,12 +368,36 @@ the release pre-flight, and in each release. The release `vscode-host-smoke`
 job also loads the darwin-x64 extension before the publish jobs can start. On
 busy days, the macOS queue held a `CI` run on `main` for up to two hours.
 
-On a schedule only: `Branch Coverage`, `Ecosystem (Full)`, and `Release
-Validation`. `Branch Coverage` runs every week and with
+On a schedule only: `Branch Coverage`, `Ecosystem (Full)`, `Oracle Seeds`,
+and `Release Validation`. `Branch Coverage` runs every week and with
 `workflow_dispatch`. It runs `cargo llvm-cov --branch` on the pinned nightly of
 `Fuzz Smoke`, because `--branch` needs a nightly compiler. It writes line and
 branch coverage to the job summary. It has no floor and does not gate a
 release.
+
+`Oracle Seeds` runs every day and with `workflow_dispatch`. It runs the
+ignored seed sweep of the cache model tests over a wide seed range. Pull
+request CI runs the same tests with the fixed `PR_SEEDS` only. Each scheduled
+run starts at a new seed number, so the sweep searches new sequences. A
+failure writes the failing template and steps to the job summary, with the
+seed range that runs them again. Add the sequence to `REGRESSIONS` in
+`crates/engine/tests/integration/cache_model/sequences.rs` when you fix the
+cause. The sweep does not gate a release.
+
+### Oracle proof
+
+An oracle is a test that compares two results that must agree, for example a
+warm cache run and a `--no-cache` run. The cache model tests in
+`crates/engine/tests/integration/cache_model` are an oracle. Each oracle must
+fail on the parent of a named fix commit and pass on the fix commit, or it does
+not catch that bug class. `node scripts/oracle-proof.mjs <oracle>` shows this.
+It checks out `fix^` and `fix` in temporary worktrees, puts the current oracle
+on each commit, builds it, and runs it. A build failure is a tool error (exit
+2), not a failing oracle. `--list` names the oracles and their fix commits. A
+fix commit can narrow the oracle to its own tests, when the commit does not
+have a later fix that the other tests need. To add an oracle, add a module
+under `scripts/oracle-proof/` with its fix commits, its port step and its
+commands, and register it in `ORACLES`.
 
 ### Prose-only main scheduling
 
