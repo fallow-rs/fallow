@@ -61,6 +61,7 @@ codspeed = []
 schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
+fallow-graph = { workspace = true, features = ["read-trace"] }
 criterion = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }

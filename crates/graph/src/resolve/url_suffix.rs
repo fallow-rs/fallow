@@ -6,6 +6,7 @@ use std::path::Path;
 use super::path_info::is_valid_package_name;
 use super::types::{ResolveContext, ResolveResult};
 use super::workspace_alias::resolve_failed_bare_package_specifier;
+use crate::read_trace::TracedPath;
 
 /// Return the specifier without its query string or hash fragment.
 pub(super) fn strip_url_suffix(specifier: &str) -> &str {
@@ -82,7 +83,7 @@ fn is_package_installed(from_file: &Path, package_name: &str) -> bool {
     from_file
         .ancestors()
         .skip(1)
-        .any(|dir| dir.join("node_modules").join(package_name).is_dir())
+        .any(|dir| dir.join("node_modules").join(package_name).traced_is_dir())
 }
 
 #[cfg(test)]

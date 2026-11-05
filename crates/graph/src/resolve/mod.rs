@@ -120,9 +120,9 @@ pub struct ResolveAllImportsInput<'a> {
 /// stylesheets one file at a time) builds a session once and reuses it across
 /// every resolution instead of rebuilding this state per call.
 pub struct ResolverSession {
-    resolver: oxc_resolver::Resolver,
-    script_resolver: oxc_resolver::Resolver,
-    style_resolver: oxc_resolver::Resolver,
+    resolver: crate::read_trace::Resolver,
+    script_resolver: crate::read_trace::Resolver,
+    style_resolver: crate::read_trace::Resolver,
     extensions: Vec<String>,
     condition_names: Vec<String>,
     package_manifests: Vec<PackageManifestInfo>,
@@ -144,13 +144,14 @@ impl ResolverSession {
         let canonical_ws_roots: Vec<PathBuf> = input
             .workspaces
             .par_iter()
-            .map(|ws| dunce::canonicalize(&ws.root).unwrap_or_else(|_| ws.root.clone()))
+            .map(|ws| crate::read_trace::canonicalize(&ws.root).unwrap_or_else(|_| ws.root.clone()))
             .collect();
         let package_manifests = build_package_manifests(input, &canonical_ws_roots);
         let has_deno_import_maps = package_manifests
             .iter()
             .any(|manifest| !manifest.deno_import_map.is_empty());
-        let root_is_canonical = dunce::canonicalize(input.root).is_ok_and(|c| c == input.root);
+        let root_is_canonical =
+            crate::read_trace::canonicalize(input.root).is_ok_and(|c| c == input.root);
 
         let extensions = build_extensions(input.active_plugins);
         let condition_names = build_condition_names(input.active_plugins, input.extra_conditions);
@@ -232,7 +233,7 @@ pub fn resolve_all_imports_with_session(
     let pattern_root = if canonical_paths.is_empty() {
         input.root.to_path_buf()
     } else {
-        dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf())
+        crate::read_trace::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf())
     };
     let jsx_rules = compile_jsx_rules(input.jsx_import_sources);
 
@@ -324,7 +325,7 @@ fn build_canonical_file_paths(files: &[DiscoveredFile], root_is_canonical: bool)
 
     files
         .par_iter()
-        .map(|f| dunce::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone()))
+        .map(|f| crate::read_trace::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone()))
         .collect()
 }
 
@@ -339,7 +340,7 @@ fn build_package_manifests(
     canonical_ws_roots: &[PathBuf],
 ) -> Vec<PackageManifestInfo> {
     let root_canonical =
-        dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
+        crate::read_trace::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
     let root_probe = fallow_config::probe_dir_manifest(input.root);
     let root_import_map = merge_deno_import_maps(&[], input.root, root_probe.deno_import_map);
     let mut package_manifests = Vec::new();

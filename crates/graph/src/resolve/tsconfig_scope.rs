@@ -7,6 +7,7 @@ use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
 
 use super::fallbacks::normalize_path_lexically;
+use crate::read_trace::TracedPath;
 
 pub(super) fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
     let mut builder = GlobSetBuilder::new();
@@ -31,7 +32,7 @@ fn tsconfig_entry_glob(base_dir: &Path, value: &str) -> String {
         .map(|wildcard| value[..wildcard].rfind('/').map_or(0, |slash| slash + 1));
     let (literal, rest) = value.split_at(glob_start.unwrap_or(value.len()));
     let literal = resolve_tsconfig_relative_path(base_dir, literal);
-    let rest = if glob_start.is_none() && literal.is_dir() {
+    let rest = if glob_start.is_none() && literal.traced_is_dir() {
         "**/*"
     } else {
         rest

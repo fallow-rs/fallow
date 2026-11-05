@@ -5,16 +5,16 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_types::discover::FileId;
 use rustc_hash::FxHashMap;
 use serde_json::Value;
-
-use fallow_types::discover::FileId;
 
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
 use super::types::{
     MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult,
     SOURCE_EXTS,
 };
+use crate::read_trace::TracedPath;
 
 #[path = "fallbacks_relative_package_root.rs"]
 mod relative_package_root;
@@ -366,7 +366,7 @@ pub(super) fn try_scss_node_modules_fallback(
     let mut dir = from_file.parent()?;
     loop {
         let nm_dir = dir.join("node_modules");
-        if nm_dir.is_dir()
+        if nm_dir.traced_is_dir()
             && let Some(path) = find_scss_in_node_modules(&nm_dir, bare)
             && let Some(pkg_name) = extract_package_name_from_node_modules_path(&path)
         {
@@ -398,28 +398,28 @@ fn find_scss_in_node_modules(nm_dir: &Path, bare: &str) -> Option<PathBuf> {
 
     for ext in &["scss", "sass", "css"] {
         let candidate = join_with_parent(&format!("{file_name}.{ext}"));
-        if candidate.is_file() {
+        if candidate.traced_is_file() {
             return Some(candidate);
         }
     }
     for ext in &["scss", "sass"] {
         let candidate = join_with_parent(&format!("_{file_name}.{ext}"));
-        if candidate.is_file() {
+        if candidate.traced_is_file() {
             return Some(candidate);
         }
     }
     for ext in &["scss", "sass"] {
         let idx_partial = nm_dir.join(bare).join(format!("_index.{ext}"));
-        if idx_partial.is_file() {
+        if idx_partial.traced_is_file() {
             return Some(idx_partial);
         }
         let idx_plain = nm_dir.join(bare).join(format!("index.{ext}"));
-        if idx_plain.is_file() {
+        if idx_plain.traced_is_file() {
             return Some(idx_plain);
         }
     }
     let exact = nm_dir.join(bare);
-    if exact.is_file() {
+    if exact.traced_is_file() {
         return Some(exact);
     }
     None
@@ -1229,7 +1229,7 @@ pub(super) fn missing_package_export_paths(
         .iter()
         .map(|target| package_map_target_path(manifest, target))
         .collect::<Option<Vec<_>>>()?;
-    (!paths.is_empty() && paths.iter().all(|path| !path.exists())).then_some(paths)
+    (!paths.is_empty() && paths.iter().all(|path| !path.traced_exists())).then_some(paths)
 }
 
 /// Resolve the stripped subpath as a relative import from inside the package
@@ -1354,7 +1354,7 @@ mod tests {
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
         let condition_names = conditions();
-        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let resolver = crate::read_trace::Resolver::new(oxc_resolver::ResolveOptions::default());
         let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
         let tsconfig_cache = TsconfigCache::default();
         let canonicalize_cache = CanonicalizeCache::default();
@@ -3055,7 +3055,7 @@ mod tests {
         let raw_path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
         let condition_names = conditions();
-        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let resolver = crate::read_trace::Resolver::new(oxc_resolver::ResolveOptions::default());
         let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
         let tsconfig_cache = TsconfigCache::default();
         let canonicalize_cache = CanonicalizeCache::default();

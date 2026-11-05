@@ -39,6 +39,11 @@ const NEAREST_CONFIGS: &[&str] = &["package.json", "tsconfig.json"];
 /// would make each restored cache miss. `node_modules/.modules.yaml` of pnpm
 /// holds an install timestamp, so the hash reads the copy of the lockfile in
 /// `node_modules/.pnpm/lock.yaml` instead.
+///
+/// Yarn Plug'n'Play writes `.pnp.cjs` and `.pnp.data.json` in place of
+/// `node_modules`. The resolver turns on PnP resolution when it finds
+/// `.pnp.cjs` at the root or above it. A switch of the Yarn linker can keep
+/// `yarn.lock` the same, so the hash reads these files too.
 const INSTALL_STATE_FILES: &[&str] = &[
     "package-lock.json",
     "npm-shrinkwrap.json",
@@ -50,6 +55,8 @@ const INSTALL_STATE_FILES: &[&str] = &[
     "node_modules/.pnpm/lock.yaml",
     "node_modules/.yarn-state.yml",
     "node_modules/.yarn-integrity",
+    ".pnp.cjs",
+    ".pnp.data.json",
 ];
 
 /// Lockfiles of Bun. Bun writes no install marker in `node_modules`, so a
@@ -446,6 +453,29 @@ mod tests {
         let initial = resolution_inputs_hash(&root, &[], &[]);
         write(&lockfile, "a: 2\n");
         assert_ne!(resolution_inputs_hash(&root, &[], &[]), initial);
+    }
+
+    #[test]
+    fn yarn_pnp_manifest_keys_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo/packages/app");
+        std::fs::create_dir_all(&root).expect("root");
+        let initial = resolution_inputs_hash(&root, &[], &[]);
+
+        let manifest = temp.path().join("repo/.pnp.cjs");
+        write(&manifest, "// pnp v1\n");
+        let with_pnp = resolution_inputs_hash(&root, &[], &[]);
+        assert_ne!(
+            with_pnp, initial,
+            "a new PnP manifest above the root must change it"
+        );
+
+        write(&root.join(".pnp.data.json"), "{}");
+        assert_ne!(
+            resolution_inputs_hash(&root, &[], &[]),
+            with_pnp,
+            "a PnP data file at the root must change it"
+        );
     }
 
     #[test]

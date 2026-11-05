@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use dashmap::DashMap;
-use oxc_resolver::Resolver;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
 use fallow_config::TsconfigOutputMap;
 use fallow_types::discover::FileId;
+
+use crate::read_trace::Resolver;
 
 /// Result of resolving an import specifier.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -451,7 +452,7 @@ impl CanonicalizeCache {
         if let Some(value) = self.map.get(path) {
             return value.clone();
         }
-        let value = dunce::canonicalize(path).ok();
+        let value = crate::read_trace::canonicalize(path).ok();
         self.map.insert(path.to_path_buf(), value.clone());
         value
     }
@@ -564,7 +565,7 @@ impl<'a> CanonicalFallback<'a> {
             self.files
                 .iter()
                 .filter_map(|f| {
-                    dunce::canonicalize(&f.path)
+                    crate::read_trace::canonicalize(&f.path)
                         .ok()
                         .map(|canonical| (canonical, f.id))
                 })

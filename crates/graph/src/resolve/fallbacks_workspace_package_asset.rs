@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use super::{PackageManifestInfo, ResolveResult, package_map_target_path};
+use crate::read_trace::TracedPath;
 
 /// Extensions of files that discovery analyzes (`SOURCE_EXTENSIONS` in
 /// `fallow_core::discover`). A workspace package target with one of these
@@ -26,7 +27,8 @@ pub(super) fn workspace_package_asset(path: &Path, package_name: &str) -> Option
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ANALYZABLE_EXTS.contains(&ext));
-    (!is_source && path.is_file()).then(|| ResolveResult::NpmPackage(package_name.to_string()))
+    (!is_source && path.traced_is_file())
+        .then(|| ResolveResult::NpmPackage(package_name.to_string()))
 }
 
 /// Credit a workspace package for the first `exports` target that names an

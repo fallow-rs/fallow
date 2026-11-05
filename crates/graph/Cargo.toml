@@ -47,6 +47,11 @@ postcard = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }
 
+[features]
+# Record the paths that import resolution reads (see `read_trace`). Tests
+# use it to check that the graph cache key covers each read.
+read-trace = []
+
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }

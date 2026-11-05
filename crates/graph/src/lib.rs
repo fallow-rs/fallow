@@ -17,4 +17,5 @@
 pub mod cache;
 pub mod graph;
 pub mod project;
+pub mod read_trace;
 pub mod resolve;

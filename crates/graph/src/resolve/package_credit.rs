@@ -13,6 +13,7 @@ use super::specifier::{
     tsconfig_paths_base_dir,
 };
 use super::types::ResolveContext;
+use crate::read_trace::TracedPath;
 
 /// Package-usage key for an import from `from_file` that resolved into
 /// `node_modules`.
@@ -99,7 +100,7 @@ pub(super) fn uninstalled_tsconfig_alias_target_package(
     let (name, package_root) = nearest_tsconfig_alias_targets(ctx, from_file, specifier)
         .iter()
         .find_map(|target| node_modules_package_root(target))?;
-    (!name.starts_with("@types/") && !package_root.is_dir()).then_some(name)
+    (!name.starts_with("@types/") && !package_root.traced_is_dir()).then_some(name)
 }
 
 /// Expanded `paths` targets for `specifier` from the nearest tsconfig with

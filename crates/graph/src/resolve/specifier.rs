@@ -1,11 +1,10 @@
 //! Main resolution engine: creates the oxc_resolver instance and resolves individual specifiers.
 
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
+use oxc_resolver::{Resolution, ResolveError, ResolveOptions};
 use serde_json::Value;
 
 use super::fallbacks::{
@@ -39,6 +38,7 @@ use super::url_suffix::{
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
 };
+use crate::read_trace::{Resolver, TracedPath};
 
 /// Create an `oxc_resolver` instance with standard configuration.
 ///
@@ -158,7 +158,7 @@ pub(super) fn build_resolve_options(
     // issuers fallow feeds it are canonical.
     let manifest_dir = find_yarn_pnp_manifest_dir(root);
     options.yarn_pnp = manifest_dir.is_some();
-    options.cwd = manifest_dir.map(|dir| dunce::canonicalize(&dir).unwrap_or(dir));
+    options.cwd = manifest_dir.map(|dir| crate::read_trace::canonicalize(&dir).unwrap_or(dir));
 
     options
 }
@@ -186,7 +186,7 @@ const YARN_PNP_MANIFEST: &str = ".pnp.cjs";
 /// named like the manifest is not an install, hence `is_file`.
 fn find_yarn_pnp_manifest_dir(root: &Path) -> Option<PathBuf> {
     root.ancestors()
-        .find(|dir| dir.join(YARN_PNP_MANIFEST).is_file())
+        .find(|dir| dir.join(YARN_PNP_MANIFEST).traced_is_file())
         .map(Path::to_path_buf)
 }
 
@@ -233,7 +233,7 @@ fn nearest_package_dir_below_root<'p>(root: &Path, source_dir: &'p Path) -> Opti
         .ancestors()
         .skip(1)
         .take_while(|dir| *dir != root && dir.starts_with(root))
-        .find(|dir| dir.join("package.json").is_file())
+        .find(|dir| dir.join("package.json").traced_is_file())
 }
 
 fn is_root_relative_importer(from_file: &Path) -> bool {
@@ -284,7 +284,7 @@ fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
     let mut current = from_file.parent()?;
     loop {
         let candidate = current.join("tsconfig.json");
-        if candidate.is_file() {
+        if candidate.traced_is_file() {
             return Some(candidate);
         }
         if current == root {
@@ -341,14 +341,14 @@ fn collect_local_tsconfig_chain(
     let root = ctx.root;
     let tsconfig_dir = tsconfig_path.parent().unwrap_or(root);
     for reference in referenced_tsconfig_paths(tsconfig_dir, &json) {
-        if reference.is_file() && tsconfig_applies_to_file(ctx, &reference, from_file) {
+        if reference.traced_is_file() && tsconfig_applies_to_file(ctx, &reference, from_file) {
             collect_local_tsconfig_chain(ctx, from_file, &reference, chain, seen);
         }
     }
 
     for extends in tsconfig_extends_values(&json) {
         let next = resolve_tsconfig_extends_path(tsconfig_dir, extends);
-        if next.is_file() {
+        if next.traced_is_file() {
             collect_local_tsconfig_chain(ctx, from_file, &next, chain, seen);
         }
     }
@@ -373,13 +373,13 @@ fn resolve_tsconfig_reference_path(base_dir: &Path, reference: &str) -> PathBuf 
     {
         return path;
     }
-    if path.is_dir() {
+    if path.traced_is_dir() {
         return path.join("tsconfig.json");
     }
     let mut with_json = OsString::from(path.as_os_str());
     with_json.push(".json");
     let with_json = PathBuf::from(with_json);
-    if with_json.is_file() {
+    if with_json.traced_is_file() {
         with_json
     } else {
         path.join("tsconfig.json")
@@ -434,9 +434,9 @@ pub(super) fn same_path(left: &Path, right: &Path) -> bool {
         return true;
     }
     super::work::note_canonicalize(2);
-    dunce::canonicalize(left)
+    crate::read_trace::canonicalize(left)
         .ok()
-        .zip(dunce::canonicalize(right).ok())
+        .zip(crate::read_trace::canonicalize(right).ok())
         .is_some_and(|(left, right)| left == right)
 }
 
@@ -524,7 +524,7 @@ fn resolve_filesystem_path(ctx: &ResolveContext<'_>, path: &Path) -> Option<Reso
     {
         return Some(ResolveResult::InternalModule(file_id));
     }
-    path.exists()
+    path.traced_exists()
         .then_some(ResolveResult::ExternalFile(canonical))
 }
 
@@ -617,7 +617,7 @@ fn resolve_package_tsconfig_extends(base_dir: &Path, extends: &str) -> Option<Pa
     for ancestor in base_dir.ancestors() {
         let candidate = ancestor.join("node_modules").join(extends);
         let candidate = resolve_tsconfig_extends_candidate(candidate);
-        if candidate.is_file() {
+        if candidate.traced_is_file() {
             return Some(candidate);
         }
     }
@@ -632,13 +632,13 @@ fn resolve_tsconfig_extends_candidate(path: PathBuf) -> PathBuf {
     {
         return path;
     }
-    if path.is_dir() {
+    if path.traced_is_dir() {
         return path.join("tsconfig.json");
     }
     let mut with_json = OsString::from(path.as_os_str());
     with_json.push(".json");
-    let with_json = PathBuf::from(with_json);
-    if with_json.is_file() { with_json } else { path }
+    let json = PathBuf::from(with_json);
+    if json.traced_is_file() { json } else { path }
 }
 
 fn read_tsconfig_json(path: &Path) -> Option<Value> {
@@ -653,7 +653,7 @@ pub(super) fn read_tsconfig_json_cached(
 }
 
 fn read_json_file(path: &Path) -> Option<Value> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = crate::read_trace::read_to_string(path).ok()?;
     if let Ok(json) = serde_json::from_str::<Value>(&content) {
         return Some(json);
     }
@@ -979,7 +979,7 @@ fn try_tsconfig_alias_directory(
     target: &Path,
     style_context: bool,
 ) -> Option<ResolveResult> {
-    if !target.is_dir() {
+    if !target.traced_is_dir() {
         return None;
     }
     if let Some(package_json) = read_json_file(&target.join("package.json")) {
