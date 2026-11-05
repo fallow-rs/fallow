@@ -137,6 +137,11 @@ as it is now. For a regression, state what breaks without the code, and link
 the issue. `scripts/check-comment-quality.mjs` blocks narration and history
 comments in commits, CI, and Claude edits.
 
+Before you open or update a pull request, read each changed comment, doc,
+commit message, and PR text as a reader with no access to the session.
+Remove each reference to the session. Explain each term that a new reader
+does not know.
+
 ## Knowledge and publication boundaries
 
 - This repository owns open-source maintainer knowledge and public product
