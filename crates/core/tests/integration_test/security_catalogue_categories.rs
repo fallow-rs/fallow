@@ -1366,7 +1366,8 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
 
 // ── catalogue gaps: callee variants of existing categories ───────────────────
 
-const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 23] = [
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 24] = [
+    ("src/cjs-fs-rename-destination.ts", "path-traversal", 22),
     ("src/cjs-fs-promises-temp.ts", "insecure-temp-file", 377),
     (
         "src/cjs-fs-promises-chmod.ts",

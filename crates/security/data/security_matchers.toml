@@ -713,6 +713,19 @@ arg_index = 1
 import_provenance = "node:fs"
 evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the destination cannot escape the intended directory (reject `..`)."
 
+[[matcher]]
+id = "path-traversal"
+cwe = 22
+title = "File-system path traversal sink"
+effect = "storage"
+sink_shape = "member-call"
+callee_patterns = ["node:fs.rename", "node:fs.copyFile", "node:fs.copyFileSync", "fs.copyFile", "fs.copyFileSync"]
+arg_index = 1
+import_provenance = "node:fs"
+requires_module_source = true
+ignored_source_kinds = ["process-argv"]
+evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the destination cannot escape the intended directory (reject `..`)."
+
 # ── CWE-113: HTTP response header injection ─────────────────────────────────
 # Node rejects CR/LF in header values, and adapters copy their own header maps
 # into the response. The rows therefore require a source-backed value.
