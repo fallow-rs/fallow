@@ -347,6 +347,15 @@ fn guide_install_writes_through_a_link_that_stays_in_the_project() {
             .file_type()
             .is_symlink()
     );
+    let agents = std::fs::read_to_string(root.path().join("AGENTS.md")).unwrap();
+    assert!(
+        !agents.lines().any(|line| line.trim() == "@AGENTS.md"),
+        "AGENTS.md imports itself:\n{agents}"
+    );
+    assert_eq!(row(&steps, "CLAUDE.md").status, StepStatus::Unchanged);
+
+    let removed = guide::uninstall(&ctx(root.path(), Mode::Uninstall), &[Harness::Claude]);
+    assert_eq!(row(&removed, "CLAUDE.md").status, StepStatus::Unchanged);
 }
 
 #[test]

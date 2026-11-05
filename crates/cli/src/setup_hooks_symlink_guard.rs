@@ -138,8 +138,10 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::setup_hooks::HookAgentArg;
 
+    #[cfg(unix)]
     fn opts(root: &Path) -> SetupHooksOptions<'_> {
         SetupHooksOptions {
             root,
