@@ -8618,6 +8618,37 @@ fn health_css_less_mixin_parameter_and_named_argument_reference_keyframes() {
 }
 
 #[test]
+fn health_css_scss_comment_and_mixin_default_keep_keyframes_references() {
+    let css = scss_keyframes_health(
+        "@mixin an($n: spin) { animation: $n 1s; }\n\
+         @mixin bn($n: $def) { animation: $n 1s; }\n\
+         $def: pulse;\n\
+         .a {\n  // use the default\n  @include an;\n}\n\
+         .b {\n  /* use the variable default */\n  @include bn;\n}\n\
+         .c {\n  // comment\n  @include an(fade);\n}\n\
+         @keyframes spin { to { opacity: 1; } }\n\
+         @keyframes pulse { to { opacity: 1; } }\n\
+         @keyframes fade { to { opacity: 1; } }\n\
+         @keyframes dead { to { opacity: 1; } }\n",
+    );
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_defined"], 4, "summary: {summary}");
+    assert_eq!(summary["keyframes_unchecked"], 0, "summary: {summary}");
+    assert_eq!(unreferenced_keyframe_names(&css), vec!["dead"]);
+}
+
+#[test]
+fn health_css_scss_comment_above_interpolated_animation_skips_scss_keyframes() {
+    let css = scss_keyframes_health(
+        "$p: x;\n.a {\n  // spin it\n  animation: #{$p}-go 1s;\n}\n\
+         @keyframes dead { to { opacity: 1; } }\n",
+    );
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_unchecked"], 1, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 0, "summary: {summary}");
+}
+
+#[test]
 fn health_css_unresolved_scss_variable_skips_only_preprocessor_keyframes() {
     let css = keyframes_health_json(&[
         (
@@ -8664,16 +8695,16 @@ fn health_css_unchecked_keyframes_show_in_human_and_markdown_output() {
     )];
     let human = keyframes_health(&files, "human");
     assert!(
-        human
-            .stdout
-            .contains("1 not checked (a Sass/Less animation value uses a variable)"),
+        human.stdout.contains(
+            "1 not checked (a Sass/Less animation value uses a variable or an interpolation)"
+        ),
         "stdout: {}",
         human.stdout
     );
     let markdown = keyframes_health(&files, "markdown");
     assert!(
         markdown.stdout.contains(
-            "0 unreferenced + 0 undefined @keyframes, 1 not checked (a Sass/Less animation value uses a variable)"
+            "0 unreferenced + 0 undefined @keyframes, 1 not checked (a Sass/Less animation value uses a variable or an interpolation)"
         ),
         "stdout: {}",
         markdown.stdout

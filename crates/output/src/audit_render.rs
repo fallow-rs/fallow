@@ -57,7 +57,7 @@ pub fn styling_candidate_count(summary: &CssAnalyticsSummary) -> u32 {
 pub fn keyframes_unchecked_clause(summary: &CssAnalyticsSummary) -> Option<String> {
     let unchecked = summary.keyframes_unchecked;
     (unchecked > 0)
-        .then(|| format!("{unchecked} not checked (a Sass/Less animation value uses a variable)"))
+        .then(|| format!("{unchecked} not checked (a Sass/Less animation value uses a variable or an interpolation)"))
 }
 
 /// The [`keyframes_unchecked_clause`] with a leading `, `, or an empty string.
@@ -150,7 +150,7 @@ mod tests {
         };
         assert_eq!(
             keyframes_unchecked_clause(&summary).as_deref(),
-            Some("2 not checked (a Sass/Less animation value uses a variable)")
+            Some("2 not checked (a Sass/Less animation value uses a variable or an interpolation)")
         );
     }
 }

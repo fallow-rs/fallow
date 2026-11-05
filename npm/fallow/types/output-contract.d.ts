@@ -11565,10 +11565,10 @@ keyframes_unreferenced: number
  */
 keyframes_undefined: number
 /**
- * `@keyframes` that a Sass or Less source defines and that the
- * unreferenced check skips. A Sass or Less `animation` /
- * `animation-name` value with a variable or an interpolation that fallow
- * cannot resolve can name any such block. These are not in
+ * `@keyframes` with no literal reference that a Sass or Less source
+ * defines and that the unreferenced check skips. A Sass or Less
+ * animation value with a variable or an interpolation that fallow cannot
+ * resolve can name any such block. These are not in
  * `keyframes_unreferenced`. A `@keyframes` block in plain CSS is always
  * checked.
  */

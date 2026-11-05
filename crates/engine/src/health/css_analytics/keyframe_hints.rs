@@ -38,10 +38,11 @@ pub(super) fn preprocessor_keyframe_hints(source: &str) -> KeyframeHints {
     // One entry per open `{` block: the parameters of a mixin definition, or
     // an empty list for any other block.
     let mut scopes: Vec<Vec<String>> = Vec::new();
-    for (statement, terminator) in statements(source) {
+    let source = blank_comments(source);
+    for (statement, terminator) in statements(&source) {
         let statement = statement.trim();
         match terminator {
-            b'{' => scopes.push(mixin_parameters(statement)),
+            b'{' => scopes.push(mixin_parameters(statement, &mut hints)),
             b'}' => {
                 scan_declaration(statement, &scopes, &mut hints);
                 scopes.pop();
@@ -83,8 +84,63 @@ fn scan_declaration(statement: &str, scopes: &[Vec<String>], hints: &mut Keyfram
     }
 }
 
-/// Split a source into statements that end at `;`, `{` or `}`. A `#{...}` or
-/// `@{...}` interpolation, a quoted string, a comment and a `;` inside
+/// Replace each comment with spaces, so that a comment above a declaration
+/// does not become part of the declaration statement. A `//` inside
+/// parentheses, such as `url(//host/x)`, or after a `:` is no comment.
+fn blank_comments(source: &str) -> String {
+    let mut bytes = source.as_bytes().to_vec();
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        let end = match bytes[i] {
+            quote @ (b'"' | b'\'') => {
+                i = skip_string(&bytes, i + 1, quote);
+                continue;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => skip_block_comment(&bytes, i + 2),
+            b'/' if bytes.get(i + 1) == Some(&b'/')
+                && depth == 0
+                && (i == 0 || bytes[i - 1] != b':') =>
+            {
+                bytes[i..]
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .map_or(bytes.len(), |offset| i + offset)
+            }
+            b'(' => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+                continue;
+            }
+            b'{' | b'}' | b';' => {
+                depth = 0;
+                i += 1;
+                continue;
+            }
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        for byte in &mut bytes[i..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+        i = end;
+    }
+    // Each blanked range starts and ends at an ASCII byte, so the bytes stay
+    // valid UTF-8.
+    String::from_utf8(bytes).unwrap_or_else(|_| source.to_owned())
+}
+
+/// Split a comment-free source into statements that end at `;`, `{` or `}`.
+/// A `#{...}` or `@{...}` interpolation, a quoted string and a `;` inside
 /// parentheses (Less mixin arguments) stay inside their statement.
 fn statements(source: &str) -> Vec<(&str, u8)> {
     let bytes = source.as_bytes();
@@ -98,13 +154,6 @@ fn statements(source: &str) -> Vec<(&str, u8)> {
                 i = skip_past(bytes, i + 2, b'}');
             }
             quote @ (b'"' | b'\'') => i = skip_string(bytes, i + 1, quote),
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = skip_block_comment(bytes, i + 2);
-            }
-            // `url(https://...)` holds `//` after a `:`, which is no comment.
-            b'/' if bytes.get(i + 1) == Some(&b'/') && (i == 0 || bytes[i - 1] != b':') => {
-                i = skip_past(bytes, i + 2, b'\n');
-            }
             b'(' => {
                 depth += 1;
                 i += 1;
@@ -154,8 +203,9 @@ fn skip_block_comment(bytes: &[u8], from: usize) -> usize {
 
 /// The parameters of a `@mixin name($a, $b)` or a Less `.name(@a; @b)`
 /// definition. Any other block gives an empty list. A Less mixin also gets
-/// the implicit `@arguments` parameter.
-fn mixin_parameters(prelude: &str) -> Vec<String> {
+/// the implicit `@arguments` parameter. A default value (`$a: spin`) counts
+/// like a call argument, because a call without that argument uses it.
+fn mixin_parameters(prelude: &str, hints: &mut KeyframeHints) -> Vec<String> {
     let less = is_less_mixin_head(prelude);
     if !less && !prelude.starts_with("@mixin") {
         return Vec::new();
@@ -163,7 +213,17 @@ fn mixin_parameters(prelude: &str) -> Vec<String> {
     let Some(open) = prelude.find('(') else {
         return Vec::new();
     };
-    let mut parameters: Vec<String> = variables(&prelude[open..]).map(str::to_owned).collect();
+    let list = prelude[open + 1..]
+        .rfind(')')
+        .map_or(&prelude[open + 1..], |close| {
+            &prelude[open + 1..open + 1 + close]
+        });
+    let mut parameters = Vec::new();
+    for parameter in list.split([',', ';']) {
+        let (name, default) = parameter.split_once(':').unwrap_or((parameter, ""));
+        parameters.extend(variables(name).map(str::to_owned));
+        push_arguments(default, hints);
+    }
     if less {
         parameters.push("@arguments".to_owned());
     }
@@ -239,8 +299,7 @@ fn variables(text: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Push each bare identifier and each variable inside the outer parentheses
-/// of a mixin call.
+/// Push the arguments inside the outer parentheses of a mixin call.
 fn push_call_arguments(call: &str, hints: &mut KeyframeHints) {
     let Some(open) = call.find('(') else {
         return;
@@ -248,6 +307,16 @@ fn push_call_arguments(call: &str, hints: &mut KeyframeHints) {
     let arguments = call[open + 1..]
         .rfind(')')
         .map_or(&call[open + 1..], |close| &call[open + 1..open + 1 + close]);
+    push_arguments(arguments, hints);
+}
+
+/// Push each bare identifier and each variable of mixin arguments. An
+/// interpolation such as `#{$prefix}-spin` builds a name that the scan
+/// cannot know, so it is an opaque reference.
+fn push_arguments(arguments: &str, hints: &mut KeyframeHints) {
+    if arguments.contains("#{") || arguments.contains("@{") {
+        hints.opaque_reference = true;
+    }
     push_identifiers(arguments, &mut hints.possible_names);
     hints
         .argument_variables
@@ -379,6 +448,48 @@ mod tests {
         let hints = preprocessor_keyframe_hints(source);
         assert!(hints.opaque_reference);
         assert_eq!(hints.possible_names, vec!["spin"]);
+    }
+
+    #[test]
+    fn comment_above_a_statement_does_not_hide_it() {
+        for comment in ["// note", "/* note */"] {
+            let source = format!(
+                ".a {{\n  {comment}\n  animation: #{{$p}}-go 1s;\n}}\n\
+                 .b {{\n  {comment}\n  @include an(spin);\n}}\n\
+                 {comment}\n$fade: fade-in;\n"
+            );
+            let hints = preprocessor_keyframe_hints(&source);
+            assert!(hints.opaque_reference, "{source}");
+            assert_eq!(hints.possible_names, vec!["spin"], "{source}");
+            assert_eq!(
+                hints.assignments,
+                vec![("$fade".to_owned(), Some(vec!["fade-in".to_owned()]))],
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn protocol_relative_url_is_no_comment() {
+        let source = ".a { background: url(//cdn.example/a.png); animation: spin 1s; }";
+        let hints = preprocessor_keyframe_hints(source);
+        assert_eq!(hints.possible_names, vec!["spin"]);
+    }
+
+    #[test]
+    fn mixin_parameter_defaults_count_as_arguments() {
+        let hints = preprocessor_keyframe_hints(
+            "@mixin an($n: spin, $d: $def) { animation: $n $d; }\n.m(@a: pulse) { animation: @a; }",
+        );
+        assert!(hints.animation_variables.is_empty(), "{hints:?}");
+        assert_eq!(hints.possible_names, vec!["pulse", "spin"]);
+        assert_eq!(hints.argument_variables, vec!["$def"]);
+    }
+
+    #[test]
+    fn interpolated_mixin_argument_is_opaque() {
+        let hints = preprocessor_keyframe_hints(".a { @include an(#{$p}-spin); }");
+        assert!(hints.opaque_reference);
     }
 
     #[test]

@@ -1956,7 +1956,7 @@ fn audit_human_shows_unchecked_sass_keyframes() {
     assert!(
         output
             .stdout
-            .contains("@keyframes: 1 not checked (a Sass/Less animation value uses a variable)"),
+            .contains("@keyframes: 1 not checked (a Sass/Less animation value uses a variable or an interpolation)"),
         "audit should say that the keyframes check skipped a block. stdout: {}",
         output.stdout
     );

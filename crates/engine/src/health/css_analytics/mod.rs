@@ -110,11 +110,14 @@ struct CssTokenSets {
     referenced_keyframes: rustc_hash::FxHashSet<String>,
     keyframes_definers: rustc_hash::FxHashMap<String, String>,
     keyframe_referencers: rustc_hash::FxHashMap<String, String>,
-    /// `@keyframes` names that a Sass/Less source defines. Only these can be
-    /// the target of an animation value that the scan cannot resolve, because
-    /// a plain CSS file cannot read a Sass/Less variable.
+    /// `@keyframes` names that a Sass/Less source defines. Only these are
+    /// skipped when an animation value that the scan cannot resolve exists.
+    /// Sass can name a plain CSS `@keyframes` through a variable too, but
+    /// plain CSS `@keyframes` always stay checked, so that one opaque Sass
+    /// value cannot hide every dead plain CSS animation.
     preprocessor_keyframes: rustc_hash::FxHashSet<String>,
-    /// `true` when a Sass/Less `animation` value holds an interpolation.
+    /// `true` when a Sass/Less `animation` value or mixin argument holds an
+    /// interpolation.
     opaque_keyframe_reference: bool,
     /// Bare identifiers in Sass/Less `animation` values and mixin call
     /// arguments. One counts as a keyframes reference only when a
