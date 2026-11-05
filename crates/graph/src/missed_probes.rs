@@ -139,8 +139,7 @@ impl MissedProbes {
     /// True when a missed path exists below `root` now.
     #[must_use]
     pub fn any_exists(&self, root: &Path) -> bool {
-        use rayon::prelude::*;
-        self.dirs.par_iter().any(|entry| {
+        let check = |entry: &MissedDir| {
             let dir = root.join(&entry.dir);
             // A missing directory holds none of the names, and the creation
             // of the directory itself is a separate missed path when a
@@ -150,7 +149,12 @@ impl MissedProbes {
                     .names
                     .iter()
                     .any(|name| dir.join(name).metadata().is_ok())
-        })
+        };
+        if self.dirs.len() < PARALLEL_MIN {
+            return self.dirs.iter().any(check);
+        }
+        use rayon::prelude::*;
+        self.dirs.par_iter().any(check)
     }
 
     /// The missed paths, root-relative with forward slashes.
@@ -254,11 +258,17 @@ fn is_below_node_modules(relative: &Path) -> bool {
 /// now.
 #[must_use]
 pub fn any_missing(root: &Path, found: &[String]) -> bool {
+    let check = |relative: &String| root.join(relative).metadata().is_err();
+    if found.len() < PARALLEL_MIN {
+        return found.iter().any(check);
+    }
     use rayon::prelude::*;
-    found
-        .par_iter()
-        .any(|relative| root.join(relative).metadata().is_err())
+    found.par_iter().any(check)
 }
+
+/// Below this number of entries, a check runs on the calling thread: the
+/// rayon pool costs more than a few `stat` calls.
+const PARALLEL_MIN: usize = 64;
 
 #[cfg(test)]
 mod tests {
@@ -309,6 +319,22 @@ mod tests {
         std::fs::remove_file(root.join("src/util")).unwrap();
         std::fs::write(root.join("index"), "").unwrap();
         assert!(missed.any_exists(root));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn the_parallel_check_sees_one_changed_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let paths: Vec<String> = (0..PARALLEL_MIN * 2).map(|i| format!("d{i}/x")).collect();
+        let missed = MissedProbes::from_paths(paths.clone());
+        assert!(!missed.any_exists(root));
+        std::fs::create_dir_all(root.join("d77")).unwrap();
+        std::fs::write(root.join("d77/x"), "").unwrap();
+        assert!(missed.any_exists(root));
+        assert!(any_missing(root, &paths));
+        let present: Vec<String> = vec!["d77/x".to_string(); PARALLEL_MIN * 2];
+        assert!(!any_missing(root, &present));
     }
 
     #[cfg(unix)]

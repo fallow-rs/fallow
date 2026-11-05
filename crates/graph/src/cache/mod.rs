@@ -435,8 +435,9 @@ impl CachedResolvedProject {
 /// The root-relative paths of the [`ResolveResult::ExternalFile`] targets
 /// below `root` and not below `node_modules`.
 fn external_targets(root: &Path, resolved: &ResolvedProject) -> Vec<String> {
-    // The resolver can spell a target with the canonical root.
-    let canonical_root = dunce::canonicalize(root).ok();
+    // The resolver can spell a target with the canonical root. Most projects
+    // have no external target, so the root is canonicalized only on demand.
+    let canonical_root = std::cell::OnceCell::new();
     let mut targets: Vec<String> = resolved
         .modules
         .iter()
@@ -444,9 +445,12 @@ fn external_targets(root: &Path, resolved: &ResolvedProject) -> Vec<String> {
         .filter_map(|edge| match edge.target() {
             ResolveResult::ExternalFile(path) => crate::missed_probes::project_relative(root, path)
                 .or_else(|| {
-                    canonical_root.as_deref().and_then(|canonical| {
-                        crate::missed_probes::project_relative(canonical, path)
-                    })
+                    canonical_root
+                        .get_or_init(|| dunce::canonicalize(root).ok())
+                        .as_deref()
+                        .and_then(|canonical| {
+                            crate::missed_probes::project_relative(canonical, path)
+                        })
                 }),
             _ => None,
         })
