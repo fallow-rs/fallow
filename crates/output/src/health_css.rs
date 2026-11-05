@@ -1113,6 +1113,13 @@ pub struct CssAnalyticsSummary {
     /// undefined direction). Located in `undefined_keyframes`; usually a typo or
     /// a removed animation.
     pub keyframes_undefined: u32,
+    /// `@keyframes` with no literal reference that a Sass or Less source
+    /// defines and that the unreferenced check skips. A Sass or Less
+    /// animation value with a variable or an interpolation that fallow cannot
+    /// resolve can name any such block. These are not in
+    /// `keyframes_unreferenced`. A `@keyframes` block in plain CSS is always
+    /// checked.
+    pub keyframes_unchecked: u32,
     /// Total Vue `<style scoped>` classes used nowhere else in their component
     /// (cleanup candidates), across all SFCs.
     pub scoped_unused_classes: u32,

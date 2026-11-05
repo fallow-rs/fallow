@@ -120,7 +120,8 @@ pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUni
 pub use audit_ownership::{OWNER_GROUP_CAP, OwnerGroupFact, OwnershipFacts, OwnershipSliceFact};
 pub use audit_render::{
     AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput,
-    styling_audit_context_label, styling_candidate_count,
+    keyframes_unchecked_clause, keyframes_unchecked_suffix, styling_audit_context_label,
+    styling_candidate_count,
 };
 pub use audit_routing::{RoutingFacts, RoutingUnit};
 pub use audit_test_reach::{
