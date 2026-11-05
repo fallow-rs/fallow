@@ -495,7 +495,8 @@ pub fn plan_mutations_for_session_with(
     let inventory = crate::list_inventory::collect_listing_inventory(session, false)
         .map_err(|error| MutationPlanError::Plugins(error.message().to_owned()))?;
     let framework_config_exports = framework_config_exports(session, graph, &inventory);
-    let setup_files = inventory.plugins.backend().setup_files();
+    let mut setup_files = inventory.plugins.backend().setup_files();
+    setup_files.extend(crate::core_backend::bun_preload_files(session.root()));
     let inputs = MutationPlanInputs {
         root: session.root(),
         graph,

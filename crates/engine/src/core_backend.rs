@@ -517,6 +517,12 @@ impl BackendUsedExportNames {
     }
 }
 
+/// The preload files of the root `bunfig.toml`. Bun runs them before the
+/// tests, also when no package enables the Bun plugin.
+pub fn bun_preload_files(root: &Path) -> Vec<PathBuf> {
+    fallow_core::plugins::PluginRegistry::bun_preload_files(root)
+}
+
 pub struct BackendPluginRegistry {
     inner: fallow_core::plugins::PluginRegistry,
 }

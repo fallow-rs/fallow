@@ -6,7 +6,7 @@
 //! reported unused. The preload files are also setup files: bun runs them
 //! before the tests, so the mutation result cache keys on their content.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{Plugin, PluginResult, config_parser};
 
@@ -49,6 +49,24 @@ define_plugin! {
         }
         result
     },
+}
+
+/// The preload files of the `bunfig.toml` at `root`, as absolute paths.
+/// Bun runs them before the tests of each `bun test` run, also when no
+/// package enables this plugin. A missing or invalid file gives none.
+#[must_use]
+pub(super) fn preload_files(root: &Path) -> Vec<PathBuf> {
+    let config_path = root.join(CONFIG_PATTERNS[0]);
+    let Ok(source) = std::fs::read_to_string(&config_path) else {
+        return Vec::new();
+    };
+    let Ok(value) = source.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+    extract_preload_entries(&value, &config_path, root)
+        .into_iter()
+        .map(|path| root.join(path))
+        .collect()
 }
 
 fn extract_preload_entries(value: &toml::Table, config_path: &Path, root: &Path) -> Vec<String> {

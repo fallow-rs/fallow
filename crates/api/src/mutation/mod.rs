@@ -23,6 +23,9 @@ pub(crate) mod typecheck;
 pub(crate) mod verdicts;
 pub(crate) mod worktree;
 
+/// The model runs link `node_modules` with a Unix symlink.
+#[cfg(all(test, unix))]
+mod cache_model;
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 mod e2e_tests;

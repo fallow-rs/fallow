@@ -9,9 +9,10 @@ name: Oracle Seeds
 #
 # Each run searches new seed numbers: the first seed number moves by
 # SEED_STRIDE with each run number. A failure prints the template and the
-# steps of the failing sequence. Add that sequence to REGRESSIONS in
-# crates/engine/tests/integration/cache_model/sequences.rs when you fix the
-# cause.
+# steps of the failing sequence. Add that sequence to REGRESSIONS in the
+# sequences.rs file of the cache model when you fix the cause: in
+# crates/engine/tests/integration/cache_model for the analysis caches, and in
+# crates/api/src/mutation/cache_model for the mutation result cache.
 on:
   schedule:
     - cron: '40 2 * * *'
@@ -25,6 +26,14 @@ on:
         description: 'The first seed number (0: run number times SEED_STRIDE)'
         type: number
         default: 0
+      mutation_seeds:
+        description: 'The number of mutation result cache seeds to run'
+        type: number
+        default: 100
+      mutation_start:
+        description: 'The first mutation result cache seed number (0: run number times MUTATION_SEED_STRIDE)'
+        type: number
+        default: 0
 
 concurrency:
   group: oracle-seeds
@@ -35,6 +44,9 @@ permissions: {}
 env:
   CARGO_TERM_COLOR: always
   SEED_STRIDE: 400
+  # Each mutation result cache seed runs the real test runner about ten
+  # times, so its range is smaller.
+  MUTATION_SEED_STRIDE: 100
   # A background git repack after a fixture commit races the next git add.
   # See scripts/workflow-policy.test.mjs.
   GIT_CONFIG_COUNT: '2'
@@ -100,7 +112,85 @@ jobs:
               echo "A warm run differs from the cache-free run. Add this sequence to \`REGRESSIONS\` when you fix the cause:"
               echo
               echo '```text'
-              sed -n '/panicked at/,/^$/p' seeds.log | head -80
+              sed -n '/panicked at/,$p' seeds.log | head -80
+              echo '```'
+            else
+              echo "The run failed before it compared a sequence. Read the log of this step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  mutation-cache-model-seeds:
+    name: Mutation result cache model wide seed range
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: oracle-seeds-mutation
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.x'
+          no-cache: true
+
+      - name: Install mutation runner dependencies
+        run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
+
+      - name: Build the mutation result cache model tests
+        run: cargo test --locked -p fallow-api --lib --no-run
+
+      - name: Run the wide seed range
+        shell: bash
+        env:
+          INPUT_SEEDS: ${{ inputs.mutation_seeds }}
+          INPUT_START: ${{ inputs.mutation_start }}
+          RUN_NUMBER: ${{ github.run_number }}
+          # A missing runner fails the run instead of a skip.
+          FALLOW_MUTATION_E2E_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          count="${INPUT_SEEDS:-$MUTATION_SEED_STRIDE}"
+          start="${INPUT_START:-0}"
+          case "$count:$start" in
+            *[!0-9:]* | :* | *:) echo "::error::seeds and start must be whole numbers"; exit 2 ;;
+          esac
+          if [ "$count" -lt 1 ]; then
+            echo "::error::seeds must be 1 or more"
+            exit 2
+          fi
+          if [ "$start" = 0 ]; then
+            start=$(( (RUN_NUMBER - 1) * MUTATION_SEED_STRIDE + 1 ))
+          fi
+          export FALLOW_MUTATION_CACHE_MODEL_SEEDS="$count"
+          export FALLOW_MUTATION_CACHE_MODEL_SEED_START="$start"
+          echo "Seed numbers $start to $(( start + count - 1 ))"
+          status=0
+          cargo test --locked -p fallow-api --lib mutation::cache_model::sequences::seed_sweep_matches_cache_free_runs \
+            -- --ignored --exact 2>&1 | tee seeds.log || status=$?
+          {
+            echo "## Mutation result cache model wide seed range"
+            echo
+            echo "Seed numbers $start to $(( start + count - 1 )). Run again with \`FALLOW_MUTATION_CACHE_MODEL_SEED_START=$start FALLOW_MUTATION_CACHE_MODEL_SEEDS=$count\`."
+            echo
+            if [ "$status" = 0 ]; then
+              echo "Each warm run matched the cache-free run."
+            elif grep -q 'the warm run differs from the cache-free run' seeds.log; then
+              echo "A warm run differs from the cache-free run. Add this sequence to \`REGRESSIONS\` when you fix the cause:"
+              echo
+              echo '```text'
+              sed -n '/panicked at/,$p' seeds.log | head -80
               echo '```'
             else
               echo "The run failed before it compared a sequence. Read the log of this step."
