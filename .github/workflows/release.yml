@@ -619,6 +619,11 @@ jobs:
           echo "PGO_PROFILE=$profile" >> "$GITHUB_ENV"
           echo "PGO profile ${digest} applied to fallow-cli, fallow-lsp, fallow-mcp and fallow-multicall for ${FALLOW_TARGET}." >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Limit GNU ARM64 build concurrency
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
+
       # One cargo invocation builds the four binaries. Cargo then resolves the
       # features once, so every shared crate gets the same hash as in the
       # fallow-multicall training build, and the profile matches. A separate
