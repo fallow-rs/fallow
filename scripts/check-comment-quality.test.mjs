@@ -328,3 +328,24 @@ test("pre-tool mode blocks an edit that adds a history comment", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a backtick in a regex literal, string, or comment does not open a template", () => {
+  const source = [
+    "const fence = /`{3}/u;",
+    "const quote = '`';",
+    'const other = "a ` b";',
+    "// Wrap the name in a ` pair.",
+    "const ratio = total / count; const tick = /`/u;",
+    "/* a ` b */ const done = true;",
+    "// This used to be a map.",
+    "const template = `",
+    "// Here we show the example.",
+    "`;",
+    "// Previously the loop ran twice.",
+  ].join("\n");
+
+  assert.deepEqual(
+    scanSourceText("scripts/check.mjs", source).map(({ line }) => line),
+    [7, 11],
+  );
+});

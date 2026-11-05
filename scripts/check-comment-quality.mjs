@@ -82,12 +82,83 @@ const JAVASCRIPT_EXTENSIONS = new Set([
 
 const isSourcePath = (path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase());
 
+// A `/` after one of these characters, or at the start of the line, starts a
+// regex literal. After an identifier, a number or `)`, it is a division.
+const REGEX_PRECEDER = /[(,=:[!&|?{};+\-*%<>~^]/u;
+const REGEX_KEYWORD = /\b(?:return|typeof|case|do|else|in|of|void|yield|await)$/u;
+
+const startsRegexLiteral = (line, index) => {
+  const before = line.slice(0, index).trimEnd();
+  return before.length === 0 || REGEX_PRECEDER.test(before.at(-1)) || REGEX_KEYWORD.test(before);
+};
+
+const regexLiteralEnd = (line, index) => {
+  let inClass = false;
+  for (let cursor = index + 1; cursor < line.length; cursor += 1) {
+    const character = line[cursor];
+    if (character === "\\") {
+      cursor += 1;
+    } else if (character === "[") {
+      inClass = true;
+    } else if (character === "]") {
+      inClass = false;
+    } else if (character === "/" && !inClass) {
+      return cursor;
+    }
+  }
+  return -1;
+};
+
+// Finds the first backtick that opens a template literal. A backtick inside a
+// quoted string, a regex literal, or a comment opens nothing. Without this
+// scan, the rest of the file reads as one template and hides every comment.
+// Returns the last index of the slash construct at `index`, or -1 when the
+// rest of the line is a comment or an unclosed block comment.
+const slashConstructEnd = (line, index) => {
+  const next = line[index + 1];
+  if (next === "/") {
+    return -1;
+  }
+  if (next === "*") {
+    const close = line.indexOf("*/", index + 2);
+    return close === -1 ? -1 : close + 1;
+  }
+  if (!startsRegexLiteral(line, index)) {
+    return index;
+  }
+  const close = regexLiteralEnd(line, index);
+  return close === -1 ? index : close;
+};
+
+// Returns the last index of the construct at `index` that cannot hold a
+// template opener, or -1 when nothing after it can.
+const skippedConstructEnd = (line, index) => {
+  const character = line[index];
+  if (character === '"' || character === "'") {
+    return closingDelimiterIndex(line, character, index + 1, true);
+  }
+  return character === "/" ? slashConstructEnd(line, index) : index;
+};
+
+const templateOpenerIndex = (line, start) => {
+  for (let index = start; index < line.length; index += 1) {
+    if (line[index] === "`") {
+      return index;
+    }
+    index = skippedConstructEnd(line, index);
+    if (index === -1) {
+      return -1;
+    }
+  }
+  return -1;
+};
+
 const multilineOpener = (path, line, start) => {
   const extension = extname(path).toLowerCase();
   const candidates = [];
 
   if (JAVASCRIPT_EXTENSIONS.has(extension)) {
-    const index = line.indexOf("`", start);
+    const index = templateOpenerIndex(line, start);
     if (index !== -1) {
       candidates.push({ index, length: 1, delimiter: "`", escaped: true });
     }
