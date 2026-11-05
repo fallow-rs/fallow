@@ -11,6 +11,7 @@ use super::tailwind_theme;
 
 mod classes;
 mod cva;
+mod keyframe_hints;
 mod markup_scan;
 mod near_duplicates;
 mod preprocessor;
@@ -20,6 +21,7 @@ mod token_consumers;
 
 use classes::*;
 use cva::*;
+use keyframe_hints::*;
 use markup_scan::*;
 use near_duplicates::*;
 use preprocessor::*;
@@ -108,6 +110,23 @@ struct CssTokenSets {
     referenced_keyframes: rustc_hash::FxHashSet<String>,
     keyframes_definers: rustc_hash::FxHashMap<String, String>,
     keyframe_referencers: rustc_hash::FxHashMap<String, String>,
+    /// `@keyframes` names that a Sass/Less source defines. Only these can be
+    /// the target of an animation value that the scan cannot resolve, because
+    /// a plain CSS file cannot read a Sass/Less variable.
+    preprocessor_keyframes: rustc_hash::FxHashSet<String>,
+    /// `true` when a Sass/Less `animation` value holds an interpolation.
+    opaque_keyframe_reference: bool,
+    /// Bare identifiers in Sass/Less `animation` values and mixin call
+    /// arguments. One counts as a keyframes reference only when a
+    /// `@keyframes` block defines it.
+    possible_keyframe_names: rustc_hash::FxHashSet<String>,
+    /// Free variables in Sass/Less `animation` values.
+    animation_variables: rustc_hash::FxHashSet<String>,
+    /// Variables in Sass/Less mixin call arguments.
+    argument_variables: rustc_hash::FxHashSet<String>,
+    /// The literal names that the assignments of each Sass/Less variable give,
+    /// or `None` when one assignment holds a variable or an interpolation.
+    variable_values: rustc_hash::FxHashMap<String, Option<rustc_hash::FxHashSet<String>>>,
     /// Declaration-block fingerprint -> (declaration count, occurrences as
     /// `(path, line)`), for cross-file duplicate-block detection.
     declaration_blocks: rustc_hash::FxHashMap<u64, (u16, Vec<(String, u32)>)>,
@@ -273,6 +292,42 @@ impl CssTokenSets {
         }
     }
 
+    fn record_keyframe_hints(&mut self, hints: KeyframeHints) {
+        self.opaque_keyframe_reference |= hints.opaque_reference;
+        self.possible_keyframe_names.extend(hints.possible_names);
+        self.animation_variables.extend(hints.animation_variables);
+        self.argument_variables.extend(hints.argument_variables);
+        for (variable, names) in hints.assignments {
+            let entry = self
+                .variable_values
+                .entry(variable)
+                .or_insert_with(|| Some(rustc_hash::FxHashSet::default()));
+            match (entry.as_mut(), names) {
+                (Some(known), Some(names)) => known.extend(names),
+                _ => *entry = None,
+            }
+        }
+    }
+
+    /// The names that the Sass/Less hints can reference, and whether an
+    /// animation value holds a reference that the scan cannot resolve.
+    fn resolve_keyframe_hints(&self) -> (rustc_hash::FxHashSet<String>, bool) {
+        let mut names = self.possible_keyframe_names.clone();
+        let mut opaque = self.opaque_keyframe_reference;
+        for variable in &self.animation_variables {
+            match self.variable_values.get(variable) {
+                Some(Some(values)) => names.extend(values.iter().cloned()),
+                _ => opaque = true,
+            }
+        }
+        for variable in &self.argument_variables {
+            if let Some(Some(values)) = self.variable_values.get(variable) {
+                names.extend(values.iter().cloned());
+            }
+        }
+        (names, opaque)
+    }
+
     fn record_declaration_blocks(
         &mut self,
         analytics: &fallow_types::extract::CssAnalytics,
@@ -432,12 +487,13 @@ impl CssTokenSets {
     fn finalize(
         &self,
         referenced_keyframes: &rustc_hash::FxHashSet<String>,
+        unchecked_keyframes: &rustc_hash::FxHashSet<String>,
         summary: &mut fallow_output::CssAnalyticsSummary,
     ) -> (
         Vec<fallow_output::UnreferencedKeyframes>,
         Vec<fallow_output::UndefinedKeyframes>,
     ) {
-        use fallow_output::{CssCandidateAction, UndefinedKeyframes, UnreferencedKeyframes};
+        use fallow_output::{CssCandidateAction, UndefinedKeyframes};
 
         summary.unique_colors = saturate_len(self.colors.len());
         summary.unique_font_sizes = saturate_len(self.font_sizes.len());
@@ -460,9 +516,14 @@ impl CssTokenSets {
                 .count(),
         );
         summary.keyframes_defined = saturate_len(self.defined_keyframes.len());
+        summary.keyframes_unchecked = saturate_len(unchecked_keyframes.len());
+        let covered_keyframes: rustc_hash::FxHashSet<String> = referenced_keyframes
+            .union(unchecked_keyframes)
+            .cloned()
+            .collect();
         summary.keyframes_unreferenced = saturate_len(
             self.defined_keyframes
-                .difference(referenced_keyframes)
+                .difference(&covered_keyframes)
                 .count(),
         );
         summary.keyframes_undefined = saturate_len(
@@ -473,18 +534,7 @@ impl CssTokenSets {
 
         // @keyframes are low-cardinality, so BOTH directions are located (not
         // just counted): defined-but-unused, and used-but-defined-nowhere.
-        let unreferenced_keyframes = locate_keyframe_diff(
-            &self.defined_keyframes,
-            referenced_keyframes,
-            &self.keyframes_definers,
-        )
-        .into_iter()
-        .map(|(name, path)| UnreferencedKeyframes {
-            actions: vec![CssCandidateAction::verify_keyframe(&name)],
-            name,
-            path,
-        })
-        .collect();
+        let unreferenced_keyframes = self.locate_unreferenced_keyframes(&covered_keyframes);
         let undefined_keyframes = locate_keyframe_diff(
             referenced_keyframes,
             &self.defined_keyframes,
@@ -498,6 +548,26 @@ impl CssTokenSets {
         })
         .collect();
         (unreferenced_keyframes, undefined_keyframes)
+    }
+
+    fn locate_unreferenced_keyframes(
+        &self,
+        covered_keyframes: &rustc_hash::FxHashSet<String>,
+    ) -> Vec<fallow_output::UnreferencedKeyframes> {
+        use fallow_output::{CssCandidateAction, UnreferencedKeyframes};
+
+        locate_keyframe_diff(
+            &self.defined_keyframes,
+            covered_keyframes,
+            &self.keyframes_definers,
+        )
+        .into_iter()
+        .map(|(name, path)| UnreferencedKeyframes {
+            actions: vec![CssCandidateAction::verify_keyframe(&name)],
+            name,
+            path,
+        })
+        .collect()
     }
 
     /// `@font-face`-declared families referenced by no `font-family` anywhere in
@@ -899,6 +969,9 @@ fn walk_css_files(
         if kind == CssScanKind::Sfc {
             record_scoped_unused_classes(&source, relative, &mut summary, &mut scoped_unused);
         }
+        if let Some(preprocessor_source) = preprocessor_source_of(&source, kind) {
+            tokens.record_keyframe_hints(preprocessor_keyframe_hints(&preprocessor_source));
+        }
 
         let rel = relative.to_string_lossy().replace('\\', "/");
         let mut file_had_sheet = false;
@@ -945,6 +1018,11 @@ fn record_css_scan_item(
         tokens.record_theme(layer, rel);
     }
     record_css_analytics_summary(summary, &analytics);
+    if item.from_preprocessor {
+        tokens
+            .preprocessor_keyframes
+            .extend(analytics.defined_keyframes.iter().cloned());
+    }
 
     match item.policy {
         GradePolicy::Atomic => {
@@ -983,18 +1061,36 @@ fn finalize_css_token_metrics(
     ignore_set: &globset::GlobSet,
 ) -> CssTokenMetrics {
     // Credit @keyframes applied via Tailwind markup (`animate-[name_...]` /
-    // `animate-name`), not just CSS `animation:` declarations, before the
-    // unreferenced diff. Filtered to actually-defined keyframes so a stray
-    // `animate-*` suffix never manufactures a false `undefined_keyframes`.
+    // `animate-name`) and named in Sass/Less source that the lowering drops
+    // (`@include animate(spin)`, `%pulse { animation-name: pulsate; }`), not
+    // just CSS `animation:` declarations, before the unreferenced diff.
+    // Filtered to actually-defined keyframes so a stray `animate-*` suffix or
+    // a mixin argument never manufactures a false `undefined_keyframes`.
     let mut referenced_keyframes = tokens.referenced_keyframes.clone();
-    for name in collect_markup_keyframe_references(files, config, ignore_set) {
+    let (preprocessor_names, opaque_reference) = tokens.resolve_keyframe_hints();
+    for name in collect_markup_keyframe_references(files, config, ignore_set)
+        .into_iter()
+        .chain(preprocessor_names)
+    {
         if tokens.defined_keyframes.contains(&name) {
             referenced_keyframes.insert(name);
         }
     }
+    // A Sass/Less animation value that the scan cannot resolve can name any
+    // `@keyframes` of a Sass/Less source, so the unreferenced check skips
+    // those. A `@keyframes` block in plain CSS stays checked.
+    let unchecked_keyframes: rustc_hash::FxHashSet<String> = if opaque_reference {
+        tokens
+            .preprocessor_keyframes
+            .difference(&referenced_keyframes)
+            .cloned()
+            .collect()
+    } else {
+        rustc_hash::FxHashSet::default()
+    };
 
     let (unreferenced_keyframes, undefined_keyframes) =
-        tokens.finalize(&referenced_keyframes, summary);
+        tokens.finalize(&referenced_keyframes, &unchecked_keyframes, summary);
     let duplicate_declaration_blocks = tokens.group_duplicate_blocks(summary);
     let unused_at_rules = tokens.group_unused_at_rules(summary);
     let font_size_unit_mix = tokens.font_size_unit_mix(summary);

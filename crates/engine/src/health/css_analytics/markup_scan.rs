@@ -252,6 +252,8 @@ pub(super) struct CssScanItem<'a> {
     pub(super) layers: Vec<String>,
     pub(super) policy: GradePolicy,
     pub(super) report_notable: bool,
+    /// `true` for the lowered form of a Sass/Less source.
+    pub(super) from_preprocessor: bool,
 }
 
 impl<'a> CssScanItem<'a> {
@@ -261,6 +263,7 @@ impl<'a> CssScanItem<'a> {
             layers: Vec::new(),
             policy,
             report_notable,
+            from_preprocessor: false,
         }
     }
 }
@@ -283,11 +286,27 @@ pub(super) fn css_report_scan_items<'a>(
     }
 }
 
+/// The Sass/Less source of a preprocessor stylesheet or of the
+/// `<style lang="scss|sass|less">` blocks of an SFC.
+pub(super) fn preprocessor_source_of(
+    source: &str,
+    kind: CssScanKind,
+) -> Option<std::borrow::Cow<'_, str>> {
+    match kind {
+        CssScanKind::Preprocessor => Some(std::borrow::Cow::Borrowed(source)),
+        CssScanKind::Sfc => {
+            crate::css::sfc_preprocessor_virtual_stylesheet(source).map(std::borrow::Cow::Owned)
+        }
+        CssScanKind::Css | CssScanKind::CssInJs => None,
+    }
+}
+
 fn preprocessor_scan_item(source: &str) -> Option<CssScanItem<'static>> {
     let mut layers = preprocessor_virtual_stylesheets(source).into_iter();
     let main = layers.next()?;
     let mut item = CssScanItem::new(std::borrow::Cow::Owned(main), GradePolicy::Structural, true);
     item.layers = layers.collect();
+    item.from_preprocessor = true;
     Some(item)
 }
 

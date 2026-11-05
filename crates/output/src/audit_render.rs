@@ -52,6 +52,19 @@ pub fn styling_candidate_count(summary: &CssAnalyticsSummary) -> u32 {
     .fold(0u32, u32::saturating_add)
 }
 
+/// Describes the `@keyframes` that the unreferenced check skipped, or `None`
+/// when the check covered every `@keyframes` block.
+pub fn keyframes_unchecked_clause(summary: &CssAnalyticsSummary) -> Option<String> {
+    let unchecked = summary.keyframes_unchecked;
+    (unchecked > 0)
+        .then(|| format!("{unchecked} not checked (a Sass/Less animation value uses a variable)"))
+}
+
+/// The [`keyframes_unchecked_clause`] with a leading `, `, or an empty string.
+pub fn keyframes_unchecked_suffix(summary: &CssAnalyticsSummary) -> String {
+    keyframes_unchecked_clause(summary).map_or_else(String::new, |clause| format!(", {clause}"))
+}
+
 /// Renders the parenthesized gate-context label for a styling audit finding.
 ///
 /// The prefix explains why the finding does or does not gate: "gated" for
@@ -123,5 +136,21 @@ mod tests {
         };
 
         assert_eq!(styling_candidate_count(&summary), 10);
+    }
+
+    #[test]
+    fn keyframes_unchecked_clause_names_the_skipped_count() {
+        assert_eq!(
+            keyframes_unchecked_clause(&CssAnalyticsSummary::default()),
+            None
+        );
+        let summary = CssAnalyticsSummary {
+            keyframes_unchecked: 2,
+            ..CssAnalyticsSummary::default()
+        };
+        assert_eq!(
+            keyframes_unchecked_clause(&summary).as_deref(),
+            Some("2 not checked (a Sass/Less animation value uses a variable)")
+        );
     }
 }

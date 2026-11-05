@@ -1937,6 +1937,32 @@ fn audit_human_splits_styling_by_confidence_budget() {
 }
 
 #[test]
+fn audit_human_shows_unchecked_sass_keyframes() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("package.json"), r#"{"name":"audit-keyframes"}"#).unwrap();
+    fs::write(root.join("src/index.ts"), "export const ok = true;\n").unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/styles.scss"),
+        ".a { animation: #{$prefix}-in 1s; }\n@keyframes fade-in { to { opacity: 1; } }\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&["audit", "--root", root.to_str().unwrap(), "--base", "HEAD"]);
+    assert!(
+        output
+            .stdout
+            .contains("@keyframes: 1 not checked (a Sass/Less animation value uses a variable)"),
+        "audit should say that the keyframes check skipped a block. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
 fn audit_css_deep_surfaces_cross_file_styling_findings() {
     let dir = create_audit_css_deep_fixture();
     let root = dir.path();

@@ -8483,6 +8483,233 @@ fn health_css_sfc_preprocessor_blocks_feed_structural_analytics() {
 }
 
 #[test]
+fn health_css_scss_keyframes_count_as_defined() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"scss-keyframes","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/Spinner.vue"),
+        "<template>\n  <div class=\"spinner\" />\n</template>\n\n\
+         <style lang=\"scss\" scoped>\n\
+         .spinner {\n\
+           animation: spin 1s linear infinite;\n\
+         }\n\
+         \n\
+         @keyframes spin {\n\
+           to {\n\
+             transform: rotate(360deg);\n\
+           }\n\
+         }\n\
+         </style>\n",
+    );
+    write_file(
+        &root.join("src/pulse.scss"),
+        ".pulse {\n\
+           animation: pulse 2s ease-in-out infinite;\n\
+         }\n\
+         \n\
+         @keyframes pulse {\n\
+           from { opacity: 0.5; }\n\
+           to { opacity: 1; }\n\
+         }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let summary = &json["css_analytics"]["summary"];
+    assert_eq!(summary["keyframes_defined"], 2, "summary: {summary}");
+    assert_eq!(summary["keyframes_undefined"], 0, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 0, "summary: {summary}");
+}
+
+fn keyframes_health(files: &[(&str, &str)], format: &str) -> crate::common::CommandOutput {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"scss-keyframes-refs","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    for (path, source) in files {
+        write_file(&root.join(path), source);
+    }
+    run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            format,
+            "--quiet",
+        ],
+    )
+}
+
+fn keyframes_health_json(files: &[(&str, &str)]) -> serde_json::Value {
+    parse_json(&keyframes_health(files, "json"))["css_analytics"].clone()
+}
+
+fn scss_keyframes_health(scss: &str) -> serde_json::Value {
+    keyframes_health_json(&[("src/styles.scss", scss)])
+}
+
+fn unreferenced_keyframe_names(css: &serde_json::Value) -> Vec<String> {
+    css["unreferenced_keyframes"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .map(|kf| kf["name"].as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn health_css_scss_mixin_parameter_and_literal_variable_reference_keyframes() {
+    let css = scss_keyframes_health(
+        "@mixin animate($name) {\n  animation: $name 1s;\n}\n\
+         $fade: fade-in;\n\
+         .a {\n  @include animate(spin);\n}\n\
+         .b {\n  animation: $fade 2s;\n}\n\
+         @keyframes spin {\n  to { transform: rotate(360deg); }\n}\n\
+         @keyframes fade-in {\n  from { opacity: 0; }\n}\n\
+         @keyframes dead {\n  to { opacity: 1; }\n}\n",
+    );
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_defined"], 3, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 1, "summary: {summary}");
+    assert_eq!(summary["keyframes_unchecked"], 0, "summary: {summary}");
+    assert_eq!(unreferenced_keyframe_names(&css), vec!["dead"]);
+}
+
+#[test]
+fn health_css_less_mixin_parameter_and_named_argument_reference_keyframes() {
+    let css = keyframes_health_json(&[(
+        "src/styles.less",
+        ".m(@a; @b) { animation: @a @b; }\n\
+         .n(@x: 1; @y: 2) { animation-name: @y; }\n\
+         .a { .m(spin; 2s); }\n\
+         .b { .n(@y: pulse); }\n\
+         @keyframes spin { to { opacity: 1; } }\n\
+         @keyframes pulse { to { opacity: 1; } }\n\
+         @keyframes dead { to { opacity: 1; } }\n",
+    )]);
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_defined"], 3, "summary: {summary}");
+    assert_eq!(summary["keyframes_unchecked"], 0, "summary: {summary}");
+    assert_eq!(unreferenced_keyframe_names(&css), vec!["dead"]);
+}
+
+#[test]
+fn health_css_unresolved_scss_variable_skips_only_preprocessor_keyframes() {
+    let css = keyframes_health_json(&[
+        (
+            "src/a.scss",
+            "$name: get-name();\n.a { animation: $name 1s; }\n\
+             @keyframes scss-only { to { opacity: 1; } }\n",
+        ),
+        (
+            "src/b.css",
+            "@keyframes plain-dead { to { opacity: 1; } }\n",
+        ),
+    ]);
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_defined"], 2, "summary: {summary}");
+    assert_eq!(summary["keyframes_unchecked"], 1, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 1, "summary: {summary}");
+    assert_eq!(unreferenced_keyframe_names(&css), vec!["plain-dead"]);
+}
+
+#[test]
+fn health_css_vue_scss_variable_does_not_hide_plain_css_keyframes() {
+    let css = keyframes_health_json(&[
+        (
+            "src/A.vue",
+            "<template><div /></template>\n\
+             <style lang=\"scss\">\n.a { animation: $n 1s; }\n</style>\n",
+        ),
+        (
+            "src/b.css",
+            "@keyframes plain-dead { to { opacity: 1; } }\n",
+        ),
+    ]);
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_unchecked"], 0, "summary: {summary}");
+    assert_eq!(unreferenced_keyframe_names(&css), vec!["plain-dead"]);
+}
+
+#[test]
+fn health_css_unchecked_keyframes_show_in_human_and_markdown_output() {
+    let files = [(
+        "src/a.scss",
+        ".a { animation: #{$prefix}-in 1s; }\n\
+         @keyframes fade-in { to { opacity: 1; } }\n",
+    )];
+    let human = keyframes_health(&files, "human");
+    assert!(
+        human
+            .stdout
+            .contains("1 not checked (a Sass/Less animation value uses a variable)"),
+        "stdout: {}",
+        human.stdout
+    );
+    let markdown = keyframes_health(&files, "markdown");
+    assert!(
+        markdown.stdout.contains(
+            "0 unreferenced + 0 undefined @keyframes, 1 not checked (a Sass/Less animation value uses a variable)"
+        ),
+        "stdout: {}",
+        markdown.stdout
+    );
+}
+
+#[test]
+fn health_css_scss_placeholder_animation_references_keyframes() {
+    let css = scss_keyframes_health(
+        "%pulsation {\n  animation-name: pulsate;\n}\n\
+         .skeleton {\n  @extend %pulsation;\n}\n\
+         @keyframes pulsate {\n  50% { opacity: 0.5; }\n}\n",
+    );
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_defined"], 1, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 0, "summary: {summary}");
+    assert_eq!(summary["keyframes_unchecked"], 0, "summary: {summary}");
+}
+
+#[test]
+fn health_css_scss_mixin_argument_references_keyframes() {
+    let css = scss_keyframes_health(
+        "@use \"pkg/animations\" as anim;\n\
+         .a {\n  @include anim.animate(spin, 1s);\n}\n\
+         @keyframes spin {\n  to { transform: rotate(360deg); }\n}\n\
+         @keyframes unused-pulse {\n  to { opacity: 1; }\n}\n",
+    );
+    let summary = &css["summary"];
+    assert_eq!(summary["keyframes_defined"], 2, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 1, "summary: {summary}");
+    assert_eq!(summary["keyframes_undefined"], 0, "summary: {summary}");
+    assert_eq!(summary["keyframes_unchecked"], 0, "summary: {summary}");
+    assert_eq!(css["unreferenced_keyframes"][0]["name"], "unused-pulse");
+}
+
+#[test]
 fn health_css_preprocessor_findings_report_source_lines() {
     let dir = tempdir().unwrap();
     let root = dir.path();

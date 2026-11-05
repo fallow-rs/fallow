@@ -1724,9 +1724,8 @@ fn write_styling_findings_section(
     out.push('\n');
 }
 
-/// Render the opt-in `## CSS Health` markdown section (present only with
-/// `--css`): a summary of structural metrics, value sprawl, and candidate counts
-/// plus a bounded list of the most actionable located candidates.
+/// Render the opt-in `## CSS Health` section (only with `--css`): structural metrics,
+/// value sprawl, candidate counts and a bounded list of located candidates.
 fn write_css_analytics_section(out: &mut String, report: &fallow_output::HealthReport) {
     let Some(ref css) = report.css_analytics else {
         return;
@@ -1756,9 +1755,10 @@ fn write_css_analytics_section(out: &mut String, report: &fallow_output::HealthR
         s.unique_border_radii,
         s.unique_line_heights,
     );
+    let unchecked_keyframes = fallow_output::keyframes_unchecked_suffix(s);
     let _ = writeln!(
         out,
-        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes | {} unused @font-face | {} unused @theme tokens",
+        "- Candidates: {} unreferenced + {} undefined @keyframes{unchecked_keyframes} | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes | {} unused @font-face | {} unused @theme tokens",
         s.keyframes_unreferenced,
         s.keyframes_undefined,
         s.duplicate_declaration_blocks,

@@ -18527,6 +18527,10 @@
           "type": "integer",
           "description": "Distinct animation names referenced via `animation` / `animation-name`\nthat resolve to no `@keyframes` definition anywhere (the used-but-\nundefined direction). Located in `undefined_keyframes`; usually a typo or\na removed animation."
         },
+        "keyframes_unchecked": {
+          "type": "integer",
+          "description": "`@keyframes` that a Sass or Less source defines and that the\nunreferenced check skips. A Sass or Less `animation` /\n`animation-name` value with a variable or an interpolation that fallow\ncannot resolve can name any such block. These are not in\n`keyframes_unreferenced`. A `@keyframes` block in plain CSS is always\nchecked."
+        },
         "scoped_unused_classes": {
           "type": "integer",
           "description": "Total Vue `<style scoped>` classes used nowhere else in their component\n(cleanup candidates), across all SFCs."
@@ -18619,6 +18623,7 @@
         "keyframes_defined",
         "keyframes_unreferenced",
         "keyframes_undefined",
+        "keyframes_unchecked",
         "scoped_unused_classes",
         "duplicate_declaration_blocks",
         "duplicate_declarations_total",

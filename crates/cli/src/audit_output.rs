@@ -412,10 +412,10 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     // candidates), else the styling summary is invisible on the common case.
     let has_styling = result.health.as_ref().is_some_and(|h| {
         !h.report.styling_findings.is_empty()
-            || h.report
-                .css_analytics
-                .as_ref()
-                .is_some_and(|c| fallow_output::styling_candidate_count(&c.summary) > 0)
+            || h.report.css_analytics.as_ref().is_some_and(|c| {
+                fallow_output::styling_candidate_count(&c.summary) > 0
+                    || c.summary.keyframes_unchecked > 0
+            })
     });
 
     let has_diff_risk = !result.diff_risk.is_empty();
@@ -688,13 +688,24 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
     let descriptive = health.report.css_analytics.as_ref().map_or(0, |css| {
         fallow_output::styling_candidate_count(&css.summary)
     });
-    if findings.is_empty() && descriptive == 0 {
+    let unchecked_keyframes = health
+        .report
+        .css_analytics
+        .as_ref()
+        .and_then(|css| fallow_output::keyframes_unchecked_clause(&css.summary));
+    if findings.is_empty() && descriptive == 0 && unchecked_keyframes.is_none() {
         return;
     }
     print_audit_section_header(
         show_headers,
         "── Styling ────────────────────────────────────────",
     );
+    if let Some(clause) = unchecked_keyframes {
+        outln!("  @keyframes: {clause}");
+    }
+    if findings.is_empty() && descriptive == 0 {
+        return;
+    }
     if findings.is_empty() {
         // Only not-yet-graduated descriptive candidates (dead surface, etc.).
         let noun = if descriptive == 1 {
