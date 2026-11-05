@@ -3,7 +3,7 @@
   "maximum_minor_lag": 6,
   "waiver": {
     "issue": "https://github.com/fallow-rs/fallow/issues/3776",
-    "until_version": "3.40.0",
-    "reason": "The gate needs decisions on project roles, the yield denominator and a new adjudication before the evidence can be regenerated."
+    "until_version": "3.43.0",
+    "reason": "Pull request #3797 decided the project roles and the yield denominator. Before the evidence can be regenerated, the candidates need a new adjudication and the runtime (p95) needs a new measurement."
   }
 }
