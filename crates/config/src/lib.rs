@@ -35,6 +35,7 @@ mod fixability;
 /// JSONC parsing helpers pinning the dialect fallow accepts.
 pub mod jsonc;
 pub mod levenshtein;
+mod package_manager;
 mod rule_pack;
 mod source_walk;
 mod workspace;
@@ -46,6 +47,7 @@ pub use config_inputs::*;
 pub use config_writer::*;
 pub use external_plugin::*;
 pub use fixability::*;
+pub use package_manager::PackageManager;
 pub use rule_pack::*;
 pub use source_walk::{source_walk_builder, source_walked_workspaces};
 pub use workspace::*;

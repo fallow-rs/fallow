@@ -1738,35 +1738,12 @@ fn same_path(left: &Path, right: &Path) -> bool {
 }
 
 fn detect_package_manager(root: &Path) -> Option<PackageManager> {
-    detect_package_manager_from_field(root).or_else(|| {
-        if root.join("bun.lockb").exists() || root.join("bun.lock").exists() {
-            Some(PackageManager::Bun)
-        } else if root.join("pnpm-lock.yaml").exists() {
-            Some(PackageManager::Pnpm)
-        } else if root.join("yarn.lock").exists() {
-            Some(PackageManager::Yarn)
-        } else if root.join("package-lock.json").exists()
-            || root.join("npm-shrinkwrap.json").exists()
-        {
-            Some(PackageManager::Npm)
-        } else {
-            None
-        }
+    fallow_config::PackageManager::detect(root).map(|manager| match manager {
+        fallow_config::PackageManager::Npm => PackageManager::Npm,
+        fallow_config::PackageManager::Pnpm => PackageManager::Pnpm,
+        fallow_config::PackageManager::Yarn => PackageManager::Yarn,
+        fallow_config::PackageManager::Bun => PackageManager::Bun,
     })
-}
-
-fn detect_package_manager_from_field(root: &Path) -> Option<PackageManager> {
-    let content = std::fs::read_to_string(root.join("package.json")).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let field = value.get("packageManager")?.as_str()?;
-    let name = field.split('@').next().unwrap_or(field);
-    match name {
-        "npm" => Some(PackageManager::Npm),
-        "pnpm" => Some(PackageManager::Pnpm),
-        "yarn" => Some(PackageManager::Yarn),
-        "bun" => Some(PackageManager::Bun),
-        _ => None,
-    }
 }
 
 fn recipe_path(root: &Path) -> PathBuf {
