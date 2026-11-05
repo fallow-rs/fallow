@@ -3928,8 +3928,8 @@ pub struct BoundaryCoverageViolation {
 }
 
 /// A call from a zoned file to a callee forbidden for that zone via
-/// `boundaries.calls.forbidden`. One finding is reported per unique callee
-/// path per file (first occurrence wins).
+/// `boundaries.calls.forbidden`. One finding is reported per call or `new`
+/// site.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryCallViolation {
@@ -3983,8 +3983,8 @@ pub enum PolicyViolationSeverity {
 
 /// A banned call, banned import, banned effect, or banned export matched by a
 /// declarative rule pack (`rulePacks` config). Banned-call and banned-effect
-/// findings report one entry per unique callee path per file (first occurrence
-/// wins, matching `boundary_call_violations`); banned-import findings anchor
+/// findings report one entry per call site (`new` sites count for banned-call
+/// only), matching `boundary_call_violations`; banned-import findings anchor
 /// at each matching import or re-export declaration; banned-export findings
 /// anchor at matching export declarations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

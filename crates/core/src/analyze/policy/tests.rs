@@ -224,7 +224,7 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
 fn callee(path: &str, span_start: u32) -> CalleeUse {
     CalleeUse {
         callee_path: path.to_string(),
-        span_start,
+        span_starts: vec![span_start],
         is_new: false,
     }
 }

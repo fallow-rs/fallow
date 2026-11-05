@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 414;
+pub(super) const CACHE_VERSION: u32 = 415;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -69,7 +69,7 @@ assert_cached_type_size!(CachedMember, 88);
 assert_cached_type_size!(CachedDynamicImportPattern, 88);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 80);
-assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
+assert_cached_type_size!(fallow_types::extract::CalleeUse, 56);
 assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
 assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 64);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
@@ -239,9 +239,8 @@ pub struct CachedModule {
     pub sanitized_sink_args: Vec<fallow_types::extract::SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.
     pub security_control_sites: Vec<fallow_types::extract::SecurityControlSite>,
-    /// Deduped statically flattenable callee paths. Round-trips so the
-    /// `boundaries.calls.forbidden` detector sees call sites on warm-cache
-    /// loads.
+    /// Statically flattenable callee paths with every site. Round-trips so
+    /// the callee rules see each call site on warm-cache loads.
     pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
     /// Literal commands of process-spawning calls for `unlisted-binaries`.
     pub command_invocations: Vec<fallow_types::extract::CommandInvocation>,

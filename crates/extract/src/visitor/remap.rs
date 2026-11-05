@@ -29,8 +29,12 @@ impl ModuleInfoExtractor {
         for reference in &mut self.import_binding_references {
             reference.span_start = remap_start(reference.span_start);
         }
-        for callee in &mut self.callee_uses {
-            callee.span_start = remap_start(callee.span_start);
+        for start in self
+            .callee_uses
+            .iter_mut()
+            .flat_map(|callee| callee.span_starts.iter_mut())
+        {
+            *start = remap_start(*start);
         }
         for invocation in &mut self.command_invocations {
             invocation.span_start = remap_start(invocation.span_start);

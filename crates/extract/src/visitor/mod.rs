@@ -1,3 +1,4 @@
+mod callee_uses;
 mod declarations;
 mod helpers;
 mod remap;
@@ -1083,9 +1084,8 @@ pub(crate) struct ModuleInfoExtractor {
     sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.
     security_control_sites: Vec<SecurityControlSite>,
-    /// Statically flattenable callee paths, deduped per unique path (first
-    /// occurrence wins). Consumed by the `boundaries.calls.forbidden`
-    /// detector.
+    /// Statically flattenable callee paths, one entry per path and form with
+    /// the start of every site. Consumed by the callee rules.
     callee_uses: Vec<CalleeUse>,
     /// Literal commands of process-spawning calls.
     command_invocations: Vec<CommandInvocation>,
@@ -1098,11 +1098,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// Value references to runtime ESM import bindings, set by the semantic
     /// pass. `import_index` points into `imports`.
     import_binding_references: Vec<ImportBindingReference>,
-    /// Dedup guard for `callee_uses`. Working state only: not persisted and
-    /// not merged across SFC script blocks (each block dedups independently;
-    /// the detector matches per unique path, so cross-block duplicates only
-    /// cost one extra entry). The second element is the `is_new` form.
-    seen_callee_paths: FxHashSet<(String, bool)>,
+    /// Index into `callee_uses` of the entry for each callee path and form.
+    /// The second key element is the `is_new` form. Working state only: not
+    /// persisted and not merged across SFC script blocks, so each block has
+    /// its own entries.
+    callee_use_index: FxHashMap<(String, bool), usize>,
     /// `"use client"` / `"use server"` directive strings written as expression
     /// statements in `program.body` (misplaced, NOT in the leading
     /// prologue), so the RSC bundler silently ignores them. Captured by

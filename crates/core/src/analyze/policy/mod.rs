@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
 use fallow_config::{EffectKind, ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
-use fallow_types::extract::{ImportedName, ModuleInfo};
+use fallow_types::extract::{CalleeUse, ImportedName, ModuleInfo};
 use fallow_types::output::IssueAction;
 use fallow_types::output_dead_code::PolicyViolationFinding;
 use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
@@ -120,10 +120,10 @@ pub(super) struct PolicyAnalysisInput<'a> {
 /// Banned-call matching mirrors `boundaries.calls.forbidden`: the written
 /// callee path and an import-resolved canonical path are both tried, so
 /// `child_process.*` covers named, namespace, and default imports from
-/// `child_process` / `node:child_process`. One finding is reported per unique
-/// callee path per form per file (the `callee_uses` capture dedups per path
-/// and per call or `new` form, first occurrence wins). Banned-effect matching
-/// reads calls only. Banned-import matching is segment-aware on the RAW
+/// `child_process` / `node:child_process`. One finding is reported per call or
+/// `new` site, so a suppression comment covers only the site on its next line.
+/// Banned-effect matching also reports one finding per site, and reads calls
+/// only. Banned-import matching is segment-aware on the RAW
 /// specifier over imports and re-exports; `require()` calls and dynamic
 /// `import()` are documented false negatives in v1. A rule with `allowNames`
 /// reports each site that does not bind a listed name, with the binding in
@@ -638,11 +638,30 @@ fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {
         let Some((rule, severity, effect)) = matched else {
             continue;
         };
-        let (line, col) = byte_offset_to_line_col(
-            input.line_offsets_by_file,
-            input.node.file_id,
-            callee_use.span_start,
+        let matched = format!("{}: {}", effect.as_str(), callee_use.callee_path);
+        push_callee_site_violations(
+            input,
+            callee_use,
+            rule,
+            severity,
+            PolicyRuleKind::BannedEffect,
+            &matched,
         );
+    }
+}
+
+/// Push one finding per site of `callee_use` that no suppression comment covers.
+fn push_callee_site_violations(
+    input: &mut PolicyCollectionInput<'_>,
+    callee_use: &CalleeUse,
+    rule: &CompiledRule<'_>,
+    severity: PolicyViolationSeverity,
+    kind: PolicyRuleKind,
+    matched: &str,
+) {
+    for &span_start in &callee_use.span_starts {
+        let (line, col) =
+            byte_offset_to_line_col(input.line_offsets_by_file, input.node.file_id, span_start);
         if input.suppressions.is_policy_suppressed(
             input.node.file_id,
             line,
@@ -657,15 +676,15 @@ fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {
             col,
             pack: rule.pack.to_owned(),
             rule_id: rule.rule.id.clone(),
-            kind: PolicyRuleKind::BannedEffect,
-            matched: format!("{}: {}", effect.as_str(), callee_use.callee_path),
+            kind,
+            matched: matched.to_owned(),
             severity,
             message: rule.rule.message.clone(),
         });
     }
 }
 
-/// Emit one finding per unique callee path per form matched by the first applicable
+/// Emit one finding per call or `new` site matched by the first applicable
 /// `banned-call` rule (config order), mirroring the boundary forbidden-call
 /// first-pattern-wins behavior.
 fn collect_banned_calls(input: &mut PolicyCollectionInput<'_>) {
@@ -681,30 +700,15 @@ fn collect_banned_calls(input: &mut PolicyCollectionInput<'_>) {
         let Some((rule, severity)) = matched else {
             continue;
         };
-        let (line, col) = byte_offset_to_line_col(
-            input.line_offsets_by_file,
-            input.node.file_id,
-            callee_use.span_start,
-        );
-        if input.suppressions.is_policy_suppressed(
-            input.node.file_id,
-            line,
-            rule.pack,
-            &rule.rule.id,
-        ) {
-            continue;
-        }
-        input.violations.push(PolicyViolation {
-            path: input.node.path.clone(),
-            line,
-            col,
-            pack: rule.pack.to_owned(),
-            rule_id: rule.rule.id.clone(),
-            kind: PolicyRuleKind::BannedCall,
-            matched: display_callee(callee_use),
+        let matched = display_callee(callee_use);
+        push_callee_site_violations(
+            input,
+            callee_use,
+            rule,
             severity,
-            message: rule.rule.message.clone(),
-        });
+            PolicyRuleKind::BannedCall,
+            &matched,
+        );
     }
 }
 

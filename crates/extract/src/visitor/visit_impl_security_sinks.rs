@@ -100,7 +100,7 @@ pub(in crate::visitor) struct SinkAliasState {
 /// identifiers and static member chains (no call/new forms), so the catalogue
 /// matcher sees a clean dotted callee path. Returns `None` for dynamic dispatch,
 /// computed members, or aliased call forms (those count as blind spots).
-pub(super) fn flatten_callee_path(mut expr: &Expression<'_>) -> Option<String> {
+pub(in crate::visitor) fn flatten_callee_path(mut expr: &Expression<'_>) -> Option<String> {
     let mut properties = Vec::new();
     let root = loop {
         crate::cost::walk_step();
