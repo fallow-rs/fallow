@@ -47,6 +47,7 @@ import {
   recordSymbolUncertainty,
   targetName,
 } from "./symbol-targets.mjs";
+import { recordBoundedUse } from "./symbol-use-evidence.mjs";
 import { analyzeTypeCoupling } from "./type-coupling.mjs";
 import {
   MODULE_SOURCE_EXTENSIONS,
@@ -79,7 +80,6 @@ const {
 } = ast;
 
 const ATTACHED_COMMENT_PATTERN = /\/\/|\/\*/u;
-const MAX_SYMBOL_USE_EVIDENCE = 1;
 const DECLARATION_KINDS = new Set([
   "export",
   "class",
@@ -265,12 +265,13 @@ const boundedResult = ({
   evidenceLimit,
   totalEvidenceCount,
   omissions: extraOmissions = [],
+  evidenceLimitIsGap = true,
 }) => {
   const ordered = orderedEvidence(evidence);
   const totalEvidence = totalEvidenceCount === undefined ? ordered.length : totalEvidenceCount;
   const returnedEvidenceCount = Math.min(ordered.length, evidenceLimit);
   const omissions = combineOmissions([
-    ...evidenceLimitOmission(totalEvidence, returnedEvidenceCount),
+    ...(evidenceLimitIsGap ? evidenceLimitOmission(totalEvidence, returnedEvidenceCount) : []),
     ...extraOmissions,
   ]).toSorted(compareOmissions);
   const partial = omissions.length > 0;
@@ -284,7 +285,7 @@ const boundedResult = ({
     actions: resultActions(omissions),
     evidence: ordered.slice(0, evidenceLimit),
     totalEvidenceCount: totalEvidence,
-    truncated,
+    truncated: truncated || totalEvidence > returnedEvidenceCount,
     omissions,
     data,
   };
@@ -598,11 +599,7 @@ const recordSymbolUse = (root, state, project, entry, node, namespace) => {
       state.aliasHopTotalByQuery.get(entry.query.id) + use.via.length,
     );
   }
-  const limit =
-    entry.query.operation === "symbol-use" ? MAX_SYMBOL_USE_EVIDENCE : state.evidenceLimit;
-  if (evidence.length < limit) {
-    evidence.push(use);
-  }
+  recordBoundedUse(evidence, use, entry.query.operation, state.evidenceLimit);
 };
 
 const projectOwnsEntry = (project, entry) =>
@@ -1143,6 +1140,8 @@ const analyzeSymbolUse = (
     evidenceLimit,
     totalEvidenceCount,
     omissions,
+    // A capped use keeps one item per file. A negative assertion needs every reference.
+    evidenceLimitIsGap: assertion !== "confirmed-used",
     data: {
       symbol: semanticQueryIdentity(root, query, resolved),
       selected_project: resolved.state.config,
