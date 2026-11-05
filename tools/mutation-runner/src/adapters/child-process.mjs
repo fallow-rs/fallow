@@ -149,7 +149,26 @@ export const withTestIds = (file, tests) => {
  * pattern that selects more tests than requested costs time only: the run
  * drops each result that it did not request.
  */
-const namePatternText = (parts) => parts.map(escapeRegExp).join(" ").replace(/\s+/gu, "\\s*");
+const namePatternText = (parts) =>
+  parts
+    .map(escapeRegExp)
+    .join(" ")
+    .replace(/\s+/gu, "\\s*")
+    .replace(LONE_SURROGATE, escapeSurrogate);
+
+/**
+ * A lone UTF-16 surrogate. With the `u` flag, a surrogate pair is one code
+ * point, so only a lone surrogate matches.
+ */
+const LONE_SURROGATE = /[\uD800-\uDFFF]/gu;
+
+/**
+ * Writes a lone surrogate as a `\uXXXX` escape. A Node test process does not
+ * match a test name with a lone surrogate against a pattern that holds the
+ * surrogate itself, but it matches the escape.
+ */
+const escapeSurrogate = (surrogate) =>
+  `\\u${surrogate.charCodeAt(0).toString(16).padStart(4, "0")}`;
 
 /** The source of the name pattern that selects the tests of `entries`. */
 const namePatternSource = (entries) =>
