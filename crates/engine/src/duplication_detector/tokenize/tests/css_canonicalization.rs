@@ -71,8 +71,8 @@ fn css_hex_color_shorthand_expands_and_lowercases() {
 
 #[test]
 fn css_id_selector_is_not_treated_as_hex_color() {
-    // `#main` is an id selector, not a hex color: it keeps the existing behavior
-    // (the `#` is dropped, the identifier `main` remains), so no `#...` token.
+    // `#main` is an id selector, not a hex color: the `#` is dropped and the
+    // identifier `main` remains, so no `#...` token.
     let tokens = value_tokens(&tokenize_css("#main { color: red; }"));
     assert!(
         tokens.contains(&"main".to_string()),

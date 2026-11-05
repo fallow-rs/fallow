@@ -1030,9 +1030,10 @@ fn list_files_includes_plugin_scoped_hidden_dirs_for_remix() {
 }
 
 /// Issue #2366 follow-up: the `fallow workspaces` / `fallow list --workspaces`
-/// envelope has no post-serialization root-prefix strip, so its
-/// `workspace_diagnostics[].path` used to be the only absolute path in any
-/// fallow JSON envelope while the `workspaces[].path` next to it was relative.
+/// envelope has no post-serialization root-prefix strip. Unless the paths are
+/// made relative before serialization, its `workspace_diagnostics[].path` is the
+/// only absolute path in any fallow JSON envelope, next to a relative
+/// `workspaces[].path`.
 #[test]
 fn list_workspaces_json_emits_project_relative_diagnostic_paths() {
     let dir = tempfile::tempdir().expect("create temp dir");

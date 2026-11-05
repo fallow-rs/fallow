@@ -3933,8 +3933,8 @@ mod tests {
     }
 
     /// A block-bodied callback is the common shape for configs that branch on
-    /// the build mode. Only the concise arrow used to be traversed, so every
-    /// such config extracted nothing at all (issue #2005).
+    /// the build mode. A parser that traverses only the concise arrow extracts
+    /// nothing at all from such a config (issue #2005).
     #[test]
     fn extract_define_config_block_body_arrow_function() {
         let source = r#"

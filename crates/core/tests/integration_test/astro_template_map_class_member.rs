@@ -16,13 +16,13 @@ fn unused_members(fixture: &str) -> Vec<String> {
         .collect()
 }
 
-/// Issue #1713 (#1707 follow-up): a `.map()` callback in the Astro TEMPLATE body
-/// (`{utils.map((util) => <li>{util.getter}</li>)}`) whose receiver is a
-/// frontmatter `Util[]` binding credits the element-class members. Previously the
-/// template `{...}` region was only scanned for bare identifiers, so `util.getter`
-/// / `util.property` / `util.hello` were never credited and false-reported as
-/// `unused-class-member`. The control `unusedMethod` (accessed nowhere) must still
-/// report, proving the fix is over-credit-only.
+/// Issue #1713 (#1707 follow-up): a `.map()` callback in the Astro TEMPLATE
+/// body (`{utils.map((util) => <li>{util.getter}</li>)}`) whose receiver is a
+/// frontmatter `Util[]` binding credits the element-class members. A scan of
+/// the template `{...}` region for bare identifiers only never credits
+/// `util.getter` / `util.property` / `util.hello`, and reports them as
+/// `unused-class-member`. The control `unusedMethod` (accessed nowhere) must
+/// still report, proving the credit is over-credit-only.
 #[test]
 fn astro_template_map_credits_element_class_members() {
     let unused = unused_members("issue-1713-astro-template-map-class-member");

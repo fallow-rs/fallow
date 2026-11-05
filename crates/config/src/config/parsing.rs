@@ -1698,9 +1698,9 @@ impl FallowConfig {
     /// Call sites (`runtime_support::load_config_for_analysis` in the CLI,
     /// `core::lib::config_for_project` for LSP and programmatic embedders)
     /// surface every collected error in a single rendered diagnostic, then
-    /// exit with code 2. Previously these failures emitted `tracing::error!`
-    /// and continued, producing a flood of false-positive boundary violations
-    /// at analysis time (#468).
+    /// exit with code 2. A failure that only emits `tracing::error!` and
+    /// continues produces a flood of false-positive boundary violations at
+    /// analysis time (#468).
     ///
     /// `root` is the project root used by `expand_auto_discover` to scan for
     /// child directories. Caller is responsible for passing the same root it

@@ -280,11 +280,11 @@ fn print_human(trace: &ErrorTrace, quiet: bool) {
 
 /// The empty state: one statement of the fact, then what to do about it.
 ///
-/// It used to state the same thing three times (a literal `No stack frames
-/// recognised.`, a counts line that was all zeroes, and the prose `reason`) and
-/// then stop, with no next step and nothing saying the input can be piped. The
-/// unparsed-line count is folded into the sentence rather than left on a counts
-/// line so it survives `--quiet`, which drops prose.
+/// It states the fact once, instead of a literal `No stack frames recognised.`,
+/// a counts line of zeroes and the prose `reason`, and it names the next step,
+/// including that the input can be piped. The unparsed-line count is folded
+/// into the sentence rather than left on a counts line so it survives
+/// `--quiet`, which drops prose.
 fn print_empty_human(trace: &ErrorTrace) {
     let unparsed = trace.counts.unparsed_lines;
     if unparsed > 0 {

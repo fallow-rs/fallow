@@ -1,7 +1,7 @@
 //! `fallow-engine` integration tests, built as one test binary.
 //!
-//! Each module used to be a test binary of its own. Every binary linked the
-//! engine, so the build linked it once per file. One binary links it once.
+//! A separate test binary per file links the engine once per file. One
+//! binary links it once.
 //! Add a new integration test as a module here, not as a new file in
 //! `tests/`.
 

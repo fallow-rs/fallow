@@ -10,7 +10,7 @@
 //! - An anchored prefix that ends with a slash, such as `/^@\//`, when the
 //!   replacement ends with a slash. The key keeps the slash.
 //!
-//! Every other regex gives no alias, which keeps the old behavior.
+//! Every other regex gives no alias.
 //!
 //! Limit: the resolver matches every key as a prefix. Thus an exact key such as
 //! `lodash` from `/^lodash$/` also matches `lodash/fp`, which Vite does not

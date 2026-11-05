@@ -634,6 +634,12 @@ feature-only dependency in `crates/cli/Cargo.toml`. The check runs in
 Codex does not execute `.claude/settings.json` hooks. Mirror the repository
 hooks manually when they did not run.
 
+Claude runs `node scripts/check-comment-quality.mjs --claude-pre-tool` before
+each `Edit`, `Write`, and `MultiEdit`. The hook blocks an edit that adds a
+narration comment or a comment about the edit history. Codex does not run
+this hook, so run `node scripts/check-comment-quality.mjs --working-tree`
+before you commit.
+
 Pre-commit parity:
 
 ```bash

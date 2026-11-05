@@ -1505,9 +1505,9 @@ fn fail_on_issues_passes_a_clean_combined_run() {
 }
 
 /// One envelope must not produce two surfaces that state opposite verdicts. The
-/// pull-request comment is the one a reviewer reads, and it used to assert a
-/// passing quality gate while the job summary rendered from the same file said
-/// a gate had failed.
+/// pull-request comment is the one a reviewer reads, so it must not assert a
+/// passing quality gate while the job summary rendered from the same file says
+/// a gate failed.
 #[test]
 fn the_pull_request_comment_carries_the_same_verdict_as_the_job_summary() {
     let (project, baseline) = regressed_orphan_project();

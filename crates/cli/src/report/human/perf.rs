@@ -110,10 +110,10 @@ fn push_dimmed(lines: &mut Vec<String>, line: &str) {
 
 /// Name a refused cache under the stage that paid for it.
 ///
-/// A refusal used to be signalled by the ABSENCE of a cached/parsed
-/// annotation, which reads exactly like a first run on a project. The counts
-/// above this line are always printed now, and this line says why they are
-/// what they are.
+/// Without this line, the only sign of a refusal is the ABSENCE of a
+/// cached/parsed annotation, which reads exactly like a first run on a
+/// project. The counts above this line are always printed, and this line says
+/// why they are what they are.
 fn push_cache_rejection_line(
     lines: &mut Vec<String>,
     label: &str,
@@ -629,9 +629,9 @@ mod tests {
         assert!(text.contains("10 parsed"));
     }
 
-    /// A cold run states its counts instead of dropping the annotation: the
-    /// absence of text used to be the only signal that a cache was refused,
-    /// which reads exactly like a first run on a project.
+    /// A cold run states its counts instead of dropping the annotation. If the
+    /// absence of text were the only signal that a cache was refused, it would
+    /// read exactly like a first run on a project.
     #[test]
     fn performance_output_states_zero_hits_instead_of_omitting_the_detail() {
         let timings = PipelineTimings {

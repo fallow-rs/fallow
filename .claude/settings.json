@@ -15,6 +15,16 @@
             "statusMessage": "Pre-commit: formatting and typo check..."
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node \"$root/scripts/check-comment-quality.mjs\" --claude-pre-tool",
+            "statusMessage": "Checking new comments for narration and edit history..."
+          }
+        ]
       }
     ],
     "SessionStart": [

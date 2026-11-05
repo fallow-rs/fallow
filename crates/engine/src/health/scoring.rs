@@ -1965,7 +1965,7 @@ fn accessor_property_name(name: &str) -> Option<&str> {
 /// with its canonicalized form: coverage generated inside a symlinked
 /// directory (macOS `/var` vs `/private/var`) records the symlinked spelling
 /// while the rebase prefix is typically canonical. Paths under neither
-/// spelling are kept as-is, matching the previous behavior.
+/// spelling are kept as-is.
 fn rebase_coverage_path(
     raw_path: std::path::PathBuf,
     coverage_root: &std::path::Path,

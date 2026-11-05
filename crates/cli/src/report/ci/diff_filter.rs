@@ -419,11 +419,11 @@ pub(crate) fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
 
 /// Filter for the typed PR-comment renderer (`print_pr_comment`).
 ///
-/// `FALLOW_SUMMARY_SCOPE=all` (default) keeps the existing behavior:
-/// project-level rule findings (dependency / catalog / override hygiene that
-/// lives in `package.json` / `pnpm-workspace.yaml`) bypass the diff filter
-/// because the PR diff rarely touches the anchored line even though the
-/// finding may be the reason CI fails.
+/// With `FALLOW_SUMMARY_SCOPE=all` (the default), project-level rule findings
+/// (dependency / catalog / override hygiene that lives in `package.json` /
+/// `pnpm-workspace.yaml`) bypass the diff filter because the PR diff rarely
+/// touches the anchored line even though the finding may be the reason CI
+/// fails.
 ///
 /// `FALLOW_SUMMARY_SCOPE=diff` applies the same diff filter to project-level
 /// findings too, which is useful for advisory monorepo comments where

@@ -1133,11 +1133,11 @@ async fn e2e_save_paths_outside_the_project_root_are_tool_errors() {
     assert!(inside.is_file(), "a nested path inside the root is written");
 }
 
-/// A failing duplication threshold is a gate, and a gate an agent cannot see is
-/// the defect this change exists to remove. The programmatic duplication route
-/// has no threshold comparison, so a direct `find_dupes` call used to answer
-/// with no verdict at all while the same call with an unrelated `group_by`
-/// beside it reported one. Both surfaces must now say the same thing.
+/// A failing duplication threshold is a gate, and an agent must see every gate.
+/// The programmatic duplication route has no threshold comparison, so without
+/// this verdict a direct `find_dupes` call answers with no verdict at all while
+/// the same call with an unrelated `group_by` beside it reports one. Both
+/// surfaces must say the same thing.
 #[tokio::test]
 async fn e2e_find_dupes_reports_a_failing_threshold_on_both_routes() {
     let bin = fallow_binary();

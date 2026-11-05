@@ -262,9 +262,8 @@ fn a_clean_project_carries_no_caveat_on_any_surface() {
 /// The severe case the whole arm is about: a review comment carrying a literal
 /// code-edit block for a mutation `fallow fix` itself refuses.
 ///
-/// This used to assert that the block MAY stand as long as the body hedges,
-/// on the rule that a caveat never withholds a finding. That rule is right and
-/// this was the wrong place to apply it: a ```` ```suggestion ```` block is not
+/// The rule that a caveat never withholds a finding does not apply here, so a
+/// hedged body does not let the block stand: a ```` ```suggestion ```` block is not
 /// part of the finding, it is the mutation, and on GitHub it is one click from
 /// a commit on the contributor's branch. Every other mutation surface asks
 /// `MutationEvidence::may_auto_apply_mutation` first. A parenthetical several

@@ -1,7 +1,7 @@
 //! Attribution gate for the entry-point discovery stage.
 //!
-//! `PipelineTimings::entry_points_ms` used to be a single opaque number, so a
-//! slow discovery stage could only be guessed at. These tests assert that the
+//! `PipelineTimings::entry_points_ms` alone is a single opaque number, so a
+//! slow discovery stage can only be guessed at. These tests assert that the
 //! sub-spans are a real partition of that stage: every span is an elapsed time
 //! rather than a difference, together they never exceed the stage they
 //! subdivide, and a section that did not run does not absorb the work of the

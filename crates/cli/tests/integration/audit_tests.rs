@@ -8590,10 +8590,10 @@ fn audit_publishes_staleness_for_every_baseline_it_loaded() {
 }
 
 /// An audit reports every baseline that is not the section's own, not the first
-/// one it finds. Its health note used to be missing entirely: the standalone
-/// command prints it at a site audit never reaches, so an audit pointed at
-/// another command's health baseline was silent about it while the dead-code and
-/// duplication baselines beside it said so (issue #2735).
+/// one it finds. The standalone command prints the health note at a site audit
+/// never reaches, so without this check an audit pointed at another command's
+/// health baseline is silent about it while the dead-code and
+/// duplication baselines beside it say so (issue #2735).
 #[test]
 fn audit_reports_every_baseline_that_is_another_commands() {
     let fixture = create_audit_fixture("baseline-kinds");

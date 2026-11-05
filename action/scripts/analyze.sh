@@ -2161,10 +2161,9 @@ fi
 # already published its outputs and artifacts, so the downstream steps still
 # run; this is the last thing the script does.
 #
-# The count gate lives here too. It used to sit in an inline `run:` block in
-# action.yml whose first line returned when `fail-on-issues` was not true,
-# which is what made the security gate unreachable for anyone who set
-# `fail-on-issues: false` (issue #2685).
+# The count gate lives here too. An inline `run:` block in action.yml that
+# returns early when `fail-on-issues` is not true makes the security gate
+# unreachable for anyone who sets `fail-on-issues: false` (issue #2685).
 COUNT_FAILURES_BEFORE=${#GATE_FAILURES[@]}
 if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
   if [ "$INPUT_COMMAND" = "audit" ]; then

@@ -503,9 +503,8 @@ fn misspelled_tool_guide_suggests_the_nearest_documented_tool() {
 }
 
 /// A typo and a real tool that simply has no guide are different problems with
-/// different fixes. They used to return byte-identical bodies, so a caller
-/// could not tell "correct the name" from "stop looking, the description is
-/// the whole contract".
+/// different fixes. With byte-identical bodies, a caller cannot tell "correct
+/// the name" from "stop looking, the description is the whole contract".
 #[test]
 fn a_typo_and_an_undocumented_tool_are_distinguishable() {
     let undocumented =

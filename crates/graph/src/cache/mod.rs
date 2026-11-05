@@ -821,8 +821,8 @@ impl GraphCacheManifest {
     /// a manifest whose resolution inputs may differ from the current run.
     ///
     /// The caller decides graph reuse after a successful, fully paid load, so
-    /// this is the most expensive refusal in the pipeline and used to be the
-    /// only silent one. `None` means the resolution inputs actually match and
+    /// this is the most expensive refusal in the pipeline, and it must not be
+    /// silent. `None` means the resolution inputs actually match and
     /// the caller should not be asking.
     #[must_use]
     pub fn classify_resolution_mismatch(&self, current: &Self) -> Option<CacheRejection> {

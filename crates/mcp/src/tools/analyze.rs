@@ -426,8 +426,8 @@ mod tests {
 
     /// `unused-dependencies` is the long form of `unused-deps`, seven edits
     /// away, so the typo matcher cannot reach it. It is also the selector an
-    /// agent is most likely to guess, and it used to answer with a bare dump
-    /// of the whole vocabulary.
+    /// agent is most likely to guess, so it must name the abbreviation instead
+    /// of a bare dump of the whole vocabulary.
     #[test]
     fn long_form_issue_type_names_the_abbreviation_fallow_registers() {
         let params = AnalyzeParams {
