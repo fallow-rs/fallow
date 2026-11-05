@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::read_trace::Resolver;
 use dashmap::DashMap;
-use oxc_resolver::Resolver;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
@@ -444,14 +444,14 @@ pub(super) struct CanonicalizeCache {
 }
 
 impl CanonicalizeCache {
-    /// Return the cached `dunce::canonicalize(path)` outcome, computing it on
+    /// Return the cached `crate::read_trace::canonicalize(path)` outcome, computing it on
     /// first miss. `None` (a path that fails to canonicalize) is cached too so a
     /// repeated probe of the same missing path does not re-issue the syscall.
     pub fn get(&self, path: &Path) -> Option<PathBuf> {
         if let Some(value) = self.map.get(path) {
             return value.clone();
         }
-        let value = dunce::canonicalize(path).ok();
+        let value = crate::read_trace::canonicalize(path).ok();
         self.map.insert(path.to_path_buf(), value.clone());
         value
     }
@@ -564,7 +564,7 @@ impl<'a> CanonicalFallback<'a> {
             self.files
                 .iter()
                 .filter_map(|f| {
-                    dunce::canonicalize(&f.path)
+                    crate::read_trace::canonicalize(&f.path)
                         .ok()
                         .map(|canonical| (canonical, f.id))
                 })

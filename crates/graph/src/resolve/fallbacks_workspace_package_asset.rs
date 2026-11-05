@@ -1,6 +1,7 @@
 //! Workspace package subpaths that name a file on disk that discovery does
 //! not collect, such as `<pkg>/package.json`.
 
+use crate::read_trace::TracedPath;
 use std::path::Path;
 
 use super::{PackageManifestInfo, ResolveResult, package_map_target_path};
@@ -26,7 +27,8 @@ pub(super) fn workspace_package_asset(path: &Path, package_name: &str) -> Option
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ANALYZABLE_EXTS.contains(&ext));
-    (!is_source && path.is_file()).then(|| ResolveResult::NpmPackage(package_name.to_string()))
+    (!is_source && path.traced_is_file())
+        .then(|| ResolveResult::NpmPackage(package_name.to_string()))
 }
 
 /// Credit a workspace package for the first `exports` target that names an

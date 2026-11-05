@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use oxc_resolver::{Resolution, ResolveError, Resolver};
+use oxc_resolver::{Resolution, ResolveError};
+
+use crate::read_trace::Resolver;
 
 use super::react_native::{may_be_platform_self_resolution, without_platform_extensions};
 use super::specifier::{is_style_file, same_path};

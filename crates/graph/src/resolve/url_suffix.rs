@@ -1,6 +1,7 @@
 //! Query and fragment suffixes of import specifiers (`./a.css?inline`,
 //! `pkg/a.wasm?url`, `./page.html#top`).
 
+use crate::read_trace::TracedPath;
 use std::path::Path;
 
 use super::path_info::is_valid_package_name;
@@ -82,7 +83,7 @@ fn is_package_installed(from_file: &Path, package_name: &str) -> bool {
     from_file
         .ancestors()
         .skip(1)
-        .any(|dir| dir.join("node_modules").join(package_name).is_dir())
+        .any(|dir| dir.join("node_modules").join(package_name).traced_is_dir())
 }
 
 #[cfg(test)]

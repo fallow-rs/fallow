@@ -1,5 +1,6 @@
 //! Dependency credit for imports that resolve, or point, into `node_modules`.
 
+use crate::read_trace::TracedPath;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
@@ -99,7 +100,7 @@ pub(super) fn uninstalled_tsconfig_alias_target_package(
     let (name, package_root) = nearest_tsconfig_alias_targets(ctx, from_file, specifier)
         .iter()
         .find_map(|target| node_modules_package_root(target))?;
-    (!name.starts_with("@types/") && !package_root.is_dir()).then_some(name)
+    (!name.starts_with("@types/") && !package_root.traced_is_dir()).then_some(name)
 }
 
 /// Expanded `paths` targets for `specifier` from the nearest tsconfig with

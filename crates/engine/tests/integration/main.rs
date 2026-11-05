@@ -5,6 +5,7 @@
 //! Add a new integration test as a module here, not as a new file in
 //! `tests/`.
 
+mod cache_model;
 mod churn_cache_transparency;
 mod dupes_integration;
 mod dupes_profile;

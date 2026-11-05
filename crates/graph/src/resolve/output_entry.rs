@@ -3,6 +3,7 @@
 //! Entry point discovery (`fallow-core`) and the public API entry set
 //! (`fallow-engine`) share these helpers, so both apply the same rule.
 
+use crate::read_trace::TracedPath;
 use std::path::{Component, Path, PathBuf};
 
 use super::fallbacks::{is_declaration_file_name, output_source_stem};
@@ -51,7 +52,7 @@ pub fn directory_index_entry(resolved: &Path, source_extensions: &[&str]) -> Opt
     source_extensions
         .iter()
         .map(|ext| resolved.join(format!("index.{ext}")))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.traced_is_file())
 }
 
 /// Map the last `dirs` component of `entry` to `src/` with the same stem.
@@ -98,7 +99,7 @@ fn output_dir_to_source_path(
     same_stem
         .chain(declaration)
         .chain(directory_index)
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.traced_is_file())
 }
 
 /// Return `true` when `path` ends in a missing-only output directory, such as
@@ -112,13 +113,13 @@ fn is_bare_missing_only_dir(path: &Path) -> bool {
 /// Return the file that the filesystem probe finds for `resolved`: the exact
 /// file, then an extension variant, then a directory index.
 fn probed_entry_target(resolved: &Path, source_extensions: &[&str]) -> Option<PathBuf> {
-    if resolved.is_file() {
+    if resolved.traced_is_file() {
         return Some(resolved.to_path_buf());
     }
     source_extensions
         .iter()
         .map(|ext| resolved.with_extension(ext))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.traced_is_file())
         .or_else(|| directory_index_entry(resolved, source_extensions))
 }
 
