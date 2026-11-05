@@ -16,9 +16,8 @@ use crate::{
     js_text::{JsText, static_name_text},
 };
 use fallow_types::extract::{
-    AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
-    ImportLoadKind, ImportedCallSite, LocalTypeDeclaration, MisplacedDirectiveSite,
-    PublicSignatureTypeReference,
+    AngularComponentSelector, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, ImportLoadKind,
+    ImportedCallSite, LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -132,7 +131,7 @@ use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
 pub(super) use visit_security_sinks::SinkAliasState;
-use visit_security_sinks::flatten_callee_path;
+pub(super) use visit_security_sinks::flatten_callee_path;
 #[path = "visit_impl_taint_chain.rs"]
 mod taint_chain;
 use taint_chain::collect_chained_taint_idents;
@@ -6117,23 +6116,6 @@ impl ModuleInfoExtractor {
             return Some((&member.object, pattern));
         }
         None
-    }
-
-    /// Record the statically flattenable callee path of a call or `new` site, deduped per path
-    /// and form (first occurrence wins). Capture is unconditional because extraction is
-    /// config-blind. Computed members, dynamic dispatch, and optional-chaining callees flatten
-    /// to `None` and stay uncaptured (documented false negatives).
-    fn record_callee_use(&mut self, callee: &Expression<'_>, span_start: u32, is_new: bool) {
-        let Some(callee_path) = flatten_callee_path(callee) else {
-            return;
-        };
-        if self.seen_callee_paths.insert((callee_path.clone(), is_new)) {
-            self.callee_uses.push(CalleeUse {
-                callee_path,
-                span_start,
-                is_new,
-            });
-        }
     }
 
     /// Capture each static call and defer lexical import admission to semantics.

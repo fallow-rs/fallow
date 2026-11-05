@@ -434,12 +434,12 @@ mod tests {
             callee_uses: vec![
                 fallow_types::extract::CalleeUse {
                     callee_path: "localHelper".to_string(),
-                    span_start: 0,
+                    span_starts: vec![0],
                     is_new: false,
                 },
                 fallow_types::extract::CalleeUse {
                     callee_path: "obj.method".to_string(),
-                    span_start: 10,
+                    span_starts: vec![10],
                     is_new: false,
                 },
             ],
@@ -459,12 +459,12 @@ mod tests {
             callee_uses: vec![
                 fallow_types::extract::CalleeUse {
                     callee_path: "Foo".to_string(),
-                    span_start: 0,
+                    span_starts: vec![0],
                     is_new: true,
                 },
                 fallow_types::extract::CalleeUse {
                     callee_path: "localHelper".to_string(),
-                    span_start: 10,
+                    span_starts: vec![10],
                     is_new: false,
                 },
             ],
@@ -491,12 +491,12 @@ mod tests {
             callee_uses: vec![
                 fallow_types::extract::CalleeUse {
                     callee_path: "dep".to_string(),
-                    span_start: 0,
+                    span_starts: vec![0],
                     is_new: false,
                 },
                 fallow_types::extract::CalleeUse {
                     callee_path: "ghost".to_string(),
-                    span_start: 5,
+                    span_starts: vec![5],
                     is_new: false,
                 },
             ],

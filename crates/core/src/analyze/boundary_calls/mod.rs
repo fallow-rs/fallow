@@ -128,19 +128,22 @@ fn boundary_call_violations_for_module(
         else {
             continue;
         };
-        let (line, col) =
-            byte_offset_to_line_col(line_offsets_by_file, node.file_id, callee_use.span_start);
-        if suppressions.is_suppressed(node.file_id, line, IssueKind::BoundaryViolation) {
-            continue;
+        let callee = display_callee(callee_use);
+        for &span_start in &callee_use.span_starts {
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, node.file_id, span_start);
+            if suppressions.is_suppressed(node.file_id, line, IssueKind::BoundaryViolation) {
+                continue;
+            }
+            violations.push(BoundaryCallViolation {
+                path: node.path.clone(),
+                line,
+                col,
+                zone: zone.to_owned(),
+                callee: callee.clone(),
+                pattern: pattern.raw().to_owned(),
+            });
         }
-        violations.push(BoundaryCallViolation {
-            path: node.path.clone(),
-            line,
-            col,
-            zone: zone.to_owned(),
-            callee: display_callee(callee_use),
-            pattern: pattern.raw().to_owned(),
-        });
     }
     violations
 }

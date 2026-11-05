@@ -17,13 +17,19 @@ pub struct CommandInvocation {
     pub span_start: u32,
 }
 
-/// A flattenable callee path of a call or `new` site; one per `(callee_path, is_new)` per module.
+/// A flattenable callee path of a call or `new` form, with every site of that path and form.
+///
+/// The extractor groups the sites per `(callee_path, is_new)` in one script
+/// block, so the path string is stored once and each extra site costs 4 bytes.
+/// A module can still hold two entries with the same path and form when the
+/// sites are in different script blocks of a single-file component.
 #[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct CalleeUse {
     /// The dotted or bare callee path as written at the site (e.g. `cp.exec`).
     pub callee_path: String,
-    /// Start byte offset of the first site with this path and form.
-    pub span_start: u32,
+    /// Start byte offset of each site with this path and form, in source order.
+    /// Never empty.
+    pub span_starts: Vec<u32>,
     /// True for a `new` expression. `banned-effect` and the trace read only false entries.
     pub is_new: bool,
 }

@@ -190,11 +190,11 @@ pub struct ModuleInfo {
     /// Control patterns observed in this module. Surface context only: their
     /// presence does not establish input identity, execution order, or protection.
     pub security_control_sites: Vec<SecurityControlSite>,
-    /// Statically flattenable callee paths invoked in this module, deduped per
-    /// unique path (first occurrence wins). Consumed by the
-    /// `boundaries.calls.forbidden` detector. Captured unconditionally because
-    /// extraction is config-blind; the per-module cost is bounded by the
-    /// unique-callee count.
+    /// Statically flattenable callee paths invoked in this module, one entry
+    /// per path and form with the start of every site. Consumed by
+    /// `boundaries.calls.forbidden`, `banned-call` and `banned-effect`.
+    /// Captured unconditionally because extraction is config-blind; each path
+    /// string is stored once, and each extra site costs 4 bytes.
     pub callee_uses: Vec<CalleeUse>,
     /// Literal commands that process-spawning calls run (`spawn("git")`,
     /// `execSync("make build")`, `` $`ffmpeg -i a` ``). Read by the

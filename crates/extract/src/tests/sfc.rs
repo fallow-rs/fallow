@@ -2436,7 +2436,10 @@ fn sfc_script_callee_use_offset_points_at_the_call() {
         .iter()
         .find(|use_site| use_site.callee_path == "callee.path")
         .expect("callee use");
-    assert!(text_at(SCRIPT_AFTER_MARKUP, callee.span_start).starts_with("callee.path()"));
+    assert!(!callee.span_starts.is_empty());
+    for &start in &callee.span_starts {
+        assert!(text_at(SCRIPT_AFTER_MARKUP, start).starts_with("callee.path()"));
+    }
 }
 
 #[test]

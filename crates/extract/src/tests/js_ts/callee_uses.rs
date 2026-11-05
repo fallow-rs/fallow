@@ -34,7 +34,7 @@ fn captures_global_callee_without_import() {
 }
 
 #[test]
-fn dedupes_repeated_callee_to_first_span() {
+fn keeps_every_site_of_a_repeated_callee_under_one_entry() {
     let source = "console.log('a');\nconsole.log('b');\nconsole.log('c');";
     let info = parse_source(source);
     let uses: Vec<_> = info
@@ -42,8 +42,8 @@ fn dedupes_repeated_callee_to_first_span() {
         .iter()
         .filter(|u| u.callee_path == "console.log")
         .collect();
-    assert_eq!(uses.len(), 1, "duplicate callee paths should dedup");
-    assert_eq!(uses[0].span_start, 0, "first occurrence span should win");
+    assert_eq!(uses.len(), 1, "one entry per path and form");
+    assert_eq!(uses[0].span_starts, vec![0, 18, 36], "one start per site");
 }
 
 #[test]
@@ -126,7 +126,11 @@ fn forms(source: &str) -> Vec<(String, bool, u32)> {
     parse_source(source)
         .callee_uses
         .iter()
-        .map(|u| (u.callee_path.clone(), u.is_new, u.span_start))
+        .flat_map(|u| {
+            u.span_starts
+                .iter()
+                .map(|&start| (u.callee_path.clone(), u.is_new, start))
+        })
         .collect()
 }
 
@@ -153,12 +157,17 @@ fn captures_new_static_member_chain() {
 }
 
 #[test]
-fn dedupes_per_form_with_first_span_of_each_form() {
+fn groups_sites_per_form_and_keeps_every_site() {
     // new Date() at 0, Date() at 11, new Date() at 18, Date() at 29.
     let source = "new Date();Date();new Date();Date();";
     assert_eq!(
         forms(source),
-        vec![("Date".to_owned(), true, 0), ("Date".to_owned(), false, 11)]
+        vec![
+            ("Date".to_owned(), true, 0),
+            ("Date".to_owned(), true, 18),
+            ("Date".to_owned(), false, 11),
+            ("Date".to_owned(), false, 29),
+        ]
     );
 }
 
