@@ -140,6 +140,8 @@ pub enum Reason {
     NotAnObject,
     /// Fallow markers exist but not as a start-then-end pair.
     ManagedBlockMalformed,
+    /// In project scope, the path or a directory on the way to it is a symlink.
+    SymlinkedPath,
 }
 
 impl Reason {
@@ -147,7 +149,7 @@ impl Reason {
         not(test),
         allow(dead_code, reason = "read by the documentation drift test")
     )]
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::SkillNameTaken,
         Self::SkillNotEmbedded,
         Self::McpEntryUnavailable,
@@ -163,6 +165,7 @@ impl Reason {
         Self::InvalidToml,
         Self::NotAnObject,
         Self::ManagedBlockMalformed,
+        Self::SymlinkedPath,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -182,6 +185,7 @@ impl Reason {
             Self::InvalidToml => "invalid_toml",
             Self::NotAnObject => "not_an_object",
             Self::ManagedBlockMalformed => "managed_block_malformed",
+            Self::SymlinkedPath => "symlinked_path",
         }
     }
 }
@@ -254,6 +258,18 @@ impl StepReport {
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Turn the row into a skip because its path goes through the symlink
+    /// `link`. The row keeps its own path, and `detail` names the link.
+    pub fn symlinked(mut self, ctx: &Ctx, link: &Path) -> Self {
+        self.status = StepStatus::Skipped;
+        self.reason = Some(Reason::SymlinkedPath);
+        self.detail = Some(format!(
+            "{} is a symlink, and fallow does not write, back up or delete through a symlink in the project; replace it with a regular file or directory",
+            display_path(&ctx.root, ctx.home.as_deref(), link)
+        ));
         self
     }
 
@@ -344,6 +360,18 @@ impl Ctx {
         } else {
             Ok(&self.root)
         }
+    }
+
+    /// In project scope, the first symlink on the way from the root to one
+    /// of `paths`. Always `None` under `--user`, because dotfile managers
+    /// link the files in the home directory.
+    pub fn symlink_on<'a>(&self, paths: impl IntoIterator<Item = &'a Path>) -> Option<PathBuf> {
+        if self.user {
+            return None;
+        }
+        paths
+            .into_iter()
+            .find_map(|path| crate::setup_hooks::symlinked_component(&self.root, path))
     }
 
     pub const fn scope(&self) -> Scope {
@@ -814,3 +842,6 @@ fn render_step(step: &StepReport, dry_run: bool) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, unix))]
+mod symlink_tests;

@@ -410,6 +410,9 @@ fn json_step(
         StepStatus::Removed
     };
     let base = StepReport::new(Some(harness), Step::Mcp, status, scope).path(ctx, path);
+    if let Some(link) = ctx.symlink_on([path, backup_path(path).as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let outcome = merge_json_server(path, "mcpServers", entry, ctx.dry_run, ctx.force);
     outcome_report(base, outcome, ctx, path, Reason::InvalidJson)
 }
@@ -429,6 +432,9 @@ fn approval_step(ctx: &Ctx, mode: Mode) -> StepReport {
             .with_status(StepStatus::Skipped)
             .reason(Reason::ApprovalNotRequested)
             .detail("pass --approve to pre-approve the project MCP server for yourself");
+    }
+    if let Some(link) = ctx.symlink_on([path.as_path(), backup_path(&path).as_path()]) {
+        return base.symlinked(ctx, &link);
     }
     if is_git_tracked(&ctx.root, CLAUDE_LOCAL_SETTINGS) {
         return base
@@ -469,6 +475,9 @@ fn codex_step(ctx: &Ctx, path: &Path, command: Option<&McpCommand>) -> StepRepor
     } else {
         base
     };
+    if let Some(link) = ctx.symlink_on([path, backup_path(path).as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let outcome = merge_codex(path, command, ctx.dry_run, ctx.force);
     outcome_report(base, outcome, ctx, path, Reason::InvalidToml)
 }

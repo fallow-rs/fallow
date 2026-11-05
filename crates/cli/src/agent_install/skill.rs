@@ -143,8 +143,25 @@ pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
     };
     targets
         .into_iter()
-        .map(|target| match Source::resolve(&ctx.root, target.skill) {
-            Ok(source) => install_one(ctx, &target, &source),
+        .map(|target| {
+            if let Some(link) = symlink_in(ctx, &target) {
+                return StepReport::new(
+                    target.harness,
+                    Step::Skill,
+                    StepStatus::Skipped,
+                    target.scope,
+                )
+                .path(ctx, &target.dir)
+                .symlinked(ctx, &link);
+            }
+            install_resolved(ctx, &target)
+        })
+        .collect()
+}
+
+fn install_resolved(ctx: &Ctx, target: &Target) -> StepReport {
+    match Source::resolve(&ctx.root, target.skill) {
+            Ok(source) => install_one(ctx, target, &source),
             Err(reason) => {
                 StepReport::new(target.harness, Step::Skill, StepStatus::Skipped, target.scope)
                     .path(ctx, &target.dir)
@@ -153,8 +170,7 @@ pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
                         "install or upgrade the fallow npm package so the skill ships with the binary, or build fallow from a full checkout",
                     )
             }
-        })
-        .collect()
+    }
 }
 
 pub fn uninstall(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
@@ -448,6 +464,17 @@ fn managed_files(skill: &ReleasedSkill) -> Vec<String> {
     files
 }
 
+/// The first symlink on the way to the skill directory or a file in it.
+/// Install and uninstall write or delete only paths from this set.
+fn symlink_in(ctx: &Ctx, target: &Target) -> Option<PathBuf> {
+    let files: Vec<PathBuf> = managed_files(target.skill)
+        .iter()
+        .map(|relative| target.dir.join(relative))
+        .chain(["references", "agents"].map(|sub| target.dir.join(sub)))
+        .collect();
+    ctx.symlink_on(std::iter::once(target.dir.as_path()).chain(files.iter().map(PathBuf::as_path)))
+}
+
 fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
     let base = StepReport::new(
         target.harness,
@@ -456,6 +483,9 @@ fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
         target.scope,
     )
     .path(ctx, &target.dir);
+    if let Some(link) = symlink_in(ctx, target) {
+        return base.symlinked(ctx, &link);
+    }
     match inspect(&target.dir) {
         SkillState::Absent => {
             return base

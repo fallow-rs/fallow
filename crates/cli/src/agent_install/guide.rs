@@ -66,6 +66,9 @@ fn install_agents_guide(ctx: &Ctx) -> StepReport {
     let path = ctx.root.join(AGENTS_FILE);
     let base =
         StepReport::new(None, Step::Guide, StepStatus::Written, Scope::Shared).path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let existing = match read_optional_text(&path) {
         Ok(existing) => existing,
         Err(error) => return failed(ctx, &path, error),
@@ -114,6 +117,9 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
         Scope::Shared,
     )
     .path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let existing = match read_optional_text(&path) {
         Ok(existing) => existing,
         Err(error) => return failed(ctx, &path, error),
@@ -167,6 +173,9 @@ fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
     let path = ctx.root.join(AGENTS_FILE);
     let base =
         StepReport::new(None, Step::Guide, StepStatus::Removed, Scope::Shared).path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let existing = match read_optional_text(&path) {
         Ok(Some(existing)) => existing,
         Ok(None) => {
@@ -205,6 +214,9 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
         Scope::Shared,
     )
     .path(ctx, &path);
+    if let Some(link) = ctx.symlink_on([path.as_path()]) {
+        return base.symlinked(ctx, &link);
+    }
     let existing = match read_optional_text(&path) {
         Ok(Some(existing)) => existing,
         Ok(None) => {
