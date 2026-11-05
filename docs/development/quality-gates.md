@@ -930,8 +930,18 @@ A safety claim needs level 4 or 5. When a check fails or passes too easily,
 suspect the check first: confirm that the binary under test contains the change
 and that the cache (`.fallow/`) does not serve an older result.
 
+Do not call a failure pre-existing or a flake, and do not skip a hook for it,
+until the same check fails the same way on `origin/main`. Without that proof,
+the failure belongs to the change. `main` rarely has a failing check or a
+compiler warning.
+
 ### Test evidence
 
+- Before you add a test, search for a test that already covers the behavior.
+  Extend that test instead of a near copy.
+- Do not repeat a test for each flag alias, spelling, or unrelated option.
+  Add a variant only when it exercises behavior of the change. Test shared
+  parsing and rendering in the layer that owns them.
 - Write the expected value by hand. A test that computes its expected value
   with the code under test proves nothing.
 - Give every "no finding" assertion a positive control: a second input on
