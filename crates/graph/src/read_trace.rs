@@ -4,7 +4,7 @@
 //! reuse them when the cache key covers each path that the resolution read.
 //! With the `read-trace` feature, the file system calls of `oxc_resolver` and
 //! the direct path checks of the resolution fallbacks report their paths
-//! here, and [`ReadRecorder`] collects the paths below a scope directory.
+//! here, and `ReadRecorder` collects the paths below a scope directory.
 //! Tests use the recorded read set to check that the cache key covers each
 //! path.
 //!
