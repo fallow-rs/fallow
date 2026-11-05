@@ -769,11 +769,11 @@ pub(crate) mod member_serde {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GraphCacheMode {
     /// Import resolver and tsconfig-relevant options.
-    pub resolver_options_hash: u64,
+    resolver_options: u64,
     /// Entry point set and reachability root options.
-    pub entry_points_hash: u64,
+    entry_points: u64,
     /// Plugin-derived graph-affecting configuration.
-    pub plugin_config_hash: u64,
+    plugin_config: u64,
 }
 
 impl GraphCacheMode {
@@ -785,9 +785,9 @@ impl GraphCacheMode {
         plugin_config_hash: u64,
     ) -> Self {
         Self {
-            resolver_options_hash,
-            entry_points_hash,
-            plugin_config_hash,
+            resolver_options: resolver_options_hash,
+            entry_points: entry_points_hash,
+            plugin_config: plugin_config_hash,
         }
     }
 }

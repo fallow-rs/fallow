@@ -83,7 +83,7 @@ impl AlchemyMains {
 /// Returns an empty result without parsing when the source does not name the
 /// package, which is the case for almost every file.
 #[must_use]
-pub fn extract_alchemy_mains(path: &Path, source: &str) -> AlchemyMains {
+pub(crate) fn extract_alchemy_mains(path: &Path, source: &str) -> AlchemyMains {
     if !source.contains(ALCHEMY_PACKAGE) {
         return AlchemyMains::default();
     }

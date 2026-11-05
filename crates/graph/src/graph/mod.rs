@@ -296,7 +296,7 @@ pub struct ImportedSymbol {
     pub is_type_only: bool,
     /// Whether the ambient star this symbol stands for is spelled
     /// `export type *` (issue #2375), which forwards type meanings only.
-    pub is_type_only_star: bool,
+    pub(crate) is_type_only_star: bool,
     /// Runtime module mechanism that created this symbol edge.
     mechanism: ModuleLoadMechanism,
     /// When the target loads relative to the importer, and whether it runs
@@ -740,7 +740,7 @@ impl ModuleGraph {
     }
 
     /// Build the module graph with explicit runtime and test reachability roots.
-    pub fn build_with_reachability_roots(
+    fn build_with_reachability_roots(
         resolved_modules: &[ResolvedModule],
         entry_points: &[EntryPoint],
         runtime_entry_points: &[EntryPoint],
@@ -925,7 +925,7 @@ impl ModuleGraph {
     /// the export, so it never gives coverage. This includes `import type` and
     /// a plain import that the test uses only in type positions.
     #[must_use]
-    pub fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
+    fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
         let Some(reference) = export.references.get(reference_index) else {
             return false;
         };

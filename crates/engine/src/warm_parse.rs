@@ -37,7 +37,7 @@ use fallow_types::extract::{ModuleInfo, SourceParseDegradation, SourceReadFailur
 use fallow_types::source_fingerprint::SourceFingerprint;
 
 /// The default number of parsed file lists that a store keeps.
-pub const DEFAULT_MAX_ENTRIES: usize = 4;
+const DEFAULT_MAX_ENTRIES: usize = 4;
 
 /// The default limit on the estimated memory of the kept modules.
 pub const DEFAULT_MAX_RETAINED_BYTES: u64 = 512 * 1024 * 1024;

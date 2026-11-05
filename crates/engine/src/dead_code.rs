@@ -45,7 +45,7 @@ pub(crate) fn analyze_with_parse_result(
 /// Every producer calls this on the full result set, before the workspace,
 /// scope, changed-file, ignore, baseline and rule filters. A filter then never
 /// changes the id of a finding that stays in the report.
-pub fn stamp_finding_ids(results: &mut AnalysisResults, root: &Path) {
+pub(crate) fn stamp_finding_ids(results: &mut AnalysisResults, root: &Path) {
     fallow_types::identity::stamp_dead_code_finding_ids(results, root);
 }
 
@@ -224,13 +224,13 @@ const MAX_EXTENDS_DEPTH: usize = 8;
 /// every platform. Known exclusions: the global git excludes file and other
 /// machine environment outside the `FALLOW_*` variables.
 #[must_use]
-pub fn analysis_fingerprint(config: &ResolvedConfig) -> String {
+fn analysis_fingerprint(config: &ResolvedConfig) -> String {
     analysis_fingerprint_for_version(config, env!("CARGO_PKG_VERSION"))
 }
 
 /// [`analysis_fingerprint`] for an explicit fallow version.
 #[must_use]
-pub fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) -> String {
+fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) -> String {
     let rules = serde_json::to_string(&config.rules).unwrap_or_default();
     let projects: Vec<String> = config
         .type_aware

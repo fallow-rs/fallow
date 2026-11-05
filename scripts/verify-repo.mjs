@@ -81,11 +81,6 @@ const FAST_COMMANDS = [
     args: ["run", "generate:contracts:check"],
   },
   {
-    label: "Cargo feature unification",
-    command: "npm",
-    args: ["run", "check:cargo-features"],
-  },
-  {
     // The same command as the "Rust Structure" CI job.
     label: "Rust structure",
     command: "cargo",
@@ -97,16 +92,6 @@ const FAST_COMMANDS = [
       "--fail-on-issues",
       "--quiet",
     ],
-  },
-  {
-    label: "Miri cfg gates",
-    command: "npm",
-    args: ["run", "check:miri-cfg"],
-  },
-  {
-    label: "Bounded parse sites",
-    command: "npm",
-    args: ["run", "check:parse-sites"],
   },
   {
     label: "Emitted version drift",

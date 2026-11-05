@@ -154,12 +154,12 @@ pub struct MutantChange {
 
 impl MutantChange {
     /// Placeholder for the test of a condition.
-    pub const CONDITION: &'static str = "<condition>";
+    const CONDITION: &'static str = "<condition>";
     /// Placeholder for a call statement.
-    pub const CALL: &'static str = "<call>";
+    const CALL: &'static str = "<call>";
     /// Placeholder for an expression, for example a returned value or a
     /// comparison.
-    pub const EXPRESSION: &'static str = "<expression>";
+    const EXPRESSION: &'static str = "<expression>";
     /// Placeholder for a non-empty string literal.
     pub const STRING: &'static str = "<string>";
 

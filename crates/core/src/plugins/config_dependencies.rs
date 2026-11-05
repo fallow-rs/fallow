@@ -40,7 +40,7 @@ pub struct RequiredDependency {
 impl RequiredDependency {
     /// Build a requirement at byte `offset` of the config `source`.
     #[must_use]
-    pub fn at_offset(
+    pub(crate) fn at_offset(
         package_name: String,
         config_path: &Path,
         source: &str,

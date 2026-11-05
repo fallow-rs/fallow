@@ -99,7 +99,7 @@ struct FileBlame {
 ///
 /// A missing repository, a branch without commits and a shallow clone leave
 /// every age `None` and return the matching diagnostic.
-pub fn apply_flag_ages(
+pub(crate) fn apply_flag_ages(
     rows: &mut [RetirementFlag],
     request: &FlagAgeRequest<'_>,
 ) -> FlagAgeOutcome {

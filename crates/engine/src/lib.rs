@@ -457,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_session_can_be_consumed_into_parsed_pipeline_parts() {
+    fn analysis_session_parses_only_its_discovered_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let src = temp.path().join("src");
         std::fs::create_dir(&src).expect("src dir");
@@ -465,7 +465,7 @@ mod tests {
 
         let session = AnalysisSession::load(temp.path(), None).expect("session loads");
         std::fs::write(src.join("late.ts"), "export const late = 1;\n").expect("late source file");
-        let parts = session.into_parsed_parts(false);
+        let parts = session.parsed_parts_uncached(false);
 
         assert_eq!(parts.config.root, temp.path());
         assert!(parts.config_path.is_none());
@@ -513,7 +513,7 @@ mod tests {
         std::fs::write(src.join("util.ts"), "export const value = 1;\n").expect("source file");
 
         let session = AnalysisSession::load(temp.path(), None).expect("session loads");
-        let parts = session.into_parsed_parts(false);
+        let parts = session.parsed_parts_uncached(false);
         let analysis = crate::dead_code::analyze_with_parse_result(&parts.config, &parts.modules)
             .expect("reused parse analysis succeeds");
 

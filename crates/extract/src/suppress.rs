@@ -134,7 +134,7 @@ fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u
     clippy::cast_possible_truncation,
     reason = "source length is bounded by file size"
 )]
-pub fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSuppressions {
+pub(crate) fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSuppressions {
     let mut parsed = ParsedSuppressions::default();
 
     for comment in comments {

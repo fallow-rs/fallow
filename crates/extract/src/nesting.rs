@@ -52,8 +52,9 @@ pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> Modu
 
 /// Returns `true` when the bracket nesting of `source` exceeds
 /// [`MAX_NESTING_DEPTH`].
+#[cfg(test)]
 #[must_use]
-pub fn exceeds_nesting_limit(source: &str) -> bool {
+fn exceeds_nesting_limit(source: &str) -> bool {
     max_depth(source, MAX_NESTING_DEPTH, Dialect::Script) > MAX_NESTING_DEPTH
 }
 

@@ -120,10 +120,8 @@ pub use dom_classes::{DomClassScan, scan_dom_class_values};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use js_text::JsText;
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
-pub use nesting::{
-    MAX_NESTING_DEPTH, exceeds_nesting_limit, parse_bounded, parse_bounded_or_default,
-    parse_style_bounded,
-};
+pub(crate) use nesting::parse_style_bounded;
+pub use nesting::{MAX_NESTING_DEPTH, parse_bounded, parse_bounded_or_default};
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
     is_sfc_file, sfc_merged_script_source,

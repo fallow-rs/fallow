@@ -56,13 +56,13 @@ pub struct RetirementSiteInput {
 #[derive(Debug, Default)]
 pub struct RetirementFacts {
     /// Guard facts of each flag read, keyed by file, line and column.
-    pub site_facts: FxHashMap<(PathBuf, u32, u32), FlagSiteFacts>,
+    pub(crate) site_facts: FxHashMap<(PathBuf, u32, u32), FlagSiteFacts>,
     /// Sites that are not per-site flag findings: literal `const` flags
     /// (a definition and the guard reads) and unused registry members.
-    pub constant_sites: Vec<RetirementSiteInput>,
+    pub(crate) constant_sites: Vec<RetirementSiteInput>,
     /// Definition sites that no code reads, keyed by file, line and column,
     /// with the reason.
-    pub unread_definitions: FxHashMap<(PathBuf, u32, u32), String>,
+    pub(crate) unread_definitions: FxHashMap<(PathBuf, u32, u32), String>,
 }
 
 impl RetirementFacts {
@@ -92,7 +92,7 @@ impl RetirementFacts {
 impl RetirementSiteInput {
     /// The retirement site of a per-site flag finding, without guard facts.
     #[must_use]
-    pub fn from_feature_flag(flag: &FeatureFlag) -> Self {
+    fn from_feature_flag(flag: &FeatureFlag) -> Self {
         Self {
             path: flag.path.clone(),
             flag_name: flag.flag_name.clone(),
@@ -161,7 +161,7 @@ struct FlagKey {
 /// `--changed-since` run does not call a widely read flag single-read.
 /// Rows come back sorted by name; [`finish_report`] applies the final order.
 #[must_use]
-pub fn aggregate_flags(
+pub(crate) fn aggregate_flags(
     sites: Vec<RetirementSiteInput>,
     root: &Path,
     workspaces: &[WorkspaceInfo],
@@ -445,7 +445,7 @@ fn add_reason(row: &mut RetirementFlag, evidence: RetirementEvidence) {
 /// Count, filter, order and limit the rows, and add the review action to
 /// each candidate.
 #[must_use]
-pub fn finish_report(
+pub(crate) fn finish_report(
     mut rows: Vec<RetirementFlag>,
     age_mode: FlagAgeMode,
     generated_at_clock: Option<String>,
@@ -486,17 +486,17 @@ pub fn finish_report(
 }
 
 /// Why a `--max-flag-age` gate without git history did not run.
-pub const AGE_GATE_NO_HISTORY: &str =
+pub(crate) const AGE_GATE_NO_HISTORY: &str =
     "git history is not available (a shallow clone or no repository), so no flag age was measured";
 
 /// Why a `--max-flag-age` gate with the age mode `off` did not run.
-pub const AGE_GATE_AGE_OFF: &str = "the flag age mode is off, so no flag age was measured";
+pub(crate) const AGE_GATE_AGE_OFF: &str = "the flag age mode is off, so no flag age was measured";
 
 /// The `--max-flag-age` verdict over every row in scope. Pass the rows
 /// before [`finish_report`] filters and limits them. `skip_reason` is set
 /// when no age was measured; the gate is then `skipped`, not passed.
 #[must_use]
-pub fn max_age_gate(
+pub(crate) fn max_age_gate(
     rows: &[RetirementFlag],
     max_days: u64,
     skip_reason: Option<&str>,

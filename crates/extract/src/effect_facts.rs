@@ -61,7 +61,7 @@ const TAG_DECLARING_CONSTRUCTORS: &[&str] = &[
 /// Return true when the specifier names the Effect core package or an
 /// `@effect/*` package.
 #[must_use]
-pub fn is_effect_specifier(source: &str) -> bool {
+fn is_effect_specifier(source: &str) -> bool {
     source == "effect" || source.starts_with("effect/") || source.starts_with("@effect/")
 }
 

@@ -11,7 +11,6 @@ mod duplicate_export_aliases;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 mod effect;
-pub mod feature_flags;
 mod gitignored_targets;
 mod graph_confidence;
 mod iconify;

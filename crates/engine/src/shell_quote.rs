@@ -17,7 +17,7 @@ pub fn shell_quote(word: &str) -> String {
 /// Single quotes, with an inner `'` written as `'\''`. A POSIX shell expands
 /// nothing inside single quotes.
 #[must_use]
-pub fn posix_quote(word: &str) -> String {
+fn posix_quote(word: &str) -> String {
     if is_plain(word, &[]) {
         word.to_owned()
     } else {
@@ -36,7 +36,7 @@ pub fn posix_quote(word: &str) -> String {
 /// literally. `cmd` has no literal quoting, so it can still expand `%VAR%` in
 /// such a word.
 #[must_use]
-pub fn windows_quote(word: &str) -> String {
+fn windows_quote(word: &str) -> String {
     if is_plain(word, &['\\', ':']) {
         word.to_owned()
     } else if word.contains(['$', '`', '%', '!', '"']) {

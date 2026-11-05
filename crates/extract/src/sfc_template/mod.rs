@@ -60,7 +60,7 @@ pub enum SfcKind {
 
 /// Collect template-visible import usage from Vue or Svelte markup.
 #[cfg(test)]
-pub fn collect_template_usage(
+fn collect_template_usage(
     kind: SfcKind,
     source: &str,
     imported_bindings: &FxHashSet<String>,

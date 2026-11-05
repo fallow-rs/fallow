@@ -319,16 +319,49 @@ rule = "engine-does-not-depend-on-api"
 from = ["fallow-engine"]
 deny = ["fallow-api"]
 
-[[workspace.metadata.fallow.boundaries.sources]]
+[[workspace.metadata.fallow.boundaries.reexports]]
 rule = "explicit-type-reexports"
-paths = ["crates/engine/src", "crates/api/src"]
-deny = [
-    "pub use fallow_types::extract::*",
-    "pub use fallow_types::results::*",
-    "pub use fallow_types::output_dead_code::*",
+from = ["fallow-engine", "fallow-api"]
+deny = ["fallow_types::extract", "fallow_types::results", "fallow_types::output_dead_code"]
+
+# Each Oxc parse of user source runs inside `fallow_extract::parse_bounded`.
+# That function sizes the stack from the source, so deep nesting cannot
+# overflow it. A new parser call, also in a listed file, needs a decision:
+# wrap it in `parse_bounded`, then raise `max`. css_metrics.rs calls the CSS
+# parser, which does not take source text.
+[[workspace.metadata.fallow.boundaries.sources]]
+rule = "parse-through-parse-bounded"
+paths = ["crates"]
+deny = ["Parser::new("]
+scope = "production"
+message = "{path} calls a parser outside the listed sites. Run the parse inside fallow_extract::parse_bounded, then add the file to the allow list of this rule in Cargo.toml"
+allow = [
+    { path = "crates/core/src/plugins/config_parser.rs", max = 1 },
+    { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4 },
+    { path = "crates/engine/src/search_visibility.rs", max = 2 },
+    { path = "crates/extract/src/alchemy.rs", max = 1 },
+    { path = "crates/extract/src/astro/mod.rs", max = 3 },
+    { path = "crates/extract/src/css_in_js/object.rs", max = 1 },
+    { path = "crates/extract/src/css_metrics.rs", max = 1 },
+    { path = "crates/extract/src/federation_runtime.rs", max = 1 },
+    { path = "crates/extract/src/inventory.rs", max = 1 },
+    { path = "crates/extract/src/mdx.rs", max = 1 },
+    { path = "crates/extract/src/nesting.rs", max = 1 },
+    { path = "crates/extract/src/parse.rs", max = 2 },
+    { path = "crates/extract/src/sfc.rs", max = 2 },
+    { path = "crates/extract/src/sfc_template/component_contracts.rs", max = 1 },
+    { path = "crates/extract/src/similar_code.rs", max = 1 },
+    { path = "crates/extract/src/template_usage.rs", max = 3 },
+    # fallow-mutation has no fallow dependencies. The engine calls it only
+    # inside parse_bounded (crates/engine/src/mutation/layout.rs).
+    { path = "crates/mutation/src/lib.rs", max = 1 },
 ]
-owner = "fallow-types"
-message = "{path} must name each re-exported type of {owner}, not use a glob"
+
+# The Miri CI job is slow and has a path filter. This rule finds a test path
+# that the Miri build does not compile before the code reaches main.
+[[workspace.metadata.fallow.boundaries.cfg]]
+rule = "miri-build-compiles"
+builds = [["test"], ["test", "miri"]]
 
 [[workspace.metadata.fallow.boundaries.sources]]
 rule = "semantic-client-owned-by-api"
@@ -356,6 +389,13 @@ deny = [
 ]
 owner = "fallow-process"
 
+# Cargo resolves features for each build. When another member turns on a
+# feature of a crate that fallow-cli also uses, `cargo build -p fallow-cli`
+# and `cargo build --workspace` compile two variants of that crate. The fix is
+# a feature-only entry in crates/cli/Cargo.toml.
+[workspace.metadata.fallow.deps]
+unify-features = ["fallow-cli"]
+
 [workspace.metadata.fallow.visibility]
 production = [
     "fallow-cli:fallow",
@@ -364,6 +404,19 @@ production = [
     "fallow-multicall:fallow-multicall",
 ]
 uniform-fields = true
+# Only these libraries are a Rust API for other repositories. cargo-fallow
+# reads fallow-report-protocol, and the coverage sidecar reads fallow-license
+# and fallow-v8-coverage. The other published crates exist because a published
+# crate depends on them, so each rule applies to them.
+public-crates = [
+    "fallow-api",
+    "fallow-types",
+    "fallow-output",
+    "fallow-config",
+    "fallow-report-protocol",
+    "fallow-license",
+    "fallow-v8-coverage",
+]
 
 # `max-function-lines` and `max-cognitive` are the same limits as
 # `too-many-lines-threshold` and `cognitive-complexity-threshold` in
@@ -373,17 +426,23 @@ uniform-fields = true
 max-file-lines = 2000
 max-function-lines = 100
 
+# `flat-match` counts a `match` with no guard and no decision in an arm, for
+# example a lookup table, as one decision.
 [workspace.metadata.fallow.complexity]
 max-cognitive = 25
 max-cyclomatic = 20
+cyclomatic-policy = "flat-match"
 
 # Rust code has many small clone groups, and a baseline of each group goes
-# stale on each edit. The percentage gate stops the total from growing.
+# stale on each edit. The percentage gate stops the total from growing, so
+# the rule is off and only the gate reports. `production` leaves test code
+# out, so test duplication cannot hide a rise in production duplication.
 [workspace.metadata.fallow.dupes]
-threshold = 10.7
+threshold = 4.9
+production = true
 
 [workspace.metadata.fallow.rules]
-code-duplication = "warn"
+code-duplication = "off"
 
 # Dev profile: disable debug info for faster builds
 [profile.dev]

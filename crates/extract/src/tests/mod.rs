@@ -42,7 +42,7 @@ pub fn parse_at_path(path: &str, source: &str) -> ModuleInfo {
 }
 
 /// The sources of the dynamic imports that extraction marks as eager.
-pub fn eager_dynamic_import_sources(info: &ModuleInfo) -> Vec<&str> {
+fn eager_dynamic_import_sources(info: &ModuleInfo) -> Vec<&str> {
     let eager_starts: Vec<u32> = info
         .semantic_facts
         .iter()

@@ -41,13 +41,10 @@ const FAST_COMMANDS = [
   ["npm", ["run", "lint:js"]],
   ["npm", ["run", "fmt:js:check"]],
   ["npm", ["run", "generate:contracts:check"]],
-  ["npm", ["run", "check:cargo-features"]],
   [
     "cargo",
     ["fallow", "check", "--baseline", "cargo-fallow-baseline.json", "--fail-on-issues", "--quiet"],
   ],
-  ["npm", ["run", "check:miri-cfg"]],
-  ["npm", ["run", "check:parse-sites"]],
   ["npm", ["run", "check:emitted-versions"]],
   ["npm", ["run", "check:conformance-fixtures"]],
   ["sh", ["scripts/hook-file-length.sh", "origin/main"]],

@@ -61,7 +61,7 @@ impl ProductionFlags {
 
     /// The override flag of one analysis, without the global override.
     #[must_use]
-    pub const fn own(self, analysis: ProductionAnalysis) -> Option<bool> {
+    const fn own(self, analysis: ProductionAnalysis) -> Option<bool> {
         match analysis {
             ProductionAnalysis::DeadCode => self.dead_code,
             ProductionAnalysis::Health => self.health,

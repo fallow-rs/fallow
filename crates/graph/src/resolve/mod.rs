@@ -49,9 +49,8 @@ pub use path_info::{
 };
 pub use react_native::{PlatformFamilyKey, has_react_native_plugin, platform_family_key};
 pub use types::{
-    MISSING_ONLY_OUTPUT_DIRS, MissingExportTarget, OUTPUT_DIRS, ResolveResult, ResolvedImport,
-    ResolvedModule, ResolvedProject, ResolvedReExport, ResolvedReplacedModuleTarget,
-    ResolvedSourceEdge,
+    MissingExportTarget, OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule,
+    ResolvedProject, ResolvedReExport, ResolvedReplacedModuleTarget, ResolvedSourceEdge,
 };
 pub use work::ResolveWork;
 

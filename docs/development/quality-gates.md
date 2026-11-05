@@ -644,14 +644,15 @@ a speed improvement. Reservations estimate cost; they do not enforce billing.
 
 ## Cargo feature unification
 
-`npm run check:cargo-features` compares the crate features of
-`cargo build -p fallow-cli` with those of `cargo build --workspace`. Cargo
+The cargo-fallow rule `feature-unification-drift` compares the crate features
+of `cargo build -p fallow-cli` with those of `cargo build --workspace`. Cargo
 resolves features per build, so a feature that only another member enables
 makes cargo compile two variants of that crate and its dependents. After each
 edit, a switch between the two commands then compiles the fallow crates again.
 Fix a failure with the feature in `[workspace.dependencies]`, or with a
-feature-only dependency in `crates/cli/Cargo.toml`. The check runs in
-`verify:fast` and in the CI Clippy job.
+feature-only dependency in `crates/cli/Cargo.toml`. `unify-features` in
+`[workspace.metadata.fallow.deps]` names the member. The rule runs in each
+`cargo fallow check` (see [Rust structure](#rust-structure)).
 
 ## Hook parity
 
@@ -673,7 +674,7 @@ typos
 python3 scripts/scan-hidden-unicode.py --mode committed --staged
 sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
-node scripts/check-miri-cfg.mjs
+cargo fallow boundaries --fail-on-issues --quiet
 cargo fallow size --staged --fail-on-growth --quiet
 sh scripts/hook-file-length.sh HEAD
 sh scripts/hook-changelog-fragments.sh
@@ -772,9 +773,9 @@ To fix a failure, move the new code to a new module, or remove lines from
 the file in the same change. To skip only this step for one commit, run
 `HK_SKIP_STEPS=file-size git commit`. `HK=0 git commit` skips all hooks.
 
-The `Large file growth` step of the CI `Rust Structure` job runs the same
-rule on pull requests. It compares `HEAD` with the merge base of the pull
-request base branch:
+The `Static checks` step of the CI `Rust Structure` job runs the same rule
+on pull requests, with `base: auto`. It compares `HEAD` with the merge base
+of the pull request base branch:
 
 ```bash
 cargo fallow size --base origin/main --fail-on-growth
@@ -803,30 +804,40 @@ Each gate fails the run:
   `[package.metadata.fallow.deps]`, with the reason.
 - `files`: a `.rs` file that no target compiles.
 - `visibility`: a `pub`, `pub(crate)` or `pub(super)` item that can be less
-  visible. `production` lists the release binaries. cargo-fallow treats each
-  crate that a registry can publish as an external API, so it reports no dead
-  `pub` item in the published crates. Only `pub(crate)` and `pub(super)`
-  items there get a finding
-  ([cargo-fallow#70](https://github.com/fallow-rs/cargo-fallow/issues/70)). Run
+  visible. `production` lists the release binaries. `public-crates` lists
+  the libraries that other repositories read, and their exported items are
+  entry points. Each other library gets each rule, also when crates.io
+  publishes it. Run
   `cargo fallow fix --dry-run`, then `cargo fallow fix --yes`, then the
   Clippy commands. Clippy can reject an edit that `fix` accepts.
-- `boundaries`: the crate rules and the source rules in
-  `[workspace.metadata.fallow.boundaries]`. The crate rules keep the
-  dependency direction of
-  [Architecture invariants](../architecture-invariants.md). The source rules
-  keep the semantic client in `fallow-api` and the process-tree code in
-  `fallow-process`. A source rule matches tokens, so a pattern in a comment
-  or a string does not match.
+- `boundaries`: the rules in `[workspace.metadata.fallow.boundaries]`.
+  - The crate rules keep the dependency direction of
+    [Architecture invariants](../architecture-invariants.md).
+  - The source rules keep the semantic client in `fallow-api` and the
+    process-tree code in `fallow-process`. A source rule matches tokens, so a
+    pattern in a comment or a string does not match.
+  - `parse-through-parse-bounded` lists each file with production parser
+    calls and the count. A new call needs `parse_bounded` and a higher `max`.
+  - `explicit-type-reexports` rejects a glob re-export of the internal type
+    modules from `fallow-engine` and `fallow-api`.
+  - `miri-build-compiles` finds a path from `cfg(test)` code to an item that
+    the Miri build does not compile, for example a `not(miri)` test module.
 - `complexity`: a function over the cognitive limit of 25 or the cyclomatic
-  limit of 20. `cargo-fallow-baseline.json` holds the functions that were over
+  limit of 20. With `cyclomatic-policy = "flat-match"`, a `match` with no
+  guard and no decision in an arm counts as one decision.
+  `cargo-fallow-baseline.json` holds the functions that were over
   a limit when the gate started. A new function over a limit fails. When you
   simplify a function in the baseline, save the baseline again with
   `cargo fallow check --only complexity --save-baseline cargo-fallow-baseline.json`.
-- `dupes`: the duplication percentage over `threshold` in
-  `[workspace.metadata.fallow.dupes]`. The threshold is a ratchet just above
-  the current percentage, so a change that adds a clone can fail the gate.
-  Remove the clone, or remove another clone in the same change. The single
-  clone groups are warnings. Lower `threshold` when the percentage goes down.
+- `dupes`: the duplication percentage of production code over `threshold`
+  in `[workspace.metadata.fallow.dupes]`. `production = true` leaves test
+  code out, so test duplication cannot hide a rise in production code. The
+  threshold is a ratchet just above the current percentage, so a change that
+  adds a clone can fail the gate. Remove the clone, or remove another clone in
+  the same change. The `code-duplication` rule is `off`, so the report has no
+  clone group. To list the groups, set the rule to `warn` for one local run
+of `cargo fallow dupes`. Lower
+  `threshold` when the percentage goes down.
 - `parse`: a target root file that does not parse.
 
 The cargo-fallow complexity model is not the Clippy model, so a function can
@@ -836,9 +847,6 @@ To hide one finding, put `// fallow-ignore-next-line <rule> -- <reason>`
 above the line. Link the cargo-fallow issue when the finding is a cargo-fallow
 false positive. `cargo fallow explain <rule>` explains each rule.
 
-`scripts/check-cargo-features.mjs` stays, because cargo-fallow does not
-compare the feature sets of a member build and the workspace build yet
-([cargo-fallow#71](https://github.com/fallow-rs/cargo-fallow/issues/71)).
 
 ### JavaScript and TypeScript files
 

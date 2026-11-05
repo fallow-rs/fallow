@@ -71,7 +71,7 @@ impl ResolveResult {
 
     /// Return whether this edge originated from CommonJS `require()`.
     #[must_use]
-    pub const fn is_commonjs_require(&self) -> bool {
+    pub(crate) const fn is_commonjs_require(&self) -> bool {
         matches!(
             self,
             Self::CommonJsInternalModule(_)
@@ -88,7 +88,7 @@ impl ResolveResult {
 
     /// Retain CommonJS provenance on targets that can participate in upgrades.
     #[must_use]
-    pub fn into_commonjs_require(self) -> Self {
+    pub(crate) fn into_commonjs_require(self) -> Self {
         match self {
             Self::InternalModule(file_id) => Self::CommonJsInternalModule(file_id),
             Self::InternalPackageModule {
@@ -99,23 +99,6 @@ impl ResolveResult {
                 package_name,
             },
             Self::NpmPackage(package_name) => Self::CommonJsNpmPackage(package_name),
-            other => other,
-        }
-    }
-
-    /// Remove CommonJS provenance while preserving the resolved destination.
-    #[must_use]
-    pub fn into_es_module(self) -> Self {
-        match self {
-            Self::CommonJsInternalModule(file_id) => Self::InternalModule(file_id),
-            Self::CommonJsInternalPackageModule {
-                file_id,
-                package_name,
-            } => Self::InternalPackageModule {
-                file_id,
-                package_name,
-            },
-            Self::CommonJsNpmPackage(package_name) => Self::NpmPackage(package_name),
             other => other,
         }
     }

@@ -21,7 +21,7 @@ mod provenance;
 mod rules;
 mod severity;
 
-pub use identity::{security_finding_id, security_rule_id, stamp_security_finding_ids};
+pub use identity::{security_rule_id, stamp_security_finding_ids};
 pub use provenance::{ProvenanceBindings, import_source_matches};
 pub use rules::{
     enable_security_rules, resolve_security_finding_severity, retain_enabled_security_findings,
@@ -30,7 +30,7 @@ pub use rules::{
 pub use severity::{derive_security_severity, security_catalogue_title};
 
 pub const HARDCODED_SECRET_CATEGORY_ID: &str = "hardcoded-secret";
-pub const HARDCODED_SECRET_CATEGORY_TITLE: &str = "Hardcoded secret candidate";
+const HARDCODED_SECRET_CATEGORY_TITLE: &str = "Hardcoded secret candidate";
 
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
 /// time, a green `security_catalogue_parses` test guarantees the released
@@ -664,7 +664,7 @@ impl Catalogue {
 
 /// The human-readable title for a category id, used by the CLI renderer.
 #[must_use]
-pub fn catalogue_title(id: &str) -> Option<&'static str> {
+fn catalogue_title(id: &str) -> Option<&'static str> {
     catalogue().title_for(id)
 }
 

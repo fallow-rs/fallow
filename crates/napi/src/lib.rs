@@ -725,7 +725,6 @@ fn to_napi_error(env: Env, error: api::ProgrammaticError) -> napi::Error {
 
 #[derive(Debug)]
 #[doc(hidden)]
-// fallow-ignore-next-line unnecessary-public -- a #[napi] pub fn returns it: https://github.com/fallow-rs/cargo-fallow/issues/66
 pub enum ProgrammaticOutput {
     DeadCode(Box<api::DeadCodeProgrammaticOutput>),
     CircularDependencies(Box<api::CircularDependenciesProgrammaticOutput>),
@@ -767,7 +766,6 @@ type ProgrammaticWork =
     Box<dyn FnOnce() -> Result<ProgrammaticOutput, api::ProgrammaticError> + Send + 'static>;
 
 #[doc(hidden)]
-// fallow-ignore-next-line unnecessary-public -- a #[napi] pub fn returns it: https://github.com/fallow-rs/cargo-fallow/issues/66
 pub struct ProgrammaticTask {
     task: Option<ProgrammaticWork>,
     error: Option<api::ProgrammaticError>,

@@ -28,7 +28,7 @@ pub enum ExportCredits {
 impl ExportCredits {
     /// The credits of a run: a trace needs the retained module graph.
     #[must_use]
-    pub fn for_run(retain_graph: bool, config: &fallow_config::ResolvedConfig) -> Self {
+    pub(crate) fn for_run(retain_graph: bool, config: &fallow_config::ResolvedConfig) -> Self {
         if retain_graph {
             Self::Collect {
                 include_entry_exports: config.include_entry_exports

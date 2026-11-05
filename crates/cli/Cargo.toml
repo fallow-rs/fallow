@@ -105,7 +105,7 @@ schemars = { workspace = true, optional = true }
 # enable these features on shared third-party crates. Without them here,
 # `cargo build -p fallow-cli` and `cargo build --workspace` resolve different
 # feature sets, and each switch rebuilds the dependents.
-# `npm run check:cargo-features` fails when a feature is missing here.
+# The cargo-fallow rule `feature-unification-drift` fails when a feature is missing here.
 chrono = { version = "0.4", default-features = false, features = ["alloc", "now", "serde", "std"] }
 hashbrown = { version = "0.17", features = ["default"] }
 httparse = { version = "1", features = ["std"] }

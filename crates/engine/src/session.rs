@@ -299,8 +299,8 @@ impl AnalysisSession {
     /// Use `store` for parsed modules across sessions, in place of the store
     /// that the process installed with [`crate::warm_parse::install`].
     /// `None` makes the session parse through the persisted cache only.
-    #[must_use]
-    pub fn with_warm_parse(mut self, store: Option<Arc<WarmParseStore>>) -> Self {
+    #[cfg(test)]
+    fn with_warm_parse(mut self, store: Option<Arc<WarmParseStore>>) -> Self {
         self.warm_parse = store;
         self
     }
@@ -638,40 +638,6 @@ impl AnalysisSession {
             files: self.discovery.into_files(),
             workspaces: self.workspaces,
             workspace_diagnostics,
-        }
-    }
-
-    /// Consume the session, load the parser cache, and parse discovered files.
-    #[must_use]
-    pub fn into_parsed_parts(self, need_complexity: bool) -> ParsedAnalysisSessionParts {
-        let AnalysisSessionParts {
-            config,
-            config_path,
-            files,
-            workspaces,
-            workspace_diagnostics,
-        } = self.into_parts();
-        let ParsedModules {
-            modules,
-            metrics,
-            source_diagnostics,
-            ..
-        } = parse_files_with_config(&config, &files, need_complexity, None);
-        ParsedAnalysisSessionParts {
-            config,
-            config_path,
-            files,
-            modules,
-            workspaces,
-            workspace_diagnostics: merge_workspace_diagnostics(
-                workspace_diagnostics,
-                source_diagnostics,
-            ),
-            parse_ms: metrics.parse_ms,
-            cache_update_ms: metrics.cache_ms,
-            cache_hits: metrics.cache_hits,
-            cache_misses: metrics.cache_misses,
-            parse_cpu_ms: metrics.parse_cpu_ms,
         }
     }
 
@@ -1077,7 +1043,6 @@ impl AnalysisSession {
                 metrics,
                 read_failures,
                 parse_degradations,
-                ..
             } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
             let problems = SourceProblems {
                 read_failures,
@@ -1351,7 +1316,6 @@ impl AnalysisSession {
 struct ParsedModules {
     modules: Vec<ModuleInfo>,
     metrics: core_backend::ParseMetrics,
-    source_diagnostics: Vec<WorkspaceDiagnostic>,
     read_failures: Vec<SourceReadFailure>,
     parse_degradations: Vec<SourceParseDegradation>,
 }
@@ -1419,7 +1383,7 @@ fn parse_files_with_config(
         cancellation,
         &config.flags.patterns(),
     );
-    let source_diagnostics = record_source_diagnostics(
+    record_source_diagnostics(
         config,
         &parse_result.read_failures,
         &parse_result.parse_degradations,
@@ -1461,7 +1425,6 @@ fn parse_files_with_config(
     ParsedModules {
         modules,
         metrics,
-        source_diagnostics,
         read_failures: parse_result.read_failures,
         parse_degradations: parse_result.parse_degradations,
     }

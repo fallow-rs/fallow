@@ -345,7 +345,7 @@ impl FederationSource {
 /// runtime call (`registerRemotes`, `loadRemote`, `init`, `createInstance`) names traces to the source
 /// file, with the function name as the key.
 #[must_use]
-pub fn federation_trace_provenance(
+fn federation_trace_provenance(
     root: &Path,
     files: &[crate::discover::DiscoveredFile],
     sources: &[FederationSource],
@@ -407,7 +407,7 @@ pub fn federation_trace_provenance(
 /// ask for a test of it. Extend this set when a new plugin adds a
 /// configuration-only export. Never add a name that holds behavior, such as
 /// `generateMetadata`, `loader` or a route handler.
-pub const CONFIG_ONLY_EXPORT_NAMES: &[&str] = &[
+const CONFIG_ONLY_EXPORT_NAMES: &[&str] = &[
     "dynamic",
     "dynamicParams",
     "revalidate",
@@ -424,7 +424,7 @@ pub const CONFIG_ONLY_EXPORT_NAMES: &[&str] = &[
 /// Record why the unused devDependency check credits each plugin tooling
 /// dependency, so `--trace-dependency` explains the credit instead of calling
 /// the dependency unused.
-pub fn push_tooling_trace_credits(
+fn push_tooling_trace_credits(
     provenance: &mut fallow_types::trace::TraceProvenance,
     root: &Path,
     workspaces: &[fallow_config::WorkspaceInfo],
@@ -1962,7 +1962,7 @@ mod rstest;
 mod serverless_framework;
 mod textlint;
 mod tooling;
-mod trace_provenance;
+pub(crate) mod trace_provenance;
 mod used_export_names;
 mod used_export_rule;
 
@@ -1976,7 +1976,7 @@ pub use tooling::types_package_target;
 pub(crate) use tooling::{
     cli_tooling_config_patterns, is_ambient_types_package, is_known_tooling_dependency,
 };
-pub use trace_provenance::{ExportCredits, build_trace_provenance};
+pub use trace_provenance::ExportCredits;
 pub use used_export_names::UsedExportNames;
 pub(crate) use used_export_rule::{ConfigExportCredit, is_export_ignored};
 pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};

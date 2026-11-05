@@ -22,7 +22,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
 /// The schema version of the export that this build reads.
-pub const FLAG_STATE_SCHEMA_VERSION: u32 = 1;
+const FLAG_STATE_SCHEMA_VERSION: u32 = 1;
 
 /// Largest export that Fallow reads, in bytes.
 pub const MAX_FLAG_STATE_BYTES: u64 = 16 * 1024 * 1024;
@@ -155,10 +155,7 @@ fn display_path(path: &Path, root: &Path) -> String {
 /// Returns an error when the bytes are not valid JSON in the schema, when
 /// `schema_version` is not [`FLAG_STATE_SCHEMA_VERSION`], when `exported_at`
 /// has no `YYYY-MM-DD` date, or when a key is empty or occurs two times.
-pub fn parse_flag_state(
-    bytes: &[u8],
-    display_path: String,
-) -> Result<VendorExport, FlagStateError> {
+fn parse_flag_state(bytes: &[u8], display_path: String) -> Result<VendorExport, FlagStateError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| FlagStateError::new(format!("{display_path} is not UTF-8 text")))?;
     let file: FlagStateFile = serde_json::from_str(text)
@@ -273,7 +270,7 @@ pub struct VendorMatch<'a> {
 /// export of one vendor does not mark the flags of another SDK as
 /// `missing-in-vendor`. The label check reads every SDK site of the project,
 /// so a run narrowed to part of the project gives the same result for a row.
-pub fn apply_vendor_state(
+pub(crate) fn apply_vendor_state(
     rows: &mut Vec<RetirementFlag>,
     input: &VendorMatch<'_>,
 ) -> RetirementVendorState {

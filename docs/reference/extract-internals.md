@@ -35,8 +35,9 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   limit, and a stack overflow aborts the whole process. Run every parse of
   user source, and the walks over its AST, inside
   `fallow_extract::parse_bounded` (`crates/extract/src/nesting.rs`).
-  `scripts/check-parse-sites.mjs` lists each production parser call and
-  fails on a new one.
+  The cargo-fallow source rule `parse-through-parse-bounded` in the root
+  `Cargo.toml` lists each file with production parser calls, with the count,
+  and fails on a new call.
   - `parse_bounded` first scans the bracket depth. A file past
     `MAX_NESTING_DEPTH` returns `None`. Extraction turns it into a failed
     parse (`parse_panicked`) with no facts, and the other callers skip it.

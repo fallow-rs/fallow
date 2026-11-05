@@ -161,7 +161,7 @@ pub fn collect_custom_element_tags(source: &str) -> Vec<String> {
 
 /// Parse an HTML file, extracting script and stylesheet references as imports.
 #[cfg(test)]
-pub fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     parse_html_to_module_with_complexity(file_id, source, content_hash, false)
 }
 
