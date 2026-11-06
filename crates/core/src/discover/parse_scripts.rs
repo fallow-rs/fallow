@@ -198,17 +198,28 @@ fn shell_command_body<'a>(
         return None;
     }
     // Shell flags such as `-e`, `-eu` or `-o pipefail` can come before `-c`.
+    // The `c` can also be part of a flag cluster, as in `-ec` or `-lc`.
     let mut idx = start + 1;
-    loop {
+    let c_flag = loop {
         match *tokens.get(idx)? {
-            "-c" => break,
             "-o" | "+o" => idx += 2,
+            flag if is_c_flag(flag) => break flag,
             flag if flag.starts_with(['-', '+']) => idx += 1,
             _ => return None,
         }
-    }
-    let (_, body) = segment.split_once(" -c ")?;
+    };
+    let (_, body) = segment.split_once(&format!(" {c_flag} "))?;
     Some(command_string(body.trim()))
+}
+
+/// Whether the shell flag `flag` is `-c` or a short flag cluster with a `c`,
+/// such as `-ec`. A long flag such as `--rcfile` is not a `-c` flag.
+fn is_c_flag(flag: &str) -> bool {
+    flag.strip_prefix('-').is_some_and(|letters| {
+        !letters.is_empty()
+            && letters.bytes().all(|b| b.is_ascii_alphabetic())
+            && letters.contains('c')
+    })
 }
 
 /// Return the text of the `-c` value `value` without its quotes. A quoted
@@ -516,6 +527,26 @@ mod tests {
             })
             .collect();
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn shell_command_body_after_clustered_c_flag() {
+        let cases: &[(&str, &[&str])] = &[
+            ("sh -ec \"echo x && node a.js\"", &["a.js"]),
+            ("bash -lc 'node a.js'", &["a.js"]),
+            ("bash -euc \"cd . && node a.js\"", &["a.js"]),
+            ("bash --norc -lc \"node a.js\"", &["a.js"]),
+        ];
+        let failures: Vec<String> = cases
+            .iter()
+            .filter(|(script, expected)| refs(script) != *expected)
+            .map(|(script, expected)| {
+                format!("{script}: expected {expected:?}, got {:?}", refs(script))
+            })
+            .collect();
+        assert!(failures.is_empty(), "{failures:#?}");
+        assert!(!is_c_flag("--rcfile"));
+        assert!(!is_c_flag("-e"));
     }
 
     #[test]
