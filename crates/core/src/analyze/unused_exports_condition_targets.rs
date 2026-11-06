@@ -23,37 +23,7 @@ impl ConditionTargetFamilies {
     pub(super) fn build(resolved_modules: &[crate::resolve::ResolvedModule]) -> Self {
         let mut families = Self::default();
         for module in resolved_modules {
-            let mut targets_by_import: FxHashMap<(&str, u32), Vec<FileId>> = FxHashMap::default();
-            for import in module
-                .resolved_imports
-                .iter()
-                .chain(&module.resolved_dynamic_imports)
-            {
-                if !import.info.source.starts_with('#') {
-                    continue;
-                }
-                if let Some(target) = import.target.internal_file_id() {
-                    targets_by_import
-                        .entry((import.info.source.as_str(), import.info.source_span.start))
-                        .or_default()
-                        .push(target);
-                }
-            }
-            for re_export in &module.re_exports {
-                if !re_export.info.source.starts_with('#') {
-                    continue;
-                }
-                if let Some(target) = re_export.target.internal_file_id() {
-                    targets_by_import
-                        .entry((
-                            re_export.info.source.as_str(),
-                            re_export.info.source_span.start,
-                        ))
-                        .or_default()
-                        .push(target);
-                }
-            }
-            for targets in targets_by_import.values() {
+            for targets in hash_import_targets(module).values() {
                 if let Some((first, rest)) = targets.split_first() {
                     for other in rest {
                         families.join(*first, *other);
@@ -112,4 +82,36 @@ impl ConditionTargetFamilies {
             .filter_map(|(entry, keep)| keep.then_some(entry))
             .collect()
     }
+}
+
+/// The project files that each `#` import or re-export statement of `module`
+/// reaches, keyed by the specifier and the start of its source span.
+fn hash_import_targets(
+    module: &crate::resolve::ResolvedModule,
+) -> FxHashMap<(&str, u32), Vec<FileId>> {
+    let imports = module
+        .resolved_imports
+        .iter()
+        .chain(&module.resolved_dynamic_imports)
+        .map(|import| (&import.info.source, import.info.source_span, &import.target));
+    let re_exports = module.re_exports.iter().map(|re_export| {
+        (
+            &re_export.info.source,
+            re_export.info.source_span,
+            &re_export.target,
+        )
+    });
+    let mut targets: FxHashMap<(&str, u32), Vec<FileId>> = FxHashMap::default();
+    for (source, span, target) in imports.chain(re_exports) {
+        if !source.starts_with('#') {
+            continue;
+        }
+        if let Some(file) = target.internal_file_id() {
+            targets
+                .entry((source.as_str(), span.start))
+                .or_default()
+                .push(file);
+        }
+    }
+    targets
 }
