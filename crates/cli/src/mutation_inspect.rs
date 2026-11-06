@@ -118,7 +118,12 @@ pub fn read_report_bytes(path: &Path) -> Result<Vec<u8>, fallow_api::Programmati
     Ok(bytes)
 }
 
-fn parse_saved_report(bytes: &[u8]) -> Result<SavedReport, fallow_api::ProgrammaticError> {
+/// Parses the bytes of a saved report.
+///
+/// # Errors
+///
+/// Returns an error when the bytes are not a mutation report or plan.
+pub fn parse_saved_report(bytes: &[u8]) -> Result<SavedReport, fallow_api::ProgrammaticError> {
     let report: SavedReport = serde_json::from_slice(bytes).map_err(|error| {
         report_input_error(format!(
             "the file is not a `fallow mutation --format json` report: {error}"

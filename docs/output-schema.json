@@ -33123,6 +33123,17 @@
             }
           ],
           "description": "The type check of the survivors. Absent when the run did not check\nthem (`--typecheck` not set)."
+        },
+        "recheck": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationRecheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The result of each rechecked mutant against its status in the earlier\nreport. Absent outside `--recheck`."
         }
       },
       "required": [
@@ -36442,6 +36453,120 @@
         "stale"
       ],
       "description": "The number of tasks for each status."
+    },
+    "MutationRecheck": {
+      "type": "object",
+      "properties": {
+        "report_sha256": {
+          "type": "string",
+          "description": "The SHA-256 digest of the earlier report."
+        },
+        "killed": {
+          "type": "integer",
+          "description": "The number of mutants for each outcome."
+        },
+        "survived": {
+          "type": "integer",
+          "description": "See `killed`."
+        },
+        "no_coverage": {
+          "type": "integer",
+          "description": "See `killed`."
+        },
+        "tests_fail_on_original": {
+          "type": "integer",
+          "description": "See `killed`."
+        },
+        "unsettled": {
+          "type": "integer",
+          "description": "See `killed`."
+        },
+        "mutants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationRecheckMutant"
+          },
+          "description": "The rechecked mutants, sorted by file, line and mutant id."
+        }
+      },
+      "required": [
+        "report_sha256",
+        "killed",
+        "survived",
+        "no_coverage",
+        "tests_fail_on_original",
+        "unsettled",
+        "mutants"
+      ],
+      "description": "The recheck facts of a `--recheck` run."
+    },
+    "MutationRecheckMutant": {
+      "type": "object",
+      "properties": {
+        "mutant_id": {
+          "type": "string",
+          "description": "The id of the mutant."
+        },
+        "file": {
+          "type": "string",
+          "description": "The project-root-relative path of the mutated file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "The 1-based line of the mutant."
+        },
+        "previous_status": {
+          "description": "The status in the earlier report.",
+          "$ref": "#/definitions/MutantStatus"
+        },
+        "status": {
+          "description": "The status in this run.",
+          "$ref": "#/definitions/MutantStatus"
+        },
+        "outcome": {
+          "description": "What the recheck shows.",
+          "$ref": "#/definitions/MutationRecheckOutcome"
+        }
+      },
+      "required": [
+        "mutant_id",
+        "file",
+        "line",
+        "previous_status",
+        "status",
+        "outcome"
+      ],
+      "description": "One rechecked mutant."
+    },
+    "MutationRecheckOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "killed",
+          "description": "A test now fails on the mutant (`killed` or `timeout`)."
+        },
+        {
+          "type": "string",
+          "const": "survived",
+          "description": "Each covering test still passes on the mutant."
+        },
+        {
+          "type": "string",
+          "const": "no_coverage",
+          "description": "No test reaches the mutant."
+        },
+        {
+          "type": "string",
+          "const": "tests_fail_on_original",
+          "description": "A test of the run fails on the original code, so the run proves no\nsurvivor. Fix that test first."
+        },
+        {
+          "type": "string",
+          "const": "unsettled",
+          "description": "The mutant has no final result, for example `runtime_error`, `flaky`\nor `pending`. `status` gives the reason."
+        }
+      ],
+      "description": "What a recheck shows for one mutant of the earlier report."
     }
   }
 }

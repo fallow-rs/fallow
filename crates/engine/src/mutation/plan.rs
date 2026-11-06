@@ -182,6 +182,15 @@ pub(super) fn build(
         mutants.extend(outcome.mutants);
         skipped_files.extend(outcome.skipped);
     }
+    if let Some(ids) = &request.mutant_ids {
+        for entry in &mut mutants {
+            if !ids.contains(entry.planned.mutant.id.as_str())
+                && !matches!(entry.planned.disposition, MutantDisposition::Pruned(_))
+            {
+                entry.planned.disposition = MutantDisposition::Pruned(PruneReason::NotSelected);
+            }
+        }
+    }
     rank(&mut mutants, request.max_mutants);
     let mutants: Vec<PlannedMutant> = mutants.into_iter().map(|entry| entry.planned).collect();
 
@@ -1046,6 +1055,7 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
             MutantDisposition::Pruned(PruneReason::FrameworkConfig) => {
                 counts.pruned.framework_config += 1;
             }
+            MutantDisposition::Pruned(PruneReason::NotSelected) => counts.pruned.not_selected += 1,
         }
     }
     counts

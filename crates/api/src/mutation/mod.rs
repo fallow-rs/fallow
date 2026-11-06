@@ -170,4 +170,14 @@ pub struct MutationRunOptions {
     /// journal, the run starts from the beginning and the report says so.
     /// Without this option, the run starts a new journal.
     pub resume: bool,
+    /// Run only the mutants with these ids, for example the survivors of an
+    /// earlier report after new tests. Each id must be in the plan of the
+    /// scope, or the run fails with `FALLOW_MUTATION_UNKNOWN_MUTANT`. Empty
+    /// runs each mutant of the scope.
+    pub mutant_ids: Vec<String>,
+    /// Allow a dirty worktree when each dirty path is a test file: a path
+    /// that the test path rules match, or a test file of the plan. Another
+    /// dirty path fails the run with `FALLOW_MUTATION_SOURCE_CHANGED`, so
+    /// the run proves a change of the tests only. `allow_dirty` wins.
+    pub test_changes_only: bool,
 }

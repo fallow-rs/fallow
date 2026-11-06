@@ -410,6 +410,8 @@ fn plan_for(
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
         skip_component_files: false,
+        mutant_ids: (!options.mutant_ids.is_empty())
+            .then(|| options.mutant_ids.iter().cloned().collect()),
     };
     // The runner decision reads the test files of the first plan. A second
     // plan without the component files keeps that decision.
@@ -611,6 +613,97 @@ fn guard_worktree(allow_dirty: bool, start: Option<&WorktreeSnapshot>) -> Progra
         ),
     )
     .with_help("commit or stash the changes, or pass --allow-dirty"))
+}
+
+/// The guards that need the plan: the test-only worktree of a recheck, the
+/// requested mutant ids, the cache directory and the type-check companion.
+fn guard_planned(
+    options: &MutationRunOptions,
+    planned: &Planned,
+    start: Option<&WorktreeSnapshot>,
+) -> ProgrammaticResult<()> {
+    if options.test_changes_only && !options.allow_dirty {
+        guard_test_changes_only(planned, start)?;
+    }
+    guard_mutant_ids(options, &planned.plan)?;
+    guard_cache_holds_no_planned_file(planned.resolved.root(), &planned.cache_dir, &planned.plan)?;
+    guard_typecheck_companion(options.typecheck, planned.resolved.root())
+}
+
+/// Refuses a dirty path that is not a test file, so a run with
+/// [`MutationRunOptions::test_changes_only`] proves a change of the tests
+/// only. A test file is a path that the test path rules match, or a test
+/// file of the plan.
+fn guard_test_changes_only(
+    planned: &Planned,
+    start: Option<&WorktreeSnapshot>,
+) -> ProgrammaticResult<()> {
+    let Some(start) = start else {
+        return Ok(());
+    };
+    let root = planned.resolved.root();
+    let test_files: FxHashSet<&str> = planned.plan.test_files.iter().map(String::as_str).collect();
+    let changed: Vec<String> = start
+        .dirty_paths()
+        .into_iter()
+        .filter(|path| {
+            !test_files.contains(path.as_str())
+                && !fallow_engine::test_paths::is_test_path_str(root, path)
+        })
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<&str> = changed.iter().take(10).map(String::as_str).collect();
+    Err(mutation_error(
+        "FALLOW_MUTATION_SOURCE_CHANGED",
+        format!(
+            "the git worktree changes {} {} that {} not a test file: {}",
+            changed.len(),
+            path_noun(changed.len()),
+            if changed.len() == 1 { "is" } else { "are" },
+            shown.join(", ")
+        ),
+    )
+    .with_help(
+        "a recheck proves a change of the tests only; commit or stash the other changes, then run `fallow mutation` again for new results",
+    ))
+}
+
+/// Refuses a requested mutant id that the plan does not have. The id of a
+/// mutant changes when its source changes.
+fn guard_mutant_ids(options: &MutationRunOptions, plan: &MutationPlan) -> ProgrammaticResult<()> {
+    if options.mutant_ids.is_empty() {
+        return Ok(());
+    }
+    let planned: FxHashSet<&str> = plan
+        .mutants
+        .iter()
+        .map(|mutant| mutant.mutant.id.as_str())
+        .collect();
+    let mut missing: Vec<&str> = options
+        .mutant_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !planned.contains(id))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort_unstable();
+    missing.dedup();
+    Err(mutation_error(
+        "FALLOW_MUTATION_UNKNOWN_MUTANT",
+        format!(
+            "the plan has no mutant with the {} {}",
+            if missing.len() == 1 { "id" } else { "ids" },
+            missing.join(", ")
+        ),
+    )
+    .with_context("mutation.mutantId")
+    .with_help(
+        "a mutant id changes when its source changes; run `fallow mutation` again for new ids",
+    ))
 }
 
 /// The help of a runner version outside `range`. It names the supported
@@ -1226,10 +1319,12 @@ pub fn run_mutation_with_progress(
     let planned = plan_for(options, |root, cache_dir| {
         guard_cache_dir(root, cache_dir)?;
         start_snapshot = take_worktree_snapshot(root, cache_dir, &options.output_paths, None)?;
+        if options.test_changes_only && !options.allow_dirty && start_snapshot.is_some() {
+            return Ok(());
+        }
         guard_worktree(options.allow_dirty, start_snapshot.as_ref())
     })?;
-    guard_cache_holds_no_planned_file(planned.resolved.root(), &planned.cache_dir, &planned.plan)?;
-    guard_typecheck_companion(options.typecheck, planned.resolved.root())?;
+    guard_planned(options, &planned, start_snapshot.as_ref())?;
     let normalized = with_normalized_targets(options, planned.resolved.root())?;
     let options = normalized.as_ref().unwrap_or(options);
     let plan_ms = millis(started.elapsed());
@@ -1316,6 +1411,7 @@ pub fn run_mutation_with_progress(
         files: plan_files(plan),
         verdicts: None,
         typecheck: typecheck.output,
+        recheck: None,
     })
 }
 

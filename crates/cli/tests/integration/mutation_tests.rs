@@ -669,6 +669,63 @@ fn tasks_list_the_open_mutants_of_the_last_run_in_json_text_and_markdown() {
 }
 
 #[test]
+fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
+    let project = untested_project();
+    let (_, report) = json_mutation(project.path(), &["--all"]);
+    let open: Vec<String> = report["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|mutant| mutant["status"] == "no_coverage")
+        .map(|mutant| mutant["mutant_id"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(open.len() > 1, "the untested project has open mutants");
+
+    let (output, recheck) = json_mutation(project.path(), &["--recheck"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(recheck["kind"], "mutation");
+    assert_eq!(recheck["recheck"]["no_coverage"], open.len());
+    assert_eq!(
+        recheck["recheck"]["mutants"].as_array().unwrap().len(),
+        open.len()
+    );
+    assert_eq!(
+        recheck["recheck"]["mutants"][0]["previous_status"],
+        "no_coverage"
+    );
+    assert_eq!(recheck["recheck"]["mutants"][0]["outcome"], "no_coverage");
+
+    let one = open[0].as_str();
+    let (output, single) = json_mutation(project.path(), &["--recheck", "--mutant", one]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(single["recheck"]["mutants"].as_array().unwrap().len(), 1);
+    assert_eq!(single["recheck"]["mutants"][0]["mutant_id"], one);
+    let not_selected = single["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|mutant| mutant["prune_reason"] == "not-selected")
+        .count();
+    assert_eq!(not_selected, open.len() - 1);
+
+    let (unknown, error) = json_mutation(
+        project.path(),
+        &["--recheck", "--mutant", "0000000000000000"],
+    );
+    assert_eq!(unknown.code, 2);
+    assert_eq!(error["code"], "FALLOW_MUTATION_UNKNOWN_MUTANT");
+
+    fs::write(
+        project.path().join("src/math.ts"),
+        MATH.replace("a + b", "b + a"),
+    )
+    .expect("edit");
+    let (changed, error) = json_mutation(project.path(), &["--recheck"]);
+    assert_eq!(changed.code, 2);
+    assert_eq!(error["code"], "FALLOW_MUTATION_SOURCE_CHANGED", "{error}");
+}
+
+#[test]
 fn typecheck_without_a_companion_exits_2_before_the_tests_run() {
     let project = untested_project();
     let missing = project.path().join("no-such-companion");
