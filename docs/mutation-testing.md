@@ -363,6 +363,16 @@ or relational mutant, so it adds little test-strength signal for its run time.
   panic, and a panic hook ends the group first. A companion whose stdin closes
   without a `shutdown` request kills its own process group and exits, so it
   does not outlive a Fallow process that ended in another way.
+- Each companion gets its own temp directory, named `fallow-mt-<id>` in the
+  system temp directory. Fallow sets `TMPDIR`, `TMP` and `TEMP` of the
+  companion to it, so the runner and the test processes write their temp
+  files there. Fallow deletes the directory when the companion ends, also
+  after a kill, because a killed test run cannot run its teardown. A lock
+  file next to the directory marks a live Fallow process. The next run
+  deletes a directory whose lock is free, for example after Fallow ended on a
+  signal or could not delete a file. On Unix, only the owner can read the
+  directory, and Fallow deletes only a directory whose lock file is a regular
+  file of the same user.
 
 ## Exit codes
 

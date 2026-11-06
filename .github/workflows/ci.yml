@@ -231,6 +231,7 @@ jobs:
               - 'crates/mcp/tests/integration/typed_route_env_coverage.rs'
               - 'crates/config/**'
               - 'crates/types/**'
+              - 'crates/api/src/mutation/companion_temp.rs'
               - 'crates/api/src/mutation/discovery.rs'
               - 'crates/api/src/similar_code/cache.rs'
               - 'crates/api/src/similar_code/transport.rs'

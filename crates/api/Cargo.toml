@@ -34,6 +34,9 @@ xxhash-rust = { workspace = true }
 [features]
 schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallow-types/schema"]
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 fallow-mutation = { workspace = true }
 jsonschema = { workspace = true }

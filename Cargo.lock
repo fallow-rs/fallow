@@ -1101,6 +1101,7 @@ dependencies = [
  "fallow-types",
  "globset",
  "jsonschema",
+ "libc",
  "rayon",
  "rustc-hash",
  "schemars",

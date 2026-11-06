@@ -16,6 +16,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::companion::InstalledCompanion;
+use super::companion_temp::CompanionTemp;
 use super::protocol::{LinkFault, Request, Response, decode_response};
 
 /// The size of the stderr tail that an error report keeps.
@@ -111,10 +112,17 @@ impl CompanionSpawner for ProcessSpawner {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let temp = CompanionTemp::create(&std::env::temp_dir()).map_err(|error| {
+            SpawnFailure::Fault(LinkFault::Io(format!(
+                "cannot create the companion temp directory: {error}"
+            )))
+        })?;
+        temp.apply(&mut command);
         let token = SessionToken::generate(&self.session_token_env);
-        ProcessLink::spawn(&mut command, self.wire_version, &token)
-            .map(|link| Box::new(link) as Box<dyn CompanionLink>)
-            .map_err(SpawnFailure::Fault)
+        let mut link = ProcessLink::spawn(&mut command, self.wire_version, &token)
+            .map_err(SpawnFailure::Fault)?;
+        link.temp = Some(temp);
+        Ok(Box::new(link))
     }
 }
 
@@ -198,6 +206,9 @@ pub struct ProcessLink {
     next_id: u64,
     version: u32,
     alive: bool,
+    /// The temp directory of the companion tree. It is the last field, so
+    /// that it drops after the child, when the tree has ended.
+    temp: Option<CompanionTemp>,
 }
 
 impl ProcessLink {
@@ -236,6 +247,7 @@ impl ProcessLink {
             next_id: 1,
             version,
             alive: true,
+            temp: None,
         })
     }
 
@@ -430,6 +442,8 @@ fn read_stderr(mut stderr: impl Read, tail: &(Mutex<StderrTail>, Condvar)) {
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 #[cfg(all(test, unix))]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     fn shell(script: &str) -> Command {
@@ -503,6 +517,49 @@ mod tests {
             Err(other) => panic!("expected an integrity failure, got {other:?}"),
             Ok(_) => panic!("a changed companion must not start"),
         }
+    }
+
+    /// Starts a companion from `script` through the spawner, as a run does.
+    fn spawn_script(cache: &Path, script: &'static str) -> Box<dyn CompanionLink> {
+        use super::super::companion::{EmbeddedFile, install};
+        let files = [EmbeddedFile {
+            path: "companion.mjs",
+            text: script,
+        }];
+        let companion = install(cache, &files).expect("install");
+        let spawner = ProcessSpawner {
+            runtime: PathBuf::from("/bin/sh"),
+            companion,
+            root: cache.to_path_buf(),
+            wire_version: 1,
+            session_token_env: TOKEN_ENV.to_owned(),
+        };
+        spawner.spawn().expect("spawn")
+    }
+
+    /// A test run that the runner kills cannot delete its temp files, so the
+    /// temp directory of the companion goes away with the companion.
+    #[test]
+    fn the_temp_files_of_a_killed_companion_do_not_stay_on_the_disk() {
+        let cache = tempfile::tempdir().expect("dir");
+        let script = "dir=\"${TMPDIR:-/tmp}/fallow-vitest-run-$$\"; mkdir -p \"$dir\"; \
+             echo data > \"$dir/file\"; printf '%s' \"$dir\" > \"$PWD/temp-path\"; \
+             read line; sleep 30\n";
+        let mut link = spawn_script(cache.path(), script);
+        let report = cache.path().join("temp-path");
+        let started = Instant::now();
+        while !report.is_file() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let fault = link
+            .request(&init(), Duration::from_millis(300))
+            .unwrap_err();
+        assert_eq!(fault, LinkFault::Timeout);
+        drop(link);
+        let written = PathBuf::from(std::fs::read_to_string(&report).unwrap());
+        let left = written.exists();
+        let _ = std::fs::remove_dir_all(&written);
+        assert!(!left, "{} stays after the kill", written.display());
     }
 
     #[test]
