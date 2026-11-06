@@ -87,12 +87,12 @@ matching, but the two helpers really do share structure. See
 
 | Pair ID | Type | Strict | Mild | Weak | Semantic | Overlap |
 |---------|------|--------|------|------|----------|---------|
-| T1-dataproc | type-1 | TP (143 lines) | TP | TP | TP | Full file |
+| T1-dataproc | type-1 | TP (141 lines) | TP | TP | TP | Full file |
 | T1-cache | type-1 | TP (132 lines) | TP | TP | TP | Full file |
 | T2-http | type-2 | TN | TN | TN | **TP (136 lines)** | Full file |
 | T2-eventbus | type-2 | TN | TN | TN | **TP (123 lines)** | Full file |
 | T3-validator | type-3 | TP (32 lines) | TP | TP | TP (35 lines) | Shared switch cases |
-| T3-queue | type-3 | TP (25 lines) | TP | TP | TP (25 lines) | Binary search + updatePriority |
+| T3-queue | type-3 | TP (22 lines) | TP | TP | TP (25 lines) | Binary search + updatePriority |
 | T4-sort | type-4 | TN | TN | TN | FP (16 lines) | Binary search helper |
 
 ## False Positive Analysis

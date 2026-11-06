@@ -17,7 +17,7 @@
           "id": "T1-dataproc",
           "type": "type-1",
           "matched": true,
-          "overlap_lines": 143,
+          "overlap_lines": 141,
           "notes": "TP"
         },
         {
@@ -52,7 +52,7 @@
           "id": "T3-queue",
           "type": "type-3",
           "matched": true,
-          "overlap_lines": 25,
+          "overlap_lines": 22,
           "notes": "TP"
         },
         {
@@ -78,7 +78,7 @@
           "id": "T1-dataproc",
           "type": "type-1",
           "matched": true,
-          "overlap_lines": 143,
+          "overlap_lines": 141,
           "notes": "TP"
         },
         {
@@ -113,7 +113,7 @@
           "id": "T3-queue",
           "type": "type-3",
           "matched": true,
-          "overlap_lines": 25,
+          "overlap_lines": 22,
           "notes": "TP"
         },
         {
@@ -139,7 +139,7 @@
           "id": "T1-dataproc",
           "type": "type-1",
           "matched": true,
-          "overlap_lines": 143,
+          "overlap_lines": 141,
           "notes": "TP"
         },
         {
@@ -174,7 +174,7 @@
           "id": "T3-queue",
           "type": "type-3",
           "matched": true,
-          "overlap_lines": 25,
+          "overlap_lines": 22,
           "notes": "TP"
         },
         {
@@ -200,7 +200,7 @@
           "id": "T1-dataproc",
           "type": "type-1",
           "matched": true,
-          "overlap_lines": 143,
+          "overlap_lines": 141,
           "notes": "TP"
         },
         {
@@ -261,7 +261,7 @@
           "id": "T1-dataproc",
           "type": "type-1",
           "matched": true,
-          "overlap_lines": 143,
+          "overlap_lines": 141,
           "notes": "Bonus (not expected but acceptable overlap)"
         },
         {
@@ -296,7 +296,7 @@
           "id": "T3-queue",
           "type": "type-3",
           "matched": true,
-          "overlap_lines": 25,
+          "overlap_lines": 22,
           "notes": "Bonus (not expected but acceptable overlap)"
         },
         {

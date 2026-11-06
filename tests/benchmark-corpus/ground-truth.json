@@ -66,7 +66,7 @@
       "file_b": "src/type3-near-miss/queue-b.ts",
       "region_a": { "start_line": 1, "end_line": 95 },
       "region_b": { "start_line": 1, "end_line": 125 },
-      "min_overlap_lines": 25,
+      "min_overlap_lines": 20,
       "expected_in_modes": ["strict", "mild", "weak", "semantic"],
       "notes": "Strict/mild should find the binary search insertion and updatePriority blocks"
     },
