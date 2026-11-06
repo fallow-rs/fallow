@@ -1741,8 +1741,9 @@ mod interrupt {
         );
     }
 
-    /// The one test waits long enough for an interrupt during the dry run.
-    const SLOW_DRY_RUN_TESTS: &str = "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { inc } from \"../src/math.js\";\ntest(\"inc\", async () => { await new Promise((resolve) => setTimeout(resolve, 20000)); assert.equal(inc(1), 2); });\n";
+    /// The one test writes the marker file of `DRY_RUN_MARKER`, then waits
+    /// long enough for an interrupt during the dry run.
+    const SLOW_DRY_RUN_TESTS: &str = "import assert from \"node:assert/strict\";\nimport { writeFileSync } from \"node:fs\";\nimport { test } from \"node:test\";\nimport { inc } from \"../src/math.js\";\ntest(\"inc\", async () => { writeFileSync(process.env.DRY_RUN_MARKER, \"\"); await new Promise((resolve) => setTimeout(resolve, 20000)); assert.equal(inc(1), 2); });\n";
 
     /// Issue #4302: a SIGINT during the dry run ends the run with exit code
     /// 130 and no error report. The signal kills the companion, and the run
@@ -1757,28 +1758,31 @@ mod interrupt {
         fs::write(root.join("test/math.test.js"), SLOW_DRY_RUN_TESTS).expect("test file");
         commit_all(root, "slow dry run");
         let temp = tempfile::tempdir().expect("temp dir");
+        let marker = temp.path().join("dry-run-started");
 
         let mut command = Command::new(fallow_bin());
         scrub_analysis_env(&mut command);
         command
-            .env("TMPDIR", temp.path())
+            .env("DRY_RUN_MARKER", &marker)
             .args(["mutation", "--root"])
             .arg(root)
             .args(["--all", "--no-cache", "--format", "json", "--quiet"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let child = command.spawn().expect("spawn fallow mutation");
-        let deadline = Instant::now() + Duration::from_secs(60);
-        // The companion temp directory exists once the companion runs.
-        while fs::read_dir(temp.path())
-            .expect("temp dir")
-            .next()
-            .is_none()
-        {
-            assert!(Instant::now() < deadline, "no companion in time");
+        let mut child = command.spawn().expect("spawn fallow mutation");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        // The marker proves that the dry run runs the test.
+        while !marker.exists() {
+            if child.try_wait().expect("poll").is_some() || Instant::now() >= deadline {
+                let _ = child.kill();
+                let output = child.wait_with_output().expect("wait");
+                panic!(
+                    "the dry run did not start: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
-        std::thread::sleep(Duration::from_secs(2));
         let interrupted = Command::new("kill")
             .args(["-INT", &child.id().to_string()])
             .status()
