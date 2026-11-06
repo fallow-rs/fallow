@@ -97,3 +97,71 @@ fn clone_ending_on_a_declaration_keyword_does_not_cover_the_declaration() {
         report.stats.duplicated_lines
     );
 }
+
+/// The shared code after an object literal that differs between the two files.
+const SHARED_SEARCH: &str = "  let low = 0;
+  let high = items.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (items[mid].priority > priority) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  items.splice(low, 0, item);
+  return low;
+}
+";
+
+#[test]
+fn clone_starting_on_a_closing_brace_does_not_cover_the_object_literal() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+
+    // The object literals differ in their last property, so the clone starts
+    // at the closing brace: line 6 of the first file, line 7 of the second.
+    let first = format!(
+        "export function insertA(items: Item[], data: string, priority: number): number {{\n  \
+         const item = {{\n    data,\n    priority,\n    addedAt: 1,\n  }};\n{SHARED_SEARCH}"
+    );
+    let second = format!(
+        "export function insertB(items: Item[], data: string, priority: number): number {{\n  \
+         const item = {{\n    data,\n    priority,\n    addedAt: 1,\n    retryCount: 0,\n  }};\n{SHARED_SEARCH}"
+    );
+    std::fs::write(src.join("first.ts"), &first).expect("write first");
+    std::fs::write(src.join("second.ts"), &second).expect("write second");
+    let files = vec![
+        discovered(0, src.join("first.ts"), &first),
+        discovered(1, src.join("second.ts"), &second),
+    ];
+    let config = fallow_config::DuplicatesConfig {
+        mode: fallow_config::DetectionMode::Strict,
+        min_tokens: 30,
+        min_lines: 3,
+        ..Default::default()
+    };
+
+    let report = fallow_engine::duplicates::find_duplicates(dir.path(), &files, &config);
+
+    let starts: Vec<(String, usize)> = report
+        .clone_groups
+        .iter()
+        .flat_map(|group| &group.instances)
+        .map(|instance| {
+            let name = instance
+                .file
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (name, instance.start_line)
+        })
+        .collect();
+    assert_eq!(
+        starts,
+        vec![("first.ts".to_string(), 6), ("second.ts".to_string(), 7)],
+        "the clone starts at the `}};` line, not at the `{{` of the object literal: {:#?}",
+        report.clone_groups
+    );
+}
