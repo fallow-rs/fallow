@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 
 use fallow_types::discover::FileId;
 use rustc_hash::FxHashMap;
-use serde_json::Value;
 
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
 use super::types::{
@@ -16,6 +15,8 @@ use super::types::{
 };
 use crate::read_trace::TracedPath;
 
+#[path = "fallbacks_package_map.rs"]
+mod package_map;
 #[path = "fallbacks_path_aliases.rs"]
 mod path_aliases;
 #[path = "fallbacks_relative_package_root.rs"]
@@ -27,9 +28,10 @@ mod tsconfig_output;
 #[path = "fallbacks_workspace_package_asset.rs"]
 mod workspace_package_asset;
 
-use path_aliases::applicable_path_aliases;
+use package_map::{PackageMapTarget, package_map_target};
 pub(super) use path_aliases::{
-    alias_match_remainder, matches_plugin_path_alias, try_path_alias_fallback,
+    alias_match_remainder, applicable_path_aliases, matches_plugin_path_alias,
+    try_path_alias_fallback,
 };
 pub(super) use relative_package_root::try_relative_package_root_source_fallback;
 use scss_paths::{find_scss_through_path_alias, lookup_scss_path};
@@ -618,122 +620,9 @@ pub(super) fn normalize_path_lexically(path: &Path) -> PathBuf {
     normalized
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PackageMapTarget {
-    NoMatch,
-    Blocked,
-    Targets(Vec<String>),
-}
-
 enum PackageImportTarget {
     Internal(FileId),
     ExternalPackage(String),
-}
-
-fn package_map_match_value(
-    value: &Value,
-    condition_names: &[String],
-    capture: Option<&str>,
-) -> PackageMapTarget {
-    resolve_package_map_value(value, condition_names, capture)
-        .filter(|targets| !targets.is_empty())
-        .map_or(PackageMapTarget::Blocked, PackageMapTarget::Targets)
-}
-
-fn package_map_target(
-    map: &Value,
-    specifier_key: &str,
-    condition_names: &[String],
-) -> PackageMapTarget {
-    let Some(obj) = map.as_object() else {
-        if specifier_key == "." {
-            return package_map_match_value(map, condition_names, None);
-        }
-        return PackageMapTarget::NoMatch;
-    };
-
-    let has_subpath_keys = obj
-        .keys()
-        .any(|key| key == "." || key.starts_with("./") || key.starts_with('#'));
-    if !has_subpath_keys {
-        if specifier_key == "." {
-            return package_map_match_value(map, condition_names, None);
-        }
-        return PackageMapTarget::NoMatch;
-    }
-
-    if let Some(value) = obj.get(specifier_key) {
-        return package_map_match_value(value, condition_names, None);
-    }
-
-    let mut patterns: Vec<(&str, &Value, String)> = obj
-        .iter()
-        .filter_map(|(pattern, value)| {
-            package_map_pattern_capture(pattern, specifier_key)
-                .map(|capture| (pattern.as_str(), value, capture))
-        })
-        .collect();
-    patterns.sort_by(|(left, _, _), (right, _, _)| {
-        package_map_pattern_specificity(right).cmp(&package_map_pattern_specificity(left))
-    });
-
-    patterns
-        .first()
-        .map_or(PackageMapTarget::NoMatch, |(_, value, capture)| {
-            package_map_match_value(value, condition_names, Some(capture))
-        })
-}
-
-fn resolve_package_map_value(
-    value: &Value,
-    condition_names: &[String],
-    capture: Option<&str>,
-) -> Option<Vec<String>> {
-    match value {
-        Value::String(target) => Some(vec![match capture {
-            Some(capture) => target.replace('*', capture),
-            None => target.clone(),
-        }]),
-        Value::Object(map) => {
-            for (condition, value) in map {
-                if (condition == "default"
-                    || condition_names
-                        .iter()
-                        .any(|active_condition| active_condition == condition))
-                    && let Some(targets) =
-                        resolve_package_map_value(value, condition_names, capture)
-                {
-                    return Some(targets);
-                }
-            }
-            None
-        }
-        Value::Array(values) => {
-            let targets: Vec<String> = values
-                .iter()
-                .filter_map(|value| resolve_package_map_value(value, condition_names, capture))
-                .flatten()
-                .collect();
-            (!targets.is_empty()).then_some(targets)
-        }
-        Value::Bool(_) | Value::Null | Value::Number(_) => None,
-    }
-}
-
-fn package_map_pattern_capture(pattern: &str, specifier: &str) -> Option<String> {
-    let star = pattern.find('*')?;
-    if pattern[star + 1..].contains('*') {
-        return None;
-    }
-    let (prefix, suffix_with_star) = pattern.split_at(star);
-    let suffix = &suffix_with_star[1..];
-    let captured = specifier.strip_prefix(prefix)?.strip_suffix(suffix)?;
-    Some(captured.to_string())
-}
-
-fn package_map_pattern_specificity(pattern: &str) -> (usize, usize) {
-    let star = pattern.find('*').unwrap_or(pattern.len());
-    (star, pattern.len())
 }
 
 fn package_import_source_subpath(
@@ -1139,14 +1028,14 @@ fn export_key(subpath: &str) -> String {
 }
 
 /// Return the paths that the `exports` map of a project package names for a
-/// bare `specifier`, when no named path exists on disk.
+/// bare `specifier` and that do not exist on disk.
 ///
 /// Generated code (`./src/generated/enums.ts`) does not exist before the
 /// generator runs, so such an import does not resolve. The unresolved-import
 /// check uses these paths to find out if the repository ignores the target.
 /// The result is `None` when the specifier does not name a project package,
 /// when the package has no `exports` map, when no `exports` key matches the
-/// subpath, when a target leaves the package root, or when a target exists.
+/// subpath, or when no target inside the package root is missing.
 pub(super) fn missing_package_export_paths(
     ctx: &ResolveContext<'_>,
     specifier: &str,
@@ -1166,11 +1055,12 @@ pub(super) fn missing_package_export_paths(
     else {
         return None;
     };
-    let paths = targets
+    let paths: Vec<PathBuf> = targets
         .iter()
-        .map(|target| package_map_target_path(manifest, target))
-        .collect::<Option<Vec<_>>>()?;
-    (!paths.is_empty() && paths.iter().all(|path| !path.traced_exists())).then_some(paths)
+        .filter_map(|target| package_map_target_path(manifest, target))
+        .filter(|path| !path.traced_exists())
+        .collect();
+    (!paths.is_empty()).then_some(paths)
 }
 
 /// Resolve the stripped subpath as a relative import from inside the package
@@ -1268,6 +1158,7 @@ pub(super) fn has_wildcard_or_alternates(prefix: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::package_map::{package_map_pattern_capture, resolve_package_map_value};
     use super::*;
     use crate::resolve::types::{CanonicalizeCache, TsconfigCache};
     use fallow_types::extract::ModuleLoadMechanism;
@@ -1572,134 +1463,6 @@ mod tests {
             try_source_fallback(&dist_path, &path_to_id),
             Some(FileId(0)),
             "should resolve dist/ within project, not match parent 'build' dir"
-        );
-    }
-
-    #[test]
-    fn package_map_exact_entry_beats_pattern_entry() {
-        let map = serde_json::json!({
-            "#nitro/runtime/task": "./dist/special/task.mjs",
-            "#nitro/runtime/*": "./dist/runtime/internal/*.mjs"
-        });
-        assert_eq!(
-            package_map_target(&map, "#nitro/runtime/task", &conditions()),
-            PackageMapTarget::Targets(vec!["./dist/special/task.mjs".to_string()])
-        );
-    }
-
-    #[test]
-    fn package_map_wildcard_substitutes_capture() {
-        let map = serde_json::json!({
-            "#nitro/runtime/*": "./dist/runtime/internal/*.mjs"
-        });
-        assert_eq!(
-            package_map_target(&map, "#nitro/runtime/task", &conditions()),
-            PackageMapTarget::Targets(vec!["./dist/runtime/internal/task.mjs".to_string()])
-        );
-    }
-
-    #[test]
-    fn package_map_exact_entry_with_no_target_blocks_pattern_entry() {
-        let map = serde_json::json!({
-            "#nitro/runtime/task": null,
-            "#nitro/runtime/*": "./dist/runtime/internal/*.mjs"
-        });
-        assert_eq!(
-            package_map_target(&map, "#nitro/runtime/task", &conditions()),
-            PackageMapTarget::Blocked
-        );
-    }
-
-    #[test]
-    fn package_map_best_pattern_with_no_target_blocks_broader_pattern() {
-        let map = serde_json::json!({
-            "#nitro/runtime/internal/*": null,
-            "#nitro/runtime/*": "./dist/runtime/*.mjs"
-        });
-        assert_eq!(
-            package_map_target(&map, "#nitro/runtime/internal/task", &conditions()),
-            PackageMapTarget::Blocked
-        );
-    }
-
-    #[test]
-    fn package_map_unmatched_subpath_is_not_a_target() {
-        let map = serde_json::json!({
-            "./query": "./dist/query/index.js"
-        });
-        assert_eq!(
-            package_map_target(&map, "./private", &conditions()),
-            PackageMapTarget::NoMatch
-        );
-    }
-
-    #[test]
-    fn package_map_nested_conditions_follow_manifest_order() {
-        let map = serde_json::json!({
-            "./query/react": {
-                "types": "./dist/query/react/index.d.ts",
-                "import": {
-                    "development": "./src/query/react/index.ts",
-                    "default": "./dist/query/react/index.js"
-                },
-                "default": "./dist/query/react/index.cjs"
-            }
-        });
-        assert_eq!(
-            package_map_target(&map, "./query/react", &conditions()),
-            PackageMapTarget::Targets(vec!["./dist/query/react/index.d.ts".to_string()])
-        );
-    }
-
-    #[test]
-    fn package_map_import_before_types_selects_runtime_branch() {
-        let map = serde_json::json!({
-            ".": {
-                "import": "./dist/index.js",
-                "types": "./dist/index.d.ts"
-            }
-        });
-        assert_eq!(
-            package_map_target(&map, ".", &conditions()),
-            PackageMapTarget::Targets(vec!["./dist/index.js".to_string()])
-        );
-    }
-
-    #[test]
-    fn package_map_condition_order_follows_manifest_order() {
-        let map = serde_json::json!({
-            ".": {
-                "node": "./dist/node.js",
-                "import": "./dist/index.js"
-            }
-        });
-        assert_eq!(
-            package_map_target(&map, ".", &conditions()),
-            PackageMapTarget::Targets(vec!["./dist/node.js".to_string()])
-        );
-    }
-
-    #[test]
-    fn package_map_arrays_preserve_fallback_order() {
-        let map = serde_json::json!({
-            "#array": ["./dist/missing.js", "./src/array.ts"],
-            "#null": null,
-            "#false": false
-        });
-        assert_eq!(
-            package_map_target(&map, "#array", &conditions()),
-            PackageMapTarget::Targets(vec![
-                "./dist/missing.js".to_string(),
-                "./src/array.ts".to_string()
-            ])
-        );
-        assert_eq!(
-            package_map_target(&map, "#null", &conditions()),
-            PackageMapTarget::Blocked
-        );
-        assert_eq!(
-            package_map_target(&map, "#false", &conditions()),
-            PackageMapTarget::Blocked
         );
     }
 

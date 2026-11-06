@@ -23,7 +23,7 @@ use super::file_attempt::{
 use super::inline_loaders::InlineLoaderRequest;
 use super::package_credit::{
     package_usage_name_for_external_bare_specifier, package_usage_name_for_import,
-    uninstalled_tsconfig_alias_target_package,
+    uninstalled_plugin_alias_target_package, uninstalled_tsconfig_alias_target_package,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -1845,7 +1845,6 @@ fn resolve_failed_specifier(
             specifier,
             from_style || is_style_file(from_file),
             flags.is_bare,
-            matches_tsconfig_path_alias,
         );
     }
     resolve_failed_regular_specifier(
@@ -1941,7 +1940,6 @@ fn resolve_failed_alias_specifier(
     specifier: &str,
     style_context: bool,
     is_bare: bool,
-    matches_tsconfig_path_alias: bool,
 ) -> ResolveResult {
     if let Some(result) = try_path_alias_fallback(ctx, from_file, specifier, style_context) {
         return result;
@@ -1953,10 +1951,12 @@ fn resolve_failed_alias_specifier(
     {
         return result;
     }
-    if matches_tsconfig_path_alias {
-        return ResolveResult::Unresolvable(specifier.to_string());
+    match uninstalled_plugin_alias_target_package(ctx, from_file, specifier) {
+        Some(pkg) if is_bare && !ctx.workspace_roots.contains_key(pkg.as_str()) => {
+            ResolveResult::NpmPackage(pkg)
+        }
+        _ => ResolveResult::Unresolvable(specifier.to_string()),
     }
-    ResolveResult::Unresolvable(specifier.to_string())
 }
 
 fn try_tsconfig_root_dirs(

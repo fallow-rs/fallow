@@ -34,7 +34,7 @@ pub(in crate::resolve) fn alias_match_remainder<'a>(
 /// unresolved, and the specifier does not resolve into another workspace that
 /// declares the same prefix. When no workspace owns the specifier, the
 /// project-level aliases apply.
-pub(super) fn applicable_path_aliases<'c>(
+pub(in crate::resolve) fn applicable_path_aliases<'c>(
     ctx: &'c ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
