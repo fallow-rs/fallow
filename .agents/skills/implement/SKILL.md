@@ -14,6 +14,11 @@ Deliver the requested change through the native Fallow lifecycle.
    same change, do not open a competing one. Report its URL to the
    maintainer as an open decision, with a recommended answer. A pull request
    of this objective does not count.
+   Search with the key terms of the change, not only the issue number,
+   because a pull request can have no link to the issue. Use
+   `gh pr list --state all --search "<terms>"`. Do the search and a rebase
+   on `origin/main` again before you open the pull request, because another
+   session can merge the same change in the meantime.
 3. Write the acceptance criteria and verification plan to the gitignored
    `.plans/<task>.md`.
 4. Resolve open decisions before editing. Sort each open question:
