@@ -27,7 +27,7 @@ pub(super) fn load_and_compare_baseline(
     let outcome = apply_dead_code_baseline(
         results,
         &content,
-        io.root,
+        &io.config.root,
         io.analysis_identity,
         !comparison.reasons.is_empty(),
     )

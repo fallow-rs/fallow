@@ -17,6 +17,7 @@ pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) runtime_coverage_findings: &'a [fallow_output::RuntimeCoverageFinding],
     pub(super) targets: &'a [fallow_output::RefactoringTarget],
     pub(super) config_root: &'a std::path::Path,
+    pub(super) cache_dir: &'a std::path::Path,
     pub(super) quiet: bool,
     pub(super) mode: HealthBaselineMode,
     pub(super) mode_explicit: bool,
@@ -84,6 +85,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         runtime_coverage_findings,
         targets,
         config_root,
+        cache_dir,
         quiet,
         mode,
         mode_explicit,
@@ -126,6 +128,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
             if !quiet {
                 eprintln!("Saved health baseline to {}", save_path.display());
             }
+            crate::baseline_location::warn_if_in_cache_dir(save_path, cache_dir, config_root);
             Ok(())
         }
         Err(e) => Err(HealthError::message(

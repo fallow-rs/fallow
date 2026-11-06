@@ -8,10 +8,10 @@ expression: redacted
     src/copy1.ts:1-27
     src/original.ts:1-27
 
-     21 lines  3 instances  dup:8a6ebe05
-    src/copy1.ts:1-21
-    src/original.ts:1-21
-    src/partial.ts:2-17
+     12 lines  3 instances  dup:31da35a4
+    src/copy1.ts:1-12
+    src/original.ts:1-12
+    src/partial.ts:2-13
 
   Duplicate code blocks
   https://fallow.tools/docs/explanations/duplication/#clone-groups

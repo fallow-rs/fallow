@@ -307,9 +307,11 @@ fallow dead-code --format json --quiet --save-regression-baseline
 # 2. In CI: fail only if issues increase beyond tolerance
 fallow dead-code --format json --quiet --fail-on-regression --tolerance 0
 # Identity-based baseline (fail only on NEW findings, not raw counts)
-fallow dead-code --format json --quiet --save-baseline .fallow/snapshot.json
-fallow dead-code --format json --quiet --baseline .fallow/snapshot.json
+fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-code.json
+fallow dead-code --format json --quiet --baseline fallow-baselines/dead-code.json
 ```
+
+Commit the baseline file. Do not save it in `.fallow/`: fallow tells Git to ignore that cache directory, so the baseline is not committed and `fallow` prints a warning.
 
 `--save-regression-baseline` / `--regression-baseline` / `--fail-on-regression` / `--tolerance` are count-based gates for `dead-code`, `architecture`, bare combined mode, and `flags --retirement` (a flags baseline needs a PATH; without `--retirement` the options have no effect on `flags` and it warns). `--save-baseline` / `--baseline` are identity-based (track finding identity, fail on new). On bare `fallow` they hold the dead-code baseline only; pass health and duplication baselines with `--health-baseline` / `--dupes-baseline`. `audit` rejects the global baseline flags and uses `--dead-code-baseline` / `--health-baseline` / `--dupes-baseline` instead.
 
