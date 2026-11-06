@@ -5,10 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use fallow_engine::mutation::PlannedMutant;
 use fallow_output::{
     MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
-    MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus,
-    MutationKillMatrixTarget, MutationTestKillRow,
+    MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationTestKillRow,
 };
 use rustc_hash::FxHashMap;
+
+use super::scheduler::targets::ResolvedTarget;
 
 mod targets;
 
@@ -33,7 +34,7 @@ pub enum Mode<'a> {
     /// they select. The selection is empty when no dry run happened.
     Targets {
         requested: &'a [String],
-        resolved: &'a [MutationKillMatrixTarget],
+        resolved: &'a [ResolvedTarget],
     },
 }
 

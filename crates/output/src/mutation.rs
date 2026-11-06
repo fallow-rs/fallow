@@ -819,6 +819,17 @@ pub struct MutationKillMatrixTarget {
     pub target: String,
     /// The dry-run test ids that the target selects, sorted.
     pub test_ids: Vec<String>,
+    /// Whether the evidence of this target supports candidate analysis:
+    /// `complete` or `incomplete`. Only the tests of a complete target can
+    /// be candidates.
+    pub status: MutationKillMatrixStatus,
+    /// Why the evidence of this target is incomplete, sorted. The run-wide
+    /// reasons `partial-mutation-run`, `baseline-failure`, and
+    /// `missing-test-file-metadata` apply to each target.
+    /// `incomplete-mutant-results` means that a test of this target covers a
+    /// mutant with incomplete evidence. `unmatched-target` means that the
+    /// target selects no test.
+    pub reasons: Vec<String>,
 }
 
 /// Redundancy signals over the observed mutants. Candidates need review.
@@ -833,6 +844,7 @@ pub struct MutationKillMatrix {
     /// Each eligible test with observed coverage, sorted by test id.
     pub tests: Vec<MutationTestKillRow>,
     /// Tests with nonempty kills and no unique kills, sorted by test id.
+    /// In target mode, only the tests of complete targets.
     pub candidates: Vec<String>,
     /// Tests with coverage and no observed kills, sorted by test id.
     pub coverage_without_kills: Vec<String>,

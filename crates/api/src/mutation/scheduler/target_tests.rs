@@ -94,7 +94,7 @@ fn targets_run_without_bail_then_the_other_tests_run_with_bail() {
     assert_eq!(outcome.results["m1"].status, MutantStatus::Pruned);
     assert_eq!(
         outcome.targets,
-        [MutationKillMatrixTarget {
+        [targets::ResolvedTarget {
             target: tid("t2"),
             test_ids: vec![tid("t2")],
         }]

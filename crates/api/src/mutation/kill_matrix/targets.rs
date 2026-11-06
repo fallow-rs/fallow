@@ -14,24 +14,27 @@ use fallow_output::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::baseline_excluded;
+use super::{ResolvedTarget, baseline_excluded};
 
 /// The note of each target row: bail hides the other killers.
 const SUBSUMERS_NOT_COMPUTED: &str = "subsumers-not-computed";
 
+const INCOMPLETE_MUTANT_RESULTS: &str = "incomplete-mutant-results";
+const UNMATCHED_TARGET: &str = "unmatched-target";
+
 /// The targets of a run and the dry-run tests that they select.
 pub struct Selection {
-    targets: Vec<MutationKillMatrixTarget>,
+    targets: Vec<ResolvedTarget>,
 }
 
 impl Selection {
     /// The resolved targets. Without a dry run, `resolved` is empty and each
     /// requested target selects no test.
-    pub fn new(requested: &[String], resolved: &[MutationKillMatrixTarget]) -> Self {
+    pub fn new(requested: &[String], resolved: &[ResolvedTarget]) -> Self {
         let targets = if resolved.is_empty() {
             requested
                 .iter()
-                .map(|target| MutationKillMatrixTarget {
+                .map(|target| ResolvedTarget {
                     target: target.clone(),
                     test_ids: Vec::new(),
                 })
@@ -55,6 +58,10 @@ struct Evidence {
     /// The target killers of each mutant with no other killer.
     target_only: BTreeMap<String, BTreeSet<String>>,
     incomplete: bool,
+    /// The selected tests that cover a mutant with incomplete evidence.
+    incomplete_tests: BTreeSet<String>,
+    /// An incomplete mutant names no selected test, so no target is safe.
+    incomplete_everywhere: bool,
     missing_test_files: bool,
 }
 
@@ -87,28 +94,43 @@ pub fn build(
     if !baseline.is_empty() {
         reasons.insert("baseline-failure");
     }
-    if evidence.incomplete {
-        reasons.insert("incomplete-mutant-results");
-    }
     if evidence.missing_test_files {
         reasons.insert("missing-test-file-metadata");
     }
-    if selection
+    let run_wide: Vec<&str> = reasons.iter().copied().collect();
+    let targets: Vec<MutationKillMatrixTarget> = selection
         .targets
         .iter()
-        .any(|target| target.test_ids.is_empty())
-    {
-        reasons.insert("unmatched-target");
+        .map(|target| target_entry(target, &run_wide, &evidence))
+        .collect();
+    if evidence.incomplete {
+        reasons.insert(INCOMPLETE_MUTANT_RESULTS);
+    }
+    if targets.iter().any(|target| target.test_ids.is_empty()) {
+        reasons.insert(UNMATCHED_TARGET);
     }
     let complete = reasons.is_empty();
+    // A test has complete evidence when one complete target selects it.
+    let complete_tests: FxHashSet<&str> = targets
+        .iter()
+        .filter(|target| target.status == MutationKillMatrixStatus::Complete)
+        .flat_map(|target| target.test_ids.iter().map(String::as_str))
+        .collect();
     let tests: Vec<MutationTestKillRow> = evidence
         .kills
         .iter()
-        .map(|(id, kills)| row(id, kills, &evidence, test_files, complete))
+        .map(|(id, kills)| {
+            let row_complete = complete_tests.contains(id.as_str());
+            row(id, kills, &evidence, test_files, row_complete)
+        })
         .collect();
     let candidates = tests
         .iter()
-        .filter(|row| complete && !row.kills.is_empty() && row.unique_kills.is_empty())
+        .filter(|row| {
+            complete_tests.contains(row.test_id.as_str())
+                && !row.kills.is_empty()
+                && row.unique_kills.is_empty()
+        })
         .map(|row| row.test_id.clone())
         .collect();
     let coverage_without_kills = tests
@@ -126,7 +148,37 @@ pub fn build(
         tests,
         candidates,
         coverage_without_kills,
-        targets: Some(selection.targets.clone()),
+        targets: Some(targets),
+    }
+}
+
+/// The output entry of one target with the status of its own evidence.
+fn target_entry(
+    target: &ResolvedTarget,
+    run_wide: &[&str],
+    evidence: &Evidence,
+) -> MutationKillMatrixTarget {
+    let mut reasons: BTreeSet<&str> = run_wide.iter().copied().collect();
+    if evidence.incomplete_everywhere
+        || target
+            .test_ids
+            .iter()
+            .any(|test| evidence.incomplete_tests.contains(test))
+    {
+        reasons.insert(INCOMPLETE_MUTANT_RESULTS);
+    }
+    if target.test_ids.is_empty() {
+        reasons.insert(UNMATCHED_TARGET);
+    }
+    MutationKillMatrixTarget {
+        target: target.target.clone(),
+        test_ids: target.test_ids.clone(),
+        status: if reasons.is_empty() {
+            MutationKillMatrixStatus::Complete
+        } else {
+            MutationKillMatrixStatus::Incomplete
+        },
+        reasons: reasons.into_iter().map(str::to_owned).collect(),
     }
 }
 
@@ -146,11 +198,27 @@ fn observe(
     }
     // A timeout of the other tests after a target survivor keeps complete
     // target evidence. Each status without a final result does not.
-    evidence.incomplete |= !result.kill_matrix_complete
+    let incomplete = !result.kill_matrix_complete
         || matches!(
             result.status,
             MutantStatus::Pending | MutantStatus::Flaky | MutantStatus::RuntimeError
         );
+    if incomplete {
+        evidence.incomplete = true;
+        let touched: Vec<&String> = result
+            .covering_tests
+            .iter()
+            .chain(&result.killing_tests)
+            .filter(|test| all_targets.contains(test.as_str()))
+            .collect();
+        // Without a known target test, the mutant can touch each target.
+        if touched.is_empty() {
+            evidence.incomplete_everywhere = true;
+        }
+        evidence
+            .incomplete_tests
+            .extend(touched.into_iter().cloned());
+    }
     for test in &result.covering_tests {
         if eligible.contains(test.as_str()) {
             evidence.kills.entry(test.clone()).or_default();
@@ -228,16 +296,18 @@ fn row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::MutantLocation;
+    use fallow_output::{MutantLocation, MutationIncompleteReason};
 
     const A: &str = "test/a.ts::a";
     const B: &str = "test/a.ts::b";
+    const C: &str = "test/c.ts::c";
     const OTHER: &str = "test/other.ts::other";
 
     fn files() -> FxHashMap<String, String> {
         FxHashMap::from_iter([
             (A.to_owned(), "test/a.ts".to_owned()),
             (B.to_owned(), "test/a.ts".to_owned()),
+            (C.to_owned(), "test/c.ts".to_owned()),
             (OTHER.to_owned(), "test/other.ts".to_owned()),
         ])
     }
@@ -274,7 +344,7 @@ mod tests {
     }
 
     fn matrix(results: &[MutantResult]) -> MutationKillMatrix {
-        let resolved = [MutationKillMatrixTarget {
+        let resolved = [ResolvedTarget {
             target: "test/a.ts".to_owned(),
             test_ids: vec![A.to_owned(), B.to_owned()],
         }];
@@ -345,6 +415,9 @@ mod tests {
         assert_eq!(incomplete.status, MutationKillMatrixStatus::Incomplete);
         assert_eq!(incomplete.reasons, ["incomplete-mutant-results"]);
         assert!(incomplete.candidates.is_empty());
+        let target = &incomplete.targets.as_ref().expect("target mode")[0];
+        assert_eq!(target.status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(target.reasons, ["incomplete-mutant-results"]);
         assert_eq!(
             incomplete.tests[0].notes,
             ["incomplete-observed-evidence", SUBSUMERS_NOT_COMPUTED]
@@ -367,11 +440,84 @@ mod tests {
         );
         assert_eq!(unmatched.reasons, ["unmatched-target"]);
         assert!(unmatched.tests.is_empty());
+        assert_eq!(
+            unmatched.targets.expect("target mode")[0].reasons,
+            ["unmatched-target"]
+        );
+    }
+
+    #[test]
+    fn an_incomplete_mutant_outside_a_target_keeps_its_candidates() {
+        let mut other_target = result("m2", MutantStatus::Killed, &[C]);
+        other_target.kill_matrix_complete = false;
+        other_target.covering_tests = vec![C.to_owned()];
+        let resolved = [
+            ResolvedTarget {
+                target: "test/a.ts".to_owned(),
+                test_ids: vec![A.to_owned(), B.to_owned()],
+            },
+            ResolvedTarget {
+                target: "test/c.ts".to_owned(),
+                test_ids: vec![C.to_owned()],
+            },
+        ];
+        let matrix = build(
+            &Selection::new(&["test/a.ts".to_owned(), "test/c.ts".to_owned()], &resolved),
+            &[result("m1", MutantStatus::Killed, &[A, B]), other_target],
+            &[],
+            &MutationCompletion::from_reasons(Vec::new()),
+            &files(),
+        );
+        assert_eq!(matrix.status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(matrix.reasons, ["incomplete-mutant-results"]);
+        assert_eq!(matrix.candidates, [A, B], "m2 does not touch test/a.ts");
+        let targets = matrix.targets.expect("target mode");
+        assert_eq!(targets[0].status, MutationKillMatrixStatus::Complete);
+        assert!(targets[0].reasons.is_empty());
+        assert_eq!(targets[1].status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(targets[1].reasons, ["incomplete-mutant-results"]);
+        assert_eq!(matrix.tests[0].notes, [SUBSUMERS_NOT_COMPUTED]);
+        assert_eq!(
+            matrix.tests[2].notes,
+            ["incomplete-observed-evidence", SUBSUMERS_NOT_COMPUTED]
+        );
+    }
+
+    #[test]
+    fn an_incomplete_mutant_without_a_known_target_test_makes_each_target_incomplete() {
+        let mut unknown = result("m2", MutantStatus::RuntimeError, &[]);
+        unknown.covering_tests.clear();
+        let matrix = matrix(&[result("m1", MutantStatus::Killed, &[A, B]), unknown]);
+        assert_eq!(matrix.reasons, ["incomplete-mutant-results"]);
+        assert!(matrix.candidates.is_empty());
+        let targets = matrix.targets.expect("target mode");
+        assert_eq!(targets[0].status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(targets[0].reasons, ["incomplete-mutant-results"]);
+    }
+
+    #[test]
+    fn a_run_wide_reason_makes_each_target_incomplete() {
+        let resolved = [ResolvedTarget {
+            target: "test/a.ts".to_owned(),
+            test_ids: vec![A.to_owned(), B.to_owned()],
+        }];
+        let matrix = build(
+            &Selection::new(&["test/a.ts".to_owned()], &resolved),
+            &[result("m1", MutantStatus::Killed, &[A, B])],
+            &[],
+            &MutationCompletion::from_reasons(vec![MutationIncompleteReason::TimeBudget]),
+            &files(),
+        );
+        assert_eq!(matrix.reasons, ["partial-mutation-run"]);
+        assert!(matrix.candidates.is_empty());
+        let targets = matrix.targets.expect("target mode");
+        assert_eq!(targets[0].status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(targets[0].reasons, ["partial-mutation-run"]);
     }
 
     #[test]
     fn a_baseline_failing_target_gets_no_row_and_its_kill_is_not_shared() {
-        let resolved = [MutationKillMatrixTarget {
+        let resolved = [ResolvedTarget {
             target: "test/a.ts".to_owned(),
             test_ids: vec![A.to_owned(), B.to_owned()],
         }];

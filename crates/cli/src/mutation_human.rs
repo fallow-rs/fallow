@@ -872,25 +872,37 @@ fn render_test_kill_rows(out: &mut String, title: &str, rows: &[&MutationTestKil
     }
 }
 
-fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
-    let status = match matrix.status {
+const fn kill_matrix_status(status: MutationKillMatrixStatus) -> &'static str {
+    match status {
         MutationKillMatrixStatus::Complete => "complete",
         MutationKillMatrixStatus::Incomplete => "incomplete",
         MutationKillMatrixStatus::Unavailable => "unavailable",
-    };
-    let _ = writeln!(out, "\nTest kill evidence: {status}");
+    }
+}
+
+fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
+    let _ = writeln!(
+        out,
+        "\nTest kill evidence: {}",
+        kill_matrix_status(matrix.status)
+    );
     for target in matrix.targets.iter().flatten() {
-        let _ = writeln!(
+        let _ = write!(
             out,
-            "  Target {}: {} {}",
+            "  Target {}: {} {}, {}",
             shorten(&target.target, MAX_TEST_NAME_CHARS),
             target.test_ids.len(),
             if target.test_ids.len() == 1 {
                 "test"
             } else {
                 "tests"
-            }
+            },
+            kill_matrix_status(target.status)
         );
+        if !target.reasons.is_empty() {
+            let _ = write!(out, " ({})", target.reasons.join(", "));
+        }
+        out.push('\n');
     }
     for reason in &matrix.reasons {
         let _ = writeln!(out, "  {reason}: {}", kill_matrix_reason(reason));
@@ -898,7 +910,16 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
     if matrix.status == MutationKillMatrixStatus::Unavailable {
         return;
     }
-    if matrix.status == MutationKillMatrixStatus::Incomplete {
+    let complete_target = matrix
+        .targets
+        .iter()
+        .flatten()
+        .any(|target| target.status == MutationKillMatrixStatus::Complete);
+    let incomplete = matrix.status == MutationKillMatrixStatus::Incomplete;
+    if incomplete && complete_target {
+        out.push_str("  Only the tests of complete targets can be candidates.\n");
+    }
+    if incomplete && !complete_target {
         out.push_str("  Candidates are unavailable because the kill matrix is incomplete.\n");
     } else if matrix.candidates.is_empty() {
         out.push_str("  No redundant-test candidates were observed.\n");
@@ -930,9 +951,7 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
                 && !without_kills.contains(row.test_id.as_str())
         })
         .collect();
-    if matrix.status == MutationKillMatrixStatus::Complete {
-        render_test_kill_rows(out, "Redundant-test candidates for review", &candidate_rows);
-    }
+    render_test_kill_rows(out, "Redundant-test candidates for review", &candidate_rows);
     render_test_kill_rows(
         out,
         "Observed coverage without observed kills",

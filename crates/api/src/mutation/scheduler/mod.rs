@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fallow_output::{MutantAttempt, MutantFailureKind, MutantStatus, MutationKillMatrixTarget};
+use fallow_output::{MutantAttempt, MutantFailureKind, MutantStatus};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::manifest::RunnerRange;
@@ -27,7 +27,7 @@ mod classification;
 pub(super) mod control;
 mod dry_facts;
 mod retry_set;
-mod targets;
+pub mod targets;
 use classification::{attempt_record, classify, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run};
 use targets::{config_targets, job_targets};
@@ -209,7 +209,7 @@ pub struct ScheduleOutcome {
     pub promoted: Vec<String>,
     /// Each `--kill-matrix-for` target with the dry-run tests that it
     /// selects, in the given order. Empty outside target mode.
-    pub targets: Vec<MutationKillMatrixTarget>,
+    pub targets: Vec<targets::ResolvedTarget>,
 }
 
 impl ScheduleOutcome {

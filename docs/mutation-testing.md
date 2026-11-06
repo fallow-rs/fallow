@@ -518,7 +518,7 @@ The `kill_matrix` object has these fields:
 | `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. In target mode, also `target_only_kills`. |
 | `candidates` | Test IDs whose observed kill sets other tests cover. |
 | `coverage_without_kills` | Test IDs with runtime coverage and no observed kills. |
-| `targets` | Only in target mode: each `--kill-matrix-for` target with the `test_ids` that it selects. |
+| `targets` | Only in target mode: each `--kill-matrix-for` target with the `test_ids` that it selects, and the `status` (`complete` or `incomplete`) and `reasons` of its own evidence. |
 
 Each mutant and attempt records `killing_tests` and `kill_matrix_complete`. The existing `killed_by` field keeps the first observed killer. Outside matrix mode, `killing_tests` is empty.
 
@@ -565,8 +565,17 @@ fallow mutation src/math.ts \
   order of the tests. After a target kill, Fallow runs the target tests with
   no active mutant. When another test also kills the mutant, Fallow runs
   those other tests with no active mutant too. When a control run does not
-  pass, the evidence of the mutant is incomplete, and the matrix gives no
-  candidates.
+  pass, the evidence of the mutant is incomplete.
+
+Each entry of `kill_matrix.targets` has its own `status` and `reasons`. A
+target is `incomplete` with the reason `incomplete-mutant-results` when one
+of its tests covers a mutant with incomplete evidence. The run-wide reasons
+`partial-mutation-run`, `baseline-failure`, and `missing-test-file-metadata`
+make each target incomplete. Only the tests of a complete target can be
+candidates. One incomplete mutant therefore removes the candidates of the
+targets that cover it, not of all targets. The top-level `status` stays
+`incomplete` when any evidence is incomplete, so `candidates` can be nonempty
+while `status` is `incomplete`.
 
 Each target test with coverage gets a row in `kill_matrix.tests`. Other tests
 get no row.
