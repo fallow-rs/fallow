@@ -548,6 +548,37 @@ impl NameCount {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The number of identifiers that [`NameUsage`] read on this thread.
+    static NAME_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Count one identifier that [`NameUsage`] reads. Tests read the count to
+/// check that the stable filter does work linear in the program size.
+fn count_name_visit() {
+    #[cfg(test)]
+    NAME_VISITS.set(NAME_VISITS.get() + 1);
+}
+
+/// The number of identifiers that [`NameUsage`] read on this thread since
+/// the last call. The count starts again at zero.
+#[cfg(test)]
+pub(super) fn take_name_visits() -> usize {
+    NAME_VISITS.replace(0)
+}
+
+/// The number of steps that the alias analysis took on this thread since the
+/// last call. The count starts again at zero.
+#[cfg(test)]
+pub(super) fn take_alias_steps() -> usize {
+    value_changes::take_steps()
+}
+
+/// The most steps that one run of the alias analysis can count.
+#[cfg(test)]
+pub(super) const MAX_ALIAS_STEPS: usize = value_changes::MAX_TOTAL_STEPS;
+
 /// The [`NameCount`] of each name in a set, from one walk of a program.
 struct NameUsage<'n> {
     counts: FxHashMap<&'n str, NameCount>,
@@ -576,12 +607,14 @@ impl NameUsage<'_> {
 
 impl<'a> Visit<'a> for NameUsage<'_> {
     fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
+        count_name_visit();
         if let Some(count) = self.counts.get_mut(identifier.name.as_str()) {
             count.bindings += 1;
         }
     }
 
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        count_name_visit();
         if self.write_depth > 0
             && let Some(count) = self.counts.get_mut(identifier.name.as_str())
         {

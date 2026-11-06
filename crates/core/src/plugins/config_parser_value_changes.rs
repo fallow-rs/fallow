@@ -30,6 +30,33 @@ const MAX_STEPS: usize = 200_000;
 /// The maximum number of aliases that one analysis collects.
 const MAX_EDGES: usize = 20_000;
 
+/// The most steps that one analysis can count: each collected alias, plus
+/// each step of the propagation up to the one that passes [`MAX_STEPS`].
+#[cfg(test)]
+pub(super) const MAX_TOTAL_STEPS: usize = MAX_EDGES + MAX_STEPS + 1;
+
+#[cfg(test)]
+thread_local! {
+    /// The number of steps that the alias analysis took on this thread.
+    static STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Count `steps` steps of the alias analysis. Tests read the count to check
+/// that the analysis stops at its limits.
+fn count_steps(steps: usize) {
+    #[cfg(test)]
+    STEPS.set(STEPS.get() + steps);
+    #[cfg(not(test))]
+    let _ = steps;
+}
+
+/// The number of steps that the alias analysis took on this thread since the
+/// last call. The count starts again at zero.
+#[cfg(test)]
+pub(super) fn take_steps() -> usize {
+    STEPS.replace(0)
+}
+
 /// A change of the value that a name holds.
 type NamedChange = (String, Change);
 
@@ -219,6 +246,7 @@ fn propagate(
     }
     let mut steps = changes.len();
     if steps > MAX_STEPS {
+        count_steps(steps);
         return None;
     }
     let changes: Vec<(String, Change)> = changes
@@ -231,6 +259,7 @@ fn propagate(
         for edge in edges_by_name.get(name.as_str()).into_iter().flatten() {
             steps += 1;
             if steps > MAX_STEPS {
+                count_steps(steps);
                 return None;
             }
             let Some(next) = edge.translate(&change, keep) else {
@@ -242,6 +271,7 @@ fn propagate(
             }
         }
     }
+    count_steps(steps);
     Some(seen.into_iter().map(|(name, _)| name).collect())
 }
 
@@ -330,6 +360,7 @@ impl Collector<'_> {
             self.overflow = true;
             return;
         }
+        count_steps(1);
         self.edges.push(edge);
     }
 
