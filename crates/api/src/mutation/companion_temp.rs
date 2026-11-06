@@ -11,7 +11,9 @@
 //! exclusive lock on the file while the directory is in use, and the
 //! operating system releases the lock when the owner ends. A directory whose
 //! lock is free belongs to an API that ended without cleanup (a signal or a
-//! crash), so the first companion of the next run removes it.
+//! crash), so the first companion of the next run removes it. A signal ends
+//! Fallow without a drop, so the signal cleanup of `fallow-process` deletes
+//! the directory after it ends the companion tree.
 //!
 //! The system temp directory can be shared with other users (`/tmp` on
 //! Linux). The directory is private to its owner, and a sweep opens only a
@@ -53,6 +55,8 @@ pub struct CompanionTemp {
     dir: PathBuf,
     lock_path: PathBuf,
     lock: Option<File>,
+    /// The key of the directory in the signal cleanup of `fallow-process`.
+    cleanup: u64,
 }
 
 impl CompanionTemp {
@@ -77,10 +81,13 @@ impl CompanionTemp {
             if let Ok(own) = lock.metadata() {
                 SWEEP.call_once(|| sweep_stale(parent, SystemTime::now(), &own));
             }
+            let cleanup =
+                fallow_process::register_cleanup_paths(vec![dir.clone(), lock_path.clone()]);
             return Ok(Self {
                 dir,
                 lock_path,
                 lock: Some(lock),
+                cleanup,
             });
         }
         Err(io::Error::new(
@@ -104,6 +111,7 @@ impl CompanionTemp {
 
 impl Drop for CompanionTemp {
     fn drop(&mut self) {
+        fallow_process::deregister_cleanup_paths(self.cleanup);
         let removed = (0..REMOVE_ATTEMPTS).any(|attempt| {
             if attempt > 0 {
                 std::thread::sleep(REMOVE_PAUSE);

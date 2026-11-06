@@ -89,25 +89,33 @@ pub fn drain_and_kill() {
         .map(|(_id, target)| target)
         .collect();
     kill_and_wait(&targets);
+    crate::cleanup_paths::delete_registered();
 }
 
 /// Like [`drain_and_kill`], but returns at once when another thread holds
 /// the registry lock. A panic hook calls this: a blocking lock would
 /// deadlock when the panicking thread itself holds the lock.
 pub fn try_drain_and_kill() {
-    let targets: Vec<KillTarget> = match registry().try_lock() {
+    let targets = match registry().try_lock() {
         Ok(mut guard) => drain_targets(&mut guard),
         Err(TryLockError::Poisoned(error)) => drain_targets(&mut error.into_inner()),
         Err(TryLockError::WouldBlock) => return,
     };
+    // Another drain owns the shutdown and deletes the paths after its
+    // children end. A deletion here could run under live children.
+    let Some(targets) = targets else {
+        return;
+    };
     kill_and_wait(&targets);
+    crate::cleanup_paths::try_delete_registered();
 }
 
-fn drain_targets(registry: &mut FxHashMap<u64, KillTarget>) -> Vec<KillTarget> {
+/// The targets of the registry, or `None` when another drain already began.
+fn drain_targets(registry: &mut FxHashMap<u64, KillTarget>) -> Option<Vec<KillTarget>> {
     if !begin_drain() {
-        return Vec::new();
+        return None;
     }
-    registry.drain().map(|(_id, target)| target).collect()
+    Some(registry.drain().map(|(_id, target)| target).collect())
 }
 
 fn begin_drain() -> bool {
