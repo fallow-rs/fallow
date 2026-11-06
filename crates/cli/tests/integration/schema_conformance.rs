@@ -450,3 +450,24 @@ fn error_envelope_conforms_to_output_schema() {
         errors.join("\n"),
     );
 }
+
+/// A `--kill-matrix-for` target is always `complete` or `incomplete`. The
+/// schema must not offer the run-level `unavailable` state for a target.
+#[test]
+fn kill_matrix_target_status_allows_complete_and_incomplete_only() {
+    let schema = load_schema_root();
+    let definitions = &schema["definitions"];
+    let reference = definitions["MutationKillMatrixTarget"]["properties"]["status"]["$ref"]
+        .as_str()
+        .expect("target status is a definition reference");
+    let name = reference
+        .strip_prefix("#/definitions/")
+        .expect("local definition reference");
+    let values: Vec<&str> = definitions[name]["oneOf"]
+        .as_array()
+        .expect("target status is a oneOf of constants")
+        .iter()
+        .filter_map(|branch| branch["const"].as_str())
+        .collect();
+    assert_eq!(values, ["complete", "incomplete"]);
+}

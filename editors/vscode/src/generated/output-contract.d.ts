@@ -1817,6 +1817,10 @@ export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time
  */
 export type MutationKillMatrixStatus = ("complete" | "incomplete" | "unavailable")
 /**
+ * The quality of the evidence of one `--kill-matrix-for` target.
+ */
+export type MutationKillMatrixTargetStatus = ("complete" | "incomplete")
+/**
  * Which code a run mutates.
  */
 export type MutationScopeKind = ("changed" | "all" | "paths")
@@ -20754,6 +20758,7 @@ reasons: string[]
 tests: MutationTestKillRow[]
 /**
  * Tests with nonempty kills and no unique kills, sorted by test id.
+ * In target mode, only the tests of complete targets.
  */
 candidates: string[]
 /**
@@ -20829,6 +20834,16 @@ target: string
  * The dry-run test ids that the target selects, sorted.
  */
 test_ids: string[]
+status: MutationKillMatrixTargetStatus
+/**
+ * Why the evidence of this target is incomplete, sorted. The run-wide
+ * reasons `partial-mutation-run`, `baseline-failure`, and
+ * `missing-test-file-metadata` apply to each target.
+ * `incomplete-mutant-results` means that a test of this target covers a
+ * mutant with incomplete evidence. `unmatched-target` means that the
+ * target selects no test.
+ */
+reasons: string[]
 }
 /**
  * The scope of a plan or a run.

@@ -35352,7 +35352,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Tests with nonempty kills and no unique kills, sorted by test id."
+          "description": "Tests with nonempty kills and no unique kills, sorted by test id.\nIn target mode, only the tests of complete targets."
         },
         "coverage_without_kills": {
           "type": "array",
@@ -36032,11 +36032,24 @@
             "type": "string"
           },
           "description": "The dry-run test ids that the target selects, sorted."
+        },
+        "status": {
+          "description": "Whether the evidence of this target supports candidate analysis:\n`complete` or `incomplete`. Only the tests of a complete target can\nbe candidates.",
+          "$ref": "#/definitions/MutationKillMatrixTargetStatus"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Why the evidence of this target is incomplete, sorted. The run-wide\nreasons `partial-mutation-run`, `baseline-failure`, and\n`missing-test-file-metadata` apply to each target.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test."
         }
       },
       "required": [
         "target",
-        "test_ids"
+        "test_ids",
+        "status",
+        "reasons"
       ],
       "description": "One `--kill-matrix-for` target and the dry-run tests that it selects."
     },
@@ -36714,6 +36727,21 @@
         }
       ],
       "description": "How one mutant of a compare differs from the saved report."
+    },
+    "MutationKillMatrixTargetStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Each test of the target has complete evidence for each covered mutant."
+        },
+        {
+          "type": "string",
+          "const": "incomplete",
+          "description": "The run or at least one covered mutant has incomplete evidence."
+        }
+      ],
+      "description": "The quality of the evidence of one `--kill-matrix-for` target."
     }
   }
 }

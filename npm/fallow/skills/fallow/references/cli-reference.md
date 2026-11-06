@@ -2264,6 +2264,7 @@ Use this mode to check whether specific tests are redundant without a full kill 
 - Only the mutants that a target test covers run. The other mutants are `pruned` with `prune_reason: "no-target-coverage"`.
 - Each mutant runs its target tests with bail disabled, then its other covering tests with bail enabled, up to the first failure.
 - `kill_matrix.targets` lists each target with the `test_ids` that it selects. A target that selects no test exits `2` with `FALLOW_MUTATION_TARGET_UNMATCHED`.
+- Each target has its own `status` (`complete` or `incomplete`) and `reasons`. Only the tests of a complete target can be candidates. `candidates` can be nonempty while the top-level `status` is `incomplete`.
 - `kill_matrix.tests` has rows for target tests only. `unique_kills` are kills that no other test detects, target or not. `target_only_kills` lists kills that only other targets share, each with those `targets`. `subsuming_tests` is empty (note `subsumers-not-computed`).
 - A target with kills and no `unique_kills` is a candidate. With `target_only_kills`, it stays redundant only while one of the sharing targets stays. Do not remove all sharing targets together.
 - The evidence covers the planned scope only. A unique kill outside the scope is not visible.

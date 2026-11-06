@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// One `--kill-matrix-for` target and the dry-run tests that it selects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedTarget {
+    /// The target as the caller gave it, after path normalization.
+    pub target: String,
+    /// The dry-run test ids that the target selects, sorted.
+    pub test_ids: Vec<String>,
+}
+
 impl Worker<'_> {
     /// Runs the target tests of `job` without bail, so each target test that
     /// kills the mutant is known. After a terminal result, runs the other
@@ -167,7 +176,7 @@ pub(super) fn resolve_targets(
     targets: &[String],
     tests: &[DryTest],
     caps: Capabilities,
-) -> Result<(Vec<MutationKillMatrixTarget>, FxHashSet<String>), ScheduleError> {
+) -> Result<(Vec<ResolvedTarget>, FxHashSet<String>), ScheduleError> {
     if !caps.test_filter {
         return Err(ScheduleError::TargetsNeedTestFilter);
     }
@@ -186,7 +195,7 @@ pub(super) fn resolve_targets(
             unmatched.push(target.clone());
         }
         ids.extend(test_ids.iter().cloned());
-        resolved.push(MutationKillMatrixTarget {
+        resolved.push(ResolvedTarget {
             target: target.clone(),
             test_ids,
         });
