@@ -10,6 +10,7 @@ use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, build_codeclimate_issue,
     codeclimate_fingerprint_hash, normalize_uri,
 };
+use fallow_types::envelope::AuditIntroduced;
 use fallow_types::identity::dead_code_finding_id;
 use fallow_types::output_dead_code::{
     EffectiveSeverity, GatedFinding, ReachabilityCaveat, caveat_suffix,
@@ -18,10 +19,16 @@ use fallow_types::results::AnalysisResults;
 
 #[path = "dead_code_codeclimate_catalog.rs"]
 mod catalog_issues;
+#[path = "dead_code_codeclimate_component_io.rs"]
+mod component_io;
 use catalog_issues::{
     push_empty_catalog_group_issues, push_misconfigured_dependency_override_issues,
     push_unresolved_catalog_reference_issues, push_unused_catalog_entry_issues,
     push_unused_dependency_override_issues,
+};
+use component_io::{
+    push_unused_component_input_issues, push_unused_component_output_issues,
+    push_unused_svelte_event_issues,
 };
 
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
@@ -99,12 +106,18 @@ fn cc_caveat_suffix(caveats: &[ReachabilityCaveat]) -> String {
 ///
 /// A finding without an id (a saved report from an older version) keeps the
 /// legacy fingerprint, so its review threads stay matched.
+///
+/// `introduced` is the audit flag of the finding. An audit sets it when it
+/// compares the run with a base snapshot. The issue then carries the
+/// attribution for the inline review comment.
 fn dead_code_issue(
     finding_id: Option<&str>,
+    introduced: Option<AuditIntroduced>,
     discriminator: &[&str],
     input: CodeClimateIssueInput<'_>,
 ) -> CodeClimateIssue {
     let mut issue = build_codeclimate_issue(input);
+    issue.audit = introduced.map(|AuditIntroduced(introduced)| audit_review_context(introduced));
     if let Some(id) = finding_id {
         let mut parts = Vec::with_capacity(discriminator.len() + 1);
         parts.push(id);
@@ -115,6 +128,20 @@ fn dead_code_issue(
         }
     }
     issue
+}
+
+/// The audit facts of an inline review comment for a finding that an audit
+/// compared with the base snapshot. `introduced` is the audit flag.
+pub(crate) const fn audit_review_context(introduced: bool) -> fallow_output::AuditReviewContext {
+    fallow_output::AuditReviewContext {
+        attribution: if introduced {
+            fallow_output::AuditFindingAttribution::Introduced
+        } else {
+            fallow_output::AuditFindingAttribution::Inherited
+        },
+        gate_exemption: None,
+        gate: None,
+    }
 }
 
 /// The discriminator of each location of one finding, in input order.
@@ -163,10 +190,11 @@ fn push_dep_cc_issues<'a, I>(
             &'a [ReachabilityCaveat],
             Option<EffectiveSeverity>,
             Option<&'a str>,
+            Option<AuditIntroduced>,
         ),
     >,
 {
-    for (dep, caveats, effective, finding_id) in deps {
+    for (dep, caveats, effective, finding_id, introduced) in deps {
         let level = gate_codeclimate(effective, severity);
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
@@ -184,6 +212,7 @@ fn push_dep_cc_issues<'a, I>(
         };
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: rule_id,
@@ -217,6 +246,7 @@ fn push_unused_file_issues(
         let fp = codeclimate_fingerprint_hash(&["fallow/unused-file", &path]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-file",
@@ -257,10 +287,11 @@ where
             &'a [ReachabilityCaveat],
             Option<EffectiveSeverity>,
             Option<&'a str>,
+            Option<AuditIntroduced>,
         ),
     >,
 {
-    for (export, caveats, effective, finding_id) in input.exports {
+    for (export, caveats, effective, finding_id, introduced) in input.exports {
         let level = gate_codeclimate(effective, input.severity);
         let path = cc_path(&export.path, input.root);
         let kind = if export.is_re_export {
@@ -273,6 +304,7 @@ where
             codeclimate_fingerprint_hash(&[input.rule_id, &path, &line_str, &export.export_name]);
         input.issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: input.rule_id,
@@ -314,6 +346,7 @@ fn push_private_type_leak_issues(
         ]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/private-type-leak",
@@ -350,6 +383,7 @@ fn push_deprecated_export_issues(
         ]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/deprecated-export-in-use",
@@ -381,6 +415,7 @@ fn push_type_only_dep_issues(
         let fp = codeclimate_fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/type-only-dependency",
@@ -415,6 +450,7 @@ fn push_test_only_dep_issues(
         let fp = codeclimate_fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/test-only-dependency",
@@ -452,6 +488,7 @@ fn push_dev_dep_in_prod_issues(
         ]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/dev-dependency-in-production",
@@ -487,10 +524,11 @@ fn push_unused_member_issues<'a, I>(
             &'a [ReachabilityCaveat],
             Option<EffectiveSeverity>,
             Option<&'a str>,
+            Option<AuditIntroduced>,
         ),
     >,
 {
-    for (member, caveats, effective, finding_id) in members {
+    for (member, caveats, effective, finding_id, introduced) in members {
         let level = gate_codeclimate(effective, severity);
         let path = cc_path(&member.path, root);
         let line_str = member.line.to_string();
@@ -503,6 +541,7 @@ fn push_unused_member_issues<'a, I>(
         ]);
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: rule_id,
@@ -544,6 +583,7 @@ fn push_unresolved_import_issues(
         ]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unresolved-import",
@@ -587,6 +627,7 @@ fn push_unlisted_dep_issues(
             ]);
             issues.push(dead_code_issue(
                 entry.finding_id.as_deref(),
+                entry.introduced,
                 &discriminator,
                 CodeClimateIssueInput {
                     check_name: "fallow/unlisted-dependency",
@@ -631,6 +672,7 @@ fn push_unlisted_binary_issues(
             ]);
             issues.push(dead_code_issue(
                 entry.finding_id.as_deref(),
+                entry.introduced,
                 &discriminator,
                 CodeClimateIssueInput {
                     check_name: "fallow/unlisted-binary",
@@ -671,6 +713,7 @@ fn push_duplicate_export_issues(
             .is_some()
             .then(|| dead_code_finding_id("duplicate-export", &[&dup.export.export_name]));
         let finding_id = location_identity.as_deref();
+        let introduced = dup.introduced;
         let dup = &dup.export;
         let locations: Vec<(String, u32, u32)> = dup
             .locations
@@ -689,6 +732,7 @@ fn push_duplicate_export_issues(
             ]);
             issues.push(dead_code_issue(
                 finding_id,
+                introduced,
                 &discriminator,
                 CodeClimateIssueInput {
                     check_name: "fallow/duplicate-export",
@@ -733,6 +777,7 @@ fn push_circular_dep_issues(
         };
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/circular-dependency",
@@ -784,6 +829,7 @@ fn push_re_export_cycle_issues(
         let fp = codeclimate_fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/re-export-cycle",
@@ -821,7 +867,7 @@ fn push_package_cycle_issues(
         } else {
             String::new()
         };
-        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
+        let mut issue = build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/package-cycle",
             description: &format!("Package cycle: {}{note}", cycle.chain(" \u{2192} ")),
             severity: level,
@@ -829,7 +875,11 @@ fn push_package_cycle_issues(
             path: &path,
             begin_line: (anchor.line > 0).then_some(anchor.line),
             fingerprint: &fp,
-        }));
+        });
+        issue.audit = entry
+            .introduced
+            .map(|AuditIntroduced(introduced)| audit_review_context(introduced));
+        issues.push(issue);
     }
 }
 
@@ -855,6 +905,7 @@ fn push_boundary_violation_issues(
             .map_or_else(String::new, |via| format!(", via {}", cc_path(via, root)));
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/boundary-violation",
@@ -889,6 +940,7 @@ fn push_boundary_coverage_issues(
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/boundary-coverage",
@@ -921,6 +973,7 @@ fn push_boundary_call_issues(
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/boundary-call-violation",
@@ -968,6 +1021,7 @@ fn push_policy_violation_issues(
         };
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/policy-violation",
@@ -1004,6 +1058,7 @@ fn push_invalid_client_export_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/invalid-client-export",
@@ -1044,6 +1099,7 @@ fn push_mixed_client_server_barrel_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/mixed-client-server-barrel",
@@ -1084,6 +1140,7 @@ fn push_misplaced_directive_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/misplaced-directive",
@@ -1124,6 +1181,7 @@ fn push_unprovided_inject_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unprovided-inject",
@@ -1164,6 +1222,7 @@ fn push_unrendered_component_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unrendered-component",
@@ -1199,6 +1258,7 @@ fn push_absent_component_prop_issues(
         );
         issues.push(dead_code_issue(
             finding.finding_id.as_deref(),
+            finding.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/absent-component-prop",
@@ -1239,6 +1299,7 @@ fn push_unused_component_prop_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-component-prop",
@@ -1279,6 +1340,7 @@ fn push_unused_component_emit_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-component-emit",
@@ -1317,6 +1379,7 @@ fn push_unused_effect_layer_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-effect-layer",
@@ -1357,6 +1420,7 @@ fn push_duplicate_export_alias_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/duplicate-export-alias",
@@ -1394,6 +1458,7 @@ fn push_unused_tagged_error_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-tagged-error",
@@ -1432,129 +1497,10 @@ fn push_unproduced_catch_tag_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unproduced-catch-tag",
-                description: &message,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: line,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_unused_svelte_event_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    for entry in findings {
-        let level = finding_codeclimate(entry, severity);
-        let e = &entry.event;
-        let path = cc_path(&e.path, root);
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/unused-svelte-event",
-            &path,
-            &e.line.to_string(),
-            &e.event_name,
-        ]);
-        let line = if e.line > 0 { Some(e.line) } else { None };
-        let message = format!(
-            "event `{}` is dispatched by component `{}` but listened to nowhere in the project (remove it or listen for it)",
-            e.event_name, e.component_name
-        );
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/unused-svelte-event",
-                description: &message,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: line,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_unused_component_input_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedComponentInputFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    for entry in findings {
-        let level = finding_codeclimate(entry, severity);
-        let i = &entry.input;
-        let path = cc_path(&i.path, root);
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/unused-component-input",
-            &path,
-            &i.line.to_string(),
-            &i.input_name,
-        ]);
-        let line = if i.line > 0 { Some(i.line) } else { None };
-        let message = format!(
-            "input `{}` is declared but referenced nowhere in component `{}` (remove it or use it)",
-            i.input_name, i.component_name
-        );
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/unused-component-input",
-                description: &message,
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: line,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_unused_component_output_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedComponentOutputFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if findings.is_empty() {
-        return;
-    }
-    for entry in findings {
-        let level = finding_codeclimate(entry, severity);
-        let o = &entry.output;
-        let path = cc_path(&o.path, root);
-        let fp = codeclimate_fingerprint_hash(&[
-            "fallow/unused-component-output",
-            &path,
-            &o.line.to_string(),
-            &o.output_name,
-        ]);
-        let line = if o.line > 0 { Some(o.line) } else { None };
-        let message = format!(
-            "output `{}` is declared but emitted nowhere in component `{}` (remove it or emit it)",
-            o.output_name, o.component_name
-        );
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/unused-component-output",
                 description: &message,
                 severity: level,
                 category: "Bug Risk",
@@ -1592,6 +1538,7 @@ fn push_unused_server_action_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-server-action",
@@ -1632,6 +1579,7 @@ fn push_unused_load_data_key_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-load-data-key",
@@ -1668,6 +1616,7 @@ fn push_route_collision_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/route-collision",
@@ -1708,6 +1657,7 @@ fn push_dynamic_segment_name_conflict_issues(
         );
         issues.push(dead_code_issue(
             entry.finding_id.as_deref(),
+            entry.introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/dynamic-segment-name-conflict",
@@ -1748,6 +1698,8 @@ fn push_stale_suppression_issues(
         let fp = codeclimate_fingerprint_hash(&[check_name, &path, &line_str]);
         issues.push(dead_code_issue(
             s.finding_id.as_deref(),
+            // A stale suppression has no typed audit flag.
+            None,
             &[],
             CodeClimateIssueInput {
                 check_name,
@@ -1828,6 +1780,7 @@ impl CodeClimateBuilder<'_> {
                     e.reachability_caveats.as_slice(),
                     e.effective_severity,
                     e.finding_id.as_deref(),
+                    e.introduced,
                 )
             }),
             root: self.root,
@@ -1844,6 +1797,7 @@ impl CodeClimateBuilder<'_> {
                     e.reachability_caveats.as_slice(),
                     e.effective_severity,
                     e.finding_id.as_deref(),
+                    e.introduced,
                 )
             }),
             root: self.root,
@@ -1872,6 +1826,7 @@ impl CodeClimateBuilder<'_> {
                     f.reachability_caveats.as_slice(),
                     f.effective_severity,
                     f.finding_id.as_deref(),
+                    f.introduced,
                 )
             }),
             self.root,
@@ -1887,6 +1842,7 @@ impl CodeClimateBuilder<'_> {
                     f.reachability_caveats.as_slice(),
                     f.effective_severity,
                     f.finding_id.as_deref(),
+                    f.introduced,
                 )
             }),
             self.root,
@@ -1902,6 +1858,7 @@ impl CodeClimateBuilder<'_> {
                     f.reachability_caveats.as_slice(),
                     f.effective_severity,
                     f.finding_id.as_deref(),
+                    f.introduced,
                 )
             }),
             self.root,
@@ -1941,6 +1898,7 @@ impl CodeClimateBuilder<'_> {
                     m.reachability_caveats.as_slice(),
                     m.effective_severity,
                     m.finding_id.as_deref(),
+                    m.introduced,
                 )
             }),
             self.root,
@@ -1956,6 +1914,7 @@ impl CodeClimateBuilder<'_> {
                     m.reachability_caveats.as_slice(),
                     m.effective_severity,
                     m.finding_id.as_deref(),
+                    m.introduced,
                 )
             }),
             self.root,
@@ -1971,6 +1930,7 @@ impl CodeClimateBuilder<'_> {
                     m.reachability_caveats.as_slice(),
                     m.effective_severity,
                     m.finding_id.as_deref(),
+                    m.introduced,
                 )
             }),
             self.root,
@@ -1986,6 +1946,7 @@ impl CodeClimateBuilder<'_> {
                     m.reachability_caveats.as_slice(),
                     m.effective_severity,
                     m.finding_id.as_deref(),
+                    m.introduced,
                 )
             }),
             self.root,

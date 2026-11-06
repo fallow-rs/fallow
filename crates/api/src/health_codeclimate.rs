@@ -255,7 +255,12 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
         issues.push(issue);
     }
     for finding in &report.styling_findings {
-        issues.push(ctx.styling_issue(finding));
+        let mut issue = ctx.styling_issue(finding);
+        issue.audit = finding
+            .internal
+            .introduced
+            .map(crate::dead_code_codeclimate::audit_review_context);
+        issues.push(issue);
     }
 
     if let Some(ref production) = report.runtime_coverage {
@@ -482,6 +487,19 @@ mod tests {
         assert_eq!(issue.location.path, "src/styles.css");
         assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.severity, CodeClimateSeverity::Major);
+        assert_eq!(
+            issue.audit, None,
+            "outside an audit there is no attribution"
+        );
+
+        let mut inherited = report;
+        inherited.styling_findings[0].internal.introduced = Some(false);
+        let issues = build_health_codeclimate(&inherited, Path::new("/root"));
+        assert_eq!(
+            issues[0].audit.map(|context| context.attribution),
+            Some(fallow_output::AuditFindingAttribution::Inherited)
+        );
+        assert_eq!(issues[0].fingerprint, issue.fingerprint);
     }
 
     fn crap_violation(

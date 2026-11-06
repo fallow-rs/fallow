@@ -3,8 +3,7 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_api::{
-    AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput,
-    DupesReportPayload,
+    AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput, DupesReportPayload,
 };
 use fallow_config::{AuditGate, AuditWorsened, OutputFormat, RulesConfig, Severity};
 use fallow_output::{
@@ -27,8 +26,13 @@ use super::keys::{
 use super::{AuditResult, AuditSummary, AuditVerdict, DupeDemotionDiffSource};
 use complexity_notes::worsened_class_label;
 
+#[path = "audit_output_codeclimate.rs"]
+mod codeclimate;
 #[path = "audit_complexity_notes.rs"]
 mod complexity_notes;
+#[cfg(test)]
+use codeclimate::build_audit_codeclimate;
+use codeclimate::{build_audit_codeclimate_issues, print_audit_codeclimate};
 
 /// Print audit results and return the appropriate exit code.
 #[must_use]
@@ -1474,32 +1478,6 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
     });
 
     report::emit_json(&combined, "SARIF audit")
-}
-
-fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
-    let value = build_audit_codeclimate(result);
-    report::emit_json(&value, "CodeClimate audit")
-}
-
-fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    fallow_output::codeclimate_issues_to_value(&build_audit_codeclimate_issues(result))
-}
-
-/// Typed audit CodeClimate issues. The CI comment and review renderers take
-/// these, so the legacy fingerprint of a dead-code issue reaches them.
-fn build_audit_codeclimate_issues(result: &AuditResult) -> Vec<fallow_output::CodeClimateIssue> {
-    fallow_api::build_audit_codeclimate_issues(AuditCodeClimateOutputInput {
-        dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
-            fallow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
-        }),
-        duplication: result.dupes.as_ref().map_or_else(Vec::new, |dupes| {
-            fallow_api::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
-        }),
-        health: result.health.as_ref().map_or_else(Vec::new, |health| {
-            fallow_api::build_health_codeclimate(&health.report, &health.config.root)
-        }),
-        diff_risk: fallow_api::build_diff_risk_codeclimate(&result.diff_risk),
-    })
 }
 
 #[cfg(test)]

@@ -500,6 +500,29 @@ pub fn build_duplication_codeclimate(
     issues
 }
 
+/// Set the audit attribution on the issues of [`build_duplication_codeclimate`].
+///
+/// `introduced` holds one audit flag per clone group, in report order. Each
+/// group gives one issue per instance, so the instances of one group get the
+/// flag of that group. The inline review comment then states if the change
+/// introduced the clone group.
+pub fn set_duplication_audit_attribution(
+    issues: &mut [CodeClimateIssue],
+    report: &DuplicationReport,
+    introduced: impl IntoIterator<Item = bool>,
+) {
+    let mut remaining = issues;
+    for (group, introduced) in report.clone_groups.iter().zip(introduced) {
+        let count = group.instances.len().min(remaining.len());
+        let (group_issues, rest) = remaining.split_at_mut(count);
+        let context = crate::dead_code_codeclimate::audit_review_context(introduced);
+        for issue in group_issues {
+            issue.audit = Some(context);
+        }
+        remaining = rest;
+    }
+}
+
 fn codeclimate_path(path: &Path, root: &Path) -> String {
     normalize_uri(
         &path
@@ -543,6 +566,43 @@ mod tests {
             token_count: 100,
             line_count: 20,
             similarity: None,
+        }
+    }
+
+    #[test]
+    fn duplication_audit_attribution_follows_each_group() {
+        use fallow_output::AuditFindingAttribution as A;
+        let report = DuplicationReport {
+            clone_groups: vec![group(2), group(3)],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
+        let root = Path::new("/root");
+        let plain = build_duplication_codeclimate(&report, root);
+        let mut issues = plain.clone();
+        set_duplication_audit_attribution(&mut issues, &report, [false, true]);
+        let attributions: Vec<_> = issues
+            .iter()
+            .map(|issue| issue.audit.map(|context| context.attribution))
+            .collect();
+        assert_eq!(
+            attributions,
+            [
+                Some(A::Inherited),
+                Some(A::Inherited),
+                Some(A::Introduced),
+                Some(A::Introduced),
+                Some(A::Introduced),
+            ]
+        );
+        for (with, without) in issues.iter().zip(&plain) {
+            assert_eq!(with.fingerprint, without.fingerprint);
+            assert_eq!(
+                serde_json::to_value(with).expect("issue serializes"),
+                serde_json::to_value(without).expect("issue serializes"),
+                "the wire shape does not carry the attribution"
+            );
         }
     }
 

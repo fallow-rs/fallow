@@ -10,6 +10,7 @@ fn codeclimate_check_name_literals() -> BTreeSet<String> {
             .expect("source before tests"),
         include_str!("dead_code_codeclimate_component_health.rs"),
         include_str!("dead_code_codeclimate_catalog.rs"),
+        include_str!("dead_code_codeclimate_component_io.rs"),
     ]
     .concat();
     let mut literals = BTreeSet::new();

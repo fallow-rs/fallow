@@ -5,9 +5,8 @@ use std::process::ExitCode;
 use fallow_config::Severity;
 use fallow_config::{OutputFormat, RulesConfig};
 use fallow_output::{
-    CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
-    CodeClimateLocation, CodeClimateSeverity, HealthReport, annotate_codeclimate_issues,
-    codeclimate_fingerprint_hash, codeclimate_issues_to_value,
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateSeverity, HealthReport, codeclimate_fingerprint_hash, codeclimate_issues_to_value,
 };
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
@@ -15,8 +14,14 @@ use fallow_types::results::AnalysisResults;
 use super::github::report_prefix;
 use super::github::{AnnotationLevel, resolve_render_options};
 use super::github_annotations::{EnvelopeKind, collect_annotations};
-use super::grouping::{self, OwnershipResolver};
+use super::grouping::OwnershipResolver;
 use super::{emit_json, normalize_uri, relative_path};
+#[path = "codeclimate_saved_grouping.rs"]
+mod saved_grouping;
+use saved_grouping::{
+    annotate_dead_code_owner, annotate_duplication_groups, annotate_health_groups,
+    annotate_saved_fallback_grouping, saved_clone_group_flags,
+};
 
 /// Rebase every issue path onto the repository root.
 ///
@@ -652,60 +657,6 @@ fn parse_saved_section<T: serde::de::DeserializeOwned>(
         .map_err(|error| format!("saved {label} is incompatible with this Fallow version: {error}"))
 }
 
-fn annotate_dead_code_owner(issues: &mut [CodeClimateIssue], resolver: Option<&OwnershipResolver>) {
-    let Some(resolver) = resolver else {
-        return;
-    };
-    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Owner, |path| {
-        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
-    });
-}
-
-fn annotate_health_groups(issues: &mut [CodeClimateIssue], resolver: Option<&OwnershipResolver>) {
-    let Some(resolver) = resolver else {
-        return;
-    };
-    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Group, |path| {
-        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
-    });
-}
-
-fn annotate_duplication_groups(
-    issues: &mut [CodeClimateIssue],
-    report: &DuplicationReport,
-    root: &Path,
-    resolver: Option<&OwnershipResolver>,
-) {
-    let Some(resolver) = resolver else {
-        return;
-    };
-    use rustc_hash::FxHashMap;
-    let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
-    for group in &report.clone_groups {
-        let owner = super::dupes_grouping::largest_owner(group, root, resolver);
-        for instance in &group.instances {
-            path_to_owner.insert(cc_path(&instance.file, root), owner.clone());
-        }
-    }
-    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Group, |path| {
-        path_to_owner
-            .get(path)
-            .cloned()
-            .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
-    });
-}
-
-fn annotate_saved_fallback_grouping(
-    issues: &mut [CodeClimateIssue],
-    kind: EnvelopeKind,
-    resolver: Option<&OwnershipResolver>,
-) {
-    match kind {
-        EnvelopeKind::Health | EnvelopeKind::Dupes => annotate_health_groups(issues, resolver),
-        _ => annotate_dead_code_owner(issues, resolver),
-    }
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "audit and combined envelopes supply three named native section pointers"
@@ -738,6 +689,13 @@ fn saved_multi_analysis_codeclimate(
     }
     if let Some(report) = duplication {
         let mut duplication_issues = api_duplication_codeclimate_issues(&report, root);
+        if let Some(introduced) = saved_clone_group_flags(envelope, duplication_pointer) {
+            fallow_api::set_duplication_audit_attribution(
+                &mut duplication_issues,
+                &report,
+                introduced,
+            );
+        }
         annotate_duplication_groups(&mut duplication_issues, &report, root, resolver);
         issues.extend(duplication_issues);
     }
@@ -941,8 +899,10 @@ pub(super) fn print_grouped_duplication_codeclimate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::grouping;
     use crate::report::test_helpers::sample_results;
     use fallow_config::RulesConfig;
+    use fallow_output::{CodeClimateAnnotationField, annotate_codeclimate_issues};
     use fallow_types::output_dead_code::*;
     use fallow_types::results::*;
     use std::path::PathBuf;
