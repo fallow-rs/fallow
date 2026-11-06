@@ -98,6 +98,7 @@ pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneDemotionReason,
     CloneFamilyFinding, CloneGroupFinding, CombinedDupesSection, DupesReportPayload,
     DuplicationGroup, DuplicationGrouping, build_duplication_codeclimate,
+    set_duplication_audit_attribution,
 };
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,

@@ -21,6 +21,7 @@ impl CodeClimateBuilder<'_> {
             ]);
             self.issues.push(dead_code_issue(
                 finding.finding_id.as_deref(),
+                finding.introduced,
                 &[],
                 CodeClimateIssueInput {
                     check_name: "fallow/prop-drilling",
@@ -38,21 +39,22 @@ impl CodeClimateBuilder<'_> {
     pub(super) fn push_component_shape_issues(&mut self) {
         let wrappers = self.results.thin_wrappers.iter()
             .filter(|finding| finding.effective_severity == Some(EffectiveSeverity::Error))
-            .map(|finding| (finding.finding_id.as_deref(), "fallow/thin-wrapper", &finding.wrapper.file,
+            .map(|finding| (finding.finding_id.as_deref(), finding.introduced, "fallow/thin-wrapper", &finding.wrapper.file,
                 finding.wrapper.line, finding.wrapper.component.as_str(), "Complexity",
                 format!("Component '{}' only forwards its props to '{}'. Consider inlining it at its call sites.", finding.wrapper.component, finding.wrapper.child_component)));
         let shapes = self.results.duplicate_prop_shapes.iter()
             .filter(|finding| finding.effective_severity == Some(EffectiveSeverity::Error))
-            .map(|finding| (finding.finding_id.as_deref(), "fallow/duplicate-prop-shape", &finding.shape.file,
+            .map(|finding| (finding.finding_id.as_deref(), finding.introduced, "fallow/duplicate-prop-shape", &finding.shape.file,
                 finding.shape.line, finding.shape.component.as_str(), "Duplication",
                 format!("Component '{}' shares its prop shape with {} components. Consider a shared Props type.", finding.shape.component, finding.shape.group_size.saturating_sub(1))));
-        for (finding_id, code, file, line, component, category, description) in
+        for (finding_id, introduced, code, file, line, component, category, description) in
             wrappers.chain(shapes)
         {
             let path = cc_path(file, self.root);
             let fingerprint = codeclimate_fingerprint_hash(&[code, &path, component]);
             self.issues.push(dead_code_issue(
                 finding_id,
+                introduced,
                 &[],
                 CodeClimateIssueInput {
                     check_name: code,

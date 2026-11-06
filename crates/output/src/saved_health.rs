@@ -216,6 +216,9 @@ struct SavedStylingFinding {
     line: u32,
     value: String,
     effective_severity: StylingFindingSeverity,
+    /// Audit flag that the audit JSON writes. Absent outside an audit.
+    #[serde(default)]
+    introduced: Option<bool>,
 }
 
 /// Rehydrate the finding-bearing portion of a saved health JSON section.
@@ -445,7 +448,10 @@ impl From<SavedStylingFinding> for StylingFinding {
             nearest_token: None,
             fix_hint: None,
             actions: Vec::new(),
-            internal: crate::StylingFindingInternal::default(),
+            internal: crate::StylingFindingInternal {
+                rule_selector: None,
+                introduced: saved.introduced,
+            },
         }
     }
 }

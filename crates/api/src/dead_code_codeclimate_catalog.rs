@@ -15,6 +15,7 @@ pub(super) fn push_unresolved_catalog_reference_issues(
     for finding in findings {
         let level = finding_codeclimate(finding, severity);
         let finding_id = finding.finding_id.as_deref();
+        let introduced = finding.introduced;
         let finding = &finding.reference;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
@@ -50,6 +51,7 @@ pub(super) fn push_unresolved_catalog_reference_issues(
         }
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unresolved-catalog-reference",
@@ -76,6 +78,7 @@ pub(super) fn push_misconfigured_dependency_override_issues(
     for finding in findings {
         let level = finding_codeclimate(finding, severity);
         let finding_id = finding.finding_id.as_deref();
+        let introduced = finding.introduced;
         let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
@@ -94,6 +97,7 @@ pub(super) fn push_misconfigured_dependency_override_issues(
         );
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/misconfigured-dependency-override",
@@ -120,6 +124,7 @@ pub(super) fn push_unused_catalog_entry_issues(
     for entry in entries {
         let level = finding_codeclimate(entry, severity);
         let finding_id = entry.finding_id.as_deref();
+        let introduced = entry.introduced;
         let entry = &entry.entry;
         let path = cc_path(&entry.path, root);
         let line_str = entry.line.to_string();
@@ -143,6 +148,7 @@ pub(super) fn push_unused_catalog_entry_issues(
         };
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-catalog-entry",
@@ -169,6 +175,7 @@ pub(super) fn push_empty_catalog_group_issues(
     for group in groups {
         let level = finding_codeclimate(group, severity);
         let finding_id = group.finding_id.as_deref();
+        let introduced = group.introduced;
         let group = &group.group;
         let path = cc_path(&group.path, root);
         let line_str = group.line.to_string();
@@ -180,6 +187,7 @@ pub(super) fn push_empty_catalog_group_issues(
         ]);
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/empty-catalog-group",
@@ -206,6 +214,7 @@ pub(super) fn push_unused_dependency_override_issues(
     for finding in findings {
         let level = finding_codeclimate(finding, severity);
         let finding_id = finding.finding_id.as_deref();
+        let introduced = finding.introduced;
         let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
@@ -226,6 +235,7 @@ pub(super) fn push_unused_dependency_override_issues(
         }
         issues.push(dead_code_issue(
             finding_id,
+            introduced,
             &[],
             CodeClimateIssueInput {
                 check_name: "fallow/unused-dependency-override",

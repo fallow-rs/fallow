@@ -1717,8 +1717,50 @@ pub fn annotate_stale_suppressions_json(
     annotate_issue_array(
         json,
         "stale_suppressions",
-        introduced_flags(&results.stale_suppressions, root, base),
+        stale_suppression_introduced_flags(results, root, base),
     );
+}
+
+/// The audit flag of each stale suppression, in report order. A flag is
+/// `true` when the base snapshot does not hold the key of the suppression.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+#[must_use]
+pub fn stale_suppression_introduced_flags(
+    results: &fallow_types::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) -> Vec<bool> {
+    introduced_flags(&results.stale_suppressions, root, base)
+}
+
+const STALE_SUPPRESSION_CHECK_NAMES: [&str; 2] = [
+    "fallow/stale-suppression",
+    "fallow/missing-suppression-reason",
+];
+
+/// Set the audit attribution on the stale-suppression issues of the
+/// dead-code CodeClimate issues.
+///
+/// `introduced` holds one audit flag per stale suppression, in the order of
+/// `AnalysisResults::stale_suppressions`. The builder emits one issue per
+/// stale suppression in that order, so the flags match the issues by
+/// position. The inline review comment then states if the change introduced
+/// the stale suppression.
+pub fn set_stale_suppression_audit_attribution(
+    issues: &mut [fallow_output::CodeClimateIssue],
+    introduced: impl IntoIterator<Item = bool>,
+) {
+    let stale_issues = issues
+        .iter_mut()
+        .filter(|issue| STALE_SUPPRESSION_CHECK_NAMES.contains(&issue.check_name.as_str()));
+    for (issue, introduced) in stale_issues.zip(introduced) {
+        issue.audit = Some(crate::dead_code_codeclimate::audit_review_context(
+            introduced,
+        ));
+    }
 }
 
 /// Insert `"introduced": bool` into each `findings` and `styling_findings`
