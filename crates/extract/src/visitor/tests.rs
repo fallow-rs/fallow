@@ -9999,8 +9999,9 @@ fn this_member_return_type_credits_member_access() {
 fn local_holding_this_method_result_credits_return_type_member() {
     // Issue #4033: `const old = this.current(); old?.deactivate?.();` credits
     // `Tool.deactivate`, as the direct `this.current()?.deactivate?.()` does.
-    // The method can come after the call site. A cast, a call with arguments,
-    // a call in a plain `function` and a method-generic return give no credit.
+    // The method can come after the call site. A call with arguments credits
+    // the return type too (issue #4199). A cast, a call in a plain `function`
+    // and a method-generic return give no credit.
     let info = parse(
         r"
         import type { Tool } from './tool';
@@ -10039,7 +10040,8 @@ fn local_holding_this_method_result_credits_return_type_member() {
     };
     assert!(has("Tool", "deactivate"), "{:?}", info.member_accesses);
     assert!(has("Brush", "stroke"), "{:?}", info.member_accesses);
-    for member in ["castOnly", "argsOnly", "genericOnly", "innerOnly"] {
+    assert!(has("Tool", "argsOnly"), "{:?}", info.member_accesses);
+    for member in ["castOnly", "genericOnly", "innerOnly"] {
         assert!(
             !has("Tool", member) && !has("Other", member),
             "{member}: {:?}",
@@ -17791,4 +17793,68 @@ fn constructor_alternatives_preserve_jsx_receiver_spelling() {
                 .any(|access| access.object == "Widgets" && access.member == "dead")
         );
     }
+}
+
+#[test]
+fn unexported_local_base_class_folds_into_exported_subclass_heritage() {
+    // Issue #4199: the analysis finds a base class through its export key.
+    // A base class that the file does not export folds into the heritage of
+    // the exported subclass, at any depth: the subclass takes the bindings of
+    // the base, and the binding walk continues at the base's own `extends`
+    // target. The declared `super_class` stays for the scoped rules and the
+    // framework base checks. A generic base and an exported base stay as they
+    // are.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+        import type { Table } from './table';
+        import type { Seat } from './seat';
+
+        class Base {
+            protected find(): Table | undefined { return undefined; }
+            protected seat(): Seat | undefined { return undefined; }
+        }
+        class Mid extends Base {}
+        export class Deep extends Mid {
+            protected seat(): Table | undefined { return undefined; }
+        }
+
+        class Bridge extends Floor {}
+        export class Chained extends Bridge {}
+
+        class Generic<T> { protected item(): T | undefined { return undefined; } }
+        export class Typed extends Generic<Table> {}
+
+        export class Shared {}
+        export class Child extends Shared {}
+        ",
+    );
+
+    let heritage = |name: &str| {
+        info.class_heritage
+            .iter()
+            .find(|heritage| heritage.export_name == name)
+            .unwrap_or_else(|| panic!("{name}: {:?}", info.class_heritage))
+    };
+    let binding = |name: &str, field: &str| {
+        heritage(name)
+            .instance_bindings
+            .iter()
+            .find(|(existing, _)| existing == field)
+            .map(|(_, type_name)| type_name.clone())
+    };
+
+    assert_eq!(heritage("Deep").super_class.as_deref(), Some("Mid"));
+    assert_eq!(heritage("Deep").binding_super_class, None);
+    assert_eq!(binding("Deep", "find()").as_deref(), Some("Table"));
+    assert_eq!(binding("Deep", "seat()").as_deref(), Some("Table"));
+    assert_eq!(heritage("Chained").super_class.as_deref(), Some("Bridge"));
+    assert_eq!(
+        heritage("Chained").binding_super_class,
+        Some(("Floor".to_string(), Vec::new()))
+    );
+    assert_eq!(heritage("Typed").super_class.as_deref(), Some("Generic"));
+    assert_eq!(heritage("Typed").binding_super_class, None);
+    assert_eq!(heritage("Child").super_class.as_deref(), Some("Shared"));
+    assert_eq!(heritage("Child").binding_super_class, None);
 }

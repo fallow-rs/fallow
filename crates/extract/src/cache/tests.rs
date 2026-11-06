@@ -739,6 +739,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             instance_bindings: Vec::new(),
             super_class_type_args: vec!["TClient".to_string()],
             generic_instance_bindings: Vec::new(),
+            binding_super_class: None,
         }],
         ..ModuleInfo::empty(FileId(0))
     };

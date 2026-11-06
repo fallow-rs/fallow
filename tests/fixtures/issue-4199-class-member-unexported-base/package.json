@@ -1,0 +1,6 @@
+{
+  "name": "issue-4199-class-member-unexported-base",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
