@@ -14,8 +14,8 @@
 //! The resolver input hash reads each of these files by name.
 //!
 //! Without the feature, the trace records nothing, so a release build pays
-//! no cost for it. The helpers report missed paths to
-//! [`crate::missed_probes`] in every build.
+//! no cost for it. The helpers report missed paths and read package
+//! manifests to [`crate::missed_probes`] in every build.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -91,7 +91,7 @@ fn checked_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
 pub(crate) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     let path = path.as_ref();
     let result = std::fs::read_to_string(path);
-    missed_probes::note_if_missing(path, &result);
+    missed_probes::note_read(path, &result);
     note(path, content_kind(result.is_ok()));
     result
 }
@@ -117,14 +117,14 @@ impl FileSystem for ProbeFs {
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let result = self.0.read(path);
-        missed_probes::note_if_missing(path, &result);
+        missed_probes::note_read(path, &result);
         note(path, content_kind(result.is_ok()));
         result
     }
 
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         let result = self.0.read_to_string(path);
-        missed_probes::note_if_missing(path, &result);
+        missed_probes::note_read(path, &result);
         note(path, content_kind(result.is_ok()));
         result
     }

@@ -305,12 +305,14 @@ pub fn resolve_all_imports_with_session(
     );
 
     let replaced_module_targets = final_replaced_module_targets(vitest_mock_operations);
+    let probes = missed_probes.finish();
 
     ResolvedProject {
         modules: resolved,
         replaced_module_targets,
         work,
-        missed_probes: missed_probes.finish(),
+        missed_probes: probes.missed,
+        package_manifests: probes.package_manifests,
     }
 }
 

@@ -103,8 +103,12 @@ protocol and package parity.
   report each path that resolution checks and does not find to
   `crate::missed_probes`. The graph cache stores these paths and the
   resolved targets that discovery does not list. A warm run refuses the
-  cache when a stored missed path exists or a stored target is gone. A new
-  kind of resolver input needs a step in the templates of these tests.
+  cache when a stored missed path exists or a stored target is gone. The
+  helpers also report each package manifest below `node_modules` that
+  resolution reads. For a Bun install, the graph cache stores the `version`
+  of each of these manifests (`crate::installed_versions`), and a warm run
+  refuses the cache when one of the versions changed. A new kind of resolver
+  input needs a step in the templates of these tests.
 - Runtime and cloud data must enter through explicit options or typed evidence
   fields. Static analyzers should not hide network or filesystem side effects.
 
