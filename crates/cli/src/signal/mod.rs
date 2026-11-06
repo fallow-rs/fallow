@@ -148,6 +148,15 @@ impl Drop for PendingExit {
     }
 }
 
+/// True when a signal handler is about to end the process.
+///
+/// The handler sets this before it kills the child processes. An error that
+/// the command sees after that point (for example a child that exited) comes
+/// from the signal, so the command must not report it.
+pub fn exit_pending() -> bool {
+    EXIT_PENDING.load(Ordering::SeqCst)
+}
+
 /// Blocks for good when a signal handler is about to end the process.
 ///
 /// The drain can take up to its budget. In that time the command can end

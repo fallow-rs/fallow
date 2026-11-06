@@ -1740,6 +1740,56 @@ mod interrupt {
             missing.stdout
         );
     }
+
+    /// The one test waits long enough for an interrupt during the dry run.
+    const SLOW_DRY_RUN_TESTS: &str = "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { inc } from \"../src/math.js\";\ntest(\"inc\", async () => { await new Promise((resolve) => setTimeout(resolve, 20000)); assert.equal(inc(1), 2); });\n";
+
+    /// Issue #4302: a SIGINT during the dry run ends the run with exit code
+    /// 130 and no error report. The signal kills the companion, and the run
+    /// must not report that exit as a runner failure.
+    #[test]
+    fn an_interrupt_during_the_dry_run_prints_no_runner_error() {
+        if !has_node() {
+            return;
+        }
+        let project = slow_project();
+        let root = project.path();
+        fs::write(root.join("test/math.test.js"), SLOW_DRY_RUN_TESTS).expect("test file");
+        commit_all(root, "slow dry run");
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        let mut command = Command::new(fallow_bin());
+        scrub_analysis_env(&mut command);
+        command
+            .env("TMPDIR", temp.path())
+            .args(["mutation", "--root"])
+            .arg(root)
+            .args(["--all", "--no-cache", "--format", "json", "--quiet"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = command.spawn().expect("spawn fallow mutation");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        // The companion temp directory exists once the companion runs.
+        while fs::read_dir(temp.path())
+            .expect("temp dir")
+            .next()
+            .is_none()
+        {
+            assert!(Instant::now() < deadline, "no companion in time");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_secs(2));
+        let interrupted = Command::new("kill")
+            .args(["-INT", &child.id().to_string()])
+            .status()
+            .expect("kill");
+        assert!(interrupted.success());
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(output.status.code(), Some(130), "{:?}", output.status);
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("Error:"), "{stderr}");
+    }
 }
 
 /// Issue #4168: `--compare` lists each mutant that a weaker test no longer
