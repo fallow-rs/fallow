@@ -31,6 +31,18 @@ const executable = process.env.FALLOW_TYPE_AWARE_BIN
 
 const makeProject = () => mkdtempSync(path.join(tmpdir(), "fallow-type-aware-"));
 
+/**
+ * The native TypeScript backend runs as a child process that writes to the
+ * stderr of the sidecar. The TypeScript API fixes that stdio, so the sidecar
+ * cannot redirect it. When `api.close()` closes the stdin of the child before
+ * its kill takes effect, the child prints this line. Fallow reads sidecar
+ * stderr only for a failure message, so the line has no effect on a result.
+ */
+const BACKEND_SHUTDOWN_NOTICE = /^context canceled\n/gmu;
+
+/** Stderr without the shutdown notice of the native backend. */
+const withoutShutdownNotice = (stderr) => stderr.replace(BACKEND_SHUTDOWN_NOTICE, "");
+
 test("status reports protocol and backend without a project request", () => {
   const result = spawnSync(executable, ["--status"], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
@@ -858,7 +870,7 @@ test("api-surface reads type arguments only from type references and keeps stder
     });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stderr, "");
+    assert.equal(withoutShutdownNotice(result.stderr), "");
     const api = JSON.parse(result.stdout).results[0];
     assert.equal(api.status, "complete");
     const referenced = (name) =>
@@ -3761,4 +3773,13 @@ test("a query for a deleted file does not fail the other queries in the request"
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the stderr check ignores only the shutdown notice of the native backend", () => {
+  assert.equal(withoutShutdownNotice("context canceled\n"), "");
+  assert.equal(
+    withoutShutdownNotice("panic: getTypeArguments\ncontext canceled\n"),
+    "panic: getTypeArguments\n",
+  );
+  assert.equal(withoutShutdownNotice("error: context canceled\n"), "error: context canceled\n");
 });
