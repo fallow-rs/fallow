@@ -26,6 +26,7 @@ fn unused_dev_dependencies(results: &fallow_core::results::AnalysisResults) -> V
         .collect()
 }
 
+#[cfg(unix)]
 fn unused_file_paths(results: &fallow_core::results::AnalysisResults, root: &Path) -> Vec<String> {
     results
         .unused_files
