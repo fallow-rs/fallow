@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "no-shell",
+  "rules": [
+    {
+      "id": "no-shell",
+      "kind": "banned-effect",
+      "effects": ["shell"],
+      "message": "Use the sandboxed runner."
+    }
+  ]
+}

@@ -142,8 +142,8 @@ const SINKS: &[SubstituteSink] = &[
         "compileFunction",
         "compileFunction",
     ),
-    // The extractor resolves a named import (`import { runInNewContext } from
-    // "vm"`) and a `require("vm")` binding to the `node:vm.<member>` path.
+    // The extractor resolves a named, default or namespace import of `vm`
+    // and a `require("vm")` binding to the `node:vm.<member>` path.
     sink(
         SinkClass::CodeExecution,
         SinkShape::MemberCall,
@@ -554,7 +554,7 @@ mod tests {
         let head = "import vm from 'node:vm';\nexport const run = (raw: string) => vm.runInNewContext(`(${raw})`);\n";
         assert_eq!(
             detect("src/run.ts", base, head),
-            vec!["new Function sink replaced by vm.runInNewContext"]
+            vec!["new Function sink replaced by runInNewContext"]
         );
     }
 

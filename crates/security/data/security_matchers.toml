@@ -242,9 +242,10 @@ cwe = 94
 title = "Code injection sink"
 effect = "process"
 sink_shape = "member-call"
-# The extractor resolves a named import (`import { runInNewContext } from "vm"`)
-# and a CommonJS binding (`const { runInThisContext } = require("vm")`) to the
-# `node:vm.<member>` path. That path proves the provenance on its own.
+# The extractor resolves a named import (`import { runInNewContext } from "vm"`),
+# a default or namespace import (`import vm from "vm"`) and a CommonJS binding
+# (`const { runInThisContext } = require("vm")`) to the `node:vm.<member>`
+# path. That path proves the provenance on its own.
 callee_patterns = ["vm.runInNewContext", "vm.runInThisContext", "vm.runInContext", "vm.compileFunction", "node:vm.runInNewContext", "node:vm.runInThisContext", "node:vm.runInContext", "node:vm.compileFunction"]
 arg_index = 0
 import_provenance = "node:vm"
@@ -649,7 +650,11 @@ evidence_template = "Non-literal file-system path passed to {callee}(). Candidat
 # (`import { readFile } from "node:fs/promises"`). Build and CLI code calls
 # them with computed paths all the time, so they use the `path.join` source
 # gate. The extractor writes a named binding (`readFile`, also aliased or
-# destructured from `require()`) as `node:fs.readFile`.
+# destructured from `require()`) as `node:fs.readFile`. A default or namespace
+# ES import keeps its written path (`fs.readFile` after `import fs from "fs"`),
+# so the rows above match it. A `require()` module binding and a member
+# binding (`fsp.readFile` after `import { promises as fsp } from "fs"`) take
+# the `node:fs` path.
 [[matcher]]
 id = "path-traversal"
 cwe = 22

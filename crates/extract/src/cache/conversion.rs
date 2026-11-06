@@ -150,6 +150,7 @@ fn cached_require_calls_to_module(
             span: Span::new(require_call.span_start, require_call.span_end),
             source_span: Span::new(require_call.source_span_start, require_call.source_span_end),
             destructured_names: require_call.destructured_names.clone(),
+            destructured_locals: require_call.destructured_locals.clone(),
             local_name: require_call.local_name.clone(),
             is_type_only: require_call.is_type_only,
         })
@@ -367,6 +368,7 @@ fn module_require_calls_to_cached(
             source_span_start: require_call.source_span.start,
             source_span_end: require_call.source_span.end,
             destructured_names: require_call.destructured_names.clone(),
+            destructured_locals: require_call.destructured_locals.clone(),
             local_name: require_call.local_name.clone(),
             is_type_only: require_call.is_type_only,
         })

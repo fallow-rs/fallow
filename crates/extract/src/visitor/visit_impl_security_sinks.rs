@@ -1220,7 +1220,9 @@ impl ModuleInfoExtractor {
     /// [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES)
     /// resolves to its `node:` path (`runInNewContext(code)` after
     /// `import { runInNewContext } from "vm"` becomes
-    /// `node:vm.runInNewContext`). `fs.promises.<member>` on a module binding
+    /// `node:vm.runInNewContext`). A further path on a module or member
+    /// binding joins the `node:` path (`fsp.readFile` after
+    /// `import { promises as fsp } from "node:fs"`). `node:fs.promises.<member>`
     /// becomes `node:fs.<member>`, the path of an `fs/promises` import.
     fn security_callee_path(&self, expr: &Expression<'_>) -> Option<String> {
         let path = normalize_global_code_exec_path(self.static_callee_path(expr)?);
@@ -1232,12 +1234,15 @@ impl ModuleInfoExtractor {
             (Some(SinkBinding::CodeExec(target) | SinkBinding::NodeModuleMember(target)), None) => {
                 Some(target.clone())
             }
-            (Some(SinkBinding::NodeModule(module)), Some(rest)) => {
-                let rest = match rest.strip_prefix("promises.") {
-                    Some(member) if module == "node:fs" => member,
-                    _ => rest,
-                };
-                Some(format!("{module}.{rest}"))
+            (
+                Some(SinkBinding::NodeModule(base) | SinkBinding::NodeModuleMember(base)),
+                Some(rest),
+            ) => {
+                let joined = format!("{base}.{rest}");
+                Some(match joined.strip_prefix("node:fs.promises.") {
+                    Some(member) => format!("node:fs.{member}"),
+                    None => joined,
+                })
             }
             _ => None,
         };
@@ -1483,6 +1488,36 @@ impl ModuleInfoExtractor {
                 SinkBinding::NodeModuleMember(format!("{module}.{imported}")),
             );
         }
+    }
+
+    /// Record the DOMPurify and Node module sink bindings of a default or
+    /// namespace ES import (`import cp from "node:child_process"`,
+    /// `import * as vm from "vm"`). A Node module local then binds the
+    /// module, as `const cp = require(...)` does.
+    ///
+    /// A default or namespace import of `fs` keeps its written path
+    /// (`fs.readFile`). The ungated `fs.*` catalogue rows match that path,
+    /// and the gated `node:fs.*` rows lose an advisory file hit of the
+    /// security corpus.
+    pub(super) fn record_whole_module_import_bindings(
+        &mut self,
+        source: &str,
+        local: &str,
+        is_type_only: bool,
+    ) {
+        self.record_dompurify_import_binding(source, local, is_type_only);
+        if is_type_only {
+            return;
+        }
+        let Some(module) = node_binding_module(source) else {
+            return;
+        };
+        if module == "node:fs" {
+            return;
+        }
+        self.sink_aliases
+            .bindings
+            .insert(local.to_string(), SinkBinding::NodeModule(module));
     }
 
     /// Update the sink binding of `name` after a plain assignment

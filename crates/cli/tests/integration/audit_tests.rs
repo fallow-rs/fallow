@@ -7945,7 +7945,7 @@ fn review_brief_weakening_reports_security_sink_substitution() {
     };
     assert_eq!(
         evidence_for("src/eval.ts"),
-        vec!["new Function sink replaced by vm.runInNewContext".to_owned()],
+        vec!["new Function sink replaced by runInNewContext".to_owned()],
         "code execution swap: {weakening:?}"
     );
     assert_eq!(

@@ -21,6 +21,7 @@ mod new_url_node_modules;
 mod react_structural;
 mod reflective_object_uses;
 mod require_resolve;
+mod security_node_bindings;
 mod security_set_attribute;
 mod security_sources;
 mod signature_references;

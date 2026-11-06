@@ -3874,14 +3874,14 @@ pub struct RequireCallInfo {
     pub source: String,
     /// Source span of the `require()` call.
     pub span: Span,
-    /// Source span of the specifier string-literal argument (including its
-    /// quotes), e.g. the `'./x'` in `require('./x')`. Used to anchor an
-    /// `unresolved-import` diagnostic squiggly under the specifier rather than
-    /// the `require` keyword. `Span::default()` when the argument is not a
-    /// plain string literal.
+    /// Span of the string-literal argument with quotes (`'./x'`), which anchors an
+    /// `unresolved-import` diagnostic. `Span::default()` for a non-literal argument.
     pub source_span: Span,
     /// Names destructured from the `require()` result.
     pub destructured_names: Vec<String>,
+    /// The `(key, local)` pair of each destructured identifier property:
+    /// `const { exec: run } = require(...)` gives `("exec", "run")`.
+    pub destructured_locals: Vec<(String, String)>,
     /// The local variable name for `const x = require(...)`.
     pub local_name: Option<String>,
     /// `true` for `import type X = require('...')`, the one require spelling

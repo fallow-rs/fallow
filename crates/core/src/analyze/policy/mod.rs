@@ -774,17 +774,23 @@ fn node_binding_callee_path(module: &ModuleInfo, callee_path: &str) -> Option<St
             ImportedName::SideEffect => None,
         };
     }
-    let call = module.require_calls.iter().find(|call| {
-        !call.is_type_only
-            && (call.local_name.as_deref() == Some(head)
-                || call.destructured_names.iter().any(|name| name == head))
-    })?;
-    let root = node_binding_module(&call.source)?;
-    if call.local_name.as_deref() == Some(head) {
-        join(root, None)
-    } else {
-        join(root, Some(head))
-    }
+    // A destructured property binds its local name (`run` in
+    // `const { exec: run } = require(...)`), and the path takes the key.
+    module.require_calls.iter().find_map(|call| {
+        if call.is_type_only {
+            return None;
+        }
+        let member = if call.local_name.as_deref() == Some(head) {
+            None
+        } else {
+            let (key, _) = call
+                .destructured_locals
+                .iter()
+                .find(|(_, local)| local == head)?;
+            Some(key.as_str())
+        };
+        join(node_binding_module(&call.source)?, member)
+    })
 }
 
 fn matcher_matches_callee(
