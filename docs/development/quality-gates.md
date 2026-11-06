@@ -264,6 +264,10 @@ Focused integration checks:
   that add a `fallow_core::` call to an engine adapter, an `env!` macro, or a
   new cross-crate import. These source rules are tests of the CLI crate, so a
   test run of the changed crate does not run them.
+- `sh scripts/linux-keychain-test.sh --docker` for changes to the credential
+  store of `fallow cloud login`. In a Linux container, it runs the `0600`
+  credentials file test without D-Bus and the Secret Service test with
+  `gnome-keyring`. The `Linux keychain` CI job runs the same script.
 - `npm run check:knowledge-architecture` for docs and routing changes.
 - `npm run check:agent-adapters` for skill or adapter changes.
 - `python3 scripts/check_telemetry_doc_sync.py` when telemetry agent-source

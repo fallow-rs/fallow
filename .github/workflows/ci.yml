@@ -56,6 +56,7 @@ jobs:
       viz: ${{ steps.filter.outputs.viz }}
       mutation-runner: ${{ steps.filter.outputs.mutation-runner }}
       similar-code-sidecar: ${{ steps.filter.outputs.similar-code-sidecar }}
+      linux-keychain: ${{ steps.filter.outputs.linux-keychain }}
       # A failed or skipped selector step never publishes partial output.
       heavy-runner: ${{ steps.heavy-runner.outcome == 'success' && steps.heavy-runner.outputs.runner || 'ubuntu-26.04' }}
       miri-runner: ${{ steps.miri-runner.outcome == 'success' && steps.miri-runner.outputs.runner || 'ubuntu-26.04' }}
@@ -365,6 +366,21 @@ jobs:
             similar-code-sidecar:
               - 'tools/similar-code-sidecar/**'
               - 'crates/api/similar-code-protocol.json'
+              - 'rust-toolchain.toml'
+              - '.github/actions/setup-rust/**'
+              - '.github/workflows/ci.yml'
+              - 'scripts/workflow-policy.test.mjs'
+            # `linux-keychain` gates the credential store tests of `fallow
+            # cloud login` with a real Secret Service. The `check` job cannot
+            # run them, because it has no D-Bus session and no keyring.
+            linux-keychain:
+              - 'crates/cli/src/coverage/credentials.rs'
+              - 'crates/cli/src/coverage/login.rs'
+              - 'crates/cli/tests/integration/cloud_login_linux_keychain_tests.rs'
+              - 'crates/cli/tests/integration/inspect_cloud_tests.rs'
+              - 'crates/cli/tests/integration/main.rs'
+              - 'crates/cli/tests/common/**'
+              - 'scripts/linux-keychain-test.sh'
               - 'rust-toolchain.toml'
               - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
@@ -1558,6 +1574,34 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --manifest-path tools/similar-code-sidecar/Cargo.toml --target-dir target --all-targets -- -D warnings
 
+  linux-keychain:
+    name: Linux keychain
+    needs: changes
+    if: needs.changes.outputs.linux-keychain == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: linux-keychain
+
+      - name: Install the Secret Service
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends dbus gnome-keyring libsecret-tools
+
+      # The script runs the 0600 file fallback without a D-Bus session, then
+      # the Secret Service round trip in a D-Bus session with a temporary
+      # gnome-keyring. Both use a mock device flow.
+      - name: Run the credential store tests
+        run: sh scripts/linux-keychain-test.sh
+
   test-gitlab-ci:
     name: Test GitLab CI scripts
     needs: changes
@@ -1837,7 +1881,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, cargo-fallow, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor, similar-code-sidecar]
+    needs: [changes, docker, check, check-lint, napi, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, cargo-fallow, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor, similar-code-sidecar, linux-keychain]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
