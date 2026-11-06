@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { registerHooks, stripTypeScriptTypes } from "node:module";
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compileFunction } from "node:vm";
 
 import { realPath } from "./child.mjs";
 
@@ -11,6 +12,8 @@ const SCRIPT_FORMATS = new Set(["module", "commonjs", "module-typescript", "comm
 const JAVASCRIPT_FORMATS = new Set(["module", "commonjs"]);
 // Node type stripping does not accept JSX, so a `.tsx` file is not here.
 const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".mts", ".cts"]);
+const COMMONJS_PARAMETERS = ["exports", "require", "module", "__filename", "__dirname"];
+const HASHBANG = /^#!.*/;
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 /**
@@ -29,11 +32,28 @@ const stripTypes = (code) => {
 };
 
 /**
+ * Throws when the code does not compile as a CommonJS module. A project loader
+ * that compiles ESM-syntax TypeScript to CommonJS gives format `commonjs`, but
+ * type stripping keeps `import` and `export` in the mutant.
+ */
+const assertCommonJs = (code) => {
+  try {
+    compileFunction(code.replace(HASHBANG, ""), COMMONJS_PARAMETERS);
+  } catch (error) {
+    throw new Error(
+      `the project loader gives format \`commonjs\`, but the mutant does not compile as CommonJS (${error.message})`,
+      { cause: error },
+    );
+  }
+};
+
+/**
  * Gives the source to serve for an overlay entry, as a Result. A TypeScript
  * target in a JavaScript format comes from a project loader that compiles
  * TypeScript before this hook. The hook replaces that output with the
  * mutant, so the hook strips the types of the mutant. The error names the
- * syntax that type stripping does not accept, for example an `enum`.
+ * syntax that type stripping does not accept, for example an `enum`, or ESM
+ * syntax in a mutant that the project loader gives as CommonJS.
  */
 const serveTarget = (entry, format) => {
   const source = readFileSync(entry.target, "utf8");
@@ -41,7 +61,9 @@ const serveTarget = (entry, format) => {
     return { ok: true, source };
   }
   try {
-    return { ok: true, source: stripTypes(source) };
+    const stripped = stripTypes(source);
+    if (format === "commonjs") assertCommonJs(stripped);
+    return { ok: true, source: stripped };
   } catch (error) {
     return { ok: false, error: `Cannot serve the mutant of ${entry.source}: ${error.message}` };
   }

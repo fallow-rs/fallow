@@ -43,10 +43,11 @@ test("the overlay preserves a virtual file module supplied by a project loader",
   assert.deepEqual(JSON.parse(output), { virtual: 7, planned: 2, loaded: ["original.mjs"] });
 });
 
-// A project loader that compiles TypeScript itself returns format `module`.
-// This loader removes the `: number` annotations, the only TypeScript syntax
-// of the original files below.
-const runBehindCompilingLoader = (directory, sourceText, targetText) => {
+// A project loader that compiles TypeScript itself returns format `module`
+// or `commonjs`. This loader removes the `: number` annotations, the only
+// TypeScript syntax of the original files below. For `commonjs`, it also
+// compiles `export const value` to `exports.value`.
+const runBehindCompilingLoader = (directory, sourceText, targetText, format = "module") => {
   // The overlay keys are real paths, as `buildOverlay` makes them.
   const source = join(realpathSync(directory), "original.ts");
   const target = join(realpathSync(directory), "instrumented.ts");
@@ -54,13 +55,16 @@ const runBehindCompilingLoader = (directory, sourceText, targetText) => {
   writeFileSync(target, targetText);
   const hook = new URL("../src/runtime/overlay-hook.mjs", import.meta.url).href;
   const code = `
-    import { registerHooks } from "node:module";
+    import { createRequire, registerHooks } from "node:module";
     registerHooks({
       load(url, context, nextLoad) {
         const result = nextLoad(url, context);
         if (!url.endsWith(".ts")) return result;
-        const text = String(result.source).replaceAll(": number", "");
-        return { format: "module", shortCircuit: true, source: text };
+        let text = String(result.source).replaceAll(": number", "");
+        if (${JSON.stringify(format)} === "commonjs") {
+          text = text.replace("export const value", "exports.value");
+        }
+        return { format: ${JSON.stringify(format)}, shortCircuit: true, source: text };
       },
     });
     const { registerOverlayHook } = await import(${JSON.stringify(hook)});
@@ -68,7 +72,9 @@ const runBehindCompilingLoader = (directory, sourceText, targetText) => {
     const loaded = [];
     const incomplete = [];
     registerOverlayHook(overlay, (entry) => loaded.push(entry.source), (message) => incomplete.push(message));
-    const planned = await import(${JSON.stringify(pathToFileURL(source).href)});
+    const planned = ${JSON.stringify(format)} === "commonjs"
+      ? createRequire(import.meta.url)(${JSON.stringify(source)})
+      : await import(${JSON.stringify(pathToFileURL(source).href)});
     console.log(JSON.stringify({ planned: planned.value, loaded, incomplete }));
   `;
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
@@ -103,4 +109,34 @@ test("the overlay reports a TypeScript mutant that type stripping cannot serve",
   assert.equal(result.incomplete.length, 1);
   assert.match(result.incomplete[0], /original\.ts/);
   assert.match(result.incomplete[0], /enum/);
+});
+
+test("the overlay reports a TypeScript mutant with ESM syntax behind a CommonJS loader", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "fallow-overlay-ts-cjs-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "package.json"), '{"type":"commonjs"}\n');
+  const result = runBehindCompilingLoader(
+    directory,
+    "export const value: number = 1;\n",
+    "export const value: number = 2;\n",
+    "commonjs",
+  );
+  assert.equal(result.planned, 1);
+  assert.deepEqual(result.loaded, []);
+  assert.equal(result.incomplete.length, 1);
+  assert.match(result.incomplete[0], /original\.ts/);
+  assert.match(result.incomplete[0], /CommonJS/);
+});
+
+test("the overlay serves a CommonJS TypeScript mutant behind a CommonJS loader", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "fallow-overlay-ts-cjs-ok-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "package.json"), '{"type":"commonjs"}\n');
+  const result = runBehindCompilingLoader(
+    directory,
+    "const value: number = 1;\nexports.value = value;\n",
+    "#!/usr/bin/env node\nconst value: number = 2;\nexports.value = value;\n",
+    "commonjs",
+  );
+  assert.deepEqual(result, { planned: 2, loaded: ["original.ts"], incomplete: [] });
 });
