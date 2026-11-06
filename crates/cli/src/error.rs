@@ -6,6 +6,10 @@ use crate::exit_codes::{ErrorExitCode, INVALID_INPUT};
 
 /// Emit an error as structured JSON on stdout when `--format json` is active,
 /// then return the given exit code. For non-JSON formats, emit to stderr as usual.
+///
+/// Each emitter prints nothing while a signal handler ends the process: the
+/// error then comes from the signal (a killed child), and the process exits
+/// with `128 + signum`.
 pub fn emit_error(message: &str, exit_code: ErrorExitCode, output: OutputFormat) -> ExitCode {
     emit_error_with_style(message, exit_code, output, requested_json_style())
 }
@@ -51,6 +55,9 @@ pub fn emit_programmatic_error(
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
+    if crate::signal::exit_pending() {
+        return ExitCode::from(error.exit_code);
+    }
     if matches!(output, OutputFormat::Json) {
         let error_obj = fallow_output::ErrorOutput::new(&error.message, error.exit_code)
             .with_code(error.code.clone())
@@ -83,6 +90,9 @@ pub fn emit_error_with_hint(
     exit_code: ErrorExitCode,
     output: OutputFormat,
 ) -> ExitCode {
+    if crate::signal::exit_pending() {
+        return ExitCode::from(exit_code);
+    }
     if matches!(output, OutputFormat::Json) {
         let error_obj = fallow_output::ErrorOutput::new(message, exit_code.get())
             .with_help(Some(hint.to_string()));
@@ -106,6 +116,9 @@ pub fn emit_error_with_style(
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
+    if crate::signal::exit_pending() {
+        return ExitCode::from(exit_code);
+    }
     if matches!(output, OutputFormat::Json) {
         let error_obj = fallow_output::ErrorOutput::new(message, exit_code.get());
         if let Ok(json) = json_style.serialize(&error_obj) {
