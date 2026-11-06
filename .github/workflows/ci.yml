@@ -1606,7 +1606,9 @@ jobs:
   cargo-fallow:
     name: Rust Structure
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    # The clone search takes about 5 minutes on this runner, and the
+    # visibility check also reads the fuzz/ workspace.
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
