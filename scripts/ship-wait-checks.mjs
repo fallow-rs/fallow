@@ -29,6 +29,12 @@ import { parseArgs } from "node:util";
 
 import { RELEASED_SKILLS_ROOT } from "./released-skills.mjs";
 
+/** The directory of the changelog fragments, with a trailing slash. */
+const CHANGELOG_FRAGMENT_DIR = "changelog.d/";
+/** The repository of the public user documentation. */
+const PUBLIC_DOCS_REPO = "fallow-rs/docs";
+const PUBLIC_DOCS_STEP = `Check the pages of ${PUBLIC_DOCS_REPO} that describe the changed behavior, and open a docs pull request when a page is out of date or a new command, flag or field has no page.`;
+
 const GH_PENDING_EXIT = 8;
 const GH_FAILED_CHECK_EXIT = 1;
 const GITHUB_RUN_URL_PATTERN =
@@ -111,7 +117,9 @@ the wait.
 
 When the change touches ${RELEASED_SKILLS_ROOT.join("/")}/, the script prints the step for
 scripts/sync-skills-companion.mjs: after a pass with --pr, and on any result
-with --commit. A failed read of the changed files only prints a warning.
+with --commit. When the change adds a changelog fragment, it prints a reminder
+to check the public user documentation in ${PUBLIC_DOCS_REPO}. A failed read of
+the changed files only prints a warning.
 
 Options:
   --pr <number>           The pull request.
@@ -1396,6 +1404,15 @@ export const reportChecks = (
 };
 
 const SKILLS_PATH_PREFIX = `${RELEASED_SKILLS_ROOT.join("/")}/`;
+
+/**
+ * True when a changed path is a changelog fragment. A fragment marks a change
+ * that users see, so the public user documentation can need an update too.
+ */
+export const isChangelogFragment = (path) =>
+  path.startsWith(CHANGELOG_FRAGMENT_DIR) &&
+  path.endsWith(".md") &&
+  path !== `${CHANGELOG_FRAGMENT_DIR}README.md`;
 const SKILLS_SYNC_COMMAND = "node scripts/sync-skills-companion.mjs --pin";
 const SKILLS_PUBLISH_STEP = "and publish its commit with the commands that it prints.";
 const SKILLS_CONTRACT_NOTE =
@@ -1436,11 +1453,15 @@ const reportSkillsSync = (read, { label, step }, log = console.log, warn = conso
   if (!read.ok) {
     warn(`${label}: read of the changed files failed: ${read.error}`);
     warn(`When the change touches ${SKILLS_PATH_PREFIX}: ${step}`);
+    warn(`When the change adds a changelog fragment: ${PUBLIC_DOCS_STEP}`);
     return;
   }
   if (read.paths.some((path) => path.startsWith(SKILLS_PATH_PREFIX))) {
     log(`${label}: the change touches ${SKILLS_PATH_PREFIX}. ${step}`);
     log(SKILLS_CONTRACT_NOTE);
+  }
+  if (read.paths.some(isChangelogFragment)) {
+    log(`${label}: the change adds a changelog fragment. ${PUBLIC_DOCS_STEP}`);
   }
 };
 
