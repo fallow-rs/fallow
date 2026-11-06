@@ -250,7 +250,9 @@ pub fn render(compare: &MutationCompare) -> String {
             status_text(mutant.status),
         );
     }
-    if compare.regressed == 0 {
+    if compare.compared == 0 {
+        text.push_str("No mutant id is in both runs. Compare a run of the same files.\n");
+    } else if compare.regressed == 0 {
         text.push_str("No mutant lost its detection.\n");
     }
     text

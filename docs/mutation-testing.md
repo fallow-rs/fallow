@@ -1623,7 +1623,9 @@ Each entry has `mutant_id`, `file`, `line`, `change`, `previous_status`
 | `removed` | Only the saved report has the mutant id. |
 
 The human output adds a compare section after the run report. Each
-regressed mutant names the test that killed it in the saved report.
+regressed mutant names the test that killed it in the saved report. When
+no mutant id is in both runs, the section says so, because the compare
+checked no mutant. The exit code stays 0.
 
 ## Health join
 

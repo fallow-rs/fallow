@@ -188,3 +188,19 @@ fn human_output_names_the_earlier_killing_test() {
         "{text}"
     );
 }
+
+#[test]
+fn human_output_without_a_shared_mutant_does_not_claim_a_clean_compare() {
+    let (_dir, path) = write_report(
+        &[saved("old", 1, "killed", &["t.test.js::a"])],
+        Some("complete"),
+    );
+    let compare = load(&path)
+        .unwrap()
+        .compare(&[current("new", 2, MutantStatus::Killed)]);
+
+    let text = render(&compare);
+
+    assert!(!text.contains("No mutant lost its detection."), "{text}");
+    assert!(text.contains("No mutant id is in both runs"), "{text}");
+}
