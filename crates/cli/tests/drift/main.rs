@@ -1466,15 +1466,17 @@ fn audit_controls_see_clone_group_changes() {
         (1, 2),
         vec![ChangeSpec::Delete(0)],
     );
-    // The deleted file was also imported, so the head edits an import line
-    // inside the surviving clone. Its text changes, so the group is new.
+    // Both clone files import the deleted file, so the head edits the
+    // `console.log` line that starts the surviving clone in both. Its text
+    // changes, so the group is new.
     let edited = model(
         vec![
             file(1, Vec::new()),
             file(1, Vec::new()),
             file(0, vec![(0, 0), (1, 0)]),
+            file(0, vec![(0, 0), (1, 0)]),
         ],
-        (0, 2),
+        (2, 3),
         vec![ChangeSpec::Delete(1)],
     );
     for (name, model, split) in [
