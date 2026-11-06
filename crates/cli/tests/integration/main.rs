@@ -63,6 +63,7 @@ mod doctor_tests;
 mod dupes_tests;
 mod dupes_workspace_tests;
 mod duplicate_export_alias_tests;
+mod entry_point_script_tests;
 mod exit_code_tests;
 mod export_assignment_forward_tests;
 mod file_lines_tests;

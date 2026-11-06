@@ -237,7 +237,7 @@ pub struct ReExportChain {
 }
 
 /// Result of tracing all edges for a file.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileTrace {
     /// The traced file.
@@ -257,6 +257,11 @@ pub struct FileTrace {
     pub imported_by: Vec<PathBuf>,
     /// Re-exports declared by this file.
     pub re_exports: Vec<TracedReExport>,
+    /// The package.json script key that makes this file an entry point, e.g.
+    /// `build`. Absent when no script makes the file an entry point
+    /// (issue #4175).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_script: Option<String>,
     /// The configs that make this file an entry point through Module
     /// Federation `exposes`, one per config. Absent when no Federation config
     /// exposes the file (issue #2796).
@@ -284,6 +289,9 @@ pub struct TraceProvenance {
     /// Root-relative file path, export name, and the plugin rule that marks
     /// the export as used.
     export_credits: FxHashMap<PathBuf, FxHashMap<String, Vec<PluginExportCredit>>>,
+    /// Root-relative file path of a script entry point and the package.json
+    /// script key that runs the file.
+    entry_scripts: FxHashMap<PathBuf, String>,
     /// The packages that start the peer-dependency closure in addition to the
     /// imported packages.
     peer_seeds: PeerClosureSeeds,
@@ -413,6 +421,26 @@ impl TraceProvenance {
             .filter(|(known, _)| known == name)
             .map(|(_, source)| source.clone())
             .collect()
+    }
+
+    /// Record the package.json script of each script entry point in
+    /// `entries`, by path relative to `root`.
+    pub fn push_entry_scripts(&mut self, root: &Path, entries: &[crate::discover::EntryPoint]) {
+        for entry in entries {
+            if let Some(script) = entry.source.script() {
+                let file = entry.path.strip_prefix(root).unwrap_or(&entry.path);
+                self.entry_scripts
+                    .entry(file.to_path_buf())
+                    .or_insert_with(|| script.to_string());
+            }
+        }
+    }
+
+    /// The package.json script key that makes the root-relative `file` an
+    /// entry point, if a script does.
+    #[must_use]
+    pub fn entry_script(&self, file: &Path) -> Option<&str> {
+        self.entry_scripts.get(file).map(String::as_str)
     }
 
     /// Record why the dependency `name` is credited as tooling. The first
@@ -572,6 +600,16 @@ impl FileTrace {
         for export in &mut self.exports {
             export.plugin_credits = provenance.export_credits(&self.file, &export.name);
         }
+    }
+
+    /// Set the package.json script that `provenance` records for this file
+    /// when the file is an entry point.
+    pub fn apply_entry_script(&mut self, provenance: &TraceProvenance) {
+        self.entry_script = if self.is_entry_point {
+            provenance.entry_script(&self.file).map(str::to_string)
+        } else {
+            None
+        };
     }
 }
 
@@ -1055,5 +1093,61 @@ mod tests {
         trace.apply_plugin_credits(&page_provenance());
         assert!(!trace.is_used);
         assert!(trace.plugin_credits.is_empty());
+    }
+
+    fn file_trace(file: &str, is_entry_point: bool) -> FileTrace {
+        FileTrace {
+            file: PathBuf::from(file),
+            is_reachable: true,
+            is_entry_point,
+            exports: Vec::new(),
+            imports_from: Vec::new(),
+            imported_by: Vec::new(),
+            re_exports: Vec::new(),
+            entry_script: None,
+            sources: Vec::new(),
+        }
+    }
+
+    fn script_provenance() -> TraceProvenance {
+        use crate::discover::{EntryPoint, EntryPointSource};
+        let mut provenance = TraceProvenance::default();
+        provenance.push_entry_scripts(
+            Path::new("/project"),
+            &[
+                EntryPoint {
+                    path: PathBuf::from("/project/scripts/build.js"),
+                    source: EntryPointSource::PackageJsonScript {
+                        script: "build".to_string(),
+                    },
+                },
+                EntryPoint {
+                    path: PathBuf::from("/project/src/index.js"),
+                    source: EntryPointSource::PackageJsonMain,
+                },
+            ],
+        );
+        provenance
+    }
+
+    #[test]
+    fn a_script_entry_point_names_its_script() {
+        let mut trace = file_trace("scripts/build.js", true);
+        trace.apply_entry_script(&script_provenance());
+        assert_eq!(trace.entry_script.as_deref(), Some("build"));
+    }
+
+    #[test]
+    fn an_entry_point_of_another_source_names_no_script() {
+        let mut trace = file_trace("src/index.js", true);
+        trace.apply_entry_script(&script_provenance());
+        assert_eq!(trace.entry_script, None);
+    }
+
+    #[test]
+    fn a_file_that_is_not_an_entry_point_names_no_script() {
+        let mut trace = file_trace("scripts/build.js", false);
+        trace.apply_entry_script(&script_provenance());
+        assert_eq!(trace.entry_script, None);
     }
 }

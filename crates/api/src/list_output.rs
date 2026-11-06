@@ -121,6 +121,7 @@ mod tests {
                 entry_points: Some(vec![ListEntryPointOutput {
                     path: "src/index.ts".to_string(),
                     source: "package.json main".to_string(),
+                    script: None,
                 }]),
                 boundaries: None,
                 entry_weight: None,

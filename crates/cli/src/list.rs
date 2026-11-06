@@ -596,6 +596,7 @@ fn build_list_json_output_input(
             .map(|entry| fallow_api::ListEntryPointOutput {
                 path: format_display_path(&entry.path, opts.root),
                 source: entry.source.to_string(),
+                script: entry.source.script().map(str::to_string),
             })
             .collect()
     });
@@ -698,11 +699,13 @@ fn print_list_human(input: &ListHumanInput<'_>) {
     if let Some(entries) = entry_points {
         eprintln!("Found {} entry points", entries.len());
         for ep in entries {
-            crate::report::sink::stdoutln!(
-                "{} ({})",
-                format_display_path(&ep.path, opts.root),
-                ep.source
-            );
+            let path = format_display_path(&ep.path, opts.root);
+            match ep.source.script() {
+                Some(script) => {
+                    crate::report::sink::stdoutln!("{path} ({} `{script}`)", ep.source);
+                }
+                None => crate::report::sink::stdoutln!("{path} ({})", ep.source),
+            }
         }
     }
 

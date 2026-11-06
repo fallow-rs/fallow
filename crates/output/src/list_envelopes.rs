@@ -61,6 +61,10 @@ pub struct ListEntryPointOutput {
     pub path: String,
     /// What declared the entry point, e.g. a plugin or config pattern.
     pub source: String,
+    /// The package.json script key that runs the file, e.g. `build`, when
+    /// `source` is `package.json script`. Absent for every other source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
 }
 
 /// Envelope emitted by `fallow list --boundaries --format json`. Surfaces

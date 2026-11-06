@@ -104,13 +104,34 @@ impl std::fmt::Display for EntryPointSource {
             Self::PackageJsonModule => f.write_str("package.json module"),
             Self::PackageJsonExports => f.write_str("package.json exports"),
             Self::PackageJsonBin => f.write_str("package.json bin"),
-            Self::PackageJsonScript => f.write_str("package.json script"),
+            Self::PackageJsonScript { .. } => f.write_str("package.json script"),
             Self::Plugin { name } => write!(f, "{name}"),
             Self::TestFile => f.write_str("test file"),
             Self::DefaultIndex => f.write_str("default index"),
             Self::ManualEntry => f.write_str("manual entry"),
             Self::InfrastructureConfig => f.write_str("infrastructure config"),
             Self::DynamicallyLoaded => f.write_str("dynamically loaded"),
+        }
+    }
+}
+
+impl EntryPointSource {
+    /// A script entry point that the package.json script `script` runs.
+    #[must_use]
+    pub fn package_json_script(script: impl Into<String>) -> Self {
+        Self::PackageJsonScript {
+            script: script.into(),
+        }
+    }
+
+    /// The package.json script key of a script entry point. `None` for every
+    /// other source.
+    #[must_use]
+    pub fn script(&self) -> Option<&str> {
+        if let Self::PackageJsonScript { script } = self {
+            Some(script)
+        } else {
+            None
         }
     }
 }
@@ -127,7 +148,10 @@ pub enum EntryPointSource {
     /// The `bin` field in package.json.
     PackageJsonBin,
     /// A script command in package.json.
-    PackageJsonScript,
+    PackageJsonScript {
+        /// The key of the script in `scripts`, e.g. `build`.
+        script: String,
+    },
     /// Detected by a framework plugin.
     Plugin {
         /// Name of the plugin that detected this entry point.
@@ -198,7 +222,10 @@ mod tests {
             "package.json bin"
         );
         assert_eq!(
-            EntryPointSource::PackageJsonScript.to_string(),
+            EntryPointSource::PackageJsonScript {
+                script: "build".to_string()
+            }
+            .to_string(),
             "package.json script"
         );
         assert_eq!(

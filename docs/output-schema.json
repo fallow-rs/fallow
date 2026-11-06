@@ -25300,6 +25300,13 @@
           },
           "description": "Re-exports declared by this file."
         },
+        "entry_script": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The package.json script key that makes this file an entry point, e.g.\n`build`. Absent when no script makes the file an entry point\n(issue #4175)."
+        },
         "sources": {
           "type": "array",
           "items": {

@@ -13128,6 +13128,12 @@ imported_by: string[]
  */
 re_exports: TracedReExport[]
 /**
+ * The package.json script key that makes this file an entry point, e.g.
+ * `build`. Absent when no script makes the file an entry point
+ * (issue #4175).
+ */
+entry_script?: (string | null)
+/**
  * The configs that make this file an entry point through Module
  * Federation `exposes`, one per config. Absent when no Federation config
  * exposes the file (issue #2796).

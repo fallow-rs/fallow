@@ -420,6 +420,7 @@ fn entry_points_to_output(entries: &[EntryPoint], root: &Path) -> Vec<ListEntryP
         .map(|entry| ListEntryPointOutput {
             path: display_relative(root, &entry.path),
             source: entry.source.to_string(),
+            script: entry.source.script().map(str::to_string),
         })
         .collect()
 }
