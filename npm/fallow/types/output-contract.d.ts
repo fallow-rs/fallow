@@ -1817,6 +1817,10 @@ export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time
  */
 export type MutationKillMatrixStatus = ("complete" | "incomplete" | "unavailable")
 /**
+ * The quality of the evidence of one `--kill-matrix-for` target.
+ */
+export type MutationKillMatrixTargetStatus = ("complete" | "incomplete")
+/**
  * Which code a run mutates.
  */
 export type MutationScopeKind = ("changed" | "all" | "paths")
@@ -20830,7 +20834,7 @@ target: string
  * The dry-run test ids that the target selects, sorted.
  */
 test_ids: string[]
-status: MutationKillMatrixStatus
+status: MutationKillMatrixTargetStatus
 /**
  * Why the evidence of this target is incomplete, sorted. The run-wide
  * reasons `partial-mutation-run`, `baseline-failure`, and

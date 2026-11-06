@@ -192,7 +192,7 @@ fn mutation_kill_matrix_for_targets_reach_the_run_options_and_exclude_the_full_m
 #[test]
 fn mutation_kill_matrix_for_human_report_names_targets_and_shared_kills() {
     use fallow_output::{
-        MutationKillMatrixStatus, MutationKillMatrixTarget, MutationTargetOnlyKill,
+        MutationKillMatrixTarget, MutationKillMatrixTargetStatus, MutationTargetOnlyKill,
     };
 
     let mut measured = report(
@@ -205,7 +205,7 @@ fn mutation_kill_matrix_for_human_report_names_targets_and_shared_kills() {
     matrix.targets = Some(vec![MutationKillMatrixTarget {
         target: "test/a.test.ts".to_owned(),
         test_ids: vec!["test/a.test.ts::adds".to_owned()],
-        status: MutationKillMatrixStatus::Complete,
+        status: MutationKillMatrixTargetStatus::Complete,
         reasons: Vec::new(),
     }]);
     matrix.tests[0].subsuming_tests.clear();
@@ -230,7 +230,9 @@ fn mutation_kill_matrix_for_human_report_names_targets_and_shared_kills() {
 
 #[test]
 fn mutation_kill_matrix_for_human_report_shows_candidates_of_complete_targets() {
-    use fallow_output::{MutationKillMatrixStatus, MutationKillMatrixTarget};
+    use fallow_output::{
+        MutationKillMatrixStatus, MutationKillMatrixTarget, MutationKillMatrixTargetStatus,
+    };
 
     let mut measured = report(
         vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
@@ -243,13 +245,13 @@ fn mutation_kill_matrix_for_human_report_shows_candidates_of_complete_targets() 
         MutationKillMatrixTarget {
             target: "test/a.test.ts".to_owned(),
             test_ids: vec!["test/a.test.ts::adds".to_owned()],
-            status: MutationKillMatrixStatus::Complete,
+            status: MutationKillMatrixTargetStatus::Complete,
             reasons: Vec::new(),
         },
         MutationKillMatrixTarget {
             target: "test/c.test.ts".to_owned(),
             test_ids: vec!["test/c.test.ts::loads".to_owned()],
-            status: MutationKillMatrixStatus::Incomplete,
+            status: MutationKillMatrixTargetStatus::Incomplete,
             reasons: vec!["incomplete-mutant-results".to_owned()],
         },
     ]);

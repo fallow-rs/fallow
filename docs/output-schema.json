@@ -36035,7 +36035,7 @@
         },
         "status": {
           "description": "Whether the evidence of this target supports candidate analysis:\n`complete` or `incomplete`. Only the tests of a complete target can\nbe candidates.",
-          "$ref": "#/definitions/MutationKillMatrixStatus"
+          "$ref": "#/definitions/MutationKillMatrixTargetStatus"
         },
         "reasons": {
           "type": "array",
@@ -36727,6 +36727,21 @@
         }
       ],
       "description": "How one mutant of a compare differs from the saved report."
+    },
+    "MutationKillMatrixTargetStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Each test of the target has complete evidence for each covered mutant."
+        },
+        {
+          "type": "string",
+          "const": "incomplete",
+          "description": "The run or at least one covered mutant has incomplete evidence."
+        }
+      ],
+      "description": "The quality of the evidence of one `--kill-matrix-for` target."
     }
   }
 }

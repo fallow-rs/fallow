@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use fallow_output::{
     MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
     MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus,
-    MutationKillMatrixTarget, MutationTargetOnlyKill, MutationTestKillRow,
+    MutationKillMatrixTarget, MutationKillMatrixTargetStatus, MutationTargetOnlyKill,
+    MutationTestKillRow,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -113,7 +114,7 @@ pub fn build(
     // A test has complete evidence when one complete target selects it.
     let complete_tests: FxHashSet<&str> = targets
         .iter()
-        .filter(|target| target.status == MutationKillMatrixStatus::Complete)
+        .filter(|target| target.status == MutationKillMatrixTargetStatus::Complete)
         .flat_map(|target| target.test_ids.iter().map(String::as_str))
         .collect();
     let tests: Vec<MutationTestKillRow> = evidence
@@ -174,9 +175,9 @@ fn target_entry(
         target: target.target.clone(),
         test_ids: target.test_ids.clone(),
         status: if reasons.is_empty() {
-            MutationKillMatrixStatus::Complete
+            MutationKillMatrixTargetStatus::Complete
         } else {
-            MutationKillMatrixStatus::Incomplete
+            MutationKillMatrixTargetStatus::Incomplete
         },
         reasons: reasons.into_iter().map(str::to_owned).collect(),
     }
@@ -416,7 +417,7 @@ mod tests {
         assert_eq!(incomplete.reasons, ["incomplete-mutant-results"]);
         assert!(incomplete.candidates.is_empty());
         let target = &incomplete.targets.as_ref().expect("target mode")[0];
-        assert_eq!(target.status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(target.status, MutationKillMatrixTargetStatus::Incomplete);
         assert_eq!(target.reasons, ["incomplete-mutant-results"]);
         assert_eq!(
             incomplete.tests[0].notes,
@@ -472,9 +473,12 @@ mod tests {
         assert_eq!(matrix.reasons, ["incomplete-mutant-results"]);
         assert_eq!(matrix.candidates, [A, B], "m2 does not touch test/a.ts");
         let targets = matrix.targets.expect("target mode");
-        assert_eq!(targets[0].status, MutationKillMatrixStatus::Complete);
+        assert_eq!(targets[0].status, MutationKillMatrixTargetStatus::Complete);
         assert!(targets[0].reasons.is_empty());
-        assert_eq!(targets[1].status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(
+            targets[1].status,
+            MutationKillMatrixTargetStatus::Incomplete
+        );
         assert_eq!(targets[1].reasons, ["incomplete-mutant-results"]);
         assert_eq!(matrix.tests[0].notes, [SUBSUMERS_NOT_COMPUTED]);
         assert_eq!(
@@ -491,7 +495,10 @@ mod tests {
         assert_eq!(matrix.reasons, ["incomplete-mutant-results"]);
         assert!(matrix.candidates.is_empty());
         let targets = matrix.targets.expect("target mode");
-        assert_eq!(targets[0].status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(
+            targets[0].status,
+            MutationKillMatrixTargetStatus::Incomplete
+        );
         assert_eq!(targets[0].reasons, ["incomplete-mutant-results"]);
     }
 
@@ -511,7 +518,10 @@ mod tests {
         assert_eq!(matrix.reasons, ["partial-mutation-run"]);
         assert!(matrix.candidates.is_empty());
         let targets = matrix.targets.expect("target mode");
-        assert_eq!(targets[0].status, MutationKillMatrixStatus::Incomplete);
+        assert_eq!(
+            targets[0].status,
+            MutationKillMatrixTargetStatus::Incomplete
+        );
         assert_eq!(targets[0].reasons, ["partial-mutation-run"]);
     }
 

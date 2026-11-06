@@ -13,10 +13,11 @@ use colored::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
-    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationPlanDisposition,
-    MutationPlanOutput, MutationReport, MutationResumeOutput, MutationScopeKind,
-    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill,
-    MutationTestKillRow, MutationTypecheckOutput, TestReachClass,
+    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
+    MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
+    MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
+    MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
+    TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -880,6 +881,13 @@ const fn kill_matrix_status(status: MutationKillMatrixStatus) -> &'static str {
     }
 }
 
+const fn kill_matrix_target_status(status: MutationKillMatrixTargetStatus) -> &'static str {
+    match status {
+        MutationKillMatrixTargetStatus::Complete => "complete",
+        MutationKillMatrixTargetStatus::Incomplete => "incomplete",
+    }
+}
+
 fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
     let _ = writeln!(
         out,
@@ -897,7 +905,7 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
             } else {
                 "tests"
             },
-            kill_matrix_status(target.status)
+            kill_matrix_target_status(target.status)
         );
         if !target.reasons.is_empty() {
             let _ = write!(out, " ({})", target.reasons.join(", "));
@@ -914,7 +922,7 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
         .targets
         .iter()
         .flatten()
-        .any(|target| target.status == MutationKillMatrixStatus::Complete);
+        .any(|target| target.status == MutationKillMatrixTargetStatus::Complete);
     let incomplete = matrix.status == MutationKillMatrixStatus::Incomplete;
     if incomplete && complete_target {
         out.push_str("  Only the tests of complete targets can be candidates.\n");

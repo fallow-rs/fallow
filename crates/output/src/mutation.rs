@@ -776,6 +776,17 @@ pub enum MutationKillMatrixStatus {
     Unavailable,
 }
 
+/// The quality of the evidence of one `--kill-matrix-for` target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationKillMatrixTargetStatus {
+    /// Each test of the target has complete evidence for each covered mutant.
+    Complete,
+    /// The run or at least one covered mutant has incomplete evidence.
+    Incomplete,
+}
+
 /// The observed mutant kills of one eligible test.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -822,7 +833,7 @@ pub struct MutationKillMatrixTarget {
     /// Whether the evidence of this target supports candidate analysis:
     /// `complete` or `incomplete`. Only the tests of a complete target can
     /// be candidates.
-    pub status: MutationKillMatrixStatus,
+    pub status: MutationKillMatrixTargetStatus,
     /// Why the evidence of this target is incomplete, sorted. The run-wide
     /// reasons `partial-mutation-run`, `baseline-failure`, and
     /// `missing-test-file-metadata` apply to each target.
