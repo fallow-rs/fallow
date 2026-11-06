@@ -305,6 +305,41 @@ fn configured_dimensions(
     dimensions
 }
 
+/// The status of one complexity-dimension row.
+///
+/// `global_exceeded` and `local_exceeded` say whether the unit breaches the
+/// global and the resolved ceilings. `breaches_lowered` says whether the unit
+/// breaches a resolved ceiling that the override set below the global one.
+/// Such an override produces or sets the limit of a finding, so it reads
+/// `active`. A row reads `stale` only when the override changes no result.
+const fn override_status(
+    global_exceeded: bool,
+    local_exceeded: bool,
+    breaches_lowered: bool,
+) -> fallow_output::ThresholdOverrideStatus {
+    if breaches_lowered || (global_exceeded && !local_exceeded) {
+        fallow_output::ThresholdOverrideStatus::Active
+    } else if !global_exceeded {
+        fallow_output::ThresholdOverrideStatus::Stale
+    } else {
+        fallow_output::ThresholdOverrideStatus::Insufficient
+    }
+}
+
+/// The index of the entry that resolves one ceiling: the last matching entry
+/// that configures it. A later entry supersedes an earlier one, so only this
+/// entry sets the limit of a finding on that ceiling.
+fn resolving_index(
+    matches: &[ThresholdOverrideMatch<'_>],
+    configures: impl Fn(&fallow_output::HealthConfiguredThresholds) -> bool,
+) -> Option<usize> {
+    matches
+        .iter()
+        .rev()
+        .find(|matched| configures(&matched.entry.configured))
+        .map(|matched| matched.entry.index)
+}
+
 impl ThresholdOverrideStateTracker {
     /// `effective` is the ceiling set resolved across every matching entry, not
     /// the entry's own configured value. A later entry can supersede an earlier
@@ -328,8 +363,12 @@ impl ThresholdOverrideStateTracker {
             line_count,
             suppressed,
         } = function;
+        let cyclomatic_owner = resolving_index(matches, |c| c.max_cyclomatic.is_some());
+        let cognitive_owner = resolving_index(matches, |c| c.max_cognitive.is_some());
+        let unit_size_owner = resolving_index(matches, |c| c.max_unit_size.is_some());
         for matched in matches {
             let configured = matched.entry.configured;
+            let owns = |owner: Option<usize>| owner == Some(matched.entry.index);
             // `maxUnitSize` belongs to the complexity dimension, per
             // `configured_dimensions` and the `ThresholdOverrideDimension`
             // contract. Leaving it out made a unit-size-only entry emit no row
@@ -381,13 +420,23 @@ impl ThresholdOverrideStateTracker {
                 effective.max_cognitive,
                 effective.max_unit_size,
             );
-            let status = if global_exceeded && !local_exceeded {
-                fallow_output::ThresholdOverrideStatus::Active
-            } else if !global_exceeded {
-                fallow_output::ThresholdOverrideStatus::Stale
-            } else {
-                fallow_output::ThresholdOverrideStatus::Insufficient
-            };
+            // An override can also set a ceiling below the global one. When
+            // the unit breaches such a lowered ceiling, the override sets the
+            // limit of the finding, so it is in force and reads `active`, with
+            // the breach in `outstanding` (issue #4173). Only the entry that
+            // resolves the lowered ceiling counts. Another matching entry
+            // changes no result through that ceiling.
+            let breaches_lowered = (!suppressed
+                && ((owns(cyclomatic_owner)
+                    && effective.max_cyclomatic < global.cyclomatic
+                    && cyclomatic > effective.max_cyclomatic)
+                    || (owns(cognitive_owner)
+                        && effective.max_cognitive < global.cognitive
+                        && cognitive > effective.max_cognitive)))
+                || (owns(unit_size_owner)
+                    && effective.max_unit_size < global.unit_size
+                    && line_count.is_some_and(|lc| lc > effective.max_unit_size));
+            let status = override_status(global_exceeded, local_exceeded, breaches_lowered);
             // A surviving unit-size breach has to be seeded here, because
             // `annotate_outstanding_dimensions` derives `outstanding` from the
             // findings list and unit size emits no finding. Without it a
@@ -424,8 +473,9 @@ impl ThresholdOverrideStateTracker {
 
     /// Record the rows of the `maxFileLines` entries that match one file.
     ///
-    /// A file-length ceiling of `0` is off, so it never breaches. The row
-    /// belongs to the complexity dimension and names the file-level unit
+    /// A file-length ceiling of `0` is off, so it never breaches. An override
+    /// ceiling lowers the limit when the global ceiling is off or higher. The
+    /// row belongs to the complexity dimension and names the file-level unit
     /// `<file>`. A suppressed file reads `stale`, as a suppressed function
     /// does in [`record_complexity`](Self::record_complexity).
     pub(super) fn record_file_lines(
@@ -439,19 +489,19 @@ impl ThresholdOverrideStateTracker {
         let breaches = |limit: u32| !file.suppressed && limit > 0 && file.line_count > limit;
         let global_exceeded = breaches(global_max_file_lines);
         let local_exceeded = breaches(effective_max_file_lines);
-        let status = if global_exceeded && !local_exceeded {
-            fallow_output::ThresholdOverrideStatus::Active
-        } else if !global_exceeded {
-            fallow_output::ThresholdOverrideStatus::Stale
-        } else {
-            fallow_output::ThresholdOverrideStatus::Insufficient
-        };
+        let lowered = effective_max_file_lines > 0
+            && (global_max_file_lines == 0 || effective_max_file_lines < global_max_file_lines);
+        // Only the last matching entry resolves the limit. An earlier entry
+        // is superseded, so it changes no result.
+        let owner = resolving_index(matches, |c| c.max_file_lines.is_some());
         let outstanding = if local_exceeded {
             vec![ThresholdOverrideDimension::Complexity]
         } else {
             Vec::new()
         };
         for matched in matches {
+            let breaches_lowered = lowered && local_exceeded && owner == Some(matched.entry.index);
+            let status = override_status(global_exceeded, local_exceeded, breaches_lowered);
             self.matched_indexes.insert(matched.entry.index);
             self.push_state(ThresholdOverrideStateInput {
                 status,
@@ -494,18 +544,25 @@ impl ThresholdOverrideStateTracker {
             col,
             suppressed,
         } = function;
+        // A CRAP finding fires when the score reaches the ceiling.
+        let breaches = |limit: f64| !suppressed && metrics.crap >= limit;
+        let global_exceeded = breaches(global.crap);
+        let local_exceeded = breaches(effective.max_crap);
+        // A lowered ceiling that the function reaches sets the limit of the
+        // finding, so the entry that resolves it reads `active`. The finding
+        // puts `crap` in `outstanding` (issue #4173).
+        let lowered = effective.max_crap < global.crap && local_exceeded;
+        let owner = resolving_index(matches, |c| c.max_crap.is_some());
         for matched in matches {
             if matched.entry.configured.max_crap.is_none() {
                 continue;
             }
             self.matched_indexes.insert(matched.entry.index);
-            let status = if suppressed || metrics.crap < global.crap {
-                fallow_output::ThresholdOverrideStatus::Stale
-            } else if metrics.crap < effective.max_crap {
-                fallow_output::ThresholdOverrideStatus::Active
-            } else {
-                fallow_output::ThresholdOverrideStatus::Insufficient
-            };
+            let status = override_status(
+                global_exceeded,
+                local_exceeded,
+                lowered && owner == Some(matched.entry.index),
+            );
             self.push_state(ThresholdOverrideStateInput {
                 status,
                 override_index: matched.entry.index,

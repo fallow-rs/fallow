@@ -435,17 +435,21 @@ pub fn discover_config_files<'a>(
     use rayon::prelude::*;
     let mut pending: Vec<(&'a dyn Plugin, &Path, String, bool)> = Vec::new();
     for (plugin, _) in config_matchers {
-        // A resolved plugin still probes the patterns that source discovery
-        // cannot index, such as `build/webpack.prod.js`: Phase 3a never saw
-        // those files, so a root config found there does not cover them. The
-        // `seen` set below removes a duplicate hit.
+        // A resolved plugin still probes the patterns that Phase 3a cannot
+        // read: files under a directory that source discovery does not index,
+        // such as `build/webpack.prod.js`, and non-source files, such as a
+        // root `.eslintrc.json` next to a workspace `eslint.config.mjs`. A
+        // source config that Phase 3a read does not cover those files.
         let resolved = resolved_plugins.contains(plugin.name());
         for root in roots {
             for pat in plugin.config_patterns() {
                 if !production_mode && is_source_ext_root_pattern(pat) {
                     continue;
                 }
-                if resolved && !pattern_needs_filesystem(pat) {
+                if resolved
+                    && !pattern_needs_filesystem(pat)
+                    && pattern_names_only_source_files(pat)
+                {
                     continue;
                 }
                 pending.push((*plugin, *root, pat.to_string(), resolved));
@@ -458,23 +462,24 @@ pub fn discover_config_files<'a>(
         .flat_map_iter(|(plugin, root, pat, resolved)| {
             expand_brace_pattern(pat)
                 .into_iter()
-                .flat_map(|expanded| match candidate_index {
-                    // A pattern under a non-allowlisted hidden directory
-                    // (e.g. `.config/prisma.ts`) is never descended by the
-                    // discovery walk, so it cannot be in the in-memory index;
-                    // probe the filesystem for those few patterns even on the
-                    // fast path so they stay discoverable.
-                    Some(index) if !pattern_needs_filesystem(&expanded) => {
-                        match_pattern_in_index(root, &expanded, index)
-                    }
-                    _ => discover_pattern_matches(root, &expanded),
+                .flat_map(|expanded| {
+                    let needs_fs = pattern_needs_filesystem(&expanded);
+                    let paths = match candidate_index {
+                        // A pattern under a non-allowlisted hidden directory
+                        // (e.g. `.config/prisma.ts`) is never descended by the
+                        // discovery walk, so it cannot be in the in-memory
+                        // index; probe the filesystem for those few patterns
+                        // even on the fast path so they stay discoverable.
+                        Some(index) if !needs_fs => match_pattern_in_index(root, &expanded, index),
+                        _ => discover_pattern_matches(root, &expanded),
+                    };
+                    paths
+                        .into_iter()
+                        .filter(move |path| {
+                            !*resolved || !phase_3a_read_file(path, needs_fs, candidate_index)
+                        })
+                        .map(move |path| (path, *plugin))
                 })
-                // Phase 3a already read an indexed file of a resolved plugin,
-                // such as a config in a plugin's discovery hidden directory.
-                .filter(|path| {
-                    !*resolved || !candidate_index.is_some_and(|index| index.contains_file(path))
-                })
-                .map(move |path| (path, *plugin))
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -487,6 +492,37 @@ pub fn discover_config_files<'a>(
         }
     }
     config_files
+}
+
+/// True when every brace alternative of `pattern` names a file with a source
+/// extension. Phase 3a reads only discovered source files, so a resolved plugin
+/// still needs the filesystem fallback for a pattern such as
+/// `.eslintrc.{js,json}`.
+fn pattern_names_only_source_files(pattern: &str) -> bool {
+    expand_brace_pattern(pattern)
+        .iter()
+        .all(|expanded| has_source_extension(Path::new(expanded)))
+}
+
+fn has_source_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext))
+}
+
+/// True when Phase 3a already read `path` for a resolved plugin. Phase 3a
+/// reads discovered source files only. A file that only a filesystem probe
+/// finds (`needs_fs`) was read when the discovery walk indexed it, for example
+/// a config in an allowlisted hidden directory.
+fn phase_3a_read_file(
+    path: &Path,
+    needs_fs: bool,
+    candidate_index: Option<&ConfigCandidateIndex>,
+) -> bool {
+    if needs_fs {
+        return candidate_index.is_some_and(|index| index.contains_file(path));
+    }
+    has_source_extension(path)
 }
 
 fn pattern_has_glob(pattern: &str) -> bool {
