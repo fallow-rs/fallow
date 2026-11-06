@@ -107,12 +107,20 @@ fn callback_locals<'a>(
     .into_iter()
     .map(str::to_string)
     .collect();
-    Some(
-        candidates
-            .into_iter()
-            .filter(|(name, _)| stable.contains(name))
-            .collect(),
-    )
+    Some(keep_stable(candidates, &stable))
+}
+
+/// The candidates whose name is in `stable`. A config callback can declare
+/// many thousands of locals, so the lookup must be a hash lookup: a search
+/// of a list compares each local with each stable name.
+fn keep_stable<N: Eq + std::hash::Hash, V>(
+    candidates: Vec<(N, V)>,
+    stable: &FxHashSet<N>,
+) -> FxHashMap<N, V> {
+    candidates
+        .into_iter()
+        .filter(|(name, _)| stable.contains(name))
+        .collect()
 }
 
 /// The body of a config callback: a function body, or the expression body of
@@ -488,6 +496,54 @@ mod tests {
             large <= small * 5 / 2,
             "2000 locals read {small} identifiers, 4000 locals read {large}"
         );
+    }
+
+    thread_local! {
+        static COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// A name that counts each equality comparison in [`COMPARISONS`].
+    struct CountedName(String);
+
+    impl std::hash::Hash for CountedName {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.0.hash(state);
+        }
+    }
+
+    impl PartialEq for CountedName {
+        fn eq(&self, other: &Self) -> bool {
+            COMPARISONS.set(COMPARISONS.get() + 1);
+            self.0 == other.0
+        }
+    }
+
+    impl Eq for CountedName {}
+
+    /// The number of name comparisons that the stable filter makes for
+    /// `count` candidates, of which every second one is stable.
+    fn stable_filter_comparisons(count: usize) -> usize {
+        let name = |i: usize| CountedName(format!("l{i}"));
+        let candidates = (0..count).map(|i| (name(i), i)).collect();
+        let stable = (0..count).step_by(2).map(name).collect();
+        COMPARISONS.set(0);
+        let kept = super::keep_stable(candidates, &stable);
+        assert_eq!(kept.len(), count.div_ceil(2));
+        COMPARISONS.get()
+    }
+
+    #[test]
+    fn stable_filter_compares_each_local_a_bounded_number_of_times() {
+        // The identifier count of `many_callback_locals_stay_linear` does not
+        // see the filter: a filter that searches a list of the stable names
+        // reads no identifiers, but compares each local with each name.
+        for count in [1_000, 8_000, 64_000] {
+            let comparisons = stable_filter_comparisons(count);
+            assert!(
+                comparisons <= 2 * count,
+                "{count} locals took {comparisons} comparisons"
+            );
+        }
     }
 
     /// A config whose array `h.k` holds `OPTS` `copies` times, with one
