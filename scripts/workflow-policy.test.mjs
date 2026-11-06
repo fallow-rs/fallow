@@ -1507,10 +1507,12 @@ test("CI runs the cloud login credential store tests with a real Secret Service"
   assert.match(job, /persist-credentials: false/u);
   // The Secret Service test is ignored by default, so only this job runs it.
   assert.match(script, /--ignored --exact "\$SECRET_SERVICE_TEST"/u);
-  assert.match(script, /env -u DBUS_SESSION_BUS_ADDRESS/u);
+  assert.match(script, /unset DBUS_SESSION_BUS_ADDRESS/u);
   for (const path of [
     "crates/cli/src/coverage/credentials.rs",
     "crates/cli/tests/integration/cloud_login_linux_keychain_tests.rs",
+    "crates/cli/tests/integration/main.rs",
+    "crates/cli/tests/common/**",
     "scripts/linux-keychain-test.sh",
   ]) {
     assert.ok(paths.includes(path), `the linux-keychain filter must list ${path}`);
@@ -1520,6 +1522,30 @@ test("CI runs the cloud login credential store tests with a real Secret Service"
     /linux-keychain: \$\{\{ steps\.filter\.outputs\.linux-keychain \}\}/u,
   );
   assert.match(indentedBlock(workflow, "ci-ok", 2), /needs: \[[^\n]*\blinux-keychain\b/u);
+});
+
+test("the Linux keychain script fails when a test name matches no test", (t) => {
+  const bin = mkdtempSync(join(tmpdir(), "fallow-linux-keychain-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  // Stubs for the tools that the `--in-session` part calls. The cargo stub
+  // prints the summary line of a test run with the given count.
+  writeFileSync(join(bin, "gnome-keyring-daemon"), "#!/bin/sh\ncat >/dev/null\n", { mode: 0o755 });
+  writeFileSync(
+    join(bin, "cargo"),
+    '#!/bin/sh\necho "test result: ok. $PASSED passed; 0 failed; 0 ignored"\n',
+    { mode: 0o755 },
+  );
+  const run = (passed) =>
+    runProcess("sh", ["scripts/linux-keychain-test.sh", "--in-session"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, PASSED: passed },
+    });
+
+  const renamed = run("0");
+  assert.equal(renamed.status, 1, renamed.stderr);
+  assert.match(renamed.stderr, /no test ran for/u);
+  const matched = run("1");
+  assert.equal(matched.status, 0, matched.stderr);
 });
 
 test("the check job runs the end-to-end mutation tests instead of a skip", () => {

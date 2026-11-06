@@ -378,6 +378,8 @@ jobs:
               - 'crates/cli/src/coverage/login.rs'
               - 'crates/cli/tests/integration/cloud_login_linux_keychain_tests.rs'
               - 'crates/cli/tests/integration/inspect_cloud_tests.rs'
+              - 'crates/cli/tests/integration/main.rs'
+              - 'crates/cli/tests/common/**'
               - 'scripts/linux-keychain-test.sh'
               - 'rust-toolchain.toml'
               - '.github/actions/setup-rust/**'
