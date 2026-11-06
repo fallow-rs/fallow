@@ -43,6 +43,10 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// exiting; the consumer is responsible for clean teardown.
 static GRACEFUL: AtomicBool = AtomicBool::new(false);
 
+/// True once a signal handler decided to end the process with `exit`.
+/// [`after_pending_exit`] reads it.
+static EXIT_PENDING: AtomicBool = AtomicBool::new(false);
+
 /// Idempotency guard for `install_handlers`. Repeated calls (e.g. when
 /// `run_watch` reinstalls the handler) are silently no-ops.
 static INSTALLED: OnceLock<()> = OnceLock::new();
@@ -122,6 +126,42 @@ impl Drop for GracefulModeGuard {
     }
 }
 
+/// Sets `EXIT_PENDING` and clears it again on a drop. A panic in the drain
+/// of a debug build unwinds the signal thread, and the drop then frees a
+/// main thread that waits in [`after_pending_exit`].
+struct PendingExit {
+    drained: bool,
+}
+
+impl PendingExit {
+    fn start() -> Self {
+        EXIT_PENDING.store(true, Ordering::SeqCst);
+        Self { drained: false }
+    }
+}
+
+impl Drop for PendingExit {
+    fn drop(&mut self) {
+        if !self.drained {
+            EXIT_PENDING.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Blocks for good when a signal handler is about to end the process.
+///
+/// The drain can take up to its budget. In that time the command can end
+/// quickly, because no new child process can start. A return from `main`
+/// would then end the process with the exit code of the command instead
+/// of `128 + signum`. The main thread passes its exit code through this
+/// before it returns.
+pub fn after_pending_exit(code: std::process::ExitCode) -> std::process::ExitCode {
+    while EXIT_PENDING.load(Ordering::SeqCst) {
+        std::thread::park_timeout(std::time::Duration::from_millis(50));
+    }
+    code
+}
+
 #[cfg(unix)]
 fn platform_install() -> std::io::Result<()> {
     unix::install()
@@ -151,8 +191,14 @@ fn platform_install() -> std::io::Result<()> {
 /// Invoked by the platform-specific handler thread.
 fn handle_signal(exit_code: i32) {
     SHUTDOWN.store(true, Ordering::SeqCst);
+    let graceful = GRACEFUL.load(Ordering::SeqCst);
+    let mut pending = (!graceful).then(PendingExit::start);
     fallow_process::drain_and_kill();
-    if GRACEFUL.load(Ordering::SeqCst) {
+    // The drain returned, so the exit below follows.
+    if let Some(pending) = pending.as_mut() {
+        pending.drained = true;
+    }
+    if graceful {
         return;
     }
     #[expect(
@@ -174,6 +220,19 @@ mod tests {
             assert!(GRACEFUL.load(Ordering::SeqCst));
         }
         assert!(!GRACEFUL.load(Ordering::SeqCst));
+    }
+
+    /// A drain that panics must not leave the main thread waiting forever.
+    #[test]
+    fn a_pending_exit_that_unwinds_frees_the_main_thread() {
+        let unwound = std::panic::catch_unwind(|| {
+            let _pending = PendingExit::start();
+            assert!(EXIT_PENDING.load(Ordering::SeqCst));
+            panic!("the drain panics");
+        });
+        assert!(unwound.is_err());
+        assert!(!EXIT_PENDING.load(Ordering::SeqCst));
+        let _ = after_pending_exit(std::process::ExitCode::SUCCESS);
     }
 
     #[test]

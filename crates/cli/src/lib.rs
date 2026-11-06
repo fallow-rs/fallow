@@ -446,7 +446,7 @@ fn finalize_report_file(
 /// A stdout write error other than a closed pipe changes the exit code to 2,
 /// so that a cut-off report never looks like a successful run.
 pub fn run() -> ExitCode {
-    report::sink::finish_stdout(run_command())
+    signal::after_pending_exit(report::sink::finish_stdout(run_command()))
 }
 
 fn run_command() -> ExitCode {

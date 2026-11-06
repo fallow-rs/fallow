@@ -47,13 +47,31 @@ pub fn register_process_tree(process_tree: ProcessTreeHandle) -> u64 {
     register_target(KillTarget::ProcessTree(process_tree))
 }
 
+/// A target that registers after a drain began misses the drain snapshot,
+/// so it is killed at once. The drain sets `DRAINING` before it takes the
+/// registry lock for the snapshot, so each target is in the snapshot or
+/// sees the flag.
 fn register_target(target: KillTarget) -> u64 {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    registry()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(id, target);
+    if let Some(late) = insert_unless_draining(registry(), &DRAINING, id, target) {
+        kill_target(&late);
+    }
     id
+}
+
+/// Inserts `target`, or gives it back when `draining` is set.
+fn insert_unless_draining(
+    registry: &Mutex<FxHashMap<u64, KillTarget>>,
+    draining: &AtomicU64,
+    id: u64,
+    target: KillTarget,
+) -> Option<KillTarget> {
+    let mut registry = registry.lock().unwrap_or_else(|e| e.into_inner());
+    if draining.load(Ordering::SeqCst) != 0 {
+        return Some(target);
+    }
+    registry.insert(id, target);
+    None
 }
 
 /// Remove the registry entry for `id`. Idempotent.
@@ -82,6 +100,7 @@ pub fn drain_and_kill() {
     if !begin_drain() {
         return;
     }
+    crate::cleanup_paths::close_registry();
     let targets: Vec<KillTarget> = registry()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -115,6 +134,7 @@ fn drain_targets(registry: &mut FxHashMap<u64, KillTarget>) -> Option<Vec<KillTa
     if !begin_drain() {
         return None;
     }
+    crate::cleanup_paths::close_registry();
     Some(registry.drain().map(|(_id, target)| target).collect())
 }
 
@@ -392,6 +412,26 @@ mod tests {
             !alive,
             "killed and unreaped process tree still counts as alive"
         );
+    }
+
+    /// A mutation companion can start while the signal thread kills the
+    /// drained children. It is not in the drain snapshot, so the
+    /// registration must give it back for an immediate kill.
+    #[test]
+    fn a_target_that_registers_during_a_drain_is_given_back() {
+        let local = Mutex::new(FxHashMap::default());
+        let draining = AtomicU64::new(0);
+        assert!(insert_unless_draining(&local, &draining, 1, KillTarget::Process(42)).is_none());
+        draining.store(1, Ordering::SeqCst);
+        let late = insert_unless_draining(&local, &draining, 2, KillTarget::Process(43));
+        assert!(matches!(late, Some(KillTarget::Process(43))));
+        let registered: Vec<u64> = local
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .keys()
+            .copied()
+            .collect();
+        assert_eq!(registered, vec![1]);
     }
 
     #[test]
