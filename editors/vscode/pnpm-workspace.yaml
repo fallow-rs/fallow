@@ -2,11 +2,9 @@ allowBuilds:
   '@vscode/vsce-sign': false
   keytar: false
 
-# minimatch 11.0.3 is younger than the 7-day minimum release age. Remove this entry after 2026-11-04.
-minimumReleaseAgeExclude:
-  - minimatch@11.0.3
-  # glob 14.0.2 is younger than the 7-day minimum release age. Remove this entry after 2026-11-04.
-  - glob@14.0.2
+# Install only package versions that are at least 7 days old (10080 minutes).
+# The Dependabot cooldown in `.github/dependabot.yml` uses the same age.
+minimumReleaseAge: 10080
 
 overrides:
   # Azure Identity still requests MSAL 6; the auth-code fix starts at 7.1.0.

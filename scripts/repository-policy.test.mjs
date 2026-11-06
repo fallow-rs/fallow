@@ -1017,3 +1017,23 @@ test("the fallow crate is published in lockstep with fallow-cli", () => {
   const sync = readFileSync("scripts/sync-npm-versions.sh", "utf8");
   assert.match(sync, /packaging\/crates-io\/fallow\/Cargo\.toml/u);
 });
+
+test("the extension pnpm project enforces the 7-day minimum release age", () => {
+  // pnpm 11 ignores pnpm keys in `.npmrc`, so the age limit must be in
+  // `pnpm-workspace.yaml` of the extension.
+  const settings = readFileSync("editors/vscode/pnpm-workspace.yaml", "utf8");
+  assert.match(settings, /^minimumReleaseAge: 10080$/mu);
+});
+
+test("no tracked .npmrc holds the pnpm minimum-release-age key", () => {
+  // pnpm 11 ignores pnpm keys in `.npmrc`. A key there gives a false sense
+  // of protection, so the age limit belongs in `pnpm-workspace.yaml`.
+  const listed = spawnSync("git", ["ls-files", "*.npmrc", ".npmrc"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split("\n").filter(Boolean);
+  assert.ok(files.includes("editors/vscode/.npmrc"));
+  for (const file of files) {
+    const npmrc = readFileSync(file, "utf8");
+    assert.doesNotMatch(npmrc, /^minimum-release-age=/mu, `${file}: pnpm 11 ignores this key`);
+  }
+});
