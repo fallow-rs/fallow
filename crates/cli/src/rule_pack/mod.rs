@@ -40,9 +40,8 @@ fn emit_json(
             crate::report::sink::outln!("{json}");
             ExitCode::SUCCESS
         }
-        Err(error) => crate::error::emit_error_with_style(
+        Err(error) => crate::error::emit_input_error_with_style(
             &format!("failed to serialize {kind} output: {error}"),
-            2,
             OutputFormat::Json,
             json_style,
         ),

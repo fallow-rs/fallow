@@ -697,9 +697,8 @@ fn render(
                 crate::report::sink::outln!("{json}");
                 exit
             }
-            Err(error) => crate::error::emit_error_with_style(
+            Err(error) => crate::error::emit_input_error_with_style(
                 &format!("failed to serialize agent report: {error}"),
-                2,
                 output,
                 json_style,
             ),
@@ -708,7 +707,7 @@ fn render(
             print_human(report);
             exit
         }
-        _ => crate::error::emit_error("agent commands support human and json output", 2, output),
+        _ => crate::error::emit_input_error("agent commands support human and json output", output),
     }
 }
 

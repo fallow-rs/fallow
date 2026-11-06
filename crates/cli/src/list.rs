@@ -217,9 +217,8 @@ fn benchmark_list_data_json(opts: &ListOptions<'_>) -> Result<(ListData, usize),
         workspace_data: data.workspace_data.as_ref(),
     })
     .map_err(|err| {
-        crate::error::emit_error(
+        crate::error::emit_input_error(
             &format!("failed to serialize list output: {err}"),
-            2,
             OutputFormat::Json,
         )
     })?;
@@ -240,7 +239,7 @@ fn collect_list_data(
     let session = if need_files || need_plugin_result {
         match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
             Ok(session) => Some(session),
-            Err(err) => return Err(crate::error::emit_error(err.message(), 2, opts.output)),
+            Err(err) => return Err(crate::error::emit_input_error(err.message(), opts.output)),
         }
     } else {
         None
@@ -315,7 +314,7 @@ fn collect_entry_weight(
 ) -> Result<fallow_output::EntryWeightListing, ExitCode> {
     let mut listing = fallow_engine::entry_weight::compute_entry_weight(session, entry_points)
         .map_err(|err| {
-            crate::error::emit_error(&format!("Analysis error: {err}"), 2, opts.output)
+            crate::error::emit_input_error(&format!("Analysis error: {err}"), opts.output)
         })?;
     if let Some(scope) = opts.scope.as_deref() {
         listing
@@ -374,7 +373,7 @@ fn collect_list_workspace_data(
                 diagnostics,
             }))
         }
-        Err(err) => Err(crate::error::emit_error(err.message(), 2, opts.output)),
+        Err(err) => Err(crate::error::emit_input_error(err.message(), opts.output)),
     }
 }
 
@@ -447,7 +446,7 @@ fn collect_inventory(
         opts.entry_points || opts.entry_weight || show_all,
     )
     .map(Some)
-    .map_err(|err| crate::error::emit_error(err.message(), 2, opts.output))
+    .map_err(|err| crate::error::emit_input_error(err.message(), opts.output))
 }
 
 /// Print list results as JSON and return the appropriate exit code.
@@ -492,10 +491,9 @@ fn validate_entry_weight_gate(
 ) -> Result<(), ExitCode> {
     gate.validate(opts.output)?;
     if gate.save_file.is_some() && opts.scope.is_some() {
-        return Err(crate::error::emit_error(
+        return Err(crate::error::emit_input_error(
             "list --entry-weight --save-regression-baseline saves every entry; drop the PATH \
              scope to save a baseline",
-            2,
             opts.output,
         ));
     }

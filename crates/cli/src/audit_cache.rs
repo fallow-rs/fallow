@@ -17,7 +17,7 @@ use crate::base_worktree::{
     SECONDS_PER_DAY, SweepDecision, SweepDisposition, SweepEntry, SweepMode, SweepPass,
     git_rev_parse, git_toplevel,
 };
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 /// Version 11: complexity keys hold path and function name only, and each
 /// complexity entry carries its metric values (#3277). A version-10 snapshot
@@ -588,16 +588,15 @@ pub(super) fn config_file_fingerprint(
     let loaded = if let Some(path) = opts.config_path {
         let config =
             fallow_config::FallowConfig::load_with_options(path, load_options).map_err(|e| {
-                emit_error(
+                emit_input_error(
                     &format!("failed to load config '{}': {e}", path.display()),
-                    2,
                     opts.output,
                 )
             })?;
         Some((config, path.clone()))
     } else {
         fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
-            .map_err(|e| emit_error(&e, 2, opts.output))?
+            .map_err(|e| emit_input_error(&e, opts.output))?
     };
 
     let Some((config, path)) = loaded else {
@@ -607,9 +606,8 @@ pub(super) fn config_file_fingerprint(
         });
     };
     let bytes = serde_json::to_vec(&config).map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!("failed to serialize resolved config for audit cache key: {e}"),
-            2,
             opts.output,
         )
     })?;
@@ -727,9 +725,8 @@ pub(super) fn audit_base_snapshot_cache_key(
     )
     .to_json_bytes()
     .map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!("failed to build audit cache key: {e}"),
-            2,
             opts.output,
         )
     })?;

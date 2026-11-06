@@ -10,7 +10,7 @@ use fallow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
 use crate::check::resolve_workspace_scope;
 use crate::report;
-use crate::{error::emit_error, load_config_for_analysis};
+use crate::{error::emit_input_error, exit_codes::INVALID_INPUT, load_config_for_analysis};
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum DupesMode {
@@ -207,13 +207,13 @@ fn run_clone_trace(
     } else {
         let (file_path, line) = match parse_trace_spec(trace_spec) {
             Ok(parsed) => parsed,
-            Err(msg) => return emit_error(msg, 2, output),
+            Err(msg) => return emit_input_error(msg, output),
         };
         let result = fallow_engine::trace::trace_clone(report, root, file_path, line);
         (result, format!("no clone found at {file_path}:{line}"))
     };
     if trace_result.matched_instance.is_none() {
-        return emit_error(&not_found, 2, output);
+        return emit_input_error(&not_found, output);
     }
     crate::report::print_clone_trace(&trace_result, root, output, json_style);
     ExitCode::SUCCESS
@@ -421,7 +421,7 @@ fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCo
         return Err(crate::error::emit_error_with_hint(
             TOP_WITH_GROUP_BY_MESSAGE,
             TOP_WITH_GROUP_BY_HINT,
-            2,
+            INVALID_INPUT,
             opts.output,
         ));
     }
@@ -448,8 +448,9 @@ fn resolve_change_scope(
     request: ChangeScopeRequest<'_>,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Result<ChangeScope, ExitCode> {
-    let scope = ChangeScope::resolve(request, config, workspaces)
-        .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    let scope = ChangeScope::resolve(request, config, workspaces).map_err(|err| {
+        emit_input_error(&format!("Workspace baseline error: {err}"), opts.output)
+    })?;
     crate::requests::warn_if_package_baselines_stood_down(&scope);
     Ok(scope)
 }
@@ -471,7 +472,7 @@ fn resolve_change_scope_for_pre_discovered_files(
         &config.ignore_patterns,
         &config.workspace_patterns,
     )
-    .map_err(|err| emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output))?;
+    .map_err(|err| emit_input_error(&format!("Workspace discovery error: {err}"), opts.output))?;
     resolve_change_scope(opts, config, request, &workspaces)
 }
 
@@ -513,9 +514,8 @@ fn execute_dupes_inner(
                 {
                     Ok(session) => session,
                     Err(err) => {
-                        return Err(emit_error(
+                        return Err(emit_input_error(
                             &format!("Analysis error: {err}"),
-                            2,
                             opts.output,
                         ));
                     }
@@ -610,7 +610,7 @@ fn save_duplication_baseline(
         path,
         fallow_engine::baseline::BaselineKind::Dupes,
     ) {
-        return Err(emit_error(&refusal, 2, opts.output));
+        return Err(emit_input_error(&refusal, opts.output));
     }
     let json = serialize_duplication_baseline(report, config, opts.output)?;
     match fallow_engine::write_guard::write_file(
@@ -620,16 +620,14 @@ fn save_duplication_baseline(
     ) {
         Ok(()) => {}
         Err(e) if e.is_directory() => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("failed to create duplication baseline directory: {e}"),
-                2,
                 opts.output,
             ));
         }
         Err(e) => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("failed to write duplication baseline: {e}"),
-                2,
                 opts.output,
             ));
         }
@@ -649,9 +647,8 @@ fn serialize_duplication_baseline(
     let baseline_data = DuplicationBaselineData::from_report(report, &config.root)
         .with_production(config.production);
     serde_json::to_string_pretty(&baseline_data).map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!("failed to serialize duplication baseline: {e}"),
-            2,
             output,
         )
     })
@@ -740,16 +737,11 @@ fn read_duplication_baseline(
     ExitCode,
 > {
     let json = std::fs::read_to_string(path).map_err(|e| {
-        emit_error(
-            &format!("failed to read duplication baseline: {e}"),
-            2,
-            output,
-        )
+        emit_input_error(&format!("failed to read duplication baseline: {e}"), output)
     })?;
     let data = serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!("failed to parse duplication baseline: {e}"),
-            2,
             output,
         )
     })?;

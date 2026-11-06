@@ -12,14 +12,14 @@ pub(super) fn save_baseline_file(
         baseline_path,
         fallow_engine::baseline::BaselineKind::DeadCode,
     ) {
-        return Err(emit_error(&refusal, 2, io.output));
+        return Err(emit_input_error(&refusal, io.output));
     }
     let baseline_data =
         BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone())
             .with_scope_reasons(io.scope_reasons)
             .with_node_modules(fallow_config::node_modules_state(io.root));
     let mut json = serde_json::to_string_pretty(&baseline_data)
-        .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
+        .map_err(|e| emit_input_error(&format!("failed to serialize baseline: {e}"), io.output))?;
     json.push('\n');
     match fallow_engine::write_guard::write_file(
         baseline_path,
@@ -28,16 +28,14 @@ pub(super) fn save_baseline_file(
     ) {
         Ok(()) => {}
         Err(e) if e.is_directory() => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("failed to create baseline directory: {e}"),
-                2,
                 io.output,
             ));
         }
         Err(e) => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("failed to save baseline: {e}"),
-                2,
                 io.output,
             ));
         }

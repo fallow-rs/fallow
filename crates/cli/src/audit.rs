@@ -15,8 +15,9 @@ use crate::base_worktree::git_rev_parse;
 use crate::base_worktree::{BaseWorktree, git_toplevel, sweep_old_reusable_caches};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
+use crate::error::emit_input_error;
+use crate::exit_codes::exit_invalid_input;
 use crate::health::{HealthOptions, HealthResult};
-use crate::{error::emit_error, exit_codes::exit_invalid_input};
 
 pub use fallow_api::audit_run::{AuditKeySnapshot, DupeDemotionDiffSource, branching_keys};
 
@@ -554,7 +555,7 @@ impl AuditBackend for CliAuditBackend<'_> {
             if let Some(hint) = ambient_git_env_hint() {
                 let _ = write!(message, "\n  hint: {hint}");
             }
-            emit_error(&message, 2, self.opts.output)
+            emit_input_error(&message, self.opts.output)
         })
     }
 
@@ -1230,11 +1231,10 @@ fn audit_changed_files(
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        emit_error(
+        emit_input_error(
             &format!(
                 "could not determine changed files for base ref '{base_ref}': {cause}. Verify the ref exists in this git repository"
             ),
-            2,
             opts.output,
         )
     })
@@ -2751,7 +2751,7 @@ pub fn run_audit_with_type_aware(
     type_aware: AuditTypeAwareOptions<'_>,
 ) -> ExitCode {
     if let Err(e) = fallow_engine::health::validate_coverage_root_absolute(opts.coverage_root) {
-        return crate::error::emit_error_with_style(&e, 2, opts.output, opts.json_style);
+        return crate::error::emit_input_error_with_style(&e, opts.output, opts.json_style);
     }
     let coverage_resolved = opts
         .coverage

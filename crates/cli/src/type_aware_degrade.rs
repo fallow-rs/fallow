@@ -53,9 +53,8 @@ pub struct DegradeContext<'a> {
 /// code 2 that `require = complete` still demands.
 pub fn degrade_or_fail(ctx: &DegradeContext<'_>) -> Result<TypeAwareMeta, ExitCode> {
     if ctx.require == TypeAwareRequire::Complete {
-        return Err(crate::error::emit_error(
+        return Err(crate::error::emit_input_error(
             &format!("{}: {}", ctx.failure_label, ctx.error),
-            2,
             ctx.output,
         ));
     }

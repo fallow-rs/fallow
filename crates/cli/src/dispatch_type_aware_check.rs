@@ -8,23 +8,20 @@ pub(super) fn validate_type_aware_check_options(
 ) -> Option<ExitCode> {
     let output = dispatch.output;
     if !args.type_aware_project.is_empty() && args.type_aware != Some(true) {
-        return Some(emit_error(
+        return Some(emit_input_error(
             "--type-aware-project requires --type-aware",
-            2,
             output,
         ));
     }
     if args.type_aware_require.is_some() && args.type_aware != Some(true) {
-        return Some(emit_error(
+        return Some(emit_input_error(
             "--type-aware-require requires --type-aware",
-            2,
             output,
         ));
     }
     if args.trace_opts.symbol_impact.is_some() && args.type_aware != Some(true) {
-        return Some(emit_error(
+        return Some(emit_input_error(
             "--symbol-impact requires --type-aware",
-            2,
             output,
         ));
     }
@@ -39,9 +36,8 @@ pub(super) fn validate_type_aware_check_options(
             fallow_config::OutputFormat::Human | fallow_config::OutputFormat::Json
         )
     {
-        return Some(emit_error(
+        return Some(emit_input_error(
             "focused trace and impact queries support human and JSON output",
-            2,
             output,
         ));
     }
@@ -60,9 +56,8 @@ pub(super) fn validate_type_aware_check_options(
                 | fallow_config::OutputFormat::ReviewGitlab
         )
     {
-        return Some(emit_error(
+        return Some(emit_input_error(
             "--type-aware supports human, JSON, SARIF, compact, markdown, CodeClimate, PR-comment, and review output; pair presentation formats with the JSON artifact to preserve semantic provenance",
-            2,
             output,
         ));
     }

@@ -18,6 +18,7 @@ use std::process::ExitCode;
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_output::{GroupByMode, PrDecisionConclusion};
 
+use crate::exit_codes::INVALID_INPUT;
 use crate::report::ci::pr_comment::Provider;
 use crate::report::github_annotations::{self, EnvelopeKind};
 use crate::report::github_summary;
@@ -35,17 +36,15 @@ pub fn run_report(
     if let Some(path) = config_path
         && let Err(error) = FallowConfig::load(path)
     {
-        return crate::emit_known_failure(
+        return invalid_report_input(
             &format!("failed to load report config {}: {error}", path.display()),
-            2,
             output,
             telemetry::FailureReason::Validation,
         );
     }
     let Some(target) = report_target(output) else {
-        return crate::emit_known_failure(
+        return invalid_report_input(
             "fallow report supports --format github-annotations, github-summary, codeclimate, sarif, markdown, pr-comment-github, pr-comment-gitlab, review-github, or review-gitlab only",
-            2,
             output,
             telemetry::FailureReason::UnsupportedFormat,
         );
@@ -63,15 +62,10 @@ pub fn run_report(
         Err(code) => return code,
     };
     if let Err(error) = validate_report_target(target, kind) {
-        return crate::emit_known_failure(
-            &error,
-            2,
-            output,
-            telemetry::FailureReason::UnsupportedFormat,
-        );
+        return invalid_report_input(&error, output, telemetry::FailureReason::UnsupportedFormat);
     }
     if let Err(error) = validate_saved_report_envelope(kind, &saved.envelope) {
-        return crate::emit_known_failure(&error, 2, output, telemetry::FailureReason::Validation);
+        return invalid_report_input(&error, output, telemetry::FailureReason::Validation);
     }
     let resolver = match saved_group_resolver(saved.grouped_by, root, config_path, output) {
         Ok(resolver) => resolver,
@@ -130,6 +124,15 @@ pub fn run_report(
     }
 }
 
+/// Emit an invalid-input error of `fallow report` and note the failure reason.
+fn invalid_report_input(
+    message: &str,
+    output: OutputFormat,
+    reason: telemetry::FailureReason,
+) -> ExitCode {
+    crate::emit_known_failure(message, INVALID_INPUT, output, reason)
+}
+
 /// Print the markdown document of a saved envelope, or exit 2 with the reason
 /// when the envelope has no saved markdown document.
 fn render_saved_markdown(
@@ -141,9 +144,12 @@ fn render_saved_markdown(
 ) -> ExitCode {
     match crate::report::print_saved_markdown(kind, envelope, root, resolver) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            crate::emit_known_failure(&error, 2, output, telemetry::FailureReason::Validation)
-        }
+        Err(error) => crate::emit_known_failure(
+            &error,
+            INVALID_INPUT,
+            output,
+            telemetry::FailureReason::Validation,
+        ),
     }
 }
 
@@ -234,7 +240,7 @@ fn render_saved_ci_target(
         Err(error) => {
             return crate::emit_known_failure(
                 &error,
-                2,
+                INVALID_INPUT,
                 output,
                 telemetry::FailureReason::Validation,
             );
@@ -245,7 +251,7 @@ fn render_saved_ci_target(
         Err(error) => {
             return crate::emit_known_failure(
                 &error,
-                2,
+                INVALID_INPUT,
                 output,
                 telemetry::FailureReason::Validation,
             );
@@ -682,7 +688,12 @@ fn prepare_saved_envelope(
     output: OutputFormat,
 ) -> Result<SavedEnvelope, ExitCode> {
     normalize_saved_envelope(envelope).map_err(|error| {
-        crate::emit_known_failure(&error, 2, output, telemetry::FailureReason::Validation)
+        crate::emit_known_failure(
+            &error,
+            INVALID_INPUT,
+            output,
+            telemetry::FailureReason::Validation,
+        )
     })
 }
 
@@ -1024,7 +1035,7 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
     let source = std::fs::read_to_string(from).map_err(|err| {
         crate::emit_known_failure(
             &format!("failed to read {}: {err}", from.display()),
-            2,
+            INVALID_INPUT,
             output,
             telemetry::FailureReason::Validation,
         )
@@ -1035,7 +1046,7 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
                 "{} is not valid JSON ({err}); generate it with `fallow ... --format json`",
                 from.display()
             ),
-            2,
+            INVALID_INPUT,
             output,
             telemetry::FailureReason::Validation,
         )
@@ -1081,7 +1092,7 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
                 "{} is a `--lean` document; save the run without `--lean` for `fallow report`",
                 from.display()
             ),
-            2,
+            INVALID_INPUT,
             output,
             telemetry::FailureReason::Validation,
         ));
@@ -1108,7 +1119,7 @@ fn envelope_kind(
                  generate it with `fallow ... --format json`",
                 from.display()
             ),
-            2,
+            INVALID_INPUT,
             output,
             telemetry::FailureReason::Validation,
         ));
@@ -1120,7 +1131,7 @@ fn envelope_kind(
                  architecture, dupes, health, audit, security, and combined envelopes",
                 from.display()
             ),
-            2,
+            INVALID_INPUT,
             output,
             telemetry::FailureReason::Validation,
         )

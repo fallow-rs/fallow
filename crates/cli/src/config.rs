@@ -8,7 +8,7 @@ use std::process::ExitCode;
 
 use fallow_config::{FallowConfig, OutputFormat};
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE as EXIT_NO_CONFIG;
 
 /// Run the `fallow config` subcommand.
@@ -77,7 +77,7 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
                     .collect::<Vec<_>>()
                     .join("\n  - ");
                 let msg = format!("invalid boundary configuration:\n  - {joined}");
-                return emit_error(&msg, 2, output);
+                return emit_input_error(&msg, output);
             }
             if input.path_only {
                 // Machine payload for `--path`: the config file path on stdout.
@@ -92,7 +92,10 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
                 match input.json_style.serialize(&config) {
                     Ok(json) => crate::report::sink::stdoutln!("{json}"),
                     Err(e) => {
-                        return emit_error(&format!("failed to serialize config: {e}"), 2, output);
+                        return emit_input_error(
+                            &format!("failed to serialize config: {e}"),
+                            output,
+                        );
                     }
                 }
             }
@@ -117,10 +120,10 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
                     crate::report::sink::stdoutln!("{json}");
                     ExitCode::SUCCESS
                 }
-                Err(e) => emit_error(&format!("failed to serialize config: {e}"), 2, output),
+                Err(e) => emit_input_error(&format!("failed to serialize config: {e}"), output),
             }
         }
-        Err(e) => emit_error(&e, 2, output),
+        Err(e) => emit_input_error(&e, output),
     }
 }
 

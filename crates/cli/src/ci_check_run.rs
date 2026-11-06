@@ -5,7 +5,8 @@ use fallow_config::OutputFormat;
 use fallow_output::{PrDecisionAnnotation, PrDecisionAnnotationLevel, PrDecisionConclusion};
 use serde_json::{Value, json};
 
-use crate::error::emit_error_with_style;
+use crate::error::{emit_error_with_style, emit_input_error_with_style};
+use crate::exit_codes::NETWORK_FAILURE;
 
 use super::{emit_ci_command_json, github_create_json, github_token, read_text_file};
 
@@ -26,7 +27,7 @@ pub(super) fn post_check_run(
 ) -> ExitCode {
     let decision = match read_decision(input.decision) {
         Ok(decision) => decision,
-        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
+        Err(e) => return emit_input_error_with_style(&e, output, json_style),
     };
     let payloads = github_check_run_payloads(&decision, input.head_sha, input.split_gates);
     if input.dry_run {
@@ -40,18 +41,13 @@ pub(super) fn post_check_run(
     let token = match github_token() {
         Ok(token) => token,
         Err(e) => {
-            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+            return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
         }
     };
     let agent = match crate::api::try_api_agent() {
         Ok(agent) => agent,
         Err(e) => {
-            return emit_error_with_style(
-                &e.to_string(),
-                crate::api::NETWORK_EXIT_CODE,
-                output,
-                json_style,
-            );
+            return emit_error_with_style(&e.to_string(), NETWORK_FAILURE, output, json_style);
         }
     };
     let api = input
@@ -65,21 +61,11 @@ pub(super) fn post_check_run(
             Ok(value) => match validate_github_check_run_response(&value, payload) {
                 Ok(()) => results.push(value),
                 Err(e) => {
-                    return emit_error_with_style(
-                        &e,
-                        crate::api::NETWORK_EXIT_CODE,
-                        output,
-                        json_style,
-                    );
+                    return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
                 }
             },
             Err(e) => {
-                return emit_error_with_style(
-                    &e,
-                    crate::api::NETWORK_EXIT_CODE,
-                    output,
-                    json_style,
-                );
+                return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
             }
         }
     }

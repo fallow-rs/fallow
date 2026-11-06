@@ -2,10 +2,27 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 
+use crate::exit_codes::{ErrorExitCode, INVALID_INPUT};
+
 /// Emit an error as structured JSON on stdout when `--format json` is active,
 /// then return the given exit code. For non-JSON formats, emit to stderr as usual.
-pub fn emit_error(message: &str, exit_code: u8, output: OutputFormat) -> ExitCode {
+pub fn emit_error(message: &str, exit_code: ErrorExitCode, output: OutputFormat) -> ExitCode {
     emit_error_with_style(message, exit_code, output, requested_json_style())
+}
+
+/// Emit an error with exit code 2 ([`INVALID_INPUT`]): the input was not
+/// valid, or the run could not complete.
+pub fn emit_input_error(message: &str, output: OutputFormat) -> ExitCode {
+    emit_error(message, INVALID_INPUT, output)
+}
+
+/// Emit an error with exit code 2 ([`INVALID_INPUT`]) in the given JSON style.
+pub fn emit_input_error_with_style(
+    message: &str,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    emit_error_with_style(message, INVALID_INPUT, output, json_style)
 }
 
 pub fn requested_json_style() -> crate::json_style::JsonStyle {
@@ -63,12 +80,12 @@ pub fn emit_programmatic_error(
 pub fn emit_error_with_hint(
     message: &str,
     hint: &str,
-    exit_code: u8,
+    exit_code: ErrorExitCode,
     output: OutputFormat,
 ) -> ExitCode {
     if matches!(output, OutputFormat::Json) {
-        let error_obj =
-            fallow_output::ErrorOutput::new(message, exit_code).with_help(Some(hint.to_string()));
+        let error_obj = fallow_output::ErrorOutput::new(message, exit_code.get())
+            .with_help(Some(hint.to_string()));
         if let Ok(json) = requested_json_style().serialize(&error_obj) {
             println!("{json}");
         }
@@ -85,12 +102,12 @@ pub fn emit_error_with_hint(
 )]
 pub fn emit_error_with_style(
     message: &str,
-    exit_code: u8,
+    exit_code: ErrorExitCode,
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     if matches!(output, OutputFormat::Json) {
-        let error_obj = fallow_output::ErrorOutput::new(message, exit_code);
+        let error_obj = fallow_output::ErrorOutput::new(message, exit_code.get());
         if let Ok(json) = json_style.serialize(&error_obj) {
             println!("{json}");
         }

@@ -428,7 +428,7 @@ fn run_combined_health(
             },
             &config,
         )
-        .map_err(|message| crate::error::emit_error(&message, 2, opts.output))?;
+        .map_err(|message| crate::error::emit_input_error(&message, opts.output))?;
         let mut degraded_meta = None;
         let semantic = if resolved.enabled {
             match fallow_api::analyze_type_coupling(opts.root, &resolved.projects, &[]) {

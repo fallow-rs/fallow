@@ -6,7 +6,7 @@ use fallow_config::OutputFormat;
 use fallow_types::envelope::Meta;
 use serde_json::{Value, json};
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::exit_codes::exit_gate_failed;
 use crate::report;
 use crate::report::sink::outln;
@@ -116,12 +116,12 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
         opts.output,
         OutputFormat::Json | OutputFormat::Human | OutputFormat::Compact
     ) {
-        return emit_error(UNSUPPORTED_FORMAT_MESSAGE, 2, opts.output);
+        return emit_input_error(UNSUPPORTED_FORMAT_MESSAGE, opts.output);
     }
     let transport = ProcessChildJsonTransport;
     let bundle = match build_inspect_bundle(opts, &transport) {
         Ok(bundle) => bundle,
-        Err(message) => return emit_error(&message, 2, opts.output),
+        Err(message) => return emit_input_error(&message, opts.output),
     };
 
     let completeness_failed = inspect_type_aware_completeness_failed(&bundle);
@@ -745,9 +745,8 @@ fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> Exit
             ) {
                 Ok(value) => value,
                 Err(err) => {
-                    return emit_error(
+                    return emit_input_error(
                         &format!("failed to serialize inspect output: {err}"),
-                        2,
                         opts.output,
                     );
                 }
@@ -762,7 +761,7 @@ fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> Exit
             outln!("{}", compact::render(&bundle).trim_end());
             ExitCode::SUCCESS
         }
-        _ => emit_error(UNSUPPORTED_FORMAT_MESSAGE, 2, opts.output),
+        _ => emit_input_error(UNSUPPORTED_FORMAT_MESSAGE, opts.output),
     }
 }
 

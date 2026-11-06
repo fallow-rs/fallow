@@ -24,6 +24,7 @@ use fallow_output::{
 use fallow_types::envelope::ToolVersion;
 
 use crate::error::emit_error_with_style;
+use crate::exit_codes::{ErrorExitCode, INVALID_INPUT, RESOURCE_UNAVAILABLE};
 use crate::json_style::JsonStyle;
 
 const MAX_CANDIDATE_INPUT_BYTES: u64 = 16 * 1024 * 1024;
@@ -116,7 +117,7 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
     if !matches!(input.output, OutputFormat::Human | OutputFormat::Json) {
         return failure(
             "`fallow similar-code` supports only human and json output; it is advisory and has no SARIF or CI gate",
-            2,
+            INVALID_INPUT,
             input.output,
             input.json_style,
         );
@@ -381,7 +382,7 @@ fn run_status(output: OutputFormat, json_style: JsonStyle) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Err(error) => failure(&error, 3, output, json_style),
+        Err(error) => failure(&error, RESOURCE_UNAVAILABLE, output, json_style),
     }
 }
 
@@ -392,7 +393,7 @@ fn run_setup(yes: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode
         if !std::io::stdin().is_terminal() {
             return failure(
                 "non-interactive similar-code setup requires `--yes`; agents and MCP tools must not invoke setup",
-                2,
+                INVALID_INPUT,
                 output,
                 json_style,
             );
@@ -407,7 +408,12 @@ fn run_setup(yes: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode
         let _ = std::io::stderr().flush();
         let mut confirmation = String::new();
         if std::io::stdin().read_line(&mut confirmation).is_err() || confirmation.trim() != "yes" {
-            return failure("similar-code setup cancelled", 2, output, json_style);
+            return failure(
+                "similar-code setup cancelled",
+                INVALID_INPUT,
+                output,
+                json_style,
+            );
         }
     }
     if !matches!(output, OutputFormat::Json) {
@@ -426,7 +432,7 @@ fn run_setup(yes: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode
             );
             ExitCode::SUCCESS
         }
-        Err(error) => failure(&error, 2, output, json_style),
+        Err(error) => failure(&error, INVALID_INPUT, output, json_style),
     }
 }
 
@@ -440,18 +446,33 @@ fn run_review(
     let candidate_json = match read_bounded_candidate_file(candidates) {
         Ok(bytes) => bytes,
         Err(error) => {
-            return failure(&error.message, error.exit_code, output, json_style);
+            return failure(
+                &error.message,
+                ErrorExitCode::passthrough(error.exit_code),
+                output,
+                json_style,
+            );
         }
     };
     let verdict_json = match read_bounded_verdict_file(verdicts) {
         Ok(bytes) => bytes,
         Err(error) => {
-            return failure(&error.message, error.exit_code, output, json_style);
+            return failure(
+                &error.message,
+                ErrorExitCode::passthrough(error.exit_code),
+                output,
+                json_style,
+            );
         }
     };
     match review_similar_code(&candidate_json, &verdict_json, require_all) {
         Ok(review) => emit_review(review, output, json_style),
-        Err(error) => failure(&error.message, error.exit_code, output, json_style),
+        Err(error) => failure(
+            &error.message,
+            ErrorExitCode::passthrough(error.exit_code),
+            output,
+            json_style,
+        ),
     }
 }
 
@@ -466,7 +487,7 @@ fn run_cache_clear(
     if !yes {
         return failure(
             "`fallow similar-code cache clear` requires `--yes`; downloaded model artifacts are not removed",
-            2,
+            INVALID_INPUT,
             output,
             json_style,
         );
@@ -484,7 +505,7 @@ fn run_cache_clear(
                     Ok(value) => emit_json(&value, json_style),
                     Err(error) => failure(
                         &format!("failed to serialize similar-code cache output: {error}"),
-                        2,
+                        INVALID_INPUT,
                         output,
                         json_style,
                     ),
@@ -501,7 +522,7 @@ fn run_cache_clear(
                 ExitCode::SUCCESS
             }
         }
-        Err(error) => failure(&error, 2, output, json_style),
+        Err(error) => failure(&error, INVALID_INPUT, output, json_style),
     }
 }
 
@@ -534,7 +555,7 @@ fn emit_status_json(output: SimilarCodeStatusOutput, style: JsonStyle) -> ExitCo
         Ok(value) => emit_json(&value, style),
         Err(error) => failure(
             &format!("failed to serialize similar-code status output: {error}"),
-            2,
+            INVALID_INPUT,
             OutputFormat::Json,
             style,
         ),
@@ -548,7 +569,7 @@ fn emit_discovery(output: SimilarCodeOutput, format: OutputFormat, style: JsonSt
             Ok(value) => emit_json(&value, style),
             Err(error) => failure(
                 &format!("failed to serialize similar-code output: {error}"),
-                2,
+                INVALID_INPUT,
                 format,
                 style,
             ),
@@ -664,7 +685,7 @@ fn emit_inspect(
             Ok(value) => emit_json(&value, style),
             Err(error) => failure(
                 &format!("failed to serialize similar-code inspect output: {error}"),
-                2,
+                INVALID_INPUT,
                 format,
                 style,
             ),
@@ -711,7 +732,7 @@ fn emit_review(
             Ok(value) => emit_json(&value, style),
             Err(error) => failure(
                 &format!("failed to serialize similar-code review output: {error}"),
-                2,
+                INVALID_INPUT,
                 format,
                 style,
             ),
@@ -847,14 +868,14 @@ fn emit_json(value: &serde_json::Value, style: JsonStyle) -> ExitCode {
         }
         Err(error) => failure(
             &format!("failed to serialize similar-code JSON: {error}"),
-            2,
+            INVALID_INPUT,
             OutputFormat::Json,
             style,
         ),
     }
 }
 
-fn failure(message: &str, code: u8, output: OutputFormat, style: JsonStyle) -> ExitCode {
+fn failure(message: &str, code: ErrorExitCode, output: OutputFormat, style: JsonStyle) -> ExitCode {
     emit_error_with_style(message, code, output, style)
 }
 

@@ -4,8 +4,7 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
 
-use crate::error::emit_error;
-
+use crate::error::emit_input_error;
 /// Scope results to the union of the given workspace roots.
 ///
 /// The full cross-workspace graph is still built (so cross-package imports
@@ -143,7 +142,7 @@ fn emit_workspace_scope_error(err: WorkspaceScopeError, output: OutputFormat) ->
             "--workspace and --changed-workspaces are mutually exclusive. Pick one: --workspace for explicit package names/globs, --changed-workspaces for git-derived monorepo CI scoping.".to_owned()
         }
     };
-    emit_error(&msg, 2, output)
+    emit_input_error(&msg, output)
 }
 
 fn no_workspaces_message(

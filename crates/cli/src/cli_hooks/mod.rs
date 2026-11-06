@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::init;
 use crate::setup_hooks;
 
@@ -127,9 +127,8 @@ fn run_hooks_install(
     match target {
         HooksTargetArg::Git => {
             if agent.is_some() || user || gitignore_claude {
-                return emit_error(
+                return emit_input_error(
                     "--agent, --user, and --gitignore-claude are only valid with `fallow hooks install --target agent`",
-                    2,
                     output,
                 );
             }
@@ -143,9 +142,8 @@ fn run_hooks_install(
         }
         HooksTargetArg::Agent => {
             if branch.is_some() || prune_baselines {
-                return emit_error(
+                return emit_input_error(
                     "--branch and --prune-baselines are only valid with `fallow hooks install --target git`",
-                    2,
                     output,
                 );
             }
@@ -186,9 +184,8 @@ fn run_hooks_uninstall(
     match target {
         HooksTargetArg::Git => {
             if agent.is_some() || user {
-                return emit_error(
+                return emit_input_error(
                     "--agent and --user are only valid with `fallow hooks uninstall --target agent`",
-                    2,
                     output,
                 );
             }

@@ -6,7 +6,7 @@ use fallow_types::suppress::is_valid_policy_identifier;
 use serde_json::json;
 
 use super::{InitArgs, RulePackContext};
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 pub fn run(args: &InitArgs, ctx: &RulePackContext<'_>) -> ExitCode {
     let selected = match select_template(args, ctx.output) {
@@ -53,20 +53,18 @@ struct SelectedTemplate {
 
 fn select_template(args: &InitArgs, output: OutputFormat) -> Result<SelectedTemplate, ExitCode> {
     let Some(template) = super::templates::by_name(&args.template) else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &unknown_template_message(&args.template),
-            2,
             output,
         ));
     };
 
     let pack_name = default_pack_name(args, template).to_string();
     if !is_valid_policy_identifier(&pack_name) {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!(
                 "invalid rule-pack name '{pack_name}'; use only ASCII letters, digits, '.', '_', and '-'"
             ),
-            2,
             output,
         ));
     }
@@ -96,12 +94,11 @@ fn available_pack_path(
     pack_name: &str,
 ) -> Result<PathBuf, ExitCode> {
     let rel_path = pack_relative_path(&args.dir, pack_name)
-        .map_err(|message| emit_error(&message, 2, ctx.output))?;
+        .map_err(|message| emit_input_error(&message, ctx.output))?;
     let abs_path = ctx.root.join(&rel_path);
     if abs_path.exists() {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!("rule-pack file already exists: {}", rel_path.display()),
-            2,
             ctx.output,
         ));
     }
@@ -117,24 +114,22 @@ fn write_rule_pack_file(
     if let Some(parent) = abs_path.parent()
         && let Err(err) = std::fs::create_dir_all(parent)
     {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!(
                 "failed to create rule-pack directory '{}': {err}",
                 parent.display()
             ),
-            2,
             ctx.output,
         ));
     }
 
     let rendered = super::templates::render(selected.template, &selected.pack_name);
     std::fs::write(&abs_path, rendered).map_err(|err| {
-        emit_error(
+        emit_input_error(
             &format!(
                 "failed to write rule-pack file '{}': {err}",
                 rel_path.display()
             ),
-            2,
             ctx.output,
         )
     })
@@ -149,9 +144,8 @@ fn validate_generated_pack(ctx: &RulePackContext<'_>, rel_path: &str) -> Result<
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("\n  - ");
-            emit_error(
+            emit_input_error(
                 &format!("generated rule pack failed validation:\n  - {message}"),
-                2,
                 ctx.output,
             )
         })
@@ -190,12 +184,11 @@ fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResul
     match fallow_config::add_rule_pack_path(&config_path, rel_path) {
         Ok(true) => ConfigUpdateResult::Updated(config_display),
         Ok(false) => ConfigUpdateResult::AlreadyPresent(config_display),
-        Err(ConfigWriteError::Io(err)) => ConfigUpdateResult::Error(emit_error(
+        Err(ConfigWriteError::Io(err)) => ConfigUpdateResult::Error(emit_input_error(
             &format!(
                 "failed to update config file '{}': {err}",
                 config_path.display()
             ),
-            2,
             ctx.output,
         )),
         Err(err) => ConfigUpdateResult::ManualSnippet {

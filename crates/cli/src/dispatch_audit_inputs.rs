@@ -34,9 +34,8 @@ pub(super) fn resolve_audit_inputs(
     )?;
     let analyses = resolve_audit_analyses(&audit_cfg, args);
     if !(analyses.dead_code || analyses.health || analyses.dupes) {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "this audit selects no sub-analysis: --skip and the audit.deadCode, audit.health and audit.dupes config keys leave nothing to run",
-            2,
             output,
         ));
     }
@@ -47,11 +46,10 @@ pub(super) fn resolve_audit_inputs(
             return Ok(resolve_audit_baseline_path(root, cli_path, cfg_path));
         }
         if cli_path.is_some() {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!(
                     "{flag} has no effect: this audit skips that sub-analysis (--only, --skip or the audit config)"
                 ),
-                2,
                 output,
             ));
         }

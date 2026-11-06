@@ -9,8 +9,8 @@ use serde_json::Value;
 
 use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
 use crate::coverage::upload_common::url_encode_path_segment;
-use crate::error::emit_error_with_style;
-
+use crate::error::{emit_error_with_style, emit_input_error_with_style};
+use crate::exit_codes::NETWORK_FAILURE;
 #[path = "ci_check_run.rs"]
 mod check_run;
 #[path = "ci_pr_comment_post.rs"]
@@ -273,7 +273,7 @@ fn run_post_check_run(
     match provider {
         CiProvider::Github => post_check_run(&input, output, json_style),
         CiProvider::Gitlab => {
-            emit_error_with_style("GitLab check runs are not supported", 2, output, json_style)
+            emit_input_error_with_style("GitLab check runs are not supported", output, json_style)
         }
     }
 }
@@ -293,11 +293,11 @@ fn plan_pr_comment(
 ) -> ExitCode {
     let body = match read_text_file(body, "PR comment body") {
         Ok(body) => body,
-        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
+        Err(e) => return emit_input_error_with_style(&e, output, json_style),
     };
     let existing = match existing_comment(existing_comment_id, existing_body) {
         Ok(existing) => existing,
-        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
+        Err(e) => return emit_input_error_with_style(&e, output, json_style),
     };
     let envelope = fallow_output::PrCommentEnvelope {
         marker_id,
@@ -362,9 +362,8 @@ fn emit_ci_command_json<T: Serialize + ?Sized>(
 ) -> ExitCode {
     match serde_json::to_value(value) {
         Ok(value) => crate::report::emit_report_json(&value, kind, json_style),
-        Err(e) => emit_error_with_style(
+        Err(e) => emit_input_error_with_style(
             &format!("JSON serialization error: {e}"),
-            2,
             output,
             json_style,
         ),
@@ -390,13 +389,11 @@ fn reconcile_review(
 ) -> ExitCode {
     let envelope = match read_envelope(envelope) {
         Ok(value) => value,
-        Err(e) => {
-            return emit_error_with_style(&e, 2, output, json_style);
-        }
+        Err(e) => return emit_input_error_with_style(&e, output, json_style),
     };
     let review_id = match validate_envelope_review_scope(&envelope) {
         Ok(review_id) => review_id,
-        Err(error) => return emit_error_with_style(&error, 2, output, json_style),
+        Err(error) => return emit_input_error_with_style(&error, output, json_style),
     };
     let opts = ReconcileOptions {
         review_id: review_id.as_ref(),
@@ -420,7 +417,7 @@ fn reconcile_review(
             );
         }
         Err(e) => {
-            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+            return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
         }
     };
     let plan = PlannedReconcile::new(&current, &legacy, &state);
@@ -509,9 +506,8 @@ fn emit_reconcile_result(
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => emit_ci_command_json(&value, "review reconcile", output, json_style),
-        Err(e) => emit_error_with_style(
+        Err(e) => emit_input_error_with_style(
             &format!("JSON serialization error: {e}"),
-            2,
             output,
             json_style,
         ),

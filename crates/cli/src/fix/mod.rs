@@ -43,10 +43,10 @@ fn run_analyze(
     quiet: bool,
 ) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-        .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
+        .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let output_struct = session
         .analyze_dead_code_with_artifacts(false, false)
-        .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
+        .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let mut results = output_struct.results;
     if config.type_aware.enabled {
         let projects = config
@@ -75,9 +75,8 @@ fn run_analyze(
             // verification, so its absence must stop the run rather than widen
             // the deletion.
             Err(error) => {
-                return Err(crate::error::emit_error(
+                return Err(crate::error::emit_input_error(
                     &type_aware_failure_message(&error.to_string()),
-                    2,
                     output,
                 ));
             }
@@ -98,9 +97,8 @@ fn run_analyze(
                 });
             if config.type_aware.require == fallow_config::TypeAwareRequire::Complete && incomplete
             {
-                return Err(crate::error::emit_error(
+                return Err(crate::error::emit_input_error(
                     "Type-aware completeness is required, but at least one fix candidate was retained because semantic evidence was incomplete.",
-                    2,
                     output,
                 ));
             }
@@ -219,9 +217,8 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
     let mut plan = match FixPlan::for_root(opts.root) {
         Ok(plan) => plan,
         Err(error) => {
-            return crate::error::emit_error(
+            return crate::error::emit_input_error(
                 &format!("Failed to resolve fix root: {error}"),
-                2,
                 opts.output,
             );
         }

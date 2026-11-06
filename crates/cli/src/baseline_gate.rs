@@ -195,7 +195,7 @@ pub fn refuse_save_before_analysis(
     output: fallow_config::OutputFormat,
 ) -> Option<std::process::ExitCode> {
     let refusal = fallow_engine::baseline::refuse_baseline_kind_overwrite(save_path?, saving)?;
-    Some(crate::error::emit_error(&refusal, 2, output))
+    Some(crate::error::emit_input_error(&refusal, output))
 }
 
 /// Say that a run which asked for the gate deliberately did not apply it,

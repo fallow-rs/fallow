@@ -30,7 +30,7 @@ use crate::{
     report, resolve_audit_baseline_path, rule_pack, security, setup_hooks, similar_code_cli,
     suppressions, telemetry, trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
 };
-use crate::{error::emit_error, exit_codes::exit_invalid_input};
+use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
 
 #[path = "dispatch_inspect.rs"]
 mod inspect_dispatch;
@@ -62,11 +62,10 @@ fn dispatch_mutation_command(
         None
     };
     if let Some(flag) = workspace_flag {
-        return error::emit_error_with_style(
+        return error::emit_input_error_with_style(
             &format!(
                 "{flag} does not narrow `fallow mutation` yet; pass the workspace directory as a path, for example `fallow mutation packages/app`"
             ),
-            2,
             dispatch.output,
             dispatch.json_style,
         );
@@ -86,9 +85,8 @@ fn dispatch_mutation_command(
         ) {
             Ok(project) => project.config.mutation,
             Err(error) => {
-                return error::emit_error_with_style(
+                return error::emit_input_error_with_style(
                     &format!("failed to load config: {error}"),
-                    2,
                     dispatch.output,
                     dispatch.json_style,
                 );
@@ -343,15 +341,13 @@ fn dispatch_type_aware_command(
                                 crate::report::sink::outln!("{json}");
                                 ExitCode::SUCCESS
                             }
-                            Err(error) => emit_error(
+                            Err(error) => emit_input_error(
                                 &format!("failed to serialize type-aware status: {error}"),
-                                2,
                                 dispatch.output,
                             ),
                         },
-                        Err(error) => emit_error(
+                        Err(error) => emit_input_error(
                             &format!("failed to build type-aware status: {error}"),
-                            2,
                             dispatch.output,
                         ),
                     }
@@ -385,9 +381,8 @@ fn dispatch_type_aware_command(
                     }
                     ExitCode::SUCCESS
                 }
-                _ => emit_error(
+                _ => emit_input_error(
                     "type-aware status supports human and json output",
-                    2,
                     dispatch.output,
                 ),
             }
@@ -461,7 +456,9 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
 
     let finding_ids = match fallow_engine::dead_code::FindingIdFilter::parse(&finding_id) {
         Ok(filter) => filter,
-        Err(message) => return emit_error(&format!("--finding-id: {message}"), 2, dispatch.output),
+        Err(message) => {
+            return emit_input_error(&format!("--finding-id: {message}"), dispatch.output);
+        }
     };
 
     let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
@@ -513,7 +510,9 @@ fn dispatch_architecture_command(command: Command, dispatch: &DispatchContext<'_
 
     let finding_ids = match fallow_engine::dead_code::FindingIdFilter::parse(&finding_id) {
         Ok(filter) => filter,
-        Err(message) => return emit_error(&format!("--finding-id: {message}"), 2, dispatch.output),
+        Err(message) => {
+            return emit_input_error(&format!("--finding-id: {message}"), dispatch.output);
+        }
     };
 
     let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
@@ -764,9 +763,8 @@ fn dispatch_trace_command(
         });
     }
     let Some(symbol) = symbol else {
-        return emit_error(
+        return emit_input_error(
             "trace requires a FILE:SYMBOL target or --path <FROM> <TO>",
-            2,
             dispatch.output,
         );
     };
@@ -984,9 +982,8 @@ fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Op
     } else {
         None
     }?;
-    Some(emit_error(
+    Some(emit_input_error(
         &format!("{flag} is not valid with `fallow security survivors`."),
-        2,
         flags.output,
     ))
 }
@@ -1013,9 +1010,8 @@ fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> 
     } else {
         None
     }?;
-    Some(emit_error(
+    Some(emit_input_error(
         &format!("{flag} is not valid with `fallow security blind-spots`."),
-        2,
         flags.output,
     ))
 }
@@ -1429,9 +1425,8 @@ fn dispatch_audit_cache_command(
     match subcommand {
         AuditCacheCli::Remove { dry_run, yes } => {
             if !*dry_run && !*yes && !std::io::stdin().is_terminal() {
-                return emit_error(
+                return emit_input_error(
                     "audit-cache remove requires --yes (or --force) in non-interactive environments. Use --dry-run to preview removal first, then pass --yes to confirm.",
-                    2,
                     dispatch.output,
                 );
             }
@@ -1477,12 +1472,11 @@ fn dispatch_audit_cache_command(
                         exit_invalid_input()
                     }
                 }
-                Err(error) => emit_error(
+                Err(error) => emit_input_error(
                     &format!(
                         "failed to remove audit caches for {}: {error}",
                         dispatch.root.display()
                     ),
-                    2,
                     dispatch.output,
                 ),
             }
@@ -2063,9 +2057,8 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
         let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
             Ok(tolerance) => tolerance,
             Err(message) => {
-                return emit_error(
+                return emit_input_error(
                     &format!("invalid --tolerance: {message}"),
-                    2,
                     dispatch.output,
                 );
             }
@@ -2335,9 +2328,8 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
     let output = dispatch.output;
 
     if cli.baseline.is_some() || cli.save_baseline.is_some() {
-        return emit_error(
+        return emit_input_error(
             "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
-            2,
             output,
         );
     }
@@ -2662,7 +2654,7 @@ pub fn resolve_coverage_inputs(
     };
 
     fallow_api::resolve_coverage_inputs(explicit, env, config_health.as_ref())
-        .map_err(|err| emit_error(&err.to_string(), 2, output))
+        .map_err(|err| emit_input_error(&err.to_string(), output))
 }
 
 /// [`resolve_coverage_inputs`] for commands that load config lazily: the
@@ -2702,11 +2694,10 @@ fn validate_health_report_only_gate(
     output: fallow_config::OutputFormat,
 ) -> Result<(), ExitCode> {
     if report_only && (min_score.is_some() || min_severity.is_some()) {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "--report-only cannot be combined with --min-score or --min-severity. \
              --report-only always exits 0; drop it to gate on score/severity, or \
              drop the gate flags to stay advisory.",
-            2,
             output,
         ));
     }

@@ -13,7 +13,8 @@ use fallow_config::{OutputFormat, ProductionAnalysis};
 use fallow_engine::trace::{DependencyTrace, DependencyUsageQuery, SitePageRequest};
 use fallow_types::trace_usage::DEFAULT_USAGE_SITE_LIMIT;
 
-use crate::error::{emit_error, emit_error_with_hint};
+use crate::error::{emit_error_with_hint, emit_input_error};
+use crate::exit_codes::INVALID_INPUT;
 use crate::report;
 use crate::{ConfigLoadOptions, load_config_for_analysis};
 
@@ -89,7 +90,7 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
     }
     let query = match opts.target.query() {
         Ok(query) => query,
-        Err(err) => return emit_error(&err.to_string(), 2, opts.output),
+        Err(err) => return emit_input_error(&err.to_string(), opts.output),
     };
     let config = match load_config_for_analysis(
         opts.root,
@@ -124,7 +125,7 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
     }
     let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
     let trace = match fallow_engine::trace::trace_dependency_with_session(
         &session,
@@ -136,11 +137,11 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
             return emit_error_with_hint(
                 &format!("--cursor: {err}"),
                 "pass the `next_cursor` of a page from the same package and --specifier list",
-                2,
+                INVALID_INPUT,
                 opts.output,
             );
         }
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
     emit(&trace, opts)
 }
@@ -149,7 +150,7 @@ fn unsupported_format(output: OutputFormat) -> ExitCode {
     emit_error_with_hint(
         "trace --dependency supports --format json or human",
         "re-run with `--format json` for a machine-readable answer, or drop `--format`",
-        2,
+        INVALID_INPUT,
         output,
     )
 }
@@ -163,9 +164,8 @@ fn emit(trace: &DependencyTrace, opts: &TraceDependencyOptions<'_>) -> ExitCode 
             ) {
                 Ok(value) => value,
                 Err(err) => {
-                    return emit_error(
+                    return emit_input_error(
                         &format!("failed to serialize trace output: {err}"),
-                        2,
                         opts.output,
                     );
                 }

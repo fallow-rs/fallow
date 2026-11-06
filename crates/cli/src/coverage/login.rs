@@ -18,7 +18,7 @@ use serde_json::json;
 
 use crate::api::{parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout};
 use crate::coverage::credentials::{self, KeySource};
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::json_style::JsonStyle;
 
 /// Connect timeout of one device flow request.
@@ -132,15 +132,15 @@ fn run_login(args: &LoginArgs, output: OutputFormat, json_style: JsonStyle) -> E
     let base_url = credentials::api_base_url(args.api_url.as_deref());
     let machine_name = match machine_name(args.machine_name.as_deref()) {
         Ok(name) => name,
-        Err(message) => return emit_error(&message, 2, output),
+        Err(message) => return emit_input_error(&message, output),
     };
     let agent = match try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, REQUEST_TIMEOUT_SECS) {
         Ok(agent) => agent,
-        Err(err) => return emit_error(&err.to_string(), 2, output),
+        Err(err) => return emit_input_error(&err.to_string(), output),
     };
     let start = match start_device_flow(&agent, &base_url, &machine_name) {
         Ok(start) => start,
-        Err(message) => return emit_error(&message, 2, output),
+        Err(message) => return emit_input_error(&message, output),
     };
     eprintln!(
         "Open {} and enter the code {}",
@@ -150,20 +150,19 @@ fn run_login(args: &LoginArgs, output: OutputFormat, json_style: JsonStyle) -> E
 
     let token = match poll_for_key(&agent, &base_url, &start, &machine_name) {
         Ok(token) => token,
-        Err(message) => return emit_error(&message, 2, output),
+        Err(message) => return emit_input_error(&message, output),
     };
     let Some(issued) = token.api_key else {
-        return emit_error(&no_key_message(token.api_key_error.as_ref()), 2, output);
+        return emit_input_error(&no_key_message(token.api_key_error.as_ref()), output);
     };
     let source = match credentials::store_api_key(&base_url, &issued.key) {
         Ok(source) => source,
         Err(message) => {
-            return emit_error(
+            return emit_input_error(
                 &format!(
                     "failed to store the API key: {message}. {}",
                     orphan_key_hint(&machine_name)
                 ),
-                2,
                 output,
             );
         }
@@ -210,7 +209,7 @@ fn run_logout(api_url: Option<&str>, output: OutputFormat, json_style: JsonStyle
     let base_url = credentials::api_base_url(api_url);
     let removed = match credentials::remove_api_key(&base_url) {
         Ok(removed) => removed,
-        Err(message) => return emit_error(&message, 2, output),
+        Err(message) => return emit_input_error(&message, output),
     };
     if matches!(output, OutputFormat::Json) {
         let value = json!({

@@ -10,7 +10,7 @@ use super::counts::{
 use super::outcome::RegressionOutcome;
 use super::tolerance::Tolerance;
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
@@ -148,9 +148,8 @@ pub(super) fn write_regression_baseline(
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
     let json = serde_json::to_string_pretty(baseline).map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!("failed to serialize regression baseline: {e}"),
-            2,
             output,
         )
     })?;
@@ -159,13 +158,7 @@ pub(super) fn write_regression_baseline(
         json.as_bytes(),
         fallow_engine::write_guard::WriteTarget::Path,
     )
-    .map_err(|e| {
-        emit_error(
-            &format!("failed to save regression baseline: {e}"),
-            2,
-            output,
-        )
-    })?;
+    .map_err(|e| emit_input_error(&format!("failed to save regression baseline: {e}"), output))?;
     eprintln!("Regression baseline saved to {}", path.display());
     if is_likely_gitignored(path, root) {
         eprintln!(
@@ -208,12 +201,11 @@ pub fn save_baseline_to_config_with_identity(
             }
         }
         Err(e) => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!(
                     "failed to read config file '{}': {e}",
                     config_path.display()
                 ),
-                2,
                 output,
             ));
         }
@@ -229,12 +221,11 @@ pub fn save_baseline_to_config_with_identity(
         update_json_regression(&content, &baseline)
     }
     .map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!(
                 "failed to update config file '{}': {e}",
                 config_path.display()
             ),
-            2,
             output,
         )
     })?;
@@ -245,12 +236,11 @@ pub fn save_baseline_to_config_with_identity(
         fallow_engine::write_guard::WriteTarget::DiscoveredConfig,
     )
     .map_err(|e| {
-        emit_error(
+        emit_input_error(
             &format!(
                 "failed to write config file '{}': {e}",
                 config_path.display()
             ),
-            2,
             output,
         )
     })?;
@@ -596,22 +586,20 @@ pub fn load_regression_baseline_for(
 ) -> Result<RegressionBaseline, ExitCode> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            emit_error(
+            emit_input_error(
                 &format!(
                     "no regression baseline found at '{}'.\n\
                      Run with --save-regression-baseline on your main branch to create one.",
                     path.display()
                 ),
-                2,
                 output,
             )
         } else {
-            emit_error(
+            emit_input_error(
                 &format!(
                     "failed to read regression baseline '{}': {e}",
                     path.display()
                 ),
-                2,
                 output,
             )
         }
@@ -625,7 +613,7 @@ pub fn load_regression_baseline_for(
                 path.display()
             )
         };
-        emit_error(&message, 2, output)
+        emit_input_error(&message, output)
     })?;
     if !matches!(baseline.schema_version, 1 | REGRESSION_SCHEMA_VERSION) {
         let message = format_schema_mismatch_error(
@@ -635,7 +623,7 @@ pub fn load_regression_baseline_for(
             &baseline.fallow_version,
             command,
         );
-        return Err(emit_error(&message, 2, output));
+        return Err(emit_input_error(&message, output));
     }
     Ok(baseline)
 }
@@ -686,12 +674,11 @@ pub fn compare_check_regression_with_identity(
             command,
         )?;
         let Some(counts) = baseline.check else {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!(
                     "regression baseline '{}' has no check data",
                     baseline_path.display()
                 ),
-                2,
                 opts.output,
             ));
         };
@@ -706,12 +693,11 @@ pub fn compare_check_regression_with_identity(
         )?;
         CheckCounts::from_config_baseline(config_baseline)
     } else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "no regression baseline found.\n\
              Either add a `regression.baseline` section to your config file\n\
              (run with --save-regression-baseline to generate it),\n\
              or provide an explicit file via --regression-baseline <PATH>.",
-            2,
             opts.output,
         ));
     };
@@ -755,14 +741,13 @@ fn ensure_regression_identity(
     } else {
         ""
     };
-    Err(emit_error(
+    Err(emit_input_error(
         &format!(
             "regression baseline '{}' has an incompatible analysis identity in: {}. Regenerate it with: fallow {command}{type_aware_flag} --save-regression-baseline {}",
             path.display(),
             incompatible.join(", "),
             path.display(),
         ),
-        2,
         output,
     ))
 }

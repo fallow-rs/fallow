@@ -14,7 +14,7 @@ use crate::base_worktree::{
     sweep_reusable_caches_with_report,
 };
 use crate::report::{format_bytes, plural};
-use crate::{emit_error, report};
+use crate::{emit_input_error, report};
 
 pub struct AuditCachePruneOptions<'a> {
     pub root: &'a Path,
@@ -36,12 +36,11 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
     );
     let scan_root = std::env::temp_dir();
     if let Err(error) = std::fs::read_dir(&scan_root) {
-        return emit_error(
+        return emit_input_error(
             &format!(
                 "failed to read the audit cache scan root {}: {error}",
                 scan_root.display()
             ),
-            2,
             opts.output,
         );
     }

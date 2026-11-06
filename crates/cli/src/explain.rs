@@ -52,9 +52,8 @@ pub(crate) fn run_explain(
         | OutputFormat::ReviewGitlab
         | OutputFormat::Badge
         | OutputFormat::GithubAnnotations
-        | OutputFormat::GithubSummary => crate::error::emit_error(
+        | OutputFormat::GithubSummary => crate::error::emit_input_error(
             "explain supports human, compact, markdown, and json output",
-            2,
             output,
         ),
     }

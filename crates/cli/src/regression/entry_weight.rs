@@ -15,7 +15,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::counts::{REGRESSION_SCHEMA_VERSION, RegressionBaseline};
 use super::tolerance::Tolerance;
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 /// Entry weights saved in a regression baseline file.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -86,18 +86,16 @@ impl EntryWeightGate<'_> {
     /// or for a save into the config file.
     pub fn validate(&self, output: OutputFormat) -> Result<(), ExitCode> {
         if self.save_to_config {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 "list --entry-weight saves its regression baseline to a file: pass \
                  --save-regression-baseline <PATH>",
-                2,
                 output,
             ));
         }
         if self.fail_on_regression && self.baseline_file.is_none() {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 "list --entry-weight --fail-on-regression needs --regression-baseline <PATH>; \
                  create one with list --entry-weight --save-regression-baseline <PATH>",
-                2,
                 output,
             ));
         }
@@ -116,14 +114,13 @@ pub fn load_entry_weight_baseline(
 ) -> Result<EntryWeightCounts, ExitCode> {
     let baseline = super::load_regression_baseline(path, output)?;
     baseline.entry_weight.ok_or_else(|| {
-        emit_error(
+        emit_input_error(
             &format!(
                 "regression baseline '{}' has no entry weight data; save one with \
                  fallow list --entry-weight --save-regression-baseline {}",
                 path.display(),
                 path.display()
             ),
-            2,
             output,
         )
     })

@@ -26,7 +26,10 @@ use crate::coverage::upload_common::parse_git_remote_to_project_id;
 use crate::coverage::upload_inventory::extension_supported;
 use crate::health::HealthOptions;
 use crate::health::optimization_target::{StaticCost, optimization_target};
-use crate::{error::emit_error, exit_codes::exit_invalid_input};
+use crate::{
+    error::{emit_error, emit_input_error},
+    exit_codes::exit_invalid_input,
+};
 use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
@@ -87,15 +90,14 @@ impl fmt::Debug for AnalyzeArgs {
 
 pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
     if let Err(message) = validate_output_format(ctx.output) {
-        return emit_error(&message, 2, ctx.output);
+        return emit_input_error(&message, ctx.output);
     }
 
     let env_cloud = runtime_coverage_source_env_is_cloud();
     let cloud = args.cloud || env_cloud;
     if cloud && args.runtime_coverage.is_some() {
-        return emit_error(
+        return emit_input_error(
             "Choose one runtime coverage source: --cloud or --runtime-coverage <path>.",
-            2,
             ctx.output,
         );
     }
@@ -105,9 +107,8 @@ pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
     }
 
     let Some(path) = args.runtime_coverage.as_deref() else {
-        return emit_error(
+        return emit_input_error(
             "No runtime coverage source selected. Pass --runtime-coverage <path>, --cloud, or set FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
-            2,
             ctx.output,
         );
     };
@@ -157,7 +158,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         Err(code) => return code,
     };
     let Some(report) = result.report.runtime_coverage else {
-        return emit_error("runtime coverage report was not produced", 2, ctx.output);
+        return emit_input_error("runtime coverage report was not produced", ctx.output);
     };
     print_runtime_report(&report, ctx, result.elapsed, args)
 }
@@ -512,10 +513,10 @@ fn run_static_analysis(
         fallow_config::ProductionAnalysis::Health,
     )?;
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config)
-        .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
+        .map_err(|err| emit_input_error(&format!("analysis failed: {err}"), ctx.output))?;
     let artifacts = session
         .analyze_dead_code_with_artifacts(true, true)
-        .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
+        .map_err(|err| emit_input_error(&format!("analysis failed: {err}"), ctx.output))?;
     Ok(StaticAnalysisRun { session, artifacts })
 }
 
@@ -536,16 +537,14 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
     let run = run_static_analysis(ctx, production)?;
     let analysis_output = &run.artifacts;
     let Some(modules) = analysis_output.modules.as_deref() else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "analysis failed: engine did not retain parsed modules",
-            2,
             ctx.output,
         ));
     };
     let Some(files) = analysis_output.files.as_deref() else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "analysis failed: engine did not retain discovered files",
-            2,
             ctx.output,
         ));
     };

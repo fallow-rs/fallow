@@ -10,6 +10,7 @@ use tracing_subscriber::filter::{LevelFilter, Targets};
 
 use crate::cli_format::{Format, FormatConfig, format_from_env, parse_format_arg, resolve_format};
 use crate::cli_telemetry::{TelemetryRun, record_run_epilogue};
+use crate::exit_codes::{ErrorExitCode, INVALID_INPUT};
 use crate::{
     Cli, Command, emit_known_failure, emit_known_failure_with_style, rayon_pool, regression,
     report, runtime_support, security_help_target, similar_code_help_target, telemetry,
@@ -128,7 +129,7 @@ fn validate_input_flags(
     let validation_failure = |message: &str| {
         emit_known_failure_with_style(
             message,
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -245,7 +246,7 @@ fn resolve_validated_root(
         std::env::current_dir().map_err(|err| {
             emit_known_failure_with_style(
                 &format!("Failed to get current directory: {err}"),
-                2,
+                INVALID_INPUT,
                 output,
                 json_style,
                 telemetry::FailureReason::Config,
@@ -273,7 +274,7 @@ fn validate_input_git_refs(
     let validation_failure = |message: &str| {
         emit_known_failure_with_style(
             message,
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -441,7 +442,7 @@ pub fn run_pre_dispatch_checks(
     {
         let code = emit_known_failure_with_style(
             "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -452,7 +453,7 @@ pub fn run_pre_dispatch_checks(
     if let Some(message) = sarif_file_without_sarif_error(cli) {
         let code = emit_known_failure_with_style(
             &message,
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -463,7 +464,7 @@ pub fn run_pre_dispatch_checks(
     if let Some(message) = crate::write_scope::write_path_error(cli, root) {
         let code = emit_known_failure_with_style(
             &message,
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -474,7 +475,7 @@ pub fn run_pre_dispatch_checks(
     if let Some(message) = global_filter_error(cli) {
         let code = emit_known_failure_with_style(
             message,
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -498,7 +499,7 @@ pub fn run_pre_dispatch_checks(
             "--report-path-prefix is only valid with --format github-annotations, \
              github-summary, codeclimate, pr-comment-github, pr-comment-gitlab, \
              review-github, or review-gitlab",
-            2,
+            INVALID_INPUT,
             output,
             json_style,
             telemetry::FailureReason::Validation,
@@ -538,7 +539,7 @@ fn defers_tolerance_parse(command: Option<&Command>) -> bool {
 }
 
 fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
-    let exit_code = u8::try_from(err.exit_code()).unwrap_or(2);
+    let exit_code = u8::try_from(err.exit_code()).unwrap_or(INVALID_INPUT.get());
     if err.kind() == clap::error::ErrorKind::DisplayHelp
         && let Some(target) = similar_code_help_target(std::env::args_os().skip(1))
     {
@@ -569,7 +570,7 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
         }
         return crate::error::emit_error_with_style(
             err.to_string().trim(),
-            exit_code,
+            ErrorExitCode::passthrough(exit_code),
             fallow_config::OutputFormat::Json,
             parse_error_json_style(std::env::args_os().skip(1)),
         );
@@ -765,9 +766,8 @@ pub fn reject_global_baseline_flags(cli: &Cli, format: &FormatConfig) -> Option<
         .as_ref()
         .and_then(command_without_global_baseline)?;
     let flag = cli_global_baseline_flag(cli)?;
-    Some(crate::error::emit_error_with_style(
+    Some(crate::error::emit_input_error_with_style(
         &global_baseline_subcommand_error_message(name, flag),
-        2,
         format.output,
         format.json_style,
     ))
@@ -828,7 +828,7 @@ fn parse_cli_tolerance(
     regression::Tolerance::parse(&cli.tolerance).map_err(|e| {
         emit_known_failure(
             &format!("invalid --tolerance: {e}"),
-            2,
+            INVALID_INPUT,
             output,
             telemetry::FailureReason::Validation,
         )
@@ -846,7 +846,9 @@ fn init_cli_diff_filter(
         cli.diff_stdin,
         root,
     )
-    .map_err(|msg| emit_known_failure(&msg, 2, output, telemetry::FailureReason::Diff))?;
+    .map_err(|msg| {
+        emit_known_failure(&msg, INVALID_INPUT, output, telemetry::FailureReason::Diff)
+    })?;
     if diff_source.is_some() && cli.changed_since.is_some() && !quiet {
         eprintln!(
             "fallow: --diff-file precedes --changed-since for line-level \

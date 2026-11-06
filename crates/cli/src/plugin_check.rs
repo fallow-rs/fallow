@@ -19,7 +19,7 @@ use fallow_engine::plugins::{
     CheckWarning, RuleReport, WarningKind, check_manifest_entries, is_external_plugin_active,
 };
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 /// Caveat surfaced at the JSON root: `path_exists` is a filesystem check, not a
 /// reachability proof (the command deliberately skips the discovery walk to stay
@@ -37,7 +37,7 @@ pub fn run_plugin_check(
 ) -> ExitCode {
     let doc = match build_plugin_check_doc(root) {
         Ok(doc) => doc,
-        Err(e) => return emit_error(&e, 2, output),
+        Err(e) => return emit_input_error(&e, output),
     };
     if matches!(output, OutputFormat::Human) {
         print_human(&doc);
@@ -48,9 +48,8 @@ pub fn run_plugin_check(
             println!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => crate::error::emit_error_with_style(
+        Err(e) => crate::error::emit_input_error_with_style(
             &format!("failed to serialize plugin-check: {e}"),
-            2,
             output,
             json_style,
         ),
