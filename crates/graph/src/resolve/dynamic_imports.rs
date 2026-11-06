@@ -23,7 +23,7 @@ use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo,
 
 use super::ResolveResult;
 use super::ResolvedImport;
-use super::fallbacks::make_glob_from_pattern;
+use super::fallbacks::{has_wildcard_or_alternates, make_glob_from_pattern};
 use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
 use fallow_config::extglob::ExtglobMatcher;
@@ -205,9 +205,48 @@ fn dynamic_import_with(
 #[derive(Default)]
 pub(super) struct GlobMatcherCache {
     map: Mutex<FxHashMap<String, Option<Arc<ExtglobMatcher>>>>,
+    /// The alternates `{,.ts,.tsx,...}` of the module extensions that the
+    /// resolver tries. Empty when no extension list is set.
+    extension_alternates: String,
 }
 
 impl GlobMatcherCache {
+    /// A cache whose patterns with an extensionless literal suffix also match
+    /// the suffix plus one of `extensions`.
+    pub(super) fn with_module_extensions(extensions: &[String]) -> Self {
+        let extension_alternates = if extensions.is_empty() {
+            String::new()
+        } else {
+            format!("{{,{}}}", extensions.join(","))
+        };
+        Self {
+            map: Mutex::default(),
+            extension_alternates,
+        }
+    }
+
+    /// The glob of `pattern`. A literal suffix without an extension, such as
+    /// `` `./icons/__${name}__` ``, also matches the suffix plus a module
+    /// extension, because a bundler adds the extension to the request, the
+    /// same as for a static import.
+    fn pattern_glob(&self, pattern: &DynamicImportPattern) -> String {
+        let glob = make_glob_from_pattern(pattern);
+        let Some(suffix) = pattern.suffix.as_deref() else {
+            return glob;
+        };
+        let last_segment = suffix.rsplit('/').next().unwrap_or(suffix);
+        if self.extension_alternates.is_empty()
+            || last_segment.is_empty()
+            || last_segment.contains('.')
+            || has_wildcard_or_alternates(suffix)
+            || has_wildcard_or_alternates(&pattern.prefix)
+            || fallow_config::extglob::has_extglob_group(&pattern.prefix)
+        {
+            return glob;
+        }
+        format!("{glob}{}", self.extension_alternates)
+    }
+
     /// Return the cached matcher for `glob_str` with the exclude globs
     /// `excludes`, compiling it on first miss.
     fn get(&self, glob_str: &str, excludes: &[&str]) -> Option<Arc<ExtglobMatcher>> {
@@ -260,7 +299,7 @@ pub(super) fn resolve_dynamic_patterns(
     patterns
         .iter()
         .map(|pattern| {
-            let glob_str = make_glob_from_pattern(pattern);
+            let glob_str = glob_cache.pattern_glob(pattern);
             let Some(based) = BasedPattern::new(&glob_str, &pattern.excludes, from_dir, root)
             else {
                 return (pattern.clone(), Vec::new());

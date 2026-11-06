@@ -231,7 +231,7 @@ pub fn resolve_all_imports_with_session(
     let tsconfig_warned: Mutex<FxHashSet<String>> = Mutex::new(FxHashSet::default());
     let tsconfig_cache = types::TsconfigCache::default();
     let canonicalize_cache = types::CanonicalizeCache::default();
-    let glob_matcher_cache = GlobMatcherCache::default();
+    let glob_matcher_cache = GlobMatcherCache::with_module_extensions(&session.extensions);
     // Dynamic import patterns match against canonical file paths when the
     // root is not canonical, so their root containment check needs the
     // canonical root too.

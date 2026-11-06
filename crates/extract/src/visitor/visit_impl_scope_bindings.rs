@@ -362,6 +362,8 @@ impl ModuleInfoExtractor {
         declarator: &VariableDeclarator<'_>,
         init: &Expression<'_>,
     ) {
+        // A string `const` in any scope can also name a dynamic import.
+        self.record_const_specifier(decl, declarator, init);
         if !self.is_module_scope() {
             return;
         }
@@ -693,6 +695,7 @@ impl ModuleInfoExtractor {
             .map(|name| (name.clone(), None))
             .collect::<FxHashMap<_, _>>();
         self.nested_declaration_stack.push(scope);
+        self.const_specifiers.push_frame();
         self.push_scoped_alias_frames();
         self.scoped_non_instance_bindings.push(non_instance_scope);
         self.scoped_namespace_binding_names
@@ -712,6 +715,7 @@ impl ModuleInfoExtractor {
     /// Open the nested scope frames of a block. Outside a namespace only.
     pub(super) fn push_nested_scope_frames(&mut self) {
         self.nested_declaration_stack.push(FxHashSet::default());
+        self.const_specifiers.push_frame();
         self.push_scoped_alias_frames();
         self.scoped_non_instance_bindings.push(FxHashSet::default());
         self.scoped_namespace_binding_names
@@ -729,6 +733,7 @@ impl ModuleInfoExtractor {
     /// Close the frames that [`Self::push_nested_scope_frames`] opened.
     pub(super) fn pop_nested_scope_frames(&mut self) {
         self.nested_declaration_stack.pop();
+        self.const_specifiers.pop_frame();
         self.pop_scoped_alias_frames();
         self.scoped_non_instance_bindings.pop();
         self.scoped_namespace_binding_names.pop();
@@ -773,6 +778,7 @@ impl ModuleInfoExtractor {
     pub(super) fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.const_specifiers.pop_frame();
             self.pop_scoped_alias_frames();
             self.scoped_non_instance_bindings.pop();
             self.scoped_namespace_binding_names.pop();

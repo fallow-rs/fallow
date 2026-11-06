@@ -1,0 +1,17 @@
+{
+  "name": "dynamic-import-const-specifier",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "module-scope-pkg": "1.0.0",
+    "function-scope-pkg": "1.0.0",
+    "subpath-pkg": "1.0.0",
+    "shadowed-pkg": "1.0.0",
+    "let-pkg": "1.0.0",
+    "sibling-pkg": "1.0.0",
+    "caught-pkg": "1.0.0",
+    "nested-caught-pkg": "1.0.0",
+    "hoisted-pkg": "1.0.0",
+    "loop-pkg": "1.0.0"
+  }
+}

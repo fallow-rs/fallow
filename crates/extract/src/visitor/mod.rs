@@ -878,6 +878,8 @@ pub(crate) struct ModuleInfoExtractor {
     independent_this_depth: usize,
     class_method_function_span: Option<Span>,
     this_result_locals: FxHashMap<String, Vec<visit_impl::visit_signature::ThisResultLocal>>,
+    /// String `const` locals that a dynamic `import()` can name.
+    const_specifiers: visit_impl::visit_dynamic_imports::ConstSpecifierScopes,
     pending_subclass_member_accesses: Vec<PendingSubclassMemberAccess>,
     projected_member_accesses: Vec<ProjectedMemberAccess>,
     projection_retained_work: usize,
@@ -1053,8 +1055,7 @@ pub(crate) struct ModuleInfoExtractor {
     directives: Vec<String>,
     /// Byte-offset starts of dynamic `import()` expressions wrapped in
     /// `next/dynamic(() => import('./X'), { ssr: false })`. Consumed by the
-    /// security `client-server-leak` BFS to exclude the ssr:false client-only
-    /// escape hatch.
+    /// security `client-server-leak` BFS to exclude the ssr:false client-only escape hatch.
     client_only_dynamic_import_spans: Vec<u32>,
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector.
@@ -1117,8 +1118,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// unused-EXPORT names, so a stray name is inert.
     inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
-    /// keyed by a stable identifier symbol. Consumed by the `unprovided-inject`
-    /// detector.
+    /// keyed by a stable identifier symbol. Consumed by the `unprovided-inject` detector.
     di_key_sites: Vec<DiKeySite>,
     /// `true` when a `provide`/`setContext` keyed by an unknowable key (a
     /// non-identifier, a spread, or a transient nested-scope local) was seen.

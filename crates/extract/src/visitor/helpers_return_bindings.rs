@@ -1,7 +1,7 @@
 //! Class instance bindings from the declared return type of a getter or a
 //! method.
 
-use oxc_ast::ast::{MethodDefinition, TSAccessibility, TSType};
+use oxc_ast::ast::{Class, MethodDefinition, TSAccessibility, TSType};
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
 
@@ -42,8 +42,11 @@ pub(super) fn collect_getter_binding(
 /// segment `current()` (from `manager.current().member`) then resolves to the
 /// return type, so the access credits `ReturnType.member` (issue #3868).
 /// A return type that names a method type parameter is skipped: the binding
-/// would name a type that does not exist outside the method.
+/// would name a type that does not exist outside the method. A method that
+/// returns `this` binds to the class itself, so a chain such as
+/// `link.setId(id).setLabel(label)` credits `setLabel` on the class.
 pub(super) fn collect_method_return_binding(
+    class: &Class<'_>,
     method: &MethodDefinition<'_>,
     resolve: &impl Fn(String) -> Option<String>,
     bindings: &mut Vec<(String, String)>,
@@ -57,6 +60,15 @@ pub(super) fn collect_method_return_binding(
     let Some(type_annotation) = method.value.return_type.as_deref() else {
         return;
     };
+    let key = format!("{}()", name.text());
+    if matches!(type_annotation.type_annotation, TSType::TSThisType(_)) {
+        if let Some(id) = &class.id
+            && !bindings.iter().any(|(existing, _)| *existing == key)
+        {
+            bindings.push((key, id.name.to_string()));
+        }
+        return;
+    }
     let Some(type_name) = extract_type_annotation_name(type_annotation) else {
         return;
     };
@@ -76,7 +88,6 @@ pub(super) fn collect_method_return_binding(
     let Some(resolved) = resolve(type_name) else {
         return;
     };
-    let key = format!("{}()", name.text());
     if bindings.iter().any(|(existing, _)| *existing == key) {
         return;
     }

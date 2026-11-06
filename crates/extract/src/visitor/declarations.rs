@@ -695,7 +695,7 @@ impl ModuleInfoExtractor {
             return;
         };
         let mut sources = Vec::new();
-        super::collect_static_import_specifiers(&import_expr.source, &mut sources);
+        self.collect_dynamic_import_specifiers(&import_expr.source, &mut sources);
         if sources.is_empty() {
             return;
         }

@@ -73,6 +73,8 @@ mod duplicate_prop_shape;
 mod dynamic_import_glob_excludes;
 #[path = "integration_test/dynamic_import_parent_patterns.rs"]
 mod dynamic_import_parent_patterns;
+#[path = "integration_test/dynamic_import_specifier_shapes.rs"]
+mod dynamic_import_specifier_shapes;
 #[path = "integration_test/dynamic_import_then.rs"]
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]

@@ -1253,7 +1253,7 @@ pub(super) fn make_glob_from_pattern(
 /// Whether `prefix` has a `*` or a `{` outside a one-character class. The
 /// extractor escapes a literal metacharacter as a one-character class, such
 /// as `[*]`, so an escaped character is not glob syntax.
-fn has_wildcard_or_alternates(prefix: &str) -> bool {
+pub(super) fn has_wildcard_or_alternates(prefix: &str) -> bool {
     let bytes = prefix.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
