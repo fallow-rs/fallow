@@ -266,6 +266,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn uninstalled_alias_target_credits_the_matching_package() {
         let target = |path: &str| vec![PathBuf::from(path)];
         assert_eq!(
