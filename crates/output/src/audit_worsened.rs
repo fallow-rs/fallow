@@ -160,6 +160,69 @@ pub fn describe_worsened_metrics(metrics: &[WorsenedMetric]) -> String {
         .join(", ")
 }
 
+/// Metric values of the base finding that an inherited complexity finding
+/// matches. The JSON output does not carry these values, so only a live audit
+/// run has them. A `report --from` re-render of a saved audit has no base
+/// values.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AuditBaseMetrics {
+    /// Cyclomatic complexity of the base finding.
+    pub cyclomatic: u16,
+    /// Cognitive complexity of the base finding.
+    pub cognitive: u16,
+    /// CRAP score of the base finding, when coverage data exists.
+    pub crap: Option<f64>,
+    /// Lines of code of the base finding.
+    pub line_count: u32,
+}
+
+impl AuditBaseMetrics {
+    /// The human form of each metric that `head` exceeds, with the base value
+    /// and the head value, for example `cognitive 21 -> 21`. A CRAP score
+    /// shows only when both sides have one. `None` when no exceeded metric
+    /// has a base value.
+    #[must_use]
+    pub fn describe_exceeded(&self, head: &crate::ComplexityViolation) -> Option<String> {
+        let exceeded = head.exceeded;
+        let mut parts = Vec::new();
+        let mut push = |kind: WorsenedMetricKind, base: f64, head: f64| {
+            parts.push(format!(
+                "{} {} -> {}",
+                kind.label(),
+                format_metric_value(base),
+                format_metric_value(head)
+            ));
+        };
+        if exceeded.includes_cyclomatic() {
+            push(
+                WorsenedMetricKind::Cyclomatic,
+                f64::from(self.cyclomatic),
+                f64::from(head.cyclomatic),
+            );
+        }
+        if exceeded.includes_cognitive() {
+            push(
+                WorsenedMetricKind::Cognitive,
+                f64::from(self.cognitive),
+                f64::from(head.cognitive),
+            );
+        }
+        if exceeded.includes_crap()
+            && let (Some(base), Some(head)) = (self.crap, head.crap)
+        {
+            push(WorsenedMetricKind::Crap, base, head);
+        }
+        if exceeded.is_file_lines() {
+            push(
+                WorsenedMetricKind::LineCount,
+                f64::from(self.line_count),
+                f64::from(head.line_count),
+            );
+        }
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+}
+
 /// Largest magnitude that an `f64` holds as an exact whole number.
 const MAX_EXACT_WHOLE: f64 = 9_007_199_254_740_992.0;
 
@@ -226,6 +289,73 @@ mod tests {
         let json = serde_json::to_value(metric).expect("serialize");
         assert_eq!(json["base"], 31.5);
         assert_eq!(metric.describe(), "CRAP 31.5 -> 42.2");
+    }
+
+    fn violation(
+        exceeded: crate::ExceededThreshold,
+        crap: Option<f64>,
+    ) -> crate::ComplexityViolation {
+        crate::ComplexityViolation {
+            path: std::path::PathBuf::from("src/a.ts"),
+            name: "work".to_owned(),
+            line: 1,
+            col: 0,
+            cyclomatic: 19,
+            standard_cyclomatic: None,
+            cognitive: 18,
+            line_count: 40,
+            param_count: 1,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded,
+            effective_severity: None,
+            severity: crate::FindingSeverity::High,
+            mutation: None,
+            coverage_pct: None,
+            crap,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
+            max_file_lines: None,
+        }
+    }
+
+    const BASE: AuditBaseMetrics = AuditBaseMetrics {
+        cyclomatic: 23,
+        cognitive: 18,
+        crap: Some(31.5),
+        line_count: 60,
+    };
+
+    #[test]
+    fn base_metrics_name_only_the_exceeded_metrics() {
+        let head = violation(crate::ExceededThreshold::Cyclomatic, None);
+        assert_eq!(
+            BASE.describe_exceeded(&head).as_deref(),
+            Some("cyclomatic 23 -> 19")
+        );
+        let head = violation(crate::ExceededThreshold::All, Some(30.0));
+        assert_eq!(
+            BASE.describe_exceeded(&head).as_deref(),
+            Some("cyclomatic 23 -> 19, cognitive 18 -> 18, CRAP 31.5 -> 30")
+        );
+        let head = violation(crate::ExceededThreshold::FileLines, None);
+        assert_eq!(
+            BASE.describe_exceeded(&head).as_deref(),
+            Some("lines 60 -> 40")
+        );
+    }
+
+    #[test]
+    fn base_metrics_skip_a_crap_score_that_one_side_lacks() {
+        let head = violation(crate::ExceededThreshold::Crap, None);
+        assert_eq!(BASE.describe_exceeded(&head), None);
     }
 
     #[test]

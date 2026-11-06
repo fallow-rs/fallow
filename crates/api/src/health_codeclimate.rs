@@ -220,7 +220,8 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
     for finding in &report.findings {
         let mut issue = ctx.complexity_issue(finding);
         // Audit only: name the measured values that grew against the base
-        // finding. The fingerprint does not read the description.
+        // finding. An inherited finding names the base and head values of its
+        // exceeded metrics. The fingerprint does not read the description.
         if !finding.worsened_metrics.is_empty() {
             let class =
                 if finding.attribution == Some(fallow_output::AuditFindingAttribution::Worsened) {
@@ -233,6 +234,12 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
                 issue.description,
                 fallow_output::describe_worsened_metrics(&finding.worsened_metrics)
             );
+        } else if let Some(metrics) = finding
+            .audit_base
+            .and_then(|base| base.describe_exceeded(&finding.violation))
+        {
+            issue.description =
+                format!("{} (inherited from the base: {metrics})", issue.description);
         }
         if finding.gate_exemption == Some(fallow_output::AuditGateExemption::TestFile) {
             issue.description =

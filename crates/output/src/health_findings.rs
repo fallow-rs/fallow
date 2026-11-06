@@ -75,6 +75,12 @@ pub struct HealthFinding {
     /// `warn`. Absent outside `audit`, and on a finding that gates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_exemption: Option<crate::AuditGateExemption>,
+    /// Audit-mode metric values of the matched base finding, set on an
+    /// inherited finding. Only the review comment text reads them. The JSON
+    /// output does not carry them.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub audit_base: Option<crate::AuditBaseMetrics>,
 }
 
 impl Deref for HealthFinding {
@@ -95,6 +101,7 @@ impl From<ComplexityViolation> for HealthFinding {
             attribution: None,
             worsened_metrics: Vec::new(),
             gate_exemption: None,
+            audit_base: None,
         }
     }
 }
@@ -114,6 +121,7 @@ impl HealthFinding {
             attribution: None,
             worsened_metrics: Vec::new(),
             gate_exemption: None,
+            audit_base: None,
         }
     }
 
@@ -129,6 +137,7 @@ impl HealthFinding {
             attribution: None,
             worsened_metrics: Vec::new(),
             gate_exemption: None,
+            audit_base: None,
         }
     }
 }
