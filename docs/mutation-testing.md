@@ -14,6 +14,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation` | yes | `mutation` |
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
 | `fallow mutation tasks [--report <file>]` | no | `mutation-tasks` |
+| `fallow mutation --recheck [--report <file>] [--mutant <id>]` | yes | `mutation` |
 | `fallow health --mutation-report <file>` | no | `health` |
 
 - The default scope is the changed code against the detected base ref, the same
@@ -27,7 +28,8 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
-  `--min-score`, `--operators`, `--verdicts`, `--typecheck` and `--resume`.
+  `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
+  `--recheck` (with `--report` and `--mutant`).
   The global `--no-cache` flag also turns off the result cache (see "Result
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
   journal and resume").
@@ -368,7 +370,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck). |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run in which no mutant has a test result has no score. It exits
@@ -1504,6 +1506,64 @@ The header says that one test can cover several items, and that an item that
 no input can detect can be skipped. The markdown output puts the two lines in
 a fenced block. The MCP tool `mutation_tasks` returns the JSON batch. It runs
 no mutants.
+
+## Recheck
+
+`--recheck` reruns mutants of a saved report against the current tests. It
+closes the loop of `tasks`: write tests for the open tasks, recheck, and the
+mutants that still survive are the next batch.
+
+```bash
+fallow mutation src/utils.ts       # run, and save the report
+fallow mutation tasks              # the open tasks as one batch
+# write or change tests
+fallow mutation --recheck          # rerun the open tasks
+fallow mutation tasks              # what is still open
+```
+
+- The mutants come from the report: the ids of `--mutant` (comma-separated
+  or repeated, any status), else each `survived` and `no_coverage` mutant.
+  The report is `--report <file>`, or else the report of the last run, with
+  the same search as `inspect`.
+- Each selected file must have the SHA-256 digest of the report. A changed
+  file changes its mutants, so the recheck exits with code 2 and
+  `FALLOW_MUTATION_SOURCE_CHANGED`. Run `fallow mutation` again for new
+  results.
+- The worktree can be dirty, but each dirty path must be a test file: a path
+  that the test path rules match, or a test file of the plan. Another dirty
+  path exits with code 2 and `FALLOW_MUTATION_NON_TEST_CHANGE`.
+- These two checks cover the selected files and the uncommitted changes. The
+  report stores no commit, so a recheck does not see a change that was
+  committed after the report to another file, for example a module that a
+  selected file imports or the runner config. Run `fallow mutation` again
+  after such a commit.
+- The run plans the files of the selected mutants. The other mutants of
+  these files are `pruned` with `prune_reason` `not-selected`, because the
+  instrumented file holds their switch too. They leave the score.
+- An id that the report does not have exits with code 2 and
+  `FALLOW_MUTATION_UNKNOWN_MUTANT`. A report without an open task exits with
+  code 2 and `FALLOW_MUTATION_NOTHING_TO_RECHECK`.
+- `--recheck` conflicts with `--all`, paths, `--changed-since`, `--plan`,
+  `--resume`, `--allow-dirty`, `--max-mutants` and `--min-score`. The score
+  covers only the rechecked mutants, so `mutation.minScore` does not apply.
+  The other run flags apply.
+- The output is a normal `mutation` report with the optional `recheck`
+  object. A recheck without `--mutant` replaces the saved report, so `tasks`
+  then lists the mutants that are still open. A recheck with `--mutant`
+  keeps the saved report, so the other open tasks stay in it. Pass
+  `-o <file>` to keep a copy of the output.
+
+The `recheck` object has `report_sha256` (the digest of the earlier report),
+a count for each outcome, and `mutants`: each selected mutant with its
+`mutant_id`, `file`, `line`, `previous_status`, `status` and `outcome`.
+
+| `outcome` | Meaning |
+|---|---|
+| `killed` | A test now fails on the mutant (`killed` or `timeout`). |
+| `survived` | Each covering test still passes on the mutant. |
+| `no_coverage` | No test reaches the mutant. |
+| `tests_fail_on_original` | A test of the run fails on the original code (a baseline failure), so the run proves no survivor. Fix that test first. |
+| `unsettled` | No final result, for example `runtime_error`, `flaky` or `pending`. `status` gives the reason. |
 
 ## Health join
 

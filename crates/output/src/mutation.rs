@@ -917,6 +917,67 @@ pub struct MutationReport {
     /// them (`--typecheck` not set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typecheck: Option<MutationTypecheckOutput>,
+    /// The result of each rechecked mutant against its status in the earlier
+    /// report. Absent outside `--recheck`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recheck: Option<MutationRecheck>,
+}
+
+/// What a recheck shows for one mutant of the earlier report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationRecheckOutcome {
+    /// A test now fails on the mutant (`killed` or `timeout`).
+    Killed,
+    /// Each covering test still passes on the mutant.
+    Survived,
+    /// No test reaches the mutant.
+    NoCoverage,
+    /// A test of the run fails on the original code, so the run proves no
+    /// survivor. Fix that test first.
+    TestsFailOnOriginal,
+    /// The mutant has no final result, for example `runtime_error`, `flaky`
+    /// or `pending`. `status` gives the reason.
+    Unsettled,
+}
+
+/// One rechecked mutant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationRecheckMutant {
+    /// The id of the mutant.
+    pub mutant_id: String,
+    /// The project-root-relative path of the mutated file.
+    pub file: String,
+    /// The 1-based line of the mutant.
+    pub line: u32,
+    /// The status in the earlier report.
+    pub previous_status: MutantStatus,
+    /// The status in this run.
+    pub status: MutantStatus,
+    /// What the recheck shows.
+    pub outcome: MutationRecheckOutcome,
+}
+
+/// The recheck facts of a `--recheck` run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationRecheck {
+    /// The SHA-256 digest of the earlier report.
+    pub report_sha256: String,
+    /// The number of mutants for each outcome.
+    pub killed: usize,
+    /// See `killed`.
+    pub survived: usize,
+    /// See `killed`.
+    pub no_coverage: usize,
+    /// See `killed`.
+    pub tests_fail_on_original: usize,
+    /// See `killed`.
+    pub unsettled: usize,
+    /// The rechecked mutants, sorted by file, line and mutant id.
+    pub mutants: Vec<MutationRecheckMutant>,
 }
 
 /// Version singleton for a mutation verdict document.

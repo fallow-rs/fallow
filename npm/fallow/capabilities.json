@@ -1366,6 +1366,28 @@
           "description": "Check whether this test is redundant: a test file (each test in it) or a test id (`file::name`). Repeat the flag for more targets. Only the mutants that a target covers run: first the target tests without a stop at a failure, then the other covering tests up to the first failure"
         },
         {
+          "name": "--recheck",
+          "type": "bool",
+          "required": false,
+          "description": "Rerun the open tasks of a saved report (its `survived` and `no_coverage` mutants) against the current tests. The worktree may change test files only. The run replaces the saved report, so `fallow mutation tasks` then lists the mutants that are still open",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--report",
+          "type": "string",
+          "required": false,
+          "description": "The saved report of `--recheck` (default: the report of the last run). A recheck without `--mutant` replaces the saved report"
+        },
+        {
+          "name": "--mutant",
+          "type": "string",
+          "required": false,
+          "description": "Recheck only these mutant ids of the report, comma-separated or repeated (default: each open task). The saved report then stays as it is, so `fallow mutation tasks` keeps the other open tasks"
+        },
+        {
           "name": "paths",
           "type": "string",
           "required": false,

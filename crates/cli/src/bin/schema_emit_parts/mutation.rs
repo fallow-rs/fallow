@@ -41,4 +41,7 @@ pub const MUTATION_DEFINITION_NAMES: &[&str] = &[
     "MutationInspectStatus",
     "MutationStaleReason",
     "MutationInspectCode",
+    "MutationRecheck",
+    "MutationRecheckMutant",
+    "MutationRecheckOutcome",
 ];

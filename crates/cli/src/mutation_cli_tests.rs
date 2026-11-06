@@ -446,6 +446,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         files: Vec::new(),
         verdicts: None,
         typecheck: None,
+        recheck: None,
     }
 }
 

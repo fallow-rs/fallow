@@ -143,6 +143,29 @@ pub struct MutationArgs {
     /// failure.
     #[arg(long, value_name = "TARGET", conflicts_with = "kill_matrix")]
     pub kill_matrix_for: Vec<String>,
+    /// Rerun the open tasks of a saved report (its `survived` and
+    /// `no_coverage` mutants) against the current tests. The worktree may
+    /// change test files only. The run replaces the saved report, so
+    /// `fallow mutation tasks` then lists the mutants that are still open.
+    #[arg(
+        long,
+        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "min_score"]
+    )]
+    pub recheck: bool,
+    /// The saved report of `--recheck` (default: the report of the last run).
+    /// A recheck without `--mutant` replaces the saved report.
+    #[arg(long, value_name = "PATH", requires = "recheck")]
+    pub report: Option<PathBuf>,
+    /// Recheck only these mutant ids of the report, comma-separated or
+    /// repeated (default: each open task). The saved report then stays as it
+    /// is, so `fallow mutation tasks` keeps the other open tasks.
+    #[arg(
+        long = "mutant",
+        value_name = "ID",
+        value_delimiter = ',',
+        requires = "recheck"
+    )]
+    pub mutants: Vec<String>,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -343,6 +366,8 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         resume: input.args.resume,
         kill_matrix: input.args.kill_matrix,
         kill_matrix_targets: input.args.kill_matrix_for.clone(),
+        mutant_ids: Vec::new(),
+        test_changes_only: false,
     })
 }
 
@@ -565,8 +590,9 @@ fn refuse_run_flags_in_plan(args: &MutationArgs) -> Result<(), ProgrammaticError
 }
 
 fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError> {
-    let options = run_options(input)?;
-    let min_score = min_score(input)?;
+    let mut options = run_options(input)?;
+    let recheck = recheck_selection(input)?;
+    let min_score = apply_recheck(input, &mut options, recheck.as_ref())?;
     if input.args.plan {
         refuse_run_flags_in_plan(&input.args)?;
         let plan = plan_mutation(&options)?;
@@ -588,6 +614,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     }
     let mut report = run_with_progress(&options, input)?;
     complete_file_digests(&mut report, input.root);
+    report.recheck = recheck.as_ref().map(|selection| selection.section(&report));
     // Before the verdicts: an equivalent verdict for a survivor does not make
     // the run one in which no mutant has a test result.
     let blocked = baseline_blocked_run_error(&report);
@@ -602,7 +629,14 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             2,
         )
     })?;
-    let saved_path = save_report(&options.analysis, &value);
+    // A recheck of named mutants keeps the saved report, so the other open
+    // tasks stay in it.
+    let saved_path = input
+        .args
+        .mutants
+        .is_empty()
+        .then(|| save_report(&options.analysis, &value))
+        .flatten();
     let saved = saved_path.is_some();
     if saved {
         remove_journal(&options.analysis, &report);
@@ -633,7 +667,11 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
                     inspect_flags: saved.then_some(flags.as_str()),
                 },
             );
-            for line in text.lines() {
+            let recheck_text = report.recheck.as_ref().map(recheck::render);
+            for line in text
+                .lines()
+                .chain(recheck_text.iter().flat_map(|text| text.lines()))
+            {
                 crate::report::sink::outln!("{line}");
             }
         }
@@ -659,6 +697,44 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
         ));
     }
     Ok(ExitCode::from(exit))
+}
+
+#[path = "mutation_recheck.rs"]
+mod recheck;
+
+/// Narrows the run options to the mutants of a recheck and gives the minimum
+/// score. The score of a recheck covers only the rechecked mutants, so the
+/// project gate of `mutation.minScore` does not apply to it.
+fn apply_recheck(
+    input: &MutationCliInput<'_>,
+    options: &mut MutationRunOptions,
+    recheck: Option<&recheck::Selection>,
+) -> Result<Option<f64>, ProgrammaticError> {
+    let Some(selection) = recheck else {
+        return min_score(input);
+    };
+    options.scope = MutationRunScope::Paths(selection.files());
+    options.mutant_ids = selection.mutant_ids();
+    options.test_changes_only = true;
+    Ok(None)
+}
+
+/// The mutants of a `--recheck` run, from the saved report. `None` without
+/// `--recheck`.
+fn recheck_selection(
+    input: &MutationCliInput<'_>,
+) -> Result<Option<recheck::Selection>, ProgrammaticError> {
+    if !input.args.recheck {
+        return Ok(None);
+    }
+    if input.changed_since.is_some() {
+        return Err(input_error(
+            "--recheck takes its mutants from the report; it cannot be combined with --changed-since",
+            "mutation.recheck",
+        ));
+    }
+    let (path, root) = inspect_report_path(input, input.args.report.as_deref())?;
+    recheck::select(&path, &root, &input.args.mutants).map(Some)
 }
 
 /// Saves the report for `fallow mutation inspect` and gives its path. A
