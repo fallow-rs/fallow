@@ -75,6 +75,20 @@ const SCRIPT_ELEMENT_ROOT: &str = "HTMLScriptElement";
 /// through [`ModuleInfoExtractor::sink_object_path`].
 const OBJECT_ROOTED_HTML_METHODS: &[&str] = &["createContextualFragment", "insertAdjacentHTML"];
 
+/// Raw SQL methods of a query builder or a database client. A knex builder
+/// chain starts with a call (`db("t").whereRaw(x)`), and a Prisma client often
+/// comes from a call (`getPrisma()`) or a class field (`this.prisma`). A call
+/// of one of these methods also resolves through
+/// [`ModuleInfoExtractor::sink_object_path`], and the matching `*.` rows of
+/// the `sql-injection` matcher then match the path.
+const OBJECT_ROOTED_RAW_SQL_METHODS: &[&str] = &[
+    "whereRaw",
+    "havingRaw",
+    "orderByRaw",
+    "$queryRawUnsafe",
+    "$executeRawUnsafe",
+];
+
 /// Per-module local bindings that re-expose a sink under another name.
 #[derive(Default)]
 pub(in crate::visitor) struct SinkAliasState {
@@ -1317,8 +1331,9 @@ impl ModuleInfoExtractor {
     /// [`Self::static_callee_path`] cannot: a `this` root, TypeScript
     /// wrappers (`el!`, `el as T`), optional chains (`a?.b`) and calls, which
     /// keep a `()` suffix (`document.createRange()`). Only member-assign
-    /// objects and [`OBJECT_ROOTED_HTML_METHODS`] use this path, so call
-    /// rows with broad patterns do not see these roots.
+    /// objects, [`OBJECT_ROOTED_HTML_METHODS`] and
+    /// [`OBJECT_ROOTED_RAW_SQL_METHODS`] use this path, so call rows with
+    /// broad patterns do not see these roots.
     fn sink_object_path(&self, expr: &Expression<'_>) -> Option<String> {
         let mut segments: Vec<String> = Vec::new();
         let mut calls = 0_usize;
@@ -1380,12 +1395,15 @@ impl ModuleInfoExtractor {
     }
 
     /// The callee path of a call sink. A method in
-    /// [`OBJECT_ROOTED_HTML_METHODS`] also resolves on an object that only
-    /// [`Self::sink_object_path`] can flatten.
+    /// [`OBJECT_ROOTED_HTML_METHODS`] or [`OBJECT_ROOTED_RAW_SQL_METHODS`]
+    /// also resolves on an object that only [`Self::sink_object_path`] can
+    /// flatten.
     fn call_sink_callee_path(&self, callee: &Expression<'_>) -> Option<String> {
         self.security_callee_path(callee).or_else(|| {
             let method = super::visit_helpers::terminal_static_member_name(callee)?;
-            if !OBJECT_ROOTED_HTML_METHODS.contains(&method) {
+            if !OBJECT_ROOTED_HTML_METHODS.contains(&method)
+                && !OBJECT_ROOTED_RAW_SQL_METHODS.contains(&method)
+            {
                 return None;
             }
             self.sink_object_path(callee)
