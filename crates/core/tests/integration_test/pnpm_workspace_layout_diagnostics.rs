@@ -107,6 +107,84 @@ fn pnpm_workspace_overrides_take_precedence_over_catalog_references() {
     );
 }
 
+/// The members of a nested independent pnpm project are workspaces. Their
+/// `catalog:` references resolve against the nearest `pnpm-workspace.yaml`,
+/// and the catalog findings of the nested project name its own files. The
+/// root catalog checks see only the root workspaces.
+#[test]
+fn nested_pnpm_project_members_use_the_nested_catalog() {
+    let root = fixture_path("pnpm-nested-workspace-members");
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis succeeds");
+
+    let mut unused: Vec<(String, String, String)> = results
+        .unused_catalog_entries
+        .iter()
+        .map(|finding| {
+            (
+                relative(&root, &finding.entry.path),
+                finding.entry.catalog_name.clone(),
+                finding.entry.entry_name.clone(),
+            )
+        })
+        .collect();
+    unused.sort();
+    assert_eq!(
+        unused,
+        [
+            (
+                "pnpm-workspace.yaml".to_owned(),
+                "default".to_owned(),
+                "vue".to_owned()
+            ),
+            (
+                "site/pnpm-workspace.yaml".to_owned(),
+                "default".to_owned(),
+                "unused-in-site".to_owned()
+            ),
+        ]
+    );
+
+    let mut unresolved: Vec<(String, String, String)> = results
+        .unresolved_catalog_references
+        .iter()
+        .map(|finding| {
+            (
+                relative(&root, &finding.reference.path),
+                finding.reference.catalog_name.clone(),
+                finding.reference.entry_name.clone(),
+            )
+        })
+        .collect();
+    unresolved.sort();
+    assert_eq!(
+        unresolved,
+        [
+            (
+                "site/packages/web/package.json".to_owned(),
+                "default".to_owned(),
+                "react".to_owned()
+            ),
+            (
+                "site/packages/web/package.json".to_owned(),
+                "legacy".to_owned(),
+                "pinia".to_owned()
+            ),
+        ]
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| relative(&root, &finding.file.path))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "site/packages/web/src/index.ts"),
+        "the nested member manifest owns its entry point: {unused_files:?}"
+    );
+}
+
 /// pnpm 10 reads `pnpm.overrides` in `package.json`, with the same rules.
 #[test]
 fn package_json_overrides_take_precedence_for_pnpm_10() {

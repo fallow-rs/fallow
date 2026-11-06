@@ -1,0 +1,8 @@
+{
+  "name": "@root/app",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "catalog:"
+  }
+}

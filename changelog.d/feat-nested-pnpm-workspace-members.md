@@ -1,0 +1,4 @@
+### Added
+
+- **Fallow analyzes the members of a nested pnpm workspace.** A directory with its own `package.json` and `pnpm-workspace.yaml`, which no root workspace pattern declares, is an independent pnpm project. The members that its `packages` list declares are now workspaces, and `fallow list --workspaces` shows them under the nested project root. A `catalog:` or `catalog:<name>` reference in the nested project resolves against the nested `pnpm-workspace.yaml`. The `unused-catalog-entries`, `empty-catalog-groups` and `unresolved-catalog-references` findings of the nested project name the nested files, and `fallow fix` removes an unused entry from the nested file. The root catalog checks do not change. Nested npm and yarn workspaces are not read.
+  (Closes [#4177](https://github.com/fallow-rs/fallow/issues/4177))

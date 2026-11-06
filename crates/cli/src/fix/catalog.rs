@@ -23,12 +23,11 @@
 use std::path::Path;
 
 use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
+use fallow_types::catalog_source::is_pnpm_catalog_source;
 use fallow_types::output_dead_code::{EmptyCatalogGroupFinding, UnusedCatalogEntryFinding};
 use fallow_types::results::{EmptyCatalogGroup, UnusedCatalogEntry};
 
 use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check};
-
-const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 
 /// Apply unused-catalog-entry fixes to `pnpm-workspace.yaml`.
 ///
@@ -342,10 +341,6 @@ fn group_unused_catalog_entries_by_path(
         by_path.entry(entry.path.as_path()).or_default().push(entry);
     }
     by_path
-}
-
-fn is_pnpm_catalog_source(path: &Path) -> bool {
-    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 fn skip_unsupported_catalog_source_entries(

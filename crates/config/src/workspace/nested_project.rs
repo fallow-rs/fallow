@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use super::{
     ManifestCache, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    collect_declared_patterns, register_matched_workspace,
+    collect_declared_patterns, expand_patterns_to_workspaces, parse_pnpm_workspace_yaml,
+    register_matched_workspace,
     undeclared::{is_ignored_scan_dir, is_undeclared_scan_skip_dir},
 };
 
@@ -136,12 +137,14 @@ fn scan_dirs(parent: &Path) -> Vec<PathBuf> {
 }
 
 /// Register each independent pnpm project below the root as a workspace, with
-/// one `nested-project-root` diagnostic.
+/// one `nested-project-root` diagnostic, and register the members that the
+/// `packages` list of its `pnpm-workspace.yaml` declares.
 ///
 /// The project's `package.json` then owns its files and dependencies, and
 /// framework plugins activate from it. A directory that an earlier source
 /// already registered, for example the fallow config `workspaces.patterns`,
-/// keeps that registration and gets no diagnostic.
+/// keeps that registration and gets no diagnostic. The members of such a
+/// project are registered all the same.
 pub(super) fn collect_nested_project_workspaces(
     scan: &NestedProjectScan<'_>,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
@@ -155,23 +158,74 @@ pub(super) fn collect_nested_project_workspaces(
         .collect();
     for dir in nested_project_roots(scan) {
         let canonical_dir = canonical(&dir);
-        if known.contains(&canonical_dir) || !canonical_dir.starts_with(scan.canonical_root) {
+        if !canonical_dir.starts_with(scan.canonical_root) {
             continue;
         }
-        let registered_before = workspaces.len();
-        register_matched_workspace(
+        if !known.contains(&canonical_dir) {
+            let registered_before = workspaces.len();
+            register_matched_workspace(
+                scan.root,
+                dir.clone(),
+                workspaces,
+                diagnostics,
+                manifest_cache,
+            );
+            if workspaces.len() > registered_before {
+                diagnostics.push(WorkspaceDiagnostic::new(
+                    scan.root,
+                    dir.clone(),
+                    WorkspaceDiagnosticKind::NestedProjectRoot,
+                ));
+            }
+        }
+        let patterns = nested_member_patterns(scan.root, &dir);
+        workspaces.extend(expand_patterns_to_workspaces(
             scan.root,
-            dir.clone(),
-            workspaces,
+            &patterns,
+            scan.canonical_root,
+            scan.ignore_patterns,
             diagnostics,
             manifest_cache,
-        );
-        if workspaces.len() > registered_before {
-            diagnostics.push(WorkspaceDiagnostic::new(
-                scan.root,
-                dir,
-                WorkspaceDiagnosticKind::NestedProjectRoot,
-            ));
-        }
+        ));
     }
+}
+
+/// The `packages` entries of the `pnpm-workspace.yaml` in `project_dir`,
+/// rewritten relative to the analysis root.
+///
+/// pnpm reads these entries relative to `project_dir`. An entry that names
+/// `project_dir` itself (`.`) gives no pattern, because the caller registers
+/// the project root. An absolute entry, or an entry with a `..` segment, also
+/// gives no pattern, so the expansion stays inside `project_dir`.
+fn nested_member_patterns(root: &Path, project_dir: &Path) -> Vec<String> {
+    let Ok(content) = std::fs::read_to_string(project_dir.join(PNPM_WORKSPACE_FILE)) else {
+        return Vec::new();
+    };
+    let relative = project_dir.strip_prefix(root).unwrap_or(project_dir);
+    let prefix = relative.to_string_lossy().replace('\\', "/");
+    parse_pnpm_workspace_yaml(&content)
+        .iter()
+        .filter_map(|pattern| prefix_member_pattern(&prefix, pattern))
+        .collect()
+}
+
+/// Prefix one pnpm `packages` entry with the project directory `prefix`.
+/// A negated entry keeps its `!`.
+fn prefix_member_pattern(prefix: &str, pattern: &str) -> Option<String> {
+    let (negation, mut body) = match pattern.strip_prefix('!') {
+        Some(rest) => ("!", rest),
+        None => ("", pattern),
+    };
+    while let Some(rest) = body.strip_prefix("./") {
+        body = rest;
+    }
+    if body.is_empty()
+        || body == "."
+        || body.starts_with('/')
+        || Path::new(body).is_absolute()
+        || body.split('/').any(|segment| segment == "..")
+    {
+        return None;
+    }
+    Some(format!("{negation}{prefix}/{body}"))
 }

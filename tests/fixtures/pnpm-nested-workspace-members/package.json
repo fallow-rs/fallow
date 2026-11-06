@@ -1,0 +1,5 @@
+{
+  "name": "nested-members-root",
+  "private": true,
+  "type": "module"
+}

@@ -117,7 +117,7 @@ use unrendered_component::{
 };
 use unused_catalog::{
     can_prove_unused_catalog_entries, find_empty_catalog_groups,
-    find_unresolved_catalog_references, find_unused_catalog_entries, gather_pnpm_catalog_state,
+    find_unresolved_catalog_references, find_unused_catalog_entries, gather_pnpm_catalog_states,
 };
 use unused_component_emit::find_unused_component_emits;
 use unused_component_input::find_unused_component_inputs;
@@ -2026,27 +2026,27 @@ fn populate_pnpm_catalog_findings(
     let need_unused = config.rules.unused_catalog_entries != Severity::Off;
     let need_empty_groups = config.rules.empty_catalog_groups != Severity::Off;
     let need_unresolved_refs = config.rules.unresolved_catalog_references != Severity::Off;
-    let Some(state) = ((need_unused || need_empty_groups || need_unresolved_refs)
-        .then(|| gather_pnpm_catalog_state(config, workspaces)))
-    .flatten() else {
+    let Some(states) = (need_unused || need_empty_groups || need_unresolved_refs)
+        .then(|| gather_pnpm_catalog_states(config, workspaces))
+    else {
         return;
     };
 
     if need_unused && can_prove_unused_catalog_entries(config) {
-        results.unused_catalog_entries = find_unused_catalog_entries(&state)
+        results.unused_catalog_entries = find_unused_catalog_entries(&states)
             .into_iter()
             .map(UnusedCatalogEntryFinding::with_actions)
             .collect();
     }
     if need_empty_groups {
-        results.empty_catalog_groups = find_empty_catalog_groups(&state)
+        results.empty_catalog_groups = find_empty_catalog_groups(&states)
             .into_iter()
             .map(EmptyCatalogGroupFinding::with_actions)
             .collect();
     }
     if need_unresolved_refs {
         results.unresolved_catalog_references = find_unresolved_catalog_references(
-            &state,
+            &states,
             &config.compiled_ignore_catalog_references,
             &config.root,
         )

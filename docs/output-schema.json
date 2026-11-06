@@ -5813,7 +5813,7 @@
         "path",
         "line"
       ],
-      "description": "A package manager catalog entry that no workspace package references via\nthe `catalog:` protocol.\n\nThe default catalog uses `catalog_name: \"default\"`. Named catalogs\n(`catalogs.<name>`) use their declared name. The source file is\n`pnpm-workspace.yaml` for pnpm catalogs or root `package.json` for Bun\ncatalogs."
+      "description": "A package manager catalog entry that no workspace package references via\nthe `catalog:` protocol.\n\nThe default catalog uses `catalog_name: \"default\"`. Named catalogs\n(`catalogs.<name>`) use their declared name. The source file is\n`pnpm-workspace.yaml` for pnpm catalogs or root `package.json` for Bun\ncatalogs. For an independent pnpm project below the root, the source\nfile is the `pnpm-workspace.yaml` of that project."
     },
     "EmptyCatalogGroup": {
       "type": "object",
@@ -13135,7 +13135,7 @@
           "required": [
             "kind"
           ],
-          "description": "A directory has its own `package.json` and `pnpm-workspace.yaml`, and\nno workspace pattern of the root manifests declares it. pnpm installs\nit as an independent project. Fallow analyzes it as a workspace, so its\n`package.json` owns its files and dependencies, and its `catalog:`\nreferences are not checked against the root catalog.\n\nInformation only: nothing is lost from the analysis, so\n`degrades_analysis` is false."
+          "description": "A directory has its own `package.json` and `pnpm-workspace.yaml`, and\nno workspace pattern of the root manifests declares it. pnpm installs\nit as an independent project. Fallow analyzes it as a workspace, so its\n`package.json` owns its files and dependencies. The members that the\n`packages` list of its `pnpm-workspace.yaml` declares are workspaces\ntoo. The `catalog:` references of the project and its members resolve\nagainst its own catalog, not against the root catalog.\n\nInformation only: nothing is lost from the analysis, so\n`degrades_analysis` is false."
         },
         {
           "type": "object",

@@ -1,0 +1,8 @@
+packages:
+  - ./packages/*
+catalog:
+  vue: ^3.5.0
+  unused-in-site: ^1.0.0
+catalogs:
+  legacy:
+    vue-router: ^3.6.5

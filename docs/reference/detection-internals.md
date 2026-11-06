@@ -873,7 +873,11 @@ merges these sources and keeps the first entry for each canonical directory:
    manifest pattern declares, is registered as a workspace with a
    `nested-project-root` diagnostic (`collect_nested_project_workspaces`).
    `ignorePatterns` excludes it. The undeclared-workspace scan does not look
-   inside such a directory.
+   inside such a directory. The `packages` entries of its
+   `pnpm-workspace.yaml` declare more workspaces, read relative to the nested
+   project (`nested_member_patterns`). An entry `.`, an absolute entry, and an
+   entry with a `..` segment give no member. Only pnpm gets this source: the
+   nested `workspaces` of npm and yarn are not read.
 
 Three more rules keep the workspace diagnostics and the catalog checks
 consistent:
@@ -891,6 +895,11 @@ consistent:
 - `is_independent_pnpm_project` removes a nested pnpm project from the root
   catalog consumers, also when the fallow config `workspaces.patterns` adds
   it. pnpm resolves its `catalog:` references against its own catalog.
+  `gather_pnpm_catalog_states` gives each workspace to the nearest
+  independent pnpm project that contains it, and builds one catalog state for
+  each project. The catalog findings of a nested project name its own
+  `pnpm-workspace.yaml` and member manifests, and `fallow fix` edits that
+  file.
 
 Source 3 is for older yarn monorepos. These repositories
 have no `workspaces` field. The root lists each package as

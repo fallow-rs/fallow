@@ -21,6 +21,8 @@ pub mod audit_cache;
 /// Why a persisted cache was refused, shared by the extraction cache, the
 /// graph cache, the perf table, and `fallow doctor`.
 pub mod cache_rejection;
+/// Classification of the source file of a package manager catalog finding.
+pub mod catalog_source;
 /// Shared churn output contracts.
 pub mod churn;
 /// Cross-surface strings for the cloud runtime-coverage path, shared by the

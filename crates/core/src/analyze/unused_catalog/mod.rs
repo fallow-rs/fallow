@@ -51,8 +51,11 @@
 //! (`vite@^5`), so such a key does not suppress the finding.
 //!
 //! A workspace with its own `pnpm-workspace.yaml` that no root workspace
-//! pattern declares is an independent project. pnpm resolves its references
-//! against its own catalog, so its manifest is not a consumer here.
+//! pattern declares is an independent project. pnpm resolves the references
+//! of the project and of its members against the catalog of that file, so
+//! these manifests are not consumers of the root catalog. Each independent
+//! project gets its own catalog state, and its findings name its own
+//! `pnpm-workspace.yaml`.
 
 use std::path::{Path, PathBuf};
 
@@ -86,17 +89,132 @@ pub struct PnpmCatalogState {
     suppressed_entry_lines: FxHashSet<u32>,
 }
 
+/// Build one catalog analysis state for the project root and one for each
+/// independent pnpm project below it.
+///
+/// A workspace belongs to the nearest independent pnpm project that contains
+/// it, or else to the project root. pnpm resolves the `catalog:` references
+/// of a workspace against the catalog of the `pnpm-workspace.yaml` of that
+/// project, so each state reads one catalog and the manifests that belong to
+/// it.
+///
+/// A state is left out when its `pnpm-workspace.yaml` does not parse. The
+/// root state is also left out when the root has no `pnpm-workspace.yaml`
+/// and its `package.json` declares no Bun catalog.
+pub fn gather_pnpm_catalog_states(
+    config: &ResolvedConfig,
+    workspaces: &[WorkspaceInfo],
+) -> Vec<PnpmCatalogState> {
+    let mut owners = ProjectOwners::new(&config.root);
+    let mut root_members = Vec::new();
+    let mut nested_members: std::collections::BTreeMap<PathBuf, Vec<&WorkspaceInfo>> =
+        std::collections::BTreeMap::new();
+    for ws in workspaces {
+        match owners.owner_of(&ws.root) {
+            Some(project) => nested_members.entry(project).or_default().push(ws),
+            None => root_members.push(ws),
+        }
+    }
+
+    let mut states = Vec::with_capacity(nested_members.len() + 1);
+    states.extend(gather_pnpm_catalog_state(config, &root_members));
+    for (project, members) in nested_members {
+        states.extend(gather_nested_pnpm_catalog_state(
+            &config.root,
+            &project,
+            &members,
+        ));
+    }
+    states
+}
+
+/// Finds the independent pnpm project that contains a workspace, with one
+/// independence check per candidate directory.
+struct ProjectOwners<'a> {
+    root: &'a Path,
+    independent: rustc_hash::FxHashMap<PathBuf, bool>,
+}
+
+impl<'a> ProjectOwners<'a> {
+    fn new(root: &'a Path) -> Self {
+        Self {
+            root,
+            independent: rustc_hash::FxHashMap::default(),
+        }
+    }
+
+    /// The nearest directory at or above `ws_root`, and below the project
+    /// root, that is an independent pnpm project.
+    fn owner_of(&mut self, ws_root: &Path) -> Option<PathBuf> {
+        let mut dir = ws_root;
+        while dir != self.root && dir.starts_with(self.root) {
+            if dir.join(PNPM_WORKSPACE_FILE).is_file() {
+                let root = self.root;
+                let independent = *self
+                    .independent
+                    .entry(dir.to_path_buf())
+                    .or_insert_with(|| is_independent_pnpm_project(root, dir));
+                if independent {
+                    return Some(dir.to_path_buf());
+                }
+            }
+            dir = dir.parent()?;
+        }
+        None
+    }
+}
+
+/// The catalog state of the independent pnpm project at `project`: its
+/// `pnpm-workspace.yaml` catalog, its overrides, and the `package.json` of
+/// each member. The findings name the files relative to `root`.
+fn gather_nested_pnpm_catalog_state(
+    root: &Path,
+    project: &Path,
+    members: &[&WorkspaceInfo],
+) -> Option<PnpmCatalogState> {
+    let yaml_path = project.join(PNPM_WORKSPACE_FILE);
+    let yaml_source = std::fs::read_to_string(&yaml_path).ok()?;
+    let data = match parse_pnpm_catalog_data(&yaml_source) {
+        Ok(data) => data,
+        Err(error) => {
+            report_malformed_pnpm_workspace_yaml(root, &yaml_path, error);
+            return None;
+        }
+    };
+    let suppressed_entry_lines = suppressed_yaml_catalog_entries(&yaml_source, &data);
+    let mut consumer_pkg_paths: Vec<PathBuf> = members
+        .iter()
+        .map(|ws| ws.root.join(PACKAGE_JSON_FILE))
+        .collect();
+    let project_manifest = project.join(PACKAGE_JSON_FILE);
+    if !consumer_pkg_paths.contains(&project_manifest) {
+        consumer_pkg_paths.insert(0, project_manifest);
+    }
+    let mut consumers = collect_catalog_consumers(&consumer_pkg_paths, root);
+    collect_pnpm_override_consumers(project, &mut consumers);
+    let source_path = yaml_path
+        .strip_prefix(root)
+        .map_or_else(|_| yaml_path.clone(), Path::to_path_buf);
+    Some(PnpmCatalogState {
+        data,
+        consumers,
+        source_path,
+        suppressed_entry_lines,
+    })
+}
+
 /// Read catalog declarations and walk workspace `package.json` files to build
-/// shared catalog analysis state. `pnpm-workspace.yaml` stays the preferred
-/// source when present; otherwise Bun-style root `package.json` catalogs are
-/// read from `workspaces.catalog` / `workspaces.catalogs`.
+/// the catalog analysis state of the project root. `workspaces` holds the
+/// workspaces that belong to the root project. `pnpm-workspace.yaml` stays
+/// the preferred source when present; otherwise Bun-style root `package.json`
+/// catalogs are read from `workspaces.catalog` / `workspaces.catalogs`.
 ///
 /// Returns `None` when `pnpm-workspace.yaml` does not parse. pnpm reads the
 /// file with a more lenient parser, so its catalogs can still resolve; an
 /// empty catalog would report every `catalog:` reference as unresolved.
-pub fn gather_pnpm_catalog_state(
+fn gather_pnpm_catalog_state(
     config: &ResolvedConfig,
-    workspaces: &[WorkspaceInfo],
+    workspaces: &[&WorkspaceInfo],
 ) -> Option<PnpmCatalogState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let (data, source_path, suppressed_entry_lines) =
@@ -159,7 +277,11 @@ pub fn can_prove_unused_catalog_entries(config: &ResolvedConfig) -> bool {
 
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
 /// workspace `package.json` via the `catalog:` protocol.
-pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
+pub fn find_unused_catalog_entries(states: &[PnpmCatalogState]) -> Vec<UnusedCatalogEntry> {
+    states.iter().flat_map(unused_catalog_entries_of).collect()
+}
+
+fn unused_catalog_entries_of(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
     if state.data.catalogs.is_empty() {
         return Vec::new();
     }
@@ -201,7 +323,11 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
 /// Emit one `EmptyCatalogGroup` for every named `catalogs.<name>:` group
 /// that has no package entries. The top-level default `catalog:` map is
 /// intentionally ignored.
-pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
+pub fn find_empty_catalog_groups(states: &[PnpmCatalogState]) -> Vec<EmptyCatalogGroup> {
+    states.iter().flat_map(empty_catalog_groups_of).collect()
+}
+
+fn empty_catalog_groups_of(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
     state
         .data
         .empty_named_catalog_groups
@@ -224,6 +350,17 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
 ///
 /// Findings matching any rule in `ignore_rules` are suppressed.
 pub fn find_unresolved_catalog_references(
+    states: &[PnpmCatalogState],
+    ignore_rules: &[CompiledIgnoreCatalogReferenceRule],
+    root: &Path,
+) -> Vec<UnresolvedCatalogReference> {
+    states
+        .iter()
+        .flat_map(|state| unresolved_catalog_references_of(state, ignore_rules, root))
+        .collect()
+}
+
+fn unresolved_catalog_references_of(
     state: &PnpmCatalogState,
     ignore_rules: &[CompiledIgnoreCatalogReferenceRule],
     root: &Path,
@@ -304,20 +441,15 @@ fn collect_available_in_catalogs(
     catalogs
 }
 
-/// Collect every `package.json` path that participates in the workspace:
-/// the project root plus each declared workspace package.
+/// Collect every `package.json` path that participates in the root project:
+/// the project root plus each workspace package of the root project.
 fn collect_consumer_pkg_paths(
     config: &ResolvedConfig,
-    workspaces: &[WorkspaceInfo],
+    workspaces: &[&WorkspaceInfo],
 ) -> Vec<PathBuf> {
     let mut paths = Vec::with_capacity(workspaces.len() + 1);
-    paths.push(config.root.join("package.json"));
-    for ws in workspaces {
-        if is_independent_pnpm_project(&config.root, &ws.root) {
-            continue;
-        }
-        paths.push(ws.root.join("package.json"));
-    }
+    paths.push(config.root.join(PACKAGE_JSON_FILE));
+    paths.extend(workspaces.iter().map(|ws| ws.root.join(PACKAGE_JSON_FILE)));
     paths
 }
 
@@ -864,8 +996,11 @@ mod tests {
             None,
         );
         let workspaces = fallow_config::discover_workspaces(root);
-        let state = gather_pnpm_catalog_state(&config, &workspaces).expect("catalog state");
-        find_unresolved_catalog_references(&state, &[], root)
+        let state = gather_pnpm_catalog_states(&config, &workspaces)
+            .into_iter()
+            .next()
+            .expect("catalog state");
+        unresolved_catalog_references_of(&state, &[], root)
             .into_iter()
             .map(|finding| {
                 let path = finding
@@ -958,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn independent_pnpm_project_is_not_a_catalog_consumer() {
+    fn independent_pnpm_project_resolves_against_its_own_catalog() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         std::fs::write(root.join("package.json"), r#"{"name":"root"}"#).expect("write root");
@@ -994,10 +1129,13 @@ mod tests {
             "{workspaces:?}"
         );
 
-        let state = gather_pnpm_catalog_state(&config, &workspaces).expect("catalog state");
+        let states = gather_pnpm_catalog_states(&config, &workspaces);
+        let [root_state, docs_state] = states.as_slice() else {
+            panic!("expected a root and a docs catalog state");
+        };
 
-        assert!(find_unresolved_catalog_references(&state, &[], root).is_empty());
-        let unused: Vec<String> = find_unused_catalog_entries(&state)
+        assert!(unresolved_catalog_references_of(root_state, &[], root).is_empty());
+        let unused: Vec<String> = unused_catalog_entries_of(root_state)
             .into_iter()
             .map(|entry| entry.entry_name)
             .collect();
@@ -1005,6 +1143,18 @@ mod tests {
             unused,
             ["vue"],
             "the docs reference does not use the root entry"
+        );
+
+        assert!(unused_catalog_entries_of(docs_state).is_empty());
+        let unresolved: Vec<(String, PathBuf)> =
+            unresolved_catalog_references_of(docs_state, &[], root)
+                .into_iter()
+                .map(|finding| (finding.entry_name, finding.path))
+                .collect();
+        assert_eq!(
+            unresolved,
+            [("vue".to_owned(), docs.join("package.json"))],
+            "the docs catalog does not declare vue"
         );
     }
 

@@ -128,8 +128,10 @@ pub enum WorkspaceDiagnosticKind {
     /// A directory has its own `package.json` and `pnpm-workspace.yaml`, and
     /// no workspace pattern of the root manifests declares it. pnpm installs
     /// it as an independent project. Fallow analyzes it as a workspace, so its
-    /// `package.json` owns its files and dependencies, and its `catalog:`
-    /// references are not checked against the root catalog.
+    /// `package.json` owns its files and dependencies. The members that the
+    /// `packages` list of its `pnpm-workspace.yaml` declares are workspaces
+    /// too. The `catalog:` references of the project and its members resolve
+    /// against its own catalog, not against the root catalog.
     ///
     /// Information only: nothing is lost from the analysis, so
     /// `degrades_analysis` is false.
@@ -1542,8 +1544,9 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::NestedProjectRoot => format!(
             "Directory '{display}' has its own pnpm-workspace.yaml, so it is an independent \
              project. Fallow analyzes it as a workspace: its package.json owns its files and \
-             dependencies, and its catalog references are not checked against the root \
-             catalog. Add '{display}' to ignorePatterns to exclude it."
+             dependencies, the packages that its pnpm-workspace.yaml declares are workspaces, \
+             and their catalog references resolve against its own catalog. Add '{display}' to \
+             ignorePatterns to exclude it."
         ),
         WorkspaceDiagnosticKind::MalformedTsconfig { error } => format!(
             "tsconfig at '{display}' failed to parse ({error}); \

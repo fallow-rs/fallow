@@ -8,12 +8,11 @@ use std::path::Path;
 use ls_types::*;
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
+use fallow_types::catalog_source::is_pnpm_catalog_source;
 use fallow_types::output_dead_code::MutationEvidence;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 use crate::position::PositionMapper;
-
-const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 
 /// Return true if `c` is a JS / TS identifier character.
 ///
@@ -769,10 +768,6 @@ fn remove_empty_catalog_group_action(
         }]),
         ..Default::default()
     })
-}
-
-fn is_pnpm_catalog_source(path: &Path) -> bool {
-    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 /// Anchored match for a catalog key on its declared line. Handles

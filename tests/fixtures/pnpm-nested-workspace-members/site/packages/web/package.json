@@ -1,0 +1,11 @@
+{
+  "name": "site-web",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:legacy",
+    "pinia": "catalog:legacy"
+  }
+}
