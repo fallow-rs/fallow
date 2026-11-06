@@ -1460,10 +1460,39 @@ test("CI runs the mutation runner tests at the declared runtime floors", () => {
   // Without Bun the bun-test suite skips. The job must fail instead.
   assert.match(
     job,
-    /FALLOW_REQUIRE_BUN: '1'\n\s+run: node --test tools\/mutation-runner\/test\/\*\.test\.mjs/u,
+    /FALLOW_REQUIRE_BUN: '1'\n\s+run: node scripts\/check-temp-leaks\.mjs -- node --test tools\/mutation-runner\/test\/\*\.test\.mjs/u,
   );
   assert.match(job, /persist-credentials: false/u);
   assert.match(indentedBlock(workflow, "ci-ok", 2), /mutation-runner-floor/u);
+});
+
+// A test that leaves a folder in the system temp directory fills a developer
+// machine and a reused runner. The guard fails such a step in CI.
+test("CI runs each JS test suite through the temp folder guard", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const suites = [
+    ["js-lint", "scripts/*.test.mjs"],
+    ["js-lint", "tools/type-aware-sidecar/test/*.test.mjs"],
+    ["js-lint", "tools/mutation-runner/test/*.test.mjs"],
+    ["mutation-runner-floor", "tools/mutation-runner/test/*.test.mjs"],
+    ["npm-package", ".github/scripts/*.test.mjs"],
+  ];
+  for (const [jobName, glob] of suites) {
+    const job = indentedBlock(workflow, jobName, 2);
+    const runs = job.split("\n").filter((line) => line.includes(`node --test ${glob}`));
+    assert.notEqual(runs.length, 0, `${jobName} must run ${glob}`);
+    for (const line of runs) {
+      assert.match(line, /run: node scripts\/check-temp-leaks\.mjs -- node --test /u, line);
+    }
+  }
+});
+
+// Fallow reads the scripts of package.json to find entry points. Without this
+// script, each `scripts/*.test.mjs` file reads as an unused file, because only
+// the CI workflow runs them.
+test("package.json runs the script tests that CI runs", () => {
+  const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(manifest.scripts["test:scripts"], "node --test scripts/*.test.mjs");
 });
 
 test("CI runs clippy on the similar-code sidecar workspace", () => {

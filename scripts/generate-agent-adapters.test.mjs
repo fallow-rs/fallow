@@ -3,12 +3,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { tmpdir } from "node:os";
-import { mkdtempSync } from "node:fs";
 
 import { generateAgentAdapters } from "./generate-agent-adapters.mjs";
+import { makeTempDir } from "./lib/temp-dir.mjs";
 
-const createRepo = (root = mkdtempSync(join(tmpdir(), "fallow-agent-adapters-"))) => {
+const createRepo = (root = makeTempDir("fallow-agent-adapters-")) => {
   const skill = join(root, ".agents", "skills", "review");
   mkdirSync(skill, { recursive: true });
   writeFileSync(
@@ -163,7 +162,7 @@ test("a checkout nested in another repository judges ownership by its own paths"
   // here is the outer one. Ownership is looked up by a path relative to the
   // checkout, so a checkout that is not itself the repository top would read as
   // entirely untracked: nothing stale, and nothing removed.
-  const outer = mkdtempSync(join(tmpdir(), "fallow-agent-adapters-nested-"));
+  const outer = makeTempDir("fallow-agent-adapters-nested-");
   git(outer, ["init", "--quiet"]);
   const repoRoot = createRepo(join(outer, "inner"));
   generateAgentAdapters({ repoRoot });

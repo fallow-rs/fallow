@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { makeTempDir } from "./lib/temp-dir.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPT = join(REPO_ROOT, "benchmarks", "cli-instructions.sh");
@@ -31,7 +31,7 @@ const parseConfig = (text) => {
 };
 
 test("config lists one benchmark per project, command and cache state", () => {
-  const work = mkdtempSync(join(tmpdir(), "fallow-cli-instructions-"));
+  const work = makeTempDir("fallow-cli-instructions-");
   const result = run(["config", "--fallow-bin", "/opt/fallow", "--work-dir", work]);
   assert.equal(result.status, 0, result.stderr);
 

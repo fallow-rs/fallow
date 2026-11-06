@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { makeTempDir } from "./lib/temp-dir.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPT = "scripts/check_telemetry_doc_sync.py";
@@ -63,7 +63,7 @@ const createCheckout = (root) => {
 };
 
 test("telemetry documentation parity fails closed when companions are absent", () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-telemetry-parity-"));
+  const root = makeTempDir("fallow-telemetry-parity-");
   const result = run(REPO_ROOT, {
     FALLOW_DOCS_DIR: join(root, "missing-docs"),
     FALLOW_SKILLS_DIR: join(root, "missing-skills"),
@@ -74,7 +74,7 @@ test("telemetry documentation parity fails closed when companions are absent", (
 });
 
 test("telemetry documentation parity fails closed when a companion variable is set but empty", () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-telemetry-empty-"));
+  const root = makeTempDir("fallow-telemetry-empty-");
   const checkout = createCheckout(root);
 
   // Nothing sits beside this throwaway checkout, so standing down is the only
@@ -87,7 +87,7 @@ test("telemetry documentation parity fails closed when a companion variable is s
 });
 
 test("telemetry documentation parity looks beside the main checkout, not beside a worktree", () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-telemetry-worktree-"));
+  const root = makeTempDir("fallow-telemetry-worktree-");
   const checkout = createCheckout(root);
   git(checkout, ["init", "--quiet"]);
   git(checkout, ["add", "-f", "--", "."]);

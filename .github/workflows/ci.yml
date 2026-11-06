@@ -321,6 +321,7 @@ jobs:
               - 'npm/fallow/**'
               - 'schema.json'
               - '.github/scripts/**'
+              - 'scripts/check-temp-leaks.mjs'
               - '.github/workflows/ci.yml'
             # The "File length" step checks each .mjs and .ts file.
             self-analyze:
@@ -358,6 +359,7 @@ jobs:
             mutation-runner:
               - 'tools/mutation-runner/**'
               - 'crates/api/mutation-runner-protocol.json'
+              - 'scripts/check-temp-leaks.mjs'
               - '.github/workflows/ci.yml'
               - 'scripts/workflow-policy.test.mjs'
             # `similar-code-sidecar` gates the lint job of the similar-code
@@ -1016,8 +1018,11 @@ jobs:
         run: npm run fmt:js:check
       - name: Narrator comment guard
         run: node scripts/check-comment-quality.mjs --all
+      # check-temp-leaks.mjs fails a test step that leaves a `fallow-*`
+      # folder in the system temp directory. A reused runner and a developer
+      # machine keep such folders.
       - name: Script tests
-        run: node --test scripts/*.test.mjs
+        run: node scripts/check-temp-leaks.mjs -- node --test scripts/*.test.mjs
       - name: Changelog fragments
         if: github.event_name == 'pull_request'
         env:
@@ -1036,18 +1041,18 @@ jobs:
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
       - name: Type-aware sidecar tests
-        run: node --test tools/type-aware-sidecar/test/*.test.mjs
+        run: node scripts/check-temp-leaks.mjs -- node --test tools/type-aware-sidecar/test/*.test.mjs
       - name: Type-aware sidecar tests (tsrs backend)
         env:
           FALLOW_TYPE_AWARE_BACKEND: tsrs
-        run: node --test tools/type-aware-sidecar/test/*.test.mjs
+        run: node scripts/check-temp-leaks.mjs -- node --test tools/type-aware-sidecar/test/*.test.mjs
       - name: Type-aware sidecar package check
         working-directory: tools/type-aware-sidecar
         run: npm pack --dry-run --json
       - name: Install mutation runner dependencies
         run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
       - name: Mutation runner tests
-        run: node --test tools/mutation-runner/test/*.test.mjs
+        run: node scripts/check-temp-leaks.mjs -- node --test tools/mutation-runner/test/*.test.mjs
       - name: Knowledge architecture
         run: npm run check:knowledge-architecture
       - name: Cross-repository telemetry documentation parity
@@ -1106,7 +1111,7 @@ jobs:
       - name: Mutation runner tests
         env:
           FALLOW_REQUIRE_BUN: '1'
-        run: node --test tools/mutation-runner/test/*.test.mjs
+        run: node scripts/check-temp-leaks.mjs -- node --test tools/mutation-runner/test/*.test.mjs
 
   npm-package:
     name: npm Package
@@ -1177,7 +1182,7 @@ jobs:
       # moment it lands, instead of waiting for someone to remember this line.
       # The `npm-package` filter already includes `.github/scripts/**`.
       - name: Test CI helper scripts
-        run: node --test .github/scripts/*.test.mjs
+        run: node scripts/check-temp-leaks.mjs -- node --test .github/scripts/*.test.mjs
 
       - name: Run npm wrapper unit tests
         run: npm --prefix npm/fallow test
