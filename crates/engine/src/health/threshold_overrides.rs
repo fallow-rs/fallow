@@ -326,6 +326,20 @@ const fn override_status(
     }
 }
 
+/// The index of the entry that resolves one ceiling: the last matching entry
+/// that configures it. A later entry supersedes an earlier one, so only this
+/// entry sets the limit of a finding on that ceiling.
+fn resolving_index(
+    matches: &[ThresholdOverrideMatch<'_>],
+    configures: impl Fn(&fallow_output::HealthConfiguredThresholds) -> bool,
+) -> Option<usize> {
+    matches
+        .iter()
+        .rev()
+        .find(|matched| configures(&matched.entry.configured))
+        .map(|matched| matched.entry.index)
+}
+
 impl ThresholdOverrideStateTracker {
     /// `effective` is the ceiling set resolved across every matching entry, not
     /// the entry's own configured value. A later entry can supersede an earlier
@@ -349,8 +363,12 @@ impl ThresholdOverrideStateTracker {
             line_count,
             suppressed,
         } = function;
+        let cyclomatic_owner = resolving_index(matches, |c| c.max_cyclomatic.is_some());
+        let cognitive_owner = resolving_index(matches, |c| c.max_cognitive.is_some());
+        let unit_size_owner = resolving_index(matches, |c| c.max_unit_size.is_some());
         for matched in matches {
             let configured = matched.entry.configured;
+            let owns = |owner: Option<usize>| owner == Some(matched.entry.index);
             // `maxUnitSize` belongs to the complexity dimension, per
             // `configured_dimensions` and the `ThresholdOverrideDimension`
             // contract. Leaving it out made a unit-size-only entry emit no row
@@ -405,13 +423,17 @@ impl ThresholdOverrideStateTracker {
             // An override can also set a ceiling below the global one. When
             // the unit breaches such a lowered ceiling, the override sets the
             // limit of the finding, so it is in force and reads `active`, with
-            // the breach in `outstanding` (issue #4173).
+            // the breach in `outstanding` (issue #4173). Only the entry that
+            // resolves the lowered ceiling counts. Another matching entry
+            // changes no result through that ceiling.
             let breaches_lowered = (!suppressed
-                && ((effective.max_cyclomatic < global.cyclomatic
+                && ((owns(cyclomatic_owner)
+                    && effective.max_cyclomatic < global.cyclomatic
                     && cyclomatic > effective.max_cyclomatic)
-                    || (effective.max_cognitive < global.cognitive
+                    || (owns(cognitive_owner)
+                        && effective.max_cognitive < global.cognitive
                         && cognitive > effective.max_cognitive)))
-                || (touches_unit_size
+                || (owns(unit_size_owner)
                     && effective.max_unit_size < global.unit_size
                     && line_count.is_some_and(|lc| lc > effective.max_unit_size));
             let status = override_status(global_exceeded, local_exceeded, breaches_lowered);
@@ -469,13 +491,17 @@ impl ThresholdOverrideStateTracker {
         let local_exceeded = breaches(effective_max_file_lines);
         let lowered = effective_max_file_lines > 0
             && (global_max_file_lines == 0 || effective_max_file_lines < global_max_file_lines);
-        let status = override_status(global_exceeded, local_exceeded, lowered && local_exceeded);
+        // Only the last matching entry resolves the limit. An earlier entry
+        // is superseded, so it changes no result.
+        let owner = resolving_index(matches, |c| c.max_file_lines.is_some());
         let outstanding = if local_exceeded {
             vec![ThresholdOverrideDimension::Complexity]
         } else {
             Vec::new()
         };
         for matched in matches {
+            let breaches_lowered = lowered && local_exceeded && owner == Some(matched.entry.index);
+            let status = override_status(global_exceeded, local_exceeded, breaches_lowered);
             self.matched_indexes.insert(matched.entry.index);
             self.push_state(ThresholdOverrideStateInput {
                 status,
@@ -518,18 +544,25 @@ impl ThresholdOverrideStateTracker {
             col,
             suppressed,
         } = function;
+        // A CRAP finding fires when the score reaches the ceiling.
+        let breaches = |limit: f64| !suppressed && metrics.crap >= limit;
+        let global_exceeded = breaches(global.crap);
+        let local_exceeded = breaches(effective.max_crap);
+        // A lowered ceiling that the function reaches sets the limit of the
+        // finding, so the entry that resolves it reads `active`. The finding
+        // puts `crap` in `outstanding` (issue #4173).
+        let lowered = effective.max_crap < global.crap && local_exceeded;
+        let owner = resolving_index(matches, |c| c.max_crap.is_some());
         for matched in matches {
             if matched.entry.configured.max_crap.is_none() {
                 continue;
             }
             self.matched_indexes.insert(matched.entry.index);
-            let status = if suppressed || metrics.crap < global.crap {
-                fallow_output::ThresholdOverrideStatus::Stale
-            } else if metrics.crap < effective.max_crap {
-                fallow_output::ThresholdOverrideStatus::Active
-            } else {
-                fallow_output::ThresholdOverrideStatus::Insufficient
-            };
+            let status = override_status(
+                global_exceeded,
+                local_exceeded,
+                lowered && owner == Some(matched.entry.index),
+            );
             self.push_state(ThresholdOverrideStateInput {
                 status,
                 override_index: matched.entry.index,
