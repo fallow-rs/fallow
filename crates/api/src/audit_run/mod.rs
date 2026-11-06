@@ -464,8 +464,12 @@ fn annotate_health_report(report: &mut HealthReport, comparison: &AuditCompariso
         .zip(&comparison.health_classes)
     {
         finding.introduced = Some(introduced);
-        finding.attribution = Some(class.attribution());
+        let attribution = class.attribution();
+        finding.attribution = Some(attribution);
         finding.worsened_metrics.clone_from(&class.worsened_metrics);
+        finding.audit_base = class
+            .base
+            .filter(|_| attribution == fallow_output::AuditFindingAttribution::Inherited);
     }
     for (finding, introduced) in report
         .styling_findings

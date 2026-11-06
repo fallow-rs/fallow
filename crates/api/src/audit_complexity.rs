@@ -82,6 +82,17 @@ impl ComplexityMetrics {
         }
     }
 
+    /// The metric values that a review comment shows for an inherited
+    /// finding.
+    const fn base_metrics(&self) -> fallow_output::AuditBaseMetrics {
+        fallow_output::AuditBaseMetrics {
+            cyclomatic: self.cyclomatic,
+            cognitive: self.cognitive,
+            crap: self.crap,
+            line_count: self.line_count,
+        }
+    }
+
     /// Whether both findings have the same complexity values. The line and
     /// the line count are not compared.
     fn same_values(&self, other: &Self) -> bool {
@@ -123,6 +134,9 @@ pub struct ComplexityClass {
     /// that growth made the finding introduced, so `audit.worsened: off`
     /// keeps it worsened (see [`Self::clear_worsened_for_off`]).
     pub exceeded_metric_grew: bool,
+    /// The metric values of the matched base finding. `None` when no base
+    /// finding matches.
+    pub base: Option<fallow_output::AuditBaseMetrics>,
 }
 
 impl ComplexityClass {
@@ -164,6 +178,7 @@ impl ComplexityClass {
                 introduced: true,
                 worsened_metrics: Vec::new(),
                 exceeded_metric_grew: false,
+                base: None,
             },
             |base| {
                 let exceeded_metric_grew = exceeded_metric_increased(head, base);
@@ -172,6 +187,7 @@ impl ComplexityClass {
                         || (exceeded_metric_grew && severity_tier_rose(head, base)),
                     worsened_metrics: grown_metrics(head, base),
                     exceeded_metric_grew,
+                    base: Some(base.base_metrics()),
                 }
             },
         )
@@ -550,6 +566,7 @@ pub fn classify_complexity_attribution_against_all<'a>(
             inherited.cloned().unwrap_or_else(|| ComplexityClass {
                 introduced: true,
                 exceeded_metric_grew: false,
+                base: None,
                 worsened_metrics: classes
                     .map(|class| &class.worsened_metrics)
                     .find(|metrics| !metrics.is_empty())

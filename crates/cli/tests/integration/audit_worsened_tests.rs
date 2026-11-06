@@ -696,3 +696,49 @@ fn review_comments_under_gate_all_keep_the_plain_label() {
     let old = review_comment_body(&review, "old");
     assert!(old.starts_with("**error** `"), "{old}");
 }
+
+/// The `review-github` output of an audit of `dir` against `main`.
+fn live_review(dir: &Path) -> serde_json::Value {
+    parse_json(&run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "review-github",
+        "--quiet",
+        "--no-cache",
+        "--no-css",
+        "--skip",
+        "dupes",
+    ]))
+}
+
+/// Issue #4196: the inline comment of an inherited finding names each
+/// exceeded metric with the base value and the head value. The comment body
+/// escapes Markdown characters.
+#[test]
+fn inherited_review_comment_names_the_base_values() {
+    let base = hotspot("old", 20, 2);
+    let tmp = fixture(&base, &format!("{}{base}", simple("a")), CONFIG);
+    let review = live_review(tmp.path());
+    let old = review_comment_body(&review, "old");
+    assert!(
+        old.contains(r"\(inherited from the base: cyclomatic 21 -\> 21, cognitive 20 -\> 20\)"),
+        "{old}"
+    );
+}
+
+/// Issue #4196: when the head value is lower than the base value, the
+/// inherited comment shows the lower head value.
+#[test]
+fn inherited_review_comment_shows_a_lower_head_value() {
+    let tmp = fixture(&hotspot("old", 22, 10), &hotspot("old", 18, 4), CONFIG);
+    let review = live_review(tmp.path());
+    let old = review_comment_body(&review, "old");
+    assert!(
+        old.contains(r"\(inherited from the base: cyclomatic 23 -\> 19, cognitive 22 -\> 18\)"),
+        "{old}"
+    );
+}
