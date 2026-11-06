@@ -8,7 +8,7 @@ use fallow_engine::guard::{GuardError, build_guard_report};
 use fallow_types::guard::{GuardFileReport, GuardPolicyRule, GuardReport};
 use serde_json::{Value, json};
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::report::sink::outln;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
@@ -44,9 +44,8 @@ pub fn run_guard(opts: &GuardOptions<'_>) -> ExitCode {
     let report = match build_guard_report(&config, opts.files) {
         Ok(report) => report,
         Err(GuardError::OutsideRoot(path)) => {
-            return emit_error(
+            return emit_input_error(
                 &format!("guard target is outside project root: {path}"),
-                2,
                 opts.output,
             );
         }
@@ -66,7 +65,7 @@ fn emit_guard_report(
             emit_human(report);
             ExitCode::SUCCESS
         }
-        _ => emit_error("guard supports --format json or human", 2, output),
+        _ => emit_input_error("guard supports --format json or human", output),
     }
 }
 
@@ -76,9 +75,8 @@ fn emit_json(report: &GuardReport, json_style: crate::json_style::JsonStyle) -> 
             outln!("{json}");
             ExitCode::SUCCESS
         }
-        Err(err) => crate::error::emit_error_with_style(
+        Err(err) => crate::error::emit_input_error_with_style(
             &format!("failed to serialize guard output: {err}"),
-            2,
             OutputFormat::Json,
             json_style,
         ),

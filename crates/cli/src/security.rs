@@ -43,7 +43,7 @@ use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::health::HealthOptions;
 use crate::load_config_for_analysis;
 use fallow_output::{
@@ -162,7 +162,7 @@ pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
     }
     let output = match build_survivors_output(opts, started) {
         Ok(output) => output,
-        Err(message) => return emit_error(&message, 2, opts.output),
+        Err(message) => return emit_input_error(&message, opts.output),
     };
     // Note find-state for telemetry before any exit (issue #1650): the survivors
     // subcommand emits a `security` workflow event, and without this the
@@ -173,13 +173,12 @@ pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
         output.summary.survivors + output.summary.needs_human_review,
     );
     if opts.require_verdict_for_each_candidate && output.summary.unverdicted > 0 {
-        return emit_error(
+        return emit_input_error(
             &format!(
                 "Verifier verdict file is missing verdicts for {} candidate{}.",
                 output.summary.unverdicted,
                 crate::report::plural(output.summary.unverdicted)
             ),
-            2,
             opts.output,
         );
     }
@@ -331,7 +330,7 @@ pub fn create_security_survivors_benchmark_corpus(
     };
     let (output, _) = build_security_command_output(&opts, Instant::now())?;
     write_security_survivors_benchmark_corpus(&output)
-        .map_err(|message| emit_error(&message, 2, OutputFormat::Json))
+        .map_err(|message| emit_input_error(&message, OutputFormat::Json))
 }
 
 fn write_security_survivors_benchmark_corpus(
@@ -595,9 +594,8 @@ fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
     ) {
         Ok(())
     } else {
-        Err(emit_error(
+        Err(emit_input_error(
             "fallow security supports --format human, json, sarif, github-annotations, or github-summary only.",
-            2,
             output,
         ))
     }
@@ -610,9 +608,8 @@ fn validate_derived_security_output(
     if matches!(output, OutputFormat::Human | OutputFormat::Json) {
         Ok(())
     } else {
-        Err(emit_error(
+        Err(emit_input_error(
             &format!("fallow security {subcommand} supports --format human or json only."),
-            2,
             output,
         ))
     }
@@ -883,7 +880,7 @@ fn maybe_write_security_sarif(
         Err(failure) => {
             let message = failure.message(path);
             crate::requests::record_sarif_file_failure(path, failure.reason(), message.clone());
-            Err(emit_error(&message, 2, opts.output))
+            Err(emit_input_error(&message, opts.output))
         }
     }
 }
@@ -910,7 +907,7 @@ fn render_security_output(
 }
 
 fn emit_json_error(message: &str, json_style: crate::json_style::JsonStyle) -> ExitCode {
-    crate::error::emit_error_with_style(message, 2, OutputFormat::Json, json_style)
+    crate::error::emit_input_error_with_style(message, OutputFormat::Json, json_style)
 }
 
 /// Render security candidates in a GitHub-native format from the same JSON
@@ -1127,21 +1124,19 @@ fn apply_security_gate(
                 Ok(text) => owned_gate_diff
                     .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
                 Err(err) => {
-                    return Err(emit_error(
+                    return Err(emit_input_error(
                         &format!(
                             "fallow security --gate could not compute the diff for '{git_ref}': {}",
                             err.describe()
                         ),
-                        2,
                         opts.output,
                     ));
                 }
             }
         } else {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 "fallow security --gate requires a diff source: --changed-since <ref>, \
                      --diff-file <path>, or --diff-stdin.",
-                2,
                 opts.output,
             ));
         };
@@ -1177,19 +1172,17 @@ fn retain_gate_newly_reachable(
     results: &mut AnalysisResults,
 ) -> Result<(), ExitCode> {
     let Some(base_ref) = opts.changed_since else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "fallow security --gate newly-reachable requires --changed-since <ref>; \
              --diff-file and --diff-stdin do not identify a base tree.",
-            2,
             opts.output,
         ));
     };
     let Some(base_sha) = git_rev_parse(opts.root, base_ref) else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!(
                 "fallow security --gate newly-reachable could not resolve base ref '{base_ref}'."
             ),
-            2,
             opts.output,
         ));
     };
@@ -1220,9 +1213,8 @@ fn compute_base_security_snapshot(
         Some(base_sha),
         &config.workspace_patterns,
     ) else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!("could not create a temporary worktree for base ref '{base_ref}'"),
-            2,
             opts.output,
         ));
     };
@@ -1373,9 +1365,8 @@ fn security_base_snapshot_cache_key(
         "changed_workspaces": opts.changed_workspaces,
     });
     let bytes = serde_json::to_vec(&payload).map_err(|err| {
-        emit_error(
+        emit_input_error(
             &format!("failed to build security gate cache key: {err}"),
-            2,
             opts.output,
         )
     })?;
@@ -1478,7 +1469,7 @@ fn analyze_security_candidates(
     config: &fallow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-        .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output))?;
+        .map_err(|err| emit_input_error(&format!("Analysis error: {err}"), opts.output))?;
     let changed_since_files = if opts.changed_since.is_some() {
         session.files().to_vec()
     } else {
@@ -1496,7 +1487,7 @@ fn analyze_security_candidates(
                 analysis_output: None,
                 changed_since_files,
             })
-            .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
+            .map_err(|err| emit_input_error(&format!("Analysis error: {err}"), opts.output));
     }
 
     session
@@ -1514,7 +1505,7 @@ fn analyze_security_candidates(
                 changed_since_files,
             }
         })
-        .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output))
+        .map_err(|err| emit_input_error(&format!("Analysis error: {err}"), opts.output))
 }
 
 fn security_runtime_report(

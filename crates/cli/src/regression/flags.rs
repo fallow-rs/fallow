@@ -14,7 +14,7 @@ use fallow_types::flag_retirement::{
 use super::baseline::{RegressionOpts, load_regression_baseline};
 use super::counts::FlagsCounts;
 use super::tolerance::Tolerance;
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 /// Metric name of the distinct flag count.
 pub const DISTINCT_FLAGS_METRIC: &str = "distinct_flags";
@@ -72,23 +72,21 @@ pub fn compare_flags_regression(
         }));
     }
     let Some(path) = opts.regression_baseline_file else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "fallow flags --fail-on-regression needs --regression-baseline <PATH>.\n\
              Create the file with: fallow flags --retirement --save-regression-baseline <PATH>",
-            2,
             opts.output,
         ));
     };
     let baseline = load_regression_baseline(path, opts.output)?;
     let Some(stored) = baseline.flags else {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!(
                 "regression baseline '{}' has no flags data.\n\
                  Create it with: fallow flags --retirement --save-regression-baseline {}",
                 path.display(),
                 path.display()
             ),
-            2,
             opts.output,
         ));
     };

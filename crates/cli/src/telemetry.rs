@@ -1222,14 +1222,13 @@ fn print_status_human(status: TelemetryStatus) -> ExitCode {
 
 fn set_enabled(enabled: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode {
     if admin_disabled() && enabled {
-        return crate::error::emit_error(
+        return crate::error::emit_input_error(
             "telemetry is disabled by DO_NOT_TRACK or FALLOW_TELEMETRY_DISABLED",
-            2,
             output,
         );
     }
     let Some(path) = config_path() else {
-        return crate::error::emit_error("could not determine user config directory", 2, output);
+        return crate::error::emit_input_error("could not determine user config directory", output);
     };
     let mut config = read_config_from(&path).unwrap_or_default();
     config.enabled = enabled;
@@ -1245,9 +1244,8 @@ fn set_enabled(enabled: bool, output: OutputFormat, json_style: JsonStyle) -> Ex
         config.install_id = None;
     }
     if let Err(err) = write_config_to(&path, &config) {
-        return crate::error::emit_error(
+        return crate::error::emit_input_error(
             &format!("failed to write telemetry config: {err}"),
-            2,
             output,
         );
     }

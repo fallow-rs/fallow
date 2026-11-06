@@ -11,7 +11,8 @@ use serde_json::{Map, Value};
 
 use super::cloud_transport::{self, CloudAuth, CloudBody, CloudHttpFailure, CloudOutcome};
 use super::upload_common::url_encode_path_segment;
-use crate::api::{NETWORK_EXIT_CODE, api_url};
+use crate::api::api_url;
+use crate::exit_codes::{ErrorExitCode, INVALID_INPUT, NETWORK_FAILURE, RESOURCE_UNAVAILABLE};
 
 const RUNTIME_CONTEXT_FORMAT: &str = "fallow-cloud-runtime-v1";
 const RUNTIME_CONTEXT_OPERATION: &str = "runtime-context";
@@ -55,11 +56,11 @@ pub enum CloudError {
 }
 
 impl CloudError {
-    pub const fn exit_code(&self) -> u8 {
+    pub const fn exit_code(&self) -> ErrorExitCode {
         match self {
-            Self::Validation(_) => 2,
-            Self::Auth(_) | Self::TierRequired(_) | Self::NotFound(_) => 3,
-            Self::Network(_) | Self::Server(_) => NETWORK_EXIT_CODE,
+            Self::Validation(_) => INVALID_INPUT,
+            Self::Auth(_) | Self::TierRequired(_) | Self::NotFound(_) => RESOURCE_UNAVAILABLE,
+            Self::Network(_) | Self::Server(_) => NETWORK_FAILURE,
         }
     }
 
@@ -527,7 +528,10 @@ mod tests {
 
     #[test]
     fn cloud_error_exit_code_for_validation_is_two() {
-        assert_eq!(CloudError::Validation("any".to_owned()).exit_code(), 2);
+        assert_eq!(
+            CloudError::Validation("any".to_owned()).exit_code().get(),
+            2
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ pub(super) fn load_and_compare_baseline(
     };
 
     let content = std::fs::read_to_string(baseline_path)
-        .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
+        .map_err(|e| emit_input_error(&format!("failed to read baseline: {e}"), io.output))?;
     baseline_notes::warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
     let comparison =
         baseline_notes::compare_with_saved_baseline(&content, io.scope_reasons, io.filters);
@@ -32,11 +32,7 @@ pub(super) fn load_and_compare_baseline(
         !comparison.reasons.is_empty(),
     )
     .map_err(|err| match err {
-        DeadCodeBaselineError::Parse(message) => emit_error(
-            &format!("failed to parse baseline: {message}"),
-            2,
-            io.output,
-        ),
+        DeadCodeBaselineError::Parse(message) => emit_input_error(&format!("failed to parse baseline: {message}"), io.output),
         DeadCodeBaselineError::IncompatibleIdentity(fields) => {
             let type_aware_flag = if matches!(
                 io.analysis_identity.mode,
@@ -46,14 +42,13 @@ pub(super) fn load_and_compare_baseline(
             } else {
                 ""
             };
-            emit_error(
+            emit_input_error(
                 &format!(
                     "baseline analysis identity is incompatible in: {}. Regenerate it with: fallow {}{type_aware_flag} --save-baseline {}",
                     fields.join(", "),
                     io.command,
                     baseline_path.display(),
                 ),
-                2,
                 io.output,
             )
         }

@@ -5,7 +5,7 @@ use fallow_config::{OutputFormat, ProductionAnalysis, ProductionConfig};
 
 use super::Cli;
 use crate::cli_format::bool_from_env;
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 #[derive(Clone, Copy)]
 pub struct ProductionModes {
@@ -37,16 +37,15 @@ fn load_config_production(
         fallow_config::FallowConfig::load_with_options(path, load_options)
             .map(Some)
             .map_err(|e| {
-                emit_error(
+                emit_input_error(
                     &format!("failed to load config '{}': {e}", path.display()),
-                    2,
                     output,
                 )
             })?
     } else {
         fallow_config::FallowConfig::find_and_load_with_options(root, load_options)
             .map(|found| found.map(|(config, _)| config))
-            .map_err(|e| emit_error(&e, 2, output))?
+            .map_err(|e| emit_input_error(&e, output))?
     };
 
     Ok(match loaded {

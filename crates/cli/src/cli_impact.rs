@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use crate::exit_codes::INVALID_INPUT;
 use crate::impact;
 use crate::telemetry;
 
@@ -83,7 +84,7 @@ pub fn dispatch_impact(
             return crate::emit_known_failure(
                 "`fallow impact --all` is a read-only cross-repo view and cannot be combined \
                  with a subcommand",
-                2,
+                INVALID_INPUT,
                 output,
                 telemetry::FailureReason::Validation,
             );
@@ -147,7 +148,7 @@ fn refuse_newer_store(
 ) -> ExitCode {
     crate::emit_known_failure(
         &newer.message(),
-        2,
+        INVALID_INPUT,
         output,
         telemetry::FailureReason::Validation,
     )
@@ -249,7 +250,7 @@ fn render_impact_status(
         | fallow_config::OutputFormat::GithubSummary => {
             return crate::emit_known_failure(
                 "impact supports human, json, and markdown output",
-                2,
+                INVALID_INPUT,
                 output,
                 telemetry::FailureReason::UnsupportedFormat,
             );
@@ -296,7 +297,7 @@ fn render_impact_all(
         | fallow_config::OutputFormat::GithubSummary => {
             return crate::emit_known_failure(
                 "impact --all supports human, json, and markdown output",
-                2,
+                INVALID_INPUT,
                 output,
                 telemetry::FailureReason::UnsupportedFormat,
             );

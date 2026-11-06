@@ -14,7 +14,7 @@ use fallow_output::{
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::exit_codes::exit_invalid_input;
 use crate::report;
 use crate::report::plural;
@@ -1239,9 +1239,8 @@ pub(super) fn build_audit_json_output(result: &AuditResult) -> Result<serde_json
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .map_err(|err| {
-        emit_error(
+        emit_input_error(
             &format!("JSON serialization error: {err}"),
-            2,
             OutputFormat::Json,
         )
     })
@@ -1324,9 +1323,8 @@ fn build_audit_dead_code_json_with_results(
             }
             Ok(json)
         }
-        Err(e) => Err(emit_error(
+        Err(e) => Err(emit_input_error(
             &format!("JSON serialization error: {e}"),
-            2,
             OutputFormat::Json,
         )),
     }
@@ -1367,9 +1365,8 @@ fn build_audit_duplication_json(
             }
             Ok(json)
         }
-        Err(e) => Err(emit_error(
+        Err(e) => Err(emit_input_error(
             &format!("JSON serialization error: {e}"),
-            2,
             OutputFormat::Json,
         )),
     }
@@ -1434,9 +1431,8 @@ fn build_audit_health_json_with_report(
             }
             Ok(json)
         }
-        Err(e) => Err(emit_error(
+        Err(e) => Err(emit_input_error(
             &format!("JSON serialization error: {e}"),
-            2,
             OutputFormat::Json,
         )),
     }

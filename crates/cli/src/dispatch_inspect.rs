@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use crate::cli_args::{CloudCli, Command};
 use crate::coverage::login as cloud_login;
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::runtime_support::{ConfigLoadOptions, load_config_for_analysis};
 use crate::{DispatchContext, inspect, json_style, selector};
 
@@ -84,17 +84,15 @@ fn dispatch_inspect_command(
                 export_name: export_name.to_string(),
             },
             None => {
-                return emit_error(
+                return emit_input_error(
                     "--symbol must be formatted as FILE:EXPORT",
-                    2,
                     dispatch.output,
                 );
             }
         },
         _ => {
-            return emit_error(
+            return emit_input_error(
                 "inspect requires exactly one of --file or --symbol",
-                2,
                 dispatch.output,
             );
         }

@@ -7,7 +7,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::api::try_api_agent;
-use crate::error::emit_error_with_style;
+use crate::error::{emit_error_with_style, emit_input_error_with_style};
+use crate::exit_codes::NETWORK_FAILURE;
 
 use super::{
     ApplyResult, CiProvider, PlannedReconcile, ReconcileOptions, apply_provider_reconcile,
@@ -62,11 +63,11 @@ pub(super) fn post_review(
 ) -> ExitCode {
     let envelope = match read_envelope(input.envelope) {
         Ok(value) => value,
-        Err(e) => return emit_error_with_style(&e, 2, output, json_style),
+        Err(e) => return emit_input_error_with_style(&e, output, json_style),
     };
     let review_id = match validate_envelope_review_scope(&envelope) {
         Ok(review_id) => review_id,
-        Err(error) => return emit_error_with_style(&error, 2, output, json_style),
+        Err(error) => return emit_input_error_with_style(&error, output, json_style),
     };
     let opts = ReconcileOptions {
         repo: input.repo,
@@ -78,7 +79,7 @@ pub(super) fn post_review(
     let provider_state = match load_provider_state(input.provider, input.target, opts) {
         Ok(state) => state,
         Err(e) => {
-            return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
+            return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
         }
     };
     let current = envelope_fingerprints(&envelope);

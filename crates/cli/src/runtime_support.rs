@@ -200,23 +200,22 @@ pub fn build_ownership_resolver_for_mode(
     match mode {
         GroupByMode::Owner => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
             Ok(co) => Ok(Some(crate::report::OwnershipResolver::Owner(co))),
-            Err(e) => Err(crate::error::emit_error(&e, 2, output)),
+            Err(e) => Err(crate::error::emit_input_error(&e, output)),
         },
         GroupByMode::Section => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
             Ok(co) => {
                 if co.has_sections() {
                     Ok(Some(crate::report::OwnershipResolver::Section(co)))
                 } else {
-                    Err(crate::error::emit_error(
+                    Err(crate::error::emit_input_error(
                         "--group-by section requires a GitLab-style CODEOWNERS file \
                          with `[Section]` headers. This CODEOWNERS has no sections; \
                          use --group-by owner instead.",
-                        2,
                         output,
                     ))
                 }
             }
-            Err(e) => Err(crate::error::emit_error(&e, 2, output)),
+            Err(e) => Err(crate::error::emit_input_error(&e, output)),
         },
         GroupByMode::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
         GroupByMode::Package => {
@@ -225,12 +224,11 @@ pub fn build_ownership_resolver_for_mode(
                 workspace_patterns,
             );
             if workspaces.is_empty() {
-                Err(crate::error::emit_error(
+                Err(crate::error::emit_input_error(
                     "--group-by package requires a monorepo with workspace packages \
                      (package.json workspaces, pnpm-workspace.yaml, tsconfig references, \
                      or \"workspaces.patterns\" in the fallow config). \
                      For single-package projects try --group-by directory instead.",
-                    2,
                     output,
                 ))
             } else {
@@ -395,7 +393,7 @@ fn load_user_config(
             }
             Err(e) => {
                 let msg = format!("failed to load config '{}': {e}", path.display());
-                Err(crate::error::emit_error(&msg, 2, options.output))
+                Err(crate::error::emit_input_error(&msg, options.output))
             }
         };
     }
@@ -405,7 +403,7 @@ fn load_user_config(
             Ok(Some(config))
         }
         Ok(None) => Ok(None),
-        Err(e) => Err(crate::error::emit_error(&e, 2, options.output)),
+        Err(e) => Err(crate::error::emit_input_error(&e, options.output)),
     }
 }
 
@@ -420,7 +418,7 @@ fn emit_joined_config_errors<E: ToString>(
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n  - ");
-    crate::error::emit_error(&format!("{label}:\n  - {joined}"), 2, output)
+    crate::error::emit_input_error(&format!("{label}:\n  - {joined}"), output)
 }
 
 /// Validate external plugins, resolved boundaries, and rule packs. A rule pack
@@ -495,7 +493,10 @@ fn report_workspace_diagnostics(
             }
             Ok(())
         }
-        Err(err) => Err(crate::error::emit_error(err.message(), 2, options.output)),
+        Err(err) => Err(crate::error::emit_input_error(
+            err.message(),
+            options.output,
+        )),
     }
 }
 

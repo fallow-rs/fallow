@@ -137,7 +137,7 @@ use cli_telemetry::TelemetryRun;
 #[cfg(test)]
 use cli_telemetry::{fallback_failure_reason_for, telemetry_workflow_for_command};
 use cli_telemetry::{record_run_epilogue, start_telemetry_run};
-use error::emit_error;
+use error::{emit_error, emit_input_error};
 pub(crate) use runtime_support::{AnalysisKind, GroupBy};
 pub(crate) use runtime_support::{
     ConfigLoadOptions, build_ownership_resolver, load_config_for_analysis,
@@ -146,6 +146,8 @@ pub(crate) use runtime_support::{
 use security_help::{SECURITY_UNSUPPORTED_GLOBAL_LONGS, SecurityHelpTarget};
 use security_help::{render_security_help, security_help_target};
 use similar_code_help::{render_similar_code_help, similar_code_help_target};
+
+use crate::exit_codes::ErrorExitCode;
 
 const DEFAULT_MIN_INVOCATIONS_HOT: u64 = 100;
 
@@ -178,7 +180,7 @@ fn resolve_audit_baseline_path(
 
 fn emit_known_failure(
     message: &str,
-    exit_code: u8,
+    exit_code: ErrorExitCode,
     output: fallow_config::OutputFormat,
     reason: telemetry::FailureReason,
 ) -> ExitCode {
@@ -188,7 +190,7 @@ fn emit_known_failure(
 
 fn emit_known_failure_with_style(
     message: &str,
-    exit_code: u8,
+    exit_code: ErrorExitCode,
     output: fallow_config::OutputFormat,
     json_style: json_style::JsonStyle,
     reason: telemetry::FailureReason,
@@ -400,17 +402,15 @@ fn redirect_report_to_file(
             colored::control::set_override(false);
             Ok(())
         }
-        Err(e) if e.is_directory() => Err(emit_error(
+        Err(e) if e.is_directory() => Err(emit_input_error(
             &format!(
                 "failed to create the directory of {} for --output-file: {e}",
                 path.display()
             ),
-            2,
             output,
         )),
-        Err(e) => Err(emit_error(
+        Err(e) => Err(emit_input_error(
             &format!("failed to open {} for --output-file: {e}", path.display()),
-            2,
             output,
         )),
     }
@@ -424,9 +424,8 @@ fn finalize_report_file(
     output: fallow_config::OutputFormat,
 ) -> Result<(), ExitCode> {
     if let Err(e) = report::sink::flush() {
-        return Err(emit_error(
+        return Err(emit_input_error(
             &format!("failed to write {}: {e}", path.display()),
-            2,
             output,
         ));
     }
@@ -465,7 +464,7 @@ fn run_command() -> ExitCode {
         Err(code) => return code,
     };
     if let Some(message) = cli_format::json_presentation_error(&cli, &fmt) {
-        return error::emit_error_with_style(message, 2, fmt.output, fmt.json_style);
+        return error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
     }
 
     if let Some(code) = reject_global_baseline_flags(&cli, &fmt) {
@@ -877,13 +876,12 @@ fn dispatch_and_finalize(
     }
 
     let exit_code = if command.is_some() && cli_has_bare_coverage_input(cli) {
-        emit_error(bare_coverage_subcommand_error_message(), 2, output)
+        emit_input_error(bare_coverage_subcommand_error_message(), output)
     } else if command.is_some()
         && let Some(flag) = cli_bare_combined_baseline_flag(cli)
     {
-        emit_error(
+        emit_input_error(
             &bare_combined_baseline_subcommand_error_message(flag),
-            2,
             output,
         )
     } else {
@@ -933,9 +931,8 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
         } else {
             format!("{flag} is not valid with `fallow doctor`.")
         };
-        return Some(crate::error::emit_error_with_style(
+        return Some(crate::error::emit_input_error_with_style(
             &message,
-            2,
             format.output,
             format.json_style,
         ));
@@ -1058,9 +1055,8 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
     let (run_check, run_dupes, run_health) = combined::resolve_analyses(&cli.only, &cli.skip);
     if !(run_check || run_dupes || run_health) {
-        return emit_error(
+        return emit_input_error(
             "--skip leaves no analysis to run: pass at most two of dead-code, dupes and health",
-            2,
             dispatch.output,
         );
     }
@@ -1119,9 +1115,8 @@ fn run_bare_combined(
     let cli = dispatch.cli;
     let output = dispatch.output;
     if cli.fail_on_parse_error && !analyses.run_check && !analyses.run_health {
-        return error::emit_error_with_style(
+        return error::emit_input_error_with_style(
             "--fail-on-parse-error needs the dead-code or health analysis, and this run analyzes neither. Include dead-code or health in --only or --skip, or remove the flag.",
-            2,
             output,
             dispatch.json_style,
         );
@@ -1914,7 +1909,7 @@ mod tests {
 
     #[test]
     fn emit_error_returns_given_exit_code() {
-        let code = emit_error("test error", 2, fallow_config::OutputFormat::Human);
+        let code = emit_input_error("test error", fallow_config::OutputFormat::Human);
         assert_eq!(code, exit_codes::exit_invalid_input());
     }
 

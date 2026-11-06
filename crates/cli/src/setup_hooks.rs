@@ -238,9 +238,8 @@ pub fn run_hooks_status(
                 crate::report::sink::outln!("{json}");
                 ExitCode::SUCCESS
             }
-            Err(error) => crate::error::emit_error_with_style(
+            Err(error) => crate::error::emit_input_error_with_style(
                 &format!("failed to serialize hooks status output: {error}"),
-                2,
                 output,
                 json_style,
             ),
@@ -252,7 +251,7 @@ pub fn run_hooks_status(
             println!("Codex block: {}", describe_status(&report.codex));
             ExitCode::SUCCESS
         }
-        _ => crate::error::emit_error("hooks status supports human and json output", 2, output),
+        _ => crate::error::emit_input_error("hooks status supports human and json output", output),
     }
 }
 

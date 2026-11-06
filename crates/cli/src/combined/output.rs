@@ -1,3 +1,4 @@
+use crate::exit_codes::INVALID_INPUT;
 use crate::report::sink::outln;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -15,7 +16,7 @@ use fallow_output::{
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::health::HealthResult;
 use crate::regression;
 use crate::report;
@@ -338,7 +339,7 @@ fn combined_status_note(
     .map_err(|error| {
         crate::emit_known_failure(
             &error,
-            2,
+            INVALID_INPUT,
             output,
             crate::telemetry::FailureReason::Validation,
         )
@@ -1322,9 +1323,8 @@ fn emit_combined_json_output(
             outln!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => emit_error(
+        Err(e) => emit_input_error(
             &format!("JSON serialization error: {e}"),
-            2,
             OutputFormat::Json,
         ),
     }
@@ -1503,9 +1503,8 @@ fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJson
 }
 
 fn json_output_error(error: &serde_json::Error) -> ExitCode {
-    emit_error(
+    emit_input_error(
         &format!("JSON serialization error: {error}"),
-        2,
         OutputFormat::Json,
     )
 }
@@ -1567,9 +1566,8 @@ fn print_combined_sarif(
             outln!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => emit_error(
+        Err(e) => emit_input_error(
             &format!("SARIF serialization error: {e}"),
-            2,
             OutputFormat::Sarif,
         ),
     }
@@ -1587,9 +1585,8 @@ fn print_combined_codeclimate(
             outln!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => emit_error(
+        Err(e) => emit_input_error(
             &format!("CodeClimate serialization error: {e}"),
-            2,
             OutputFormat::CodeClimate,
         ),
     }

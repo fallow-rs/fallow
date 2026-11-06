@@ -71,7 +71,7 @@ pub fn print_envelope_codeclimate_with_config(
         Err(error) => {
             return crate::emit_known_failure(
                 &error,
-                2,
+                crate::exit_codes::INVALID_INPUT,
                 OutputFormat::CodeClimate,
                 crate::telemetry::FailureReason::Validation,
             );

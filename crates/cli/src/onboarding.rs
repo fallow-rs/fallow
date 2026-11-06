@@ -635,9 +635,8 @@ pub fn run_recommend(
             println!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => crate::error::emit_error_with_style(
+        Err(e) => crate::error::emit_input_error_with_style(
             &format!("failed to serialize recommendation: {e}"),
-            2,
             output,
             json_style,
         ),

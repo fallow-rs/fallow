@@ -16,7 +16,7 @@ use fallow_types::trace_chain::{
     StarExportAmbiguity, SymbolChainQuery, SymbolChainTrace, TraceDirections,
 };
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::report;
 use crate::report::sink::outln;
 use crate::{ConfigLoadOptions, load_config_for_analysis};
@@ -44,9 +44,8 @@ pub struct TraceChainOptions<'a> {
 /// Run the symbol-level call-chain trace and emit its own output surface.
 pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
     let Some((file, symbol)) = parse_target(&opts.target) else {
-        return emit_error(
+        return emit_input_error(
             "trace requires a FILE:SYMBOL target (e.g., src/utils.ts:formatDate)",
-            2,
             opts.output,
         );
     };
@@ -84,7 +83,7 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
 
     let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
     let trace = match fallow_engine::trace_chain::trace_symbol_chain_with_session(
         &session,
@@ -97,13 +96,12 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
     ) {
         Ok(Some(trace)) => trace,
         Ok(None) => {
-            return emit_error(
+            return emit_input_error(
                 &format!("file '{file}' not found in module graph"),
-                2,
                 opts.output,
             );
         }
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
 
     emit_trace(trace, opts)
@@ -125,9 +123,8 @@ fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode
             ) {
                 Ok(value) => value,
                 Err(err) => {
-                    return emit_error(
+                    return emit_input_error(
                         &format!("failed to serialize trace output: {err}"),
-                        2,
                         opts.output,
                     );
                 }
@@ -138,7 +135,7 @@ fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode
             print_human(&trace, opts.quiet);
             ExitCode::SUCCESS
         }
-        _ => emit_error("trace supports --format json or human", 2, opts.output),
+        _ => emit_input_error("trace supports --format json or human", opts.output),
     }
 }
 

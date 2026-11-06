@@ -721,9 +721,8 @@ pub fn build_brief_json(
     let subtract = build_brief_subtract_sections(result)?;
     let mut output = fallow_output::build_review_brief_json_output(brief, audit_header, subtract)
         .map_err(|err| {
-        crate::error::emit_error(
+        crate::error::emit_input_error(
             &format!("JSON serialization error: {err}"),
-            2,
             fallow_config::OutputFormat::Json,
         )
     })?;

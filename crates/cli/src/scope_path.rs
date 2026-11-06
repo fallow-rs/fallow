@@ -151,7 +151,7 @@ pub fn resolve_command_scope(
     match resolve_scope_path(root, &raw) {
         Ok(scope) if scope.covers_everything(root) => Ok(None),
         Ok(scope) => Ok(Some(scope)),
-        Err(message) => Err(crate::error::emit_error(&message, 2, output)),
+        Err(message) => Err(crate::error::emit_input_error(&message, output)),
     }
 }
 

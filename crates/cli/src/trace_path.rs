@@ -13,7 +13,8 @@ use std::process::ExitCode;
 use fallow_config::{OutputFormat, ProductionAnalysis};
 use fallow_engine::trace::{ImportPathEndpoint, ImportPathTrace};
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
+use crate::exit_codes::INVALID_INPUT;
 use crate::report;
 use crate::report::sink::outln;
 use crate::{ConfigLoadOptions, load_config_for_analysis};
@@ -57,7 +58,7 @@ pub fn run_trace_path(opts: &TracePathOptions<'_>) -> ExitCode {
 
     let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
 
     let trace = match fallow_engine::trace::trace_import_path_with_session(
@@ -85,11 +86,11 @@ pub fn run_trace_path(opts: &TracePathOptions<'_>) -> ExitCode {
                 &format!("--path {label} module '{value}' {problem}"),
                 "pass a path relative to the project root; `fallow list --files` prints every \
                      file the run discovered",
-                2,
+                INVALID_INPUT,
                 opts.output,
             );
         }
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
 
     emit_trace_path(trace, opts)
@@ -104,9 +105,8 @@ fn emit_trace_path(trace: ImportPathTrace, opts: &TracePathOptions<'_>) -> ExitC
             ) {
                 Ok(value) => value,
                 Err(err) => {
-                    return emit_error(
+                    return emit_input_error(
                         &format!("failed to serialize trace output: {err}"),
-                        2,
                         opts.output,
                     );
                 }
@@ -120,7 +120,7 @@ fn emit_trace_path(trace: ImportPathTrace, opts: &TracePathOptions<'_>) -> ExitC
         _ => crate::error::emit_error_with_hint(
             "trace --path supports --format json or human",
             "re-run with `--format json` for a machine-readable answer, or drop `--format`",
-            2,
+            INVALID_INPUT,
             opts.output,
         ),
     }

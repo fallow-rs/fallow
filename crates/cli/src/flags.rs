@@ -20,7 +20,7 @@ use fallow_types::flag_retirement::{
 };
 use fallow_types::results::{FeatureFlag, FlagKind};
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::exit_codes::exit_gate_failed;
 use crate::regression::{
     FlagsCounts, RegressionOpts, SaveRegressionTarget, compare_flags_regression,
@@ -172,7 +172,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     };
     let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return analysis_error(&err, opts.output),
     };
     let scan = if opts.retirement.is_some() {
         fallow_engine::flags::analyze_feature_flags_for_retirement(&session)
@@ -182,10 +182,10 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     };
     let (analysis, retirement_facts) = match scan {
         Ok(scan) => scan,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+        Err(err) => return analysis_error(&err, opts.output),
     };
     if analysis.files_scanned == 0 {
-        return emit_error("no files discovered", 2, opts.output);
+        return emit_input_error("no files discovered", opts.output);
     }
 
     let scope = match resolve_flag_scope(opts, &session.config().workspace_patterns) {
@@ -271,6 +271,10 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     }
 }
 
+fn analysis_error(err: &dyn std::fmt::Display, output: OutputFormat) -> ExitCode {
+    emit_input_error(&format!("Analysis error: {err}"), output)
+}
+
 /// Compare the report with the regression baseline, and save a new
 /// baseline when asked.
 fn run_regression_gate(
@@ -292,10 +296,9 @@ fn run_regression_gate(
     report.regression = compare_flags_regression(&regression, &counts, &reasons)?;
     match regression.save_target {
         SaveRegressionTarget::None => Ok(()),
-        SaveRegressionTarget::Config => Err(emit_error(
+        SaveRegressionTarget::Config => Err(emit_input_error(
             "fallow flags --save-regression-baseline needs a PATH: \
              the config file holds no flags baseline",
-            2,
             opts.output,
         )),
         SaveRegressionTarget::File(_) if regression.scoped => {
@@ -614,9 +617,8 @@ fn validate_retirement_args(opts: &FlagsOptions<'_>) -> Result<(), ExitCode> {
             None
         };
         if let Some(option) = option {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("{option} needs a flag age: use --flag-age blame or pickaxe"),
-                2,
                 opts.output,
             ));
         }
@@ -635,9 +637,8 @@ fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
             | OutputFormat::GithubAnnotations
             | OutputFormat::GithubSummary
     ) {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "flags supports human, json, compact, sarif, markdown, and codeclimate output",
-            2,
             output,
         ));
     }

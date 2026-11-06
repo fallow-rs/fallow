@@ -274,9 +274,8 @@ pub fn run_agent_status(
                 crate::report::sink::outln!("{json}");
                 ExitCode::SUCCESS
             }
-            Err(error) => crate::error::emit_error_with_style(
+            Err(error) => crate::error::emit_input_error_with_style(
                 &format!("failed to serialize agent status: {error}"),
-                2,
                 output,
                 json_style,
             ),
@@ -285,7 +284,7 @@ pub fn run_agent_status(
             print!("{}", render_human(&report));
             ExitCode::SUCCESS
         }
-        _ => crate::error::emit_error("agent status supports human and json output", 2, output),
+        _ => crate::error::emit_input_error("agent status supports human and json output", output),
     }
 }
 

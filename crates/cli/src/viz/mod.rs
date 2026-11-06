@@ -32,7 +32,7 @@ use fallow_types::semantic::SemanticAnalysisIdentity;
 mod payload;
 
 use crate::dispatch::resolve_coverage_inputs;
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
 // ── Embedded viz assets ─────────────────────────────────────────
@@ -112,9 +112,8 @@ pub fn benchmark_viz_html(root: &Path, threads: usize) -> Result<(usize, usize, 
     let file_count = data.files.len();
     let edge_count = data.edges.len();
     let html = render_html(&data).map_err(|message| {
-        emit_error(
+        emit_input_error(
             &format!("Failed to serialize viz data: {message}"),
-            2,
             OutputFormat::Human,
         )
     })?;
@@ -152,9 +151,8 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
     let session = match AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
         Err(e) => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("Analysis error: {e}"),
-                2,
                 OutputFormat::Human,
             ));
         }
@@ -170,16 +168,15 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
     ) {
         Ok(artifacts) => artifacts,
         Err(e) => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 &format!("Analysis error: {e}"),
-                2,
                 OutputFormat::Human,
             ));
         }
     };
 
     let Some(graph) = artifacts.dead_code.graph.as_ref() else {
-        return Err(emit_error("Graph not available", 2, OutputFormat::Human));
+        return Err(emit_input_error("Graph not available", OutputFormat::Human));
     };
 
     let feature_flags = if opts.format == VizFormat::Html {
@@ -312,7 +309,7 @@ fn write_text_format(opts: &VizOptions<'_>, content: &str) -> ExitCode {
         return ExitCode::SUCCESS;
     };
     if let Err(message) = write_output(path, content) {
-        return emit_error(&message, 2, OutputFormat::Human);
+        return emit_input_error(&message, OutputFormat::Human);
     }
     if !opts.quiet {
         eprintln!("  → {}", path.display());
@@ -366,9 +363,8 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
     let html = match render_html(data) {
         Ok(html) => html,
         Err(e) => {
-            return emit_error(
+            return emit_input_error(
                 &format!("Failed to serialize viz data: {e}"),
-                2,
                 OutputFormat::Human,
             );
         }
@@ -379,7 +375,7 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
         .map_or_else(|| opts.root.join("fallow-viz.html"), Path::to_path_buf);
 
     if let Err(message) = write_output(&output_path, &html) {
-        return emit_error(&message, 2, OutputFormat::Human);
+        return emit_input_error(&message, OutputFormat::Human);
     }
 
     if !opts.quiet {

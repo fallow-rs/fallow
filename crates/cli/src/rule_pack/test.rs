@@ -50,7 +50,7 @@ fn analyze_rule_pack(
 ) -> Result<(Vec<RuleSummary>, Vec<PolicyViolationFinding>), ExitCode> {
     let analysis = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .and_then(|session| session.analyze_dead_code())
-        .map_err(|error| crate::error::emit_error(error.message(), 2, output))?;
+        .map_err(|error| crate::error::emit_input_error(error.message(), output))?;
     let mut findings = analysis.results.policy_violations;
     for finding in &mut findings {
         if let Ok(relative) = finding.violation.path.strip_prefix(&config.root) {
@@ -89,9 +89,8 @@ fn load_test_config(
                         .map(ToString::to_string)
                         .collect::<Vec<_>>()
                         .join("\n  - ");
-                    return Err(crate::error::emit_error(
+                    return Err(crate::error::emit_input_error(
                         &format!("invalid rule pack:\n  - {message}"),
-                        2,
                         ctx.output,
                     ));
                 }
@@ -99,9 +98,8 @@ fn load_test_config(
         config.rule_packs = loaded;
         config.rule_pack_sources = vec![std::path::PathBuf::from(pack_path)];
     } else if config.rule_packs.is_empty() {
-        return Err(crate::error::emit_error(
+        return Err(crate::error::emit_input_error(
             "no rule packs configured; pass a pack path or run: fallow rule-pack init",
-            2,
             ctx.output,
         ));
     }
@@ -201,9 +199,8 @@ pub fn benchmark_rule_pack_test_json(
     let (summaries, findings) = analyze_rule_pack(&config, ctx.output)?;
     let output = build_json_output(&config, forced_severity, &summaries, &findings);
     let rendered = ctx.json_style.serialize(&output).map_err(|error| {
-        crate::error::emit_error(
+        crate::error::emit_input_error(
             &format!("failed to serialize rule-pack-test output: {error}"),
-            2,
             ctx.output,
         )
     })?;

@@ -8,12 +8,14 @@ use fallow_types::results::AnalysisResults;
 
 use crate::baseline::BaselineData;
 use crate::baseline_gate::LoadedBaselineStaleness;
-use crate::error::emit_error;
-use crate::exit_codes::{exit_invalid_input, gate_failed_exit_code};
 use crate::load_config_for_analysis;
 use crate::process_clock::{self, ProcessSpan};
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
+use crate::{
+    error::emit_input_error,
+    exit_codes::{exit_invalid_input, gate_failed_exit_code},
+};
 use fallow_output::GateName;
 
 mod baseline_notes;
@@ -750,7 +752,7 @@ fn run_check_analysis(
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-        .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))?;
+        .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))?;
     // Resolve the package map before the analysis, so a map that names no
     // workspace fails fast. The run-wide memo keeps the result for the scope.
     fallow_engine::change_scope::ChangeScope::resolve(
@@ -764,13 +766,13 @@ fn run_check_analysis(
         config,
         session.workspaces(),
     )
-    .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    .map_err(|err| emit_input_error(&format!("Workspace baseline error: {err}"), opts.output))?;
 
     let result = if opts.retain_modules_for_health {
         session
             .analyze_dead_code_with_artifacts(true, true)
             .map(|output| check_data_from_artifacts(output, &session))
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+            .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))
     } else if opts.include_dupes {
         session
             .analyze_dead_code_retaining_files(false, opts.trace_opts.any_active())
@@ -778,7 +780,7 @@ fn run_check_analysis(
                 output.modules = None;
                 check_data_from_artifacts(output, &session)
             })
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+            .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))
     } else if opts.trace_opts.any_active() || config.type_aware.enabled {
         session
             .analyze_dead_code_with_artifacts(false, true)
@@ -787,12 +789,12 @@ fn run_check_analysis(
                 output.files = None;
                 check_data_from_artifacts(output, &session)
             })
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+            .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))
     } else {
         session
             .analyze_dead_code_with_artifacts(false, false)
             .map(|output| check_data_from_plain_artifacts(output, &session))
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+            .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))
     };
     drop_in_background(session);
     result
@@ -885,9 +887,8 @@ pub fn apply_type_aware_overrides_from(
         Ok(value) => Some(parse_type_aware_bool(&value, output)?),
         Err(std::env::VarError::NotPresent) => None,
         Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(emit_error(
+            return Err(emit_input_error(
                 "FALLOW_TYPE_AWARE must be valid UTF-8",
-                2,
                 output,
             ));
         }
@@ -924,9 +925,8 @@ fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, Exit
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),
-        _ => Err(emit_error(
+        _ => Err(emit_input_error(
             "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off",
-            2,
             output,
         )),
     }
@@ -939,9 +939,8 @@ fn parse_type_aware_require(
     match value.trim().to_ascii_lowercase().as_str() {
         "best-effort" => Ok(fallow_config::TypeAwareRequire::BestEffort),
         "complete" => Ok(fallow_config::TypeAwareRequire::Complete),
-        _ => Err(emit_error(
+        _ => Err(emit_input_error(
             "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete",
-            2,
             output,
         )),
     }
@@ -1343,7 +1342,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             &data.workspaces,
         )
     })
-    .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    .map_err(|err| emit_input_error(&format!("Workspace baseline error: {err}"), opts.output))?;
     crate::requests::warn_if_package_baselines_stood_down(&change_scope);
 
     apply_scope_filters(
@@ -1675,9 +1674,8 @@ fn validate_effective_type_aware_output(
                 | fallow_config::OutputFormat::ReviewGitlab
         )
     {
-        return Err(emit_error(
+        return Err(emit_input_error(
             "type-aware analysis supports human, JSON, SARIF, compact, markdown, CodeClimate, PR-comment, and review output; pair presentation formats with the JSON artifact to preserve semantic provenance",
-            2,
             output,
         ));
     }
@@ -2155,9 +2153,8 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
 
     if opts.include_dupes && result.config.duplicates.enabled {
         let Some(files) = result.retained_files.as_deref() else {
-            return emit_error(
+            return emit_input_error(
                 "internal error: --include-dupes analysis did not retain discovered files",
-                2,
                 opts.output,
             );
         };

@@ -49,9 +49,8 @@ pub fn validate_output(output: OutputFormat, json_style: JsonStyle) -> Result<()
     if matches!(output, OutputFormat::Human | OutputFormat::Json) {
         return Ok(());
     }
-    Err(crate::error::emit_error_with_style(
+    Err(crate::error::emit_input_error_with_style(
         "doctor supports human and json output",
-        2,
         output,
         json_style,
     ))
@@ -61,9 +60,8 @@ fn render_json(report: &DoctorOutput, json_style: JsonStyle) -> ExitCode {
     let value = match fallow_output::serialize_doctor_json_output(report.clone()) {
         Ok(value) => value,
         Err(error) => {
-            return crate::error::emit_error_with_style(
+            return crate::error::emit_input_error_with_style(
                 &format!("failed to serialize doctor report: {error}"),
-                2,
                 OutputFormat::Json,
                 json_style,
             );
@@ -72,9 +70,8 @@ fn render_json(report: &DoctorOutput, json_style: JsonStyle) -> ExitCode {
     match json_style.serialize(&value) {
         Ok(json) => outln!("{json}"),
         Err(error) => {
-            return crate::error::emit_error_with_style(
+            return crate::error::emit_input_error_with_style(
                 &format!("failed to serialize doctor report: {error}"),
-                2,
                 OutputFormat::Json,
                 json_style,
             );

@@ -522,9 +522,8 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
         return run_tasks(input, report.as_deref());
     }
     if !matches!(output, OutputFormat::Human | OutputFormat::Json) {
-        return crate::error::emit_error_with_style(
+        return crate::error::emit_input_error_with_style(
             "`fallow mutation` supports only human and json output",
-            INPUT_EXIT_CODE,
             output,
             style,
         );
@@ -944,9 +943,8 @@ fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
         output,
         OutputFormat::Human | OutputFormat::Json | OutputFormat::Markdown
     ) {
-        return crate::error::emit_error_with_style(
+        return crate::error::emit_input_error_with_style(
             "`fallow mutation tasks` supports only human, json and markdown output",
-            INPUT_EXIT_CODE,
             output,
             style,
         );

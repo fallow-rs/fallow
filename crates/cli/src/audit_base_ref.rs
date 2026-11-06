@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use fallow_api::audit_run::{AuditBaseError, AuditBaseOrigin};
 
-use crate::error::emit_error;
+use crate::error::emit_input_error;
 
 use super::AuditOptions;
 
@@ -16,7 +16,10 @@ pub fn resolve_base_ref(
 ) -> Result<fallow_engine::repo_refs::ResolvedAuditBase, ExitCode> {
     match fallow_api::audit_run::resolve_audit_base(opts.root, opts.changed_since) {
         Ok(resolved) => Ok(resolved),
-        Err(error) => Err(emit_error(&base_ref_error_message(&error), 2, opts.output)),
+        Err(error) => Err(emit_input_error(
+            &base_ref_error_message(&error),
+            opts.output,
+        )),
     }
 }
 

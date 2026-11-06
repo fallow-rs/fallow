@@ -271,7 +271,7 @@ pub struct GrowthContext<'a> {
 }
 
 fn usage_error(ctx: &GrowthContext<'_>, message: &str) -> ExitCode {
-    crate::error::emit_error_with_style(message, 2, ctx.output, ctx.json_style)
+    crate::error::emit_input_error_with_style(message, ctx.output, ctx.json_style)
 }
 
 fn judge(

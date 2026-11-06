@@ -6,8 +6,10 @@
 //!
 //! The codes 0, 1 and 2 belong to the shared report contract in
 //! `fallow-report-protocol`. The CLI gets the codes 1 and 2 from
-//! [`exit_gate_failed`] and [`exit_invalid_input`]. A test below rejects a
-//! literal `1` or `2` in `ExitCode::from` or `process::exit`.
+//! [`exit_gate_failed`] and [`exit_invalid_input`]. An error document gets
+//! its code from [`ErrorExitCode`]. A test below rejects a literal `1` or `2`
+//! in `ExitCode::from` or `process::exit`, and a literal in
+//! `ErrorExitCode::passthrough`.
 
 use std::process::ExitCode;
 
@@ -36,6 +38,55 @@ pub const COVERAGE_UPLOAD_VALIDATION_EXIT_CODE: u8 = 10;
 pub const COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE: u8 = 11;
 pub const COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE: u8 = 12;
 pub const COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE: u8 = 13;
+
+/// The exit code of an error document that `crate::error::emit_error` and
+/// its variants write.
+///
+/// The field is private, so a call site cannot give a literal integer. A call
+/// site names one of the `ErrorExitCode` constants of this module, for example
+/// [`INVALID_INPUT`]. For exit code 2, `crate::error::emit_input_error` is the
+/// short form. Only a code that a lower layer already decided goes through
+/// [`ErrorExitCode::passthrough`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ErrorExitCode(u8);
+
+/// Exit code 2: the input was not valid, or the run could not complete.
+pub const INVALID_INPUT: ErrorExitCode = ErrorExitCode(EXIT_INVALID_INPUT);
+/// Exit code 3: a required resource, license or account is not available.
+pub const RESOURCE_UNAVAILABLE: ErrorExitCode = ErrorExitCode(RESOURCE_UNAVAILABLE_EXIT_CODE);
+/// Exit code 4: the runtime coverage sidecar is missing or did not start.
+pub const RUNTIME_COVERAGE_SIDECAR: ErrorExitCode =
+    ErrorExitCode(RUNTIME_COVERAGE_SIDECAR_EXIT_CODE);
+/// Exit code 5: the runtime coverage sidecar rejected its input.
+pub const RUNTIME_COVERAGE_INPUT: ErrorExitCode = ErrorExitCode(RUNTIME_COVERAGE_INPUT_EXIT_CODE);
+/// Exit code 6: the runtime coverage sidecar failed internally.
+pub const RUNTIME_COVERAGE_INTERNAL: ErrorExitCode =
+    ErrorExitCode(RUNTIME_COVERAGE_INTERNAL_EXIT_CODE);
+/// Exit code 7: a network request failed.
+pub const NETWORK_FAILURE: ErrorExitCode = ErrorExitCode(NETWORK_EXIT_CODE);
+
+impl ErrorExitCode {
+    /// Keep an exit code that a lower layer decided, for example the code of
+    /// a `fallow_api::ProgrammaticError`, an engine error or a `clap` error.
+    ///
+    /// Do not give a literal here. The guard test below rejects one.
+    #[must_use]
+    pub const fn passthrough(code: u8) -> Self {
+        Self(code)
+    }
+
+    /// The raw exit code, for the `exit_code` field of the error document.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<ErrorExitCode> for ExitCode {
+    fn from(code: ErrorExitCode) -> Self {
+        Self::from(code.0)
+    }
+}
 
 /// The exit code that one gate verdict gives the process.
 ///
@@ -145,11 +196,49 @@ mod tests {
                 let source = read_source_without_line_comments(source_path)
                     .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
                 needles.iter().any(|needle| source.contains(needle))
+                    || has_literal_passthrough(&source)
             })
             .collect();
         assert!(
             offenders.is_empty(),
-            "use exit_gate_failed(), exit_invalid_input() or the contract constants: {offenders:?}"
+            "use exit_gate_failed(), exit_invalid_input(), an ErrorExitCode constant or the contract constants: {offenders:?}"
         );
+    }
+
+    /// `ErrorExitCode::passthrough` keeps a code from a lower layer. A
+    /// literal there skips the named constants.
+    fn has_literal_passthrough(source: &str) -> bool {
+        let needle = concat!("passthrough", "(");
+        source.match_indices(needle).any(|(index, _)| {
+            source[index + needle.len()..]
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_digit())
+        })
+    }
+
+    #[test]
+    fn the_passthrough_guard_rejects_a_literal_and_accepts_a_variable() {
+        let literal = concat!("ErrorExitCode::passthrough", "(2)");
+        let spaced = concat!("ErrorExitCode::passthrough", "(\n    3,\n)");
+        let variable = concat!("ErrorExitCode::passthrough", "(error.exit_code)");
+        assert!(has_literal_passthrough(literal));
+        assert!(has_literal_passthrough(spaced));
+        assert!(!has_literal_passthrough(variable));
+    }
+
+    #[test]
+    fn the_error_exit_codes_keep_their_values() {
+        let codes = [
+            (INVALID_INPUT, 2),
+            (RESOURCE_UNAVAILABLE, 3),
+            (RUNTIME_COVERAGE_SIDECAR, 4),
+            (RUNTIME_COVERAGE_INPUT, 5),
+            (RUNTIME_COVERAGE_INTERNAL, 6),
+            (NETWORK_FAILURE, 7),
+        ];
+        for (code, expected) in codes {
+            assert_eq!(code.get(), expected);
+            assert_eq!(ExitCode::from(code), ExitCode::from(expected));
+        }
     }
 }

@@ -18,20 +18,18 @@ pub(super) fn dispatch_baselines_command(
     let root = dispatch.root;
     let output = dispatch.output;
     if let Some(flag) = baselines::narrowing_flag(cli) {
-        return emit_error(
+        return emit_input_error(
             &format!(
                 "`fallow baselines prune` runs one analysis over the whole project, in production mode with --production or config, so it does not accept `{flag}`. A narrowed run would remove valid entries."
             ),
-            2,
             output,
         );
     }
     if let Some(flag) = cli_global_baseline_flag(cli) {
-        return emit_error(
+        return emit_input_error(
             &format!(
                 "`fallow baselines prune` does not accept `{flag}`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config."
             ),
-            2,
             output,
         );
     }
@@ -56,9 +54,8 @@ pub(super) fn dispatch_baselines_command(
         [dead_code_baseline, health_baseline, dupes_baseline],
     );
     if targets.dead_code.is_none() && targets.health.is_none() && targets.dupes.is_none() {
-        return emit_error(
+        return emit_input_error(
             "no baseline to prune. Set `audit.deadCodeBaseline`, `audit.healthBaseline` or `audit.dupesBaseline` in the config, or pass --dead-code-baseline, --health-baseline or --dupes-baseline",
-            2,
             output,
         );
     }
