@@ -24,10 +24,13 @@ use fallow_license::{
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
-    LICENSE_API_KEY_RECOVERY, NETWORK_EXIT_CODE, TOKEN_STALE_CODE, api_url, http_status_failure,
-    http_status_message, sanitize_network_error, try_api_agent,
+    LICENSE_API_KEY_RECOVERY, TOKEN_STALE_CODE, api_url, http_status_failure, http_status_message,
+    sanitize_network_error, try_api_agent,
 };
-use crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE as LICENSE_UNAVAILABLE_EXIT_CODE;
+use crate::exit_codes::{
+    ErrorExitCode, INVALID_INPUT, NETWORK_FAILURE, RESOURCE_UNAVAILABLE,
+    RESOURCE_UNAVAILABLE_EXIT_CODE as LICENSE_UNAVAILABLE_EXIT_CODE,
+};
 use crate::json_style::JsonStyle;
 
 /// Ed25519 verification key for fallow license JWT validation.
@@ -165,9 +168,9 @@ pub fn run(
 
 /// Surface a setup / input error: JSON envelope on stdout under `--format json`
 /// (so the extension parses one stream), plain stderr otherwise.
-fn fail(message: &str, exit_code: u8, json: bool, json_style: JsonStyle) -> ExitCode {
+fn fail(message: &str, exit_code: ErrorExitCode, json: bool, json_style: JsonStyle) -> ExitCode {
     if json {
-        emit_error_json(message, exit_code, json_style);
+        emit_error_json(message, exit_code.get(), json_style);
     } else {
         eprintln!("fallow license: {message}");
     }
@@ -202,11 +205,11 @@ fn run_activate(args: &ActivateArgs, json: bool, json_style: JsonStyle) -> ExitC
     }
     let jwt = match read_jwt(args) {
         Ok(jwt) => jwt,
-        Err(msg) => return fail(&msg, 2, json, json_style),
+        Err(msg) => return fail(&msg, INVALID_INPUT, json, json_style),
     };
     let key = match verifying_key() {
         Ok(k) => k,
-        Err(msg) => return fail(&msg, 2, json, json_style),
+        Err(msg) => return fail(&msg, INVALID_INPUT, json, json_style),
     };
     match verify_jwt_with_skew(
         &jwt,
@@ -217,20 +220,20 @@ fn run_activate(args: &ActivateArgs, json: bool, json_style: JsonStyle) -> ExitC
     ) {
         Ok(status) => {
             if let Err(msg) = persist_jwt(&jwt, json) {
-                return fail(&msg, 2, json, json_style);
+                return fail(&msg, INVALID_INPUT, json, json_style);
             }
             emit_status(&status, LicenseKind::Activate, json, json_style);
             ExitCode::SUCCESS
         }
         Err(LicenseError::Truncated { .. }) => fail(
             &format!("{}", LicenseError::Truncated { actual: jwt.len() }),
-            LICENSE_UNAVAILABLE_EXIT_CODE,
+            RESOURCE_UNAVAILABLE,
             json,
             json_style,
         ),
         Err(err) => fail(
             &format!("failed to verify JWT: {err}"),
-            LICENSE_UNAVAILABLE_EXIT_CODE,
+            RESOURCE_UNAVAILABLE,
             json,
             json_style,
         ),
@@ -240,7 +243,7 @@ fn run_activate(args: &ActivateArgs, json: bool, json_style: JsonStyle) -> ExitC
 fn run_status(json: bool, json_style: JsonStyle) -> ExitCode {
     let key = match verifying_key() {
         Ok(k) => k,
-        Err(msg) => return fail(&msg, 2, json, json_style),
+        Err(msg) => return fail(&msg, INVALID_INPUT, json, json_style),
     };
     match fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
         Ok(status) => {
@@ -252,12 +255,7 @@ fn run_status(json: bool, json_style: JsonStyle) -> ExitCode {
                 _ => ExitCode::SUCCESS,
             }
         }
-        Err(err) => fail(
-            &format!("{err}"),
-            LICENSE_UNAVAILABLE_EXIT_CODE,
-            json,
-            json_style,
-        ),
+        Err(err) => fail(&format!("{err}"), RESOURCE_UNAVAILABLE, json, json_style),
     }
 }
 
@@ -267,7 +265,7 @@ fn run_refresh(args: &RefreshArgs, json: bool, json_style: JsonStyle) -> ExitCod
             emit_status(&status, LicenseKind::Refresh, json, json_style);
             ExitCode::SUCCESS
         }
-        Err(message) => fail(&message, NETWORK_EXIT_CODE, json, json_style),
+        Err(message) => fail(&message, NETWORK_FAILURE, json, json_style),
     }
 }
 
@@ -275,7 +273,7 @@ fn run_trial(email: Option<&str>, json: bool, json_style: JsonStyle) -> ExitCode
     let Some(email) = email else {
         return fail(
             "activate --trial requires --email <addr>",
-            2,
+            INVALID_INPUT,
             json,
             json_style,
         );
@@ -285,7 +283,7 @@ fn run_trial(email: Option<&str>, json: bool, json_style: JsonStyle) -> ExitCode
             emit_status(&status, LicenseKind::Activate, json, json_style);
             ExitCode::SUCCESS
         }
-        Err(message) => fail(&message, NETWORK_EXIT_CODE, json, json_style),
+        Err(message) => fail(&message, NETWORK_FAILURE, json, json_style),
     }
 }
 
@@ -310,7 +308,7 @@ fn run_deactivate(json: bool, json_style: JsonStyle) -> ExitCode {
         }
         Err(err) => fail(
             &format!("failed to remove {}: {err}", path.display()),
-            2,
+            INVALID_INPUT,
             json,
             json_style,
         ),
@@ -877,7 +875,7 @@ fn render_json_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::exit_codes::exit_invalid_input;
+    use crate::exit_codes::{NETWORK_EXIT_CODE, exit_invalid_input};
 
     #[test]
     fn activate_args_debug_masks_raw_jwt() {
@@ -1111,8 +1109,16 @@ mod tests {
 
     #[test]
     fn json_failures_return_requested_exit_code() {
-        let exit = fail("synthetic failure", 7, true, JsonStyle::Compact);
-        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(7)));
+        let exit = fail(
+            "synthetic failure",
+            NETWORK_FAILURE,
+            true,
+            JsonStyle::Compact,
+        );
+        assert_eq!(
+            format!("{exit:?}"),
+            format!("{:?}", ExitCode::from(NETWORK_EXIT_CODE))
+        );
     }
 
     fn sample_claims(features: &[&str]) -> LicenseClaims {

@@ -28,7 +28,9 @@ use fallow_types::serde_path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::exit_codes::exit_invalid_input;
+use crate::exit_codes::{
+    ErrorExitCode, INVALID_INPUT, RUNTIME_COVERAGE_SIDECAR, exit_invalid_input,
+};
 use crate::health::coverage as runtime_coverage;
 use crate::license;
 
@@ -633,7 +635,8 @@ fn run_setup_license_step(
     args: SetupArgs,
     setup_state: &mut CoverageSetupState,
 ) -> Result<(), ExitCode> {
-    let key = license::verifying_key().map_err(|message| setup_error_exit(&message, 2))?;
+    let key =
+        license::verifying_key().map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
     let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
     if license_state_is_current(setup_state, &license_state) {
         println!("Step 1/4: License check... ok (resumed).");
@@ -646,7 +649,8 @@ fn run_setup_license_step(
     let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
     if license_status_is_setup_acceptable(&license_state) {
         record_current_license_state(setup_state);
-        save_setup_state(root, setup_state).map_err(|message| setup_error_exit(&message, 2))?;
+        save_setup_state(root, setup_state)
+            .map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
     } else {
         setup_state.license = None;
     }
@@ -668,10 +672,10 @@ fn run_setup_sidecar_step(
         return Err(exit);
     }
     let path = runtime_coverage::discover_sidecar(Some(root))
-        .map_err(|message| setup_error_exit(&message, COVERAGE_SETUP_FAILED_EXIT_CODE))?;
+        .map_err(|message| setup_error_exit(&message, RUNTIME_COVERAGE_SIDECAR))?;
     record_sidecar_state(setup_state, path)
         .and_then(|()| save_setup_state(root, setup_state))
-        .map_err(|message| setup_error_exit(&message, 2))
+        .map_err(|message| setup_error_exit(&message, INVALID_INPUT))
 }
 
 fn print_resumed_sidecar_step(setup_state: &CoverageSetupState) {
@@ -693,9 +697,11 @@ fn run_setup_recipe_step(
         return Ok(resumed_recipe_path(root, setup_state));
     }
 
-    let path = write_recipe(root, &recipe).map_err(|message| setup_error_exit(&message, 2))?;
+    let path =
+        write_recipe(root, &recipe).map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
     record_recipe_state(setup_state, path.clone(), context, &recipe);
-    save_setup_state(root, setup_state).map_err(|message| setup_error_exit(&message, 2))?;
+    save_setup_state(root, setup_state)
+        .map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
     Ok(path)
 }
 
@@ -742,7 +748,7 @@ fn run_setup_final_step(
     ExitCode::SUCCESS
 }
 
-fn setup_error_exit(message: &str, code: u8) -> ExitCode {
+fn setup_error_exit(message: &str, code: ErrorExitCode) -> ExitCode {
     eprintln!("fallow coverage setup: {message}");
     ExitCode::from(code)
 }
