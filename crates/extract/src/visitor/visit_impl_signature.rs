@@ -19,6 +19,9 @@ pub(in crate::visitor) struct ThisResultLocal {
     /// The deeper frame that binds the same name to a class of its own. A read
     /// in that frame resolves through the class binding, not through the local.
     rebound_frame: Option<usize>,
+    /// The deeper frames that hold a copy of an outer binding of the name,
+    /// such as the branch of an `instanceof` guard. A copy declares nothing.
+    forked_frames: Vec<usize>,
 }
 
 /// The visitor state that a method body replaces and its end restores.
@@ -718,6 +721,7 @@ impl ModuleInfoExtractor {
         if let Some(locals) = self.this_result_locals.get_mut(id.name.as_str()) {
             locals.retain(|local| local.frame < frame);
         }
+        self.mark_factory_local_rebound(id.name.as_str(), init);
         if self.class_scope_stack.is_empty() || self.independent_this_depth > 0 {
             return;
         }
@@ -745,6 +749,7 @@ impl ModuleInfoExtractor {
                 frame,
                 inherited_source,
                 rebound_frame: None,
+                forked_frames: Vec::new(),
             });
     }
 
@@ -775,13 +780,59 @@ impl ModuleInfoExtractor {
     }
 
     /// The innermost frame that declares `root` above the frame of the `this`
-    /// result local `root`.
+    /// result local `root`. A frame with a copy of an outer binding does not
+    /// declare the name.
     fn this_result_local_shadow_frame(&self, root: &str) -> Option<usize> {
         let local = self.innermost_this_result_local(root)?;
         self.scoped_direct_object_binding_roots
             .iter()
-            .rposition(|roots| roots.contains(root))
+            .enumerate()
+            .rev()
+            .find(|(index, roots)| roots.contains(root) && !local.forked_frames.contains(index))
+            .map(|(index, _)| index)
             .filter(|&index| index > local.frame)
+    }
+
+    /// Whether `frame` takes a copy of the outer binding of `root` that the
+    /// frame `owner` declares. A copy declares nothing, so the function also
+    /// records it for a `this` result local with the name `root`.
+    pub(super) fn admit_direct_object_binding_fork(
+        &mut self,
+        root: &str,
+        frame: usize,
+        owner: Option<usize>,
+    ) -> bool {
+        if owner.is_some_and(|index| index >= frame) {
+            return false;
+        }
+        if let Some(local) = self
+            .this_result_locals
+            .get_mut(root)
+            .and_then(|locals| locals.last_mut())
+            && frame > local.frame
+            && !local.forked_frames.contains(&frame)
+        {
+            local.forked_frames.push(frame);
+        }
+        true
+    }
+
+    /// A local from a bare call such as `const seat = makeSeat()` can hold
+    /// a class that a same-file factory returns. The factory resolves after
+    /// the walk, so the shadow of a `this` result local counts as a class
+    /// binding of its own now. A callee that returns no class falls back to
+    /// the module-flat binding of the name.
+    fn mark_factory_local_rebound(&mut self, name: &str, init: &Expression<'_>) {
+        if !self.this_result_locals.contains_key(name) {
+            return;
+        }
+        let call = match init {
+            Expression::AwaitExpression(await_expr) => &await_expr.argument,
+            _ => init,
+        };
+        if Self::bare_call_callee_name(self.class_carrying_init(call)).is_some() {
+            self.mark_this_result_local_rebound(name);
+        }
     }
 
     /// Record that the shadow frame of the `this` result local `root` binds
@@ -812,6 +863,7 @@ impl ModuleInfoExtractor {
                 if local.rebound_frame.is_some_and(|frame| frame >= depth) {
                     local.rebound_frame = None;
                 }
+                local.forked_frames.retain(|&frame| frame < depth);
             }
             !locals.is_empty()
         });
@@ -826,7 +878,9 @@ impl ModuleInfoExtractor {
         let (root, rest) = object_name
             .split_once('.')
             .map_or((object_name, None), |(root, rest)| (root, Some(rest)));
-        if self.this_result_local_is_shadowed(root) {
+        // Any binding in a deeper frame holds another value, also a binding
+        // to a class of its own. Only the outer local reads the base class.
+        if self.this_result_local_shadow_frame(root).is_some() {
             return;
         }
         let Some(source) = self

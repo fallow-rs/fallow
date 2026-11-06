@@ -6,7 +6,9 @@ fn shadowed_this_method_result_local_gives_no_credit() {
     // method reads through `table`. A callback parameter or a loop head with
     // the name `table` holds another value, so `table.reset()` there gives no
     // credit to `RectTable.reset` or `RoundTable.reset`. The same rule applies
-    // to a local that holds the result of a method of the class itself.
+    // to a local that holds the result of a method of the class itself. A
+    // shadow that an `instanceof` guard, an element type or a same-file
+    // factory binds to a class credits that class.
     let root = fixture_path("issue-4198-shadowed-this-method-result-local");
     let mut config = create_config(root);
     config.rules.unused_class_members = fallow_config::Severity::Error;
@@ -22,13 +24,26 @@ fn shadowed_this_method_result_local_gives_no_credit() {
         })
         .collect();
 
-    for used in ["RectTable.setVip", "RoundTable.setVip", "Seat.claim"] {
+    for used in [
+        "RectTable.setVip",
+        "RoundTable.setVip",
+        "Seat.claim",
+        "Chair.narrowed",
+        "Chair.rectOnly",
+        "Seat.narrowed",
+        "Seat.factoryLocal",
+    ] {
         assert!(
             !unused.contains(&used.to_string()),
             "{used} is read through the outer local, found: {unused:?}"
         );
     }
-    for shadowed in ["RectTable.reset", "RoundTable.reset", "Seat.release"] {
+    for shadowed in [
+        "RectTable.reset",
+        "RoundTable.reset",
+        "RectTable.rectOnly",
+        "Seat.release",
+    ] {
         assert!(
             unused.contains(&shadowed.to_string()),
             "{shadowed} is read only through a shadowing binding, found: {unused:?}"

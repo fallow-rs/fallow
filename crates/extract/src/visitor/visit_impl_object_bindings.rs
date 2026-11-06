@@ -1355,7 +1355,7 @@ impl ModuleInfoExtractor {
     fn fork_direct_object_binding_root(&mut self, root: &str, frame: usize, conditional: bool) {
         let owner =
             self.direct_object_binding_scope_index(DirectObjectBindingScope::BindingOwner, root);
-        if owner.is_some_and(|index| index >= frame) {
+        if !self.admit_direct_object_binding_fork(root, frame, owner) {
             return;
         }
         let (targets, paths) = owner.map_or_else(

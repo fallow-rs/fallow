@@ -10259,6 +10259,147 @@ fn nested_class_binding_keeps_its_own_class_over_this_method_result() {
 }
 
 #[test]
+fn narrowed_shadow_of_inherited_this_method_result_credits_its_class() {
+    // Issue #4198: an `instanceof` guard on a parameter with the name of a
+    // local that holds an inherited `this.find()` result binds the parameter
+    // to the guard class. The read credits that class and not the call.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+        import { Chair } from './chair';
+
+        export class Viewer extends Floor {
+            mark(xs: unknown[]): void {
+                const table = this.find();
+                table.setVip();
+                xs.forEach((table) => {
+                    if (table instanceof Chair) {
+                        table.narrowed();
+                    }
+                });
+            }
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Chair" && access.member == "narrowed"),
+        "{:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object.starts_with("this.find()") && access.member == "narrowed"),
+        "{:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn class_shadow_of_inherited_this_method_result_gives_no_call_credit() {
+    // Issue #4198: a loop head that binds the name of a local with an
+    // inherited `this.find()` result to an element class holds an element.
+    // A read through it records nothing on the call.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+        import type { Chair } from './chair';
+
+        export class Viewer extends Floor {
+            mark(chairs: Chair[]): void {
+                const table = this.find();
+                table.setVip();
+                for (const table of chairs) {
+                    table.rectOnly();
+                }
+                table.afterLoop();
+            }
+        }
+        ",
+    );
+
+    let on_call = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object.starts_with("this.find()") && access.member == member)
+    };
+    assert!(on_call("setVip"), "{:?}", info.member_accesses);
+    assert!(on_call("afterLoop"), "{:?}", info.member_accesses);
+    assert!(!on_call("rectOnly"), "{:?}", info.member_accesses);
+}
+
+#[test]
+fn narrowed_and_factory_shadows_of_own_this_method_result_keep_credit() {
+    // Issue #4198: an `instanceof` guard on a shadowing parameter and a block
+    // local from a same-file factory bind the name to a class of their own.
+    // A read through them credits that class.
+    let info = parse(
+        r"
+        import { Seat } from './seat';
+
+        const makeSeat = () => new Seat();
+
+        export class Usher {
+            guide(xs: unknown[]): void {
+                const seat = this.current();
+                seat.claim();
+                xs.forEach((seat) => {
+                    if (seat instanceof Seat) seat.narrowed();
+                });
+                {
+                    const seat = makeSeat();
+                    seat.factoryLocal();
+                }
+            }
+            private current(): Seat { return new Seat(); }
+        }
+        ",
+    );
+
+    let has = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Seat" && access.member == member)
+    };
+    for member in ["claim", "narrowed", "factoryLocal"] {
+        assert!(has(member), "{member}: {:?}", info.member_accesses);
+    }
+}
+
+#[test]
+fn narrowed_inherited_this_method_result_local_credits_guard_class() {
+    // An `instanceof` guard on the local that holds an inherited
+    // `this.find()` result credits the guard class inside the guard.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+        import { Chair } from './chair';
+
+        export class Viewer extends Floor {
+            mark(): void {
+                const table = this.find();
+                if (table instanceof Chair) {
+                    table.narrowed();
+                }
+            }
+        }
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Chair" && access.member == "narrowed"),
+        "{:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn chained_method_call_with_arguments_records_call_receiver() {
     // Issue #4184: `local.rotate(1).translate(1, 1)` records `translate` on
     // `local.rotate()`, as `local.rotate().translate()` does. A bare call with

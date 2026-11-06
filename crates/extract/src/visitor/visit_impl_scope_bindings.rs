@@ -188,9 +188,11 @@ impl ModuleInfoExtractor {
     }
 
     /// A class binding under the root of `binding` disproves the shadow that
-    /// the declaring scope recorded for the root.
+    /// the declaring scope recorded for the root. It also rebinds a `this`
+    /// result local with the name of the root in the current frame.
     fn clear_non_instance_binding(&mut self, binding: &str) {
         let root = binding.split_once('.').map_or(binding, |(root, _)| root);
+        self.mark_this_result_local_rebound(root);
         if let Some(index) = self
             .nested_declaration_stack
             .iter()
@@ -223,7 +225,6 @@ impl ModuleInfoExtractor {
         target: String,
     ) {
         self.clear_non_instance_binding(&binding);
-        self.mark_this_result_local_rebound(&binding);
         self.walk_order_class_bindings
             .insert(binding.clone(), target.clone());
         let target = super::super::BindingTarget::Class(target);
