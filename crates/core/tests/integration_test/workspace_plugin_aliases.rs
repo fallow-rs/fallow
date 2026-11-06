@@ -132,6 +132,28 @@ fn unused_files(root: &Path) -> Vec<String> {
     files
 }
 
+/// The `(file, specifier)` pairs of each unresolved-import finding.
+fn unresolved_imports(root: &Path) -> Vec<(String, String)> {
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis");
+    assert!(
+        results.unlisted_dependencies.is_empty(),
+        "an alias import is not a package import"
+    );
+    let mut imports: Vec<(String, String)> = results
+        .unresolved_imports
+        .iter()
+        .map(|finding| {
+            (
+                relative(root, &finding.import.path),
+                finding.import.specifier.clone(),
+            )
+        })
+        .collect();
+    imports.sort();
+    imports
+}
+
 fn assert_each_app_imports_its_own_lib(root: &Path, lib: &str) {
     for app in APPS {
         assert_eq!(
@@ -185,6 +207,14 @@ fn sveltekit_lib_alias_does_not_fall_back_to_another_workspace() {
     let imports = imports_of(dir.path(), "apps/alpha/src/routes/+page.svelte");
     assert_eq!(imports, vec!["apps/alpha/src/lib/util.ts".to_string()]);
     assert_eq!(unused_files(dir.path()), Vec::<String>::new());
+    assert_eq!(
+        unresolved_imports(dir.path()),
+        vec![(
+            "apps/alpha/src/routes/+page.svelte".to_string(),
+            "$lib/shared.svelte".to_string(),
+        )],
+        "a missing $lib target must be an unresolved import"
+    );
 }
 
 #[test]
@@ -231,4 +261,26 @@ fn nuxt_source_alias_stays_in_its_workspace() {
             "the {app} app must import only from its own source directory"
         );
     }
+}
+
+#[test]
+fn nuxt_source_alias_does_not_fall_back_to_another_workspace() {
+    let dir = workspace_root();
+    for app in APPS {
+        nuxt_app(dir.path(), app);
+    }
+    std::fs::remove_file(dir.path().join("apps/alpha/app/utils/format.ts"))
+        .expect("remove alpha format module");
+
+    assert_eq!(
+        imports_of(dir.path(), "apps/alpha/app/app.vue"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        unresolved_imports(dir.path()),
+        vec![(
+            "apps/alpha/app/app.vue".to_string(),
+            "~/utils/format".to_string(),
+        )]
+    );
 }

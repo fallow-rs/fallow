@@ -69,8 +69,14 @@ pub(in crate::resolve) fn matches_plugin_path_alias(
     from_file: &Path,
     specifier: &str,
 ) -> bool {
-    applicable_path_aliases(ctx, from_file, specifier)
-        .into_iter()
+    // A workspace that owns the specifier has a matching alias by definition,
+    // so this check needs no list of the applicable aliases.
+    ctx.scoped_path_aliases.iter().any(|alias| {
+        alias_match_remainder(specifier, &alias.prefix).is_some()
+            && from_file.starts_with(ctx.root.join(&alias.scope))
+    }) || ctx
+        .path_aliases
+        .iter()
         .any(|(prefix, _)| alias_match_remainder(specifier, prefix).is_some())
 }
 
