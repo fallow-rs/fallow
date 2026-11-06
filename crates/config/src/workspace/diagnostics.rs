@@ -332,6 +332,7 @@ fn build_missing_dir_group_message(
     group: &[&WorkspaceDiagnostic],
 ) -> String {
     let display = display_relative(root, source);
+    let skipped = fallow_types::workspace::missing_pattern_dir_skipped_entries(&display);
     let source = if display.is_empty() || display == "." {
         "The fallow config `workspaces.patterns`".to_owned()
     } else {
@@ -348,7 +349,7 @@ fn build_missing_dir_group_message(
         .collect();
     format!(
         "{source} declares {count} workspace patterns whose directories do not exist ({list}). \
-         Fallow analyzes no package from them. Unused catalog entries are not reported in \
+         Fallow analyzes no package from them. {skipped} are not reported in \
          this run, because packages in those directories can use them. Create the \
          directories before the run, or remove the patterns.",
         count = patterns.len(),

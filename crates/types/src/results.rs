@@ -3451,9 +3451,9 @@ pub struct SecurityFinding {
 /// the `catalog:` protocol.
 ///
 /// The default catalog uses `catalog_name: "default"`. Named catalogs
-/// (`catalogs.<name>`) use their declared name. The source file is
-/// `pnpm-workspace.yaml` for pnpm catalogs or root `package.json` for Bun
-/// catalogs.
+/// (`catalogs.<name>`) use their declared name. The source file is the
+/// `pnpm-workspace.yaml` of the root or of a nested pnpm project, or the
+/// root `package.json` for Bun catalogs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntry {

@@ -1890,6 +1890,48 @@ fn configured_workspace_entry_outside_the_root_is_anchored_at_dot() {
     }
 }
 
+/// The members that a nested `pnpm-workspace.yaml` declares are listed as
+/// workspaces under the nested project root, with no undeclared-workspace
+/// diagnostic.
+#[test]
+fn list_workspaces_includes_nested_pnpm_project_members() {
+    let output = run_list(
+        "pnpm-nested-workspace-members",
+        &["--workspaces", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    let mut workspaces: Vec<(String, String)> = json["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .map(|workspace| {
+            (
+                workspace["name"].as_str().unwrap_or_default().to_owned(),
+                workspace["path"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    workspaces.sort();
+    assert_eq!(
+        workspaces,
+        [
+            ("@root/app".into(), "packages/app".into()),
+            ("site-root".into(), "site".into()),
+            ("site-web".into(), "site/packages/web".into()),
+        ]
+    );
+
+    let kinds: Vec<&str> = json["workspace_diagnostics"]
+        .as_array()
+        .expect("workspace_diagnostics array")
+        .iter()
+        .filter_map(|entry| entry["kind"].as_str())
+        .collect();
+    assert_eq!(kinds, ["nested-project-root"]);
+}
+
 /// A nested directory with its own `pnpm-workspace.yaml` is listed as a
 /// workspace with a `nested-project-root` note. A workspace pattern whose
 /// directory is missing gets `workspace-pattern-dir-missing`, anchored at the

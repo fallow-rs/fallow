@@ -28,8 +28,8 @@
 //! `None` (`skip_serializing_if`).
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
+use crate::catalog_source::is_pnpm_catalog_source;
 use crate::envelope::AuditIntroduced;
 use crate::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
@@ -72,8 +72,6 @@ const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercont
 /// referenced by `add-to-config` actions on both the unused- and
 /// misconfigured-override findings.
 const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
-
-const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 
 fn manual_framework_fix(kind: FixActionType, description: &str, note: &str) -> IssueAction {
     IssueAction::Fix(FixAction {
@@ -4126,10 +4124,6 @@ impl EmptyCatalogGroupFinding {
             effective_severity: None,
         }
     }
-}
-
-fn is_pnpm_catalog_source(path: &Path) -> bool {
-    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 /// Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The

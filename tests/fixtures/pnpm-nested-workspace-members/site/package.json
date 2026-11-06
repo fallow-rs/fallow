@@ -1,0 +1,6 @@
+{
+  "name": "site-root",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

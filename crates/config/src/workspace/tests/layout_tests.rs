@@ -270,3 +270,69 @@ fn recursive_pattern_without_literal_prefix_is_never_missing() {
 
     assert!(!has_missing_workspace_pattern_dirs(dir.path(), &[]));
 }
+
+/// The `packages` list of a nested independent pnpm project declares more
+/// workspaces. pnpm reads the entries relative to the nested project, and
+/// keeps negation. An entry that leaves the nested project gives no member.
+#[test]
+fn nested_pnpm_project_members_are_workspaces() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"root"}"#).unwrap();
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n",
+    )
+    .unwrap();
+    write_package(&root.join("packages/core"), r#"{"name":"core"}"#);
+    write_package(&root.join("shared"), r#"{"name":"shared"}"#);
+    write_package(&root.join("site"), r#"{"name":"site"}"#);
+    std::fs::write(
+        root.join("site/pnpm-workspace.yaml"),
+        "packages:\n  - .\n  - ./apps/*\n  - '!apps/skip'\n  - ../shared\ncatalog:\n  vue: ^3.5.0\n",
+    )
+    .unwrap();
+    write_package(&root.join("site/apps/web"), r#"{"name":"site-web"}"#);
+    write_package(&root.join("site/apps/skip"), r#"{"name":"site-skip"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+
+    let mut names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["core", "site", "site-web"]);
+    assert_eq!(
+        diagnostics_of_kind(&diagnostics, "nested-project-root").len(),
+        1,
+        "{diagnostics:?}"
+    );
+}
+
+/// A nested project that the fallow config `workspaces.patterns` adds keeps
+/// that registration. Its members are workspaces all the same.
+#[test]
+fn nested_pnpm_project_members_with_config_pattern() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"root"}"#).unwrap();
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n",
+    )
+    .unwrap();
+    write_package(&root.join("site"), r#"{"name":"site"}"#);
+    std::fs::write(
+        root.join("site/pnpm-workspace.yaml"),
+        "packages:\n  - apps/*\n",
+    )
+    .unwrap();
+    write_package(&root.join("site/apps/web"), r#"{"name":"site-web"}"#);
+
+    let mut names: Vec<String> = discover_workspaces_with_patterns(root, &["site".to_owned()])
+        .into_iter()
+        .map(|ws| ws.name)
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["site", "site-web"]);
+}

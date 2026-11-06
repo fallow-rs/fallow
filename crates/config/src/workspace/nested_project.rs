@@ -3,8 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    ManifestCache, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    collect_declared_patterns, register_matched_workspace,
+    DeclaredPattern, ManifestCache, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
+    collect_declared_patterns, expand_patterns_to_workspaces, missing_dir_patterns,
+    parse_pnpm_workspace_yaml, register_matched_workspace,
     undeclared::{is_ignored_scan_dir, is_undeclared_scan_skip_dir},
 };
 
@@ -20,7 +21,7 @@ const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 /// that the root manifests declare. The fallow config `workspaces.patterns`
 /// is not part of it: those patterns add directories to the analysis, and
 /// pnpm does not read them.
-struct ManifestPatternMatcher {
+pub struct ManifestPatternMatcher {
     positive: globset::GlobSet,
     negative: globset::GlobSet,
 }
@@ -28,7 +29,8 @@ struct ManifestPatternMatcher {
 impl ManifestPatternMatcher {
     /// Build the matcher. A root manifest that does not parse gives a matcher
     /// that declares nothing; discovery reports the parse error.
-    fn load(root: &Path) -> Self {
+    #[must_use]
+    pub fn load(root: &Path) -> Self {
         let mut positive = globset::GlobSetBuilder::new();
         let mut negative = globset::GlobSetBuilder::new();
         for declared in collect_declared_patterns(root, &[]).unwrap_or_default() {
@@ -59,7 +61,9 @@ impl ManifestPatternMatcher {
         }
     }
 
-    fn declares(&self, root: &Path, dir: &Path) -> bool {
+    /// Whether a workspace pattern of the root manifests declares `dir`.
+    #[must_use]
+    pub fn declares(&self, root: &Path, dir: &Path) -> bool {
         let relative = dir.strip_prefix(root).unwrap_or(dir);
         let relative = relative.to_string_lossy().replace('\\', "/");
         self.positive.is_match(relative.as_str()) && !self.negative.is_match(relative.as_str())
@@ -136,12 +140,14 @@ fn scan_dirs(parent: &Path) -> Vec<PathBuf> {
 }
 
 /// Register each independent pnpm project below the root as a workspace, with
-/// one `nested-project-root` diagnostic.
+/// one `nested-project-root` diagnostic, and register the members that the
+/// `packages` list of its `pnpm-workspace.yaml` declares.
 ///
 /// The project's `package.json` then owns its files and dependencies, and
 /// framework plugins activate from it. A directory that an earlier source
 /// already registered, for example the fallow config `workspaces.patterns`,
-/// keeps that registration and gets no diagnostic.
+/// keeps that registration and gets no diagnostic. The members of such a
+/// project are registered all the same.
 pub(super) fn collect_nested_project_workspaces(
     scan: &NestedProjectScan<'_>,
     workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
@@ -155,23 +161,101 @@ pub(super) fn collect_nested_project_workspaces(
         .collect();
     for dir in nested_project_roots(scan) {
         let canonical_dir = canonical(&dir);
-        if known.contains(&canonical_dir) || !canonical_dir.starts_with(scan.canonical_root) {
+        if !canonical_dir.starts_with(scan.canonical_root) {
             continue;
         }
-        let registered_before = workspaces.len();
-        register_matched_workspace(
+        if !known.contains(&canonical_dir) {
+            let registered_before = workspaces.len();
+            register_matched_workspace(
+                scan.root,
+                dir.clone(),
+                workspaces,
+                diagnostics,
+                manifest_cache,
+            );
+            if workspaces.len() > registered_before {
+                diagnostics.push(WorkspaceDiagnostic::new(
+                    scan.root,
+                    dir.clone(),
+                    WorkspaceDiagnosticKind::NestedProjectRoot,
+                ));
+            }
+        }
+        let declared = nested_declared_patterns(&dir);
+        diagnostics.extend(missing_dir_patterns(&dir, &declared).map(|missing| {
+            WorkspaceDiagnostic::new(
+                scan.root,
+                missing.source.clone(),
+                WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                    pattern: missing.pattern.clone(),
+                },
+            )
+        }));
+        let patterns = nested_member_patterns(scan.root, &dir, &declared);
+        workspaces.extend(expand_patterns_to_workspaces(
             scan.root,
-            dir.clone(),
-            workspaces,
+            &patterns,
+            scan.canonical_root,
+            scan.ignore_patterns,
             diagnostics,
             manifest_cache,
-        );
-        if workspaces.len() > registered_before {
-            diagnostics.push(WorkspaceDiagnostic::new(
-                scan.root,
-                dir,
-                WorkspaceDiagnosticKind::NestedProjectRoot,
-            ));
-        }
+        ));
     }
+}
+
+/// The `packages` entries of the `pnpm-workspace.yaml` in `project_dir`, as
+/// written in the file. Each entry names that file as its source.
+pub(super) fn nested_declared_patterns(project_dir: &Path) -> Vec<DeclaredPattern> {
+    let source = project_dir.join(PNPM_WORKSPACE_FILE);
+    let Ok(content) = std::fs::read_to_string(&source) else {
+        return Vec::new();
+    };
+    parse_pnpm_workspace_yaml(&content)
+        .into_iter()
+        .map(|pattern| DeclaredPattern {
+            pattern,
+            source: source.clone(),
+        })
+        .collect()
+}
+
+/// The `packages` entries in `declared`, rewritten relative to the analysis
+/// root.
+///
+/// pnpm reads these entries relative to `project_dir`. An entry that names
+/// `project_dir` itself (`.`) gives no pattern, because the caller registers
+/// the project root. An absolute entry, or an entry with a `..` segment, also
+/// gives no pattern, so the expansion stays inside `project_dir`.
+fn nested_member_patterns(
+    root: &Path,
+    project_dir: &Path,
+    declared: &[DeclaredPattern],
+) -> Vec<String> {
+    let relative = project_dir.strip_prefix(root).unwrap_or(project_dir);
+    let prefix = relative.to_string_lossy().replace('\\', "/");
+    declared
+        .iter()
+        .filter_map(|declared| prefix_member_pattern(&prefix, &declared.pattern))
+        .collect()
+}
+
+/// Prefix one pnpm `packages` entry with the project directory `prefix`.
+/// A negated entry keeps its `!`.
+fn prefix_member_pattern(prefix: &str, pattern: &str) -> Option<String> {
+    let (negation, mut body) = match pattern.strip_prefix('!') {
+        Some(rest) => ("!", rest),
+        None => ("", pattern),
+    };
+    while let Some(rest) = body.strip_prefix("./") {
+        body = rest;
+    }
+    if body.is_empty()
+        || body == "."
+        || body.starts_with('/')
+        || Path::new(body).is_absolute()
+        || body.split('/').any(|segment| segment == "..")
+    {
+        return None;
+    }
+    Some(format!("{negation}{prefix}/{body}"))
 }

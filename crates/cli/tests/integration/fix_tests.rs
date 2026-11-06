@@ -556,6 +556,43 @@ fn fix_catalog_delete_preceding_comments_config_is_consumed() {
     assert_eq!(catalog_fix["removed_lines"], 2);
 }
 
+/// `fallow fix` removes an unused entry from the `pnpm-workspace.yaml` of a
+/// nested independent pnpm project, and keeps the entry that a member of
+/// that project references.
+#[test]
+fn fix_catalog_removes_unused_entry_from_nested_pnpm_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"root"}"#).unwrap();
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("packages")).unwrap();
+    std::fs::create_dir_all(root.join("site/packages/web")).unwrap();
+    std::fs::write(root.join("site/package.json"), r#"{"name":"site"}"#).unwrap();
+    std::fs::write(
+        root.join("site/pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\ncatalog:\n  is-odd: ^1.0.0\n  is-even: ^1.0.0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("site/packages/web/package.json"),
+        r#"{"name":"web","dependencies":{"is-odd":"catalog:"}}"#,
+    )
+    .unwrap();
+
+    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+    let after = std::fs::read_to_string(root.join("site/pnpm-workspace.yaml")).unwrap();
+    assert_eq!(
+        after,
+        "packages:\n  - packages/*\ncatalog:\n  is-odd: ^1.0.0\n"
+    );
+}
+
 #[test]
 fn fix_catalog_fallow_keep_marker_preserves_block() {
     let dir = tempfile::tempdir().unwrap();
