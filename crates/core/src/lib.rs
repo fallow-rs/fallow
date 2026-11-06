@@ -37,7 +37,6 @@ pub(crate) mod scripts;
 /// Public hook for the fuzz harness (fuzz/fuzz_targets/fuzz_scripts.rs) only;
 /// not a supported API. The module itself stays crate-private.
 #[doc(hidden)]
-// fallow-ignore-next-line unnecessary-public -- fuzz/ calls it: https://github.com/fallow-rs/cargo-fallow/issues/128
 pub use scripts::parse_script;
 pub mod suppress;
 

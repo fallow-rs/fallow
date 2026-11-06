@@ -37,7 +37,8 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   `fallow_extract::parse_bounded` (`crates/extract/src/nesting.rs`).
   The cargo-fallow source rule `parse-through-parse-bounded` in the root
   `Cargo.toml` lists each file with production parser calls, with the count,
-  and fails on a new call.
+  and fails on a new call or on a count below `max`. A file that wraps its own
+  calls has `require = ["parse_bounded("]`.
   - `parse_bounded` first scans the bracket depth. A file past
     `MAX_NESTING_DEPTH` returns `None`. Extraction turns it into a failed
     parse (`parse_panicked`) with no facts, and the other callers skip it.

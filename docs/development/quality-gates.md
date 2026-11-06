@@ -830,6 +830,10 @@ Each gate fails the run:
     pattern in a comment or a string does not match.
   - `parse-through-parse-bounded` lists each file with production parser
     calls and the count. A new call needs `parse_bounded` and a higher `max`.
+    An entry with fewer calls than `max` fails, so the list stays exact. An
+    entry with `require = ["parse_bounded("]` must also call `parse_bounded`.
+  - cargo-fallow counts the uses in the `fuzz/` workspace, so an item that a
+    fuzz target calls keeps its `pub`.
   - `explicit-type-reexports` rejects a glob re-export of the internal type
     modules from `fallow-engine` and `fallow-api`.
   - `miri-build-compiles` finds a path from `cfg(test)` code to an item that
