@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { validateKnowledgeArchitecture } from "./check-knowledge-architecture.mjs";
+import { makeTempDir } from "./lib/temp-dir.mjs";
 
 const write = (root, path, content) => {
   mkdirSync(join(root, path, ".."), { recursive: true });
@@ -67,7 +67,7 @@ const manifest = {
 };
 
 const setup = () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-knowledge-"));
+  const root = makeTempDir("fallow-knowledge-");
   write(root, "scripts/knowledge-surfaces.json", `${JSON.stringify(manifest, null, 2)}\n`);
   write(root, "scripts/generate-agent-adapters.mjs", "export {};\n");
   write(root, "AGENTS.md", "# Codex\n\n[Docs](docs/README.md)\n\n`.agents/skills`\n");

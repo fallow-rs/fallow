@@ -13,6 +13,7 @@ import {
   parseRustSchemaVersion,
   runAuditSchemaDocCheck,
 } from "./check-audit-schema-doc-sync.mjs";
+import { makeTempDir } from "./lib/temp-dir.mjs";
 
 const auditDocument = ({ audit = 10, deadCode = 9, extra = "" } = {}) => `
 ## JSON output
@@ -145,7 +146,7 @@ test("the companion checkout resolves as a sibling of the main checkout", () => 
 });
 
 test("a guessed companion checkout that is absent skips instead of reporting drift", () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-audit-schema-skip-"));
+  const root = makeTempDir("fallow-audit-schema-skip-");
   const checkout = join(root, "checkout");
   mkdirSync(join(checkout, "crates", "output", "src"), { recursive: true });
   writeFileSync(
@@ -193,7 +194,7 @@ test("a guessed companion checkout that is absent skips instead of reporting dri
 });
 
 test("audit documentation parity fails closed when the companion is absent", () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-audit-schema-parity-"));
+  const root = makeTempDir("fallow-audit-schema-parity-");
   const result = runAuditSchemaDocCheck({ docsDir: join(root, "missing-docs") });
 
   assert.equal(result.status, 1);
@@ -201,7 +202,7 @@ test("audit documentation parity fails closed when the companion is absent", () 
 });
 
 test("audit documentation parity fails closed when canonical sources are absent", () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-audit-schema-source-"));
+  const root = makeTempDir("fallow-audit-schema-source-");
   const result = runAuditSchemaDocCheck({ repoRoot: join(root, "missing-source") });
 
   assert.equal(result.status, 2);

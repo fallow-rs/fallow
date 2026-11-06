@@ -1,11 +1,29 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 
 import { SESSION_TOKEN_ENV } from "../../src/generated-protocol.mjs";
 
 const COMPANION = fileURLToPath(new URL("../../src/companion.mjs", import.meta.url));
+
+// The API gives each companion a private temp directory and deletes it after
+// the companion ends (`crates/api/src/mutation/companion_temp.rs`). A test
+// often kills the companion before `shutdown`, so the adapter never removes
+// its work directory. The same private directory keeps those leftovers out of
+// the system temp directory. A worker of a killed companion can still write
+// after the exit, so the process exit removes each directory again. The
+// prefix stays short for the same reason as in the API: a Unix socket path
+// below the directory must fit in about 100 bytes.
+const TEMP_ENV_NAMES = ["TMPDIR", "TMP", "TEMP"];
+const companionTempDirs = new Set();
+const removeTempDir = (dir) => rmSync(dir, { recursive: true, force: true });
+process.on("exit", () => {
+  for (const dir of companionTempDirs) removeTempDir(dir);
+});
 
 /**
  * Starts the companion as a child process with a new session token, and
@@ -17,7 +35,8 @@ const COMPANION = fileURLToPath(new URL("../../src/companion.mjs", import.meta.u
  * the companion in its own process group, as the API does on Unix.
  * `unsetEnv` names the variables of this process that the companion does not
  * get. `setEnv` gives the companion more variables, as a shell environment
- * does. `setEnv` applies after `unsetEnv`.
+ * does. `setEnv` applies after `unsetEnv`. The companion gets a private temp
+ * directory in `TMPDIR`, `TMP` and `TEMP`, and `setEnv` can replace it.
  */
 export const startCompanion = ({
   token = randomBytes(16).toString("hex"),
@@ -28,6 +47,9 @@ export const startCompanion = ({
 } = {}) => {
   const env = { ...process.env };
   for (const name of unsetEnv) delete env[name];
+  const tempDir = mkdtempSync(join(tmpdir(), "fallow-mtt-"));
+  companionTempDirs.add(tempDir);
+  for (const name of TEMP_ENV_NAMES) env[name] = tempDir;
   Object.assign(env, setEnv);
   delete env[SESSION_TOKEN_ENV];
   if (token !== null) env[SESSION_TOKEN_ENV] = token;
@@ -55,6 +77,7 @@ export const startCompanion = ({
   const exited = new Promise((resolve) => {
     child.on("exit", (code, signal) => {
       exitInfo = { code, signal };
+      removeTempDir(tempDir);
       for (const reject of waiting.splice(0).map((entry) => entry.reject)) {
         reject(new Error(`companion exited (${code ?? signal}) before a response:\n${stderr}`));
       }
