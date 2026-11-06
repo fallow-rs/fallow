@@ -35,6 +35,7 @@ static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)\A\s*---[ \t]*\r?\n(?P<body>.*?\r?\n)---"));
 
 mod blocks;
+mod scripts;
 
 static SCRIPT_PREFIX_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?i)<script\b"));
@@ -655,11 +656,18 @@ pub(crate) fn parse_astro_to_module(
         frontmatter_offset,
     );
     // Health complexity (only when requested): the frontmatter functions (scored
-    // above) plus a synthetic `<template>` entry for the markup `{ ... }`
-    // expression / iteration complexity, mirroring the Vue/Svelte synthetic
-    // template entry. Folds into the existing complexity aggregate; no new rule.
+    // above), the functions of each inline `<script>` block, plus a synthetic
+    // `<template>` entry for the markup `{ ... }` expression / iteration
+    // complexity, mirroring the Vue/Svelte synthetic template entry. Folds into
+    // the existing complexity aggregate; no new rule.
     info.complexity.extend(frontmatter_complexity);
     if need_complexity {
+        info.complexity
+            .extend(scripts::compute_script_block_complexity(
+                template,
+                template_offset,
+                &line_offsets,
+            ));
         info.complexity
             .extend(crate::template_complexity::compute_astro_template_complexity(source));
     }

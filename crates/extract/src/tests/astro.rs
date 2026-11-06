@@ -480,3 +480,122 @@ const { data } = await import("./data");
     );
     assert!(crate::tests::eager_dynamic_import_sources(&info).is_empty());
 }
+
+fn parse_astro_with_complexity(source: &str) -> fallow_types::extract::ModuleInfo {
+    parse_source_to_module(FileId(0), Path::new("Page.astro"), source, 0, true)
+}
+
+#[test]
+fn astro_script_block_functions_are_scored_at_file_lines() {
+    let info = parse_astro_with_complexity(
+        r##"---
+---
+<button id="b">Run</button>
+<script>
+  function hard(items) {
+    let n = 0;
+    for (const a of items) {
+      if (a.x) {
+        for (const b of a.y) {
+          if (b.z) {
+            for (const c of b.w) {
+              if (c.k && c.l) n++;
+              else if (c.m || c.o) n--;
+            }
+          }
+        }
+      }
+    }
+    return n;
+  }
+  document.querySelector("#b").addEventListener("click", () => hard([]));
+</script>
+"##,
+    );
+
+    let hard = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "hard")
+        .expect("the <script> function must be scored");
+    assert_eq!(hard.line, 5);
+    assert_eq!(hard.cyclomatic, 10);
+    assert_eq!(hard.cognitive, 24);
+}
+
+#[test]
+fn astro_frontmatter_and_every_script_block_are_scored() {
+    let info = parse_astro_with_complexity(
+        r"---
+const pick = (flag: boolean) => (flag ? 1 : 0);
+---
+<p>Text</p>
+<script is:inline>
+function inlineHelper(x) { if (x) return 1; return 0; }
+</script>
+<script define:vars={{ limit: 3 }}>const check = (n) => { if (n > limit) return 1; return 0; };</script>
+<script>
+const processed = (v) => v ?? 0;
+</script>
+",
+    );
+
+    let find = |name: &str| {
+        info.complexity
+            .iter()
+            .find(|fc| fc.name == name)
+            .unwrap_or_else(|| panic!("{name} must be scored: {:?}", info.complexity))
+    };
+    assert_eq!(find("pick").line, 2);
+    assert_eq!(find("inlineHelper").line, 6);
+    assert_eq!(find("processed").line, 10);
+    let check = find("check");
+    assert_eq!(check.line, 8);
+    // `<script define:vars={{ limit: 3 }}>const check = ` is 49 bytes, so the
+    // arrow function starts at column 49 of the file line.
+    assert_eq!(check.col, 49);
+}
+
+#[test]
+fn astro_non_code_script_blocks_add_no_complexity() {
+    let info = parse_astro_with_complexity(
+        r#"<script src="/scripts/app.js"></script>
+<script type="application/ld+json">{ "@context": "https://schema.org" }</script>
+<script type="text/x-template">function notCode(a) { if (a) return 1; return 0; }</script>
+<!-- <script>function commented(a) { if (a) return 1; return 0; }</script> -->
+<script>   </script>
+"#,
+    );
+
+    assert!(
+        info.complexity.iter().all(|fc| fc.name == "<template>"),
+        "{:?}",
+        info.complexity
+    );
+}
+
+#[test]
+fn astro_module_script_block_is_scored() {
+    let info = parse_astro_with_complexity(
+        "<p>Text</p>\n<script type=\"module\">function f(a) { if (a) return 1; return 0; }</script>\n",
+    );
+    let f = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "f")
+        .expect("a module script must be scored");
+    assert_eq!(f.line, 2);
+    assert_eq!(f.cyclomatic, 2);
+}
+
+#[test]
+fn astro_script_block_complexity_is_skipped_without_need_complexity() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        "<script>function f(a) { if (a) return 1; return 0; }</script>\n",
+        0,
+        false,
+    );
+    assert!(info.complexity.is_empty());
+}
