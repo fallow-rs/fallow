@@ -14650,8 +14650,8 @@ name: string
  */
 path: string
 /**
- * Whether the package is a generated or platform-specific dependency
- * package rather than a hand-authored workspace.
+ * Whether another workspace of the project lists this package as a
+ * dependency.
  */
 is_internal_dependency: boolean
 }

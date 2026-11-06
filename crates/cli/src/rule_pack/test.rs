@@ -222,7 +222,7 @@ fn emit_human(
 
     for summary in summaries.iter().filter(|summary| summary.findings > 0) {
         println!(
-            "{}  {}/{}  {} {}",
+            "{}  {}/{}  {} finding{}",
             summary.severity,
             summary.pack,
             summary.rule_id,

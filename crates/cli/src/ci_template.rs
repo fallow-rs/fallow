@@ -44,7 +44,7 @@ pub fn run_gitlab_template(opts: &GitlabTemplateOptions) -> ExitCode {
         return vendor_gitlab_files(dir, opts.force);
     }
 
-    print!("{GITLAB_TEMPLATE}");
+    crate::report::sink::write_stdout_str(GITLAB_TEMPLATE);
     ExitCode::SUCCESS
 }
 
@@ -57,7 +57,7 @@ fn vendor_gitlab_files(root: &Path, force: bool) -> ExitCode {
         }
     }
 
-    println!(
+    crate::report::sink::stdoutln!(
         "Vendored GitLab CI integration to {} ({} files)",
         root.display(),
         GITLAB_FILES.len()

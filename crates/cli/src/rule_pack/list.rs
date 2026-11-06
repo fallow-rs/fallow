@@ -80,7 +80,7 @@ fn emit_human(config: &ResolvedConfig) -> ExitCode {
             .get(index)
             .map_or_else(|| "<unknown>".to_string(), |path| path_to_string(path));
         println!(
-            "{} ({source}): {} {}",
+            "{} ({source}): {} rule{}",
             pack.name,
             pack.rules.len(),
             crate::report::plural(pack.rules.len())

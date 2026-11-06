@@ -296,3 +296,74 @@ fn rule_pack_test_without_pack_requires_configured_packs() {
             .contains("no rule packs configured; pass a pack path or run: fallow rule-pack init")
     );
 }
+
+#[test]
+fn rule_pack_init_human_output_names_the_rule_count() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project(dir.path());
+
+    let output = run_rule_pack(dir.path(), &["init"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output.stdout.contains("(template: starter, 2 rules)"),
+        "stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn rule_pack_init_human_output_uses_singular_for_one_rule() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project(dir.path());
+
+    let output = run_rule_pack(
+        dir.path(),
+        &["init", "--template", "side-effect-free-domain"],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output
+            .stdout
+            .contains("(template: side-effect-free-domain, 1 rule)"),
+        "stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn rule_pack_list_human_output_names_the_rule_count() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project_with_rule_pack(dir.path());
+
+    let output = run_rule_pack(dir.path(), &["list"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output
+            .stdout
+            .contains("team-policy (rule-packs/team-policy.jsonc): 2 rules"),
+        "stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn rule_pack_test_human_output_names_the_finding_count() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_policy_test_project(dir.path(), "moment");
+
+    let output = run_rule_pack(dir.path(), &["test", "packs/p.jsonc"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let summary = output
+        .stdout
+        .lines()
+        .find(|line| line.contains("team-policy/no-import"))
+        .unwrap_or_else(|| panic!("no summary line in stdout: {}", output.stdout));
+    assert!(
+        summary.trim_end().ends_with("1 finding"),
+        "summary line: {summary:?}"
+    );
+}
