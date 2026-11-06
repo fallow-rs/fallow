@@ -1401,7 +1401,11 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
 
 // ── catalogue gaps: callee variants of existing categories ───────────────────
 
-const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 24] = [
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 28] = [
+    ("src/esm-default-exec.ts", "command-injection", 78),
+    ("src/esm-namespace-exec.ts", "command-injection", 78),
+    ("src/esm-default-vm.ts", "code-injection", 94),
+    ("src/fs-promises-member.ts", "path-traversal", 22),
     ("src/cjs-fs-rename-destination.ts", "path-traversal", 22),
     ("src/cjs-fs-promises-temp.ts", "insecure-temp-file", 377),
     (
@@ -1488,6 +1492,10 @@ fn catalogue_gap_lookalikes_do_not_fire() {
         (
             "src/exec-local-shadow.ts",
             "a parameter that hides the exec import is not a shell call",
+        ),
+        (
+            "src/exec-namespace-shadow.ts",
+            "a parameter that hides the namespace import is not a shell call",
         ),
         (
             "src/fs-build-path.ts",

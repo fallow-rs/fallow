@@ -180,6 +180,7 @@ mod tests {
             span: Span::default(),
             source_span: Span::default(),
             destructured_names: destructured.iter().map(|&name| name.to_owned()).collect(),
+            destructured_locals: Vec::new(),
             local_name: local.map(str::to_owned),
             is_type_only: false,
         }

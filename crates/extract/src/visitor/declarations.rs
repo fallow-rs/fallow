@@ -5,8 +5,9 @@
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrayPattern, BindingPattern, CallExpression, Declaration,
-    Expression, IdentifierReference, Statement, TSEnumMemberName, TSImportEqualsDeclaration,
-    TSModuleReference, TSNamespaceDeclaration, TSNamespaceDeclarationBody, VariableDeclarator,
+    Expression, IdentifierReference, ObjectPattern, Statement, TSEnumMemberName,
+    TSImportEqualsDeclaration, TSModuleReference, TSNamespaceDeclaration,
+    TSNamespaceDeclarationBody, VariableDeclarator,
 };
 
 use crate::js_text::JsText;
@@ -450,6 +451,7 @@ impl ModuleInfoExtractor {
                     span: call.span,
                     source_span,
                     destructured_names: names,
+                    destructured_locals: extract_destructured_locals(obj_pat),
                     local_name: None,
                     is_type_only: false,
                 });
@@ -463,6 +465,7 @@ impl ModuleInfoExtractor {
                     span: call.span,
                     source_span,
                     destructured_names: Vec::new(),
+                    destructured_locals: Vec::new(),
                     local_name: Some(local),
                     is_type_only: false,
                 });
@@ -514,6 +517,7 @@ impl ModuleInfoExtractor {
             span: reference.span,
             source_span: reference.expression.span,
             destructured_names: Vec::new(),
+            destructured_locals: Vec::new(),
             local_name: Some(local),
             is_type_only: decl.import_kind.is_type(),
         });
@@ -757,4 +761,27 @@ fn declaration_is_instantiated(declaration: &Declaration<'_>) -> bool {
             !import_equals.import_kind.is_type()
         }
     }
+}
+
+/// The `(property key, local name)` pair of each statically named property
+/// of a destructuring pattern whose value is a plain identifier, with or
+/// without a default (`{ exec: run }` and `{ exec: run = noop }` give
+/// `("exec", "run")`). A rest element does not hide the named properties, so
+/// this function keeps them.
+fn extract_destructured_locals(obj_pat: &ObjectPattern<'_>) -> Vec<(String, String)> {
+    obj_pat
+        .properties
+        .iter()
+        .filter_map(|prop| {
+            let target = match &prop.value {
+                BindingPattern::AssignmentPattern(assign) => &assign.left,
+                value => value,
+            };
+            let BindingPattern::BindingIdentifier(local) = target else {
+                return None;
+            };
+            let key = prop.key.static_name()?;
+            Some((key.text().into_owned(), local.name.to_string()))
+        })
+        .collect()
 }

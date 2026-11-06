@@ -367,3 +367,34 @@ fn rule_pack_test_human_output_names_the_finding_count() {
         "summary line: {summary:?}"
     );
 }
+
+#[test]
+fn rule_pack_test_traces_the_local_name_of_an_aliased_require() {
+    let output = crate::common::run_fallow(
+        "rule-pack",
+        "policy-node-bindings",
+        &["test", "packs/no-shell.jsonc", "--format", "json"],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let matched: Vec<(String, String)> = json["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .map(|finding| {
+            (
+                finding["path"].as_str().unwrap_or_default().to_string(),
+                finding["matched"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        matched,
+        [(
+            "src/aliased-require.ts".to_string(),
+            "shell: run".to_string()
+        )],
+        "only the local name of the aliased require() binding is a shell call"
+    );
+}

@@ -271,6 +271,10 @@ fn require_call(source: &str, local: Option<&str>, destructured: &[&str]) -> Req
         span: oxc_span::Span::new(0, 10),
         source_span: oxc_span::Span::new(0, 10),
         destructured_names: destructured.iter().map(ToString::to_string).collect(),
+        destructured_locals: destructured
+            .iter()
+            .map(|name| (name.to_string(), name.to_string()))
+            .collect(),
         local_name: local.map(ToString::to_string),
         is_type_only: false,
     }
@@ -1403,6 +1407,22 @@ fn banned_effect_matches_a_destructured_node_module_require() {
         banned_effect_matches(EffectKind::Storage, storage),
         ["storage: unlinkSync"]
     );
+}
+
+#[test]
+fn banned_effect_matches_the_local_name_of_an_aliased_require() {
+    let mut call = require_call("child_process", None, &["exec"]);
+    call.destructured_locals = vec![("exec".to_string(), "run".to_string())];
+    let mut aliased = module(0, vec![callee("run", 0)], Vec::new());
+    aliased.require_calls.push(call.clone());
+    let mut key_name = module(0, vec![callee("exec", 0)], Vec::new());
+    key_name.require_calls.push(call);
+
+    assert_eq!(
+        banned_effect_matches(EffectKind::Shell, aliased),
+        ["shell: run"]
+    );
+    assert!(banned_effect_matches(EffectKind::Shell, key_name).is_empty());
 }
 
 #[test]

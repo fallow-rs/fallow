@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 418;
+pub(super) const CACHE_VERSION: u32 = 419;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -63,7 +63,7 @@ assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
 assert_cached_type_size!(CachedExport, 152);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
-assert_cached_type_size!(CachedRequireCall, 96);
+assert_cached_type_size!(CachedRequireCall, 120);
 assert_cached_type_size!(CachedReExport, 104);
 assert_cached_type_size!(CachedMember, 88);
 assert_cached_type_size!(CachedDynamicImportPattern, 88);
@@ -539,6 +539,8 @@ pub struct CachedRequireCall {
     pub(crate) source_span_end: u32,
     /// Names destructured from the require result.
     pub(crate) destructured_names: Vec<String>,
+    /// The `(property key, local name)` pairs of the destructured properties.
+    pub(crate) destructured_locals: Vec<(String, String)>,
     /// Local variable name for namespace requires.
     pub(crate) local_name: Option<String>,
     /// `true` for the type-erased `import type X = require('...')` spelling.

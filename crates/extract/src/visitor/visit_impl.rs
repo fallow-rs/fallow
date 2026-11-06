@@ -2286,7 +2286,7 @@ impl<'a> ModuleInfoExtractor {
     }
 
     /// Record a default import specifier (`import x from ...`), tracking the
-    /// DOMPurify and `node:path` provenance bindings.
+    /// DOMPurify, `node:path` and Node module sink bindings.
     fn handle_import_default_specifier(
         &mut self,
         s: &ImportDefaultSpecifier<'a>,
@@ -2295,7 +2295,7 @@ impl<'a> ModuleInfoExtractor {
         source_span: Span,
     ) {
         let local = s.local.name.to_string();
-        self.record_dompurify_import_binding(source, &local, is_type_only);
+        self.record_whole_module_import_bindings(source, &local, is_type_only);
         if self.is_module_scope() && is_node_path_source(source) {
             self.node_path_namespace_bindings.insert(local.clone());
         }
@@ -2316,7 +2316,7 @@ impl<'a> ModuleInfoExtractor {
 
     /// Record a namespace import specifier (`import * as ns from ...`), tracking
     /// the DOMPurify, `child_process`, `node:path`, and `node:url` provenance
-    /// bindings plus the namespace binding name.
+    /// bindings, the Node module sink binding, and the namespace binding name.
     fn handle_import_namespace_specifier(
         &mut self,
         s: &ImportNamespaceSpecifier<'a>,
@@ -2325,7 +2325,7 @@ impl<'a> ModuleInfoExtractor {
         source_span: Span,
     ) {
         let local = s.local.name.to_string();
-        self.record_dompurify_import_binding(source, &local, is_type_only);
+        self.record_whole_module_import_bindings(source, &local, is_type_only);
         if self.is_module_scope() && is_child_process_source(source) {
             self.child_process_namespace_bindings.insert(local.clone());
         }

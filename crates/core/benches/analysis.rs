@@ -1581,6 +1581,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
             source: "fs".to_string(),
             span: oxc_span::Span::new(950, 970),
             destructured_names: vec![],
+            destructured_locals: Vec::new(),
             local_name: None,
             source_span: oxc_span::Span::default(),
             is_type_only: false,

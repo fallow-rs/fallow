@@ -386,6 +386,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
             span: span(),
             source_span: span(),
             destructured_names: Vec::new(),
+            destructured_locals: Vec::new(),
             local_name: Some("required".to_string()),
             is_type_only: false,
         }],

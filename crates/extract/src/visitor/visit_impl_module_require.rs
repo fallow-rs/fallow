@@ -226,6 +226,7 @@ impl ModuleInfoExtractor {
                 span: expr.span,
                 source_span: lit.span,
                 destructured_names: Vec::new(),
+                destructured_locals: Vec::new(),
                 local_name: None,
                 is_type_only: false,
             });
