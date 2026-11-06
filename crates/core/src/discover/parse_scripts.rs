@@ -449,7 +449,7 @@ mod tests {
         );
         assert_eq!(refs("my-cli app/a.js --engine node"), vec!["app/a.js"]);
         assert_eq!(
-            refs("run scripts/deno app/a.ts app/b.ts"),
+            refs("launch scripts/deno app/a.ts app/b.ts"),
             vec!["app/a.ts", "app/b.ts"]
         );
         assert_eq!(

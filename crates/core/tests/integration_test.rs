@@ -381,6 +381,8 @@ mod workspace_internal_deps;
 #[path = "integration_test/workspace_plugin_aliases.rs"]
 mod workspace_plugin_aliases;
 
+#[path = "integration_test/ci_action_command_inputs.rs"]
+mod ci_action_command_inputs;
 #[path = "integration_test/ci_bun_file_runner.rs"]
 mod ci_bun_file_runner;
 #[path = "integration_test/ci_working_directory.rs"]
@@ -774,3 +776,5 @@ mod webpack_alias_replacement;
 mod webpack_inline_loaders;
 #[path = "integration_test/workspace_resolution_without_install.rs"]
 mod workspace_resolution_without_install;
+#[path = "integration_test/yarn_run_top_level_jest.rs"]
+mod yarn_run_top_level_jest;

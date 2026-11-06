@@ -13,6 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[path = "ci_references.rs"]
 mod references;
 
+use super::ci_action_inputs::StepActionInputs;
 use super::shell_helpers::HelperBase;
 use super::{
     IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
@@ -260,7 +261,7 @@ fn parse_working_directory(raw: &str) -> Vec<Segment> {
     dir
 }
 
-fn unquote(value: &str) -> &str {
+pub(super) fn unquote(value: &str) -> &str {
     ['"', '\'']
         .iter()
         .find_map(|quote| {
@@ -489,7 +490,7 @@ pub(super) struct CiCommand {
 
 /// Extract the shell commands of a CI file with their working directories.
 /// See [`extract_ci_commands`] for the recognized command forms.
-fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
+pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
     let mut commands = Vec::new();
     let mut multiline_run = MultilineRunState::default();
     let mut scope = WorkingDirectoryScope::default();
@@ -512,7 +513,7 @@ fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
             continue;
         }
 
-        scope.observe(line, trimmed, &mut commands);
+        scope.observe(line, line_index, trimmed, &mut commands);
         let default_dir = scope.default_dir();
 
         if let Some(rest) = yaml_run_value(trimmed) {
@@ -558,6 +559,7 @@ struct OpenStep {
     /// Step `env` variables whose whole value is a workspace anchor
     /// (`NAME: ${{ github.action_path }}`), with that anchor.
     anchor_aliases: Vec<(String, String)>,
+    action_inputs: StepActionInputs,
 }
 
 struct PendingDefaults {
@@ -570,7 +572,13 @@ impl WorkingDirectoryScope {
         self.defaults.last().map(|(_, dir)| dir.clone())
     }
 
-    fn observe(&mut self, line: &str, trimmed: &str, commands: &mut [CiCommand]) {
+    fn observe(
+        &mut self,
+        line: &str,
+        line_index: usize,
+        trimmed: &str,
+        commands: &mut Vec<CiCommand>,
+    ) {
         let indent = line.len() - line.trim_start().len();
         let column = run_key_column(line, trimmed);
         let item = trimmed.strip_prefix("- ").map(str::trim_start);
@@ -599,12 +607,15 @@ impl WorkingDirectoryScope {
                 working_directory: None,
                 env_column: None,
                 anchor_aliases: Vec::new(),
+                action_inputs: StepActionInputs::default(),
             });
         }
 
         let key = item.unwrap_or(trimmed);
         if let Some(step) = &mut self.step {
             step.observe_env(column, indent, key);
+            step.action_inputs
+                .observe(step.column, column, indent, key, line_index);
         }
         if let Some(value) = strip_yaml_key(key, "working-directory") {
             self.set_working_directory(column, indent, value.trim());
@@ -650,10 +661,11 @@ impl WorkingDirectoryScope {
         }
     }
 
-    fn close_step(&mut self, commands: &mut [CiCommand]) {
+    fn close_step(&mut self, commands: &mut Vec<CiCommand>) {
         let Some(step) = self.step.take() else {
             return;
         };
+        let action_commands = step.action_inputs.into_commands();
         for command in commands.iter_mut().skip(step.first_command) {
             if let Some(dir) = &step.working_directory {
                 command.working_directory = Some(dir.clone());
@@ -664,6 +676,7 @@ impl WorkingDirectoryScope {
                 }
             }
         }
+        commands.extend(action_commands);
     }
 }
 
@@ -696,7 +709,7 @@ impl OpenStep {
 }
 
 /// `text` without a trailing ` # comment`.
-fn strip_yaml_comment(text: &str) -> &str {
+pub(super) fn strip_yaml_comment(text: &str) -> &str {
     text.split_once(" #")
         .map_or(text, |(value, _)| value)
         .trim_end()

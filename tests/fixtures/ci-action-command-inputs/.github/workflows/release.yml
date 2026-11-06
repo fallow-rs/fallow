@@ -1,0 +1,19 @@
+name: Release
+on:
+  push:
+    branches: [main]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release pull request or publish
+        uses: changesets/action@v1
+        with:
+          commit: "chore(release): version packages"
+          version: node .github/changeset-version.js
+          publish: node .github/changeset-publish.js
+      - name: Other action
+        uses: some/other-action@v2
+        with:
+          script: node .github/not-a-command.js

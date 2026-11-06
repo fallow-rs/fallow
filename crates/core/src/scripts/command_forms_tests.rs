@@ -792,3 +792,66 @@ fn npm_include_workspace_root_adds_the_root_to_a_workspace_selection() {
         "the flag without a workspace selection runs in the calling package"
     );
 }
+
+#[test]
+fn yarn_run_flags_keep_the_jest_config_of_the_binary() {
+    for command in [
+        "run -T jest --config ./jest.config.front.js",
+        "run --top-level jest --config ./jest.config.front.js",
+        "run -B jest --config ./jest.config.front.js",
+        "yarn run -T jest --config ./jest.config.front.js",
+        "yarn run --binaries-only jest --config ./jest.config.front.js",
+        "yarn run --inspect jest --config ./jest.config.front.js",
+        "yarn run --require ./hook.js jest --config ./jest.config.front.js",
+    ] {
+        let result = analyze(command, &[], &["jest"]);
+        let pairs: Vec<(&str, &str)> = result
+            .binary_config_files
+            .iter()
+            .map(|file| (file.binary.as_str(), file.path.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("jest", "./jest.config.front.js")],
+            "`{command}`"
+        );
+        assert!(
+            result.used_packages.contains("jest"),
+            "`{command}` did not credit jest: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[test]
+fn bare_yarn_run_of_a_declared_script_follows_the_script() {
+    let scripts = [("check", "eslint src/a.ts")];
+    let result = analyze("run check", &scripts, &["eslint"]);
+    assert!(
+        result.used_packages.is_empty() && result.entry_files.is_empty(),
+        "{:?} {:?}",
+        result.used_packages,
+        result.entry_files
+    );
+}
+
+#[test]
+fn yarn_run_top_level_and_binaries_only_skip_a_local_script_of_that_name() {
+    let scripts = [("jest", "echo local")];
+    for command in [
+        "run -T jest --config ./jest.config.front.js",
+        "yarn run --binaries-only jest --config ./jest.config.front.js",
+    ] {
+        let result = analyze(command, &scripts, &["jest"]);
+        let pairs: Vec<(&str, &str)> = result
+            .binary_config_files
+            .iter()
+            .map(|file| (file.binary.as_str(), file.path.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("jest", "./jest.config.front.js")],
+            "`{command}`"
+        );
+    }
+}
