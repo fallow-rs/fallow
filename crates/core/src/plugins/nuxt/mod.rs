@@ -26,6 +26,10 @@ use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, PropertyKey
 
 use super::{Plugin, PluginResult, config_parser, has_glob_syntax};
 
+mod dirs;
+
+use dirs::{add_nuxt_dir_entries, add_src_dir_support, default_nuxt_src_dir, extract_nuxt_src_dir};
+
 const ENABLERS: &[&str] = &["nuxt"];
 
 /// Directories Nuxt auto-imports components from, relative to the project root.
@@ -120,20 +124,6 @@ const ENTRY_PATTERNS: &[&str] = &[
     "app/modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
 ];
 
-const SRC_DIR_ENTRY_PATTERNS: &[&str] = &[
-    "pages/**/*.{vue,ts,tsx,js,jsx}",
-    "layouts/**/*.{vue,ts,tsx,js,jsx}",
-    "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "components/**/*.{vue,ts,tsx,js,jsx}",
-    "components/global/**/*.{vue,ts,tsx,js,jsx}",
-    "components/**/*.global.{vue,ts,tsx,js,jsx}",
-];
-
 /// Directories that `@nuxt/content` registers as global components, relative
 /// to the project root and to each local layer. Markdown content renders these
 /// components, and fallow does not read Markdown, so each file is an entry
@@ -173,7 +163,6 @@ const ALWAYS_USED: &[&str] = &[
     "src/module.{ts,js}",
 ];
 
-const SRC_DIR_ALWAYS_USED: &[&str] = &["app.vue", "app.config.{ts,js}", "error.vue"];
 const COMPONENT_ENTRY_GLOB: &str = "vue,ts,tsx,js,jsx";
 const SCRIPT_ENTRY_GLOB: &str = "ts,js,mts,cts,mjs,cjs";
 const SCRIPT_ENTRY_EXTENSIONS: &[&str] = &["ts", "js", "mts", "cts", "mjs", "cjs"];
@@ -243,19 +232,6 @@ const DEFAULT_EXPORT_ENTRY_PATTERNS: &[&str] = &[
     "app/app.vue",
     "app/app.config.{ts,js}",
     "app/error.vue",
-];
-
-const SRC_DIR_DEFAULT_EXPORT_PATTERNS: &[&str] = &[
-    "pages/**/*.{vue,ts,tsx,js,jsx}",
-    "layouts/**/*.{vue,ts,tsx,js,jsx}",
-    "components/**/*.{vue,ts,tsx,js,jsx}",
-    "modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
 ];
 
 /// Virtual module prefixes provided by Nuxt at build time.
@@ -425,6 +401,7 @@ fn resolve_nuxt_main_config(
     ));
     add_nuxt_plugin_entries(result, plugins, config_path, root, &src_dir);
 
+    add_nuxt_dir_entries(result, source, config_path, root, &src_dir);
     add_nuxt_aliases(result, source, config_path, root, &src_dir);
     add_nuxt_import_dirs(result, source, config_path, root, &src_dir);
 
@@ -910,14 +887,6 @@ fn add_module_runtime_patterns(result: &mut PluginResult, root: &Path) {
     }
 }
 
-fn default_nuxt_src_dir(root: &Path) -> PathBuf {
-    if root.join("app").is_dir() {
-        PathBuf::from("app")
-    } else {
-        PathBuf::new()
-    }
-}
-
 /// The package names that the `extends` lists of `root` and of its local
 /// layers name, such as `@acme/ui` for a layer that a workspace package holds.
 /// Remote sources such as `github:` entries give a name that matches no
@@ -951,45 +920,6 @@ fn is_local_path(entry: &str) -> bool {
         || entry.starts_with("@@/")
         || entry.starts_with('.')
         || entry.starts_with('/')
-}
-
-fn extract_nuxt_src_dir(source: &str, config_path: &Path, root: &Path) -> Option<PathBuf> {
-    let raw = config_parser::extract_config_path(source, config_path, &["srcDir"])?;
-    normalize_nuxt_src_dir(&raw, config_path, root)
-}
-
-fn normalize_nuxt_src_dir(raw: &Path, config_path: &Path, root: &Path) -> Option<PathBuf> {
-    let raw_string = config_parser::path_to_config_string(raw);
-    let trimmed = raw_string.trim().trim_end_matches('/');
-    if trimmed.is_empty() || trimmed == "." {
-        return Some(PathBuf::new());
-    }
-    config_parser::normalize_config_path_buf(
-        config_parser::path_from_config_string(trimmed),
-        config_path,
-        root,
-    )
-}
-
-fn add_src_dir_support(result: &mut PluginResult, src_dir: &Path) {
-    let src_dir_string = config_parser::path_to_config_string(src_dir);
-    result
-        .path_aliases
-        .push(("~/".to_string(), src_dir_string.clone()));
-    result.path_aliases.push(("@/".to_string(), src_dir_string));
-
-    if src_dir.as_os_str().is_empty() {
-        return;
-    }
-
-    result.extend_entry_patterns(
-        SRC_DIR_ENTRY_PATTERNS
-            .iter()
-            .map(|pattern| prefix_with_src_dir(src_dir, pattern)),
-    );
-    extend_prefixed_patterns(&mut result.always_used_files, src_dir, SRC_DIR_ALWAYS_USED);
-    add_prefixed_default_used_exports(result, src_dir, SRC_DIR_DEFAULT_EXPORT_PATTERNS);
-    add_prefixed_default_used_exports(result, src_dir, SRC_DIR_ALWAYS_USED);
 }
 
 fn add_default_used_export(result: &mut PluginResult, pattern: impl Into<String>) {
@@ -2032,14 +1962,18 @@ static IMPORTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::
 mod tests {
     use super::*;
 
-    fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
+    pub(super) fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
         result
             .entry_patterns
             .iter()
             .any(|entry_pattern| entry_pattern.pattern == pattern)
     }
 
-    fn has_used_export_rule(result: &PluginResult, pattern: &str, exports: &[&str]) -> bool {
+    pub(super) fn has_used_export_rule(
+        result: &PluginResult,
+        pattern: &str,
+        exports: &[&str],
+    ) -> bool {
         result.used_exports.iter().any(|rule| {
             rule.path.pattern == pattern
                 && exports
