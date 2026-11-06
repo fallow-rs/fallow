@@ -6,6 +6,7 @@
 //! [`crate::run_mutation`] and [`crate::plan_mutation`].
 
 pub(crate) mod companion;
+pub(crate) mod companion_temp;
 pub(crate) mod discovery;
 pub(crate) mod journal;
 pub(crate) mod kill_matrix;
