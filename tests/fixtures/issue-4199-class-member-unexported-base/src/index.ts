@@ -1,5 +1,6 @@
 import { DeepTable, LocalTable } from "./tables.js";
 import { Floor } from "./floor.js";
+import { Deploy } from "./deploy.js";
 
 class LocalFloor {
   private readonly table = new LocalTable();
@@ -64,3 +65,5 @@ export class ArgViewer extends Floor {
     this.findBy(0)?.lock();
   }
 }
+
+new Deploy().start();

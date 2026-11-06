@@ -448,6 +448,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
             instance_bindings: Vec::new(),
             super_class_type_args: Vec::new(),
             generic_instance_bindings: Vec::new(),
+            binding_super_class: None,
         }],
         exported_factory_returns: std::sync::Arc::from([FactoryReturnExport {
             export_name: "useApi".to_string(),

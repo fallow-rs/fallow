@@ -45,6 +45,7 @@ impl ModuleInfoExtractor {
                     instance_bindings: local_class.instance_bindings.clone(),
                     super_class_type_args: local_class.super_class_type_args.clone(),
                     generic_instance_bindings: local_class.generic_instance_bindings.clone(),
+                    binding_super_class: None,
                 });
             }
         }
@@ -54,8 +55,11 @@ impl ModuleInfoExtractor {
     /// the heritage of its exported subclasses (issue #4199). The analysis
     /// finds a base class through its export key, so a class without an
     /// export name stops the walk up the `extends` chain. The subclass takes
-    /// the instance bindings of the base (its own bindings win) and continues
-    /// at the base's own `extends` target, at any depth.
+    /// the instance bindings of the base (its own bindings win). The walk for
+    /// inherited bindings continues at the base's own `extends` target, at any
+    /// depth, through `binding_super_class`. The declared `super_class` stays,
+    /// because the scoped `usedClassMembers` rules and the framework base
+    /// checks match the declared name.
     ///
     /// A generic base stops the fold, because its bindings need the type
     /// arguments of the subclass. A name that the file also imports or
@@ -77,7 +81,10 @@ impl ModuleInfoExtractor {
 
         for heritage in &mut self.class_heritage {
             let mut visited: FxHashSet<String> = FxHashSet::default();
-            while let Some(base_name) = heritage.super_class.clone() {
+            let mut next = heritage.super_class.clone();
+            let mut next_type_args = heritage.super_class_type_args.clone();
+            let mut folded = false;
+            while let Some(base_name) = next.clone() {
                 if exported_locals.contains(base_name.as_str())
                     || imported_locals.contains(base_name.as_str())
                     || !visited.insert(base_name.clone())
@@ -105,10 +112,12 @@ impl ModuleInfoExtractor {
                             .push((field.clone(), type_name.clone()));
                     }
                 }
-                heritage.super_class.clone_from(&base.super_class);
-                heritage
-                    .super_class_type_args
-                    .clone_from(&base.super_class_type_args);
+                folded = true;
+                next.clone_from(&base.super_class);
+                next_type_args.clone_from(&base.super_class_type_args);
+            }
+            if folded && let Some(outer) = next {
+                heritage.binding_super_class = Some((outer, next_type_args));
             }
         }
     }

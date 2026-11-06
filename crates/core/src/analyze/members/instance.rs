@@ -190,11 +190,11 @@ fn collect_inherited_bindings(
     }
 
     let mut visited: FxHashSet<ExportKey> = FxHashSet::default();
-    let mut parent_local = child.super_class.clone();
+    let (child_parent, child_type_args) = binding_parent(child);
+    let mut parent_local = child_parent.cloned();
     // Each argument retains the file scope where its concrete name was written.
     // That scope can survive several generic forwarding hops.
-    let mut type_args = child
-        .super_class_type_args
+    let mut type_args = child_type_args
         .iter()
         .map(|name| {
             (!name.is_empty()).then(|| ScopedTypeArgument {
@@ -268,7 +268,7 @@ fn collect_inherited_bindings(
         // class's type parameters forwards the already-composed concrete arg;
         // an ordinary bare name remains scoped to the parent file.
         let next_type_args = compose_super_type_arguments(parent, &type_args, parent_key.file_id);
-        let next_parent_local = parent.super_class.clone();
+        let next_parent_local = binding_parent(parent).0.cloned();
         resolver_file_id = parent_key.file_id;
         type_args = next_type_args;
         parent_local = next_parent_local;
@@ -277,13 +277,25 @@ fn collect_inherited_bindings(
     inherited
 }
 
+/// The `extends` target and its type arguments where the walk for inherited
+/// bindings continues. A file that folds its unexported local base classes
+/// into the heritage records the outer target in `binding_super_class`.
+fn binding_parent(
+    class: &fallow_types::extract::ClassHeritageInfo,
+) -> (Option<&String>, &[String]) {
+    match &class.binding_super_class {
+        Some((name, type_args)) => (Some(name), type_args),
+        None => (class.super_class.as_ref(), &class.super_class_type_args),
+    }
+}
+
 fn compose_super_type_arguments(
     class: &fallow_types::extract::ClassHeritageInfo,
     current: &[Option<ScopedTypeArgument>],
     class_file_id: FileId,
 ) -> Vec<Option<ScopedTypeArgument>> {
-    class
-        .super_class_type_args
+    binding_parent(class)
+        .1
         .iter()
         .map(|name| {
             if name.is_empty() {
@@ -573,6 +585,7 @@ mod tests {
                 "U".to_string(),
             ],
             generic_instance_bindings: Vec::new(),
+            binding_super_class: None,
         };
         let concrete_file = FileId(7);
         let parent_file = FileId(3);

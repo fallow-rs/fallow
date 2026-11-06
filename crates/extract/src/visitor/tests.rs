@@ -17800,8 +17800,10 @@ fn unexported_local_base_class_folds_into_exported_subclass_heritage() {
     // Issue #4199: the analysis finds a base class through its export key.
     // A base class that the file does not export folds into the heritage of
     // the exported subclass, at any depth: the subclass takes the bindings of
-    // the base and continues at the base's own `extends` target. A generic
-    // base and an exported base stay as they are.
+    // the base, and the binding walk continues at the base's own `extends`
+    // target. The declared `super_class` stays for the scoped rules and the
+    // framework base checks. A generic base and an exported base stay as they
+    // are.
     let info = parse(
         r"
         import { Floor } from './floor';
@@ -17842,10 +17844,17 @@ fn unexported_local_base_class_folds_into_exported_subclass_heritage() {
             .map(|(_, type_name)| type_name.clone())
     };
 
-    assert_eq!(heritage("Deep").super_class, None);
+    assert_eq!(heritage("Deep").super_class.as_deref(), Some("Mid"));
+    assert_eq!(heritage("Deep").binding_super_class, None);
     assert_eq!(binding("Deep", "find()").as_deref(), Some("Table"));
     assert_eq!(binding("Deep", "seat()").as_deref(), Some("Table"));
-    assert_eq!(heritage("Chained").super_class.as_deref(), Some("Floor"));
+    assert_eq!(heritage("Chained").super_class.as_deref(), Some("Bridge"));
+    assert_eq!(
+        heritage("Chained").binding_super_class,
+        Some(("Floor".to_string(), Vec::new()))
+    );
     assert_eq!(heritage("Typed").super_class.as_deref(), Some("Generic"));
+    assert_eq!(heritage("Typed").binding_super_class, None);
     assert_eq!(heritage("Child").super_class.as_deref(), Some("Shared"));
+    assert_eq!(heritage("Child").binding_super_class, None);
 }

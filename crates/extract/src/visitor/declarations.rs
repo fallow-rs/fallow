@@ -203,6 +203,7 @@ impl ModuleInfoExtractor {
                 instance_bindings,
                 super_class_type_args: extract_super_class_type_args(class),
                 generic_instance_bindings: extract_class_generic_instance_bindings(class),
+                binding_super_class: None,
             });
         }
         self.exports.push(ExportInfo {
