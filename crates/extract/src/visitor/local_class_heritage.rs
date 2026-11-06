@@ -97,21 +97,7 @@ impl ModuleInfoExtractor {
                 if !base.type_parameters.is_empty() {
                     break;
                 }
-                for (field, type_name) in &base.instance_bindings {
-                    let shadowed = heritage
-                        .instance_bindings
-                        .iter()
-                        .any(|(existing, _)| existing == field)
-                        || heritage
-                            .generic_instance_bindings
-                            .iter()
-                            .any(|(existing, _)| existing == field);
-                    if !shadowed {
-                        heritage
-                            .instance_bindings
-                            .push((field.clone(), type_name.clone()));
-                    }
-                }
+                inherit_base_bindings(heritage, &base.instance_bindings);
                 folded = true;
                 next.clone_from(&base.super_class);
                 next_type_args.clone_from(&base.super_class_type_args);
@@ -119,6 +105,25 @@ impl ModuleInfoExtractor {
             if folded && let Some(outer) = next {
                 heritage.binding_super_class = Some((outer, next_type_args));
             }
+        }
+    }
+}
+
+/// Add each binding of a base class that the subclass does not declare.
+fn inherit_base_bindings(heritage: &mut ClassHeritageInfo, base_bindings: &[(String, String)]) {
+    for (field, type_name) in base_bindings {
+        let shadowed = heritage
+            .instance_bindings
+            .iter()
+            .any(|(existing, _)| existing == field)
+            || heritage
+                .generic_instance_bindings
+                .iter()
+                .any(|(existing, _)| existing == field);
+        if !shadowed {
+            heritage
+                .instance_bindings
+                .push((field.clone(), type_name.clone()));
         }
     }
 }
