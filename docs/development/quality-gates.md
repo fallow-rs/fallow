@@ -252,6 +252,10 @@ Focused integration checks:
 - `cargo test -p fallow-cli --test drift -- --include-ignored` for changes to a finding that the
   CLI, MCP, and `fallow_api` all report. Build `fallow-mcp` first; see the
   [drift contract](drift-contract.md).
+- `cargo test -p fallow-cli --lib architecture_boundaries` for Rust changes
+  that add a `fallow_core::` call to an engine adapter, an `env!` macro, or a
+  new cross-crate import. These source rules are tests of the CLI crate, so a
+  test run of the changed crate does not run them.
 - `npm run check:knowledge-architecture` for docs and routing changes.
 - `npm run check:agent-adapters` for skill or adapter changes.
 - `python3 scripts/check_telemetry_doc_sync.py` when telemetry agent-source

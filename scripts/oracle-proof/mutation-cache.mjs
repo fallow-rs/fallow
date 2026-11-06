@@ -64,6 +64,7 @@ export const mutationCache = {
       test: ["cargo", REGRESSION_TEST],
       env: { ...REQUIRED, FALLOW_MUTATION_CACHE_MODEL_REGRESSIONS: "(#3473)" },
     },
+    { commit: "372d151c4", scope: "every result cache model test", env: REQUIRED },
   ],
   port,
   backports: [],
