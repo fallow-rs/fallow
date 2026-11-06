@@ -159,6 +159,9 @@ impl ModuleInfoExtractor {
     /// name in an outer or sibling scope.
     pub(in crate::visitor) fn class_binding_root_is_shadowed(&self, object: &str) -> bool {
         let root = object.split_once('.').map_or(object, |(root, _)| root);
+        if self.this_result_local_is_shadowed(root) {
+            return true;
+        }
         self.nested_declaration_stack
             .iter()
             .rposition(|scope| scope.contains(root))
@@ -185,9 +188,11 @@ impl ModuleInfoExtractor {
     }
 
     /// A class binding under the root of `binding` disproves the shadow that
-    /// the declaring scope recorded for the root.
+    /// the declaring scope recorded for the root. It also rebinds a `this`
+    /// result local with the name of the root in the current frame.
     fn clear_non_instance_binding(&mut self, binding: &str) {
         let root = binding.split_once('.').map_or(binding, |(root, _)| root);
+        self.mark_this_result_local_rebound(root);
         if let Some(index) = self
             .nested_declaration_stack
             .iter()
@@ -806,6 +811,7 @@ impl ModuleInfoExtractor {
         self.scoped_direct_object_binding_targets.pop();
         self.scoped_direct_object_binding_generations.pop();
         self.scoped_direct_object_binding_paths_by_root.pop();
+        self.close_this_result_local_frames(self.scoped_direct_object_binding_roots.len());
     }
 
     pub(super) fn record_direct_object_binding_scope_roots(
