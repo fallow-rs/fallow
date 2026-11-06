@@ -1,6 +1,7 @@
 mod callee_uses;
 mod declarations;
 mod helpers;
+mod local_class_heritage;
 mod remap;
 mod requirements;
 mod ssr_load_module;
@@ -2403,49 +2404,6 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn enrich_local_class_exports(&mut self) {
-        if self.local_class_exports.is_empty() {
-            return;
-        }
-
-        for export in &mut self.exports {
-            let Some(local_name) = export.local_name.as_deref() else {
-                continue;
-            };
-            let Some(local_class) = self.local_class_exports.get(local_name) else {
-                continue;
-            };
-
-            if export.members.is_empty() {
-                export.members = local_class.members.clone();
-            }
-            if export.super_class.is_none() {
-                export.super_class = local_class.super_class.clone();
-            }
-
-            let export_name = export.name.to_string();
-            let already_has_heritage = self
-                .class_heritage
-                .iter()
-                .any(|heritage| heritage.export_name == export_name);
-            if !already_has_heritage
-                && (local_class.super_class.is_some()
-                    || !local_class.implemented_interfaces.is_empty()
-                    || !local_class.instance_bindings.is_empty())
-            {
-                self.class_heritage.push(ClassHeritageInfo {
-                    export_name,
-                    super_class: local_class.super_class.clone(),
-                    implements: local_class.implemented_interfaces.clone(),
-                    type_parameters: local_class.type_parameters.clone(),
-                    instance_bindings: local_class.instance_bindings.clone(),
-                    super_class_type_args: local_class.super_class_type_args.clone(),
-                    generic_instance_bindings: local_class.generic_instance_bindings.clone(),
-                });
-            }
-        }
-    }
-
     fn record_exported_instance_bindings(&mut self) {
         if self.binding_target_names.is_empty() {
             return;
@@ -3608,6 +3566,7 @@ impl ModuleInfoExtractor {
         self.resolve_pending_local_export_specifiers();
         self.resolve_native_html_element_aliases();
         self.enrich_local_class_exports();
+        self.lift_unexported_local_base_classes();
         self.enrich_store_exports();
         self.finalize_di_key_sites();
         // Before `record_exported_instance_bindings` / `resolve_object_binding_candidates`,

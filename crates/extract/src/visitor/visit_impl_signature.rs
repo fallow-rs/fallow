@@ -703,9 +703,11 @@ impl ModuleInfoExtractor {
     /// `old?.deactivate?.()` then credits `Tool.deactivate`, as the direct
     /// `this.current()?.deactivate?.()` does (issue #4033).
     ///
-    /// Only a call with no arguments directly on `this` gives a binding. A
-    /// cast (`as`), a call with arguments, and a call in a function with its
-    /// own `this` give no binding.
+    /// Only a call directly on `this` gives a binding. The arguments do not
+    /// change the binding: `this.findBy(1)` binds to the return type of
+    /// `findBy`, as the direct `this.findBy(1)?.reset()` does (issue #4199).
+    /// A cast (`as`) and a call in a function with its own `this` give no
+    /// binding.
     pub(super) fn record_this_method_result_alias(
         &mut self,
         declarator: &VariableDeclarator<'_>,
@@ -1144,10 +1146,11 @@ impl<'a> Visit<'a> for ReturnedValueCollector<'_, '_, '_> {
     fn visit_class(&mut self, _class: &Class<'a>) {}
 }
 
-/// The method name of a call with no arguments on `this`: `current` for
-/// `this.current()` or `this.current?.()`, `#current` for `this.#current()`.
-/// Parentheses and a non-null assertion around the call are transparent. Any
-/// other expression, a cast included, gives `None`.
+/// The method name of a call on `this`: `current` for `this.current()`,
+/// `this.current?.()` or `this.current(1)`, `#current` for `this.#current()`.
+/// The arguments do not change the name. Parentheses and a non-null assertion
+/// around the call are transparent. Any other expression, a cast included,
+/// gives `None`.
 fn this_method_call_name(init: &Expression<'_>) -> Option<String> {
     let mut expr = init;
     let call = loop {
@@ -1162,9 +1165,6 @@ fn this_method_call_name(init: &Expression<'_>) -> Option<String> {
             _ => return None,
         }
     };
-    if !call.arguments.is_empty() {
-        return None;
-    }
     match &call.callee {
         Expression::StaticMemberExpression(member)
             if matches!(member.object, Expression::ThisExpression(_)) =>

@@ -710,6 +710,8 @@ mod issue_4183_inherited_this_method_result_member;
 mod issue_4184_method_call_arguments_chain_member;
 #[path = "integration_test/issue_4198_shadowed_this_method_result_local.rs"]
 mod issue_4198_shadowed_this_method_result_local;
+#[path = "integration_test/issue_4199_class_member_unexported_base.rs"]
+mod issue_4199_class_member_unexported_base;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
