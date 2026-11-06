@@ -134,6 +134,12 @@ pub struct ResolvedProject {
     /// find. A file that appears at one of them can change a resolution, so
     /// the graph cache stores them (see [`crate::missed_probes`]).
     pub missed_probes: crate::missed_probes::MissedProbes,
+    /// The package manifests below `node_modules` that the resolution read,
+    /// sorted. A path above the root has `../` steps. The graph cache keys
+    /// the versions of the Bun installs among them (see
+    /// [`crate::installed_versions`]). Empty for a project restored from the
+    /// graph cache.
+    pub package_manifests: Vec<String>,
 }
 
 /// One project-internal module replacement resolved from its declaring source file.

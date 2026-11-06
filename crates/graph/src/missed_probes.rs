@@ -19,6 +19,9 @@
 //! The existence checks follow symlinks, as the resolver does, so a dangling
 //! symlink counts as a missing path. Paths outside the project root are not
 //! recorded, which includes a workspace package outside the root.
+//!
+//! The recorder also collects each package manifest below `node_modules` that
+//! the resolver read, for [`crate::installed_versions`].
 
 use std::collections::BTreeMap;
 use std::io;
@@ -41,6 +44,9 @@ struct Active {
     scopes: Vec<PathBuf>,
     /// Root-relative missed paths.
     paths: DashSet<PathBuf, FxBuildHasher>,
+    /// Read package manifests below `node_modules`, spelled as
+    /// [`crate::installed_versions::manifest_key`] gives them.
+    package_manifests: DashSet<String, FxBuildHasher>,
 }
 
 /// Collects the missed paths below one project root until [`Self::finish`].
@@ -66,23 +72,39 @@ impl MissRecorder {
                 id,
                 scopes,
                 paths: DashSet::with_hasher(FxBuildHasher),
+                package_manifests: DashSet::with_hasher(FxBuildHasher),
             });
         OPEN.fetch_add(1, Ordering::SeqCst);
         Self { id }
     }
 
-    /// Stop the recorder and return the missed paths.
-    pub(crate) fn finish(self) -> MissedProbes {
+    /// Stop the recorder and return the missed paths and the read package
+    /// manifests.
+    pub(crate) fn finish(self) -> RecordedProbes {
         let Some(active) = remove(self.id) else {
-            return MissedProbes::default();
+            return RecordedProbes::default();
         };
         let paths: Vec<String> = active
             .paths
             .into_iter()
             .map(|path| portable(&path))
             .collect();
-        MissedProbes::from_paths(paths)
+        let mut package_manifests: Vec<String> = active.package_manifests.into_iter().collect();
+        package_manifests.sort_unstable();
+        RecordedProbes {
+            missed: MissedProbes::from_paths(paths),
+            package_manifests,
+        }
     }
+}
+
+/// What one [`MissRecorder`] collected.
+#[derive(Debug, Default)]
+pub(crate) struct RecordedProbes {
+    pub(crate) missed: MissedProbes,
+    /// Sorted, spelled as [`crate::installed_versions::manifest_key`] gives
+    /// them.
+    pub(crate) package_manifests: Vec<String>,
 }
 
 /// Root-relative missed paths, grouped by their parent directory.
@@ -226,6 +248,32 @@ pub(crate) fn note_if_missing<T>(path: &Path, result: &io::Result<T>) {
     }
 }
 
+/// Report a read of `path`: a missing path as a missed probe, and a read
+/// package manifest below `node_modules` for
+/// [`crate::installed_versions`].
+pub(crate) fn note_read<T>(path: &Path, result: &io::Result<T>) {
+    if result.is_ok() {
+        note_package_manifest(path);
+    } else {
+        note_if_missing(path, result);
+    }
+}
+
+fn note_package_manifest(path: &Path) {
+    if OPEN.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let recorders = RECORDERS.read().unwrap_or_else(|e| e.into_inner());
+    for active in recorders.iter() {
+        let Some(key) = crate::installed_versions::manifest_key(&active.scopes, path) else {
+            continue;
+        };
+        if !active.package_manifests.contains(&key) {
+            active.package_manifests.insert(key);
+        }
+    }
+}
+
 /// The root-relative spelling of `path`, with forward slashes, when it is
 /// below `root` and not below `node_modules`.
 #[must_use]
@@ -268,7 +316,7 @@ pub(crate) fn any_missing(root: &Path, found: &[String]) -> bool {
 
 /// Below this number of entries, a check runs on the calling thread: the
 /// rayon pool costs more than a few `stat` calls.
-const PARALLEL_MIN: usize = 64;
+pub(crate) const PARALLEL_MIN: usize = 64;
 
 #[cfg(test)]
 mod tests {
@@ -301,7 +349,7 @@ mod tests {
         note(&root.join("node_modules/pkg/index.js"));
         note(&temp.path().join("outside.ts"));
         note(Path::new("relative.ts"));
-        let missed: Vec<String> = recorder.finish().paths().collect();
+        let missed: Vec<String> = recorder.finish().missed.paths().collect();
         assert_eq!(missed, vec!["src/util".to_string()]);
     }
 
@@ -365,7 +413,35 @@ mod tests {
         note_if_missing(&below_file, &std::fs::metadata(&below_file));
         let absent = root.join("absent.ts");
         note_if_missing(&absent, &std::fs::metadata(&absent));
-        let missed: Vec<String> = recorder.finish().paths().collect();
+        let missed: Vec<String> = recorder.finish().missed.paths().collect();
         assert_eq!(missed, vec!["absent.ts".to_string()]);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn records_read_package_manifests_below_node_modules() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let recorder = MissRecorder::start(&root);
+        let found: io::Result<()> = Ok(());
+        let lost: io::Result<()> = Err(io::ErrorKind::NotFound.into());
+        note_read(&root.join("node_modules/a/package.json"), &found);
+        note_read(&root.join("node_modules/a/package.json"), &found);
+        note_read(&temp.path().join("node_modules/b/package.json"), &found);
+        note_read(&root.join("package.json"), &found);
+        note_read(&root.join("node_modules/c/package.json"), &lost);
+        let recorded = recorder.finish();
+        assert_eq!(
+            recorded.package_manifests,
+            vec![
+                "../node_modules/b/package.json".to_string(),
+                "node_modules/a/package.json".to_string(),
+            ]
+        );
+        assert!(
+            recorded.missed.is_empty(),
+            "a miss below node_modules is not recorded"
+        );
     }
 }

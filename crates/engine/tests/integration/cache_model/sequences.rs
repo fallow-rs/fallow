@@ -96,6 +96,16 @@ const REGRESSIONS: &[Regression] = &[
         steps: &[Step::ToggleBunInstall],
     },
     Regression {
+        name: "bun hoisted version with the same lockfile (#4197)",
+        template: &BUN,
+        steps: &[Step::SwapBunHoistedVersion, Step::SwapBunHoistedVersion],
+    },
+    Regression {
+        name: "deno install with the same lockfile (#4197)",
+        template: &DENO,
+        steps: &[Step::ToggleDenoInstall, Step::ToggleDenoInstall],
+    },
+    Regression {
         name: "same-length clone edit with the old modification time",
         template: &NODE,
         steps: &[Step::EditClone { keep_mtime: true }],

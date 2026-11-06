@@ -34,13 +34,14 @@ use super::templates::{BUN, DENO, NODE, Step, Template, apply};
 /// The files that a package manager rewrites on each install, relative to
 /// the directory that holds `node_modules`. This is the model of an install,
 /// so it is written out here and not taken from the code under test.
-const INSTALL_STATE_FILES: [&str; 10] = [
+const INSTALL_STATE_FILES: [&str; 11] = [
     "package-lock.json",
     "npm-shrinkwrap.json",
     "pnpm-lock.yaml",
     "yarn.lock",
     "bun.lock",
     "bun.lockb",
+    "deno.lock",
     "node_modules/.package-lock.json",
     "node_modules/.pnpm/lock.yaml",
     "node_modules/.yarn-state.yml",
@@ -387,7 +388,7 @@ fn graph_cache_key_covers_bun_reads() {
 
 #[test]
 fn graph_cache_key_covers_deno_reads() {
-    assert_key_covers_read_set("deno project", &DENO, &[]);
+    assert_key_covers_read_set("deno project", &DENO, &[Step::ToggleDenoInstall]);
 }
 
 #[test]

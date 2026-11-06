@@ -12,7 +12,10 @@
 //! targets too. A walk of `node_modules` costs too much, so the hash reads the
 //! lockfile and the install marker that the package manager writes on each
 //! install. Bun writes no install marker, so for a Bun project the hash reads
-//! the package names at the top level of `node_modules`.
+//! the package names at the top level of `node_modules`. Deno writes no
+//! install marker either, so the hash reads the entry names of the Deno
+//! store in `node_modules/.deno`. The graph cache payload keys the versions of
+//! hoisted Bun packages (see `fallow_graph::installed_versions`).
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -51,6 +54,7 @@ const INSTALL_STATE_FILES: &[&str] = &[
     "yarn.lock",
     "bun.lock",
     "bun.lockb",
+    "deno.lock",
     "node_modules/.package-lock.json",
     "node_modules/.pnpm/lock.yaml",
     "node_modules/.yarn-state.yml",
@@ -67,6 +71,11 @@ const BUN_LOCKFILES: &[&str] = &["bun.lock", "bun.lockb"];
 /// The directory in `node_modules` where the isolated linker of Bun puts one
 /// `<name>@<version>` directory for each installed package.
 const BUN_STORE_DIR: &str = ".bun";
+
+/// The directory in `node_modules` where Deno, with a `nodeModulesDir`
+/// setting, puts one `<name>@<version>` directory for each installed npm
+/// package. The top-level entries of `node_modules` are links into it.
+const DENO_STORE_DIR: &str = ".deno";
 
 /// Hash the workspace `(name, root)` pairs and the content of every resolver
 /// input file. Every path is spelled relative to `root`, so a copy of the
@@ -123,6 +132,13 @@ pub fn resolution_inputs_hash(
         listing.hash(&mut hasher);
     }
 
+    let mut deno_listings = deno_store_listings(root, workspaces);
+    deno_listings.sort_unstable();
+    deno_listings.len().hash(&mut hasher);
+    for listing in &deno_listings {
+        listing.hash(&mut hasher);
+    }
+
     hasher.finish()
 }
 
@@ -167,6 +183,32 @@ fn bun_install_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(Strin
             let node_modules = dir.join("node_modules");
             let names = node_modules_package_names(&node_modules)?;
             Some((portable_key(root, &node_modules), names))
+        })
+        .collect()
+}
+
+/// Return `(path, entry names)` for each Deno store `node_modules/.deno` at
+/// the project root, at a workspace root, or above the root.
+///
+/// A Deno install into an existing `node_modules` does not change
+/// `deno.lock` when the lockfile already lists the package. Each store entry
+/// name holds the package name and version, so the names key an install, a
+/// removal and a version change. Dot entries are Deno state files, such as
+/// `.deno.lock` and `.setup-cache.bin`, so the list skips them.
+fn deno_store_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, Vec<String>)> {
+    let dirs: FxHashSet<&Path> = std::iter::once(root)
+        .chain(workspaces.iter().map(|ws| ws.root.as_path()))
+        .chain(root.ancestors().skip(1))
+        .collect();
+    dirs.into_iter()
+        .filter_map(|dir| {
+            let store = dir.join("node_modules").join(DENO_STORE_DIR);
+            let mut names: Vec<String> = dir_entry_names(&store)?
+                .into_iter()
+                .filter(|name| !name.starts_with('.'))
+                .collect();
+            names.sort_unstable();
+            Some((portable_key(root, &store), names))
         })
         .collect()
 }
@@ -440,6 +482,64 @@ mod tests {
             resolution_inputs_hash(&root, &[], &[]),
             scoped,
             "a package in the isolated store must change it"
+        );
+    }
+
+    #[test]
+    fn deno_lockfile_of_root_workspace_and_parent_keys_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo/app");
+        let workspace_root = root.join("packages/ui");
+        let workspaces = vec![WorkspaceInfo {
+            root: workspace_root.clone(),
+            name: "ui".to_string(),
+            is_internal_dependency: false,
+        }];
+        let lockfiles = [
+            root.join("deno.lock"),
+            workspace_root.join("deno.lock"),
+            temp.path().join("repo/deno.lock"),
+        ];
+        for lockfile in &lockfiles {
+            write(lockfile, r#"{"version":"5"}"#);
+        }
+        let mut previous = resolution_inputs_hash(&root, &workspaces, &[]);
+        for lockfile in &lockfiles {
+            write(lockfile, r#"{"version":"5","npm":{"ms@2.1.3":{}}}"#);
+            let next = resolution_inputs_hash(&root, &workspaces, &[]);
+            assert_ne!(next, previous, "{} must key the hash", lockfile.display());
+            previous = next;
+        }
+    }
+
+    #[test]
+    fn deno_store_entries_key_the_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("repo");
+        let store = root.join("node_modules/.deno");
+        write(&store.join("ms@2.1.3/node_modules/ms/package.json"), "{}");
+        write(&store.join(".deno.lock"), "");
+        let initial = resolution_inputs_hash(&root, &[], &[]);
+
+        write(&store.join(".setup-cache.bin"), "state");
+        assert_eq!(
+            resolution_inputs_hash(&root, &[], &[]),
+            initial,
+            "a Deno state file in the store must keep the hash"
+        );
+
+        std::fs::rename(store.join("ms@2.1.3"), store.join("ms@2.1.2")).expect("rename");
+        let downgraded = resolution_inputs_hash(&root, &[], &[]);
+        assert_ne!(downgraded, initial, "a version change must change it");
+
+        write(
+            &store.join("chalk@5.6.2/node_modules/chalk/package.json"),
+            "{}",
+        );
+        assert_ne!(
+            resolution_inputs_hash(&root, &[], &[]),
+            downgraded,
+            "a new package in the store must change it"
         );
     }
 

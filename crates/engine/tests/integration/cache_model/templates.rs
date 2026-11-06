@@ -36,6 +36,15 @@ pub enum Step {
     /// lockfile already lists the package, as after a pull of a lockfile
     /// change, and Bun writes no install marker.
     ToggleBunInstall,
+    /// Swap the hoisted `other-pkg` between version 1, which exports
+    /// `./feature.mjs`, and version 2, which does not. The Bun lockfile and
+    /// the package names in `node_modules` stay the same, as after a
+    /// `bun install` of a pulled lockfile change.
+    SwapBunHoistedVersion,
+    /// Install or remove `plain-pkg` in the Deno store and its link in
+    /// `node_modules`. `deno.lock` already lists the package, as after a
+    /// pull of a lockfile change.
+    ToggleDenoInstall,
     /// Write a tool cache file and a package readme in `node_modules`.
     NodeModulesNoise,
     /// Swap the two targets of the conditional `#db` entry of `package.json`
@@ -99,8 +108,8 @@ const CLONE_B: &str = "export const sumB = (items: number[]): number => {\n  let
 const CLONE_B_BROKEN: &str = "export const sumB = (items: number[]): number => {\n  let total = 0;\n  while (items.length>0) {\n    total = items.pop() ?? 10;\n    break;\n  }\n  return total;\n};\n";
 
 const ENTRY_ALPHA: &str = "import { db } from '#db';\nimport { alias } from '@alias';\nimport { alpha } from './util';\nimport { value } from '@demo/lib/src/util';\nimport { nested } from '../nested/entry';\nimport asset from 'plain-pkg/build/missing.mjs?url';\nimport data from './data';\nimport { gen } from '../dist/gen';\n\nexport const run = (): unknown[] => [db, alias, alpha(), value, nested, asset, data, gen];\n";
-const BUN_ENTRY_ALPHA: &str = "import { alpha } from './util';\nimport asset from 'plain-pkg/build/missing.mjs?url';\n\nexport const run = (): unknown[] => [alpha(), asset];\n";
-const DENO_ENTRY_ALPHA: &str = "import { db } from 'db';\nimport { alpha } from './src/util.ts';\n\nexport const run = (): unknown[] => [db, alpha()];\n";
+const BUN_ENTRY_ALPHA: &str = "import { alpha } from './util';\nimport asset from 'plain-pkg/build/missing.mjs?url';\nimport feature from 'other-pkg/feature.mjs?url';\n\nexport const run = (): unknown[] => [alpha(), asset, feature];\n";
+const DENO_ENTRY_ALPHA: &str = "import { db } from 'db';\nimport { alpha } from './src/util.ts';\nimport asset from 'plain-pkg/build/missing.mjs?url';\n\nexport const run = (): unknown[] => [db, alpha(), asset];\n";
 
 const UTIL: &str = "export const alpha = (): number => 1;\nexport const bravo = (): number => 2;\n";
 
@@ -194,11 +203,9 @@ pub const BUN: Template = Template {
             r#"{"name":"bun-app","private":true,"main":"src/index.ts","dependencies":{"plain-pkg":"1.0.0","other-pkg":"1.0.0"},"devDependencies":{"vite":"*"}}"#,
         ),
         ("bun.lock", "other-pkg@1.0.0\nplain-pkg@1.0.0\n"),
-        (
-            "node_modules/other-pkg/package.json",
-            r#"{"name":"other-pkg","version":"1.0.0","main":"index.js"}"#,
-        ),
+        ("node_modules/other-pkg/package.json", OTHER_PKG_V1),
         ("node_modules/other-pkg/index.js", "module.exports = {};\n"),
+        ("node_modules/other-pkg/feature.mjs", "export default 1;\n"),
         ("src/index.ts", BUN_ENTRY_ALPHA),
         ("src/util.ts", UTIL),
         ("src/orphan.ts", "export const orphan = 1;\n"),
@@ -214,6 +221,7 @@ pub const BUN: Template = Template {
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
         Step::ToggleBunInstall,
+        Step::SwapBunHoistedVersion,
         Step::NodeModulesNoise,
         Step::ToggleProduction,
         Step::ToggleIgnoreOrphan,
@@ -227,8 +235,13 @@ pub const DENO: Template = Template {
     files: &[
         (
             "deno.json",
-            r#"{"name":"deno-app","exports":"./main.ts","imports":{"db":"./src/db-a.ts"}}"#,
+            r#"{"name":"deno-app","exports":"./main.ts","nodeModulesDir":"manual","imports":{"db":"./src/db-a.ts"}}"#,
         ),
+        (
+            "deno.lock",
+            r#"{"version":"5","npm":{"plain-pkg@1.0.0":{}}}"#,
+        ),
+        ("node_modules/.deno/.deno.lock", ""),
         ("main.ts", DENO_ENTRY_ALPHA),
         ("src/util.ts", UTIL),
         ("src/db-a.ts", "export const db = 'a';\n"),
@@ -246,6 +259,7 @@ pub const DENO: Template = Template {
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
         Step::SwapDenoImportMap,
+        Step::ToggleDenoInstall,
         Step::ToggleProduction,
         Step::ToggleIgnoreOrphan,
     ],
@@ -429,6 +443,27 @@ const PLAIN_PKG: [(&str, &str); 2] = [
     ("node_modules/plain-pkg/index.js", "module.exports = {};\n"),
 ];
 
+/// `other-pkg` version 1 exports `./feature.mjs`. Version 2 does not, so
+/// the resolver reports the asset import of the Bun entry as unresolved.
+const OTHER_PKG_V1: &str = r#"{"name":"other-pkg","version":"1.0.0","exports":{".":"./index.js","./feature.mjs":"./feature.mjs"}}"#;
+const OTHER_PKG_V2: &str = r#"{"name":"other-pkg","version":"2.0.0","exports":{".":"./index.js"}}"#;
+
+/// The Deno store entry of `plain-pkg` and its link in `node_modules`. A
+/// copy stands in for the symlink that Deno writes, so the test also runs
+/// where a symlink needs extra rights.
+const DENO_PLAIN_PKG: [(&str, &str); 4] = [
+    (
+        "node_modules/.deno/plain-pkg@1.0.0/node_modules/plain-pkg/package.json",
+        r#"{"name":"plain-pkg","version":"1.0.0","main":"index.js"}"#,
+    ),
+    (
+        "node_modules/.deno/plain-pkg@1.0.0/node_modules/plain-pkg/index.js",
+        "module.exports = {};\n",
+    ),
+    PLAIN_PKG[0],
+    PLAIN_PKG[1],
+];
+
 /// Apply `step` to `project`.
 pub fn apply(project: &mut Project, step: Step) {
     match step {
@@ -509,6 +544,26 @@ pub fn apply(project: &mut Project, step: Step) {
     }
 }
 
+/// Swap the hoisted `other-pkg` between [`OTHER_PKG_V1`] and [`OTHER_PKG_V2`].
+fn swap_bun_hoisted_version(project: &mut Project) {
+    let manifest = "node_modules/other-pkg/package.json";
+    let current = project.read(manifest).expect("other-pkg manifest");
+    let next = if current == OTHER_PKG_V1 {
+        OTHER_PKG_V2
+    } else {
+        OTHER_PKG_V1
+    };
+    project.write(manifest, next);
+}
+
+/// Install or remove [`DENO_PLAIN_PKG`], with its directory in the store.
+fn toggle_deno_install(project: &mut Project) {
+    if !toggle_package(project, &DENO_PLAIN_PKG) {
+        std::fs::remove_dir_all(project.path("node_modules/.deno/plain-pkg@1.0.0"))
+            .expect("uninstall from the store");
+    }
+}
+
 /// Apply a step that edits a manifest, a lockfile or `node_modules`.
 fn apply_manifest_step(project: &mut Project, step: Step) {
     match step {
@@ -534,6 +589,8 @@ fn apply_manifest_step(project: &mut Project, step: Step) {
         Step::ToggleBunInstall => {
             toggle_package(project, &PLAIN_PKG);
         }
+        Step::SwapBunHoistedVersion => swap_bun_hoisted_version(project),
+        Step::ToggleDenoInstall => toggle_deno_install(project),
         Step::NodeModulesNoise => {
             let count = project
                 .read("node_modules/.cache/tool/data")

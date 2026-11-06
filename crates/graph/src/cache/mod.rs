@@ -407,23 +407,28 @@ pub struct CachedResolvedProject {
     /// The resolved targets below the root that are not discovered files
     /// and not below `node_modules`, root-relative and sorted.
     external_targets: Vec<String>,
+    /// The versions of the hoisted Bun packages that the resolution read.
+    installed_versions: crate::installed_versions::InstalledVersions,
 }
 
 impl CachedResolvedProject {
     /// True when the files that the cached resolution depends on, but that
     /// discovery does not list, changed: a file now exists at a path that the
-    /// resolution checked and did not find, or a resolved target outside the
-    /// discovered files is gone. Discovery does not list an extensionless
-    /// file, a `.json` file, or a file in an ignored directory, so the
-    /// manifest cannot show these changes.
+    /// resolution checked and did not find, a resolved target outside the
+    /// discovered files is gone, or a read Bun package has another version.
+    /// Discovery does not list an extensionless file, a `.json` file, or a
+    /// file in an ignored directory, so the manifest cannot show these
+    /// changes.
     #[must_use]
     fn probed_paths_changed(&self, root: &Path) -> bool {
         let start = std::time::Instant::now();
         let changed = self.missed_probes.any_exists(root)
-            || crate::missed_probes::any_missing(root, &self.external_targets);
+            || crate::missed_probes::any_missing(root, &self.external_targets)
+            || self.installed_versions.any_changed(root);
         tracing::debug!(
             missed_probes = self.missed_probes.len(),
             external_targets = self.external_targets.len(),
+            installed_versions = self.installed_versions.len(),
             elapsed_ms = start.elapsed().as_secs_f64() * 1000.0,
             changed,
             "checked the probed paths of the graph cache"
@@ -484,6 +489,10 @@ pub fn cache_resolved_project(
         replaced_module_targets,
         missed_probes: resolved.missed_probes.clone(),
         external_targets: external_targets(root, resolved),
+        installed_versions: crate::installed_versions::InstalledVersions::read(
+            root,
+            &resolved.package_manifests,
+        ),
     })
 }
 
@@ -528,6 +537,7 @@ pub fn restore_resolved_project(
         replaced_module_targets,
         work: crate::resolve::ResolveWork::default(),
         missed_probes: cached.missed_probes.clone(),
+        package_manifests: Vec::new(),
     })
 }
 
