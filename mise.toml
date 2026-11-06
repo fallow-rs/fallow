@@ -30,8 +30,8 @@ pnpm = "11.25.0"
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 
 # Same version as the cargo-fallow action that the CI "Rust Structure" job pins:
-# fallow-rs/cargo-fallow@b8ef4a6f2694b9b2ed9f3ea2b60630a9c28b8c81
-"github:fallow-rs/cargo-fallow" = "0.2.0"
+# fallow-rs/cargo-fallow@fdcf25ad021dd919c52c5c7ee5d285431e2865b3
+"github:fallow-rs/cargo-fallow" = "0.3.0"
 
 # CI installs these tools without a version, so this file pins a release.
 # The aqua registry gives the x86_64 binary on Apple Silicon, and macOS

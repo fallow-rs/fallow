@@ -327,8 +327,10 @@ deny = ["fallow_types::extract", "fallow_types::results", "fallow_types::output_
 # Each Oxc parse of user source runs inside `fallow_extract::parse_bounded`.
 # That function sizes the stack from the source, so deep nesting cannot
 # overflow it. A new parser call, also in a listed file, needs a decision:
-# wrap it in `parse_bounded`, then raise `max`. css_metrics.rs calls the CSS
-# parser, which does not take source text.
+# wrap it in `parse_bounded`, then raise `max`. An entry with `require` wraps
+# its calls in `parse_bounded` itself. In an entry without `require`, the call
+# runs only inside the bounded parse of a whole file. css_metrics.rs calls the
+# CSS parser, which does not take source text.
 [[workspace.metadata.fallow.boundaries.sources]]
 rule = "parse-through-parse-bounded"
 paths = ["crates"]
@@ -336,21 +338,21 @@ deny = ["Parser::new("]
 scope = "production"
 message = "{path} calls a parser outside the listed sites. Run the parse inside fallow_extract::parse_bounded, then add the file to the allow list of this rule in Cargo.toml"
 allow = [
-    { path = "crates/core/src/plugins/config_parser.rs", max = 1 },
-    { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4 },
-    { path = "crates/engine/src/search_visibility.rs", max = 2 },
+    { path = "crates/core/src/plugins/config_parser.rs", max = 1, require = ["parse_bounded("] },
+    { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4, require = ["parse_bounded("] },
+    { path = "crates/engine/src/search_visibility.rs", max = 2, require = ["parse_bounded("] },
     { path = "crates/extract/src/alchemy.rs", max = 1 },
     { path = "crates/extract/src/astro/mod.rs", max = 3 },
-    { path = "crates/extract/src/css_in_js/object.rs", max = 1 },
+    { path = "crates/extract/src/css_in_js/object.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/css_metrics.rs", max = 1 },
     { path = "crates/extract/src/federation_runtime.rs", max = 1 },
-    { path = "crates/extract/src/inventory.rs", max = 1 },
+    { path = "crates/extract/src/inventory.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/mdx.rs", max = 1 },
-    { path = "crates/extract/src/nesting.rs", max = 1 },
+    { path = "crates/extract/src/nesting.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/parse.rs", max = 2 },
     { path = "crates/extract/src/sfc.rs", max = 2 },
     { path = "crates/extract/src/sfc_template/component_contracts.rs", max = 1 },
-    { path = "crates/extract/src/similar_code.rs", max = 1 },
+    { path = "crates/extract/src/similar_code.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/template_usage.rs", max = 3 },
     # fallow-mutation has no fallow dependencies. The engine calls it only
     # inside parse_bounded (crates/engine/src/mutation/layout.rs).

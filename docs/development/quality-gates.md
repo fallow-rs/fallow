@@ -830,6 +830,9 @@ Each gate fails the run:
     pattern in a comment or a string does not match.
   - `parse-through-parse-bounded` lists each file with production parser
     calls and the count. A new call needs `parse_bounded` and a higher `max`.
+    An entry with `require = ["parse_bounded("]` fails when its file no
+    longer calls `parse_bounded`. An entry whose `max` is over the count of
+    its file is an `allow-entry` finding, so the list stays exact.
   - `explicit-type-reexports` rejects a glob re-export of the internal type
     modules from `fallow-engine` and `fallow-api`.
   - `miri-build-compiles` finds a path from `cfg(test)` code to an item that
