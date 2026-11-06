@@ -120,7 +120,10 @@ pub enum WorkspaceDiagnosticKind {
     /// A repository that clones other repositories into the workspace in CI
     /// declares such patterns. The packages there can consume catalog
     /// entries, so the run does not report `unused-catalog-entries` while a
-    /// pattern of this kind exists.
+    /// pattern of this kind exists. For a `packages` entry of the
+    /// `pnpm-workspace.yaml` of a nested pnpm project, the pattern is
+    /// relative to that file, and the run does not report the unused entries
+    /// of that catalog only.
     WorkspacePatternDirMissing {
         /// The workspace pattern, as written in the file.
         pattern: String,
@@ -1475,6 +1478,22 @@ pub fn glob_first_literal_segment(pattern: &str) -> Option<&str> {
     })
 }
 
+/// The catalog entries that a `workspace-pattern-dir-missing` diagnostic
+/// keeps out of the run, as the subject of a sentence. `source_display` is
+/// the declaring file, relative to the project root.
+///
+/// A missing directory of a root pattern hides consumers of every catalog. A
+/// missing directory of a `packages` entry of a nested `pnpm-workspace.yaml`
+/// hides consumers of the catalog of that file only.
+#[must_use]
+pub fn missing_pattern_dir_skipped_entries(source_display: &str) -> &'static str {
+    if source_display.contains('/') && source_display.ends_with("pnpm-workspace.yaml") {
+        "Unused entries of the catalog in that file"
+    } else {
+        "Unused catalog entries"
+    }
+}
+
 /// The directory part of a workspace pattern: the segments before the first
 /// segment with a glob character, joined with `/`.
 ///
@@ -1534,9 +1553,10 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                 format!("'{display}'")
             };
             let dir = workspace_pattern_literal_dir(pattern).unwrap_or_else(|| pattern.clone());
+            let skipped = missing_pattern_dir_skipped_entries(&display);
             format!(
                 "Workspace pattern '{pattern}' in {source} names directory '{dir}', which does \
-                 not exist. Fallow analyzes no package from it. Unused catalog entries are not \
+                 not exist. Fallow analyzes no package from it. {skipped} are not \
                  reported in this run, because packages in that directory can use them. \
                  Create the directory before the run, or remove the pattern."
             )

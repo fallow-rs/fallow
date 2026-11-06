@@ -33,6 +33,26 @@ fn workspace_pattern_dir_missing_id_degrades_and_names_the_directory() {
 }
 
 #[test]
+fn workspace_pattern_dir_missing_in_nested_pnpm_file_names_its_catalog() {
+    let root = Path::new("/project");
+    let diag = WorkspaceDiagnostic::new(
+        root,
+        root.join("site/pnpm-workspace.yaml"),
+        WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+            pattern: "libs/*".to_owned(),
+        },
+    );
+    assert!(
+        diag.message.contains("'site/pnpm-workspace.yaml'")
+            && diag
+                .message
+                .contains("Unused entries of the catalog in that file are not reported"),
+        "{}",
+        diag.message
+    );
+}
+
+#[test]
 fn workspace_pattern_dir_missing_from_config_names_the_setting() {
     let root = Path::new("/project");
     let diag = WorkspaceDiagnostic::new(

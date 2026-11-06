@@ -55,16 +55,25 @@
 //! of the project and of its members against the catalog of that file, so
 //! these manifests are not consumers of the root catalog. Each independent
 //! project gets its own catalog state, and its findings name its own
-//! `pnpm-workspace.yaml`.
+//! `pnpm-workspace.yaml`. A workspace that a root manifest pattern declares
+//! belongs to the root project, also when it sits below a nested
+//! `pnpm-workspace.yaml`, because pnpm runs from the root for that member.
+//!
+//! A workspace pattern whose directory does not exist hides packages that
+//! can consume catalog entries. A missing directory of a root pattern skips
+//! the unused-entry check of every catalog. A missing directory of a
+//! `packages` entry of a nested `pnpm-workspace.yaml` skips the check of
+//! that catalog only.
 
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, PnpmOverrideData,
-    ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    is_independent_pnpm_project, parse_bun_package_json_resolutions, parse_override_key,
-    parse_package_json_catalog_data, parse_pnpm_catalog_data, parse_pnpm_package_json_overrides,
-    parse_pnpm_workspace_overrides, record_workspace_diagnostics,
+    CompiledIgnoreCatalogReferenceRule, ManifestPatternMatcher, PackageJson, PnpmCatalogData,
+    PnpmOverrideData, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
+    is_independent_pnpm_project, nested_member_dirs_missing, parse_bun_package_json_resolutions,
+    parse_override_key, parse_package_json_catalog_data, parse_pnpm_catalog_data,
+    parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
+    record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
@@ -87,13 +96,17 @@ pub struct PnpmCatalogState {
     consumers: CatalogConsumers,
     source_path: PathBuf,
     suppressed_entry_lines: FxHashSet<u32>,
+    /// Whether this run sees every package that can consume the catalog, so
+    /// that an entry with no consumer is proven unused.
+    can_prove_unused: bool,
 }
 
 /// Build one catalog analysis state for the project root and one for each
 /// independent pnpm project below it.
 ///
-/// A workspace belongs to the nearest independent pnpm project that contains
-/// it, or else to the project root. pnpm resolves the `catalog:` references
+/// A workspace that a root manifest pattern declares belongs to the project
+/// root. Any other workspace belongs to the nearest independent pnpm project
+/// that contains it, or else to the project root. pnpm resolves the `catalog:` references
 /// of a workspace against the catalog of the `pnpm-workspace.yaml` of that
 /// project, so each state reads one catalog and the manifests that belong to
 /// it.
@@ -106,23 +119,36 @@ pub fn gather_pnpm_catalog_states(
     workspaces: &[WorkspaceInfo],
 ) -> Vec<PnpmCatalogState> {
     let mut owners = ProjectOwners::new(&config.root);
+    let root_declared = ManifestPatternMatcher::load(&config.root);
     let mut root_members = Vec::new();
     let mut nested_members: std::collections::BTreeMap<PathBuf, Vec<&WorkspaceInfo>> =
         std::collections::BTreeMap::new();
     for ws in workspaces {
-        match owners.owner_of(&ws.root) {
+        let owner = if root_declared.declares(&config.root, &ws.root) {
+            None
+        } else {
+            owners.owner_of(&ws.root)
+        };
+        match owner {
             Some(project) => nested_members.entry(project).or_default().push(ws),
             None => root_members.push(ws),
         }
     }
 
+    let root_can_prove_unused = can_prove_unused_catalog_entries(config);
     let mut states = Vec::with_capacity(nested_members.len() + 1);
-    states.extend(gather_pnpm_catalog_state(config, &root_members));
+    states.extend(gather_pnpm_catalog_state(
+        config,
+        &root_members,
+        root_can_prove_unused,
+    ));
     for (project, members) in nested_members {
+        let can_prove_unused = root_can_prove_unused && !nested_member_dirs_missing(&project);
         states.extend(gather_nested_pnpm_catalog_state(
             &config.root,
             &project,
             &members,
+            can_prove_unused,
         ));
     }
     states
@@ -171,6 +197,7 @@ fn gather_nested_pnpm_catalog_state(
     root: &Path,
     project: &Path,
     members: &[&WorkspaceInfo],
+    can_prove_unused: bool,
 ) -> Option<PnpmCatalogState> {
     let yaml_path = project.join(PNPM_WORKSPACE_FILE);
     let yaml_source = std::fs::read_to_string(&yaml_path).ok()?;
@@ -200,6 +227,7 @@ fn gather_nested_pnpm_catalog_state(
         consumers,
         source_path,
         suppressed_entry_lines,
+        can_prove_unused,
     })
 }
 
@@ -215,6 +243,7 @@ fn gather_nested_pnpm_catalog_state(
 fn gather_pnpm_catalog_state(
     config: &ResolvedConfig,
     workspaces: &[&WorkspaceInfo],
+    can_prove_unused: bool,
 ) -> Option<PnpmCatalogState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let (data, source_path, suppressed_entry_lines) =
@@ -248,6 +277,7 @@ fn gather_pnpm_catalog_state(
         consumers,
         source_path,
         suppressed_entry_lines,
+        can_prove_unused,
     })
 }
 
@@ -271,18 +301,19 @@ pub fn report_malformed_pnpm_workspace_yaml(root: &Path, yaml_path: &Path, error
 /// A workspace pattern whose directory is missing hides packages that can
 /// consume catalog entries, so no entry can be proven unused in this run.
 /// Discovery reports the pattern as `workspace-pattern-dir-missing`.
-pub fn can_prove_unused_catalog_entries(config: &ResolvedConfig) -> bool {
+fn can_prove_unused_catalog_entries(config: &ResolvedConfig) -> bool {
     !fallow_config::has_missing_workspace_pattern_dirs(&config.root, &config.workspace_patterns)
 }
 
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
-/// workspace `package.json` via the `catalog:` protocol.
+/// workspace `package.json` via the `catalog:` protocol. A catalog whose
+/// consumers this run cannot all see gives no finding.
 pub fn find_unused_catalog_entries(states: &[PnpmCatalogState]) -> Vec<UnusedCatalogEntry> {
     states.iter().flat_map(unused_catalog_entries_of).collect()
 }
 
 fn unused_catalog_entries_of(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
-    if state.data.catalogs.is_empty() {
+    if !state.can_prove_unused || state.data.catalogs.is_empty() {
         return Vec::new();
     }
 
@@ -960,7 +991,7 @@ mod tests {
         );
 
         assert!(
-            gather_pnpm_catalog_state(&config, &[]).is_none(),
+            gather_pnpm_catalog_state(&config, &[], true).is_none(),
             "an unparsed catalog must not report every `catalog:` reference as unresolved"
         );
         let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
@@ -1102,6 +1133,7 @@ mod tests {
             "packages:\n  - packages/*\ncatalog:\n  vue: ^3.5.0\n",
         )
         .expect("write yaml");
+        std::fs::create_dir_all(root.join("packages")).expect("mkdir packages");
         let docs = root.join("docs");
         std::fs::create_dir_all(&docs).expect("mkdir");
         std::fs::write(

@@ -891,13 +891,18 @@ consistent:
   same function, and the dead-code pass then does not report
   `unused-catalog-entries`, because the packages in the missing directory can
   consume the entries. Unresolved references and empty catalog groups are
-  still reported.
+  still reported. A `packages` entry of a nested `pnpm-workspace.yaml` gets
+  the same diagnostic, anchored at the nested file, and
+  `nested_member_dirs_missing` then skips the unused-entry check of
+  that catalog only.
 - `is_independent_pnpm_project` removes a nested pnpm project from the root
   catalog consumers, also when the fallow config `workspaces.patterns` adds
   it. pnpm resolves its `catalog:` references against its own catalog.
-  `gather_pnpm_catalog_states` gives each workspace to the nearest
-  independent pnpm project that contains it, and builds one catalog state for
-  each project. The catalog findings of a nested project name its own
+  `gather_pnpm_catalog_states` gives a workspace that a root manifest
+  pattern declares to the root project (`ManifestPatternMatcher`), because
+  pnpm runs from the root for that member. It gives any other workspace to
+  the nearest independent pnpm project that contains it, and builds one
+  catalog state for each project. The catalog findings of a nested project name its own
   `pnpm-workspace.yaml` and member manifests, and `fallow fix` edits that
   file.
 

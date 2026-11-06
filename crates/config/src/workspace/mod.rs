@@ -33,9 +33,9 @@ pub use diagnostics::{
 };
 use diagnostics::{emit_diagnostics, is_skip_listed_dir};
 use link_dependencies::collect_link_dependency_workspaces;
-pub use missing_pattern_dirs::has_missing_workspace_pattern_dirs;
 use missing_pattern_dirs::missing_dir_patterns;
-pub use nested_project::is_independent_pnpm_project;
+pub use missing_pattern_dirs::{has_missing_workspace_pattern_dirs, nested_member_dirs_missing};
+pub use nested_project::{ManifestPatternMatcher, is_independent_pnpm_project};
 use nested_project::{NestedProjectScan, collect_nested_project_workspaces};
 pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
 pub use package_json::{NapiConfig, PackageJson};

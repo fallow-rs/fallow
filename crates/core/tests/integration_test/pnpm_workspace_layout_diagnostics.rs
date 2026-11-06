@@ -185,6 +185,115 @@ fn nested_pnpm_project_members_use_the_nested_catalog() {
     );
 }
 
+fn write_files(root: &Path, files: &[(&str, &str)]) {
+    for (path, content) in files {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().expect("file has a parent")).expect("create dir");
+        std::fs::write(path, content).expect("write file");
+    }
+}
+
+/// A `packages` entry of a nested `pnpm-workspace.yaml` whose directory is
+/// missing hides consumers of the nested catalog. The run reports no unused
+/// entry of that catalog and names the entry in a
+/// `workspace-pattern-dir-missing` diagnostic on the nested file.
+#[test]
+fn nested_pnpm_pattern_dir_missing_skips_the_nested_unused_catalog_check() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(tmp.path()).expect("canonical temp dir");
+    write_files(
+        &root,
+        &[
+            ("package.json", r#"{"name":"root","private":true}"#),
+            ("pnpm-workspace.yaml", "packages:\n  - packages/*\n"),
+            ("packages/a/package.json", r#"{"name":"a"}"#),
+            ("packages/a/index.ts", "export const a = 1;\n"),
+            ("site/package.json", r#"{"name":"site","private":true}"#),
+            (
+                "site/pnpm-workspace.yaml",
+                "packages:\n  - apps/*\n  - libs/*\ncatalog:\n  is-odd: ^1.0.0\n  only-in-libs: ^1.0.0\n",
+            ),
+            (
+                "site/apps/web/package.json",
+                r#"{"name":"web","dependencies":{"is-odd":"catalog:"}}"#,
+            ),
+            ("site/apps/web/index.ts", "export const web = 1;\n"),
+        ],
+    );
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis succeeds");
+
+    assert!(
+        results.unused_catalog_entries.is_empty(),
+        "the missing `libs` directory can hold consumers of the nested catalog: {:?}",
+        results.unused_catalog_entries
+    );
+    let missing: Vec<(String, String)> = fallow_config::workspace_diagnostics_for(&root)
+        .into_iter()
+        .filter_map(|diagnostic| match &diagnostic.kind {
+            WorkspaceDiagnosticKind::WorkspacePatternDirMissing { pattern } => {
+                Some((relative(&root, &diagnostic.path), pattern.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        missing,
+        [("site/pnpm-workspace.yaml".to_owned(), "libs/*".to_owned())]
+    );
+}
+
+/// A workspace that a root manifest pattern declares belongs to the root
+/// project, also below a nested `pnpm-workspace.yaml`. Its `catalog:`
+/// references resolve against the root catalog.
+#[test]
+fn root_declared_member_below_a_nested_project_uses_the_root_catalog() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(tmp.path()).expect("canonical temp dir");
+    write_files(
+        &root,
+        &[
+            ("package.json", r#"{"name":"root","private":true}"#),
+            (
+                "pnpm-workspace.yaml",
+                "packages:\n  - site/packages/*\ncatalog:\n  is-odd: ^1.0.0\n",
+            ),
+            ("site/package.json", r#"{"name":"site","private":true}"#),
+            (
+                "site/pnpm-workspace.yaml",
+                "packages:\n  - packages/*\ncatalog:\n  is-even: ^1.0.0\n",
+            ),
+            (
+                "site/packages/web/package.json",
+                r#"{"name":"web","dependencies":{"is-odd":"catalog:"}}"#,
+            ),
+            ("site/packages/web/index.ts", "export const web = 1;\n"),
+        ],
+    );
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis succeeds");
+
+    assert!(
+        results.unresolved_catalog_references.is_empty(),
+        "the root catalog declares `is-odd`: {:?}",
+        results.unresolved_catalog_references
+    );
+    let unused: Vec<(String, String)> = results
+        .unused_catalog_entries
+        .iter()
+        .map(|finding| {
+            (
+                relative(&root, &finding.entry.path),
+                finding.entry.entry_name.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        unused,
+        [("site/pnpm-workspace.yaml".to_owned(), "is-even".to_owned())]
+    );
+}
+
 /// pnpm 10 reads `pnpm.overrides` in `package.json`, with the same rules.
 #[test]
 fn package_json_overrides_take_precedence_for_pnpm_10() {

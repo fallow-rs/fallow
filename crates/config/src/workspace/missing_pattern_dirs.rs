@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{DeclaredPattern, collect_declared_patterns};
+use super::{DeclaredPattern, collect_declared_patterns, nested_project::nested_declared_patterns};
 
 /// The positive declared patterns that stay inside the root and whose
 /// directory part does not exist on disk.
@@ -38,4 +38,19 @@ pub(super) fn missing_dir_patterns<'a>(
 pub fn has_missing_workspace_pattern_dirs(root: &Path, extra_patterns: &[String]) -> bool {
     collect_declared_patterns(root, extra_patterns)
         .is_ok_and(|declared| missing_dir_patterns(root, &declared).next().is_some())
+}
+
+/// Whether the `pnpm-workspace.yaml` of the independent pnpm project at
+/// `project_dir` declares a `packages` entry whose directory does not exist.
+///
+/// The packages in that directory can consume entries of the project
+/// catalog, so the catalog analysis does not report unused entries of that
+/// catalog. Discovery reports each such entry as
+/// `workspace-pattern-dir-missing`, with the same predicate.
+#[must_use]
+pub fn nested_member_dirs_missing(project_dir: &Path) -> bool {
+    let declared = nested_declared_patterns(project_dir);
+    missing_dir_patterns(project_dir, &declared)
+        .next()
+        .is_some()
 }

@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    ManifestCache, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    collect_declared_patterns, expand_patterns_to_workspaces, parse_pnpm_workspace_yaml,
-    register_matched_workspace,
+    DeclaredPattern, ManifestCache, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
+    collect_declared_patterns, expand_patterns_to_workspaces, missing_dir_patterns,
+    parse_pnpm_workspace_yaml, register_matched_workspace,
     undeclared::{is_ignored_scan_dir, is_undeclared_scan_skip_dir},
 };
 
@@ -21,7 +21,7 @@ const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 /// that the root manifests declare. The fallow config `workspaces.patterns`
 /// is not part of it: those patterns add directories to the analysis, and
 /// pnpm does not read them.
-struct ManifestPatternMatcher {
+pub struct ManifestPatternMatcher {
     positive: globset::GlobSet,
     negative: globset::GlobSet,
 }
@@ -29,7 +29,8 @@ struct ManifestPatternMatcher {
 impl ManifestPatternMatcher {
     /// Build the matcher. A root manifest that does not parse gives a matcher
     /// that declares nothing; discovery reports the parse error.
-    fn load(root: &Path) -> Self {
+    #[must_use]
+    pub fn load(root: &Path) -> Self {
         let mut positive = globset::GlobSetBuilder::new();
         let mut negative = globset::GlobSetBuilder::new();
         for declared in collect_declared_patterns(root, &[]).unwrap_or_default() {
@@ -60,7 +61,9 @@ impl ManifestPatternMatcher {
         }
     }
 
-    fn declares(&self, root: &Path, dir: &Path) -> bool {
+    /// Whether a workspace pattern of the root manifests declares `dir`.
+    #[must_use]
+    pub fn declares(&self, root: &Path, dir: &Path) -> bool {
         let relative = dir.strip_prefix(root).unwrap_or(dir);
         let relative = relative.to_string_lossy().replace('\\', "/");
         self.positive.is_match(relative.as_str()) && !self.negative.is_match(relative.as_str())
@@ -178,7 +181,17 @@ pub(super) fn collect_nested_project_workspaces(
                 ));
             }
         }
-        let patterns = nested_member_patterns(scan.root, &dir);
+        let declared = nested_declared_patterns(&dir);
+        diagnostics.extend(missing_dir_patterns(&dir, &declared).map(|missing| {
+            WorkspaceDiagnostic::new(
+                scan.root,
+                missing.source.clone(),
+                WorkspaceDiagnosticKind::WorkspacePatternDirMissing {
+                    pattern: missing.pattern.clone(),
+                },
+            )
+        }));
+        let patterns = nested_member_patterns(scan.root, &dir, &declared);
         workspaces.extend(expand_patterns_to_workspaces(
             scan.root,
             &patterns,
@@ -190,22 +203,39 @@ pub(super) fn collect_nested_project_workspaces(
     }
 }
 
-/// The `packages` entries of the `pnpm-workspace.yaml` in `project_dir`,
-/// rewritten relative to the analysis root.
+/// The `packages` entries of the `pnpm-workspace.yaml` in `project_dir`, as
+/// written in the file. Each entry names that file as its source.
+pub(super) fn nested_declared_patterns(project_dir: &Path) -> Vec<DeclaredPattern> {
+    let source = project_dir.join(PNPM_WORKSPACE_FILE);
+    let Ok(content) = std::fs::read_to_string(&source) else {
+        return Vec::new();
+    };
+    parse_pnpm_workspace_yaml(&content)
+        .into_iter()
+        .map(|pattern| DeclaredPattern {
+            pattern,
+            source: source.clone(),
+        })
+        .collect()
+}
+
+/// The `packages` entries in `declared`, rewritten relative to the analysis
+/// root.
 ///
 /// pnpm reads these entries relative to `project_dir`. An entry that names
 /// `project_dir` itself (`.`) gives no pattern, because the caller registers
 /// the project root. An absolute entry, or an entry with a `..` segment, also
 /// gives no pattern, so the expansion stays inside `project_dir`.
-fn nested_member_patterns(root: &Path, project_dir: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(project_dir.join(PNPM_WORKSPACE_FILE)) else {
-        return Vec::new();
-    };
+fn nested_member_patterns(
+    root: &Path,
+    project_dir: &Path,
+    declared: &[DeclaredPattern],
+) -> Vec<String> {
     let relative = project_dir.strip_prefix(root).unwrap_or(project_dir);
     let prefix = relative.to_string_lossy().replace('\\', "/");
-    parse_pnpm_workspace_yaml(&content)
+    declared
         .iter()
-        .filter_map(|pattern| prefix_member_pattern(&prefix, pattern))
+        .filter_map(|declared| prefix_member_pattern(&prefix, &declared.pattern))
         .collect()
 }
 

@@ -116,8 +116,8 @@ use unrendered_component::{
     find_unrendered_lit_elements,
 };
 use unused_catalog::{
-    can_prove_unused_catalog_entries, find_empty_catalog_groups,
-    find_unresolved_catalog_references, find_unused_catalog_entries, gather_pnpm_catalog_states,
+    find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
+    gather_pnpm_catalog_states,
 };
 use unused_component_emit::find_unused_component_emits;
 use unused_component_input::find_unused_component_inputs;
@@ -2032,7 +2032,7 @@ fn populate_pnpm_catalog_findings(
         return;
     };
 
-    if need_unused && can_prove_unused_catalog_entries(config) {
+    if need_unused {
         results.unused_catalog_entries = find_unused_catalog_entries(&states)
             .into_iter()
             .map(UnusedCatalogEntryFinding::with_actions)
