@@ -112,11 +112,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "39b5e363e5b179cb"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "3b441a4893e68bba"
     },
     {

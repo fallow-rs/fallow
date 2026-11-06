@@ -22,6 +22,7 @@ pub fn plugin_resolve_input<'a>(
         workspaces: &[],
         active_plugins: &plugin_result.active_plugins,
         path_aliases: &plugin_result.path_aliases,
+        scoped_path_aliases: &plugin_result.scoped_path_aliases,
         auto_imports: &plugin_result.auto_imports,
         jsx_import_sources: &plugin_result.jsx_import_sources,
         scss_include_paths: &plugin_result.scss_include_paths,
@@ -147,6 +148,7 @@ pub fn plugin_config_hash(
         root: _,
         active_plugins,
         path_aliases,
+        scoped_path_aliases,
         auto_imports,
         jsx_import_sources,
         scss_include_paths,
@@ -157,6 +159,7 @@ pub fn plugin_config_hash(
 
     hash_active_plugins(active_plugins, &mut hasher);
     hash_path_aliases(path_aliases, root, &mut hasher);
+    hash_scoped_path_aliases(scoped_path_aliases, root, &mut hasher);
 
     let mut auto_imports: Vec<AutoImportHashKey<'_>> = auto_imports
         .iter()
@@ -275,6 +278,29 @@ fn hash_path_aliases(
     }
 }
 
+/// Hash the workspace-scoped plugin path aliases with their workspace, so a
+/// changed alias or a moved workspace misses the cache.
+fn hash_scoped_path_aliases(
+    aliases: &[resolve::ScopedPathAlias],
+    root: &std::path::Path,
+    hasher: &mut rustc_hash::FxHasher,
+) {
+    use std::hash::Hash;
+    let mut keys: Vec<(String, &str, String)> = aliases
+        .iter()
+        .map(|alias| {
+            (
+                root_relative_key(root, &root.join(&alias.scope)),
+                alias.prefix.as_str(),
+                root_relative_key(root, &root.join(&alias.replacement)),
+            )
+        })
+        .collect();
+    keys.sort_unstable();
+    keys.len().hash(hasher);
+    keys.hash(hasher);
+}
+
 /// The fields of one auto-import rule that decide its graph edges: name,
 /// root-relative source, kind rank, and sorted root-relative scope.
 type AutoImportHashKey<'a> = (&'a str, String, u8, Vec<String>);
@@ -284,5 +310,44 @@ fn auto_import_kind_rank(kind: fallow_config::AutoImportKind) -> u8 {
         fallow_config::AutoImportKind::Named => 0,
         fallow_config::AutoImportKind::Default => 1,
         fallow_config::AutoImportKind::DefaultComponent => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hash_with_scoped_alias(scope: &str, replacement: &str) -> u64 {
+        let mut result = plugins::AggregatedPluginResult::default();
+        result.scoped_path_aliases.push(resolve::ScopedPathAlias {
+            scope: scope.to_string(),
+            prefix: "$lib/".to_string(),
+            replacement: replacement.to_string(),
+        });
+        plugin_config_hash(&result, std::path::Path::new("/project"))
+    }
+
+    #[test]
+    fn scoped_path_alias_changes_the_plugin_hash() {
+        let base = hash_with_scoped_alias("apps/alpha", "apps/alpha/src/lib");
+        assert_eq!(
+            base,
+            hash_with_scoped_alias("apps/alpha", "apps/alpha/src/lib")
+        );
+        assert_ne!(
+            base,
+            hash_with_scoped_alias("apps/alpha", "apps/alpha/src/library")
+        );
+        assert_ne!(
+            base,
+            hash_with_scoped_alias("apps/beta", "apps/alpha/src/lib")
+        );
+        assert_ne!(
+            base,
+            plugin_config_hash(
+                &plugins::AggregatedPluginResult::default(),
+                std::path::Path::new("/project")
+            )
+        );
     }
 }

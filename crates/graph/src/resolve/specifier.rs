@@ -8,10 +8,10 @@ use oxc_resolver::{Resolution, ResolveError, ResolveOptions};
 use serde_json::Value;
 
 use super::fallbacks::{
-    installed_workspace_package_target, lookup_internal_file_id, nearest_package_manifest,
-    normalize_path_lexically, package_imports_workspace_target, try_canonical_source_fallbacks,
-    try_css_extension_fallback, try_package_imports_fallback, try_path_alias_fallback,
-    try_pnpm_workspace_fallback, try_relative_output_source_fallbacks,
+    installed_workspace_package_target, lookup_internal_file_id, matches_plugin_path_alias,
+    nearest_package_manifest, normalize_path_lexically, package_imports_workspace_target,
+    try_canonical_source_fallbacks, try_css_extension_fallback, try_package_imports_fallback,
+    try_path_alias_fallback, try_pnpm_workspace_fallback, try_relative_output_source_fallbacks,
     try_relative_package_root_source_fallback, try_scss_include_path_fallback,
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
@@ -457,21 +457,6 @@ fn is_storybook_preview_html(from_file: &Path) -> bool {
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         == Some(".storybook")
-}
-
-/// Return `true` when `specifier` matches the plugin alias `prefix` at a
-/// path-segment boundary.
-///
-/// Mirrors `alias_match_remainder` in `fallbacks.rs`: a prefix that already
-/// ends with `/` matches any continuation. For bare prefixes (e.g. `@` or
-/// `~`) the match is only admitted when the specifier equals the prefix
-/// exactly or the remainder after stripping the prefix starts with `/`, so
-/// `prefix = "@"` does NOT match `@radix-ui/react-checkbox`.
-fn specifier_matches_alias_prefix(specifier: &str, prefix: &str) -> bool {
-    let Some(remainder) = specifier.strip_prefix(prefix) else {
-        return false;
-    };
-    remainder.is_empty() || prefix.ends_with('/') || remainder.starts_with('/')
 }
 
 fn static_mount_url_path(specifier: &str) -> Option<String> {
@@ -1588,7 +1573,7 @@ fn resolve_plain_specifier(
         return result;
     }
 
-    let flags = FailedSpecifierFlags::new(ctx, specifier);
+    let flags = FailedSpecifierFlags::new(ctx, from_file, specifier);
     resolve_file_or_failed(ctx, from_file, specifier, from_style, flags)
 }
 
@@ -1812,15 +1797,12 @@ struct FailedSpecifierFlags {
 }
 
 impl FailedSpecifierFlags {
-    fn new(ctx: &ResolveContext<'_>, specifier: &str) -> Self {
+    fn new(ctx: &ResolveContext<'_>, from_file: &Path, specifier: &str) -> Self {
         Self {
             used_tsconfig_fallback: false,
             is_bare: is_bare_specifier(specifier),
             is_alias: is_path_alias(specifier),
-            matches_plugin_alias: ctx
-                .path_aliases
-                .iter()
-                .any(|(prefix, _)| specifier_matches_alias_prefix(specifier, prefix)),
+            matches_plugin_alias: matches_plugin_path_alias(ctx, from_file, specifier),
         }
     }
 }
@@ -1961,7 +1943,7 @@ fn resolve_failed_alias_specifier(
     is_bare: bool,
     matches_tsconfig_path_alias: bool,
 ) -> ResolveResult {
-    if let Some(result) = try_path_alias_fallback(ctx, specifier, style_context) {
+    if let Some(result) = try_path_alias_fallback(ctx, from_file, specifier, style_context) {
         return result;
     }
     if is_bare
@@ -2056,9 +2038,8 @@ mod tests {
         path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
         resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
         resolve_tsconfig_reference_path, serves_static_dir_mounts,
-        should_preserve_node_modules_style_file, specifier_matches_alias_prefix,
-        static_dir_relative_path, static_mount_url_path, tsconfig_extends_values,
-        with_appended_extension, with_exact_extension,
+        should_preserve_node_modules_style_file, static_dir_relative_path, static_mount_url_path,
+        tsconfig_extends_values, with_appended_extension, with_exact_extension,
     };
 
     #[test]
@@ -2247,6 +2228,7 @@ mod tests {
             has_deno_import_maps: false,
             condition_names: &condition_names,
             path_aliases: &[],
+            scoped_path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
             framework_static_dir_mappings: &[],
@@ -2334,7 +2316,11 @@ mod tests {
         assert_eq!(s, "react");
     }
 
-    // ---- specifier_matches_alias_prefix (lines 412-417) ----
+    // ---- plugin alias prefix matching ----
+
+    fn specifier_matches_alias_prefix(specifier: &str, prefix: &str) -> bool {
+        super::super::fallbacks::alias_match_remainder(specifier, prefix).is_some()
+    }
 
     #[test]
     fn alias_prefix_bare_at_sign_does_not_match_scoped_package() {
@@ -3040,6 +3026,7 @@ mod tests {
             has_deno_import_maps: false,
             condition_names: &condition_names,
             path_aliases: &[],
+            scoped_path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
             framework_static_dir_mappings: &[],

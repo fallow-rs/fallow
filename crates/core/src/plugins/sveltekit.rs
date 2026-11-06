@@ -194,6 +194,18 @@ impl Plugin for SvelteKitPlugin {
             result.referenced_dependencies.push(dep);
         }
 
+        // `kit.files.lib` moves the directory that `$lib` names. An explicit
+        // `kit.alias` entry for `$lib` comes later and wins.
+        if let Some(lib) =
+            config_parser::extract_config_string(source, config_path, &["kit", "files", "lib"])
+            && let Some(normalized) = config_parser::normalize_config_path(&lib, config_path, root)
+        {
+            result
+                .path_aliases
+                .push(("$lib/".to_string(), normalized.clone()));
+            result.path_aliases.push(("$lib".to_string(), normalized));
+        }
+
         for (find, replacement) in
             config_parser::extract_config_path_aliases(source, config_path, &["kit", "alias"])
         {

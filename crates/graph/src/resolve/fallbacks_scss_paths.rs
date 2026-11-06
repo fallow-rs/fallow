@@ -4,7 +4,7 @@ use std::path::Path;
 
 use fallow_types::discover::FileId;
 
-use super::{ResolveContext, alias_match_remainder, find_scss_in_dir};
+use super::{ResolveContext, alias_match_remainder, applicable_path_aliases, find_scss_in_dir};
 
 /// Look up an absolute candidate path in the file index, falling back to
 /// canonical path lookup for intra-project symlinks.
@@ -31,13 +31,19 @@ pub(super) fn lookup_scss_path(candidate: &Path, ctx: &ResolveContext<'_>) -> Op
 /// Vite's Sass importer runs the URL through the Vite resolver after Sass
 /// fails to load it relative to the file, so the alias applies with the Sass
 /// partial and directory-index conventions.
-pub(super) fn find_scss_through_path_alias(ctx: &ResolveContext<'_>, bare: &str) -> Option<FileId> {
-    ctx.path_aliases.iter().find_map(|(prefix, replacement)| {
-        let remainder = alias_match_remainder(bare, prefix)?.trim_start_matches('/');
-        let target_dir = ctx.root.join(replacement);
-        if remainder.is_empty() {
-            return lookup_scss_path(&target_dir, ctx);
-        }
-        find_scss_in_dir(&target_dir, remainder, ctx)
-    })
+pub(super) fn find_scss_through_path_alias(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    bare: &str,
+) -> Option<FileId> {
+    applicable_path_aliases(ctx, from_file, bare)
+        .into_iter()
+        .find_map(|(prefix, replacement)| {
+            let remainder = alias_match_remainder(bare, prefix)?.trim_start_matches('/');
+            let target_dir = ctx.root.join(replacement);
+            if remainder.is_empty() {
+                return lookup_scss_path(&target_dir, ctx);
+            }
+            find_scss_in_dir(&target_dir, remainder, ctx)
+        })
 }

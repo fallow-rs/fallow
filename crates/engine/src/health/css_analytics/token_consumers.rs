@@ -354,6 +354,7 @@ fn resolve_css_in_js_import_targets(
         workspaces: &workspaces,
         active_plugins: &active_plugins,
         path_aliases: &path_aliases,
+        scoped_path_aliases: &[],
         auto_imports: &auto_imports,
         jsx_import_sources: &[],
         scss_include_paths: &scss_include_paths,

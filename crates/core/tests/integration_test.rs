@@ -374,6 +374,8 @@ mod web_components;
 mod workspace_cross_imports;
 #[path = "integration_test/workspace_internal_deps.rs"]
 mod workspace_internal_deps;
+#[path = "integration_test/workspace_plugin_aliases.rs"]
+mod workspace_plugin_aliases;
 
 #[path = "integration_test/ci_bun_file_runner.rs"]
 mod ci_bun_file_runner;

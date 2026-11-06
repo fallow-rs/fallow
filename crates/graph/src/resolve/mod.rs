@@ -51,6 +51,7 @@ pub use react_native::{PlatformFamilyKey, has_react_native_plugin, platform_fami
 pub use types::{
     MissingExportTarget, OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule,
     ResolvedProject, ResolvedReExport, ResolvedReplacedModuleTarget, ResolvedSourceEdge,
+    ScopedPathAlias,
 };
 pub use work::ResolveWork;
 
@@ -91,6 +92,8 @@ pub struct ResolveAllImportsInput<'a> {
     pub active_plugins: &'a [String],
     /// Configured TypeScript path alias pairs.
     pub path_aliases: &'a [(String, String)],
+    /// Plugin path aliases that apply only to the files of one workspace.
+    pub scoped_path_aliases: &'a [ScopedPathAlias],
     /// Auto-import rules that synthesize implicit graph edges.
     pub auto_imports: &'a [AutoImportRule],
     /// JSX import sources from bundler and test configs. Each adds a runtime
@@ -251,6 +254,7 @@ pub fn resolve_all_imports_with_session(
         has_deno_import_maps: session.has_deno_import_maps,
         condition_names: &session.condition_names,
         path_aliases: input.path_aliases,
+        scoped_path_aliases: input.scoped_path_aliases,
         scss_include_paths: input.scss_include_paths,
         static_dir_mappings: input.static_dir_mappings,
         framework_static_dir_mappings: input.framework_static_dir_mappings,
