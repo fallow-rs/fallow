@@ -10109,6 +10109,156 @@ fn local_holding_inherited_this_method_result_records_call_receiver() {
 }
 
 #[test]
+fn nested_binding_hides_local_holding_inherited_this_method_result() {
+    // Issue #4198: a parameter, a loop head, a `catch` parameter or a block
+    // declaration with the name of a local that holds an inherited
+    // `this.find()` result is a different value. A read through it records
+    // nothing on the call. After the nested scope ends, a read through the
+    // outer local records the call receiver again.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        export class Viewer extends Floor {
+            mark(other: Array<{ reset(): void }>): void {
+                const table = this.find();
+                table?.setVip();
+                other.forEach((table) => table.paramOnly());
+                for (const table of other) {
+                    table.ofOnly();
+                }
+                for (const table in other) {
+                    table.inOnly();
+                }
+                try {
+                    other.length;
+                } catch (table) {
+                    table.catchOnly();
+                }
+                {
+                    const table = other[0];
+                    table.blockOnly();
+                }
+                table.afterBlock();
+                {
+                    const table = this.find();
+                    table.innerResult();
+                }
+                table.afterInnerResult();
+            }
+        }
+        ",
+    );
+
+    let has_fact = |member: &str| {
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::ClassThisMemberAccess(access)
+                    if access.class_local_name == "Viewer"
+                        && access.object == "this.find()"
+                        && access.member == member
+            )
+        })
+    };
+    assert!(has_fact("setVip"), "{:?}", info.semantic_facts);
+    for member in ["afterBlock", "innerResult", "afterInnerResult"] {
+        assert!(has_fact(member), "{member}: {:?}", info.semantic_facts);
+    }
+    for member in ["paramOnly", "ofOnly", "inOnly", "catchOnly", "blockOnly"] {
+        assert!(
+            !info.member_accesses.iter().any(|access| {
+                access.object.starts_with("this.find()") && access.member == member
+            }),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+        assert!(!has_fact(member), "{member}: {:?}", info.semantic_facts);
+    }
+}
+
+#[test]
+fn nested_binding_hides_local_holding_own_this_method_result() {
+    // Issue #4198: the same scope rule applies when the class itself declares
+    // `find(): Table | undefined`. A nested binding with the name of the
+    // local gives no credit to `Table`, and the outer local gives credit again
+    // after the nested scope ends.
+    let info = parse(
+        r"
+        import type { Table } from './table';
+
+        export class Viewer {
+            mark(other: Array<{ reset(): void }>): void {
+                const table = this.find();
+                table?.setVip();
+                other.forEach((table) => table.paramOnly());
+                for (const table of other) {
+                    table.ofOnly();
+                }
+                for (const table in other) {
+                    table.inOnly();
+                }
+                try {
+                    other.length;
+                } catch (table) {
+                    table.catchOnly();
+                }
+                {
+                    const table = other[0];
+                    table.blockOnly();
+                }
+                table.afterBlock();
+            }
+            private find(): Table | undefined { return undefined; }
+        }
+        ",
+    );
+
+    let has = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Table" && access.member == member)
+    };
+    assert!(has("setVip"), "{:?}", info.member_accesses);
+    assert!(has("afterBlock"), "{:?}", info.member_accesses);
+    for member in ["paramOnly", "ofOnly", "inOnly", "catchOnly", "blockOnly"] {
+        assert!(!has(member), "{member}: {:?}", info.member_accesses);
+    }
+}
+
+#[test]
+fn nested_class_binding_keeps_its_own_class_over_this_method_result() {
+    // Issue #4198: a loop head that binds the name of a `this` result local
+    // to an element class credits that class inside the loop. The outer local
+    // gives no credit there.
+    let info = parse(
+        r"
+        import type { Table } from './table';
+        import type { RectTable } from './rect-table';
+
+        export class Viewer {
+            mark(rects: RectTable[]): void {
+                const table = this.find();
+                for (const table of rects) {
+                    table.rectOnly();
+                }
+                table.afterLoop();
+            }
+            private find(): Table | undefined { return undefined; }
+        }
+        ",
+    );
+
+    let has = |object: &str, member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+    assert!(has("RectTable", "rectOnly"), "{:?}", info.member_accesses);
+    assert!(!has("Table", "rectOnly"), "{:?}", info.member_accesses);
+}
+
+#[test]
 fn chained_method_call_with_arguments_records_call_receiver() {
     // Issue #4184: `local.rotate(1).translate(1, 1)` records `translate` on
     // `local.rotate()`, as `local.rotate().translate()` does. A bare call with

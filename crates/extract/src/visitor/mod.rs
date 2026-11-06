@@ -877,7 +877,7 @@ pub(crate) struct ModuleInfoExtractor {
     factory_property_classes: FxHashMap<Span, FxHashMap<String, BindingClassProof>>,
     independent_this_depth: usize,
     class_method_function_span: Option<Span>,
-    inherited_this_result_locals: FxHashMap<String, String>, // `table` -> `this.find()` (#4183)
+    this_result_locals: FxHashMap<String, Vec<visit_impl::visit_signature::ThisResultLocal>>,
     pending_subclass_member_accesses: Vec<PendingSubclassMemberAccess>,
     projected_member_accesses: Vec<ProjectedMemberAccess>,
     projection_retained_work: usize,

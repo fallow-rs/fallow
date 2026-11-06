@@ -1,0 +1,6 @@
+{
+  "name": "issue-4198-shadowed-this-method-result-local",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

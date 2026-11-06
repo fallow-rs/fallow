@@ -99,7 +99,7 @@ mod visit_security_sinks;
 #[path = "visit_impl_server_actions.rs"]
 mod visit_server_actions;
 #[path = "visit_impl_signature.rs"]
-mod visit_signature;
+pub(super) mod visit_signature;
 #[path = "visit_impl_source_paths.rs"]
 mod visit_source_paths;
 #[path = "visit_impl_spy_calls.rs"]
