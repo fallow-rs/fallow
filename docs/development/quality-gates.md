@@ -98,14 +98,15 @@ extension-host downloads through the existing explicit build and test commands.
 Do not turn install scripts back on for the whole dependency tree.
 
 A root-only `pnpm install` is enough for the type-aware CLI test targets. The
-type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
-without a sidecar-local install it resolves `typescript` from ancestor
-`node_modules` directories, and the root install pins the same `typescript`
-version as the sidecar (kept in lockstep through the `overrides` entry in the
-root `pnpm-workspace.yaml`). The sidecar's own `node --test` suite resolves
-`typescript` the same way, so it also passes after a root-only `pnpm install`.
+type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`.
+Without a sidecar-local install, the sidecar resolves `typescript` from
+ancestor `node_modules` directories. The root `package.json` lists
+`typescript` as an exact devDependency at the version of the sidecar. The
+`overrides` entry in the root `pnpm-workspace.yaml` pins the same version.
+`tools/type-aware-sidecar/test/backend-preflight.test.mjs` fails when these
+versions differ.
 
-The sidecar-local install is still needed in two cases:
+The sidecar-local install is still needed in these cases:
 
 ```bash
 npm ci --prefix tools/type-aware-sidecar
@@ -114,6 +115,9 @@ npm ci --prefix tools/type-aware-sidecar
 - The sidecar bench (`npm run bench --prefix tools/type-aware-sidecar`)
   imports sidecar-local devDependencies that the root install does not
   provide.
+- The sidecar's own `node --test` suite checks the experimental `tsrs`
+  backend. `tsrs` is a sidecar-local devDependency, so that test fails after
+  a root-only `pnpm install`. The other tests of the suite pass.
 - When the resolvable `typescript` is missing or too old (for example the
   root install is absent or out of lockstep), the sidecar exits with code 2
   and a stderr message naming the resolved version, its location, and the

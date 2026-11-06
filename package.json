@@ -50,6 +50,7 @@
     "@resvg/resvg-js": "2.6.2",
     "@tanstack/intent": "0.5.6",
     "oxfmt": "0.75.0",
-    "oxlint": "1.90.0"
+    "oxlint": "1.90.0",
+    "typescript": "7.0.2"
   }
 }
