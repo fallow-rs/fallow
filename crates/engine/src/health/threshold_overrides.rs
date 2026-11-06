@@ -305,6 +305,27 @@ fn configured_dimensions(
     dimensions
 }
 
+/// The status of one complexity-dimension row.
+///
+/// `global_exceeded` and `local_exceeded` say whether the unit breaches the
+/// global and the resolved ceilings. `breaches_lowered` says whether the unit
+/// breaches a resolved ceiling that the override set below the global one.
+/// Such an override produces or sets the limit of a finding, so it reads
+/// `active`. A row reads `stale` only when the override changes no result.
+const fn override_status(
+    global_exceeded: bool,
+    local_exceeded: bool,
+    breaches_lowered: bool,
+) -> fallow_output::ThresholdOverrideStatus {
+    if breaches_lowered || (global_exceeded && !local_exceeded) {
+        fallow_output::ThresholdOverrideStatus::Active
+    } else if !global_exceeded {
+        fallow_output::ThresholdOverrideStatus::Stale
+    } else {
+        fallow_output::ThresholdOverrideStatus::Insufficient
+    }
+}
+
 impl ThresholdOverrideStateTracker {
     /// `effective` is the ceiling set resolved across every matching entry, not
     /// the entry's own configured value. A later entry can supersede an earlier
@@ -381,13 +402,19 @@ impl ThresholdOverrideStateTracker {
                 effective.max_cognitive,
                 effective.max_unit_size,
             );
-            let status = if global_exceeded && !local_exceeded {
-                fallow_output::ThresholdOverrideStatus::Active
-            } else if !global_exceeded {
-                fallow_output::ThresholdOverrideStatus::Stale
-            } else {
-                fallow_output::ThresholdOverrideStatus::Insufficient
-            };
+            // An override can also set a ceiling below the global one. When
+            // the unit breaches such a lowered ceiling, the override sets the
+            // limit of the finding, so it is in force and reads `active`, with
+            // the breach in `outstanding` (issue #4173).
+            let breaches_lowered = (!suppressed
+                && ((effective.max_cyclomatic < global.cyclomatic
+                    && cyclomatic > effective.max_cyclomatic)
+                    || (effective.max_cognitive < global.cognitive
+                        && cognitive > effective.max_cognitive)))
+                || (touches_unit_size
+                    && effective.max_unit_size < global.unit_size
+                    && line_count.is_some_and(|lc| lc > effective.max_unit_size));
+            let status = override_status(global_exceeded, local_exceeded, breaches_lowered);
             // A surviving unit-size breach has to be seeded here, because
             // `annotate_outstanding_dimensions` derives `outstanding` from the
             // findings list and unit size emits no finding. Without it a
@@ -424,8 +451,9 @@ impl ThresholdOverrideStateTracker {
 
     /// Record the rows of the `maxFileLines` entries that match one file.
     ///
-    /// A file-length ceiling of `0` is off, so it never breaches. The row
-    /// belongs to the complexity dimension and names the file-level unit
+    /// A file-length ceiling of `0` is off, so it never breaches. An override
+    /// ceiling lowers the limit when the global ceiling is off or higher. The
+    /// row belongs to the complexity dimension and names the file-level unit
     /// `<file>`. A suppressed file reads `stale`, as a suppressed function
     /// does in [`record_complexity`](Self::record_complexity).
     pub(super) fn record_file_lines(
@@ -439,13 +467,9 @@ impl ThresholdOverrideStateTracker {
         let breaches = |limit: u32| !file.suppressed && limit > 0 && file.line_count > limit;
         let global_exceeded = breaches(global_max_file_lines);
         let local_exceeded = breaches(effective_max_file_lines);
-        let status = if global_exceeded && !local_exceeded {
-            fallow_output::ThresholdOverrideStatus::Active
-        } else if !global_exceeded {
-            fallow_output::ThresholdOverrideStatus::Stale
-        } else {
-            fallow_output::ThresholdOverrideStatus::Insufficient
-        };
+        let lowered = effective_max_file_lines > 0
+            && (global_max_file_lines == 0 || effective_max_file_lines < global_max_file_lines);
+        let status = override_status(global_exceeded, local_exceeded, lowered && local_exceeded);
         let outstanding = if local_exceeded {
             vec![ThresholdOverrideDimension::Complexity]
         } else {
