@@ -166,6 +166,12 @@ pub struct MutationArgs {
         requires = "recheck"
     )]
     pub mutants: Vec<String>,
+    /// Compare this run with a saved complete report: list each mutant that
+    /// the report detects (`killed` or `timeout`) and this run does not
+    /// (`survived` or `no_coverage`), with its earlier killing tests. A
+    /// report or a run that is not complete exits 2.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["plan", "recheck"])]
+    pub compare: Option<PathBuf>,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -593,6 +599,12 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     let mut options = run_options(input)?;
     let recheck = recheck_selection(input)?;
     let min_score = apply_recheck(input, &mut options, recheck.as_ref())?;
+    let baseline = input
+        .args
+        .compare
+        .as_deref()
+        .map(compare::load)
+        .transpose()?;
     if input.args.plan {
         refuse_run_flags_in_plan(&input.args)?;
         let plan = plan_mutation(&options)?;
@@ -621,6 +633,10 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     if let Some(verdicts) = verdicts {
         apply_mutation_verdicts(&mut report, &verdicts)?;
     }
+    // After the verdicts: an equivalent mutant is no lost detection.
+    let (compare_section, compare_blocked) = compare_with(baseline.as_ref(), &report);
+    report.compare = compare_section;
+    let blocked = blocked.or(compare_blocked);
     let exit = run_exit_code(&report, min_score);
     crate::telemetry::note_result_count(report.summary.counts.survived);
     let value = serialize_mutation_json_output(report.clone()).map_err(|error| {
@@ -657,23 +673,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
         if json {
             emit_json(&value, input.json_style)?;
         } else {
-            let code = code_lookup(&report, input.root);
-            let flags = inspect_flags(input);
-            let text = render_run(
-                &report,
-                &RunReportOptions {
-                    min_score,
-                    code: Some(&code),
-                    inspect_flags: saved.then_some(flags.as_str()),
-                },
-            );
-            let recheck_text = report.recheck.as_ref().map(recheck::render);
-            for line in text
-                .lines()
-                .chain(recheck_text.iter().flat_map(|text| text.lines()))
-            {
-                crate::report::sink::outln!("{line}");
-            }
+            emit_human(input, &report, min_score, saved);
         }
         if let Some(path) = input.output_file
             && let Err(code) = crate::finalize_report_file(path, input.quiet, input.output)
@@ -699,8 +699,59 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     Ok(ExitCode::from(exit))
 }
 
+/// Prints the human run report, then the recheck or compare section.
+fn emit_human(
+    input: &MutationCliInput<'_>,
+    report: &MutationReport,
+    min_score: Option<f64>,
+    saved: bool,
+) {
+    let code = code_lookup(report, input.root);
+    let flags = inspect_flags(input);
+    let text = render_run(
+        report,
+        &RunReportOptions {
+            min_score,
+            code: Some(&code),
+            inspect_flags: saved.then_some(flags.as_str()),
+        },
+    );
+    let section_text = report
+        .recheck
+        .as_ref()
+        .map(recheck::render)
+        .or_else(|| report.compare.as_ref().map(compare::render));
+    for line in text
+        .lines()
+        .chain(section_text.iter().flat_map(|text| text.lines()))
+    {
+        crate::report::sink::outln!("{line}");
+    }
+}
+
 #[path = "mutation_recheck.rs"]
 mod recheck;
+
+#[path = "mutation_compare.rs"]
+mod compare;
+
+/// The compare section of a `--compare` run, or the error of a run that is
+/// not complete. Both are `None` without `--compare`.
+fn compare_with(
+    baseline: Option<&compare::Baseline>,
+    report: &MutationReport,
+) -> (
+    Option<fallow_output::MutationCompare>,
+    Option<ProgrammaticError>,
+) {
+    let Some(baseline) = baseline else {
+        return (None, None);
+    };
+    match compare::guard_run_complete(report) {
+        Some(error) => (None, Some(error)),
+        None => (Some(baseline.compare(&report.mutants)), None),
+    }
+}
 
 /// Narrows the run options to the mutants of a recheck and gives the minimum
 /// score. The score of a recheck covers only the rechecked mutants, so the

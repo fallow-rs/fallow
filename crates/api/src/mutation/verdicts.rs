@@ -302,6 +302,7 @@ mod tests {
             verdicts: None,
             typecheck: None,
             recheck: None,
+            compare: None,
         }
     }
 

@@ -1300,6 +1300,21 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
     run_mutation_with_progress(options, &|_| {})
 }
 
+/// The worktree check of the report: the dirty paths at the start and the
+/// paths that the run changed.
+fn worktree_check(
+    start: Option<&WorktreeSnapshot>,
+    allow_dirty: bool,
+    changed_paths: Vec<String>,
+) -> MutationWorktreeCheck {
+    MutationWorktreeCheck {
+        checked: start.is_some(),
+        allow_dirty,
+        dirty_at_start: start.map(WorktreeSnapshot::dirty_paths).unwrap_or_default(),
+        changed_paths,
+    }
+}
+
 /// [`run_mutation`] that sends a [`MutationProgress`] event at the start of
 /// each run phase and after each finished mutant.
 ///
@@ -1397,21 +1412,14 @@ pub fn run_mutation_with_progress(
         unloaded_paths: outcome
             .map(|outcome| outcome.unloaded_paths.clone())
             .unwrap_or_default(),
-        worktree: MutationWorktreeCheck {
-            checked: start_snapshot.is_some(),
-            allow_dirty: options.allow_dirty,
-            dirty_at_start: start_snapshot
-                .as_ref()
-                .map(WorktreeSnapshot::dirty_paths)
-                .unwrap_or_default(),
-            changed_paths,
-        },
+        worktree: worktree_check(start_snapshot.as_ref(), options.allow_dirty, changed_paths),
         errors,
         timings,
         files: plan_files(plan),
         verdicts: None,
         typecheck: typecheck.output,
         recheck: None,
+        compare: None,
     })
 }
 

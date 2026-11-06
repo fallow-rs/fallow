@@ -33141,6 +33141,17 @@
             }
           ],
           "description": "The result of each rechecked mutant against its status in the earlier\nreport. Absent outside `--recheck`."
+        },
+        "compare": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationCompare"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The mutants whose result differs from a saved report. Absent outside\n`--compare`, and absent when this run is not complete."
         }
       },
       "required": [
@@ -36574,6 +36585,135 @@
         }
       ],
       "description": "What a recheck shows for one mutant of the earlier report."
+    },
+    "MutationCompare": {
+      "type": "object",
+      "properties": {
+        "report_sha256": {
+          "type": "string",
+          "description": "The SHA-256 digest of the saved report."
+        },
+        "compared": {
+          "type": "integer",
+          "description": "The number of mutant ids in both runs."
+        },
+        "regressed": {
+          "type": "integer",
+          "description": "The number of mutants for each change."
+        },
+        "inconclusive": {
+          "type": "integer",
+          "description": "See `regressed`."
+        },
+        "added": {
+          "type": "integer",
+          "description": "See `regressed`."
+        },
+        "removed": {
+          "type": "integer",
+          "description": "See `regressed`."
+        },
+        "mutants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationCompareMutant"
+          },
+          "description": "Each mutant with a change, sorted by file, line and mutant id. A\nmutant in both runs without a change is not in the list."
+        }
+      },
+      "required": [
+        "report_sha256",
+        "compared",
+        "regressed",
+        "inconclusive",
+        "added",
+        "removed",
+        "mutants"
+      ],
+      "description": "The compare facts of a `--compare` run."
+    },
+    "MutationCompareMutant": {
+      "type": "object",
+      "properties": {
+        "mutant_id": {
+          "type": "string",
+          "description": "The id of the mutant."
+        },
+        "file": {
+          "type": "string",
+          "description": "The project-root-relative path of the mutated file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "The 1-based line of the mutant."
+        },
+        "change": {
+          "description": "How the mutant differs from the saved report.",
+          "$ref": "#/definitions/MutationCompareChange"
+        },
+        "previous_status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The status in the saved report. Absent for an `added` mutant."
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The status in this run. Absent for a `removed` mutant."
+        },
+        "previous_killing_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The tests that killed the mutant in the saved report, sorted: its\n`killing_tests`, else its `killed_by`. Empty when the saved report\nnames no killing test."
+        }
+      },
+      "required": [
+        "mutant_id",
+        "file",
+        "line",
+        "change",
+        "previous_killing_tests"
+      ],
+      "description": "One mutant of a compare."
+    },
+    "MutationCompareChange": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "regressed",
+          "description": "The saved report detects the mutant (`killed` or `timeout`), and this\nrun does not (`survived` or `no_coverage`). The tests lost the\ndetection of the mutant."
+        },
+        {
+          "type": "string",
+          "const": "inconclusive",
+          "description": "The mutant is `flaky` in one of the two runs, so the comparison of\nthis mutant proves nothing."
+        },
+        {
+          "type": "string",
+          "const": "added",
+          "description": "Only this run has the mutant id."
+        },
+        {
+          "type": "string",
+          "const": "removed",
+          "description": "Only the saved report has the mutant id."
+        }
+      ],
+      "description": "How one mutant of a compare differs from the saved report."
     }
   }
 }

@@ -1388,6 +1388,12 @@
           "description": "Recheck only these mutant ids of the report, comma-separated or repeated (default: each open task). The saved report then stays as it is, so `fallow mutation tasks` keeps the other open tasks"
         },
         {
+          "name": "--compare",
+          "type": "string",
+          "required": false,
+          "description": "Compare this run with a saved complete report: list each mutant that the report detects (`killed` or `timeout`) and this run does not (`survived` or `no_coverage`), with its earlier killing tests. A report or a run that is not complete exits 2"
+        },
+        {
           "name": "paths",
           "type": "string",
           "required": false,

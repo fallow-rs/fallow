@@ -1741,3 +1741,139 @@ mod interrupt {
         );
     }
 }
+
+/// Issue #4168: `--compare` lists each mutant that a weaker test no longer
+/// detects. The `node:test` runner needs only `node`.
+mod compare {
+    use std::fs;
+    use std::process::Command;
+
+    use super::{commit_all, git, json_mutation, mutation};
+
+    const SOURCE: &str = "export const inc = (x) => x + 1;\nexport const dec = (x) => x - 1;\n";
+    const STRONG: &str = "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { inc, dec } from \"../src/math.js\";\ntest(\"inc\", () => { assert.equal(inc(1), 2); });\ntest(\"dec\", () => { assert.equal(dec(1), 0); });\n";
+    /// The `inc` test calls `inc` but asserts nothing, so it kills no mutant.
+    const WEAK: &str = "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { inc, dec } from \"../src/math.js\";\ntest(\"inc\", () => { inc(1); });\ntest(\"dec\", () => { assert.equal(dec(1), 0); });\n";
+
+    #[expect(
+        clippy::print_stderr,
+        reason = "a skipped end-to-end test says why it did not run"
+    )]
+    fn has_node() -> bool {
+        let found = Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if !found {
+            eprintln!("skipped: the compare test needs `node` on PATH");
+        }
+        found
+    }
+
+    fn project() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"compare-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+        )
+        .expect("package.json");
+        fs::create_dir_all(root.join("src")).expect("src");
+        fs::create_dir_all(root.join("test")).expect("test");
+        fs::write(root.join("src/math.js"), SOURCE).expect("math.js");
+        fs::write(root.join("test/math.test.js"), STRONG).expect("math.test.js");
+        fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+        git(root, &["init", "-q"]);
+        commit_all(root, "init");
+        dir
+    }
+
+    #[test]
+    fn compare_lists_the_mutants_that_a_weaker_test_no_longer_kills() {
+        if !has_node() {
+            return;
+        }
+        let project = project();
+        let root = project.path();
+        let saved_dir = tempfile::tempdir().expect("saved dir");
+        let saved = saved_dir.path().join("before.json");
+
+        let (output, before) = json_mutation(root, &["--all", "--no-cache"]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        assert_eq!(before["completion"]["status"], "complete", "{before}");
+        let killed_in_inc = before["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .filter(|mutant| mutant["status"] == "killed" && mutant["line"] == 1)
+            .count();
+        assert!(
+            killed_in_inc > 0,
+            "the strong test kills a mutant: {before}"
+        );
+        fs::write(&saved, &output.stdout).expect("save");
+
+        fs::write(root.join("test/math.test.js"), WEAK).expect("weaken");
+        commit_all(root, "weaken");
+        let saved_arg = saved.to_str().expect("utf-8 path");
+        let (output, after) = json_mutation(root, &["--all", "--no-cache", "--compare", saved_arg]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let compare = &after["compare"];
+        assert_eq!(compare["regressed"], killed_in_inc, "{after}");
+        assert_eq!(compare["added"], 0, "{after}");
+        assert_eq!(compare["removed"], 0, "{after}");
+        let first = &compare["mutants"][0];
+        assert_eq!(first["change"], "regressed", "{after}");
+        assert_eq!(first["previous_status"], "killed", "{after}");
+        assert_eq!(first["status"], "survived", "{after}");
+        let killer = first["previous_killing_tests"][0].as_str().expect("killer");
+        assert!(killer.contains("inc"), "{after}");
+
+        let human = mutation(
+            root,
+            &["--all", "--no-cache", "--quiet", "--compare", saved_arg],
+        );
+        assert_eq!(human.code, 0, "{}", human.stderr);
+        assert!(
+            human.stdout.contains("Compare with the saved report"),
+            "{}",
+            human.stdout
+        );
+        assert!(
+            human.stdout.contains(&format!("killed before by {killer}")),
+            "{}",
+            human.stdout
+        );
+
+        let (output, partial_run) = json_mutation(
+            root,
+            &[
+                "--all",
+                "--no-cache",
+                "--max-mutants",
+                "1",
+                "--compare",
+                saved_arg,
+            ],
+        );
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        assert_eq!(
+            partial_run["code"], "FALLOW_MUTATION_COMPARE_INCOMPLETE",
+            "{partial_run}"
+        );
+
+        let mut partial: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&saved).expect("read")).expect("json");
+        partial["completion"]["status"] = "partial".into();
+        fs::write(&saved, partial.to_string()).expect("partial");
+        let (output, error) = json_mutation(root, &["--all", "--no-cache", "--compare", saved_arg]);
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        assert_eq!(
+            error["code"], "FALLOW_MUTATION_COMPARE_INCOMPLETE",
+            "{error}"
+        );
+
+        let conflict = mutation(root, &["--plan", "--compare", saved_arg]);
+        assert_eq!(conflict.code, 2, "{}", conflict.stderr);
+    }
+}
