@@ -1,13 +1,51 @@
 // Generated from tools/mutation-runner/src/runtime/overlay-hook.mjs. Do not edit.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { registerHooks } from "node:module";
+import { registerHooks, stripTypeScriptTypes } from "node:module";
+import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { realPath } from "./child.mjs";
 
 const SCRIPT_FORMATS = new Set(["module", "commonjs", "module-typescript", "commonjs-typescript"]);
+const JAVASCRIPT_FORMATS = new Set(["module", "commonjs"]);
+// Node type stripping does not accept JSX, so a `.tsx` file is not here.
+const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".mts", ".cts"]);
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Calls `stripTypeScriptTypes` without its ExperimentalWarning. The warning
+ * goes to stderr of the process, and a test can assert on that stream.
+ */
+const stripTypes = (code) => {
+  const emitWarning = process.emitWarning;
+  process.emitWarning = () => {};
+  try {
+    const mode = process.features.typescript === "transform" ? "transform" : "strip";
+    return stripTypeScriptTypes(code, { mode });
+  } finally {
+    process.emitWarning = emitWarning;
+  }
+};
+
+/**
+ * Gives the source to serve for an overlay entry, as a Result. A TypeScript
+ * target in a JavaScript format comes from a project loader that compiles
+ * TypeScript before this hook. The hook replaces that output with the
+ * mutant, so the hook strips the types of the mutant. The error names the
+ * syntax that type stripping does not accept, for example an `enum`.
+ */
+const serveTarget = (entry, format) => {
+  const source = readFileSync(entry.target, "utf8");
+  if (!JAVASCRIPT_FORMATS.has(format) || !TYPESCRIPT_EXTENSIONS.has(extname(entry.target))) {
+    return { ok: true, source };
+  }
+  try {
+    return { ok: true, source: stripTypes(source) };
+  } catch (error) {
+    return { ok: false, error: `Cannot serve the mutant of ${entry.source}: ${error.message}` };
+  }
+};
 
 const indexSources = (overlay) => {
   const index = new Map();
@@ -26,8 +64,10 @@ const indexSources = (overlay) => {
  * file. `onLoad(entry)` runs for each served file.
  *
  * A synchronous hook runs in this thread for `import` and `require`. It keeps
- * the format of the original file, so Node strips the types of a TypeScript
- * file as it does without the overlay.
+ * the format of the original file. For a TypeScript file in a TypeScript
+ * format, Node strips the types as it does without the overlay. A project
+ * loader that compiles TypeScript itself gives a JavaScript format, so the
+ * hook strips the types of the mutant (see `serveTarget`).
  */
 export const registerOverlayHook = (overlay, onLoad, onIncomplete) => {
   let sources;
@@ -53,8 +93,13 @@ export const registerOverlayHook = (overlay, onLoad, onIncomplete) => {
       const result = nextLoad(url, context);
       const entry = overlayEntry(url, result);
       if (entry === undefined) return result;
+      const served = serveTarget(entry, result.format);
+      if (!served.ok) {
+        onIncomplete(served.error);
+        return result;
+      }
       onLoad(entry);
-      return { ...result, source: readFileSync(entry.target, "utf8"), shortCircuit: true };
+      return { ...result, source: served.source, shortCircuit: true };
     },
   });
 };
