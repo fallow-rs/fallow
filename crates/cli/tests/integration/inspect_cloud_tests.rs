@@ -405,9 +405,11 @@ fn inspect_cloud_maps_the_tier_gate_to_plan_required() {
 #[test]
 fn inspect_cloud_reports_an_unreachable_cloud_as_unavailable() {
     let (dir, home) = project();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    drop(listener);
+    // A freed port from `bind("127.0.0.1:0")` is not safe here: a parallel
+    // test can bind the same port, and this run then reaches its server.
+    // Port 1 needs privileges to bind, so no test listens there, and a
+    // connection is refused at once.
+    let endpoint = "http://127.0.0.1:1".to_owned();
     let output = run(
         INSPECT_JSON,
         dir.path(),
