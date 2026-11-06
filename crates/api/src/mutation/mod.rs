@@ -177,7 +177,7 @@ pub struct MutationRunOptions {
     pub mutant_ids: Vec<String>,
     /// Allow a dirty worktree when each dirty path is a test file: a path
     /// that the test path rules match, or a test file of the plan. Another
-    /// dirty path fails the run with `FALLOW_MUTATION_SOURCE_CHANGED`, so
+    /// dirty path fails the run with `FALLOW_MUTATION_NON_TEST_CHANGE`, so
     /// the run proves a change of the tests only. `allow_dirty` wins.
     pub test_changes_only: bool,
 }

@@ -656,7 +656,7 @@ fn guard_test_changes_only(
     }
     let shown: Vec<&str> = changed.iter().take(10).map(String::as_str).collect();
     Err(mutation_error(
-        "FALLOW_MUTATION_SOURCE_CHANGED",
+        "FALLOW_MUTATION_NON_TEST_CHANGE",
         format!(
             "the git worktree changes {} {} that {} not a test file: {}",
             changed.len(),

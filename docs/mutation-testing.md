@@ -1531,8 +1531,12 @@ fallow mutation tasks              # what is still open
   results.
 - The worktree can be dirty, but each dirty path must be a test file: a path
   that the test path rules match, or a test file of the plan. Another dirty
-  path exits with code 2 and `FALLOW_MUTATION_SOURCE_CHANGED`. The recheck
-  then proves a change of the tests only.
+  path exits with code 2 and `FALLOW_MUTATION_NON_TEST_CHANGE`.
+- These two checks cover the selected files and the uncommitted changes. The
+  report stores no commit, so a recheck does not see a change that was
+  committed after the report to another file, for example a module that a
+  selected file imports or the runner config. Run `fallow mutation` again
+  after such a commit.
 - The run plans the files of the selected mutants. The other mutants of
   these files are `pruned` with `prune_reason` `not-selected`, because the
   instrumented file holds their switch too. They leave the score.
@@ -1540,10 +1544,14 @@ fallow mutation tasks              # what is still open
   `FALLOW_MUTATION_UNKNOWN_MUTANT`. A report without an open task exits with
   code 2 and `FALLOW_MUTATION_NOTHING_TO_RECHECK`.
 - `--recheck` conflicts with `--all`, paths, `--changed-since`, `--plan`,
-  `--resume`, `--allow-dirty` and `--max-mutants`. The other run flags apply.
+  `--resume`, `--allow-dirty`, `--max-mutants` and `--min-score`. The score
+  covers only the rechecked mutants, so `mutation.minScore` does not apply.
+  The other run flags apply.
 - The output is a normal `mutation` report with the optional `recheck`
-  object. The run replaces the saved report, so `tasks` then lists the
-  mutants that are still open. Pass `-o <file>` to keep a copy.
+  object. A recheck without `--mutant` replaces the saved report, so `tasks`
+  then lists the mutants that are still open. A recheck with `--mutant`
+  keeps the saved report, so the other open tasks stay in it. Pass
+  `-o <file>` to keep a copy of the output.
 
 The `recheck` object has `report_sha256` (the digest of the earlier report),
 a count for each outcome, and `mutants`: each selected mutant with its

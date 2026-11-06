@@ -707,6 +707,25 @@ fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
         .filter(|mutant| mutant["prune_reason"] == "not-selected")
         .count();
     assert_eq!(not_selected, open.len() - 1);
+    let (_, tasks) = json_mutation(project.path(), &["tasks"]);
+    assert_eq!(
+        tasks["summary"]["tasks"],
+        open.len(),
+        "a recheck of named mutants keeps the other open tasks in the saved report"
+    );
+
+    let gated = mutation(project.path(), &["--recheck", "--min-score", "50"]);
+    assert_eq!(gated.code, 2, "{}", gated.stderr);
+
+    fs::write(
+        project.path().join("src/other.ts"),
+        "export const other = 1;\n",
+    )
+    .expect("other");
+    let (dirty, error) = json_mutation(project.path(), &["--recheck"]);
+    assert_eq!(dirty.code, 2);
+    assert_eq!(error["code"], "FALLOW_MUTATION_NON_TEST_CHANGE", "{error}");
+    fs::remove_file(project.path().join("src/other.ts")).expect("remove other");
 
     let (unknown, error) = json_mutation(
         project.path(),

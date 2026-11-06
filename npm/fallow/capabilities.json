@@ -1379,13 +1379,13 @@
           "name": "--report",
           "type": "string",
           "required": false,
-          "description": "The saved report of `--recheck` (default: the report of the last run)"
+          "description": "The saved report of `--recheck` (default: the report of the last run). A recheck without `--mutant` replaces the saved report"
         },
         {
           "name": "--mutant",
           "type": "string",
           "required": false,
-          "description": "Recheck only these mutant ids of the report, comma-separated or repeated (default: each open task)"
+          "description": "Recheck only these mutant ids of the report, comma-separated or repeated (default: each open task). The saved report then stays as it is, so `fallow mutation tasks` keeps the other open tasks"
         },
         {
           "name": "paths",

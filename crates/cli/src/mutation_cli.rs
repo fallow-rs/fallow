@@ -149,14 +149,16 @@ pub struct MutationArgs {
     /// `fallow mutation tasks` then lists the mutants that are still open.
     #[arg(
         long,
-        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants"]
+        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "min_score"]
     )]
     pub recheck: bool,
     /// The saved report of `--recheck` (default: the report of the last run).
+    /// A recheck without `--mutant` replaces the saved report.
     #[arg(long, value_name = "PATH", requires = "recheck")]
     pub report: Option<PathBuf>,
     /// Recheck only these mutant ids of the report, comma-separated or
-    /// repeated (default: each open task).
+    /// repeated (default: each open task). The saved report then stays as it
+    /// is, so `fallow mutation tasks` keeps the other open tasks.
     #[arg(
         long = "mutant",
         value_name = "ID",
@@ -590,12 +592,7 @@ fn refuse_run_flags_in_plan(args: &MutationArgs) -> Result<(), ProgrammaticError
 fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError> {
     let mut options = run_options(input)?;
     let recheck = recheck_selection(input)?;
-    if let Some(selection) = &recheck {
-        options.scope = MutationRunScope::Paths(selection.files());
-        options.mutant_ids = selection.mutant_ids();
-        options.test_changes_only = true;
-    }
-    let min_score = min_score(input)?;
+    let min_score = apply_recheck(input, &mut options, recheck.as_ref())?;
     if input.args.plan {
         refuse_run_flags_in_plan(&input.args)?;
         let plan = plan_mutation(&options)?;
@@ -632,7 +629,14 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             2,
         )
     })?;
-    let saved_path = save_report(&options.analysis, &value);
+    // A recheck of named mutants keeps the saved report, so the other open
+    // tasks stay in it.
+    let saved_path = input
+        .args
+        .mutants
+        .is_empty()
+        .then(|| save_report(&options.analysis, &value))
+        .flatten();
     let saved = saved_path.is_some();
     if saved {
         remove_journal(&options.analysis, &report);
@@ -697,6 +701,23 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
 
 #[path = "mutation_recheck.rs"]
 mod recheck;
+
+/// Narrows the run options to the mutants of a recheck and gives the minimum
+/// score. The score of a recheck covers only the rechecked mutants, so the
+/// project gate of `mutation.minScore` does not apply to it.
+fn apply_recheck(
+    input: &MutationCliInput<'_>,
+    options: &mut MutationRunOptions,
+    recheck: Option<&recheck::Selection>,
+) -> Result<Option<f64>, ProgrammaticError> {
+    let Some(selection) = recheck else {
+        return min_score(input);
+    };
+    options.scope = MutationRunScope::Paths(selection.files());
+    options.mutant_ids = selection.mutant_ids();
+    options.test_changes_only = true;
+    Ok(None)
+}
 
 /// The mutants of a `--recheck` run, from the saved report. `None` without
 /// `--recheck`.
