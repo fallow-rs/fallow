@@ -921,6 +921,73 @@ pub struct MutationReport {
     /// report. Absent outside `--recheck`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recheck: Option<MutationRecheck>,
+    /// The mutants whose result differs from a saved report. Absent outside
+    /// `--compare`, and absent when this run is not complete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<MutationCompare>,
+}
+
+/// How one mutant of a compare differs from the saved report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationCompareChange {
+    /// The saved report detects the mutant (`killed` or `timeout`), and this
+    /// run does not (`survived` or `no_coverage`). The tests lost the
+    /// detection of the mutant.
+    Regressed,
+    /// The mutant is `flaky` in one of the two runs, so the comparison of
+    /// this mutant proves nothing.
+    Inconclusive,
+    /// Only this run has the mutant id.
+    Added,
+    /// Only the saved report has the mutant id.
+    Removed,
+}
+
+/// One mutant of a compare.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationCompareMutant {
+    /// The id of the mutant.
+    pub mutant_id: String,
+    /// The project-root-relative path of the mutated file.
+    pub file: String,
+    /// The 1-based line of the mutant.
+    pub line: u32,
+    /// How the mutant differs from the saved report.
+    pub change: MutationCompareChange,
+    /// The status in the saved report. Absent for an `added` mutant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_status: Option<MutantStatus>,
+    /// The status in this run. Absent for a `removed` mutant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<MutantStatus>,
+    /// The tests that killed the mutant in the saved report, sorted: its
+    /// `killing_tests`, else its `killed_by`. Empty when the saved report
+    /// names no killing test.
+    pub previous_killing_tests: Vec<String>,
+}
+
+/// The compare facts of a `--compare` run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationCompare {
+    /// The SHA-256 digest of the saved report.
+    pub report_sha256: String,
+    /// The number of mutant ids in both runs.
+    pub compared: usize,
+    /// The number of mutants for each change.
+    pub regressed: usize,
+    /// See `regressed`.
+    pub inconclusive: usize,
+    /// See `regressed`.
+    pub added: usize,
+    /// See `regressed`.
+    pub removed: usize,
+    /// Each mutant with a change, sorted by file, line and mutant id. A
+    /// mutant in both runs without a change is not in the list.
+    pub mutants: Vec<MutationCompareMutant>,
 }
 
 /// What a recheck shows for one mutant of the earlier report.

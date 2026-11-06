@@ -44,4 +44,7 @@ pub const MUTATION_DEFINITION_NAMES: &[&str] = &[
     "MutationRecheck",
     "MutationRecheckMutant",
     "MutationRecheckOutcome",
+    "MutationCompare",
+    "MutationCompareMutant",
+    "MutationCompareChange",
 ];

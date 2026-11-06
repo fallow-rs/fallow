@@ -1837,6 +1837,10 @@ export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "
  */
 export type MutationRecheckOutcome = ("killed" | "survived" | "no_coverage" | "tests_fail_on_original" | "unsettled")
 /**
+ * How one mutant of a compare differs from the saved report.
+ */
+export type MutationCompareChange = ("regressed" | "inconclusive" | "added" | "removed")
+/**
  * Version singleton for a mutation plan.
  */
 export type MutationPlanSchemaVersion = "1"
@@ -20718,6 +20722,11 @@ typecheck?: (MutationTypecheckOutput | null)
  * report. Absent outside `--recheck`.
  */
 recheck?: (MutationRecheck | null)
+/**
+ * The mutants whose result differs from a saved report. Absent outside
+ * `--compare`, and absent when this run is not complete.
+ */
+compare?: (MutationCompare | null)
 }
 /**
  * The completion status of a run.
@@ -21444,6 +21453,72 @@ line: number
 previous_status: MutantStatus
 status: MutantStatus
 outcome: MutationRecheckOutcome
+}
+/**
+ * The compare facts of a `--compare` run.
+ */
+export interface MutationCompare {
+/**
+ * The SHA-256 digest of the saved report.
+ */
+report_sha256: string
+/**
+ * The number of mutant ids in both runs.
+ */
+compared: number
+/**
+ * The number of mutants for each change.
+ */
+regressed: number
+/**
+ * See `regressed`.
+ */
+inconclusive: number
+/**
+ * See `regressed`.
+ */
+added: number
+/**
+ * See `regressed`.
+ */
+removed: number
+/**
+ * Each mutant with a change, sorted by file, line and mutant id. A
+ * mutant in both runs without a change is not in the list.
+ */
+mutants: MutationCompareMutant[]
+}
+/**
+ * One mutant of a compare.
+ */
+export interface MutationCompareMutant {
+/**
+ * The id of the mutant.
+ */
+mutant_id: string
+/**
+ * The project-root-relative path of the mutated file.
+ */
+file: string
+/**
+ * The 1-based line of the mutant.
+ */
+line: number
+change: MutationCompareChange
+/**
+ * The status in the saved report. Absent for an `added` mutant.
+ */
+previous_status?: (MutantStatus | null)
+/**
+ * The status in this run. Absent for a `removed` mutant.
+ */
+status?: (MutantStatus | null)
+/**
+ * The tests that killed the mutant in the saved report, sorted: its
+ * `killing_tests`, else its `killed_by`. Empty when the saved report
+ * names no killing test.
+ */
+previous_killing_tests: string[]
 }
 /**
  * The envelope of `fallow mutation --plan`. It runs no user code.

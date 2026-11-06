@@ -15,6 +15,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
 | `fallow mutation tasks [--report <file>]` | no | `mutation-tasks` |
 | `fallow mutation --recheck [--report <file>] [--mutant <id>]` | yes | `mutation` |
+| `fallow mutation --compare <file>` | yes | `mutation` |
 | `fallow health --mutation-report <file>` | no | `health` |
 
 - The default scope is the changed code against the detected base ref, the same
@@ -29,7 +30,7 @@ read-only next steps. It never writes a test and never proposes a code change.
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
-  `--recheck` (with `--report` and `--mutant`).
+  `--recheck` (with `--report` and `--mutant`) and `--compare`.
   The global `--no-cache` flag also turns off the result cache (see "Result
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
   journal and resume").
@@ -381,7 +382,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare). |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run in which no mutant has a test result has no score. It exits
@@ -1575,6 +1576,56 @@ a count for each outcome, and `mutants`: each selected mutant with its
 | `no_coverage` | No test reaches the mutant. |
 | `tests_fail_on_original` | A test of the run fails on the original code (a baseline failure), so the run proves no survivor. Fix that test first. |
 | `unsettled` | No final result, for example `runtime_error`, `flaky` or `pending`. `status` gives the reason. |
+
+## Compare
+
+`--compare <file>` compares the run with a saved report. It shows if a
+change of the tests weakens the detection of mutants: a mutant that a test
+killed before and that survives now.
+
+```bash
+fallow mutation src/utils.ts --format json > before.json   # save a report
+# change, move or remove tests, then commit
+fallow mutation src/utils.ts --compare before.json
+```
+
+- The saved report is a `fallow mutation --format json` report, for example
+  the `-o` file of an earlier run. Keep it in a file of its own: each run
+  replaces the report of the last run in the Fallow cache.
+- The compare matches the mutants of the two runs by `mutant_id`. A mutant id
+  stays the same until its enclosing function changes, so an edit of a test
+  file keeps the ids. Run the two runs over the same files.
+- The saved report and this run must have `completion.status: complete`.
+  The mutants of a partial run have no final status. A saved report that is
+  not complete exits with code 2 and `FALLOW_MUTATION_COMPARE_INCOMPLETE`
+  before the run starts. A run that is not complete writes its report, then
+  exits with code 2 and the same code, and the report has no `compare`
+  object.
+- A regression does not change the exit code. To fail a CI job on a
+  regression, read `compare.regressed` of the JSON output.
+- `--compare` conflicts with `--plan` and `--recheck`. The other run flags
+  apply. A verdict document applies before the compare, so an `equivalent`
+  mutant is not a regression.
+
+The `compare` object has `report_sha256` (the digest of the saved report),
+`compared` (the number of mutant ids in both runs), a count for each change,
+and `mutants`: each mutant with a change, sorted by file, line and mutant id.
+Each entry has `mutant_id`, `file`, `line`, `change`, `previous_status`
+(absent for `added`), `status` (absent for `removed`) and
+`previous_killing_tests`: the `killing_tests` of the saved report, else its
+`killed_by`. A mutant in both runs without a change is not in the list.
+
+| `change` | Meaning |
+|---|---|
+| `regressed` | The saved report detects the mutant (`killed` or `timeout`), and this run does not (`survived` or `no_coverage`). |
+| `inconclusive` | The mutant is `flaky` in one of the two runs, so the compare of this mutant proves nothing. |
+| `added` | Only this run has the mutant id. |
+| `removed` | Only the saved report has the mutant id. |
+
+The human output adds a compare section after the run report. Each
+regressed mutant names the test that killed it in the saved report. When
+no mutant id is in both runs, the section says so, because the compare
+checked no mutant. The exit code stays 0.
 
 ## Health join
 

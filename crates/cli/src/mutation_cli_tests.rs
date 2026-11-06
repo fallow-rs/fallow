@@ -447,6 +447,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         verdicts: None,
         typecheck: None,
         recheck: None,
+        compare: None,
     }
 }
 

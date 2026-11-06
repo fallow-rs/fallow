@@ -63,9 +63,9 @@ pub struct SavedMutant {
     #[serde(default)]
     pub covering_tests: Vec<String>,
     #[serde(default)]
-    killed_by: Option<String>,
+    pub killed_by: Option<String>,
     #[serde(default)]
-    killing_tests: Vec<String>,
+    pub killing_tests: Vec<String>,
     #[serde(default)]
     kill_matrix_complete: bool,
 }
