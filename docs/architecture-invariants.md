@@ -91,7 +91,12 @@ protocol and package parity.
 - A warm run of a persisted cache must give the same result as a
   `--no-cache` run. The cache model tests in
   `crates/engine/tests/integration/cache_model` check this for the graph,
-  extract and dupes caches over edit sequences. They also check that the
+  extract and dupes caches over edit sequences. The tests in
+  `crates/api/src/mutation/cache_model` check it for the mutation result
+  cache: they run the real Vitest and `bun test` runners, trace the project
+  files that each runner reads, and check that an edit of each traced file
+  changes the result cache key. A new runner input needs a key part and a
+  step in that template. They also check that the
   graph cache key covers each path that import resolution reads, through the
   `read-trace` feature of `fallow-graph`. A new resolver read of a file goes
   through `crate::read_trace`, so that the check sees it. The same helpers
