@@ -624,6 +624,22 @@ fn resolve_setup_path(entry: &str, root_dir: &Path, root: &Path) -> PathBuf {
     root.join(entry.trim_start_matches("./"))
 }
 
+/// The `moduleNameMapper` targets that name one file under `<rootDir>`.
+///
+/// Jest resolves a target without the `<rootDir>` token from the directory
+/// of each importing file, so only the token form names a known file. A target
+/// with a `$1` capture group names many files, and a bare target names a
+/// package.
+fn module_name_mapper_files(parse_source: &str, parse_path: &Path) -> Vec<String> {
+    let mut targets = config_parser::extract_config_property_strings(
+        parse_source,
+        parse_path,
+        "moduleNameMapper",
+    );
+    targets.retain(|target| target.starts_with("<rootDir>") && !target.contains('$'));
+    targets
+}
+
 /// Extract setup files from Jest config (setupFiles, setupFilesAfterEnv, globalSetup, globalTeardown).
 fn extract_jest_setup_files(
     parse_source: &str,
@@ -655,6 +671,12 @@ fn extract_jest_setup_files(
                 .setup_files
                 .push(resolve_setup_path(&path, &root_dir, root));
         }
+    }
+
+    for target in module_name_mapper_files(parse_source, parse_path) {
+        result
+            .setup_files
+            .push(resolve_setup_path(&target, &root_dir, root));
     }
 
     let test_match =
@@ -872,6 +894,27 @@ mod tests {
     /// does not use the config directory for `<rootDir>`.
     fn absolute_project_root() -> PathBuf {
         std::env::temp_dir().join("fallow-jest-project")
+    }
+
+    #[test]
+    fn resolve_config_module_name_mapper_credits_only_single_root_dir_files() {
+        let source = r#"
+            module.exports = {
+                rootDir: "..",
+                moduleNameMapper: {
+                    "^inquirer$": "<rootDir>/mocks/inquirer.js",
+                    "^prompts$": ["./local.js", "<rootDir>/mocks/prompts"],
+                    "^@/(.*)$": "<rootDir>/src/$1",
+                    "\\.css$": "identity-obj-proxy"
+                }
+            };
+        "#;
+        let root = absolute_project_root();
+        let result = JestPlugin.resolve_config(&root.join("config/jest.config.js"), source, &root);
+        assert_eq!(
+            result.setup_files,
+            vec![root.join("mocks/inquirer.js"), root.join("mocks/prompts")]
+        );
     }
 
     #[test]

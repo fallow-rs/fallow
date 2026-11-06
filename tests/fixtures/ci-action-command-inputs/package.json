@@ -1,0 +1,5 @@
+{
+  "name": "ci-action-command-inputs",
+  "private": true,
+  "main": "src/index.js"
+}

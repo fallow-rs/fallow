@@ -13,6 +13,7 @@ mod argument_entries;
 pub use argument_entries::{ArgumentEntries, argument_entries, is_glob, is_script_runtime};
 mod borp;
 pub mod ci;
+mod ci_action_inputs;
 #[cfg(test)]
 mod command_forms_tests;
 mod command_wrappers;
@@ -27,6 +28,7 @@ mod shell;
 mod shell_helpers;
 pub mod vite_plus;
 mod workspace_selection;
+mod yarn_run;
 
 #[expect(
     clippy::disallowed_types,
@@ -1953,7 +1955,7 @@ fn advance_past_package_manager_with_context(
     // counts, so a typo or a missing script credits nothing.
     if let Some(run) = package_manager_run(tokens, idx)
         && run.runs_binary_without_script()
-        && !catalog.declares_script_at(run.name, &run.location)
+        && !run.declares_script(catalog)
     {
         return resolve_known_dependency_binary(run.name, root, bin_map, context.declared_packages)
             .map(|_| PackageManagerTarget::Binary(run.name_idx, run.location));
@@ -2185,7 +2187,7 @@ fn declared_script_invocation<'a>(
     catalog: &ScriptCatalog,
 ) -> Option<DeclaredScriptInvocation<'a>> {
     let run = package_manager_run(tokens, idx)?;
-    if !catalog.declares_script_at(run.name, &run.location) {
+    if !run.declares_script(catalog) {
         return None;
     }
 
@@ -2209,6 +2211,8 @@ struct PackageManagerRun<'a> {
     explicit: bool,
     /// Where the script or binary runs.
     location: RunLocation,
+    /// `true` when a `yarn run` flag skips the scripts of the calling package.
+    skips_local_scripts: bool,
 }
 
 impl PackageManagerRun<'_> {
@@ -2237,8 +2241,15 @@ struct ManagerPrefix<'a> {
 /// `pnpm -r --filter web`, `npm -w web`, `yarn workspace web`,
 /// `yarn workspaces foreach -A`, or `yarn --cwd docs`.
 fn package_manager_prefix<'a>(tokens: &[&'a str], idx: usize) -> Option<ManagerPrefix<'a>> {
-    let manager = *tokens.get(idx)?;
     let mut location = RunLocation::Here;
+    if yarn_run::is_shell_run(tokens, idx) {
+        return Some(ManagerPrefix {
+            manager: "yarn",
+            subcmd_idx: idx,
+            location,
+        });
+    }
+    let manager = *tokens.get(idx)?;
     let subcmd_idx = match manager {
         "pnpm" => skip_pnpm_flags(tokens, idx + 1, &mut location),
         "npm" => skip_npm_flags(tokens, idx + 1, &mut location),
@@ -2275,7 +2286,7 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
                 skip_npm_config_flags(tokens, next + 1)
             }
             "pnpm" => skip_pnpm_flags(tokens, next + 1, &mut location),
-            "yarn" => skip_yarn_silent_flags(tokens, next + 1),
+            "yarn" => yarn_run::skip_run_flags(tokens, next + 1),
             "vp" => vite_plus::skip_run_flags(tokens, next + 1, &mut location),
             _ => next + 1,
         };
@@ -2291,6 +2302,8 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
 
     let name = *tokens.get(name_idx)?;
     Some(PackageManagerRun {
+        skips_local_scripts: manager == "yarn"
+            && yarn_run::skips_local_scripts(&tokens[next..name_idx]),
         manager,
         name,
         name_idx,
@@ -2458,19 +2471,6 @@ fn skip_yarn_selection(tokens: &[&str], mut idx: usize, location: &mut RunLocati
     }
 }
 
-/// Return the index of the first token from `idx` that is not a yarn silent
-/// flag. Yarn classic accepts `-s` after `run`, also in the form
-/// `yarn workspaces run -s <script>`.
-fn skip_yarn_silent_flags(tokens: &[&str], mut idx: usize) -> usize {
-    while tokens
-        .get(idx)
-        .is_some_and(|token| matches!(*token, "-s" | "--silent"))
-    {
-        idx += 1;
-    }
-    idx
-}
-
 /// Return the index of the first token from `idx` that is not a
 /// `yarn workspaces foreach` flag (or the value of such a flag), and record
 /// in `location` the packages that the flags select. Only `-A` (`--all`),
@@ -2581,8 +2581,7 @@ pub fn invoked_command(
         idx = shell::skip_initial_wrappers(tokens, idx)?;
         let run = package_manager_run(tokens, idx);
         if let Some(run) = &run
-            && (catalog.declares_script_at(run.name, &run.location)
-                || !run.runs_binary_without_script())
+            && (run.declares_script(catalog) || !run.runs_binary_without_script())
         {
             if run.location == RunLocation::Here {
                 return None;

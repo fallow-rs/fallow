@@ -1,0 +1,8 @@
+{
+  "name": "web",
+  "main": "src/index.js",
+  "scripts": {
+    "test:front": "run -T jest --config ./jest.config.front.js",
+    "test:unit": "yarn run -T jest --config ./jest.config.unit.js"
+  }
+}

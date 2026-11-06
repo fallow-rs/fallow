@@ -421,6 +421,10 @@ fn skip_env_wrapper_flag(wrapper: &str, tokens: &[&str], idx: usize) -> usize {
 /// script (e.g., `npm run build`, `yarn build`).
 pub fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<usize> {
     let token = tokens[idx];
+    // `run <name>` in a Yarn 2+ script is `yarn run <name>`.
+    if super::yarn_run::is_shell_run(tokens, idx) {
+        return None;
+    }
     if matches!(token, "npx" | "pnpx" | "bunx") {
         idx += 1;
         while idx < tokens.len() && tokens[idx].starts_with('-') {
