@@ -20,7 +20,8 @@ Deliver the requested change through the native Fallow lifecycle.
    on `origin/main` again before you open the pull request, because another
    session can merge the same change in the meantime.
 3. Write the acceptance criteria and verification plan to the gitignored
-   `.plans/<task>.md`.
+   `.plans/<task>.md`. Write the logs, builds, clones, probes and drafts of
+   the task to `.plans/<task>/`, not to the top of `.plans/`.
 4. Resolve open decisions before editing. Sort each open question:
    - fact: the code, docs or history hold the answer; look it up;
    - observable: a run shows the answer; probe a fresh build on a public

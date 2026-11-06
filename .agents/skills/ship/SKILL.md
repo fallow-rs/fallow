@@ -87,7 +87,10 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    each hunk in a file that your pull request changed. Such a merge can make
    your code, a comment or a doc wrong without a text conflict. Fix that in
    a follow-up pull request.
-8. Return every touched checkout to a clean, synchronized state.
+8. Return every touched checkout to a clean, synchronized state. When
+   the status of step 10 is `DONE` and `.plans/<task>.md` lists no open
+   item, delete `.plans/<task>.md` and `.plans/<task>/`. Keep both for a
+   `BLOCKED` or `RUNNING` status.
 9. Run the `sweep` skill as the last step of the objective. Do not wait
    for a prompt from the maintainer, and do not end the turn before it.
 10. Start the final report with one status line:
