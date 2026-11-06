@@ -8,6 +8,7 @@
 //! The optional `tokio` feature adds async command setup and bounded cleanup
 //! while preserving the same operating-system tree owner.
 
+mod cleanup_paths;
 #[cfg(target_os = "linux")]
 mod proc_state;
 mod process_tree;
@@ -15,6 +16,7 @@ mod registry;
 mod scoped_child;
 mod spawn_retry;
 
+pub use cleanup_paths::{deregister_cleanup_paths, register_cleanup_paths};
 pub use process_tree::{ChildCleanup, ProcessTree, cleanup_std_child, configure_std_command};
 #[cfg(feature = "tokio")]
 pub use process_tree::{cleanup_tokio_child, configure_tokio_command};
