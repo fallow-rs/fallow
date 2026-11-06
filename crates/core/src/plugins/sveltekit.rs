@@ -67,9 +67,10 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 /// Virtual module prefixes provided by `SvelteKit` at build time.
 /// `$app/` provides runtime modules (environment, forms, navigation, paths, server, state).
 /// `$env/` provides environment variable access (static/dynamic, public/private).
-/// `$lib/` is an alias for the `src/lib` directory.
 /// `$service-worker` provides service worker build info.
-const VIRTUAL_MODULE_PREFIXES: &[&str] = &["$app/", "$env/", "$lib/", "$service-worker"];
+/// `$lib` is not virtual: `path_aliases` maps it to a real directory, so a
+/// missing `$lib` target is an unresolved import.
+const VIRTUAL_MODULE_PREFIXES: &[&str] = &["$app/", "$env/", "$service-worker"];
 
 /// Import suffixes for build-time generated relative imports.
 /// SvelteKit generates `./$types` (and `./$types.js`/`./$types.ts`) in route files
@@ -194,6 +195,18 @@ impl Plugin for SvelteKitPlugin {
             result.referenced_dependencies.push(dep);
         }
 
+        // `kit.files.lib` moves the directory that `$lib` names. An explicit
+        // `kit.alias` entry for `$lib` comes later and wins.
+        if let Some(lib) =
+            config_parser::extract_config_string(source, config_path, &["kit", "files", "lib"])
+            && let Some(normalized) = config_parser::normalize_config_path(&lib, config_path, root)
+        {
+            result
+                .path_aliases
+                .push(("$lib/".to_string(), normalized.clone()));
+            result.path_aliases.push(("$lib".to_string(), normalized));
+        }
+
         for (find, replacement) in
             config_parser::extract_config_path_aliases(source, config_path, &["kit", "alias"])
         {
@@ -278,7 +291,7 @@ mod tests {
         let prefixes = plugin.virtual_module_prefixes();
         assert!(prefixes.contains(&"$app/"));
         assert!(prefixes.contains(&"$env/"));
-        assert!(prefixes.contains(&"$lib/"));
+        assert!(!prefixes.contains(&"$lib/"));
         assert!(prefixes.contains(&"$service-worker"));
     }
 

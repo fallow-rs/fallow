@@ -3953,6 +3953,32 @@ fn config_export_credits_get_workspace_prefix() {
     );
 }
 
+#[test]
+fn workspace_path_aliases_are_scoped_to_their_workspace() {
+    let mut workspace = AggregatedPluginResult::default();
+    workspace
+        .path_aliases
+        .push(("$lib/".to_string(), "src/lib".to_string()));
+    workspace.apply_workspace_prefix("apps/alpha");
+
+    let mut root = AggregatedPluginResult::default();
+    root.path_aliases
+        .push(("@shared/".to_string(), "shared".to_string()));
+    root.merge_into(workspace);
+    assert_eq!(
+        root.path_aliases,
+        vec![("@shared/".to_string(), "shared".to_string())]
+    );
+    assert_eq!(
+        root.scoped_path_aliases,
+        vec![fallow_graph::resolve::ScopedPathAlias {
+            scope: "apps/alpha".to_string(),
+            prefix: "$lib/".to_string(),
+            replacement: "apps/alpha/src/lib".to_string(),
+        }]
+    );
+}
+
 fn config_export_credits(
     result: &AggregatedPluginResult,
     plugin: &str,

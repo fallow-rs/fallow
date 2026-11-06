@@ -442,6 +442,11 @@ pub struct AggregatedPluginResult {
     /// Path alias mappings from active plugins (prefix → replacement directory).
     /// Used by the resolver to substitute import prefixes before re-resolving.
     pub path_aliases: Vec<(String, String)>,
+    /// Path alias mappings from the plugins of a workspace package. Each alias
+    /// applies only to the files inside that workspace, so two packages can
+    /// map the same prefix (SvelteKit `$lib`, Nuxt `~/`) to their own
+    /// directories.
+    pub scoped_path_aliases: Vec<fallow_graph::resolve::ScopedPathAlias>,
     /// Convention-based auto-import rules from active plugins (Nuxt components).
     /// The resolver matches each file's captured `auto_import_candidates` against
     /// these and synthesizes a graph edge to the rule's source. See issue #704.
@@ -571,8 +576,15 @@ impl AggregatedPluginResult {
         for source in &mut self.federation_sources {
             *source = source.prefixed(ws_prefix);
         }
-        for (_, replacement) in &mut self.path_aliases {
-            *replacement = format!("{ws_prefix}/{replacement}");
+        if !ws_prefix.is_empty() {
+            self.scoped_path_aliases
+                .extend(self.path_aliases.drain(..).map(|(prefix, replacement)| {
+                    fallow_graph::resolve::ScopedPathAlias {
+                        scope: ws_prefix.to_string(),
+                        prefix,
+                        replacement: format!("{ws_prefix}/{replacement}"),
+                    }
+                }));
         }
     }
 
@@ -617,6 +629,7 @@ impl AggregatedPluginResult {
             generated_import_patterns,
             generated_type_import_prefixes,
             path_aliases,
+            scoped_path_aliases,
             auto_imports,
             active_plugins,
             fixture_patterns,
@@ -666,6 +679,7 @@ impl AggregatedPluginResult {
             generated_type_import_prefixes,
         );
         self.path_aliases.extend(path_aliases);
+        self.scoped_path_aliases.extend(scoped_path_aliases);
         self.auto_imports.extend(auto_imports);
         extend_unique(&mut self.active_plugins, active_plugins);
         self.fixture_patterns.extend(fixture_patterns);

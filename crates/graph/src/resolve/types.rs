@@ -291,6 +291,23 @@ pub struct ResolvedModule {
     pub missing_export_targets: Vec<MissingExportTarget>,
 }
 
+/// A plugin path alias that applies only to the files of one workspace package.
+///
+/// A framework alias such as SvelteKit `$lib` or Nuxt `~/` maps to a directory
+/// of the package that owns the framework config. Two packages can declare the
+/// same prefix, so the resolver must apply an alias only to an importing file
+/// inside the package that declared it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedPathAlias {
+    /// The workspace root, relative to the project root. A workspace outside
+    /// the project tree keeps its absolute path.
+    pub scope: String,
+    /// The import prefix, for example `$lib/`.
+    pub prefix: String,
+    /// The replacement directory, relative to the project root.
+    pub replacement: String,
+}
+
 /// The missing paths that the `exports` map of a project package names for
 /// one unresolved bare specifier.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -389,6 +406,8 @@ pub(super) struct ResolveContext<'a> {
     pub condition_names: &'a [String],
     /// Plugin-provided path aliases (prefix, replacement).
     pub path_aliases: &'a [(String, String)],
+    /// Plugin-provided path aliases that apply only inside one workspace.
+    pub scoped_path_aliases: &'a [ScopedPathAlias],
     /// Absolute directories to search when resolving bare SCSS/Sass
     /// `@import` / `@use` specifiers. Populated from Angular's
     /// `stylePreprocessorOptions.includePaths` and equivalent settings.

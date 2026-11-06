@@ -16,6 +16,8 @@ use super::types::{
 };
 use crate::read_trace::TracedPath;
 
+#[path = "fallbacks_path_aliases.rs"]
+mod path_aliases;
 #[path = "fallbacks_relative_package_root.rs"]
 mod relative_package_root;
 #[path = "fallbacks_scss_paths.rs"]
@@ -25,6 +27,10 @@ mod tsconfig_output;
 #[path = "fallbacks_workspace_package_asset.rs"]
 mod workspace_package_asset;
 
+use path_aliases::applicable_path_aliases;
+pub(super) use path_aliases::{
+    alias_match_remainder, matches_plugin_path_alias, try_path_alias_fallback,
+};
 pub(super) use relative_package_root::try_relative_package_root_source_fallback;
 use scss_paths::{find_scss_through_path_alias, lookup_scss_path};
 use tsconfig_output::try_tsconfig_output_source;
@@ -32,74 +38,6 @@ pub(super) use tsconfig_output::{
     try_canonical_source_fallbacks, try_relative_output_source_fallbacks,
 };
 use workspace_package_asset::{exports_target_asset, workspace_package_asset};
-
-/// Return the post-prefix remainder when `specifier` matches the alias `prefix`
-/// at a path boundary, else `None`.
-///
-/// The match is segment-aware: a bare exact-key alias (e.g. `@scope/sdk` or
-/// `vscode`) matches only on an exact hit or a `/`-delimited continuation, so it
-/// never captures a longer package that merely shares the prefix
-/// (`@scope/sdk-extra`). Prefixes that already end in `/` (`~/`, `@/`, `$lib/`)
-/// match any continuation by construction, preserving their existing behavior.
-fn alias_match_remainder<'a>(specifier: &'a str, prefix: &str) -> Option<&'a str> {
-    let remainder = specifier.strip_prefix(prefix)?;
-    (remainder.is_empty() || prefix.ends_with('/') || remainder.starts_with('/'))
-        .then_some(remainder)
-}
-
-/// Try resolving a specifier using plugin-provided path aliases.
-///
-/// Substitutes a matching alias prefix (e.g., `~/`) with a directory relative to the
-/// project root (e.g., `app/`) and resolves the resulting path. This handles framework
-/// aliases like Nuxt's `~/`, `~~/`, `#shared/` that aren't defined in tsconfig.json
-/// but map to real filesystem paths.
-pub(super) fn try_path_alias_fallback(
-    ctx: &ResolveContext<'_>,
-    specifier: &str,
-    style_context: bool,
-) -> Option<ResolveResult> {
-    for (prefix, replacement) in ctx.path_aliases {
-        let Some(remainder) = alias_match_remainder(specifier, prefix) else {
-            continue;
-        };
-
-        let substituted = match (replacement.is_empty(), remainder.is_empty()) {
-            (true, _) => format!("./{remainder}"),
-            (false, true) => format!("./{replacement}"),
-            (false, false) => format!("./{replacement}/{remainder}"),
-        };
-
-        if let Ok(resolved) = super::specifier::resolve_with_extension_policy(
-            ctx,
-            ctx.root,
-            &substituted,
-            style_context,
-        ) {
-            let resolved_path = resolved.path();
-            if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
-                return Some(ResolveResult::InternalModule(file_id));
-            }
-            if let Some(canonical) = ctx.canonicalize_cache.get(resolved_path) {
-                if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
-                    return Some(ResolveResult::InternalModule(file_id));
-                }
-                if let Some(file_id) = try_source_fallback(&canonical, ctx.path_to_id) {
-                    return Some(ResolveResult::InternalModule(file_id));
-                }
-                if let Some(file_id) =
-                    try_pnpm_workspace_fallback(&canonical, ctx.path_to_id, ctx.workspace_roots)
-                {
-                    return Some(ResolveResult::InternalModule(file_id));
-                }
-                if let Some(pkg_name) = extract_package_name_from_node_modules_path(&canonical) {
-                    return Some(ResolveResult::NpmPackage(pkg_name));
-                }
-                return Some(ResolveResult::ExternalFile(canonical));
-            }
-        }
-    }
-    None
-}
 
 /// Try SCSS partial resolution: `_filename` and `_index` conventions.
 ///
@@ -231,7 +169,10 @@ pub(super) fn try_scss_include_path_fallback(
     specifier: &str,
     from_style: bool,
 ) -> Option<ResolveResult> {
-    if ctx.scss_include_paths.is_empty() && ctx.path_aliases.is_empty() {
+    if ctx.scss_include_paths.is_empty()
+        && ctx.path_aliases.is_empty()
+        && ctx.scoped_path_aliases.is_empty()
+    {
         return None;
     }
     let is_scss_importer = from_file
@@ -253,7 +194,7 @@ pub(super) fn try_scss_include_path_fallback(
             return Some(ResolveResult::InternalModule(file_id));
         }
     }
-    find_scss_through_path_alias(ctx, bare).map(ResolveResult::InternalModule)
+    find_scss_through_path_alias(ctx, from_file, bare).map(ResolveResult::InternalModule)
 }
 
 /// Probe an SCSS include directory for a bare specifier, applying the standard
@@ -1371,6 +1312,7 @@ mod tests {
             has_deno_import_maps: false,
             condition_names: &condition_names,
             path_aliases: &[],
+            scoped_path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
             framework_static_dir_mappings: &[],
@@ -3073,6 +3015,7 @@ mod tests {
             has_deno_import_maps: false,
             condition_names: &condition_names,
             path_aliases: &[],
+            scoped_path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
             framework_static_dir_mappings: &[],

@@ -547,7 +547,7 @@ fn sveltekit_has_dollar_virtual_prefixes() {
     let prefixes = sveltekit::SvelteKitPlugin.virtual_module_prefixes();
     assert!(prefixes.contains(&"$app/"));
     assert!(prefixes.contains(&"$env/"));
-    assert!(prefixes.contains(&"$lib/"));
+    assert!(!prefixes.contains(&"$lib/"));
 }
 
 #[test]
