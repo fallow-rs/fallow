@@ -11,6 +11,7 @@ import {
   compareWithMain,
   followMain,
   ghMainReaders,
+  isChangelogFragment,
   parseGhChecks,
   parseGhMergeable,
   parseGhRuns,
@@ -2034,4 +2035,12 @@ test("a pull request comparison with a cancelled newest main run uses the older 
   );
 
   assert.equal(result.checks[0].main, OLDER_MAIN);
+});
+
+test("a changelog fragment, and no other path, asks for a check of the public docs", () => {
+  assert.equal(isChangelogFragment("changelog.d/feat-mutation-tasks.md"), true);
+  assert.equal(isChangelogFragment("changelog.d/README.md"), false);
+  assert.equal(isChangelogFragment("CHANGELOG.md"), false);
+  assert.equal(isChangelogFragment("docs/changelog.d/x.md"), false);
+  assert.equal(isChangelogFragment("changelog.d/notes.txt"), false);
 });

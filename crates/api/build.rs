@@ -97,7 +97,64 @@ fn invalid_manifest(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
+/// The canonical source of the embedded mutation companion, relative to this
+/// crate. Only a repository checkout has it; a published crate has the copy
+/// only.
+const COMPANION_SOURCE: &str = "../../tools/mutation-runner/src";
+
+/// The generated copy that `include_str!` embeds.
+const COMPANION_COPY: &str = "src/mutation/companion";
+
+/// The first line that the generator writes on each copied companion file.
+const COMPANION_HEADER: &str = "// Generated from ";
+
+/// Warns when the embedded companion differs from its source. A binary built
+/// after an edit of `tools/mutation-runner/src` and before
+/// `npm run generate:contracts` runs the old companion, so a probe on a real
+/// project tests the wrong code.
+fn warn_on_stale_companion() {
+    let source_root = std::path::Path::new(COMPANION_SOURCE);
+    if !source_root.is_dir() {
+        return;
+    }
+    println!("cargo:rerun-if-changed={COMPANION_SOURCE}");
+    println!("cargo:rerun-if-changed={COMPANION_COPY}");
+    let mut stale = Vec::new();
+    let mut pending = vec![source_root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|entry| entry.path()) {
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(source_root) else {
+                continue;
+            };
+            let copy = fs::read_to_string(std::path::Path::new(COMPANION_COPY).join(relative));
+            let body = copy.as_deref().ok().map(|text| {
+                text.strip_prefix(COMPANION_HEADER)
+                    .and_then(|rest| rest.split_once('\n'))
+                    .map_or(text, |(_, body)| body)
+            });
+            if body != fs::read_to_string(&path).ok().as_deref() {
+                stale.push(relative.display().to_string());
+            }
+        }
+    }
+    if !stale.is_empty() {
+        stale.sort();
+        println!(
+            "cargo:warning=the embedded mutation companion differs from {COMPANION_SOURCE} ({}); run `npm run generate:contracts` before you use this binary",
+            stale.join(", ")
+        );
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    warn_on_stale_companion();
     const MANIFEST_PATH: &str = "type-aware-protocol.json";
     println!("cargo:rerun-if-changed={MANIFEST_PATH}");
 
