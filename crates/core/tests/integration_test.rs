@@ -43,6 +43,8 @@ mod class_factory_property_provenance;
 mod class_value_projections;
 #[path = "integration_test/class_value_source_shapes.rs"]
 mod class_value_source_shapes;
+#[path = "integration_test/config_file_targets_credit.rs"]
+mod config_file_targets_credit;
 #[path = "integration_test/config_function_locals.rs"]
 mod config_function_locals;
 #[path = "integration_test/config_glob_star_segment.rs"]

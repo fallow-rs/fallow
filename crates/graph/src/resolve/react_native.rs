@@ -134,7 +134,7 @@ impl PlatformFamilies {
 
 /// Rebuild a project-internal [`ResolveResult`] against a sibling file,
 /// preserving the original edge kind and package attribution.
-fn retarget(result: &ResolveResult, sibling: FileId) -> Option<ResolveResult> {
+pub(super) fn retarget(result: &ResolveResult, sibling: FileId) -> Option<ResolveResult> {
     match result {
         ResolveResult::InternalModule(_) => Some(ResolveResult::InternalModule(sibling)),
         ResolveResult::CommonJsInternalModule(_) => {

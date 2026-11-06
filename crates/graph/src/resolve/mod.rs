@@ -24,6 +24,7 @@ mod jsx_runtime;
 mod memo;
 mod output_entry;
 mod package_credit;
+mod package_import_conditions;
 mod path_info;
 mod re_exports;
 mod react_native;
@@ -72,6 +73,7 @@ use auto_imports::synthesize_auto_import_edges;
 use dynamic_imports::{GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic_patterns};
 use jsx_runtime::resolve_config_jsx_runtime_imports;
 pub use jsx_runtime::{CompiledJsxRule, compile_jsx_rules};
+use package_import_conditions::synthesize_package_import_condition_edges;
 use re_exports::resolve_re_exports;
 use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
 use require_imports::resolve_require_imports;
@@ -295,6 +297,8 @@ pub fn resolve_all_imports_with_session(
     apply_specifier_upgrades(&mut resolved, &mut vitest_mock_operations);
 
     synthesize_platform_family_edges(&mut resolved, input.files, input.active_plugins);
+
+    synthesize_package_import_condition_edges(&mut resolved, &ctx);
 
     synthesize_auto_import_edges(
         &mut resolved,

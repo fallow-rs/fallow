@@ -26,6 +26,9 @@ use rustc_hash::FxHashSet;
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
+#[path = "jest_preset.rs"]
+mod preset;
+
 /// Built-in Jest reporter names that should not be treated as dependencies.
 const BUILTIN_REPORTERS: &[&str] = &["default", "verbose", "summary"];
 
@@ -72,12 +75,17 @@ const JEST_CONFIG_FILENAMES: &[&str] = &[
 /// Filename whose top-level `"jest"` key holds an embedded Jest config.
 const PACKAGE_JSON_FILENAME: &str = "package.json";
 
-/// Test files that Jest runs when a config sets no `testMatch` or `testRegex`.
+/// The manual mocks that `jest.mock` reads. Jest reads them whatever
+/// `testMatch` or `testRegex` names.
+const MOCK_ENTRY_PATTERN: &str = "**/__mocks__/**/*.{ts,tsx,js,jsx,mjs,cjs}";
+
+/// Test files that Jest runs when a config sets no `testMatch` or `testRegex`,
+/// and the manual mocks.
 const DEFAULT_TEST_ENTRY_PATTERNS: &[&str] = &[
     "**/*.test.{ts,tsx,js,jsx}",
     "**/*.spec.{ts,tsx,js,jsx}",
     "**/__tests__/**/*.{ts,tsx,js,jsx}",
-    "**/__mocks__/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    MOCK_ENTRY_PATTERN,
 ];
 
 define_plugin!(
@@ -123,6 +131,7 @@ fn resolve_jest_config(
     let mut walk = ProjectWalk {
         project_root,
         visited: FxHashSet::default(),
+        preset_root_dir: None,
     };
     extract_jest_config(config_path, source, root, &mut result, &mut walk, 0);
     // Every config states which files it runs, so the configs of one
@@ -130,17 +139,21 @@ fn resolve_jest_config(
     // replacing the defaults for all of them.
     if result.entry_patterns.is_empty() {
         result.extend_entry_patterns(DEFAULT_TEST_ENTRY_PATTERNS.iter().copied());
+    } else {
+        result.push_entry_pattern(MOCK_ENTRY_PATTERN);
     }
     result.replace_entry_patterns = true;
     result.accumulate_config_entry_patterns = true;
     result
 }
 
-/// The state of one walk over `projects` entries: the containment boundary
-/// and the configs already parsed.
+/// The state of one walk over `projects` entries: the containment boundary,
+/// the configs already parsed, and the root directory of the config that
+/// names the preset while the walk reads a preset file.
 struct ProjectWalk<'a> {
     project_root: &'a Path,
     visited: FxHashSet<PathBuf>,
+    preset_root_dir: Option<PathBuf>,
 }
 
 /// The package that Jest needs to load `config_path` when it is a TypeScript
@@ -215,8 +228,15 @@ fn extract_jest_config(
         result.referenced_dependencies.push(dep);
     }
 
-    extract_jest_setup_files(&parse_source, parse_path, root, result);
+    extract_jest_setup_files(
+        &parse_source,
+        parse_path,
+        root,
+        walk.preset_root_dir.as_deref(),
+        result,
+    );
     extract_jest_dependencies(&parse_source, parse_path, result);
+    preset::follow_relative_preset(&parse_source, parse_path, root, result, walk, depth);
 
     if depth >= MAX_PROJECTS_DEPTH {
         return;
@@ -624,6 +644,19 @@ fn resolve_setup_path(entry: &str, root_dir: &Path, root: &Path) -> PathBuf {
     root.join(entry.trim_start_matches("./"))
 }
 
+/// Mark a setup entry as used. Jest loads an entry such as
+/// `test-utils/setup` from a package when no project file has that path, so
+/// the package is credited.
+fn push_setup_entry(entry: &str, root_dir: &Path, root: &Path, result: &mut PluginResult) {
+    let path = resolve_setup_path(entry, root_dir, root);
+    if config_parser::is_package_specifier(entry) && !path.exists() {
+        result
+            .referenced_dependencies
+            .push(crate::resolve::extract_package_name(entry));
+    }
+    result.setup_files.push(path);
+}
+
 /// The `moduleNameMapper` targets that name one file under `<rootDir>`.
 ///
 /// Jest resolves a target without the `<rootDir>` token from the directory
@@ -641,35 +674,38 @@ fn module_name_mapper_files(parse_source: &str, parse_path: &Path) -> Vec<String
 }
 
 /// Extract setup files from Jest config (setupFiles, setupFilesAfterEnv, globalSetup, globalTeardown).
+/// `preset_root_dir` is the root directory of the config that names a preset
+/// file, when the config is that preset.
 fn extract_jest_setup_files(
     parse_source: &str,
     parse_path: &Path,
     root: &Path,
+    preset_root_dir: Option<&Path>,
     result: &mut PluginResult,
 ) {
     if let Some(preset) =
         config_parser::extract_config_string(parse_source, parse_path, &["preset"])
+        && !preset::is_relative_preset(&preset)
     {
         result
             .referenced_dependencies
             .push(crate::resolve::extract_package_name(&preset));
     }
 
-    let root_dir = jest_root_dir(parse_source, parse_path, root);
+    let root_dir = preset_root_dir.map_or_else(
+        || jest_root_dir(parse_source, parse_path, root),
+        Path::to_path_buf,
+    );
     for key in &["setupFiles", "setupFilesAfterEnv"] {
         let files = config_parser::extract_config_string_array(parse_source, parse_path, &[key]);
         for f in &files {
-            result
-                .setup_files
-                .push(resolve_setup_path(f, &root_dir, root));
+            push_setup_entry(f, &root_dir, root, result);
         }
     }
 
     for key in &["globalSetup", "globalTeardown"] {
         if let Some(path) = config_parser::extract_config_string(parse_source, parse_path, &[key]) {
-            result
-                .setup_files
-                .push(resolve_setup_path(&path, &root_dir, root));
+            push_setup_entry(&path, &root_dir, root, result);
         }
     }
 
@@ -1273,7 +1309,10 @@ mod tests {
             result.replace_entry_patterns,
             "testRegex with directory prefix should trigger replacement"
         );
-        assert_eq!(result.entry_patterns, vec!["src/**/*.test.ts"]);
+        assert_eq!(
+            result.entry_patterns,
+            vec!["src/**/*.test.ts", MOCK_ENTRY_PATTERN]
+        );
     }
 
     #[test]
@@ -1287,7 +1326,10 @@ mod tests {
         );
         assert!(result.replace_entry_patterns);
         assert!(result.accumulate_config_entry_patterns);
-        assert_eq!(result.entry_patterns, vec!["**/*.integration-spec.ts"]);
+        assert_eq!(
+            result.entry_patterns,
+            vec!["**/*.integration-spec.ts", MOCK_ENTRY_PATTERN]
+        );
     }
 
     #[test]

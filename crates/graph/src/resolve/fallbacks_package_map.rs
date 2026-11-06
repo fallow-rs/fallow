@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum PackageMapTarget {
+pub(in crate::resolve) enum PackageMapTarget {
     NoMatch,
     Blocked,
     Targets(Vec<String>),
@@ -20,7 +20,7 @@ fn package_map_match_value(
         .map_or(PackageMapTarget::Blocked, PackageMapTarget::Targets)
 }
 
-pub(super) fn package_map_target(
+pub(in crate::resolve) fn package_map_target(
     map: &Value,
     specifier_key: &str,
     condition_names: &[String],
