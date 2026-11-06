@@ -305,7 +305,11 @@ fn rank_and_concatenate(
     );
 
     let t0 = std::time::Instant::now();
-    let (text, file_of, file_offsets) = concatenation::concatenate_with_sentinels(&ranked_files);
+    let (mut text, file_of, file_offsets) =
+        concatenation::concatenate_with_sentinels(&ranked_files);
+    if files_may_have_boundaries(files) {
+        boundary::isolate_boundaries(&mut text, files, &file_offsets);
+    }
     let concat_time = t0.elapsed();
     tracing::debug!(
         elapsed_us = concat_time.as_micros(),
