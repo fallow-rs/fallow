@@ -89,6 +89,18 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    your code, a comment or a doc wrong without a text conflict. Fix that in
    a follow-up pull request.
 8. Return every touched checkout to a clean, synchronized state.
+9. Run the `sweep` skill as the last step of the objective. Do not wait
+   for a prompt from the maintainer, and do not end the turn before it.
+10. Start the final report with one status line:
+    - `DONE`: every pull request is merged and the merged-commit CI is green.
+    - `BLOCKED: <owner>: <next action>`: the work waits on a person or an
+      external system.
+    - `RUNNING: <what>, expected <time>`: the work continues without the
+      maintainer.
+
+    After the report, mark the thread with `t3_thread_organize` when the
+    tool is available: settle a `DONE` thread, snooze a `RUNNING` thread
+    until the expected time, and leave a `BLOCKED` thread active.
 
 Each new pull request of the objective, for example a follow-up of step 7,
 goes through `review` and `ship` too. Record its URL in `.plans/<task>.md`.
