@@ -4,7 +4,10 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
-use super::fallbacks::{extract_package_name_from_node_modules_path, is_declaration_file_name};
+use super::fallbacks::{
+    alias_match_remainder, applicable_path_aliases, extract_package_name_from_node_modules_path,
+    is_declaration_file_name,
+};
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
@@ -86,21 +89,94 @@ pub(super) fn package_usage_name_for_external_bare_specifier(specifier: &str) ->
 }
 
 /// Package behind an unresolved tsconfig `paths` alias whose target lies in a
-/// `node_modules` package that is not installed.
-///
-/// The first target under `node_modules`, in the order that the resolver tries
-/// them, decides. When that package directory exists, the import is a real
-/// broken import and this returns `None`. An `@types` target maps types only,
-/// so it gives no runtime credit.
+/// `node_modules` package that is not installed. See
+/// [`uninstalled_alias_target_package`].
 pub(super) fn uninstalled_tsconfig_alias_target_package(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
 ) -> Option<String> {
-    let (name, package_root) = nearest_tsconfig_alias_targets(ctx, from_file, specifier)
+    uninstalled_alias_target_package(
+        specifier,
+        &nearest_tsconfig_alias_targets(ctx, from_file, specifier),
+    )
+}
+
+/// Package behind an unresolved project-wide path alias whose replacement lies
+/// in a `node_modules` package.
+///
+/// The project-wide alias table also holds the tsconfig `paths` of every
+/// workspace. A `"react": ["./node_modules/@types/react"]` entry in one
+/// workspace then matches the `react` imports of all workspaces. TypeScript
+/// applies `paths` only to the files of its own project, so for an importer
+/// outside the directory that holds the target `node_modules`, the specifier
+/// keeps its own package name. For an importer inside that directory, the
+/// alias applies. When that `node_modules` directory does not exist,
+/// dependencies are not installed, and the import is a package import. When it
+/// exists, the alias is broken and this returns `None`.
+pub(super) fn uninstalled_plugin_alias_target_package(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<String> {
+    let (name, package_root) = applicable_path_aliases(ctx, from_file, specifier)
+        .into_iter()
+        .filter_map(|(prefix, replacement)| {
+            let remainder = alias_match_remainder(specifier, prefix)?;
+            Some(
+                ctx.root
+                    .join(replacement)
+                    .join(remainder.trim_start_matches('/')),
+            )
+        })
+        .find_map(|target| node_modules_package_root(&target))?;
+    let node_modules = package_root
+        .ancestors()
+        .find(|dir| dir.file_name().is_some_and(|name| name == "node_modules"))?;
+    if !from_file.starts_with(node_modules.parent()?) {
+        return declared_package_name(specifier);
+    }
+    if node_modules.traced_is_dir() {
+        return None;
+    }
+    alias_target_credit(specifier, name)
+}
+
+/// Package that gets the credit for an alias whose first `node_modules` target,
+/// in the order that the resolver tries them, is a package that is not
+/// installed. When that package directory exists, the import is a real broken
+/// import and this returns `None`.
+fn uninstalled_alias_target_package(specifier: &str, targets: &[PathBuf]) -> Option<String> {
+    let (name, package_root) = targets
         .iter()
         .find_map(|target| node_modules_package_root(target))?;
-    (!name.starts_with("@types/") && !package_root.traced_is_dir()).then_some(name)
+    if package_root.traced_is_dir() {
+        return None;
+    }
+    alias_target_credit(specifier, name)
+}
+
+/// Credit for an alias onto the package `target`. An `@types` target maps
+/// types only, so the credit goes to the package of the specifier, as for an
+/// installed `@types` target. This is true only when the `@types` package
+/// belongs to that package (`@types/react` for `react`, `@types/scope__pkg`
+/// for `@scope/pkg`). Another `@types` target gives no credit.
+fn alias_target_credit(specifier: &str, target: String) -> Option<String> {
+    if !target.starts_with("@types/") {
+        return Some(target);
+    }
+    let declared = declared_package_name(specifier)?;
+    let types_name = match declared.strip_prefix('@') {
+        Some(scoped) => format!("@types/{}", scoped.replacen('/', "__", 1)),
+        None => format!("@types/{declared}"),
+    };
+    (types_name == target).then_some(declared)
+}
+
+/// Package name of a bare specifier, when it is a valid package name.
+fn declared_package_name(specifier: &str) -> Option<String> {
+    let declared = extract_package_name(specifier);
+    (is_bare_specifier(specifier) && is_valid_package_name(&declared)).then_some(declared)
 }
 
 /// Expanded `paths` targets for `specifier` from the nearest tsconfig with
@@ -169,7 +245,7 @@ mod tests {
 
     use super::{
         node_modules_package_root, package_usage_name_for_external_bare_specifier,
-        package_usage_name_for_resolved_package,
+        package_usage_name_for_resolved_package, uninstalled_alias_target_package,
     };
 
     #[test]
@@ -186,6 +262,41 @@ mod tests {
                 false
             }),
             Some("@components/shared".to_string()),
+        );
+    }
+
+    #[test]
+    fn uninstalled_alias_target_credits_the_matching_package() {
+        let target = |path: &str| vec![PathBuf::from(path)];
+        assert_eq!(
+            uninstalled_alias_target_package("lodash", &target("/missing/node_modules/lodash-es")),
+            Some("lodash-es".to_string()),
+        );
+        assert_eq!(
+            uninstalled_alias_target_package(
+                "react",
+                &target("/missing/node_modules/@types/react")
+            ),
+            Some("react".to_string()),
+        );
+        assert_eq!(
+            uninstalled_alias_target_package(
+                "@scope/pkg/sub",
+                &target("/missing/node_modules/@types/scope__pkg/sub"),
+            ),
+            Some("@scope/pkg".to_string()),
+        );
+        assert_eq!(
+            uninstalled_alias_target_package(
+                "foo/x",
+                &target("/missing/node_modules/@types/bar/x")
+            ),
+            None,
+            "an @types target of another package gives no credit"
+        );
+        assert_eq!(
+            uninstalled_alias_target_package("app/x", &target("/missing/src/x")),
+            None
         );
     }
 

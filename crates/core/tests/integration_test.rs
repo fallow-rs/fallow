@@ -770,3 +770,5 @@ mod vitest_script_config_arg;
 mod webpack_alias_replacement;
 #[path = "integration_test/webpack_inline_loaders.rs"]
 mod webpack_inline_loaders;
+#[path = "integration_test/workspace_resolution_without_install.rs"]
+mod workspace_resolution_without_install;

@@ -118,9 +118,11 @@ impl TsconfigOutputMap {
             let is_declaration = DECLARATION_OUTPUT_SUFFIXES
                 .iter()
                 .any(|suffix| file_name.ends_with(suffix));
-            if options.emit_declaration_only.unwrap_or(false) && !is_declaration {
-                continue;
-            }
+            // With `emitDeclarationOnly`, another tool (swc, Babel, a bundler)
+            // can emit the JavaScript into `outDir` with the same layout. A
+            // source file with the same stem then maps, but the config does not
+            // claim the output, so the callers keep their other fallbacks.
+            let claims_output = is_declaration || !options.emit_declaration_only.unwrap_or(false);
             let output_dir = if is_declaration {
                 options
                     .declaration_dir
@@ -140,7 +142,7 @@ impl TsconfigOutputMap {
             let Some(root_dir) = options.root_dir.as_deref() else {
                 continue;
             };
-            configured = true;
+            configured |= claims_output;
             if options.no_emit.unwrap_or(false) {
                 continue;
             }
@@ -1188,6 +1190,34 @@ mod tests {
         assert_eq!(
             map(root, "./distribution/index.js", &["ts"]),
             TsconfigOutputResolution::Resolved(root.join("source/index.ts"))
+        );
+    }
+
+    #[test]
+    fn emit_declaration_only_maps_javascript_output_to_source() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"rootDir":"./src","outDir":"./dist","emitDeclarationOnly":true,"declaration":true}}"#,
+        );
+        write(&root.join("src/cli.ts"), "export const main = () => 1;\n");
+
+        for output in ["./dist/cli.js", "./dist/cli.d.ts"] {
+            assert_eq!(
+                map(root, output, &["ts"]),
+                TsconfigOutputResolution::Resolved(root.join("src/cli.ts")),
+                "{output} maps to source"
+            );
+        }
+        assert_eq!(
+            map(root, "./dist/index.js", &["ts"]),
+            TsconfigOutputResolution::Unconfigured,
+            "JavaScript output without a source file stays open for other fallbacks"
+        );
+        assert_eq!(
+            map(root, "./dist/index.d.ts", &["ts"]),
+            TsconfigOutputResolution::ConfiguredWithoutSource
         );
     }
 
