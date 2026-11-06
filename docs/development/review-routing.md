@@ -36,6 +36,11 @@ consumer.
 5. Performance in parse, graph, and analysis hot paths.
 6. Documentation, generated adapter, and companion-surface parity.
 
+For a change to signal handling, process cleanup, or other timing-sensitive
+code, run the `Coverage` workflow on the pull request branch before the merge:
+`gh workflow run coverage.yml --ref <branch>`. `Coverage` runs only on `main`,
+and its slow instrumented build finds races that the pull request jobs miss.
+
 ## Synthesis
 
 - `Fix first` when any high-confidence blocker remains.
