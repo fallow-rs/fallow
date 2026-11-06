@@ -1013,6 +1013,17 @@ test("the extension pnpm project enforces the 7-day minimum release age", () => 
   // `pnpm-workspace.yaml` of the extension.
   const settings = readFileSync("editors/vscode/pnpm-workspace.yaml", "utf8");
   assert.match(settings, /^minimumReleaseAge: 10080$/mu);
-  const npmrc = readFileSync("editors/vscode/.npmrc", "utf8");
-  assert.doesNotMatch(npmrc, /^minimum-release-age=/mu, "pnpm 11 ignores this key");
+});
+
+test("no tracked .npmrc holds the pnpm minimum-release-age key", () => {
+  // pnpm 11 ignores pnpm keys in `.npmrc`. A key there gives a false sense
+  // of protection, so the age limit belongs in `pnpm-workspace.yaml`.
+  const listed = spawnSync("git", ["ls-files", "*.npmrc", ".npmrc"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split("\n").filter(Boolean);
+  assert.ok(files.includes("editors/vscode/.npmrc"));
+  for (const file of files) {
+    const npmrc = readFileSync(file, "utf8");
+    assert.doesNotMatch(npmrc, /^minimum-release-age=/mu, `${file}: pnpm 11 ignores this key`);
+  }
 });
