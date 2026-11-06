@@ -86,3 +86,31 @@ pub(super) fn saved_clone_group_flags(
         .map(|group| group.get("introduced")?.as_bool())
         .collect()
 }
+
+/// Annotate the dead-code issues of a saved section: the audit flag of each
+/// stale suppression, then the owner group.
+pub(super) fn annotate_saved_dead_code(
+    issues: &mut [CodeClimateIssue],
+    envelope: &serde_json::Value,
+    pointer: &str,
+    resolver: Option<&OwnershipResolver>,
+) {
+    if let Some(introduced) = saved_stale_suppression_flags(envelope, pointer) {
+        fallow_api::audit_keys::set_stale_suppression_audit_attribution(issues, introduced);
+    }
+    annotate_dead_code_owner(issues, resolver);
+}
+
+/// The audit flag of each saved stale suppression, in report order. The
+/// typed stale suppression has no `introduced` field, so the flags come from
+/// the JSON. `None` when a suppression has no flag: the section is not from
+/// an audit with a base snapshot.
+fn saved_stale_suppression_flags(envelope: &serde_json::Value, pointer: &str) -> Option<Vec<bool>> {
+    envelope
+        .pointer(pointer)?
+        .get("stale_suppressions")?
+        .as_array()?
+        .iter()
+        .map(|suppression| suppression.get("introduced")?.as_bool())
+        .collect()
+}

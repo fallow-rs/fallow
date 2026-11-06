@@ -24,7 +24,22 @@ pub(super) fn build_audit_codeclimate_issues(
 ) -> Vec<fallow_output::CodeClimateIssue> {
     fallow_api::build_audit_codeclimate_issues(AuditCodeClimateOutputInput {
         dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
-            fallow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
+            let mut issues = fallow_api::build_codeclimate(
+                &check.results,
+                &check.config.root,
+                &check.config.rules,
+            );
+            if let Some(base) = result.base_snapshot.as_ref() {
+                fallow_api::audit_keys::set_stale_suppression_audit_attribution(
+                    &mut issues,
+                    fallow_api::audit_keys::stale_suppression_introduced_flags(
+                        &check.results,
+                        &check.config.root,
+                        &base.dead_code,
+                    ),
+                );
+            }
+            issues
         }),
         duplication: result.dupes.as_ref().map_or_else(Vec::new, |dupes| {
             let mut issues =

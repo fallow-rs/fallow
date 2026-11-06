@@ -1,5 +1,5 @@
 //! Inline review comments of `audit --gate new-only` for dead-code,
-//! duplication and styling findings.
+//! stale-suppression, duplication and styling findings.
 //!
 //! Each comment states if the change introduced the finding. A comment on an
 //! inherited finding states that `--gate new-only` does not count it. The
@@ -36,6 +36,9 @@ fn clone_block(name: &str, statement: &str) -> String {
     )
 }
 
+const STALE_BASE: &str = "// fallow-ignore-next-line unused-export\nexport const kept = 1;\n";
+const STALE_HEAD: &str = "// fallow-ignore-next-line unused-export\nexport const kept = 1;\n// fallow-ignore-next-line unused-export\nexport const keptToo = 2;\n";
+
 const OLD_STATEMENT: &str = "total += item * 3 - 1;";
 const NEW_STATEMENT: &str = "if (item > total) { total = item; } else { total -= 1; }";
 
@@ -59,8 +62,9 @@ fn fixture() -> TempDir {
     write(
         dir,
         "src/index.ts",
-        "import { used } from './util';\nimport { oldA } from './old-a';\nimport { oldB } from './old-b';\nimport './styles.css';\nexport const value = used + oldA([1]) + oldB([2]);\n",
+        "import { used } from './util';\nimport { oldA } from './old-a';\nimport { oldB } from './old-b';\nimport { kept } from './stale';\nimport './styles.css';\nexport const value = used + kept + oldA([1]) + oldB([2]);\n",
     );
+    write(dir, "src/stale.ts", STALE_BASE);
     write(
         dir,
         "src/util.ts",
@@ -80,8 +84,9 @@ fn fixture() -> TempDir {
     write(
         dir,
         "src/index.ts",
-        "import { used } from './util';\nimport { oldA } from './old-a';\nimport { oldB } from './old-b';\nimport { newA } from './new-a';\nimport { newB } from './new-b';\nimport './styles.css';\nexport const value = used + oldA([1]) + oldB([2]) + newA([3]) + newB([4]);\n",
+        "import { used } from './util';\nimport { oldA } from './old-a';\nimport { oldB } from './old-b';\nimport { newA } from './new-a';\nimport { newB } from './new-b';\nimport { kept, keptToo } from './stale';\nimport './styles.css';\nexport const value = used + kept + keptToo + oldA([1]) + oldB([2]) + newA([3]) + newB([4]);\n",
     );
+    write(dir, "src/stale.ts", STALE_HEAD);
     write(
         dir,
         "src/util.ts",
@@ -175,6 +180,17 @@ fn review_comments_carry_the_attribution_for_every_finding_family() {
             assert_label(
                 comment_body(review, "src/util.ts", 3, unused),
                 INTRODUCED_LABEL,
+                &context,
+            );
+            let stale = "fallow/stale-suppression";
+            assert_label(
+                comment_body(review, "src/stale.ts", 1, stale),
+                INHERITED_WARN_LABEL,
+                &context,
+            );
+            assert_label(
+                comment_body(review, "src/stale.ts", 3, stale),
+                INTRODUCED_WARN_LABEL,
                 &context,
             );
             let clone = "fallow/code-duplication";

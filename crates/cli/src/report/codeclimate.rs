@@ -20,7 +20,7 @@ use super::{emit_json, normalize_uri, relative_path};
 mod saved_grouping;
 use saved_grouping::{
     annotate_dead_code_owner, annotate_duplication_groups, annotate_health_groups,
-    annotate_saved_fallback_grouping, saved_clone_group_flags,
+    annotate_saved_dead_code, annotate_saved_fallback_grouping, saved_clone_group_flags,
 };
 
 /// Rebase every issue path onto the repository root.
@@ -684,7 +684,7 @@ fn saved_multi_analysis_codeclimate(
     let mut issues = Vec::new();
     if let Some(results) = dead_code {
         let mut dead_code_issues = api_codeclimate_issues(&results, root, rules);
-        annotate_dead_code_owner(&mut dead_code_issues, resolver);
+        annotate_saved_dead_code(&mut dead_code_issues, envelope, dead_code_pointer, resolver);
         issues.extend(dead_code_issues);
     }
     if let Some(report) = duplication {

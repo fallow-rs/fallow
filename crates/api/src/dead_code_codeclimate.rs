@@ -1698,7 +1698,7 @@ fn push_stale_suppression_issues(
         let fp = codeclimate_fingerprint_hash(&[check_name, &path, &line_str]);
         issues.push(dead_code_issue(
             s.finding_id.as_deref(),
-            // A stale suppression has no typed audit flag.
+            // The audit sets this flag with `set_stale_suppression_audit_attribution`.
             None,
             &[],
             CodeClimateIssueInput {
