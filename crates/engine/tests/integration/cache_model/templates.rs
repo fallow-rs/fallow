@@ -65,8 +65,9 @@ pub enum Step {
     /// Add or remove an ignore pattern for the orphan file.
     ToggleIgnoreOrphan,
     /// Add or remove the `react-server` resolve condition. The condition
-    /// selects the other target of the `#db` entry of `package.json`
-    /// `imports`.
+    /// selects the package target of the `#db` entry of `package.json`
+    /// `imports`. Every file target of an imported entry is used, so only a
+    /// package target makes the condition change the result.
     ToggleCondition,
     /// Point the `resolve.alias` entry of `vite.config.ts` to the other
     /// directory. With `keep_mtime`, the length and the modification time
@@ -123,7 +124,7 @@ pub const NODE: Template = Template {
     files: &[
         (
             "package.json",
-            r##"{"name":"app","private":true,"workspaces":["packages/*"],"main":"src/index.ts","imports":{"#db":{"react-server":"./src/db-b.ts","default":"./src/db-a.ts"}},"dependencies":{"plain-pkg":"1.0.0","other-pkg":"1.0.0","@demo/lib":"*"},"devDependencies":{"vite":"*"}}"##,
+            r##"{"name":"app","private":true,"workspaces":["packages/*"],"main":"src/index.ts","imports":{"#db":{"react-server":"other-pkg","default":"./src/db-a.ts"}},"dependencies":{"plain-pkg":"1.0.0","other-pkg":"1.0.0","@demo/lib":"*"},"devDependencies":{"vite":"*"}}"##,
         ),
         ("package-lock.json", NPM_LOCK),
         ("node_modules/.package-lock.json", NPM_LOCK),
