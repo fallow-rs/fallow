@@ -5,7 +5,7 @@
     reason = "tests use expect to keep fixture setup concise"
 )]
 
-use crate::common::{fallow_bin, run_fallow_raw};
+use crate::common::run_fallow_raw;
 
 #[test]
 fn gitlab_vendor_help_names_only_the_directories_it_writes() {
@@ -48,7 +48,7 @@ fn gitlab_template_with_closed_stdout_reader_exits_quietly() {
     let (reader, writer) = std::io::pipe().expect("create pipe");
     drop(reader);
 
-    let output = std::process::Command::new(fallow_bin())
+    let output = std::process::Command::new(crate::common::fallow_bin())
         .args(["ci-template", "gitlab"])
         .env("RUST_LOG", "")
         .env("NO_COLOR", "1")
