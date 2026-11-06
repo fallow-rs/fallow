@@ -1495,6 +1495,33 @@ test("CI runs clippy on the similar-code sidecar workspace", () => {
   assert.match(indentedBlock(workflow, "ci-ok", 2), /needs: \[[^\n]*\bsimilar-code-sidecar\b/u);
 });
 
+test("CI runs the cloud login credential store tests with a real Secret Service", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const job = indentedBlock(workflow, "linux-keychain", 2);
+  const paths = listedPaths(indentedBlock(workflow, "linux-keychain", 12));
+  const script = readFileSync("scripts/linux-keychain-test.sh", "utf8");
+
+  assert.match(job, /apt-get install [^\n]*\bdbus gnome-keyring libsecret-tools\b/u);
+  assert.match(job, /run: sh scripts\/linux-keychain-test\.sh$/mu);
+  assert.match(job, /needs\.changes\.outputs\.linux-keychain == 'true'/u);
+  assert.match(job, /persist-credentials: false/u);
+  // The Secret Service test is ignored by default, so only this job runs it.
+  assert.match(script, /--ignored --exact "\$SECRET_SERVICE_TEST"/u);
+  assert.match(script, /env -u DBUS_SESSION_BUS_ADDRESS/u);
+  for (const path of [
+    "crates/cli/src/coverage/credentials.rs",
+    "crates/cli/tests/integration/cloud_login_linux_keychain_tests.rs",
+    "scripts/linux-keychain-test.sh",
+  ]) {
+    assert.ok(paths.includes(path), `the linux-keychain filter must list ${path}`);
+  }
+  assert.match(
+    indentedBlock(workflow, "outputs", 4),
+    /linux-keychain: \$\{\{ steps\.filter\.outputs\.linux-keychain \}\}/u,
+  );
+  assert.match(indentedBlock(workflow, "ci-ok", 2), /needs: \[[^\n]*\blinux-keychain\b/u);
+});
+
 test("the check job runs the end-to-end mutation tests instead of a skip", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const checkJob = indentedBlock(workflow, "check", 2);

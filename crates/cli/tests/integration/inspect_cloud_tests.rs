@@ -21,11 +21,11 @@ use tempfile::{TempDir, tempdir};
 use crate::common::{CommandOutput, fallow_bin, parse_json};
 use crate::http_stub::read_request;
 
-type Captured = Arc<Mutex<Vec<String>>>;
+pub type Captured = Arc<Mutex<Vec<String>>>;
 
 /// Serve the scripted `(status, body)` answers in order, one connection each,
 /// and capture every request.
-fn serve(responses: Vec<(u16, String)>) -> (String, Captured, thread::JoinHandle<()>) {
+pub fn serve(responses: Vec<(u16, String)>) -> (String, Captured, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock addr");
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
@@ -75,7 +75,7 @@ fn write_project(root: &Path) {
 /// A file-context body: `loadUser` with the stable id of its local line,
 /// `parseRow` deployed at another line (so only the name ordinal pairs it),
 /// and `removedFn`, which the local file no longer has.
-fn file_context_body() -> String {
+pub fn file_context_body() -> String {
     let load_user = function_identity_id("src/api.ts", "loadUser", 1);
     let parse_row_old = function_identity_id("src/api.ts", "parseRow", 9);
     let removed = function_identity_id("src/api.ts", "removedFn", 20);
@@ -120,10 +120,10 @@ fn file_context_body() -> String {
     )
 }
 
-struct Env<'a> {
-    api_url: Option<&'a str>,
-    api_key: Option<&'a str>,
-    home: &'a Path,
+pub struct Env<'a> {
+    pub api_url: Option<&'a str>,
+    pub api_key: Option<&'a str>,
+    pub home: &'a Path,
 }
 
 fn run(args: &[&str], root: &Path, env: &Env<'_>) -> CommandOutput {
@@ -132,7 +132,7 @@ fn run(args: &[&str], root: &Path, env: &Env<'_>) -> CommandOutput {
 
 /// [`run`] with a last change to the command, for example to give it a
 /// keychain.
-fn run_with(
+pub fn run_with(
     args: &[&str],
     root: &Path,
     env: &Env<'_>,
@@ -170,13 +170,13 @@ fn run_with(
     }
 }
 
-fn project() -> (TempDir, TempDir) {
+pub fn project() -> (TempDir, TempDir) {
     let dir = tempdir().unwrap();
     write_project(dir.path());
     (dir, tempdir().unwrap())
 }
 
-const INSPECT_JSON: &[&str] = &[
+pub const INSPECT_JSON: &[&str] = &[
     "inspect",
     "--file",
     "src/api.ts",
@@ -612,10 +612,10 @@ fn inspect_compact_without_cloud_prints_static_findings() {
     assert!(!output.stdout.contains("cloud "), "{}", output.stdout);
 }
 
-const DEVICE_START: &str = r#"{"data":{"deviceCode":"dev-code","userCode":"ABCD-EFGH","verificationUri":"https://fallow.cloud/device","expiresIn":900,"interval":0}}"#;
+pub const DEVICE_START: &str = r#"{"data":{"deviceCode":"dev-code","userCode":"ABCD-EFGH","verificationUri":"https://fallow.cloud/device","expiresIn":900,"interval":0}}"#;
 const DEVICE_PENDING: &str =
     r#"{"error":true,"message":"Authorization pending","code":"authorization_pending"}"#;
-const DEVICE_TOKEN: &str = r#"{"data":{"licenseJwt":"jwt","apiKey":{"id":"key_1","key":"fallow_read_k1_fromlogin","prefix":"fallow_read_k1_fro","type":"read","name":"fallow cloud login (ci-box)"}}}"#;
+pub const DEVICE_TOKEN: &str = r#"{"data":{"licenseJwt":"jwt","apiKey":{"id":"key_1","key":"fallow_read_k1_fromlogin","prefix":"fallow_read_k1_fro","type":"read","name":"fallow cloud login (ci-box)"}}}"#;
 
 #[test]
 fn cloud_login_stores_the_key_and_inspect_uses_it_until_logout() {
