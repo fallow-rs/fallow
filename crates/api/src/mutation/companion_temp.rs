@@ -111,7 +111,6 @@ impl CompanionTemp {
 
 impl Drop for CompanionTemp {
     fn drop(&mut self) {
-        fallow_process::deregister_cleanup_paths(self.cleanup);
         let removed = (0..REMOVE_ATTEMPTS).any(|attempt| {
             if attempt > 0 {
                 std::thread::sleep(REMOVE_PAUSE);
@@ -125,6 +124,10 @@ impl Drop for CompanionTemp {
         if removed {
             let _ = fs::remove_file(&self.lock_path);
         }
+        // The entry goes last. A signal can end the process during this drop
+        // (the signal kills the companion, and this thread sees the exit).
+        // The signal cleanup then still holds the entry and deletes the rest.
+        fallow_process::deregister_cleanup_paths(self.cleanup);
     }
 }
 

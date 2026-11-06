@@ -9,6 +9,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, TryLockError};
+use std::time::Duration;
 
 use rustc_hash::FxHashMap;
 
@@ -74,17 +75,34 @@ fn delete_entries(entries: Vec<Vec<PathBuf>>) {
     }
 }
 
+/// How often the cleanup tries to delete one path. The owner can delete the
+/// same tree at the same time, and a child that the drain budget did not end
+/// can still write a file.
+const DELETE_ATTEMPTS: u32 = 10;
+/// The pause between two delete attempts.
+const DELETE_PAUSE: Duration = Duration::from_millis(50);
+
 /// Deletes `path`. True when it is gone.
 fn delete(path: &Path) -> bool {
-    let removed = match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(path),
-        Ok(_) => std::fs::remove_file(path),
-        Err(error) => Err(error),
-    };
-    match removed {
-        Ok(()) => true,
-        Err(error) => error.kind() == io::ErrorKind::NotFound,
+    for attempt in 0..DELETE_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(DELETE_PAUSE);
+        }
+        let _ = match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(path),
+            Ok(_) => std::fs::remove_file(path),
+            Err(error) => Err(error),
+        };
+        // A parallel delete makes `remove_dir_all` fail with `NotFound` on an
+        // inner entry while the path itself stays, so only a missing path
+        // counts as gone.
+        if std::fs::symlink_metadata(path)
+            .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+        {
+            return true;
+        }
     }
+    false
 }
 
 #[cfg(test)]
@@ -111,5 +129,25 @@ mod tests {
         assert!(!dir.exists());
         assert!(!marker.exists());
         assert!(kept.is_dir());
+    }
+
+    /// The owner and the signal cleanup can delete one tree at the same time.
+    #[test]
+    fn a_parallel_delete_of_the_same_tree_leaves_nothing() {
+        let parent = tempfile::tempdir().unwrap();
+        let dir = parent.path().join("tree");
+        for outer in 0..20 {
+            let nested = dir.join(format!("d{outer}"));
+            std::fs::create_dir_all(&nested).unwrap();
+            for inner in 0..50 {
+                std::fs::write(nested.join(format!("f{inner}")), "data").unwrap();
+            }
+        }
+        let other = dir.clone();
+        let racer = std::thread::spawn(move || delete(&other));
+        let gone = delete(&dir);
+        assert!(racer.join().unwrap());
+        assert!(gone);
+        assert!(!dir.exists());
     }
 }
