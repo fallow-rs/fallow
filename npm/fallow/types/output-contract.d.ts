@@ -1833,6 +1833,10 @@ export type MutantFailureKind = ("assertion" | "error" | "timeout")
  */
 export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing" | "unsupported-file")
 /**
+ * What a recheck shows for one mutant of the earlier report.
+ */
+export type MutationRecheckOutcome = ("killed" | "survived" | "no_coverage" | "tests_fail_on_original" | "unsettled")
+/**
  * Version singleton for a mutation plan.
  */
 export type MutationPlanSchemaVersion = "1"
@@ -20703,6 +20707,11 @@ verdicts?: (MutationVerdictJoin | null)
  * them (`--typecheck` not set).
  */
 typecheck?: (MutationTypecheckOutput | null)
+/**
+ * The result of each rechecked mutant against its status in the earlier
+ * report. Absent outside `--recheck`.
+ */
+recheck?: (MutationRecheck | null)
 }
 /**
  * The completion status of a run.
@@ -21376,6 +21385,59 @@ reason: MutationTypecheckSkipReason
  * The number of survivors.
  */
 count: number
+}
+/**
+ * The recheck facts of a `--recheck` run.
+ */
+export interface MutationRecheck {
+/**
+ * The SHA-256 digest of the earlier report.
+ */
+report_sha256: string
+/**
+ * The number of mutants for each outcome.
+ */
+killed: number
+/**
+ * See `killed`.
+ */
+survived: number
+/**
+ * See `killed`.
+ */
+no_coverage: number
+/**
+ * See `killed`.
+ */
+tests_fail_on_original: number
+/**
+ * See `killed`.
+ */
+unsettled: number
+/**
+ * The rechecked mutants, sorted by file, line and mutant id.
+ */
+mutants: MutationRecheckMutant[]
+}
+/**
+ * One rechecked mutant.
+ */
+export interface MutationRecheckMutant {
+/**
+ * The id of the mutant.
+ */
+mutant_id: string
+/**
+ * The project-root-relative path of the mutated file.
+ */
+file: string
+/**
+ * The 1-based line of the mutant.
+ */
+line: number
+previous_status: MutantStatus
+status: MutantStatus
+outcome: MutationRecheckOutcome
 }
 /**
  * The envelope of `fallow mutation --plan`. It runs no user code.

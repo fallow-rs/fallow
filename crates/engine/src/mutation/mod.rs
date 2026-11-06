@@ -99,6 +99,10 @@ pub struct MutationPlanRequest {
     /// with the skip reason [`SkipReason::RunnerCannotLoad`]. Set it when
     /// the test runner has no loader for a component file.
     pub skip_component_files: bool,
+    /// Run only the mutants with these ids. Each other mutant is pruned with
+    /// [`PruneReason::NotSelected`]. It stays in the plan, because the
+    /// instrumented file still holds its switch. `None` selects each mutant.
+    pub mutant_ids: Option<BTreeSet<String>>,
 }
 
 impl MutationPlanRequest {
@@ -111,6 +115,7 @@ impl MutationPlanRequest {
             allow_side_effects: false,
             max_mutants: None,
             skip_component_files: false,
+            mutant_ids: None,
         }
     }
 }
@@ -198,6 +203,9 @@ pub enum PruneReason {
     SideEffectSink,
     /// The mutant is in an export that a framework reads as config.
     FrameworkConfig,
+    /// The request selects other mutants by id
+    /// ([`MutationPlanRequest::mutant_ids`]).
+    NotSelected,
 }
 
 /// The status of a mutant in a plan.
@@ -333,6 +341,10 @@ pub struct PruneCounts {
     pub side_effect_sink: usize,
     /// Mutants in framework config exports.
     pub framework_config: usize,
+    /// Mutants that the request did not select by id. A plan document never
+    /// selects by id, so its output has no such count.
+    #[serde(skip)]
+    pub not_selected: usize,
 }
 
 /// The number of mutants for each disposition.

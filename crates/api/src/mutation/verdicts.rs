@@ -301,6 +301,7 @@ mod tests {
             files: Vec::new(),
             verdicts: None,
             typecheck: None,
+            recheck: None,
         }
     }
 
