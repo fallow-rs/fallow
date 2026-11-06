@@ -1664,10 +1664,12 @@ mod interrupt {
         let project = slow_project();
         let root = project.path();
         let journal = root.join(".fallow/mutation/journal.jsonl");
+        let temp = tempfile::tempdir().expect("temp dir");
 
         let mut command = Command::new(fallow_bin());
         scrub_analysis_env(&mut command);
         command
+            .env("TMPDIR", temp.path())
             .args(["mutation", "--root"])
             .arg(root)
             .args([
@@ -1698,6 +1700,13 @@ mod interrupt {
         assert!(interrupted.success());
         let status = child.wait().expect("wait");
         assert_eq!(status.code(), Some(130), "{status:?}");
+        // A signal ends Fallow without its normal cleanup, so the signal
+        // handler deletes the temp directory of each companion.
+        let left: Vec<_> = fs::read_dir(temp.path())
+            .expect("temp dir")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(left, Vec::<std::ffi::OsString>::new());
         let kept = journal_results(&journal);
         assert!(kept >= 2, "the interrupted run keeps its results: {kept}");
 
