@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+catalog:
+  "@typescript/native": npm:typescript@~7.0.2
+  typescript: npm:@typescript/typescript6@~6.0.2
+catalogs:
+  tools:
+    vite-next: npm:vite@^7.0.0
+  legacy:
+    vite-6: npm:vite@^6.0.0

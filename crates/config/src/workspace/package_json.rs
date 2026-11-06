@@ -1,5 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 
+use super::pnpm_catalog::PnpmCatalogData;
+
 /// Type alias for standard `HashMap` used in serde-deserialized structs.
 /// `rustc-hash` v2 does not have a `serde` feature, so fields deserialized
 /// from JSON must use `std::collections::HashMap`.
@@ -423,6 +425,20 @@ impl PackageJson {
     /// provides the binaries of `typescript`.
     #[must_use]
     pub fn npm_aliases(&self) -> Vec<(String, String)> {
+        self.npm_aliases_with_catalogs(None)
+    }
+
+    /// Every npm alias of the manifest, as [`Self::npm_aliases`] gives, plus
+    /// every alias that a `catalog:` reference gets from `catalogs`.
+    ///
+    /// `"@typescript/native": "catalog:"` with the catalog entry
+    /// `"@typescript/native": npm:typescript@~7.0.2` installs `typescript`
+    /// under the alias, the same as the inline spec.
+    #[must_use]
+    pub fn npm_aliases_with_catalogs(
+        &self,
+        catalogs: Option<&PnpmCatalogData>,
+    ) -> Vec<(String, String)> {
         let mut aliases: Vec<(String, String)> = [
             &self.dependencies,
             &self.dev_dependencies,
@@ -433,6 +449,9 @@ impl PackageJson {
         .flatten()
         .flat_map(|deps| deps.iter())
         .filter_map(|(name, spec)| {
+            let spec = catalogs
+                .and_then(|data| data.resolve_reference(name, spec))
+                .unwrap_or(spec);
             let target = npm_alias_name(spec)?;
             (target != name).then(|| (name.clone(), target.to_string()))
         })
@@ -1106,6 +1125,39 @@ mod tests {
                 ("typescript", "@typescript/typescript6"),
             ]
             .map(|(alias, target)| (alias.to_string(), target.to_string()))
+        );
+    }
+
+    #[test]
+    fn npm_aliases_with_catalogs_resolves_catalog_references() {
+        let catalogs = super::super::pnpm_catalog::parse_pnpm_catalog_data(
+            "catalog:\n  \"@typescript/native\": npm:typescript@~7.0.2\n  react: ^18.2.0\ncatalogs:\n  tools:\n    vite-next: npm:vite@^7.0.0\n",
+        )
+        .unwrap();
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "devDependencies": {
+                    "@typescript/native": "catalog:",
+                    "react": "catalog:default",
+                    "vite-next": "catalog:tools",
+                    "missing": "catalog:tools",
+                    "inline": "npm:left-pad@1"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            pkg.npm_aliases_with_catalogs(Some(&catalogs)),
+            [
+                ("@typescript/native", "typescript"),
+                ("inline", "left-pad"),
+                ("vite-next", "vite"),
+            ]
+            .map(|(alias, target)| (alias.to_string(), target.to_string()))
+        );
+        assert_eq!(
+            pkg.npm_aliases(),
+            [("inline".to_string(), "left-pad".to_string())]
         );
     }
 

@@ -1964,7 +1964,7 @@ fn analyze_all_scripts(
         },
         plugin_result,
     );
-    scripts::credit_npm_aliases(&mut plugin_result.script_used_packages, &manifests);
+    scripts::credit_npm_aliases(&mut plugin_result.script_used_packages, &manifests, config);
     plugin_result.dependency_binaries =
         scripts::DependencyBinaries::new(config.root.clone(), bin_map, all_dep_set);
     plugin_result.dev_dependency_names = manifests

@@ -48,6 +48,31 @@ pub struct PnpmCatalogData {
     pub empty_named_catalog_groups: Vec<PnpmCatalogGroup>,
 }
 
+impl PnpmCatalogData {
+    /// The catalog specifier that the dependency `package_name` gets from the
+    /// manifest spec `spec`.
+    ///
+    /// `"typescript": "catalog:"` reads the default catalog, and
+    /// `"typescript": "catalog:tools"` reads the catalog `tools`. Returns
+    /// `None` when `spec` is not a `catalog:` reference, or when the catalog
+    /// has no string specifier for the package.
+    #[must_use]
+    pub fn resolve_reference(&self, package_name: &str, spec: &str) -> Option<&str> {
+        let catalog_name = match spec.trim().strip_prefix("catalog:")? {
+            "" => "default",
+            name => name,
+        };
+        self.catalogs
+            .iter()
+            .find(|catalog| catalog.name == catalog_name)?
+            .entries
+            .iter()
+            .find(|entry| entry.package_name == package_name)?
+            .specifier
+            .as_deref()
+    }
+}
+
 /// A single catalog (the default or a named one).
 #[derive(Debug, Clone)]
 pub struct PnpmCatalog {
@@ -63,6 +88,9 @@ pub struct PnpmCatalog {
 pub struct PnpmCatalogEntry {
     /// Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
     pub package_name: String,
+    /// Version specifier of the entry (e.g. `"^18.2.0"` or
+    /// `"npm:typescript@~7.0.2"`), or `None` when the value is not a scalar.
+    pub specifier: Option<String>,
     /// 1-based line number of the entry within the source file.
     pub line: u32,
 }
@@ -280,11 +308,12 @@ fn collect_entries(
 ) -> Vec<PnpmCatalogEntry> {
     mapping
         .iter()
-        .filter_map(|(k, _)| {
+        .filter_map(|(k, v)| {
             let pkg = k.as_str()?;
             let line = line_index.line_for(catalog_name, pkg)?;
             Some(PnpmCatalogEntry {
                 package_name: pkg.to_string(),
+                specifier: v.scalar_text().map(str::to_string),
                 line,
             })
         })
@@ -297,9 +326,10 @@ fn collect_json_entries(
     catalog_name: &str,
 ) -> Vec<PnpmCatalogEntry> {
     mapping
-        .keys()
-        .map(|pkg| PnpmCatalogEntry {
+        .iter()
+        .map(|(pkg, value)| PnpmCatalogEntry {
             package_name: pkg.clone(),
+            specifier: value.as_str().map(str::to_string),
             line: line_index.line_for(catalog_name, pkg).unwrap_or(1),
         })
         .collect()
