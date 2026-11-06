@@ -220,7 +220,7 @@ fn tokenize_mdx(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &statements.body, SourceType::tsx()).parse();
 
-        let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+        let mut extractor = TokenExtractor::new(&statements.body, strip_types, skip_imports);
         extractor.visit_program(&parser_return.program);
         for token in &mut extractor.tokens {
             token.span = statements.remap_span(token.span);
@@ -293,7 +293,7 @@ fn tokenize_js_section(
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 
-    let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+    let mut extractor = TokenExtractor::new(source, strip_types, skip_imports);
     extractor.visit_program(&parser_return.program);
 
     let offset = byte_offset as u32;
@@ -375,7 +375,7 @@ fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bo
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
 
-    let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+    let mut extractor = TokenExtractor::new(parser_source, strip_types, skip_imports);
     extractor.visit_program(&parser_return.program);
 
     if extractor.tokens.len() < 5 && source.len() > 100 && !source_type.is_jsx() {
@@ -386,7 +386,7 @@ fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bo
         };
         let allocator2 = Allocator::default();
         let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
-        let mut retry_extractor = TokenExtractor::new(strip_types, skip_imports);
+        let mut retry_extractor = TokenExtractor::new(parser_source, strip_types, skip_imports);
         retry_extractor.visit_program(&retry_return.program);
         if retry_extractor.tokens.len() > extractor.tokens.len() {
             extractor = retry_extractor;

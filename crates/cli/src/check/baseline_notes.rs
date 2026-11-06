@@ -208,10 +208,10 @@ pub(super) fn warn_about_another_install_state(
     io: &BaselineIo<'_>,
 ) -> Option<WorkspaceDiagnostic> {
     let diagnostic = fallow_engine::baseline::install_state_diagnostic(
-        io.root,
+        &io.config.root,
         baseline_path,
         content,
-        fallow_config::node_modules_state(io.root),
+        fallow_config::node_modules_state(&io.config.root),
     )?;
     eprintln!("Warning: {}", diagnostic.message);
     Some(diagnostic)

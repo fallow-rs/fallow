@@ -637,7 +637,7 @@ fn save_duplication_baseline(
     if !opts.quiet {
         eprintln!("Saved duplication baseline to {}", path.display());
     }
-
+    fallow_engine::baseline_location::warn_if_in_cache_dir(path, &config.cache_dir, &config.root);
     Ok(())
 }
 

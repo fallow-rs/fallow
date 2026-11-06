@@ -14,10 +14,13 @@ pub(super) fn save_baseline_file(
     ) {
         return Err(emit_error(&refusal, 2, io.output));
     }
-    let baseline_data =
-        BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone())
-            .with_scope_reasons(io.scope_reasons)
-            .with_node_modules(fallow_config::node_modules_state(io.root));
+    let baseline_data = BaselineData::from_results_with_identity(
+        results,
+        &io.config.root,
+        io.analysis_identity.clone(),
+    )
+    .with_scope_reasons(io.scope_reasons)
+    .with_node_modules(fallow_config::node_modules_state(&io.config.root));
     let mut json = serde_json::to_string_pretty(&baseline_data)
         .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
     json.push('\n');
@@ -45,6 +48,11 @@ pub(super) fn save_baseline_file(
     if !io.quiet {
         eprintln!("Baseline saved to {}", baseline_path.display());
     }
+    fallow_engine::baseline_location::warn_if_in_cache_dir(
+        baseline_path,
+        &io.config.cache_dir,
+        &io.config.root,
+    );
     // The package map comes from the config and applies to every run, so a
     // saved baseline is partial unless the run turned the map off. A later run
     // that edits an unchanged package then reports its old findings as new.

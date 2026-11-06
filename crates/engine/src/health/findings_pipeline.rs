@@ -500,6 +500,7 @@ pub(super) fn save_health_baseline_if_requested(
                 .map_or(&[], |report| report.findings.as_slice()),
             targets,
             config_root: &config.root,
+            cache_dir: &config.cache_dir,
             quiet: opts.quiet,
             mode: opts.baseline_mode,
             mode_explicit: opts.baseline_mode_explicit,

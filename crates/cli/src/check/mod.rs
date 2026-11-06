@@ -1478,7 +1478,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             load_flag: opts.baseline_flag,
             bare_run: opts.bare_run,
             command: opts.surface.command(),
-            root: &config.root,
+            config: &config,
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
@@ -2197,7 +2197,7 @@ struct BaselineIo<'a> {
     /// The subcommand that runs, for the `recheck-baseline` next step and the
     /// regenerate hint. The baseline file format stays `dead-code`.
     command: &'static str,
-    root: &'a std::path::Path,
+    config: &'a ResolvedConfig,
     quiet: bool,
     output: OutputFormat,
     analysis_identity: &'a fallow_types::semantic::SemanticAnalysisIdentity,

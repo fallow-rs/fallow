@@ -10,6 +10,7 @@ mod operators;
 mod proptests;
 mod statements;
 mod token_ordering;
+mod token_spans;
 mod token_types;
 mod type_stripping;
 mod typescript;

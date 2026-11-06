@@ -397,7 +397,7 @@ fn save_baseline_writes_trailing_newline() {
             load_flag: "--baseline",
             bare_run: false,
             command: "dead-code",
-            root: std::path::Path::new("/project"),
+            config: &resolved_config(false),
             quiet: true,
             output: OutputFormat::Json,
             analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),

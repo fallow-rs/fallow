@@ -25,6 +25,7 @@ use std::path::Path;
 /// across runs.
 pub mod baseline;
 pub mod baseline_growth;
+pub mod baseline_location;
 /// Read-only inspection of the persisted extraction cache, for `fallow doctor`.
 pub mod cache_status;
 pub mod change_coupling;
