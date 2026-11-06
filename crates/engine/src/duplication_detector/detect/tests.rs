@@ -124,6 +124,52 @@ fn boundary_precheck_keeps_component_and_style_corpus() {
     }
 }
 
+/// A component file with two sections of 8 tokens each, with a boundary
+/// token before each section (token offsets 0 and 9).
+fn make_two_section_file(path: &str) -> (PathBuf, Vec<HashedToken>, FileTokens) {
+    const BOUNDARY: u64 = 1;
+    let hashes: Vec<u64> = std::iter::once(BOUNDARY)
+        .chain(10..18)
+        .chain(std::iter::once(BOUNDARY))
+        .chain(20..28)
+        .collect();
+    let source = "aa\n".repeat(hashes.len());
+    let mut file_tokens = make_file_tokens(&source, hashes.len());
+    for (token, &hash) in file_tokens.tokens.iter_mut().zip(&hashes) {
+        if hash == BOUNDARY {
+            token.kind = TokenKind::Boundary("section".to_string());
+        }
+    }
+    (
+        PathBuf::from(path),
+        make_hashed_tokens(&hashes),
+        file_tokens,
+    )
+}
+
+#[test]
+fn identical_component_files_report_each_section() {
+    let detector = CloneDetector::new(5, 1, false);
+    let report = detector.detect(vec![
+        make_two_section_file("a.vue"),
+        make_two_section_file("b.vue"),
+    ]);
+
+    let mut groups: Vec<(usize, usize, usize)> = report
+        .clone_groups
+        .iter()
+        .map(|group| {
+            (
+                group.instances.len(),
+                group.token_count,
+                group.instances[0].start_line,
+            )
+        })
+        .collect();
+    groups.sort_unstable();
+    assert_eq!(groups, vec![(2, 8, 2), (2, 8, 11)]);
+}
+
 #[test]
 fn empty_input_produces_empty_report() {
     let detector = CloneDetector::new(5, 1, false);

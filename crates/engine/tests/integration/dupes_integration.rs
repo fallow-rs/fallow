@@ -474,3 +474,67 @@ fn fuzzy_css_clones_surface_via_value_canonicalization() {
         "value-drifted CSS recipe should form a cross-file clone group: {cloned_files:?}"
     );
 }
+
+/// Line ranges (start, end) of the first instance of each clone group whose
+/// instances are exactly `src/A.vue`, `src/B.vue` and `src/C.vue`.
+fn vue_sfc_section_ranges(
+    root: &std::path::Path,
+    report: &fallow_engine::duplicates::DuplicationReport,
+) -> Vec<(usize, usize)> {
+    let mut ranges: Vec<(usize, usize)> = report
+        .clone_groups
+        .iter()
+        .filter(|group| {
+            let mut files: Vec<String> = group
+                .instances
+                .iter()
+                .map(|instance| {
+                    instance
+                        .file
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            files.sort();
+            files == ["src/A.vue", "src/B.vue", "src/C.vue"]
+        })
+        .map(|group| (group.instances[0].start_line, group.instances[0].end_line))
+        .collect();
+    ranges.sort_unstable();
+    ranges
+}
+
+/// Three byte-identical Vue SFCs. A clone never crosses a section border, so
+/// each section (template, script and style) must form its own clone group
+/// when the identical text runs through all sections (issue #4251).
+#[test]
+fn identical_vue_sfcs_report_every_section() {
+    let root = fixture_path("dupes-vue-sfc-sections");
+    let config = create_config(root.clone());
+    let files = fallow_core::discover::discover_files(&config);
+
+    let report = fallow_engine::duplicates::find_duplicates(
+        &root,
+        &files,
+        &fallow_config::DuplicatesConfig::default(),
+    );
+    let ranges = vue_sfc_section_ranges(&root, &report);
+
+    // `src/A.vue`: `<template>` 1-34, `<script>` 36-88, `<style>` 90-158.
+    let covers = |first: usize, last: usize| {
+        ranges
+            .iter()
+            .any(|&(start, end)| start <= first && end >= last)
+    };
+    assert!(covers(2, 33), "template body is not reported: {ranges:?}");
+    assert!(covers(37, 87), "script body is not reported: {ranges:?}");
+    assert!(covers(91, 157), "style body is not reported: {ranges:?}");
+    assert!(
+        ranges
+            .iter()
+            .all(|&(start, end)| end < 35 || (start > 35 && end < 89) || start > 89),
+        "a clone group crosses a section border: {ranges:?}"
+    );
+}

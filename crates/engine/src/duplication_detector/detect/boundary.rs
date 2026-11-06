@@ -27,6 +27,27 @@ pub(super) fn build_boundary_prefixes(files: &[FileData]) -> Vec<Option<Vec<u32>
         .collect()
 }
 
+/// Replace each section boundary token in `text` with a unique negative
+/// sentinel, below every value already in `text`.
+///
+/// A component file (Vue, Svelte, Astro) holds one boundary token before each
+/// section. With equal boundary values, the suffix array finds repeats that
+/// run through several sections. The extractor drops each instance that holds
+/// a boundary, and a shorter repeat inside one section is not maximal, so it
+/// gets no group. Unique values stop each repeat at the section border, so
+/// each section of identical files forms its own maximal repeat.
+pub(super) fn isolate_boundaries(text: &mut [i64], files: &[FileData], file_offsets: &[usize]) {
+    let mut sentinel = text.iter().copied().min().unwrap_or(0).min(0) - 1;
+    for (file, &start) in files.iter().zip(file_offsets) {
+        for (offset, token) in file.hashed_tokens.iter().enumerate() {
+            if hashed_token_is_boundary(file, token.original_index) {
+                text[start + offset] = sentinel;
+                sentinel -= 1;
+            }
+        }
+    }
+}
+
 fn hashed_token_is_boundary(file: &FileData, original_index: usize) -> bool {
     file.file_tokens
         .tokens
