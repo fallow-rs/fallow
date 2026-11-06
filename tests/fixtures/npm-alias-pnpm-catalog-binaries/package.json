@@ -1,0 +1,7 @@
+{
+  "name": "npm-alias-pnpm-catalog-binaries",
+  "private": true,
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

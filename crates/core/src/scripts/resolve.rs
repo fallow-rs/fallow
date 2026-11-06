@@ -212,10 +212,67 @@ pub fn all_dependency_names(manifests: &[&fallow_config::PackageJson]) -> Vec<St
 /// keeps a side-by-side alias such as `"typescript-5": "npm:typescript@5"`
 /// reportable. A plain declaration in another workspace does not block the
 /// credit, because that workspace does not install the binary for the alias.
-pub fn credit_npm_aliases(used: &mut FxHashSet<String>, manifests: &[&fallow_config::PackageJson]) {
+///
+/// A `catalog:` reference gets its spec from the catalogs in the project root
+/// of `config`, so an alias that a pnpm or Bun catalog defines counts the same
+/// as an inline alias.
+pub fn credit_npm_aliases(
+    used: &mut FxHashSet<String>,
+    manifests: &[&fallow_config::PackageJson],
+    config: &fallow_config::ResolvedConfig,
+) {
+    let catalogs = load_catalog_data(&config.root, manifests);
+    credit_npm_aliases_with_catalogs(used, manifests, catalogs.as_ref());
+}
+
+/// True when a dependency of a manifest has a `catalog:` spec.
+fn has_catalog_reference(manifests: &[&fallow_config::PackageJson]) -> bool {
+    manifests
+        .iter()
+        .flat_map(|pkg| {
+            [
+                &pkg.dependencies,
+                &pkg.dev_dependencies,
+                &pkg.optional_dependencies,
+                &pkg.peer_dependencies,
+            ]
+        })
+        .flatten()
+        .flat_map(|deps| deps.values())
+        .any(|spec| spec.trim_start().starts_with("catalog:"))
+}
+
+/// The catalogs that `catalog:` references in the manifests read from.
+///
+/// When no manifest has a `catalog:` reference, the function reads no file
+/// and gives `None`. `pnpm-workspace.yaml` is the source when it exists, as
+/// in catalog analysis. Otherwise Bun catalogs in the root `package.json` are
+/// the source. A `pnpm-workspace.yaml` that does not parse gives `None`;
+/// catalog analysis reports the parse error.
+fn load_catalog_data(
+    root: &Path,
+    manifests: &[&fallow_config::PackageJson],
+) -> Option<fallow_config::PnpmCatalogData> {
+    if !has_catalog_reference(manifests) {
+        return None;
+    }
+    if let Ok(source) = std::fs::read_to_string(root.join("pnpm-workspace.yaml")) {
+        return fallow_config::parse_pnpm_catalog_data(&source).ok();
+    }
+    let source = std::fs::read_to_string(root.join("package.json")).ok()?;
+    let data = fallow_config::parse_package_json_catalog_data(&source);
+    (!data.catalogs.is_empty()).then_some(data)
+}
+
+/// [`credit_npm_aliases`] with the catalogs already loaded.
+fn credit_npm_aliases_with_catalogs(
+    used: &mut FxHashSet<String>,
+    manifests: &[&fallow_config::PackageJson],
+    catalogs: Option<&fallow_config::PnpmCatalogData>,
+) {
     let mut credited: Vec<String> = Vec::new();
     for pkg in manifests {
-        let aliases = pkg.npm_aliases();
+        let aliases = pkg.npm_aliases_with_catalogs(catalogs);
         if aliases.is_empty() {
             continue;
         }
@@ -534,7 +591,7 @@ mod tests {
     fn credit(used: &[&str], dev_dependencies: &str) -> FxHashSet<String> {
         let pkg = workspace_package(&format!(r#"{{"devDependencies": {dev_dependencies}}}"#));
         let mut used = declared(used);
-        credit_npm_aliases(&mut used, &[&pkg]);
+        credit_npm_aliases_with_catalogs(&mut used, &[&pkg], None);
         used
     }
 
@@ -545,7 +602,7 @@ mod tests {
             r#"{"devDependencies": {"@typescript/native": "npm:typescript@~7.0.2"}}"#,
         );
         let mut used = declared(&["typescript"]);
-        credit_npm_aliases(&mut used, &[&root, &ws]);
+        credit_npm_aliases_with_catalogs(&mut used, &[&root, &ws], None);
         assert_eq!(used, declared(&["typescript", "@typescript/native"]));
     }
 
@@ -574,6 +631,95 @@ mod tests {
             r#"{"typescript": "^7.0.2", "typescript-5": "npm:typescript@5"}"#,
         );
         assert_eq!(used, declared(&["typescript"]));
+    }
+
+    fn credit_with_catalog(
+        used: &[&str],
+        dev_dependencies: &str,
+        catalog: &str,
+    ) -> FxHashSet<String> {
+        let pkg = workspace_package(&format!(r#"{{"devDependencies": {dev_dependencies}}}"#));
+        let catalogs = fallow_config::parse_pnpm_catalog_data(catalog).expect("valid YAML");
+        let mut used = declared(used);
+        credit_npm_aliases_with_catalogs(&mut used, &[&pkg], Some(&catalogs));
+        used
+    }
+
+    #[test]
+    fn npm_alias_from_a_catalog_is_credited() {
+        let used = credit_with_catalog(
+            &["typescript"],
+            r#"{"@typescript/native": "catalog:", "typescript": "catalog:"}"#,
+            "catalog:\n  \"@typescript/native\": npm:typescript@~7.0.2\n  typescript: npm:@typescript/typescript6@~6.0.2\n",
+        );
+        assert_eq!(used, declared(&["typescript", "@typescript/native"]));
+    }
+
+    #[test]
+    fn npm_alias_from_a_named_catalog_is_credited() {
+        let used = credit_with_catalog(
+            &["vite"],
+            r#"{"vite-next": "catalog:tools"}"#,
+            "catalogs:\n  tools:\n    vite-next: npm:vite@^7.0.0\n",
+        );
+        assert_eq!(used, declared(&["vite", "vite-next"]));
+    }
+
+    #[test]
+    fn npm_alias_from_a_catalog_is_not_credited_when_the_target_is_declared_plainly() {
+        let used = credit_with_catalog(
+            &["typescript"],
+            r#"{"typescript": "catalog:", "typescript-5": "catalog:"}"#,
+            "catalog:\n  typescript: ^7.0.2\n  typescript-5: npm:typescript@5\n",
+        );
+        assert_eq!(used, declared(&["typescript"]));
+    }
+
+    #[test]
+    fn npm_alias_from_a_bun_catalog_in_the_root_package_json_is_credited() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"workspaces": {"packages": ["packages/*"], "catalogs": {"tools": {"vite-next": "npm:vite@^7.0.0"}}}}"#,
+        )
+        .unwrap();
+        let pkg = workspace_package(r#"{"devDependencies": {"vite-next": "catalog:tools"}}"#);
+        let catalogs = load_catalog_data(root.path(), &[&pkg]);
+        let mut used = declared(&["vite"]);
+        credit_npm_aliases_with_catalogs(&mut used, &[&pkg], catalogs.as_ref());
+        assert_eq!(used, declared(&["vite", "vite-next"]));
+    }
+
+    #[test]
+    fn pnpm_workspace_catalog_takes_precedence_over_the_root_package_json() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pnpm-workspace.yaml"),
+            "catalog:\n  vite-next: ^7.0.0\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"workspaces": {"catalog": {"vite-next": "npm:vite@^7.0.0"}}}"#,
+        )
+        .unwrap();
+        let pkg = workspace_package(r#"{"devDependencies": {"vite-next": "catalog:"}}"#);
+        let catalogs = load_catalog_data(root.path(), &[&pkg]);
+        let mut used = declared(&["vite"]);
+        credit_npm_aliases_with_catalogs(&mut used, &[&pkg], catalogs.as_ref());
+        assert_eq!(used, declared(&["vite"]));
+    }
+
+    #[test]
+    fn catalog_files_are_not_read_without_a_catalog_reference() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pnpm-workspace.yaml"),
+            "catalog:\n  vite-next: npm:vite@^7.0.0\n",
+        )
+        .unwrap();
+        let pkg = workspace_package(r#"{"devDependencies": {"vite-next": "^7.0.0"}}"#);
+        assert!(load_catalog_data(root.path(), &[&pkg]).is_none());
     }
 
     #[test]
