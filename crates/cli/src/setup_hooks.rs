@@ -28,6 +28,11 @@ use serde::Serialize;
 pub mod symlink_guard;
 pub use symlink_guard::{execute_agent_hooks, symlinked_component, symlinked_hook_target};
 
+#[path = "setup_hooks_gitignore.rs"]
+mod gitignore;
+pub use gitignore::ensure_gitignore_entry;
+use gitignore::gitignore_needs_entry;
+
 /// Agent target for generated hook artifacts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum HookAgentArg {
@@ -466,10 +471,15 @@ impl Plan {
         if let Some(codex) = &self.codex {
             report.codex = Some(codex.execute(opts, mode)?);
         }
-        if mode == Mode::Install && self.claude.is_some() && opts.gitignore_claude && !opts.dry_run
-        {
-            ensure_gitignore_entry(opts.root, ".claude/")
-                .map_err(|e| format!("Failed to update .gitignore for .claude/: {e}"))?;
+        if mode == Mode::Install && self.claude.is_some() && opts.gitignore_claude {
+            let added = if opts.dry_run {
+                gitignore_needs_entry(opts.root, ".claude/")
+                    .map_err(|e| format!("Failed to read .gitignore: {e}"))?
+            } else {
+                ensure_gitignore_entry(opts.root, ".claude/")
+                    .map_err(|e| format!("Failed to update .gitignore for .claude/: {e}"))?
+            };
+            report.gitignore_claude_added = Some(added);
         }
         Ok(report)
     }
@@ -643,6 +653,11 @@ impl GateFiles<'_> {
 pub struct Report {
     pub claude: Option<GateReport>,
     pub codex: Option<CodexReport>,
+    /// `Some(true)` when `--gitignore-claude` added `.claude/` to
+    /// `.gitignore` (or would add it in a dry run), `Some(false)` when the
+    /// entry was already there, `None` when the install did not use
+    /// `.gitignore`.
+    pub gitignore_claude_added: Option<bool>,
 }
 
 /// Outcome for the hook config handler and the gate script of one harness.
@@ -1443,30 +1458,6 @@ fn find_tooling_insertion_point(text: &str) -> Option<usize> {
     None
 }
 
-pub fn ensure_gitignore_entry(root: &Path, entry: &str) -> std::io::Result<()> {
-    let gitignore_path = root.join(".gitignore");
-    let existing = read_optional_text(&gitignore_path)?.unwrap_or_default();
-    let target = entry.trim_end_matches('/');
-    let already_ignored = existing.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == target || trimmed == entry
-    });
-    if already_ignored {
-        return Ok(());
-    }
-
-    let is_new = existing.is_empty();
-    let mut contents = existing;
-    if !is_new && !contents.ends_with('\n') {
-        contents.push('\n');
-    }
-    contents.push_str(entry);
-    if !entry.ends_with('\n') {
-        contents.push('\n');
-    }
-    std::fs::write(&gitignore_path, contents)
-}
-
 pub fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(contents) => Ok(Some(contents)),
@@ -1491,7 +1482,7 @@ fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, comm
         eprintln!(
             "  {:<42}  {}",
             display_rel(opts.root, &gate.settings_path),
-            describe_settings(&gate.settings_outcome)
+            describe_settings(&gate.settings_outcome, opts.dry_run)
         );
         eprintln!(
             "  {:<42}  {}",
@@ -1515,13 +1506,19 @@ fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, comm
         }
     }
 
-    if mode == Mode::Install && report.claude.is_some() && opts.gitignore_claude && !opts.dry_run {
-        eprintln!("  {:<42}  .claude/ added", ".gitignore");
+    if let Some(added) = report.gitignore_claude_added {
+        let outcome = match (added, opts.dry_run) {
+            (true, false) => ".claude/ added",
+            (true, true) => "would add .claude/",
+            (false, _) => "unchanged (.claude/ already listed)",
+        };
+        eprintln!("  {:<42}  {outcome}", ".gitignore");
     }
 }
 
-pub fn describe_settings(outcome: &SettingsOutcome) -> String {
+pub fn describe_settings(outcome: &SettingsOutcome, dry_run: bool) -> String {
     match outcome {
+        SettingsOutcome::Created if dry_run => "would create".to_string(),
         SettingsOutcome::Created => "created".to_string(),
         SettingsOutcome::Updated {
             handlers_added,
@@ -1544,10 +1541,11 @@ pub fn describe_settings(outcome: &SettingsOutcome) -> String {
             if *handlers_preserved > 0 {
                 parts.push(format!("{handlers_preserved} preserved"));
             }
+            let verb = if dry_run { "would update" } else { "updated" };
             if parts.is_empty() {
-                "updated".to_string()
+                verb.to_string()
             } else {
-                format!("updated ({})", parts.join(", "))
+                format!("{verb} ({})", parts.join(", "))
             }
         }
         SettingsOutcome::Unchanged { handlers_preserved } => {

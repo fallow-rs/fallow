@@ -15414,7 +15414,7 @@
         },
         "is_internal_dependency": {
           "type": "boolean",
-          "description": "Whether the package is a generated or platform-specific dependency\npackage rather than a hand-authored workspace."
+          "description": "Whether another workspace of the project lists this package as a\ndependency."
         }
       },
       "required": [

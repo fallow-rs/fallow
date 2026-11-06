@@ -122,15 +122,29 @@ pub fn write_stdout_fmt_line(args: fmt::Arguments<'_>) {
     write_stdout_line(&mut inner, args);
 }
 
+/// Write `text` to stdout as it is, without an added newline. Like
+/// `stdoutln!`, it handles a non-blocking pipe and a closed reader.
+pub fn write_stdout_str(text: &str) {
+    let mut inner = lock();
+    write_stdout_bytes(&mut inner, text.as_bytes());
+}
+
 fn write_stdout_line(inner: &mut SinkInner, args: fmt::Arguments<'_>) {
     if !matches!(inner.stdout, StdoutState::Open) {
         return;
     }
     let mut line = fmt::format(args);
     line.push('\n');
+    write_stdout_bytes(inner, line.as_bytes());
+}
+
+fn write_stdout_bytes(inner: &mut SinkInner, bytes: &[u8]) {
+    if !matches!(inner.stdout, StdoutState::Open) {
+        return;
+    }
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    match write_all_retrying(&mut handle, line.as_bytes(), wait_until_stdout_writable) {
+    match write_all_retrying(&mut handle, bytes, wait_until_stdout_writable) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
             inner.stdout = StdoutState::Closed;

@@ -245,7 +245,7 @@ fn emit_json_result(result: &InitResult, json_style: crate::json_style::JsonStyl
 
 fn emit_human_result(result: &InitResult) {
     println!(
-        "Created {} (template: {}, {} {})",
+        "Created {} (template: {}, {} rule{})",
         result.pack_path,
         result.template,
         result.rules,

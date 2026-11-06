@@ -2437,7 +2437,7 @@ pub enum TelemetryCli {
 pub enum CiTemplateCli {
     /// Print or vendor the GitLab CI template and MR integration helpers.
     Gitlab {
-        /// Write ci/ and action/ helper files under DIR instead of printing the template.
+        /// Write the template and its helper scripts under DIR/ci/ instead of printing the template.
         ///
         /// Passing --vendor without a DIR writes into the current directory.
         #[arg(long, value_name = "DIR", num_args = 0..=1, default_missing_value = ".")]
