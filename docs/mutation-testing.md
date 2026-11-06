@@ -370,7 +370,9 @@ or relational mutant, so it adds little test-strength signal for its run time.
   after a kill, because a killed test run cannot run its teardown. A lock
   file next to the directory marks a live Fallow process. The next run
   deletes a directory whose lock is free, for example after Fallow ended on a
-  signal or could not delete a file.
+  signal or could not delete a file. On Unix, only the owner can read the
+  directory, and Fallow deletes only a directory whose lock file is a regular
+  file of the same user.
 
 ## Exit codes
 

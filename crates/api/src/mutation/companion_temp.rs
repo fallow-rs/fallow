@@ -12,9 +12,13 @@
 //! operating system releases the lock when the owner ends. A directory whose
 //! lock is free belongs to an API that ended without cleanup (a signal or a
 //! crash), so the first companion of the next run removes it.
+//!
+//! The system temp directory can be shared with other users (`/tmp` on
+//! Linux). The directory is private to its owner, and a sweep opens only a
+//! regular lock file of the same owner, never a link or a FIFO.
 
 use std::collections::hash_map::RandomState;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{self, File, Metadata, OpenOptions, TryLockError};
 use std::hash::BuildHasher;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -56,24 +60,22 @@ impl CompanionTemp {
     /// process also removes the stale directories below `parent`.
     pub fn create(parent: &Path) -> io::Result<Self> {
         static SWEEP: Once = Once::new();
-        SWEEP.call_once(|| sweep_stale(parent, SystemTime::now()));
         for _ in 0..CREATE_ATTEMPTS {
             let name = format!("{PREFIX}{}", unique_suffix());
             let lock_path = parent.join(format!("{name}{LOCK_SUFFIX}"));
-            let lock = match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
+            let lock = match private_options().create_new(true).open(&lock_path) {
                 Ok(lock) => lock,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error),
             };
             let dir = parent.join(&name);
-            if let Err(error) = lock.lock().and_then(|()| fs::create_dir(&dir)) {
+            if let Err(error) = lock.lock().and_then(|()| create_private_dir(&dir)) {
                 drop(lock);
                 let _ = fs::remove_file(&lock_path);
                 return Err(error);
+            }
+            if let Ok(own) = lock.metadata() {
+                SWEEP.call_once(|| sweep_stale(parent, SystemTime::now(), &own));
             }
             return Ok(Self {
                 dir,
@@ -135,9 +137,51 @@ fn unique_suffix() -> String {
     format!("{:x}-{:08x}", std::process::id(), hash as u32)
 }
 
+/// Options that open or create a lock file for writing. On Unix, a new file
+/// is readable by its owner only, and the open does not follow a link and
+/// does not wait on a FIFO.
+fn private_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    options
+}
+
+/// Creates `dir`, on Unix with access for its owner only.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
+/// True when `metadata` is a regular file with the owner of `own`.
+fn is_own_file(metadata: &Metadata, own: &Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        metadata.is_file() && metadata.uid() == own.uid()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = own;
+        metadata.is_file()
+    }
+}
+
 /// Removes each companion temp directory below `parent` whose lock file is
-/// older than [`SWEEP_MIN_AGE`] at `now` and has no owner.
-fn sweep_stale(parent: &Path, now: SystemTime) {
+/// older than [`SWEEP_MIN_AGE`] at `now`, has the owner of `own`, and is not
+/// locked.
+fn sweep_stale(parent: &Path, now: SystemTime, own: &Metadata) {
     let Ok(entries) = fs::read_dir(parent) else {
         return;
     };
@@ -150,24 +194,31 @@ fn sweep_stale(parent: &Path, now: SystemTime) {
         else {
             continue;
         };
-        let lock_path = entry.path();
-        let old = entry
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .is_ok_and(|modified| {
-                now.duration_since(modified)
-                    .is_ok_and(|age| age >= SWEEP_MIN_AGE)
-            });
+        // `DirEntry::metadata` does not follow a link.
+        let old = entry.metadata().is_ok_and(|metadata| {
+            is_own_file(&metadata, own)
+                && metadata.modified().is_ok_and(|modified| {
+                    now.duration_since(modified)
+                        .is_ok_and(|age| age >= SWEEP_MIN_AGE)
+                })
+        });
         if old {
-            remove_if_unowned(&lock_path, &parent.join(format!("{PREFIX}{name}")));
+            remove_if_unowned(&entry.path(), &parent.join(format!("{PREFIX}{name}")), own);
         }
     }
 }
 
-fn remove_if_unowned(lock_path: &Path, dir: &Path) {
-    let Ok(lock) = OpenOptions::new().write(true).open(lock_path) else {
+fn remove_if_unowned(lock_path: &Path, dir: &Path, own: &Metadata) {
+    let Ok(lock) = private_options().open(lock_path) else {
         return;
     };
+    // The file can change between the directory read and the open.
+    if !lock
+        .metadata()
+        .is_ok_and(|metadata| is_own_file(&metadata, own))
+    {
+        return;
+    }
     match lock.try_lock() {
         Ok(()) => {}
         Err(TryLockError::WouldBlock | TryLockError::Error(_)) => return,
@@ -186,6 +237,15 @@ mod tests {
 
     fn later() -> SystemTime {
         SystemTime::now() + SWEEP_MIN_AGE * 2
+    }
+
+    /// The metadata of a file of the test process, as the owner reference.
+    fn own() -> Metadata {
+        tempfile::tempfile().unwrap().metadata().unwrap()
+    }
+
+    fn sweep(parent: &Path, now: SystemTime) {
+        sweep_stale(parent, now, &own());
     }
 
     #[test]
@@ -227,7 +287,7 @@ mod tests {
             "",
         )
         .unwrap();
-        sweep_stale(parent.path(), later());
+        sweep(parent.path(), later());
         assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
     }
 
@@ -235,7 +295,7 @@ mod tests {
     fn a_sweep_keeps_a_directory_whose_owner_holds_the_lock() {
         let parent = tempfile::tempdir().unwrap();
         let temp = CompanionTemp::create(parent.path()).unwrap();
-        sweep_stale(parent.path(), later());
+        sweep(parent.path(), later());
         assert!(temp.dir().is_dir());
         assert!(temp.lock_path.is_file());
     }
@@ -261,10 +321,51 @@ mod tests {
         while fs::read_dir(parent.path()).unwrap().count() > 0
             && started.elapsed() < Duration::from_secs(5)
         {
-            sweep_stale(parent.path(), later());
+            sweep(parent.path(), later());
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    /// Another user of a shared temp directory can plant a FIFO or a link
+    /// with the name of a lock file. A sweep must not wait on it or follow it.
+    #[cfg(unix)]
+    #[test]
+    fn a_sweep_skips_a_fifo_and_a_link_with_a_lock_file_name() {
+        let parent = tempfile::tempdir().unwrap();
+        let fifo = parent.path().join(format!("{PREFIX}1-fifo{LOCK_SUFFIX}"));
+        let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+        assert!(status.success());
+        fs::create_dir(parent.path().join(format!("{PREFIX}1-fifo"))).unwrap();
+        let target = parent.path().join("target");
+        fs::write(&target, "").unwrap();
+        let link = parent.path().join(format!("{PREFIX}1-link{LOCK_SUFFIX}"));
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        fs::create_dir(parent.path().join(format!("{PREFIX}1-link"))).unwrap();
+        let link_lock = fs::symlink_metadata(&link).unwrap();
+        assert!(!is_own_file(&link_lock, &own()));
+        assert!(
+            private_options().open(&link).is_err(),
+            "the open follows the link"
+        );
+        assert!(
+            private_options().open(&fifo).is_err(),
+            "the open waits on the FIFO"
+        );
+        sweep(parent.path(), later());
+        assert!(parent.path().join(format!("{PREFIX}1-fifo")).is_dir());
+        assert!(parent.path().join(format!("{PREFIX}1-link")).is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_directory_and_the_lock_file_are_private_to_the_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = tempfile::tempdir().unwrap();
+        let temp = CompanionTemp::create(parent.path()).unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(temp.dir()), 0o700);
+        assert_eq!(mode(&temp.lock_path), 0o600);
     }
 
     #[test]
@@ -279,7 +380,7 @@ mod tests {
         .unwrap();
         let other = parent.path().join("fallow-vitest-run-2");
         fs::create_dir(&other).unwrap();
-        sweep_stale(parent.path(), SystemTime::now());
+        sweep(parent.path(), SystemTime::now());
         assert!(young.is_dir());
         assert!(other.is_dir());
     }
