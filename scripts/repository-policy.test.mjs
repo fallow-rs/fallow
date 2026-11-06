@@ -36,7 +36,7 @@ const dependabotUpdate = (config, ecosystem, directory) => {
     .find(
       (candidate) =>
         candidate.includes(`package-ecosystem: ${ecosystem}`) &&
-        candidate.includes(`directory: ${directory}`),
+        candidate.split("\n").some((line) => line.trim() === `directory: ${directory}`),
     );
   assert.ok(update, `missing Dependabot update for ${ecosystem} in ${directory}`);
   return update;
@@ -97,6 +97,16 @@ test("isolated publishers and the mutation runner receive dependency updates", (
     assert.match(update, /interval: weekly/u, directory);
     assert.match(update, /default-days: 7/u, directory);
   }
+});
+
+test("root Dependabot updates skip the typescript that the sidecar pins in lockstep", () => {
+  const config = readFileSync(".github/dependabot.yml", "utf8");
+  const update = dependabotUpdate(config, "npm", "/");
+  const ignoredDependencies = [...update.matchAll(/^\s+- dependency-name: ([^\s]+)$/gmu)].map(
+    (match) => match[1],
+  );
+
+  assert.ok(ignoredDependencies.includes("typescript"), update);
 });
 
 test("fuzz Dependabot updates stay scoped to its registry dependency", () => {

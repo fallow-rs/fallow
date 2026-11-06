@@ -104,7 +104,8 @@ ancestor `node_modules` directories. The root `package.json` lists
 `typescript` as an exact devDependency at the version of the sidecar. The
 `overrides` entry in the root `pnpm-workspace.yaml` pins the same version.
 `tools/type-aware-sidecar/test/backend-preflight.test.mjs` fails when these
-versions differ.
+versions differ. The root Dependabot entry ignores `typescript`, so change
+the three versions together by hand.
 
 The sidecar-local install is still needed in these cases:
 
