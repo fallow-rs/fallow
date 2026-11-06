@@ -16,7 +16,7 @@ mod registry;
 mod scoped_child;
 mod spawn_retry;
 
-pub use cleanup_paths::{deregister_cleanup_paths, register_cleanup_paths};
+pub use cleanup_paths::{create_cleanup_paths, deregister_cleanup_paths, is_cleanup_registered};
 pub use process_tree::{ChildCleanup, ProcessTree, cleanup_std_child, configure_std_command};
 #[cfg(feature = "tokio")]
 pub use process_tree::{cleanup_tokio_child, configure_tokio_command};

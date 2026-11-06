@@ -13,7 +13,10 @@
 //! lock is free belongs to an API that ended without cleanup (a signal or a
 //! crash), so the first companion of the next run removes it. A signal ends
 //! Fallow without a drop, so the signal cleanup of `fallow-process` deletes
-//! the directory after it ends the companion tree.
+//! the directory after it ends the companion tree. The scheduler starts a
+//! new companion when one ends, and after the signal cleanup began
+//! [`CompanionTemp::create`] fails, so no new directory appears before the
+//! exit.
 //!
 //! The system temp directory can be shared with other users (`/tmp` on
 //! Linux). The directory is private to its owner, and a sweep opens only a
@@ -67,22 +70,19 @@ impl CompanionTemp {
         for _ in 0..CREATE_ATTEMPTS {
             let name = format!("{PREFIX}{}", unique_suffix());
             let lock_path = parent.join(format!("{name}{LOCK_SUFFIX}"));
-            let lock = match private_options().create_new(true).open(&lock_path) {
-                Ok(lock) => lock,
+            let dir = parent.join(&name);
+            let created =
+                fallow_process::create_cleanup_paths(vec![dir.clone(), lock_path.clone()], || {
+                    create_locked_dir(&dir, &lock_path)
+                });
+            let (lock, cleanup) = match created {
+                Ok(created) => created,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error),
             };
-            let dir = parent.join(&name);
-            if let Err(error) = lock.lock().and_then(|()| create_private_dir(&dir)) {
-                drop(lock);
-                let _ = fs::remove_file(&lock_path);
-                return Err(error);
-            }
             if let Ok(own) = lock.metadata() {
                 SWEEP.call_once(|| sweep_stale(parent, SystemTime::now(), &own));
             }
-            let cleanup =
-                fallow_process::register_cleanup_paths(vec![dir.clone(), lock_path.clone()]);
             return Ok(Self {
                 dir,
                 lock_path,
@@ -111,11 +111,20 @@ impl CompanionTemp {
 
 impl Drop for CompanionTemp {
     fn drop(&mut self) {
+        self.release(remove_dir);
+    }
+}
+
+impl CompanionTemp {
+    /// Deletes the directory with `remove` and then the lock file. The
+    /// entry stays registered until the paths are gone: a signal during the
+    /// delete must still find them.
+    fn release(&mut self, remove: impl Fn(&Path) -> bool) {
         let removed = (0..REMOVE_ATTEMPTS).any(|attempt| {
             if attempt > 0 {
                 std::thread::sleep(REMOVE_PAUSE);
             }
-            remove_dir(&self.dir)
+            remove(&self.dir)
         });
         // The lock goes first: Windows cannot delete a file that is open.
         drop(self.lock.take());
@@ -124,11 +133,21 @@ impl Drop for CompanionTemp {
         if removed {
             let _ = fs::remove_file(&self.lock_path);
         }
-        // The entry goes last. A signal can end the process during this drop
-        // (the signal kills the companion, and this thread sees the exit).
-        // The signal cleanup then still holds the entry and deletes the rest.
         fallow_process::deregister_cleanup_paths(self.cleanup);
     }
+}
+
+/// Creates the lock file at `lock_path`, locks it, and creates `dir`. An
+/// error leaves neither path. A lock file that exists gives an error of kind
+/// [`io::ErrorKind::AlreadyExists`].
+fn create_locked_dir(dir: &Path, lock_path: &Path) -> io::Result<File> {
+    let lock = private_options().create_new(true).open(lock_path)?;
+    if let Err(error) = lock.lock().and_then(|()| create_private_dir(dir)) {
+        drop(lock);
+        let _ = fs::remove_file(lock_path);
+        return Err(error);
+    }
+    Ok(lock)
 }
 
 /// Deletes `dir`. True when it is gone.
@@ -268,6 +287,24 @@ mod tests {
         let dir = temp.dir().to_path_buf();
         fs::create_dir_all(dir.join("fallow-vitest-run-1")).unwrap();
         fs::write(dir.join("fallow-vitest-run-1/file"), "data").unwrap();
+        drop(temp);
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    /// A signal ends Fallow without a drop. When it comes while drop
+    /// deletes the directory, the signal cleanup must still find the paths.
+    #[test]
+    fn the_paths_stay_registered_while_drop_deletes_them() {
+        let parent = tempfile::tempdir().unwrap();
+        let mut temp = CompanionTemp::create(parent.path()).unwrap();
+        let cleanup = temp.cleanup;
+        let registered = std::cell::Cell::new(false);
+        temp.release(|dir| {
+            registered.set(fallow_process::is_cleanup_registered(cleanup));
+            remove_dir(dir)
+        });
+        assert!(registered.get(), "drop deregisters before the delete");
+        assert!(!fallow_process::is_cleanup_registered(cleanup));
         drop(temp);
         assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
     }
