@@ -6,10 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashSet;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
+
+#[path = "eslint_extends_walk.rs"]
+mod extends_walk;
+
+use extends_walk::ExtendsWalk;
 
 pub struct EslintPlugin;
 
@@ -94,9 +97,19 @@ impl Plugin for EslintPlugin {
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
+        self.resolve_config_in_project(config_path, source, root, root)
+    }
+
+    fn resolve_config_in_project(
+        &self,
+        config_path: &Path,
+        source: &str,
+        root: &Path,
+        project_root: &Path,
+    ) -> PluginResult {
         let mut result = PluginResult::default();
-        let mut visited = FxHashSet::default();
-        extract_eslint_config(config_path, source, root, &mut result, &mut visited, 0);
+        let mut walk = ExtendsWalk::new(project_root);
+        extract_eslint_config(config_path, source, root, &mut result, &mut walk, 0);
         result
     }
 }
@@ -117,14 +130,14 @@ fn extract_eslint_config(
     source: &str,
     root: &Path,
     result: &mut PluginResult,
-    visited: &mut FxHashSet<PathBuf>,
+    walk: &mut ExtendsWalk<'_>,
     depth: usize,
 ) {
     if depth >= MAX_EXTENDS_DEPTH {
         return;
     }
     let key = std::fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
-    if !visited.insert(key) {
+    if !walk.visited.insert(key) {
         return;
     }
 
@@ -146,7 +159,7 @@ fn extract_eslint_config(
         parse_path,
         config_path,
         root,
-        visited,
+        walk,
         depth,
     });
     add_eslint_override_config(&mut EslintConfigInput {
@@ -155,7 +168,7 @@ fn extract_eslint_config(
         parse_path,
         config_path,
         root,
-        visited,
+        walk,
         depth,
     });
     add_eslint_resolver_dependencies(result, &parse_source, parse_path);
@@ -192,17 +205,17 @@ fn add_eslint_import_dependencies(
     }
 }
 
-struct EslintConfigInput<'a> {
+struct EslintConfigInput<'a, 'w> {
     result: &'a mut PluginResult,
     parse_source: &'a str,
     parse_path: &'a Path,
     config_path: &'a Path,
     root: &'a Path,
-    visited: &'a mut FxHashSet<PathBuf>,
+    walk: &'a mut ExtendsWalk<'w>,
     depth: usize,
 }
 
-fn add_eslint_top_level_config(input: &mut EslintConfigInput<'_>) {
+fn add_eslint_top_level_config(input: &mut EslintConfigInput<'_, '_>) {
     let plugins = config_parser::extract_config_shallow_strings(
         input.parse_source,
         input.parse_path,
@@ -226,7 +239,7 @@ fn add_eslint_top_level_config(input: &mut EslintConfigInput<'_>) {
             input.config_path,
             input.root,
             input.result,
-            input.visited,
+            input.walk,
             input.depth,
         );
     }
@@ -251,7 +264,7 @@ fn add_eslint_top_level_config(input: &mut EslintConfigInput<'_>) {
     }
 }
 
-fn add_eslint_override_config(input: &mut EslintConfigInput<'_>) {
+fn add_eslint_override_config(input: &mut EslintConfigInput<'_, '_>) {
     let override_parsers = config_parser::extract_config_array_nested_string_or_array(
         input.parse_source,
         input.parse_path,
@@ -288,7 +301,7 @@ fn add_eslint_override_config(input: &mut EslintConfigInput<'_>) {
             input.config_path,
             input.root,
             input.result,
-            input.visited,
+            input.walk,
             input.depth,
         );
     }
@@ -332,14 +345,14 @@ fn process_extends_entry(
     config_path: &Path,
     root: &Path,
     result: &mut PluginResult,
-    visited: &mut FxHashSet<PathBuf>,
+    walk: &mut ExtendsWalk<'_>,
     depth: usize,
 ) {
     let parent = config_path.parent().unwrap_or(config_path);
     if !is_path_like_extends(name) {
         if let Some(dep) = resolve_eslint_extends_name(name) {
-            if let Some(shared) = workspace_shared_config_file(parent, name, &dep, root) {
-                follow_chained_config(&shared, root, result, visited, depth);
+            if let Some(shared) = workspace_shared_config_file(parent, name, &dep, root, walk) {
+                follow_chained_config(&shared, root, result, walk, depth);
             }
             result.referenced_dependencies.push(dep);
         }
@@ -355,7 +368,7 @@ fn process_extends_entry(
             .collect()
     };
     for candidate in candidates {
-        if follow_chained_config(&candidate, root, result, visited, depth) {
+        if follow_chained_config(&candidate, root, result, walk, depth) {
             return;
         }
     }
@@ -367,19 +380,20 @@ fn follow_chained_config(
     path: &Path,
     root: &Path,
     result: &mut PluginResult,
-    visited: &mut FxHashSet<PathBuf>,
+    walk: &mut ExtendsWalk<'_>,
     depth: usize,
 ) -> bool {
     let Ok(chained_source) = std::fs::read_to_string(path) else {
         return false;
     };
     push_setup_file_once(result, path.to_path_buf());
-    extract_eslint_config(path, &chained_source, root, result, visited, depth + 1);
+    extract_eslint_config(path, &chained_source, root, result, walk, depth + 1);
     true
 }
 
 /// Find the file that a package `extends` entry loads when the package is a
-/// workspace package of the project, linked into `node_modules`.
+/// workspace package of the project. The package is linked into
+/// `node_modules`, or, in a project without an install, found by its name.
 ///
 /// A shareable config from a registry package lives under `node_modules`, so
 /// it is not a project file and gets no file credit. The returned path uses
@@ -389,9 +403,11 @@ fn workspace_shared_config_file(
     extends_name: &str,
     pkg_name: &str,
     root: &Path,
+    walk: &mut ExtendsWalk<'_>,
 ) -> Option<PathBuf> {
     let full_name = normalize_eslint_config_name(extends_name);
-    let pkg_dir = find_package_dir(config_dir, pkg_name)?;
+    let pkg_dir =
+        find_package_dir(config_dir, pkg_name).or_else(|| walk.workspace_package_dir(pkg_name))?;
     let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
     let subpath = full_name.get(pkg_name.len()..).unwrap_or_default();
@@ -854,7 +870,13 @@ mod tests {
         )
         .unwrap();
 
-        let found = workspace_shared_config_file(&root, "shared", "eslint-config-shared", &root);
+        let found = workspace_shared_config_file(
+            &root,
+            "shared",
+            "eslint-config-shared",
+            &root,
+            &mut ExtendsWalk::new(&root),
+        );
         assert_eq!(
             found.as_deref(),
             Some(
@@ -863,7 +885,13 @@ mod tests {
             )
         );
         assert_eq!(
-            workspace_shared_config_file(&root, "registry", "eslint-config-registry", &root),
+            workspace_shared_config_file(
+                &root,
+                "registry",
+                "eslint-config-registry",
+                &root,
+                &mut ExtendsWalk::new(&root),
+            ),
             None
         );
     }

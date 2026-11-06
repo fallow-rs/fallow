@@ -27,6 +27,9 @@ mod adapter;
 use adapter::star_re_export_overlays;
 #[path = "unused_exports_cjs.rs"]
 mod cjs;
+#[path = "unused_exports_condition_targets.rs"]
+mod condition_targets;
+use condition_targets::ConditionTargetFamilies;
 #[path = "unused_exports_types.rs"]
 mod types;
 use types::drop_types_paired_with_schemas;
@@ -1131,7 +1134,11 @@ pub(super) fn find_duplicate_exports_with_plugins(
     let dynamic_re_export_sources = build_dynamic_re_export_source_map(graph, resolved_modules);
     let export_locations =
         collect_duplicate_export_locations(graph, config, suppressions, plugin_result);
-    let collapse_platform_families = is_react_native_active(plugin_result);
+    let condition_families = ConditionTargetFamilies::build(resolved_modules);
+    let collapse = AlternativeFiles {
+        platform_families: is_react_native_active(plugin_result),
+        condition_families: &condition_families,
+    };
 
     let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
     sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1145,7 +1152,7 @@ pub(super) fn find_duplicate_exports_with_plugins(
                 &dynamic_re_export_sources,
                 graph,
                 line_offsets_by_file,
-                collapse_platform_families,
+                &collapse,
             )
         })
         .collect()
@@ -1303,17 +1310,26 @@ fn is_css_module_path(path: &std::path::Path) -> bool {
     stem.ends_with(".module") && matches!(extension, "css" | "scss" | "sass" | "less")
 }
 
+/// Files that load in place of each other, so their same-name exports are one
+/// origin: Metro platform-extension families when the React Native or Expo
+/// plugin is active, and the condition targets of a package `imports` entry.
+struct AlternativeFiles<'a> {
+    platform_families: bool,
+    condition_families: &'a ConditionTargetFamilies,
+}
+
 /// Evaluate one same-name export group into an optional duplicate finding:
 /// strip re-export chain members, collapse Metro platform-extension families
-/// when `collapse_platform_families` is set, partition the remaining origins
-/// into importer-connected components, and collect the surviving locations.
+/// and the targets of each package `imports` entry (see [`AlternativeFiles`]),
+/// partition the remaining origins into importer-connected components, and
+/// collect the surviving locations.
 fn evaluate_duplicate_export_group(
     name: String,
     locations: Vec<ExportEntry>,
     dynamic_re_export_sources: &DynamicReExportSources,
     graph: &ModuleGraph,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-    collapse_platform_families: bool,
+    collapse: &AlternativeFiles<'_>,
 ) -> Option<DuplicateExport> {
     // One module that exports a name twice holds a TypeScript declaration
     // merge (`class C` plus `namespace C`), not a second origin.
@@ -1346,11 +1362,12 @@ fn evaluate_duplicate_export_group(
 
     // Collapse after the re-export strip so a barrel that re-exports from the
     // platform winner is still recognized as a chain member of the family.
-    let independent_entries = if collapse_platform_families {
+    let independent_entries = if collapse.platform_families {
         collapse_platform_family_entries(independent_entries)
     } else {
         independent_entries
     };
+    let independent_entries = collapse.condition_families.collapse(independent_entries);
 
     if independent_entries.len() <= 1 {
         return None;

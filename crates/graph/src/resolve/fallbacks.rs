@@ -28,7 +28,7 @@ mod tsconfig_output;
 #[path = "fallbacks_workspace_package_asset.rs"]
 mod workspace_package_asset;
 
-use package_map::{PackageMapTarget, package_map_target};
+pub(super) use package_map::{PackageMapTarget, package_map_target};
 pub(super) use path_aliases::{
     alias_match_remainder, applicable_path_aliases, matches_plugin_path_alias,
     try_path_alias_fallback,
@@ -664,7 +664,7 @@ fn find_package_manifest<'a>(
         .find(|manifest| manifest.name.as_deref() == Some(package_name))
 }
 
-fn resolve_package_map_target(
+pub(super) fn resolve_package_map_target(
     ctx: &ResolveContext<'_>,
     manifest: &PackageManifestInfo,
     target: &str,
