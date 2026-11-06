@@ -34,7 +34,117 @@ pub(in crate::visitor) struct NewUrlContext {
 /// Constructors that run a module as a worker script.
 const WORKER_CONSTRUCTORS: &[&str] = &["Worker", "SharedWorker"];
 
+/// The `const` locals with a string value, such as `const pkg = 'pkg'`, that
+/// a dynamic `import(pkg)` can name. `nested` holds one frame for each frame
+/// of `nested_declaration_stack`, so the frame that declares a name also
+/// tells whether that declaration is such a `const`.
+#[derive(Debug, Default)]
+pub(in crate::visitor) struct ConstSpecifierScopes {
+    module: FxHashMap<String, String>,
+    nested: Vec<FxHashMap<String, String>>,
+}
+
+impl ConstSpecifierScopes {
+    pub(in crate::visitor) fn push_frame(&mut self) {
+        self.nested.push(FxHashMap::default());
+    }
+
+    pub(in crate::visitor) fn pop_frame(&mut self) {
+        self.nested.pop();
+    }
+}
+
+/// The text of a string literal or of a template literal without
+/// substitutions, under any parentheses and TypeScript assertions.
+fn const_string_value(init: &Expression<'_>) -> Option<String> {
+    match init.get_inner_expression() {
+        Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().map(|quasi| quasi.value.raw.to_string())
+        }
+        _ => None,
+    }
+}
+
 impl<'a> ModuleInfoExtractor {
+    /// Record `const name = 'specifier'` in the frame of the declaration.
+    pub(in crate::visitor) fn record_const_specifier(
+        &mut self,
+        decl: &VariableDeclaration<'_>,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        if decl.kind != VariableDeclarationKind::Const || self.namespace_depth > 0 {
+            return;
+        }
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        let Some(value) = const_string_value(init).filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let frame = if self.is_module_scope() {
+            &mut self.const_specifiers.module
+        } else if let Some(frame) = self.const_specifiers.nested.last_mut() {
+            frame
+        } else {
+            return;
+        };
+        frame.insert(id.name.to_string(), value);
+    }
+
+    /// The value of the `const` string that `name` refers to here. A nearer
+    /// declaration of the same name, such as a parameter or a `let`, hides
+    /// it, so the name then gives no specifier.
+    fn const_specifier(&self, name: &str) -> Option<&str> {
+        // A catch parameter is not in `nested_declaration_stack`, so any
+        // enclosing catch parameter of the same name hides the `const`.
+        if self.namespace_depth > 0 || self.is_catch_param_name(name) {
+            return None;
+        }
+        if let Some(index) = self
+            .nested_declaration_stack
+            .iter()
+            .rposition(|frame| frame.contains(name))
+        {
+            return self
+                .const_specifiers
+                .nested
+                .get(index)?
+                .get(name)
+                .map(String::as_str);
+        }
+        // These roots also hold the bindings that no frame of
+        // `nested_declaration_stack` records, such as namespace locals.
+        if self
+            .scoped_direct_object_binding_roots
+            .iter()
+            .any(|roots| roots.contains(name))
+        {
+            return None;
+        }
+        self.const_specifiers.module.get(name).map(String::as_str)
+    }
+
+    /// Collect the static specifiers of a dynamic import source. A source
+    /// that is only an identifier also gives the value of the `const` string
+    /// that it refers to: `const pkg = 'pkg'; await import(pkg)` loads `pkg`.
+    pub(in crate::visitor) fn collect_dynamic_import_specifiers(
+        &self,
+        source: &Expression<'_>,
+        sources: &mut Vec<String>,
+    ) {
+        collect_static_import_specifiers(source, sources);
+        if !sources.is_empty() {
+            return;
+        }
+        if let Expression::Identifier(ident) = source.get_inner_expression()
+            && let Some(value) = self.const_specifier(ident.name.as_str())
+        {
+            sources.push(value.to_string());
+        }
+    }
+
     /// Record each `new URL(path, import.meta.url)` passed directly to a
     /// filesystem call, so `visit_new_expression` marks it speculative.
     pub(super) fn record_filesystem_path_new_url_arguments(&mut self, expr: &CallExpression<'_>) {
@@ -331,7 +441,7 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
         let mut sources = Vec::new();
-        collect_static_import_specifiers(&import_expr.source, &mut sources);
+        self.collect_dynamic_import_specifiers(&import_expr.source, &mut sources);
         if sources.is_empty() {
             return;
         }

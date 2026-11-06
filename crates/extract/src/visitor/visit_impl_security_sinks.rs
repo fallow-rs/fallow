@@ -1253,12 +1253,7 @@ impl ModuleInfoExtractor {
     /// parameter, a catch parameter or a nested declaration of the same name
     /// without such a value hides an outer binding.
     fn sink_binding(&self, name: &str) -> Option<&SinkBinding> {
-        if self
-            .sink_aliases
-            .catch_param_names
-            .iter()
-            .any(|names| names.contains(name))
-        {
+        if self.is_catch_param_name(name) {
             return None;
         }
         let bindings = match self
@@ -1288,6 +1283,14 @@ impl ModuleInfoExtractor {
     pub(super) fn push_catch_clause_scope(&mut self, names: FxHashSet<String>) {
         self.sink_aliases.catch_param_names.push(names.clone());
         self.push_direct_object_binding_scope(names);
+    }
+
+    /// Whether an enclosing catch clause binds `name`.
+    pub(in crate::visitor) fn is_catch_param_name(&self, name: &str) -> bool {
+        self.sink_aliases
+            .catch_param_names
+            .iter()
+            .any(|names| names.contains(name))
     }
 
     pub(super) fn pop_catch_clause_scope(&mut self) {

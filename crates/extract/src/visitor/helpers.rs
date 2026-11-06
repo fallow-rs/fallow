@@ -1381,7 +1381,7 @@ where
                         &mut origins,
                     );
                 } else if matches!(method.kind, MethodDefinitionKind::Method) {
-                    collect_method_return_binding(method, &resolve, &mut bindings);
+                    collect_method_return_binding(class, method, &resolve, &mut bindings);
                 }
             }
             ClassElement::PropertyDefinition(prop) => {

@@ -53,7 +53,7 @@ mod visit_constructor_alternatives;
 #[path = "visit_impl_di.rs"]
 mod visit_di;
 #[path = "visit_impl_dynamic_imports.rs"]
-mod visit_dynamic_imports;
+pub(super) mod visit_dynamic_imports;
 #[path = "visit_impl_factory_properties.rs"]
 mod visit_factory_properties;
 #[path = "visit_impl_factory_returns.rs"]
@@ -3076,7 +3076,7 @@ impl<'a> ModuleInfoExtractor {
             return;
         };
         let mut sources = Vec::new();
-        collect_static_import_specifiers(&import_expr.source, &mut sources);
+        self.collect_dynamic_import_specifiers(&import_expr.source, &mut sources);
         if sources.is_empty() {
             return;
         }
@@ -4432,7 +4432,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // branch); only when none resolve, fall back to the pattern shapes
         // (substitution templates and `'./x/' + y` concatenations).
         let mut sources = Vec::new();
-        collect_static_import_specifiers(&expr.source, &mut sources);
+        self.collect_dynamic_import_specifiers(&expr.source, &mut sources);
         if sources.is_empty() {
             match &expr.source {
                 Expression::TemplateLiteral(tpl)
