@@ -1654,7 +1654,7 @@ fn run_engine_owned_dead_code_pipeline(
             graph_cache_rejection,
         });
     let script_used_packages = prelude.script_used_packages();
-    let trace_provenance = prelude.trace_provenance(&modules, retain_graph);
+    let trace_provenance = prelude.trace_provenance(&modules, retain_graph, &entry_points);
     prelude.finish();
     let file_hashes = collect_file_hashes(&modules, discovery.files());
 

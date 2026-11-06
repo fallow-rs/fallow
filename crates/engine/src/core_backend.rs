@@ -61,6 +61,7 @@ pub struct ParseMetrics {
 
 pub struct DeadCodeBackendPrelude<'a> {
     inner: fallow_core::DeadCodeBackendPrelude<'a>,
+    root: &'a Path,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -132,12 +133,17 @@ impl DeadCodeBackendPrelude<'_> {
         self.inner.script_used_packages()
     }
 
+    /// The trace provenance of the run, with the package.json script of each
+    /// script entry point in `entry_points`.
     pub fn trace_provenance(
         &self,
         modules: &[fallow_types::extract::ModuleInfo],
         retain_graph: bool,
+        entry_points: &DeadCodeEntryPoints,
     ) -> fallow_types::trace::TraceProvenance {
-        self.inner.trace_provenance(modules, retain_graph)
+        let mut provenance = self.inner.trace_provenance(modules, retain_graph);
+        provenance.push_entry_scripts(self.root, entry_points.all());
+        provenance
     }
 
     /// The plugin stage's result, as the analysis sees it.
@@ -257,7 +263,10 @@ pub fn prepare_dead_code_backend_prelude<'a>(
         discovery.workspaces_ms(),
     );
     fallow_core::prepare_dead_code_backend_prelude(config, core_discovery)
-        .map(|inner| DeadCodeBackendPrelude { inner })
+        .map(|inner| DeadCodeBackendPrelude {
+            inner,
+            root: &config.root,
+        })
         .map_err(engine_error)
 }
 

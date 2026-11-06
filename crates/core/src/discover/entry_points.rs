@@ -770,13 +770,14 @@ impl ScriptPackage<'_> {
             .map(|dir| dir.to_string_lossy().replace('\\', "/"))
     }
 
-    /// Resolve a file reference of a script of the package. A reference
-    /// outside the package, such as `../web/scripts/a.ts` from
+    /// Resolve a file reference of the script `script` of the package. A
+    /// reference outside the package, such as `../web/scripts/a.ts` from
     /// `yarn workspace web node scripts/a.ts`, resolves from the project
     /// root.
     fn resolve(
         &self,
         file_ref: &str,
+        script: &str,
         dir: Option<&str>,
         skipped_entries: &mut FxHashMap<String, usize>,
     ) -> Option<EntryPoint> {
@@ -791,7 +792,7 @@ impl ScriptPackage<'_> {
                 project_root,
                 &project_ref,
                 &canonical_project_root,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script(script),
                 Some(skipped_entries),
                 self.workspaces.discovered,
             );
@@ -800,7 +801,7 @@ impl ScriptPackage<'_> {
             self.root,
             file_ref,
             self.canonical_root,
-            EntryPointSource::PackageJsonScript,
+            EntryPointSource::package_json_script(script),
             Some(skipped_entries),
             EntryTargets {
                 output_map: self.output_map,
@@ -825,21 +826,23 @@ fn push_script_entries(
     entries: &mut PackageEntryBuckets<'_>,
     skipped_entries: &mut FxHashMap<String, usize>,
 ) {
-    let dir = package.dir();
+    let dir_buf = package.dir();
+    let dir = dir_buf.as_deref();
     let no_seeds = FxHashSet::default();
     let seeds = dir
-        .as_deref()
         .and_then(|dir| package.workspaces.runtime_seeds.get(dir))
         .unwrap_or(&no_seeds);
     let runtime_scripts = runtime_package_script_names_with_seeds(scripts, seeds);
     let catalog = ScriptCatalog::from_scripts(scripts).with_workspaces(
         std::sync::Arc::clone(package.workspaces.packages),
-        dir.as_deref().unwrap_or_default(),
+        dir.unwrap_or_default(),
     );
-    for (script_name, script_value) in scripts {
+    // Key order: the entry dedup keeps the first script that runs a file.
+    let sorted: std::collections::BTreeMap<_, _> = scripts.iter().collect();
+    for (script_name, script_value) in sorted {
         let refs = package_script_refs(script_value, &catalog, ignored);
         for file_ref in refs.inheritable {
-            if let Some(ep) = package.resolve(&file_ref, dir.as_deref(), skipped_entries) {
+            if let Some(ep) = package.resolve(&file_ref, script_name, dir, skipped_entries) {
                 if runtime_scripts.contains(script_name) {
                     entries.runtime.push(ep);
                 } else {
@@ -848,7 +851,7 @@ fn push_script_entries(
             }
         }
         for config_ref in refs.support {
-            if let Some(ep) = package.resolve(&config_ref, dir.as_deref(), skipped_entries) {
+            if let Some(ep) = package.resolve(&config_ref, script_name, dir, skipped_entries) {
                 entries.support.push(ep);
             }
         }
@@ -1865,7 +1868,7 @@ mod tests {
                 &canonical,
                 "scripts/process-messages.js",
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
             )
             .expect("exact file should resolve");
 
@@ -1893,7 +1896,7 @@ mod tests {
                 &canonical,
                 "scripts/process-messages",
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
             )
             .expect("extension fallback should resolve");
 
@@ -1912,7 +1915,7 @@ mod tests {
                 &canonical,
                 "scripts/process-messages",
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
             )
             .expect("directory index should resolve");
 
@@ -1939,7 +1942,7 @@ mod tests {
                     &canonical,
                     entry,
                     &canonical,
-                    EntryPointSource::PackageJsonScript,
+                    EntryPointSource::package_json_script("build"),
                 );
                 assert!(result.is_none(), "{entry} should not resolve");
             }
@@ -2022,13 +2025,10 @@ mod tests {
                 dir.path(),
                 "index.ts",
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
             );
             assert!(result.is_some());
-            assert!(
-                matches!(result.unwrap().source, EntryPointSource::PackageJsonScript),
-                "should preserve the source kind"
-            );
+            assert_eq!(result.unwrap().source.script(), Some("build"));
         }
         #[test]
         fn tracks_skipped_entries_without_logging_each_repeat() {
@@ -2040,7 +2040,7 @@ mod tests {
                 dir.path(),
                 "../scripts/build.js",
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
                 Some(&mut skipped_entries),
                 None,
             );
@@ -2435,7 +2435,7 @@ mod tests {
                 &canonical,
                 entry,
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
                 analyzed,
             );
             assert_eq!(result.map(|e| e.path), Some(script));
@@ -2445,7 +2445,7 @@ mod tests {
                 &canonical,
                 entry,
                 &canonical,
-                EntryPointSource::PackageJsonScript,
+                EntryPointSource::package_json_script("build"),
                 not_analyzed,
             );
             assert_eq!(
@@ -2826,7 +2826,7 @@ mod tests {
         assert!(entries[0].path.ends_with("scripts/build.ts"));
         assert!(matches!(
             entries[0].source,
-            EntryPointSource::PackageJsonScript
+            EntryPointSource::PackageJsonScript { .. }
         ));
     }
 

@@ -403,10 +403,15 @@ fn build_file_trace_human_lines(trace: &FileTrace) -> Vec<String> {
     } else {
         "UNREACHABLE".red().bold()
     };
-    let entry = if trace.is_entry_point {
-        format!(" {}", "(entry point)".cyan())
-    } else {
-        String::new()
+    let entry = match (trace.is_entry_point, trace.entry_script.as_deref()) {
+        (true, Some(script)) => {
+            format!(
+                " {}",
+                format!("(entry point, package.json script `{script}`)").cyan()
+            )
+        }
+        (true, None) => format!(" {}", "(entry point)".cyan()),
+        (false, _) => String::new(),
     };
     lines.push(format!(
         "  {reachable} {}{entry}",
@@ -1228,6 +1233,7 @@ mod tests {
             imports_from: Vec::new(),
             imported_by: Vec::new(),
             re_exports: Vec::new(),
+            entry_script: None,
             sources: Vec::new(),
         };
 
@@ -1256,6 +1262,7 @@ mod tests {
                 imported_name: "Account".to_string(),
                 exported_name: "Account".to_string(),
             }],
+            entry_script: None,
             sources: Vec::new(),
         };
 

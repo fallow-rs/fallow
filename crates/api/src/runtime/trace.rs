@@ -111,6 +111,7 @@ pub fn run_trace_file(
                 })?;
         output.sources = artifacts.trace_provenance.file_sources(&output.file);
         output.apply_plugin_credits(&artifacts.trace_provenance);
+        output.apply_entry_script(&artifacts.trace_provenance);
         Ok(TraceFileProgrammaticOutput { output })
     })
 }

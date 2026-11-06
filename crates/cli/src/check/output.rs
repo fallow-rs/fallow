@@ -294,6 +294,7 @@ fn handle_trace_file(
         Some(mut trace) => {
             trace.sources = trace_provenance.file_sources(&trace.file);
             trace.apply_plugin_credits(trace_provenance);
+            trace.apply_entry_script(trace_provenance);
             report::print_file_trace(&trace, request.output, request.json_style);
             Some(ExitCode::SUCCESS)
         }
