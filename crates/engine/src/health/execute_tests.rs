@@ -17,7 +17,7 @@ use super::super::runtime_filter::{RuntimeCoverageFilterContext, apply_runtime_c
 use super::super::scoring;
 use super::super::sort_findings;
 use super::super::threshold_overrides::{
-    ComplexityFunctionContext, CrapFunctionContext, GlobalHealthThresholds,
+    ComplexityFunctionContext, CrapFunctionContext, FileLinesContext, GlobalHealthThresholds,
     MeasuredThresholdMetrics, ThresholdOverrideResolver, ThresholdOverrideStateTracker,
 };
 use crate::baseline::HealthBaselineData;
@@ -3858,5 +3858,395 @@ fn a_unit_size_only_override_is_not_stale_while_complexity_still_fires() {
     assert_eq!(
         states[0].outstanding,
         vec![fallow_output::ThresholdOverrideDimension::Complexity]
+    );
+}
+
+fn file_lines_override(max_file_lines: u32) -> fallow_config::HealthThresholdOverride {
+    fallow_config::HealthThresholdOverride {
+        files: vec!["src/panel.ts".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic: None,
+        max_cognitive: None,
+        max_crap: None,
+        max_unit_size: None,
+        max_file_lines: Some(max_file_lines),
+        reason: None,
+    }
+}
+
+/// Record the file-length row of `src/panel.ts` with `line_count` lines.
+fn file_lines_state(
+    global_max_file_lines: u32,
+    override_max_file_lines: u32,
+    line_count: u32,
+) -> fallow_output::ThresholdOverrideState {
+    let resolver = threshold_resolver(&[file_lines_override(override_max_file_lines)])
+        .with_max_file_lines(global_max_file_lines);
+    let relative = Path::new("src/panel.ts");
+    let (max_file_lines, matches) = resolver.resolve_max_file_lines(relative);
+    let (applied, _) = resolver.resolve(relative, fallow_output::FILE_LINES_FINDING_NAME);
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_file_lines(
+        FileLinesContext {
+            path: Path::new("/project/src/panel.ts"),
+            line_count,
+            suppressed: false,
+        },
+        &matches,
+        resolver.max_file_lines(),
+        max_file_lines,
+        applied.effective,
+    );
+    let mut states = tracker.into_states();
+    assert_eq!(states.len(), 1, "{states:#?}");
+    states.remove(0)
+}
+
+/// An override that sets a file-length limit where the global limit is off
+/// produces the finding, so it is in force. It must not tell the user to
+/// remove it (issue #4173).
+#[test]
+fn a_file_lines_override_that_enables_the_limit_is_active_while_it_fires() {
+    let state = file_lines_state(0, 5, 12);
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Active),
+        "{state:#?}"
+    );
+    assert_eq!(
+        state.outstanding,
+        vec![fallow_output::ThresholdOverrideDimension::Complexity]
+    );
+}
+
+#[test]
+fn a_file_lines_override_below_the_global_limit_is_active_while_it_fires() {
+    let state = file_lines_state(100, 5, 12);
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Active),
+        "{state:#?}"
+    );
+    assert_eq!(
+        state.outstanding,
+        vec![fallow_output::ThresholdOverrideDimension::Complexity]
+    );
+}
+
+/// A lower limit that the file does not reach changes no result.
+#[test]
+fn a_file_lines_override_that_tightens_without_a_breach_is_stale() {
+    let state = file_lines_state(0, 50, 12);
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Stale),
+        "{state:#?}"
+    );
+    assert!(state.outstanding.is_empty());
+}
+
+#[test]
+fn a_file_lines_override_that_raises_the_limit_keeps_its_statuses() {
+    assert!(matches!(
+        file_lines_state(8, 20, 12).status,
+        fallow_output::ThresholdOverrideStatus::Active
+    ));
+    assert!(matches!(
+        file_lines_state(8, 10, 12).status,
+        fallow_output::ThresholdOverrideStatus::Insufficient
+    ));
+    assert!(matches!(
+        file_lines_state(20, 30, 12).status,
+        fallow_output::ThresholdOverrideStatus::Stale
+    ));
+}
+
+fn tightening_complexity_override(
+    max_cyclomatic: Option<u16>,
+    max_unit_size: Option<u32>,
+) -> fallow_config::HealthThresholdOverride {
+    fallow_config::HealthThresholdOverride {
+        files: vec!["src/a.ts".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic,
+        max_cognitive: None,
+        max_crap: None,
+        max_unit_size,
+        max_file_lines: None,
+        reason: None,
+    }
+}
+
+/// Record the complexity row of `run` in `src/a.ts`, with the findings that
+/// the run produces.
+fn complexity_state(
+    entry: fallow_config::HealthThresholdOverride,
+    cyclomatic: u16,
+    line_count: u32,
+    findings: &[ComplexityViolation],
+) -> fallow_output::ThresholdOverrideState {
+    let resolver = threshold_resolver(&[entry]);
+    let (applied, matches) = resolver.resolve(Path::new("src/a.ts"), "run");
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_complexity(
+        ComplexityFunctionContext {
+            path: Path::new("/project/src/a.ts"),
+            function: "run",
+            line: 1,
+            col: 0,
+            cyclomatic,
+            cognitive: 1,
+            line_count: Some(line_count),
+            suppressed: false,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+    annotate_outstanding_dimensions(&mut tracker, findings);
+    let mut states = tracker.into_states();
+    assert_eq!(states.len(), 1, "{states:#?}");
+    states.remove(0)
+}
+
+fn run_finding(exceeded: ExceededThreshold) -> ComplexityViolation {
+    let mut finding = make_finding("run", exceeded);
+    finding.path = PathBuf::from("/project/src/a.ts");
+    finding.line = 1;
+    finding.col = 0;
+    finding
+}
+
+/// A cyclomatic limit below the global one produces a finding that the global
+/// thresholds do not produce, so the override is in force (issue #4173).
+#[test]
+fn a_cyclomatic_override_that_tightens_is_active_while_it_fires() {
+    let state = complexity_state(
+        tightening_complexity_override(Some(2), None),
+        5,
+        10,
+        &[run_finding(ExceededThreshold::Cyclomatic)],
+    );
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Active),
+        "{state:#?}"
+    );
+    assert_eq!(
+        state.outstanding,
+        vec![fallow_output::ThresholdOverrideDimension::Complexity]
+    );
+}
+
+#[test]
+fn a_cyclomatic_override_that_tightens_without_a_breach_is_stale() {
+    let state = complexity_state(tightening_complexity_override(Some(2), None), 2, 10, &[]);
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Stale),
+        "{state:#?}"
+    );
+}
+
+/// A lower cyclomatic limit on a unit that also breaches the global limit
+/// still sets the limit of the finding, so the row is not `insufficient`.
+#[test]
+fn a_cyclomatic_override_that_tightens_a_global_breach_is_active() {
+    let state = complexity_state(
+        tightening_complexity_override(Some(2), None),
+        25,
+        10,
+        &[run_finding(ExceededThreshold::Cyclomatic)],
+    );
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Active),
+        "{state:#?}"
+    );
+}
+
+/// Unit size emits no finding, so the tracker seeds `outstanding` itself.
+#[test]
+fn a_unit_size_override_that_tightens_is_active_while_it_fires() {
+    let state = complexity_state(tightening_complexity_override(None, Some(10)), 1, 30, &[]);
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Active),
+        "{state:#?}"
+    );
+    assert_eq!(
+        state.outstanding,
+        vec![fallow_output::ThresholdOverrideDimension::Complexity]
+    );
+}
+
+fn crap_override(max_crap: f64) -> fallow_config::HealthThresholdOverride {
+    fallow_config::HealthThresholdOverride {
+        files: vec!["src/a.ts".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic: None,
+        max_cognitive: None,
+        max_crap: Some(max_crap),
+        max_unit_size: None,
+        max_file_lines: None,
+        reason: None,
+    }
+}
+
+/// Record the CRAP row of `run` in `src/a.ts`, with the findings that the run
+/// produces.
+fn crap_state(
+    entry: fallow_config::HealthThresholdOverride,
+    crap: f64,
+    findings: &[ComplexityViolation],
+) -> fallow_output::ThresholdOverrideState {
+    let resolver = threshold_resolver(&[entry]);
+    let (applied, matches) = resolver.resolve(Path::new("src/a.ts"), "run");
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_crap(
+        CrapFunctionContext {
+            path: Path::new("/project/src/a.ts"),
+            function: "run",
+            line: 1,
+            col: 0,
+            suppressed: false,
+        },
+        MeasuredThresholdMetrics {
+            cyclomatic: 3,
+            cognitive: 1,
+            crap,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+    annotate_outstanding_dimensions(&mut tracker, findings);
+    let mut states = tracker.into_states();
+    assert_eq!(states.len(), 1, "{states:#?}");
+    states.remove(0)
+}
+
+/// A CRAP limit below the global one produces a finding that the global
+/// thresholds do not produce, so the override is in force (issue #4173).
+#[test]
+fn a_crap_override_that_tightens_is_active_while_it_fires() {
+    let state = crap_state(
+        crap_override(5.0),
+        12.0,
+        &[run_finding(ExceededThreshold::Crap)],
+    );
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Active),
+        "{state:#?}"
+    );
+    assert_eq!(
+        state.outstanding,
+        vec![fallow_output::ThresholdOverrideDimension::Crap]
+    );
+}
+
+#[test]
+fn a_crap_override_that_tightens_without_a_breach_is_stale() {
+    let state = crap_state(crap_override(5.0), 3.0, &[]);
+    assert!(
+        matches!(state.status, fallow_output::ThresholdOverrideStatus::Stale),
+        "{state:#?}"
+    );
+    assert!(state.outstanding.is_empty());
+}
+
+#[test]
+fn a_crap_override_that_raises_the_limit_keeps_its_statuses() {
+    assert!(matches!(
+        crap_state(crap_override(50.0), 40.0, &[]).status,
+        fallow_output::ThresholdOverrideStatus::Active
+    ));
+    assert!(matches!(
+        crap_state(
+            crap_override(35.0),
+            40.0,
+            &[run_finding(ExceededThreshold::Crap)]
+        )
+        .status,
+        fallow_output::ThresholdOverrideStatus::Insufficient
+    ));
+    assert!(matches!(
+        crap_state(crap_override(50.0), 10.0, &[]).status,
+        fallow_output::ThresholdOverrideStatus::Stale
+    ));
+}
+
+/// Only the entry that sets the lowered limit is in force. A second entry
+/// that changes no result reads `stale`.
+#[test]
+fn only_the_entry_that_tightens_a_breached_complexity_limit_is_active() {
+    let mut raises_cognitive = tightening_complexity_override(None, None);
+    raises_cognitive.max_cognitive = Some(40);
+    let resolver = threshold_resolver(&[
+        tightening_complexity_override(Some(2), None),
+        raises_cognitive,
+    ]);
+    let (applied, matches) = resolver.resolve(Path::new("src/a.ts"), "run");
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_complexity(
+        ComplexityFunctionContext {
+            path: Path::new("/project/src/a.ts"),
+            function: "run",
+            line: 1,
+            col: 0,
+            cyclomatic: 5,
+            cognitive: 1,
+            line_count: Some(10),
+            suppressed: false,
+        },
+        &matches,
+        issue_2163_globals(),
+        applied.effective,
+    );
+    annotate_outstanding_dimensions(&mut tracker, &[run_finding(ExceededThreshold::Cyclomatic)]);
+    let statuses: Vec<_> = tracker
+        .into_states()
+        .into_iter()
+        .map(|state| (state.override_index, state.status))
+        .collect();
+    assert!(
+        matches!(
+            statuses.as_slice(),
+            [
+                (0, fallow_output::ThresholdOverrideStatus::Active),
+                (1, fallow_output::ThresholdOverrideStatus::Stale)
+            ]
+        ),
+        "{statuses:?}"
+    );
+}
+
+/// A later entry supersedes an earlier file-length limit, so only the later
+/// entry sets the limit of the finding.
+#[test]
+fn a_superseded_file_lines_override_is_stale() {
+    let resolver = threshold_resolver(&[file_lines_override(50), file_lines_override(5)]);
+    let relative = Path::new("src/panel.ts");
+    let (max_file_lines, matches) = resolver.resolve_max_file_lines(relative);
+    let (applied, _) = resolver.resolve(relative, fallow_output::FILE_LINES_FINDING_NAME);
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    tracker.record_file_lines(
+        FileLinesContext {
+            path: Path::new("/project/src/panel.ts"),
+            line_count: 12,
+            suppressed: false,
+        },
+        &matches,
+        resolver.max_file_lines(),
+        max_file_lines,
+        applied.effective,
+    );
+    let statuses: Vec<_> = tracker
+        .into_states()
+        .into_iter()
+        .map(|state| (state.override_index, state.status))
+        .collect();
+    assert!(
+        matches!(
+            statuses.as_slice(),
+            [
+                (0, fallow_output::ThresholdOverrideStatus::Stale),
+                (1, fallow_output::ThresholdOverrideStatus::Active)
+            ]
+        ),
+        "{statuses:?}"
     );
 }

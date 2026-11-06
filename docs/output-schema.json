@@ -16991,12 +16991,12 @@
         {
           "type": "string",
           "const": "active",
-          "description": "The override matches a finding that still needs the raised ceiling."
+          "description": "The override is in force on the matched unit. Either it raises a\nceiling that the unit needs to pass, or it lowers a ceiling that the\nunit breaches. In the second case `outstanding` names the breach."
         },
         {
           "type": "string",
           "const": "stale",
-          "description": "The override is not what keeps the matched unit quiet, so it can go:\neither the unit passes the global thresholds on its own, or an inline\nsuppression already covers it."
+          "description": "The override changes no result on the matched unit, so it can go:\neither the unit gives the same result with the global thresholds, or\nan inline suppression already covers it."
         },
         {
           "type": "string",

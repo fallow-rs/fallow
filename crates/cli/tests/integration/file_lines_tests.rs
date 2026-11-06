@@ -359,6 +359,43 @@ fn override_row_reports_an_active_file_lines_entry() {
     assert_eq!(status_of(1), "no_match", "{json:#}");
 }
 
+/// With the global limit off, an override limit is the only limit, so the
+/// override produces the finding and is in force (issue #4173).
+#[test]
+fn override_that_sets_a_limit_where_the_global_limit_is_off_is_active() {
+    let config = r#"{
+        "entry": ["src/*.js"],
+        "health": {
+            "thresholdOverrides": [
+                {"files": ["src/panel.js"], "maxFileLines": 5},
+                {"files": ["src/small.js"], "maxFileLines": 50}
+            ]
+        }
+    }"#;
+    let tmp = project(
+        config,
+        &[
+            ("src/panel.js", module_of(12)),
+            ("src/small.js", module_of(12)),
+        ],
+    );
+    let json = health_json(tmp.path(), &[]);
+    let paths: Vec<&str> = file_findings(&json)
+        .iter()
+        .filter_map(|finding| finding["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["src/panel.js"], "{json:#}");
+    let rows = json["threshold_overrides"].as_array().unwrap();
+    let row_of = |index: u64| {
+        rows.iter()
+            .find(|row| row["override_index"] == index)
+            .unwrap_or_else(|| panic!("no row for override {index}: {json:#}"))
+    };
+    assert_eq!(row_of(0)["status"], "active", "{json:#}");
+    assert_eq!(row_of(0)["outstanding"], serde_json::json!(["complexity"]));
+    assert_eq!(row_of(1)["status"], "stale", "{json:#}");
+}
+
 fn health_text(dir: &Path, format: &str) -> String {
     let output = run_fallow_raw(&[
         "health",
