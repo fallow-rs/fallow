@@ -221,16 +221,41 @@ pub fn credit_npm_aliases(
     manifests: &[&fallow_config::PackageJson],
     config: &fallow_config::ResolvedConfig,
 ) {
-    credit_npm_aliases_with_catalogs(used, manifests, load_catalog_data(&config.root).as_ref());
+    let catalogs = load_catalog_data(&config.root, manifests);
+    credit_npm_aliases_with_catalogs(used, manifests, catalogs.as_ref());
+}
+
+/// True when a dependency of a manifest has a `catalog:` spec.
+fn has_catalog_reference(manifests: &[&fallow_config::PackageJson]) -> bool {
+    manifests
+        .iter()
+        .flat_map(|pkg| {
+            [
+                &pkg.dependencies,
+                &pkg.dev_dependencies,
+                &pkg.optional_dependencies,
+                &pkg.peer_dependencies,
+            ]
+        })
+        .flatten()
+        .flat_map(|deps| deps.values())
+        .any(|spec| spec.trim_start().starts_with("catalog:"))
 }
 
 /// The catalogs that `catalog:` references in the manifests read from.
 ///
-/// `pnpm-workspace.yaml` is the source when it exists, as in catalog analysis.
-/// Otherwise Bun catalogs in the root `package.json` are the source. A
-/// `pnpm-workspace.yaml` that does not parse gives `None`; catalog analysis
-/// reports the parse error.
-fn load_catalog_data(root: &Path) -> Option<fallow_config::PnpmCatalogData> {
+/// When no manifest has a `catalog:` reference, the function reads no file
+/// and gives `None`. `pnpm-workspace.yaml` is the source when it exists, as
+/// in catalog analysis. Otherwise Bun catalogs in the root `package.json` are
+/// the source. A `pnpm-workspace.yaml` that does not parse gives `None`;
+/// catalog analysis reports the parse error.
+fn load_catalog_data(
+    root: &Path,
+    manifests: &[&fallow_config::PackageJson],
+) -> Option<fallow_config::PnpmCatalogData> {
+    if !has_catalog_reference(manifests) {
+        return None;
+    }
     if let Ok(source) = std::fs::read_to_string(root.join("pnpm-workspace.yaml")) {
         return fallow_config::parse_pnpm_catalog_data(&source).ok();
     }
@@ -648,6 +673,53 @@ mod tests {
             "catalog:\n  typescript: ^7.0.2\n  typescript-5: npm:typescript@5\n",
         );
         assert_eq!(used, declared(&["typescript"]));
+    }
+
+    #[test]
+    fn npm_alias_from_a_bun_catalog_in_the_root_package_json_is_credited() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"workspaces": {"packages": ["packages/*"], "catalogs": {"tools": {"vite-next": "npm:vite@^7.0.0"}}}}"#,
+        )
+        .unwrap();
+        let pkg = workspace_package(r#"{"devDependencies": {"vite-next": "catalog:tools"}}"#);
+        let catalogs = load_catalog_data(root.path(), &[&pkg]);
+        let mut used = declared(&["vite"]);
+        credit_npm_aliases_with_catalogs(&mut used, &[&pkg], catalogs.as_ref());
+        assert_eq!(used, declared(&["vite", "vite-next"]));
+    }
+
+    #[test]
+    fn pnpm_workspace_catalog_takes_precedence_over_the_root_package_json() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pnpm-workspace.yaml"),
+            "catalog:\n  vite-next: ^7.0.0\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"workspaces": {"catalog": {"vite-next": "npm:vite@^7.0.0"}}}"#,
+        )
+        .unwrap();
+        let pkg = workspace_package(r#"{"devDependencies": {"vite-next": "catalog:"}}"#);
+        let catalogs = load_catalog_data(root.path(), &[&pkg]);
+        let mut used = declared(&["vite"]);
+        credit_npm_aliases_with_catalogs(&mut used, &[&pkg], catalogs.as_ref());
+        assert_eq!(used, declared(&["vite"]));
+    }
+
+    #[test]
+    fn catalog_files_are_not_read_without_a_catalog_reference() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pnpm-workspace.yaml"),
+            "catalog:\n  vite-next: npm:vite@^7.0.0\n",
+        )
+        .unwrap();
+        let pkg = workspace_package(r#"{"devDependencies": {"vite-next": "^7.0.0"}}"#);
+        assert!(load_catalog_data(root.path(), &[&pkg]).is_none());
     }
 
     #[test]
