@@ -5,7 +5,7 @@
 //! `--save-baseline .fallow/dead-code.json`) cannot be committed, and a CI run
 //! on a fresh checkout does not find it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// The directory that the warning recommends for committed baselines.
 const COMMITTED_BASELINE_DIR: &str = "fallow-baselines";
@@ -47,12 +47,11 @@ pub fn warn_if_in_cache_dir(baseline: &Path, cache_dir: &Path, root: &Path) {
     }
 }
 
-/// `path` relative to `root` when it is inside it, else the full path.
+/// `path` relative to `root` when it is inside it, else the full path, with
+/// `/` as the separator on every platform. A resolved path on Windows has the
+/// `\\?\` prefix, which the full path does not show.
 fn display_from(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.to_path_buf(), PathBuf::from)
-        .display()
-        .to_string()
+    fallow_types::path_util::display_relative(dunce::simplified(root), dunce::simplified(path))
 }
 
 #[cfg(test)]
@@ -75,6 +74,13 @@ mod tests {
             warning.contains("fallow-baselines/dead-code.json"),
             "{warning}"
         );
+    }
+
+    #[test]
+    fn displayed_paths_use_forward_slashes() {
+        let root = Path::new("/project");
+        let baseline = root.join(".fallow\\dead-code.json");
+        assert_eq!(display_from(&baseline, root), ".fallow/dead-code.json");
     }
 
     #[test]
