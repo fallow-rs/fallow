@@ -51,13 +51,15 @@ pub(super) fn non_manual_paths(entries: &[EntryPoint]) -> FxHashSet<PathBuf> {
 
 /// Record which `entry` patterns matched a file that no other source made a
 /// runtime entry point. `other_sources` holds the non-manual paths of the
-/// root pass, collected before its dedup.
+/// root pass, collected before its dedup. Also warn for the `entry` and
+/// `dynamicallyLoaded` globs that lost files to the single-segment `*` rule.
 pub fn record_entry_pattern_effect(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
     entry_points: &CategorizedEntryPoints,
     mut other_sources: FxHashSet<PathBuf>,
 ) {
+    super::legacy_glob::warn_entry_legacy_glob_narrowings(config, files, entry_points);
     if config.entry_patterns.is_empty() {
         return;
     }

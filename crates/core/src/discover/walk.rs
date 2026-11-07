@@ -19,7 +19,7 @@ use super::{ALLOWED_HIDDEN_DIRS, SCRIPT_SCOPE_DENYLIST};
 /// health, each of which can trigger a source walk) emits each note at most once
 /// per distinct content. Mirrors the workspace-diagnostics `should_emit`
 /// pattern (issue #1086).
-fn should_emit_note_once(key: String) -> bool {
+pub(super) fn should_emit_note_once(key: String) -> bool {
     static EMITTED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
     EMITTED
         .get_or_init(|| Mutex::new(FxHashSet::default()))
@@ -392,35 +392,6 @@ fn report_skipped_large_files(
         );
     }
     diagnostics
-}
-
-/// Warn once for each config glob that matches fewer discovered files now
-/// that a single `*` or `?` stays within one path segment.
-///
-/// The old matcher compiles only for patterns with a single-segment
-/// wildcard, and one pass over the discovered files counts every pattern.
-/// The warning goes to stderr only; JSON output does not change.
-fn warn_legacy_glob_narrowings(config: &ResolvedConfig, files: &[DiscoveredFile]) {
-    if config.quiet || config.legacy_glob_groups.is_empty() {
-        return;
-    }
-    let relative: Vec<&Path> = files
-        .iter()
-        .map(|file| file.path.strip_prefix(&config.root).unwrap_or(&file.path))
-        .collect();
-    for narrowing in
-        fallow_config::find_legacy_glob_narrowings(&config.legacy_glob_groups, &relative)
-    {
-        let message = narrowing.message();
-        if should_emit_note_once(format!(
-            "legacy-glob::{}::{}::{}",
-            config.root.display(),
-            narrowing.field,
-            narrowing.pattern
-        )) {
-            tracing::warn!("{message}");
-        }
-    }
 }
 
 /// Build the typed diagnostics for generated minified JS files skipped before
@@ -1623,7 +1594,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
         .collect();
 
     note_largest_files(config, &files);
-    warn_legacy_glob_narrowings(config, &files);
+    super::legacy_glob::warn_legacy_glob_narrowings(config, &files);
 
     DiscoveredSources {
         files,

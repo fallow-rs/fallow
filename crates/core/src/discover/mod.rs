@@ -1,6 +1,7 @@
 mod entry_points;
 mod entry_report;
 mod infrastructure;
+mod legacy_glob;
 mod orphan_declarations;
 mod output_entry_source;
 mod parse_scripts;
