@@ -969,13 +969,13 @@ test("release stages the fallow npm root for maintainer approval", () => {
   const security = readFileSync("docs/development/release-security.md", "utf8");
   const stageCalls = npmPublish.match(/^\s+stage_output=\$\(.*npm stage publish /gmu) ?? [];
   const stagedBranch = npmPublish.indexOf('if is_staged_name "$name"; then');
-  const directPublish = npmPublish.indexOf('if ! npm publish "$file"');
+  const directPublish = npmPublish.indexOf('if ! publish_with_retry "$file"');
 
   assert.match(npmPublish, /^\s+STAGED_NAMES=\("fallow"\)$/mu);
   assert.equal(stageCalls.length, 1, "npm-publish must make exactly one stage call");
   assert.match(
     npmPublish,
-    /NODE_AUTH_TOKEN="" npm stage publish "\$file" --access public --provenance --ignore-scripts/u,
+    /NODE_AUTH_TOKEN="" npm stage publish "\$DEFERRED_FILE" --access public --provenance --ignore-scripts/u,
   );
   assert.notEqual(stagedBranch, -1, "staged names must branch before the direct publish");
   assert.ok(stagedBranch < directPublish, "a staged name must never reach npm publish");
@@ -990,6 +990,31 @@ test("release stages the fallow npm root for maintainer approval", () => {
   assert.doesNotMatch(npmPublish, /npm install -g/u);
   assert.match(security, /Stage the `fallow` npm root, never publish it from the workflow/u);
   assert.match(security, /exactly one `npm stage publish` call/u);
+});
+
+test("npm publish retries a Sigstore 409 and stages the root last", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const npmPublish = indentedBlock(workflow, "npm-publish", 2);
+  const retry = npmPublish.slice(
+    npmPublish.indexOf("publish_with_retry() {"),
+    npmPublish.indexOf('DEFERRED_FILE=""'),
+  );
+  const loopEnd = npmPublish.indexOf("done < tarballs/manifest.tsv");
+  const failExit = npmPublish.indexOf('if [ "$FAILED" -eq 1 ]; then', loopEnd);
+  const stageCall = npmPublish.indexOf("npm stage publish");
+
+  assert.match(retry, /TLOG_CREATE_ENTRY_ERROR/u, "the retry must match the tlog error code");
+  assert.match(retry, /grep -qF '\(409\)'/u, "the retry must require the 409 status");
+  assert.match(npmPublish, /^\s+TLOG_RETRY_DELAYS=\(20 40\)$/mu, "at most 2 retries");
+  assert.match(retry, /npm view "\$name@\$version" version/u, "check npm before a retry");
+  assert.match(retry, /Rerun the failed job/u, "the final error must name the recovery");
+  assert.ok(loopEnd !== -1 && failExit > loopEnd, "failure exit must follow the publish loop");
+  assert.ok(stageCall > failExit, "the root must be staged only after the failure check");
+  assert.equal(
+    npmPublish.slice(0, loopEnd).includes("npm stage publish"),
+    false,
+    "the publish loop must not stage the root",
+  );
 });
 
 const WAIT_STEP = "Wait until fallow@version is public with the staged bytes";
@@ -1018,7 +1043,7 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   // The digest must still reach the gate, or the wait fails with an empty
   // expected sha256 and no rerun can recover the run (v3.38.0).
   const digestOutput = npmPublish.indexOf('echo "fallow_sha256=$digest" >> "$GITHUB_OUTPUT"');
-  const publishedSkip = npmPublish.indexOf('if npm view "$name@$version" version');
+  const publishedSkip = npmPublish.indexOf("Already published, skipping");
   assert.notEqual(publishedSkip, -1, "npm-publish must skip a published tarball");
   assert.ok(
     digestOutput < publishedSkip,

@@ -1949,6 +1949,42 @@ jobs:
             done
             return 1
           }
+          # Sigstore sometimes answers a provenance entry with a 409 although
+          # npm did not publish the package. A new attempt signs a new
+          # statement, so a short retry succeeds. Only this error is retried.
+          TLOG_RETRY_DELAYS=(20 40)
+          publish_with_retry() {
+            local file="$1" name="$2" version="$3" attempt=0 output status
+            while :; do
+              set +e
+              output=$(npm publish "$file" --access public --provenance --ignore-scripts 2>&1)
+              status=$?
+              set -e
+              printf '%s\n' "$output"
+              if [ "$status" -eq 0 ]; then
+                return 0
+              fi
+              if ! grep -q 'TLOG_CREATE_ENTRY_ERROR' <<<"$output" || ! grep -qF '(409)' <<<"$output"; then
+                return 1
+              fi
+              if [ "$attempt" -ge "${#TLOG_RETRY_DELAYS[@]}" ]; then
+                echo "::error::$name@$version failed with a Sigstore 409 after $attempt retries. Rerun the failed job."
+                return 1
+              fi
+              echo "::warning::Sigstore 409 for $name@$version, retry $((attempt + 1)) in ${TLOG_RETRY_DELAYS[$attempt]}s"
+              sleep "${TLOG_RETRY_DELAYS[$attempt]}"
+              attempt=$((attempt + 1))
+              if npm view "$name@$version" version >/dev/null 2>&1; then
+                echo "  $name@$version is on npm now, counting it as published"
+                return 0
+              fi
+            done
+          }
+          # The staged root is held back until every other package is public.
+          DEFERRED_FILE=""
+          DEFERRED_NAME=""
+          DEFERRED_VERSION=""
+          DEFERRED_DIGEST=""
           FAILED=0
           index=0
           # Manifest format (TSV): <tarball-path>\t<name>\t<version>. Rows are
@@ -1997,38 +2033,16 @@ jobs:
               continue
             fi
             if is_staged_name "$name"; then
-              # One stage call per run, never a probing publish: every attempt
-              # signs and logs a provenance statement before npm answers. The
-              # token stays empty so authentication always uses the
-              # environment-scoped, stage-only trusted publisher.
-              set +e
-              stage_output=$(NODE_AUTH_TOKEN="" npm stage publish "$file" --access public --provenance --ignore-scripts 2>&1)
-              stage_status=$?
-              set -e
-              printf '%s\n' "$stage_output"
-              if [ "$stage_status" -eq 0 ]; then
-                stage_id=$(grep -oE 'staged with id [0-9a-f-]{36}' <<<"$stage_output" | head -n1 | cut -d' ' -f4 || true)
-                echo "fallow_stage_id=${stage_id:-}" >> "$GITHUB_OUTPUT"
-                echo "Staged $name@$version as ${stage_id:-unknown}, sha256 $digest"
-                echo "- Staged \`$name@$version\`, stage id \`${stage_id:-unknown}\`, sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
-              elif grep -q '^npm error code E409$' <<<"$stage_output"; then
-                # A rerun after a successful stage. This job cannot read
-                # stages (`npm stage list` is E401 without a login), so E409
-                # is the only already-staged signal. The maintainer compares
-                # the staged bytes with the npm-tarballs artifact before
-                # approving, which proves which run built them.
-                # The stage id is unknown on this path; npm-root-approved gates
-                # on the digest, which is recorded above regardless.
-                echo "::notice::$name@$version is already staged or published; keeping the existing stage"
-                echo "- \`$name@$version\` was already staged, expected sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
-              else
-                echo "::error::Failed to stage $name@$version with npm provenance"
-                FAILED=1
-              fi
+              # The stage call runs after the loop. The root pins every other
+              # package, so a stage must not exist when one of them is missing.
+              DEFERRED_FILE="$file"
+              DEFERRED_NAME="$name"
+              DEFERRED_VERSION="$version"
+              DEFERRED_DIGEST="$digest"
               index=$((index + 1))
               continue
             fi
-            if ! npm publish "$file" --access public --provenance --ignore-scripts; then
+            if ! publish_with_retry "$file" "$name" "$version"; then
               echo "::error::Failed to publish $name@$version with npm provenance"
               FAILED=1
             fi
@@ -2039,7 +2053,43 @@ jobs:
             exit 1
           fi
           if [ "$FAILED" -eq 1 ]; then
+            if [ -n "$DEFERRED_NAME" ]; then
+              echo "::error::Not staging $DEFERRED_NAME@$DEFERRED_VERSION because another package failed. Rerun the failed job."
+            fi
             exit 1
+          fi
+          if [ -n "$DEFERRED_NAME" ]; then
+            name="$DEFERRED_NAME"
+            version="$DEFERRED_VERSION"
+            digest="$DEFERRED_DIGEST"
+            # One stage call per run, never a probing publish: every attempt
+            # signs and logs a provenance statement before npm answers. The
+            # token stays empty so authentication always uses the
+            # environment-scoped, stage-only trusted publisher.
+            set +e
+            stage_output=$(NODE_AUTH_TOKEN="" npm stage publish "$DEFERRED_FILE" --access public --provenance --ignore-scripts 2>&1)
+            stage_status=$?
+            set -e
+            printf '%s\n' "$stage_output"
+            if [ "$stage_status" -eq 0 ]; then
+              stage_id=$(grep -oE 'staged with id [0-9a-f-]{36}' <<<"$stage_output" | head -n1 | cut -d' ' -f4 || true)
+              echo "fallow_stage_id=${stage_id:-}" >> "$GITHUB_OUTPUT"
+              echo "Staged $name@$version as ${stage_id:-unknown}, sha256 $digest"
+              echo "- Staged \`$name@$version\`, stage id \`${stage_id:-unknown}\`, sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
+            elif grep -q '^npm error code E409$' <<<"$stage_output"; then
+              # A rerun after a successful stage. This job cannot read
+              # stages (`npm stage list` is E401 without a login), so E409
+              # is the only already-staged signal. The maintainer compares
+              # the staged bytes with the npm-tarballs artifact before
+              # approving, which proves which run built them.
+              # The stage id is unknown on this path; npm-root-approved gates
+              # on the digest, which is recorded in the loop regardless.
+              echo "::notice::$name@$version is already staged or published; keeping the existing stage"
+              echo "- \`$name@$version\` was already staged, expected sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Failed to stage $name@$version with npm provenance"
+              exit 1
+            fi
           fi
 
   # The VS Code extension downloads its binary from the GitHub Release of its

@@ -286,6 +286,11 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 - Make exactly one `npm stage publish` call per staged name per run and never
   probe with a direct publish. Every attempt, including a refused one, signs
   and logs a provenance statement before the registry answers.
+- Make the stage call after every other package is public. A failed package
+  stops the job before the stage, so the maintainer never sees a stage that
+  pins a missing package.
+- Retry a direct publish only for `TLOG_CREATE_ENTRY_ERROR` with `(409)`, at
+  most twice. This retry does not apply to the stage call.
 - Keep `NODE_AUTH_TOKEN` empty throughout `npm-publish`. Every package must
   have environment-scoped trusted publishing configured. Never restore a
   repository token fallback: a token bypasses the OIDC environment binding.
