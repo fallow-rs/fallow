@@ -490,14 +490,15 @@ fn append_css_duplicate_block_findings(
 }
 
 /// Audit data of a duplicate block finding. The finding names one occurrence,
-/// and the changed-file scope picks which one. The sorted paths of all
-/// occurrences give the group an identity that the scope and the line numbers
+/// and the changed-file scope picks which one. The sorted distinct paths of
+/// all occurrences give the group an identity that the scope and the line numbers
 /// do not change.
 fn duplicate_block_internal(
     occurrences: &[fallow_output::CssBlockOccurrence],
 ) -> fallow_output::StylingFindingInternal {
     let mut group_paths: Vec<String> = occurrences.iter().map(|occ| occ.path.clone()).collect();
     group_paths.sort_unstable();
+    group_paths.dedup();
     fallow_output::StylingFindingInternal {
         group_paths,
         ..fallow_output::StylingFindingInternal::default()

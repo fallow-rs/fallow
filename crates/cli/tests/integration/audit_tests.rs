@@ -8910,7 +8910,7 @@ fn audit_cache_prune_reports_and_removes_aged_snapshot_files() {
     let root = fixture.path();
     let scan = TempDir::new().expect("scan root should be created");
     // The current `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` directory.
-    let snapshot_dir = root.join(".fallow/cache/audit-base-v19");
+    let snapshot_dir = root.join(".fallow/cache/audit-base-v20");
     fs::create_dir_all(&snapshot_dir).unwrap();
     let aged = snapshot_dir.join("00000000000000aa.bin");
     let fresh = snapshot_dir.join("00000000000000bb.bin");
@@ -9274,4 +9274,128 @@ fn audit_css_duplicate_block_new_occurrence_stays_introduced() {
         "a third copy grows the group: {findings:#?}"
     );
     assert_eq!(json["attribution"]["styling_introduced"], 1);
+}
+
+/// Issue #4344: a line shift in the later file of a CVA duplicate variant
+/// block group keeps the finding inherited.
+#[test]
+fn audit_cva_duplicate_variant_block_survives_line_shift_of_a_later_occurrence() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-cva-shift","dependencies":{"class-variance-authority":"^0.7.0","tailwindcss":"^4.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "import './a';\nimport './b';\nexport const ok = true;\n",
+    )
+    .unwrap();
+    let cva = |name: &str| {
+        format!(
+            "import {{ cva }} from 'class-variance-authority';\n\
+             export const {name} = cva('inline-flex', {{\n\
+               variants: {{\n\
+                 tone: {{\n\
+                   primary: 'px-3 py-2 text-sm font-medium',\n\
+                   secondary: 'px-3 py-2 text-sm font-medium',\n\
+                 }},\n\
+               }},\n\
+             }});\n"
+        )
+    };
+    fs::write(root.join("src/a.ts"), cva("first")).unwrap();
+    fs::write(root.join("src/b.ts"), cva("second")).unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/b.ts"),
+        format!("// added\n// added\n{}", cva("second")),
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--no-cache",
+        "--quiet",
+        "--format",
+        "json",
+    ]);
+    let json = parse_json(&output);
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    let cva_findings: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["sub_kind"] == "cva-duplicate-variant-block")
+        .collect();
+    assert!(!cva_findings.is_empty(), "{findings:#?}");
+    assert!(
+        cva_findings
+            .iter()
+            .all(|finding| finding["introduced"] == false),
+        "a shifted later occurrence stays inherited: {cva_findings:#?}"
+    );
+}
+
+/// Issue #4344: a rename of one file of a duplicate block group keeps the
+/// finding inherited. The audit key lists the paths of the group, and the
+/// rename remap must find the renamed path inside that list.
+#[test]
+fn audit_css_duplicate_block_survives_rename_of_a_group_file() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-css-duplicate-rename"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "import './a.css';\nimport './b.css';\n",
+    )
+    .unwrap();
+    let block =
+        ".header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  flex-shrink: 0;\n}\n";
+    fs::write(root.join("src/a.css"), block).unwrap();
+    fs::write(root.join("src/b.css"), block).unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    git(root, &["mv", "src/a.css", "src/a2.css"]);
+    fs::write(
+        root.join("src/index.ts"),
+        "import './a2.css';\nimport './b.css';\n",
+    )
+    .unwrap();
+    commit_all(root, "rename a.css to a2.css");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--no-cache",
+        "--quiet",
+        "--format",
+        "json",
+    ]);
+    let json = parse_json(&output);
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    assert_eq!(
+        findings[0]["introduced"], false,
+        "a renamed group file keeps the finding inherited: {findings:#?}"
+    );
+    assert_eq!(json["attribution"]["styling_introduced"], 0);
 }

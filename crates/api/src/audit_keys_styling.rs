@@ -19,7 +19,8 @@ pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHash
 ///
 /// A duplicate block finding names one occurrence of its group, and the
 /// changed-file scope picks which one (issue #4344). Its `<path>` is the
-/// sorted list of the paths of all occurrences instead.
+/// sorted, `|`-separated list of the distinct paths of all occurrences
+/// instead. The rename remap of the base keys reads that list form.
 ///
 /// Line numbers are excluded, so a finding survives unrelated edits above it
 /// (issue #3956). A selector-complexity value is only a metric, such as
@@ -37,7 +38,7 @@ pub fn styling_finding_key(finding: &fallow_output::StylingFinding, root: &Path)
             .iter()
             .map(|path| relative_key_path(Path::new(path), root))
             .collect::<Vec<_>>()
-            .join(",")
+            .join("|")
     };
     let base = format!(
         "styling:{}:{}:{path}:{}",
