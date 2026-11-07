@@ -1010,6 +1010,16 @@ test("npm publish retries a Sigstore 409 and stages the root last", () => {
   assert.match(retry, /Rerun the failed job/u, "the final error must name the recovery");
   assert.ok(loopEnd !== -1 && failExit > loopEnd, "failure exit must follow the publish loop");
   assert.ok(stageCall > failExit, "the root must be staged only after the failure check");
+  assert.match(
+    npmPublish.slice(failExit, stageCall),
+    /\bexit 1\b/u,
+    "a failed package must stop the job before the root is staged",
+  );
+  assert.match(
+    retry,
+    /if ! grep -q 'TLOG_CREATE_ENTRY_ERROR' <<<"\$output" \|\| ! grep -qF '\(409\)' <<<"\$output"; then\n\s+return 1/u,
+    "the retry must stop unless the output has both the error code and the 409 status",
+  );
   assert.equal(
     npmPublish.slice(0, loopEnd).includes("npm stage publish"),
     false,

@@ -1858,7 +1858,7 @@ jobs:
     needs: [npm-prep, release-assets]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -1950,8 +1950,8 @@ jobs:
             return 1
           }
           # Sigstore sometimes answers a provenance entry with a 409 although
-          # npm did not publish the package. A new attempt signs a new
-          # statement, so a short retry succeeds. Only this error is retried.
+          # npm did not publish the package. A new attempt makes a new
+          # signature, so a short retry succeeds. Only this error is retried.
           TLOG_RETRY_DELAYS=(20 40)
           publish_with_retry() {
             local file="$1" name="$2" version="$3" attempt=0 output status
