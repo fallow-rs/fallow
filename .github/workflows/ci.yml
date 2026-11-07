@@ -180,6 +180,8 @@ jobs:
               - 'crates/engine/src/base_worktree_orphans.rs'
               - 'crates/engine/src/shell_quote.rs'
               - 'crates/engine/src/write_guard.rs'
+              - 'crates/graph/src/missed_probes.rs'
+              - 'crates/graph/src/read_trace.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/engine/src/health/scoring.rs'
               - 'crates/engine/src/health/scoring_tests.rs'
@@ -805,7 +807,8 @@ jobs:
       #   - config and workspace diagnostic path handling (`--lib` only)
       # The groups for fallow-graph, fallow-api and fallow-multicall run the
       # tests that hold Windows-only code: symlinked package sources, drive
-      # prefixes, verbatim paths and `.exe` binary names.
+      # prefixes, verbatim paths, `.exe` binary names and the missed probes
+      # of the resolver file system.
       # fallow-cli is in the package list for the null-device exit code tests.
       - name: Test Windows path and subprocess handling
         shell: bash
@@ -822,6 +825,7 @@ jobs:
           | (package(fallow-process) & test(windows_job_object_terminates_descendants_without_taskkill_lookup))
           | ((package(fallow-config) | package(fallow-types)) & kind(lib))
           | (package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety)))
+          | (package(fallow-graph) & test(missed_probes::tests))
           | (package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file)))
           | (binary_id(fallow-multicall::integration) & test(/^parity::/))'
       - name: Upload test report
