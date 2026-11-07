@@ -450,6 +450,7 @@ impl From<SavedStylingFinding> for StylingFinding {
             actions: Vec::new(),
             internal: crate::StylingFindingInternal {
                 rule_selector: None,
+                group_paths: Vec::new(),
                 introduced: saved.introduced,
             },
         }

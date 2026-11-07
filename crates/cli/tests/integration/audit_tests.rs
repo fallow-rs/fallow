@@ -9154,3 +9154,124 @@ fn audit_keeps_code_from_a_merged_unreviewed_branch_introduced() {
         output.stdout
     );
 }
+
+/// Issue #4344: a line shift in a later occurrence of a duplicate declaration
+/// block must not turn the finding into an introduced finding. The group, its
+/// files and its count are the same as in the base.
+#[test]
+fn audit_css_duplicate_block_survives_line_shift_of_a_later_occurrence() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-css-duplicate-shift"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "import './a.css';\nimport './b.css';\n",
+    )
+    .unwrap();
+    let block =
+        ".header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  flex-shrink: 0;\n}\n";
+    fs::write(root.join("src/a.css"), block).unwrap();
+    fs::write(root.join("src/b.css"), format!("/* note */\n{block}")).unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    let audit = |extra: &[&str]| {
+        let mut args = vec![
+            "audit",
+            "--root",
+            root.to_str().unwrap(),
+            "--base",
+            "HEAD",
+            "--no-cache",
+            "--quiet",
+        ];
+        args.extend_from_slice(extra);
+        run_fallow_raw(&args)
+    };
+    let assert_inherited = |label: &str| {
+        let output = audit(&["--format", "json"]);
+        let json = parse_json(&output);
+        let findings = json["complexity"]["styling_findings"]
+            .as_array()
+            .expect("styling findings should be present");
+        assert_eq!(findings.len(), 1, "{label}: {findings:#?}");
+        assert_eq!(
+            findings[0]["introduced"], false,
+            "{label}: a shifted later occurrence stays inherited: {findings:#?}"
+        );
+        assert_eq!(json["attribution"]["styling_introduced"], 0, "{label}");
+        assert_eq!(json["attribution"]["styling_inherited"], 1, "{label}");
+        let human = audit(&[]);
+        assert!(
+            human.stdout.contains("inherited styling debt"),
+            "{label}: {}",
+            human.stdout
+        );
+    };
+
+    // The second file moves down by one line.
+    fs::write(
+        root.join("src/b.css"),
+        format!("/* note */\n/* added */\n{block}"),
+    )
+    .unwrap();
+    assert_inherited("shift down");
+
+    // The second file moves up by one line.
+    fs::write(root.join("src/b.css"), block).unwrap();
+    assert_inherited("shift up");
+}
+
+/// Issue #4344: a new occurrence of a duplicate block in a changed file is
+/// still an introduced finding, because the group count grows.
+#[test]
+fn audit_css_duplicate_block_new_occurrence_stays_introduced() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-css-duplicate-new"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "import './a.css';\nimport './b.css';\nimport './c.css';\n",
+    )
+    .unwrap();
+    let block =
+        ".header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  flex-shrink: 0;\n}\n";
+    fs::write(root.join("src/a.css"), block).unwrap();
+    fs::write(root.join("src/b.css"), block).unwrap();
+    fs::write(root.join("src/c.css"), ".other { color: red; }\n").unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(root.join("src/c.css"), block).unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--no-cache",
+        "--quiet",
+        "--format",
+        "json",
+    ]);
+    let json = parse_json(&output);
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    assert_eq!(
+        findings[0]["introduced"], true,
+        "a third copy grows the group: {findings:#?}"
+    );
+    assert_eq!(json["attribution"]["styling_introduced"], 1);
+}

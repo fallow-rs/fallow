@@ -641,6 +641,11 @@ pub struct StylingFindingInternal {
     /// Selector list of the rule that owns the finding, when the finding
     /// family has one. The audit key uses it to tell equal values apart.
     pub rule_selector: Option<String>,
+    /// Sorted file paths of every occurrence of a duplicate block group, one
+    /// entry for each occurrence. Empty for other findings. The finding
+    /// reports one occurrence, and which one depends on the changed-file
+    /// scope. The audit key uses the whole group instead.
+    pub group_paths: Vec<String>,
     /// Audit-mode result of the comparison with the base snapshot. The audit
     /// sets it, and the audit JSON writes it as `introduced`.
     pub introduced: Option<bool>,

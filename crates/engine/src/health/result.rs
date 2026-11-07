@@ -489,6 +489,21 @@ fn append_css_duplicate_block_findings(
     append_cva_duplicate_variant_block_findings(findings, ctx);
 }
 
+/// Audit data of a duplicate block finding. The finding names one occurrence,
+/// and the changed-file scope picks which one. The sorted paths of all
+/// occurrences give the group an identity that the scope and the line numbers
+/// do not change.
+fn duplicate_block_internal(
+    occurrences: &[fallow_output::CssBlockOccurrence],
+) -> fallow_output::StylingFindingInternal {
+    let mut group_paths: Vec<String> = occurrences.iter().map(|occ| occ.path.clone()).collect();
+    group_paths.sort_unstable();
+    fallow_output::StylingFindingInternal {
+        group_paths,
+        ..fallow_output::StylingFindingInternal::default()
+    }
+}
+
 fn append_duplicate_declaration_block_findings(
     findings: &mut Vec<fallow_output::StylingFinding>,
     ctx: &StylingFindingContext<'_, '_>,
@@ -505,7 +520,7 @@ fn append_duplicate_declaration_block_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            internal: fallow_output::StylingFindingInternal::default(),
+            internal: duplicate_block_internal(&block.occurrences),
             code: "css-duplicate-block".to_string(),
             sub_kind: "duplicate-declaration-block".to_string(),
             path: first.path.clone(),
@@ -544,7 +559,7 @@ fn append_cva_duplicate_variant_block_findings(
             continue;
         }
         findings.push(fallow_output::StylingFinding {
-            internal: fallow_output::StylingFindingInternal::default(),
+            internal: duplicate_block_internal(&block.occurrences),
             code: "css-duplicate-block".to_string(),
             sub_kind: "cva-duplicate-variant-block".to_string(),
             path: first.path.clone(),
@@ -613,6 +628,7 @@ fn append_selector_complexity_finding(
     findings.push(fallow_output::StylingFinding {
         internal: fallow_output::StylingFindingInternal {
             rule_selector: Some(rule.selector.clone()).filter(|selector| !selector.is_empty()),
+            group_paths: Vec::new(),
             introduced: None,
         },
         code: "css-selector-complexity".to_string(),
