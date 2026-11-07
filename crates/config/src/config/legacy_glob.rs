@@ -3,9 +3,8 @@
 //! Before this rule, a single `*` or `?` in a config path glob also matched
 //! `/`. Now only `**` crosses directories (see [`super::compile_path_glob`]).
 //! A config that used a single `*` to match nested files silently matches
-//! fewer files. This module finds those patterns, so source discovery can
-//! print one warning for each pattern that lost matches on the discovered
-//! files.
+//! fewer files. This module finds those patterns and the files that they
+//! lost, so fallow can print one warning for each pattern on stderr.
 
 use std::path::Path;
 
@@ -31,6 +30,15 @@ pub struct LegacyGlobGroup {
     pub patterns: Vec<String>,
 }
 
+impl LegacyGlobGroup {
+    /// True when the list makes entry points. See
+    /// [`LegacyGlobNarrowing::counts_entry_sources`].
+    #[must_use]
+    pub fn counts_entry_sources(&self) -> bool {
+        ENTRY_SOURCE_FIELDS.contains(&self.field)
+    }
+}
+
 /// A config pattern that matches fewer discovered files under the
 /// single-segment rule than under the old rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,25 +47,57 @@ pub struct LegacyGlobNarrowing {
     pub field: &'static str,
     /// The pattern as the user wrote it, with its `!` prefix.
     pub pattern: String,
-    /// Count of discovered files that only the old rule matched.
-    pub legacy_only_files: usize,
+    /// The discovered files that only the old rule matched, root-relative,
+    /// with `/` separators, in sorted order.
+    pub legacy_only_files: Vec<String>,
     /// A rewrite with `**` that keeps the old match.
     pub suggestion: String,
 }
 
+/// Config fields whose globs make entry points.
+const ENTRY_SOURCE_FIELDS: [&str; 2] = ["entry", "dynamicallyLoaded"];
+
+/// The count of files that the warning names before "and N more".
+const NAMED_FILES: usize = 3;
+
 impl LegacyGlobNarrowing {
+    /// True when the pattern makes entry points. The check then waits for
+    /// the other entry sources, because a file that another source declares
+    /// loses nothing (see [`Self::retain_files`]).
+    #[must_use]
+    pub fn counts_entry_sources(&self) -> bool {
+        ENTRY_SOURCE_FIELDS.contains(&self.field)
+    }
+
+    /// Keep only the files for which `keep` returns true. Returns false when
+    /// no file remains, so the pattern needs no warning.
+    pub fn retain_files(&mut self, mut keep: impl FnMut(&str) -> bool) -> bool {
+        self.legacy_only_files.retain(|file| keep(file));
+        !self.legacy_only_files.is_empty()
+    }
+
     /// The stderr warning for this pattern.
     #[must_use]
     pub fn message(&self) -> String {
-        let noun = if self.legacy_only_files == 1 {
-            "file"
+        let count = self.legacy_only_files.len();
+        let (noun, lost) = if count == 1 {
+            ("file", "This file no longer matches")
         } else {
-            "files"
+            ("files", "These files no longer match")
+        };
+        let named = self.legacy_only_files[..count.min(NAMED_FILES)].join(", ");
+        let files = if count > NAMED_FILES {
+            format!("{named}, and {} more", count - NAMED_FILES)
+        } else {
+            named
         };
         format!(
-            "fallow: {} glob \"{}\" no longer matches {} {noun}, because \"*\" and \"?\" no \
-             longer match \"/\". To keep the old match, use \"{}\".",
-            self.field, self.pattern, self.legacy_only_files, self.suggestion
+            "fallow: {} glob \"{}\" matches {count} fewer {noun} than before fallow 3.34.0. A \
+             single \"*\" or \"?\" now matches in one folder level only. {lost}: {files}. To \
+             keep the one-level match and stop this warning, write the names in place of \"*\" \
+             or \"?\", for example \"{{name1,name2}}\". To match nested folders again, use \
+             \"{}\".",
+            self.field, self.pattern, self.suggestion
         )
     }
 }
@@ -278,7 +318,8 @@ struct CompiledGroup<'a> {
     strict: GlobSet,
     /// Index into `group.patterns`, and the old-rule matcher of that pattern.
     legacy: Vec<(usize, GlobMatcher)>,
-    counts: Vec<usize>,
+    /// The lost files of each `legacy` entry.
+    lost: Vec<Vec<String>>,
 }
 
 impl CompiledGroup<'_> {
@@ -289,7 +330,7 @@ impl CompiledGroup<'_> {
                 continue;
             }
             if !*strict_match.get_or_insert_with(|| self.strict.is_match(path)) {
-                self.counts[slot] += 1;
+                self.lost[slot].push(path.to_string_lossy().replace('\\', "/"));
             }
         }
     }
@@ -312,12 +353,12 @@ fn compile_group(group: &LegacyGlobGroup) -> Option<CompiledGroup<'_>> {
     if legacy.is_empty() {
         return None;
     }
-    let counts = vec![0; legacy.len()];
+    let lost = vec![Vec::new(); legacy.len()];
     Some(CompiledGroup {
         group,
         strict: strict.build().ok()?,
         legacy,
-        counts,
+        lost,
     })
 }
 
@@ -347,15 +388,16 @@ pub fn find_legacy_glob_narrowings(
             prefix,
             patterns,
         } = group.group;
-        for ((idx, _), count) in group.legacy.iter().zip(group.counts) {
-            if count == 0 {
+        for ((idx, _), mut files) in group.legacy.iter().zip(group.lost) {
+            if files.is_empty() {
                 continue;
             }
+            files.sort_unstable();
             let pattern = &patterns[*idx];
             out.push(LegacyGlobNarrowing {
                 field,
                 pattern: format!("{prefix}{pattern}"),
-                legacy_only_files: count,
+                legacy_only_files: files,
                 suggestion: format!("{prefix}{}", suggest_cross_directory_rewrite(pattern)),
             });
         }
@@ -420,13 +462,68 @@ mod tests {
         ]);
         let found = find_legacy_glob_narrowings(&[group("health.ignore", &["*.test.ts"])], &files);
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].legacy_only_files, 2);
+        assert_eq!(
+            found[0].legacy_only_files,
+            ["src/b.test.ts", "src/deep/c.test.ts"]
+        );
         assert_eq!(found[0].suggestion, "**/*.test.ts");
         assert_eq!(
             found[0].message(),
-            "fallow: health.ignore glob \"*.test.ts\" no longer matches 2 files, because \"*\" \
-             and \"?\" no longer match \"/\". To keep the old match, use \"**/*.test.ts\"."
+            "fallow: health.ignore glob \"*.test.ts\" matches 2 fewer files than before fallow \
+             3.34.0. A single \"*\" or \"?\" now matches in one folder level only. These files no \
+             longer match: src/b.test.ts, src/deep/c.test.ts. To keep the one-level match and \
+             stop this warning, write the names in place of \"*\" or \"?\", for example \
+             \"{name1,name2}\". To match nested folders again, use \"**/*.test.ts\"."
         );
+    }
+
+    #[test]
+    fn the_message_names_three_files_then_the_remaining_count() {
+        let files = paths(&[
+            "src/e/e.ts",
+            "src/a/a.ts",
+            "src/d/d.ts",
+            "src/c/c.ts",
+            "src/b/b.ts",
+        ]);
+        let found = find_legacy_glob_narrowings(&[group("entry", &["src/*.ts"])], &files);
+        assert_eq!(
+            found[0].message(),
+            "fallow: entry glob \"src/*.ts\" matches 5 fewer files than before fallow 3.34.0. A \
+             single \"*\" or \"?\" now matches in one folder level only. These files no longer \
+             match: src/a/a.ts, src/b/b.ts, src/c/c.ts, and 2 more. To keep the one-level match \
+             and stop this warning, write the names in place of \"*\" or \"?\", for example \
+             \"{name1,name2}\". To match nested folders again, use \"src/**/*.ts\"."
+        );
+    }
+
+    #[test]
+    fn the_message_uses_the_singular_for_one_file() {
+        let files = paths(&["src/a/a.ts"]);
+        let found = find_legacy_glob_narrowings(&[group("entry", &["src/*.ts"])], &files);
+        assert!(
+            found[0]
+                .message()
+                .contains("matches 1 fewer file than before fallow 3.34.0")
+        );
+        assert!(
+            found[0]
+                .message()
+                .contains("This file no longer matches: src/a/a.ts. To keep")
+        );
+    }
+
+    #[test]
+    fn files_that_another_source_covers_are_removed() {
+        let files = paths(&["src/a/a.ts", "src/b/b.ts"]);
+        let mut found = find_legacy_glob_narrowings(&[group("entry", &["src/*.ts"])], &files);
+        assert!(found[0].counts_entry_sources());
+        assert!(!found[0].retain_files(|_| false));
+        let mut partial = find_legacy_glob_narrowings(&[group("entry", &["src/*.ts"])], &files);
+        assert!(partial[0].retain_files(|file| file == "src/b/b.ts"));
+        assert_eq!(partial[0].legacy_only_files, ["src/b/b.ts"]);
+        let health = find_legacy_glob_narrowings(&[group("health.ignore", &["src/*.ts"])], &files);
+        assert!(!health[0].counts_entry_sources());
     }
 
     #[test]

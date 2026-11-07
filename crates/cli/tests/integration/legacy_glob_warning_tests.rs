@@ -1,7 +1,9 @@
 //! A single `*` in a config path glob no longer matches `/`. When the old
 //! rule matched discovered files that the new rule does not, fallow prints
-//! one warning for each pattern on stderr, with a `**` rewrite. JSON on
-//! stdout does not change, and `--quiet` hides the warning.
+//! one warning for each pattern on stderr. The warning names the files and
+//! gives two fixes: write the names, or use a `**` rewrite. For `entry` and
+//! `dynamicallyLoaded`, a file that another entry source declares does not
+//! count. JSON on stdout does not change, and `--quiet` hides the warning.
 
 #![allow(
     clippy::expect_used,
@@ -11,15 +13,15 @@
 use crate::common::{CommandOutput, parse_json, run_fallow_raw_with_env};
 use tempfile::TempDir;
 
+const PACKAGE_JSON: &str =
+    r#"{"name":"legacy-glob","version":"1.0.0","private":true,"main":"src/index.ts"}"#;
+
 /// A project with test files and generated files below the root only.
-fn project(config: &str) -> TempDir {
+fn project(config: &str, package_json: &str) -> TempDir {
     let dir = TempDir::new().expect("temp project");
     let root = dir.path();
     let files = [
-        (
-            "package.json",
-            r#"{"name":"legacy-glob","version":"1.0.0","private":true,"main":"src/index.ts"}"#,
-        ),
+        ("package.json", package_json),
         ("src/index.ts", "export const main = (): number => 1;\n"),
         ("src/deep/a.test.ts", "export const a = 1;\n"),
         ("src/deep/b.test.ts", "export const b = 2;\n"),
@@ -37,7 +39,16 @@ fn project(config: &str) -> TempDir {
 /// Run with the default warning level. The harness turns tracing off with an
 /// empty `RUST_LOG`, and this warning goes through tracing.
 fn run(subcommand: &str, config: &str, extra: &[&str]) -> CommandOutput {
-    let dir = project(config);
+    run_with_package_json(subcommand, config, PACKAGE_JSON, extra)
+}
+
+fn run_with_package_json(
+    subcommand: &str,
+    config: &str,
+    package_json: &str,
+    extra: &[&str],
+) -> CommandOutput {
+    let dir = project(config, package_json);
     let root = dir.path().to_str().expect("temp path is UTF-8");
     let mut args = vec![subcommand, "--root", root, "--no-cache"];
     args.extend_from_slice(extra);
@@ -52,9 +63,12 @@ fn assert_warning(output: &CommandOutput, expected: &str) {
     );
 }
 
+/// Text that every legacy glob warning holds.
+const WARNING_MARKER: &str = "than before fallow 3.34.0";
+
 fn assert_no_legacy_warning(output: &CommandOutput) {
     assert!(
-        !output.stderr.contains("no longer matches"),
+        !output.stderr.contains(WARNING_MARKER) && !output.stderr.contains(" glob \""),
         "unexpected warning:\n{}",
         output.stderr
     );
@@ -69,8 +83,11 @@ fn ignore_patterns_warns_with_the_globstar_rewrite() {
     );
     assert_warning(
         &output,
-        "fallow: ignorePatterns glob \"src/generated/*\" no longer matches 1 file, because \"*\" \
-         and \"?\" no longer match \"/\". To keep the old match, use \"src/generated/**\".",
+        "fallow: ignorePatterns glob \"src/generated/*\" matches 1 fewer file than before fallow \
+         3.34.0. A single \"*\" or \"?\" now matches in one folder level only. This file no \
+         longer matches: src/generated/nested/one.ts. To keep the one-level match and stop this \
+         warning, write the names in place of \"*\" or \"?\", for example \"{name1,name2}\". To \
+         match nested folders again, use \"src/generated/**\".",
     );
 }
 
@@ -83,9 +100,14 @@ fn ignore_exports_file_warns() {
     );
     assert_warning(
         &output,
-        "fallow: ignoreExports[].file glob \"*\" no longer matches 4 files",
+        "fallow: ignoreExports[].file glob \"*\" matches 4 fewer files",
     );
-    assert_warning(&output, "To keep the old match, use \"**\".");
+    assert_warning(
+        &output,
+        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts, \
+         src/generated/nested/one.ts, and 1 more.",
+    );
+    assert_warning(&output, "To match nested folders again, use \"**\".");
 }
 
 #[test]
@@ -93,8 +115,17 @@ fn health_ignore_warns() {
     let output = run("health", r#"{"health":{"ignore":["*.test.ts"]}}"#, &[]);
     assert_warning(
         &output,
-        "fallow: health.ignore glob \"*.test.ts\" no longer matches 2 files, because \"*\" and \
-         \"?\" no longer match \"/\". To keep the old match, use \"**/*.test.ts\".",
+        "fallow: health.ignore glob \"*.test.ts\" matches 2 fewer files than before fallow \
+         3.34.0.",
+    );
+    assert_warning(
+        &output,
+        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts. To keep the \
+         one-level match and stop this warning",
+    );
+    assert_warning(
+        &output,
+        "To match nested folders again, use \"**/*.test.ts\".",
     );
 }
 
@@ -103,7 +134,7 @@ fn duplicates_ignore_warns() {
     let output = run("dupes", r#"{"duplicates":{"ignore":["src/*.ts"]}}"#, &[]);
     assert_warning(
         &output,
-        "fallow: duplicates.ignore glob \"src/*.ts\" no longer matches 3 files",
+        "fallow: duplicates.ignore glob \"src/*.ts\" matches 3 fewer files",
     );
     assert_warning(&output, "use \"src/**/*.ts\".");
 }
@@ -117,7 +148,7 @@ fn overrides_files_warns() {
     );
     assert_warning(
         &output,
-        "fallow: overrides[].files glob \"*.test.ts\" no longer matches 2 files",
+        "fallow: overrides[].files glob \"*.test.ts\" matches 2 fewer files",
     );
 }
 
@@ -126,7 +157,7 @@ fn ignore_findings_warns() {
     let output = run("dead-code", r#"{"ignoreFindings":["src/*.test.ts"]}"#, &[]);
     assert_warning(
         &output,
-        "fallow: ignoreFindings glob \"src/*.test.ts\" no longer matches 2 files",
+        "fallow: ignoreFindings glob \"src/*.test.ts\" matches 2 fewer files",
     );
     assert_warning(&output, "use \"src/**/*.test.ts\".");
 }
@@ -167,6 +198,118 @@ fn quiet_hides_the_warning_and_json_stdout_stays_valid() {
         &["--format", "json"],
     );
     assert_warning(&loud, "ignorePatterns glob \"src/generated/*\"");
-    assert!(!loud.stdout.contains("no longer matches"));
+    assert!(!loud.stdout.contains(WARNING_MARKER));
     let _ = parse_json(&loud);
+}
+
+#[test]
+fn entry_warns_with_the_files_that_no_other_source_declares() {
+    let output = run("dead-code", r#"{"entry":["src/*.test.ts"]}"#, &[]);
+    assert_warning(
+        &output,
+        "fallow: entry glob \"src/*.test.ts\" matches 2 fewer files than before fallow 3.34.0.",
+    );
+    assert_warning(
+        &output,
+        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts.",
+    );
+}
+
+#[test]
+fn entry_skips_files_that_dynamically_loaded_declares() {
+    let output = run(
+        "dead-code",
+        r#"{"entry":["src/*.test.ts"],"dynamicallyLoaded":["src/deep/a.test.ts"]}"#,
+        &[],
+    );
+    assert_warning(
+        &output,
+        "fallow: entry glob \"src/*.test.ts\" matches 1 fewer file",
+    );
+    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+}
+
+#[test]
+fn dynamically_loaded_warns_not_when_another_entry_source_declares_every_file() {
+    let output = run(
+        "dead-code",
+        r#"{"dynamicallyLoaded":["src/*.test.ts"],"entry":["src/deep/*.test.ts"]}"#,
+        &[],
+    );
+    assert_no_legacy_warning(&output);
+}
+
+#[test]
+fn entry_skips_a_file_that_package_json_declares() {
+    let output = run_with_package_json(
+        "dead-code",
+        r#"{"entry":["src/*.test.ts"]}"#,
+        r#"{"name":"legacy-glob","version":"1.0.0","private":true,"main":"./src/deep/a.test.ts"}"#,
+        &[],
+    );
+    assert_warning(
+        &output,
+        "fallow: entry glob \"src/*.test.ts\" matches 1 fewer file",
+    );
+    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+}
+
+#[test]
+fn dynamically_loaded_warns_for_the_files_that_no_other_source_declares() {
+    let output = run(
+        "dead-code",
+        r#"{"dynamicallyLoaded":["src/*.test.ts"],"entry":["src/deep/a.test.ts"]}"#,
+        &[],
+    );
+    assert_warning(
+        &output,
+        "fallow: dynamicallyLoaded glob \"src/*.test.ts\" matches 1 fewer file",
+    );
+    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+}
+
+#[test]
+fn entry_skips_a_file_that_a_tooling_script_declares() {
+    let output = run_with_package_json(
+        "dead-code",
+        r#"{"entry":["src/*.test.ts"]}"#,
+        r#"{"name":"legacy-glob","version":"1.0.0","private":true,"main":"src/index.ts","scripts":{"lint":"node src/deep/a.test.ts"}}"#,
+        &[],
+    );
+    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+}
+
+/// A workspace export resolves to a path with a `./` part, for example
+/// `packages/p/./lib/deep/a.ts`. The check must still see it as declared.
+#[test]
+fn entry_skips_a_file_that_a_workspace_export_declares() {
+    let dir = TempDir::new().expect("temp project");
+    let root = dir.path();
+    let files = [
+        (
+            "package.json",
+            r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+        ),
+        (
+            "packages/p/package.json",
+            r#"{"name":"p","exports":{".":"./lib/deep/a.ts"}}"#,
+        ),
+        ("packages/p/lib/deep/a.ts", "export const a = 1;\n"),
+        ("packages/p/lib/deep/b.ts", "export const b = 2;\n"),
+        (".fallowrc.json", r#"{"entry":["packages/p/lib/*.ts"]}"#),
+    ];
+    for (path, content) in files {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, content).expect("write");
+    }
+    let root = root.to_str().expect("temp path is UTF-8");
+    let output = run_fallow_raw_with_env(
+        &["dead-code", "--root", root, "--no-cache"],
+        &[("RUST_LOG", "warn")],
+    );
+    assert_warning(
+        &output,
+        "This file no longer matches: packages/p/lib/deep/b.ts.",
+    );
 }
