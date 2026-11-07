@@ -25,3 +25,19 @@ export namespace Other {
     }
   };
 }
+
+namespace Local {
+  function all(): { reset(): void }[] {
+    return [];
+  }
+
+  all()[0].reset();
+
+  export namespace Inner {
+    function all(): { reset(): void }[] {
+      return [];
+    }
+
+    all()[0].reset();
+  }
+}

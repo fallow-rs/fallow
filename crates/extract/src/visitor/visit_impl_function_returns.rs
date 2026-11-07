@@ -116,7 +116,10 @@ impl<'a> ModuleInfoExtractor {
         let name = callee.name.as_str();
         // `nested_declaration_stack` records neither a catch parameter nor a
         // declaration in a namespace body, so both checks stay explicit.
+        // `namespace_depth` counts exported namespace bodies, and
+        // `local_namespace_depth` counts the bodies of the other namespaces.
         if self.namespace_depth > 0
+            || self.local_namespace_depth > 0
             || self.is_catch_param_name(name)
             || self.nested_scope_shadows(name)
         {

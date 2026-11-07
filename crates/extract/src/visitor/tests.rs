@@ -18021,7 +18021,9 @@ fn catch_parameter_hides_local_function_array_return() {
 fn namespace_body_hides_local_function_array_return() {
     // Issue #4313: a call in a namespace body can name a function of the
     // namespace, so it does not read the element class of the top-level
-    // `all(): Table[]`.
+    // `all(): Table[]`. This holds for an exported namespace, a namespace
+    // without `export`, an exported namespace inside one without `export`,
+    // a dotted namespace name, and a `module` declaration.
     let info = parse(
         r"
         import { Table } from './table';
@@ -18041,10 +18043,51 @@ fn namespace_body_hides_local_function_array_return() {
                 all()[0].namespacedIndex();
             };
         }
+
+        namespace Local {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            all()[0].localIndex();
+            for (const item of all()) {
+                item.localLoop();
+            }
+        }
+
+        namespace Outer {
+            export namespace Inner {
+                function all(): { inner(): void }[] {
+                    return [];
+                }
+                all()[0].nestedIndex();
+            }
+        }
+
+        namespace Dotted.Name {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            all()[0].dottedIndex();
+        }
+
+        module Legacy {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            all()[0].legacyIndex();
+        }
         ",
     );
 
-    for member in ["namespaced", "namespacedIndex"] {
+    for member in [
+        "namespaced",
+        "namespacedIndex",
+        "localIndex",
+        "localLoop",
+        "nestedIndex",
+        "dottedIndex",
+        "legacyIndex",
+    ] {
         assert!(
             !credits_table_member(&info, member),
             "{member}: {:?}",
