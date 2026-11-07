@@ -174,6 +174,12 @@ pub struct DryRunResult {
     /// module load and suite hooks such as `beforeAll` (section 8).
     #[serde(default)]
     pub file_setup_ms: BTreeMap<String, f64>,
+    /// The ids of tests that share a full name with another test of the same
+    /// file, in sorted order. The companion keeps the first id as it is and
+    /// numbers the others (`name (2)`) in report order, so the evidence of
+    /// these ids is not reliable. An older companion leaves it out.
+    #[serde(default)]
+    pub duplicate_test_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

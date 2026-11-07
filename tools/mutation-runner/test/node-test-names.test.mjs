@@ -9,6 +9,7 @@ import { readMutationConstant } from "./support/vitest-fixture.mjs";
 
 const PRELUDE = readMutationConstant("PRELUDE");
 const FILE = "test/names.test.mjs";
+const SKIPPED_FILE = "test/skipped.test.mjs";
 const id = (name) => `${FILE}::${name}`;
 
 /** A project with test names that hold a lone UTF-16 surrogate. */
@@ -24,6 +25,13 @@ const createProject = () => {
       'test("lone \\uD800", () => assert.equal(add(1, 2), 3));',
       'test("lone \\uD801", () => assert.equal(add(2, 2), 4));',
       'test("pair \\uD83D\\uDE00", () => assert.equal(add(3, 2), 5));',
+      "",
+    ].join("\n"),
+    [`project/${SKIPPED_FILE}`]: [
+      'import { test } from "node:test";',
+      'test("twin", { todo: true }, () => {});',
+      'test("twin", { skip: true }, () => {});',
+      'test("solo", () => {});',
       "",
     ].join("\n"),
     "run/files/src/add.mjs": `${PRELUDE}
@@ -77,6 +85,7 @@ describe("node-test adapter with lone surrogates in test names", () => {
       dryRun.tests.map((entry) => entry.test_id),
       ids,
     );
+    assert.deepEqual(dryRun.duplicate_test_ids, [id("lone �"), id("lone � (2)")]);
     const result = await request({
       type: "run",
       mutant_id: "m1",
@@ -89,5 +98,11 @@ describe("node-test adapter with lone surrogates in test names", () => {
       result.tests.map((entry) => [entry.test_id, entry.status]),
       ids.map((testId) => [testId, "fail"]),
     );
+  });
+
+  test("skipped or todo twins are not duplicates", async () => {
+    const dryRun = await request({ type: "dry_run", test_files: [SKIPPED_FILE] });
+    assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
+    assert.deepEqual(dryRun.duplicate_test_ids, []);
   });
 });

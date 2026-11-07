@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 use colored::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
-    MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
-    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
+    DUPLICATE_TEST_IDS_CODE, MutantResult, MutantStatus, MutationCompletionStatus,
+    MutationInspectOutput, MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
     MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
     MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
     MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
@@ -570,16 +570,22 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         }
     }
     for error in &report.errors {
+        // The run with duplicate test ids still has valid verdicts for the other tests.
+        let label = if error.code == DUPLICATE_TEST_IDS_CODE {
+            "Warning"
+        } else {
+            "Error"
+        };
         match &error.mutant_id {
             Some(id) => {
                 let _ = writeln!(
                     footer,
-                    "Error ({}), mutant {id}: {}",
+                    "{label} ({}), mutant {id}: {}",
                     error.code, error.message
                 );
             }
             None => {
-                let _ = writeln!(footer, "Error ({}): {}", error.code, error.message);
+                let _ = writeln!(footer, "{label} ({}): {}", error.code, error.message);
             }
         }
     }

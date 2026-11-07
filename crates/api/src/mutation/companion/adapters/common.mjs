@@ -152,6 +152,22 @@ export const uniqueNames = (fullNames) => {
 /** True for a test that ran to a result. A skipped or cancelled test did not run. */
 export const hasRun = (status) => status === "pass" || status === "fail";
 
+/**
+ * Flags each test that ran and whose full name another test that ran repeats.
+ * `uniqueNames` gives such tests a ` (n)` suffix, which depends on the report
+ * order, so the evidence of a repeated name is not reliable. A skipped or
+ * todo twin gives no evidence, so it does not count. `ran` has one boolean
+ * for each test. The flags use the same well-formed names as `uniqueNames`.
+ */
+export const repeatedNameFlags = (fullNames, ran) => {
+  const wellFormed = fullNames.map((name) => name.toWellFormed());
+  const counts = new Map();
+  wellFormed.forEach((name, index) => {
+    if (ran[index]) counts.set(name, (counts.get(name) ?? 0) + 1);
+  });
+  return wellFormed.map((name, index) => ran[index] && counts.get(name) > 1);
+};
+
 export const errorMessage = (error) => String(error?.message ?? error);
 
 /**
@@ -285,7 +301,8 @@ export const groupRequestedTests = (requested, testIndex) => {
 
 /**
  * Builds a `dry_run_result` body. `summary` has `tests`, `hits`,
- * `staticHits` and `setup`. A path of `pathMap` that is not in `loaded` is
+ * `staticHits`, `duplicates` (the ids of tests with a repeated name) and
+ * `setup`. A path of `pathMap` that is not in `loaded` is
  * an unloaded path.
  */
 export const dryRunResult = ({ started, summary, errors, pathMap, loaded }) => ({
@@ -294,6 +311,7 @@ export const dryRunResult = ({ started, summary, errors, pathMap, loaded }) => (
   hits: summary.hits,
   static_hits: [...summary.staticHits].toSorted(),
   file_setup_ms: roundedByKey(summary.setup),
+  duplicate_test_ids: [...summary.duplicates].toSorted(),
   unhandled_errors: errors,
   unloaded_paths: Object.keys(pathMap)
     .filter((path) => !loaded.has(path))

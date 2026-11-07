@@ -20,6 +20,8 @@ pub const MUTATION_PLAN_SCHEMA_VERSION: u32 = 1;
 pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 2;
 /// Current mutation tasks schema version.
 pub const MUTATION_TASKS_SCHEMA_VERSION: u32 = 1;
+/// The code of the run issue for tests that share a test id in the dry run.
+pub const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
 
 /// Version singleton for a mutation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -681,9 +683,9 @@ pub struct MutationWorktreeCheck {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationRunIssue {
     /// A stable kebab-case code: `cache-write-failed`,
-    /// `journal-write-failed`, `runtime-error`, `static-map-miss`,
-    /// `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
-    /// or `worktree-check-failed`.
+    /// `duplicate-test-ids`, `journal-write-failed`, `runtime-error`,
+    /// `static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,
+    /// `worktree-changed` or `worktree-check-failed`.
     pub code: String,
     /// A description.
     pub message: String,

@@ -15,6 +15,7 @@ import {
   runResult,
   testErrorText,
   toPosix,
+  repeatedNameFlags,
   uniqueNames,
   validateDryRun,
   validateRun,
@@ -129,15 +130,22 @@ export const createWorkDir = (prefix, overlay) => {
 };
 
 /**
- * Gives each test of one file its name and test id, in report order. The
+ * Gives each test of one file its name and test id, in report order. A test
+ * whose full name another test that ran repeats has `repeated` set. The
  * name joins the names of the suites and the test with ` > `. Each test is
  * `{ parts, ... }`.
  */
 export const withTestIds = (file, tests) => {
-  const names = uniqueNames(tests.map((test) => test.parts.join(NAME_SEPARATOR)));
+  const fullNames = tests.map((test) => test.parts.join(NAME_SEPARATOR));
+  const names = uniqueNames(fullNames);
+  const repeated = repeatedNameFlags(
+    fullNames,
+    tests.map((test) => hasRun(test.status)),
+  );
   return tests.map((test, index) => ({
     ...test,
     name: names[index],
+    repeated: repeated[index],
     testId: `${file}${TEST_ID_SEPARATOR}${names[index]}`,
   }));
 };
@@ -247,6 +255,7 @@ const setupMs = (result) => {
 const recordDryRunFile = (file, result, summary, directories) => {
   const entries = result.tests.map((test) => dryRunEntry(file, test, result.shared, directories));
   summary.tests.push(...entries.map((entry) => entry.report));
+  for (const test of result.tests) if (test.repeated) summary.duplicates.add(test.testId);
   addAll(summary.staticHits, result.staticHits);
   addAll(summary.loaded, result.loaded);
   Object.assign(summary.hits, Object.fromEntries(attributeHits(entries)));
@@ -258,6 +267,7 @@ const emptySummary = () => ({
   tests: [],
   hits: {},
   staticHits: new Set(),
+  duplicates: new Set(),
   loaded: new Set(),
   setup: {},
   errors: [],

@@ -746,6 +746,9 @@ fn schedule_error(
         ScheduleError::UnmatchedTargets(_) | ScheduleError::TargetsNeedTestFilter => {
             ("FALLOW_MUTATION_TARGET_UNMATCHED", None)
         }
+        ScheduleError::DuplicateTargetTestIds(_) => {
+            ("FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID", None)
+        }
     };
     let mut help = Vec::new();
     if matches!(error, ScheduleError::RunnerVersion(_)) {
@@ -1507,6 +1510,26 @@ mod tests {
             Duration::from_secs(120),
         );
         assert_eq!(other.help, None);
+    }
+
+    #[test]
+    fn a_duplicate_target_test_id_exits_2_and_names_the_id() {
+        let error = schedule_error(
+            &ScheduleError::DuplicateTargetTestIds(vec!["test/a.test.ts::adds".to_owned()]),
+            vitest_range(),
+            Duration::from_secs(120),
+        );
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID")
+        );
+        assert_eq!(error.exit_code, 2);
+        assert!(
+            error.message.contains("test/a.test.ts::adds"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("not reliable"), "{}", error.message);
     }
 
     #[test]
