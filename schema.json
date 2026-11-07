@@ -1462,6 +1462,13 @@
           },
           "default": []
         },
+        "tailwindIgnorePatterns": {
+          "description": "Regular expressions excluding Tailwind arbitrary-value utilities from\ntoken-drift findings and analytics, including CVA variants. Matches the\nutility without variant prefixes, for example `icon-[lucide--eye]` in\n`hover:icon-[lucide--eye]`. Use `^icon-\\[` to exclude that prefix.\nDefaults to no exclusions. Invalid regexes fail config loading.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "thresholdOverrides": {
           "description": "Per-file or per-function threshold overrides. These keep exceptional\nfunctions visible as configured numeric ceilings instead of hiding them\nbehind binary suppressions.",
           "type": "array",

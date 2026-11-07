@@ -339,6 +339,20 @@ pub struct HealthConfig {
     #[serde(default)]
     pub ignore: Vec<String>,
 
+    /// Regular expressions excluding Tailwind arbitrary-value utilities from
+    /// token-drift findings and analytics, including CVA variants. Matches the
+    /// utility without variant prefixes, for example `icon-[lucide--eye]` in
+    /// `hover:icon-[lucide--eye]`. Use `^icon-\[` to exclude that prefix.
+    /// Defaults to no exclusions. Invalid regexes fail config loading.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_tailwind_ignore_patterns",
+        serialize_with = "serialize_tailwind_ignore_patterns"
+    )]
+    #[schemars(with = "Vec<String>")]
+    pub tailwind_ignore_patterns: Vec<regex::Regex>,
+
     /// Per-file or per-function threshold overrides. These keep exceptional
     /// functions visible as configured numeric ceilings instead of hiding them
     /// behind binary suppressions.
@@ -382,12 +396,42 @@ impl Default for HealthConfig {
             coverage: None,
             coverage_root: None,
             ignore: vec![],
+            tailwind_ignore_patterns: vec![],
             threshold_overrides: vec![],
             ownership: OwnershipConfig::default(),
             change_coupling: ChangeCouplingConfig::default(),
             suggest_inline_suppression: default_suggest_inline_suppression(),
         }
     }
+}
+
+fn deserialize_tailwind_ignore_patterns<'de, D>(
+    deserializer: D,
+) -> Result<Vec<regex::Regex>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<String>::deserialize(deserializer)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, pattern)| {
+            regex::Regex::new(&pattern).map_err(|error| {
+                serde::de::Error::custom(format!(
+                    "health.tailwindIgnorePatterns[{index}] is not a valid regex: {error}"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn serialize_tailwind_ignore_patterns<S>(
+    patterns: &[regex::Regex],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_seq(patterns.iter().map(regex::Regex::as_str))
 }
 
 /// Per-file or per-function health threshold override.
@@ -656,6 +700,7 @@ maxCognitive = 25
             max_unit_size: 120,
             max_file_lines: 500,
             ignore: vec!["test/**".to_string()],
+            tailwind_ignore_patterns: Vec::new(),
             threshold_overrides: vec![HealthThresholdOverride {
                 files: vec!["src/auth.ts".to_string()],
                 functions: Vec::new(),

@@ -9013,6 +9013,80 @@ fn health_css_flags_tailwind_arbitrary_values() {
 }
 
 #[test]
+fn health_css_tailwind_ignore_patterns_filter_findings_and_analytics() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"tailwind-exclusions","devDependencies":{"tailwindcss":"^4.0.0"}}"#,
+    );
+    write_file(&root.join("src/app.css"), ".x { color: red; }\n");
+    write_file(
+        &root.join("src/index.tsx"),
+        r#"export const B = () => <div className="icon-[lucide--eye] hover:icon-[mdi--account]
+w-[13px] hover:bg-[#abc] w-[13px]">x</div>;"#,
+    );
+
+    for (patterns, expected, uses) in [
+        (
+            "[]",
+            vec![
+                "bg-[#abc]",
+                "icon-[lucide--eye]",
+                "icon-[mdi--account]",
+                "w-[13px]",
+            ],
+            5,
+        ),
+        (r#"["^icon-\\["]"#, vec!["bg-[#abc]", "w-[13px]"], 3),
+        (
+            r#"["^bg-\\["]"#,
+            vec!["icon-[lucide--eye]", "icon-[mdi--account]", "w-[13px]"],
+            4,
+        ),
+        (r#"["^icon-\\[", "^bg-\\["]"#, vec!["w-[13px]"], 2),
+    ] {
+        write_file(
+            &root.join(".fallowrc.json"),
+            &format!(r#"{{"health":{{"tailwindIgnorePatterns":{patterns}}}}}"#),
+        );
+        let out = run_fallow_in_root(
+            "health",
+            root,
+            &["--css", "--format", "json", "--quiet", "--no-cache"],
+        );
+        let json = parse_json(&out);
+        let css = &json["css_analytics"];
+        let mut values: Vec<_> = css["tailwind_arbitrary_values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["value"].as_str().unwrap())
+            .collect();
+        values.sort_unstable();
+        assert_eq!(values, expected, "patterns: {patterns}");
+        assert_eq!(css["summary"]["tailwind_arbitrary_values"], expected.len());
+        assert_eq!(css["summary"]["tailwind_arbitrary_value_uses"], uses);
+        let mut findings: Vec<_> = json["styling_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|finding| finding["sub_kind"] == "tailwind-arbitrary-value")
+            .map(|finding| finding["value"].as_str().unwrap())
+            .collect();
+        findings.sort_unstable();
+        assert_eq!(findings, expected, "patterns: {patterns}");
+        let width = css["tailwind_arbitrary_values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["value"] == "w-[13px]")
+            .unwrap();
+        assert_eq!(width["line"], 2);
+    }
+}
+
+#[test]
 fn health_css_emits_selector_and_dead_surface_styling_findings() {
     let dir = tempdir().unwrap();
     let root = dir.path();
