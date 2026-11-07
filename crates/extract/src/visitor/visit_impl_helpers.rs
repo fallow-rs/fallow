@@ -12,7 +12,8 @@ use crate::js_text::JsText;
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::{
-    assignment_target_identifier_name, static_member_object_name, unwrap_parens, unwrap_static_expr,
+    assignment_target_identifier_name, call_receiver_name, static_member_object_name,
+    unwrap_parens, unwrap_static_expr,
 };
 
 pub(super) const PINO_PACKAGE: &str = "pino";
@@ -139,8 +140,19 @@ impl StructuralParamMemberCollector {
         }
     }
 
-    fn resolve_receiver_path(&self, object: &Expression<'_>) -> Option<(String, String)> {
-        let object_path = static_member_object_name(object)?;
+    /// The tracked parameter and the property path that `object` reads. With
+    /// `allow_call_arguments`, a method call with arguments is a `()` link, as
+    /// in `call_receiver_name`. Use that form only to record a member access.
+    fn resolve_receiver_path(
+        &self,
+        object: &Expression<'_>,
+        allow_call_arguments: bool,
+    ) -> Option<(String, String)> {
+        let object_path = if allow_call_arguments {
+            call_receiver_name(object)?
+        } else {
+            static_member_object_name(object)?
+        };
         let (root, suffix) = object_path
             .split_once('.')
             .map_or((object_path.as_str(), ""), |(root, suffix)| (root, suffix));
@@ -172,7 +184,7 @@ impl StructuralParamMemberCollector {
         let Some(init) = declarator.init.as_ref() else {
             return Vec::new();
         };
-        let Some((param, base_path)) = self.resolve_receiver_path(init) else {
+        let Some((param, base_path)) = self.resolve_receiver_path(init, false) else {
             return Vec::new();
         };
         extract_object_pattern_bindings(pattern)
@@ -191,7 +203,10 @@ impl StructuralParamMemberCollector {
 
 impl<'a> Visit<'a> for StructuralParamMemberCollector {
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
-        if let Some((param, property_path)) = self.resolve_receiver_path(&expr.object) {
+        // `local.rotate(1).translate(1, 1)` reads `translate` on the
+        // `rotate()` path of `local`, as the call without arguments does
+        // (issue #4311).
+        if let Some((param, property_path)) = self.resolve_receiver_path(&expr.object, true) {
             if property_path.is_empty() {
                 self.members
                     .entry(param)
@@ -209,7 +224,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         if let Expression::StringLiteral(property) = &expr.expression
-            && let Some((param, property_path)) = self.resolve_receiver_path(&expr.object)
+            && let Some((param, property_path)) = self.resolve_receiver_path(&expr.object, true)
         {
             if property_path.is_empty() {
                 self.members

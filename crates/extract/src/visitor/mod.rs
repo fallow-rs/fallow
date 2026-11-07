@@ -760,6 +760,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// callee is declared after the consumer. Transient extractor state, not a
     /// cached `ModuleInfo` field. See issue #1793.
     local_function_return_types: FxHashMap<String, String>,
+    local_function_array_return_types: FxHashMap<String, String>, // `all` -> `Table` (#4313)
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     /// Direct `new Class()` object-property target associations recorded during the AST
     /// walk. Combined with `object_binding_candidates` to keep both object
@@ -3565,8 +3566,7 @@ impl ModuleInfoExtractor {
         self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
         self.resolve_native_html_element_aliases();
-        self.enrich_local_class_exports();
-        self.lift_unexported_local_base_classes();
+        self.finalize_local_class_heritage();
         self.enrich_store_exports();
         self.finalize_di_key_sites();
         // Before `record_exported_instance_bindings` / `resolve_object_binding_candidates`,
