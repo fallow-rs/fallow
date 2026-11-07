@@ -48,5 +48,11 @@ for (const { packageName, version } of VITEST_MAJORS) {
     test("the dry run names the ids of the tests with a repeated title", () => {
       assert.deepEqual(dryRun.duplicate_test_ids, [id("adds"), id("adds (2)")]);
     });
+
+    test("twins that are skipped or todo are no duplicates", async () => {
+      const skipped = await request({ type: "dry_run", test_files: ["names/skipped.test.ts"] });
+      assert.equal(skipped.type, "dry_run_result", JSON.stringify(skipped));
+      assert.deepEqual(skipped.duplicate_test_ids, []);
+    });
   });
 }

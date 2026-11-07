@@ -2,9 +2,6 @@
 
 use super::*;
 
-/// The issue code for tests that share a test id in the dry run.
-pub(super) const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
-
 /// The facts of the dry run that the scheduler uses.
 pub(super) struct DryRunFacts {
     /// Each passing test that is not in an excluded file, with its duration.
@@ -169,7 +166,27 @@ pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) 
         .collect();
     outcome
         .issues
-        .extend(duplicate_test_ids_issue(&dry.duplicate_test_ids));
+        .extend(duplicate_test_ids_issue(&reported_duplicates(dry)));
+}
+
+/// The duplicate test ids of the dry run, without the ids of a file that an
+/// unhandled error excludes. No test of such a file gives evidence.
+pub(super) fn reported_duplicates(dry: &DryRunResult) -> Vec<String> {
+    let excluded: FxHashSet<&String> = dry
+        .unhandled_errors
+        .iter()
+        .filter_map(|error| error.file.as_ref())
+        .collect();
+    let file_of: FxHashMap<&String, &String> = dry
+        .tests
+        .iter()
+        .map(|test| (&test.test_id, &test.file))
+        .collect();
+    dry.duplicate_test_ids
+        .iter()
+        .filter(|id| file_of.get(id).is_none_or(|file| !excluded.contains(file)))
+        .cloned()
+        .collect()
 }
 
 /// The most test ids that the duplicate issue names.
@@ -194,7 +211,7 @@ fn duplicate_test_ids_issue(ids: &[String]) -> Option<ScheduleIssue> {
         format!(" and {more} more")
     };
     Some(ScheduleIssue {
-        code: DUPLICATE_TEST_IDS_CODE,
+        code: fallow_output::DUPLICATE_TEST_IDS_CODE,
         message: format!(
             "{} dry-run test ids belong to tests with the same title: {}{tail}; the runner numbers them in report order, so their kill evidence is not reliable (for example `test.each` without unique titles); give each test a unique title",
             ids.len(),

@@ -519,7 +519,10 @@ const readDryRunTests = (testModule, file, prefix, directories) => {
   const testCases = [...testModule.children.allTests()];
   const fullNames = testCases.map((testCase) => testCase.fullName);
   const names = uniqueNames(fullNames);
-  const repeated = repeatedNameFlags(fullNames);
+  const repeated = repeatedNameFlags(
+    fullNames,
+    testCases.map((testCase) => hasRun(testStatus(testCase))),
+  );
   return testCases.map((testCase, index) => {
     const meta = testCase.meta();
     return {

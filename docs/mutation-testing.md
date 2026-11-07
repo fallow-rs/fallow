@@ -382,7 +382,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` target that selects a test with a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare). |
 | `128 + signal` | SIGINT, SIGTERM, SIGHUP or SIGQUIT stopped the run (`130` for SIGINT). A run that a signal stops during the mutant runs prints the report of the finished mutants, with the completion `partial`. A run that a signal stops earlier prints no report and no error. |
 
 The flag wins over the config key. The minimum applies to the score, in
@@ -477,7 +477,9 @@ shows as `pending`.
   `test.each` with a title that has no placeholder. The runner keeps the
   first test ID as it is and numbers the next ones in report order
   (`name (2)`). A change in the report order moves the numbers, so the kills
-  and survivors of these IDs are not reliable. The `errors` entry
+  and survivors of these IDs are not reliable. Only tests that ran count: a
+  skipped or todo twin gives no evidence, so it makes no duplicate. A file
+  that an unhandled error excludes reports no duplicate. The `errors` entry
   `duplicate-test-ids` names the IDs, and the human output shows it as a
   warning. The run does not stop, and the verdicts of the other tests stay
   valid. Give each test a unique title to remove the warning.
@@ -556,9 +558,11 @@ fallow mutation src/math.ts \
   (`FALLOW_MUTATION_TARGET_UNMATCHED`). The dry run runs the test files that
   reach the planned code, so the scope must include code that the target
   tests load.
-- A target that selects a test with a duplicate test ID stops the run with
-  exit `2` (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`). The message names
-  each such ID. See the `duplicate-test-ids` error below.
+- A test ID target that names a duplicate test ID stops the run with exit
+  `2` (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`). The message names each
+  such ID. A test file target drops the duplicate IDs and keeps its other
+  tests. The `duplicate-test-ids` error above names the dropped IDs. A file
+  whose tests are all duplicates is unmatched, as a file with no test is.
 - A mutant that no target test covers in the dry run does not run. It is
   `pruned` with `prune_reason: "no-target-coverage"`. It does not count in
   the score, the coverage, or the `--max-mutants` limit. The score therefore

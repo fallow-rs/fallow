@@ -164,8 +164,8 @@ pub(super) fn config_targets(
     if config.targets.is_empty() {
         return Ok(None);
     }
-    let (targets, ids) = resolve_targets(&config.targets, &dry.tests, caps)?;
-    refuse_duplicate_ids(&ids, &dry.duplicate_test_ids)?;
+    let (targets, _) = resolve_targets(&config.targets, &dry.tests, caps)?;
+    let (targets, ids) = without_duplicate_ids(targets, &reported_duplicates(dry))?;
     outcome.targets = targets;
     Ok(Some(ids))
 }
@@ -173,27 +173,44 @@ pub(super) fn config_targets(
 /// The message of the error for targets that select a test with a duplicate id.
 pub(super) fn duplicate_message(ids: &[String]) -> String {
     format!(
-        "these --kill-matrix-for targets select tests with a duplicate test id: {}; the runner numbers tests that share a title in report order, so the kill evidence of these tests is not reliable; give each test a unique title",
+        "these --kill-matrix-for targets name a duplicate test id: {}; the runner numbers tests that share a title in report order, so the kill evidence of these tests is not reliable; give each test a unique title",
         ids.join(", ")
     )
 }
 
-/// Refuses targets that select a test with a duplicate id. The companion
+/// Applies the duplicate test ids to the resolved targets. The companion
 /// numbers tests that share a title in report order, so the kills of such a
-/// test can belong to its twin.
-fn refuse_duplicate_ids(
-    selected: &FxHashSet<String>,
+/// test can belong to its twin. A target that names a duplicate id is an
+/// error. A file target drops the duplicate ids and keeps its other tests;
+/// a file target with no test left is unmatched.
+fn without_duplicate_ids(
+    targets: Vec<ResolvedTarget>,
     duplicate_ids: &[String],
-) -> Result<(), ScheduleError> {
-    let hit: Vec<String> = duplicate_ids
+) -> Result<(Vec<ResolvedTarget>, FxHashSet<String>), ScheduleError> {
+    let duplicates: FxHashSet<&String> = duplicate_ids.iter().collect();
+    let named: Vec<String> = targets
         .iter()
-        .filter(|id| selected.contains(*id))
-        .cloned()
+        .filter(|target| duplicates.contains(&target.target))
+        .map(|target| target.target.clone())
         .collect();
-    if hit.is_empty() {
-        Ok(())
+    if !named.is_empty() {
+        return Err(ScheduleError::DuplicateTargetTestIds(named));
+    }
+    let mut unmatched = Vec::new();
+    let mut ids = FxHashSet::default();
+    let mut kept = Vec::with_capacity(targets.len());
+    for mut target in targets {
+        target.test_ids.retain(|id| !duplicates.contains(id));
+        if target.test_ids.is_empty() {
+            unmatched.push(target.target.clone());
+        }
+        ids.extend(target.test_ids.iter().cloned());
+        kept.push(target);
+    }
+    if unmatched.is_empty() {
+        Ok((kept, ids))
     } else {
-        Err(ScheduleError::DuplicateTargetTestIds(hit))
+        Err(ScheduleError::UnmatchedTargets(unmatched))
     }
 }
 

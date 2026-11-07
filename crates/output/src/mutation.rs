@@ -20,6 +20,8 @@ pub const MUTATION_PLAN_SCHEMA_VERSION: u32 = 1;
 pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 2;
 /// Current mutation tasks schema version.
 pub const MUTATION_TASKS_SCHEMA_VERSION: u32 = 1;
+/// The code of the run issue for tests that share a test id in the dry run.
+pub const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
 
 /// Version singleton for a mutation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

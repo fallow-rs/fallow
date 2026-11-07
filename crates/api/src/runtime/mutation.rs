@@ -1513,6 +1513,26 @@ mod tests {
     }
 
     #[test]
+    fn a_duplicate_target_test_id_exits_2_and_names_the_id() {
+        let error = schedule_error(
+            &ScheduleError::DuplicateTargetTestIds(vec!["test/a.test.ts::adds".to_owned()]),
+            vitest_range(),
+            Duration::from_secs(120),
+        );
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID")
+        );
+        assert_eq!(error.exit_code, 2);
+        assert!(
+            error.message.contains("test/a.test.ts::adds"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("not reliable"), "{}", error.message);
+    }
+
+    #[test]
     fn a_failed_self_check_is_a_runner_failure_with_its_own_help() {
         let error = schedule_error(
             &ScheduleError::RunPath {

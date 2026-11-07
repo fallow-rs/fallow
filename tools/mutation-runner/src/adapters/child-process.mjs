@@ -131,14 +131,17 @@ export const createWorkDir = (prefix, overlay) => {
 
 /**
  * Gives each test of one file its name and test id, in report order. A test
- * whose full name another test repeats has `repeated` set. The
+ * whose full name another test that ran repeats has `repeated` set. The
  * name joins the names of the suites and the test with ` > `. Each test is
  * `{ parts, ... }`.
  */
 export const withTestIds = (file, tests) => {
   const fullNames = tests.map((test) => test.parts.join(NAME_SEPARATOR));
   const names = uniqueNames(fullNames);
-  const repeated = repeatedNameFlags(fullNames);
+  const repeated = repeatedNameFlags(
+    fullNames,
+    tests.map((test) => hasRun(test.status)),
+  );
   return tests.map((test, index) => ({
     ...test,
     name: names[index],

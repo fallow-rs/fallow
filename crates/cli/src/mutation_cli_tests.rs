@@ -1558,6 +1558,34 @@ fn an_error_line_names_its_mutant() {
 }
 
 #[test]
+fn duplicate_test_ids_show_as_a_warning_and_other_issues_as_errors() {
+    let mut warned = report(Vec::new(), Vec::new());
+    warned.errors = vec![
+        fallow_output::MutationRunIssue {
+            code: fallow_output::DUPLICATE_TEST_IDS_CODE.to_owned(),
+            message: "2 dry-run test ids belong to tests with the same title".to_owned(),
+            mutant_id: None,
+            stderr_tail: None,
+        },
+        fallow_output::MutationRunIssue {
+            code: "runtime-error".to_owned(),
+            message: "the companion exited".to_owned(),
+            mutant_id: None,
+            stderr_tail: None,
+        },
+    ];
+    let text = run_text(&warned, &OPTIONS);
+    assert!(
+        text.contains("Warning (duplicate-test-ids): 2 dry-run test ids"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Error (runtime-error): the companion exited"),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_survived_section_shows_ten_mutants_and_one_more_line() {
     let survivors: Vec<MutantResult> = (1..=12)
         .map(|rank| {

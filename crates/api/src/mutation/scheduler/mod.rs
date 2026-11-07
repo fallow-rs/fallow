@@ -29,7 +29,7 @@ mod dry_facts;
 mod retry_set;
 pub mod targets;
 use classification::{attempt_record, classify, kill_kind, matrix_evidence};
-use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run};
+use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use targets::{config_targets, job_targets};
 mod stored;
 

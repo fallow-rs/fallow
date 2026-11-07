@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 use colored::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
-    MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
-    MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
+    DUPLICATE_TEST_IDS_CODE, MutantResult, MutantStatus, MutationCompletionStatus,
+    MutationInspectOutput, MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
     MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
     MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
     MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
@@ -23,9 +23,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::report::{HumanStatus, Level, build_section_header, format_path, human_status_line};
 
-/// The code of the run issue for tests that share a test id. The run still
-/// has valid verdicts, so the footer shows it as a warning.
-const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
 /// The longest code fragment that a survivor line shows.
 const MAX_FRAGMENT_CHARS: usize = 60;
 /// The marker of a cut at the start or the end of a fragment.
@@ -573,7 +570,7 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         }
     }
     for error in &report.errors {
-        // A run with duplicate test ids still has valid verdicts for the other tests.
+        // The run with duplicate test ids still has valid verdicts for the other tests.
         let label = if error.code == DUPLICATE_TEST_IDS_CODE {
             "Warning"
         } else {

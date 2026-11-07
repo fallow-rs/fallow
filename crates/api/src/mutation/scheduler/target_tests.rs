@@ -1,5 +1,5 @@
-use super::super::dry_facts::DUPLICATE_TEST_IDS_CODE;
 use super::*;
+use fallow_output::DUPLICATE_TEST_IDS_CODE;
 
 /// The mutant runs: the tests and the bail flag of each run with an active
 /// mutant. Control runs are left out.
@@ -321,17 +321,61 @@ fn a_target_that_names_a_duplicate_test_id_stops_the_run() {
 }
 
 #[test]
-fn a_target_that_names_a_file_with_a_duplicate_test_id_stops_the_run() {
+fn a_file_target_drops_the_duplicate_test_ids_and_keeps_the_other_tests() {
     let spawner = FakeSpawner::new(script(
         |_| dry_with_duplicate_t2(),
         |_, run| Ok(run_result(run, RunStatus::Survived, None)),
     ));
     let file = test("t2", 1.0, TestStatus::Pass).file;
-    let error = run_schedule(&spawner, &plan(&["m1"]), &target_config(&[file]))
-        .expect_err("a file target that selects a duplicate id is an error");
-    assert_eq!(
-        error,
-        ScheduleError::DuplicateTargetTestIds(vec![tid("t2")])
+    let outcome =
+        run_schedule(&spawner, &plan(&["m1"]), &target_config(&[file])).expect("schedule");
+    assert_eq!(outcome.targets[0].test_ids, [tid("t1")]);
+    assert!(
+        outcome
+            .issues
+            .iter()
+            .any(|issue| issue.code == DUPLICATE_TEST_IDS_CODE),
+        "the warning names the dropped id"
+    );
+}
+
+#[test]
+fn a_file_target_with_only_duplicate_test_ids_is_unmatched() {
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            duplicate_test_ids: vec![tid("t1"), tid("t2")],
+            ..standard_dry()
+        },
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let file = test("t1", 1.0, TestStatus::Pass).file;
+    let error = run_schedule(
+        &spawner,
+        &plan(&["m1"]),
+        &target_config(std::slice::from_ref(&file)),
+    )
+    .expect_err("no test is left");
+    assert_eq!(error, ScheduleError::UnmatchedTargets(vec![file]));
+}
+
+#[test]
+fn duplicate_test_ids_of_a_file_with_an_unhandled_error_are_not_reported() {
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            unhandled_errors: vec![UnhandledError {
+                message: "boom".to_owned(),
+                file: Some("test/a.test.ts".to_owned()),
+            }],
+            ..dry_with_duplicate_t2()
+        },
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("schedule");
+    assert!(
+        outcome
+            .issues
+            .iter()
+            .all(|issue| issue.code != DUPLICATE_TEST_IDS_CODE)
     );
 }
 

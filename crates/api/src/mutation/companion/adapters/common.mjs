@@ -149,21 +149,24 @@ export const uniqueNames = (fullNames) => {
   });
 };
 
-/**
- * Flags each test whose full name another test of the same list repeats.
- * `uniqueNames` gives such tests a ` (n)` suffix, which depends on the report
- * order, so the evidence of a repeated name is not reliable. The flags use the
- * same well-formed names as `uniqueNames`.
- */
-export const repeatedNameFlags = (fullNames) => {
-  const wellFormed = fullNames.map((name) => name.toWellFormed());
-  const counts = new Map();
-  for (const name of wellFormed) counts.set(name, (counts.get(name) ?? 0) + 1);
-  return wellFormed.map((name) => counts.get(name) > 1);
-};
-
 /** True for a test that ran to a result. A skipped or cancelled test did not run. */
 export const hasRun = (status) => status === "pass" || status === "fail";
+
+/**
+ * Flags each test that ran and whose full name another test that ran repeats.
+ * `uniqueNames` gives such tests a ` (n)` suffix, which depends on the report
+ * order, so the evidence of a repeated name is not reliable. A skipped or
+ * todo twin gives no evidence, so it does not count. `ran` has one boolean
+ * for each test. The flags use the same well-formed names as `uniqueNames`.
+ */
+export const repeatedNameFlags = (fullNames, ran) => {
+  const wellFormed = fullNames.map((name) => name.toWellFormed());
+  const counts = new Map();
+  wellFormed.forEach((name, index) => {
+    if (ran[index]) counts.set(name, (counts.get(name) ?? 0) + 1);
+  });
+  return wellFormed.map((name, index) => ran[index] && counts.get(name) > 1);
+};
 
 export const errorMessage = (error) => String(error?.message ?? error);
 
