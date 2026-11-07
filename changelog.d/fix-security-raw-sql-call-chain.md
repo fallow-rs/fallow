@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow security` reports raw SQL methods on a call result or a `this` field.** The `sql-injection` rows for `whereRaw`, `havingRaw`, `orderByRaw`, `$queryRawUnsafe` and `$executeRawUnsafe` now match a call on a call result, for example `db("t").whereRaw(x)`, `knex("users").where("id", 1).orderByRaw(x)` or `getPrisma().$queryRawUnsafe(x)`. They also match a call on a `this` field, for example `this.prisma.$queryRawUnsafe(x)`. The knex builder and a NestJS Prisma service use these forms. The callee reads `db().whereRaw` or `this.prisma.$queryRawUnsafe`. A literal argument gives no candidate, and other `*.` rows keep their current behavior. (Closes [#4225](https://github.com/fallow-rs/fallow/issues/4225))

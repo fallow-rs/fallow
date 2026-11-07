@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow mutation` no longer counts bench files and `__tests__` helpers as test files.** Before, the plan counted a Vitest bench file (`benchmarks/add.bench.ts`) and a helper module below `__tests__` that another module imports (`src/__tests__/utils.ts`) as static test files. The runner did not list them, so each run was `partial` with `test-files-not-discovered`, also when every real test ran. Now the plan leaves these files out, and such a run is `complete`. A source file that only a bench file reaches has no coverage. (Closes [#4245](https://github.com/fallow-rs/fallow/issues/4245))

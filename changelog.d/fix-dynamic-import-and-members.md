@@ -1,5 +1,0 @@
-### Fixed
-
-- **`fallow dead-code` matches a dynamic import pattern with a literal suffix and no extension.** An import such as `` import(`./icons/__${name}__`) `` now loads `icons/__solid__.ts` and the other files whose name ends with the suffix and a module extension. Before, these files and their exports showed as unused. A bundler adds the extension to the request, so fallow now does the same.
-- **`fallow dead-code` follows a dynamic import of a `const` string.** In `const name = 'some-package'; await import(name)`, the import now uses `some-package`, also when the `const` is in a function. Before, the package showed as an unused dependency. A parameter, a `let`, or a `catch` binding with the same name still gives no specifier.
-- **`fallow dead-code` follows a method chain through methods that return `this`.** In `this.setId(id).setLabel(label)`, a method with the return type `this` gives an instance of its class, so `setLabel` now counts as used. Before, each member after the first call in the chain showed as unused.
