@@ -249,7 +249,8 @@ pub(crate) fn note_if_missing<T>(path: &Path, result: &io::Result<T>) {
 ///
 /// The resolver file system on Windows converts a Win32 error through an
 /// HRESULT. Its raw OS error is then `0x8007_0002`, not `2`, and `kind()` is
-/// not `NotFound`. Without this check, no resolver probe on Windows is a miss.
+/// not `NotFound`. Without this check, no `metadata` or `symlink_metadata`
+/// probe of the resolver on Windows is a miss.
 fn is_not_found(error: &io::Error) -> bool {
     if error.kind() == io::ErrorKind::NotFound {
         return true;
