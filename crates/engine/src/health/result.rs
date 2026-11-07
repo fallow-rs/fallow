@@ -489,10 +489,10 @@ fn append_css_duplicate_block_findings(
     append_cva_duplicate_variant_block_findings(findings, ctx);
 }
 
-/// Audit data of a duplicate block finding. The finding names one occurrence,
-/// and the changed-file scope picks which one. The sorted distinct paths of
-/// all occurrences give the group an identity that the scope and the line numbers
-/// do not change.
+/// Audit data of a duplicate block finding. The finding names one occurrence.
+/// For a declaration block group, the changed-file scope picks which one. The
+/// sorted distinct paths of all occurrences give each group an identity that
+/// the scope and the line numbers do not change.
 fn duplicate_block_internal(
     occurrences: &[fallow_output::CssBlockOccurrence],
 ) -> fallow_output::StylingFindingInternal {
