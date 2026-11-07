@@ -94,8 +94,9 @@ impl LegacyGlobNarrowing {
         format!(
             "fallow: {} glob \"{}\" matches {count} fewer {noun} than before fallow 3.34.0. A \
              single \"*\" or \"?\" now matches in one folder level only. {lost}: {files}. To \
-             match one level only, write the names in place of \"*\" or \"?\", for example \
-             \"{{name1,name2}}\". To match nested folders again, use \"{}\".",
+             keep the one-level match and stop this warning, write the names in place of \"*\" \
+             or \"?\", for example \"{{name1,name2}}\". To match nested folders again, use \
+             \"{}\".",
             self.field, self.pattern, self.suggestion
         )
     }
@@ -470,9 +471,9 @@ mod tests {
             found[0].message(),
             "fallow: health.ignore glob \"*.test.ts\" matches 2 fewer files than before fallow \
              3.34.0. A single \"*\" or \"?\" now matches in one folder level only. These files no \
-             longer match: src/b.test.ts, src/deep/c.test.ts. To match one level only, write the \
-             names in place of \"*\" or \"?\", for example \"{name1,name2}\". To match nested \
-             folders again, use \"**/*.test.ts\"."
+             longer match: src/b.test.ts, src/deep/c.test.ts. To keep the one-level match and \
+             stop this warning, write the names in place of \"*\" or \"?\", for example \
+             \"{name1,name2}\". To match nested folders again, use \"**/*.test.ts\"."
         );
     }
 
@@ -490,9 +491,9 @@ mod tests {
             found[0].message(),
             "fallow: entry glob \"src/*.ts\" matches 5 fewer files than before fallow 3.34.0. A \
              single \"*\" or \"?\" now matches in one folder level only. These files no longer \
-             match: src/a/a.ts, src/b/b.ts, src/c/c.ts, and 2 more. To match one level only, write \
-             the names in place of \"*\" or \"?\", for example \"{name1,name2}\". To match nested \
-             folders again, use \"src/**/*.ts\"."
+             match: src/a/a.ts, src/b/b.ts, src/c/c.ts, and 2 more. To keep the one-level match \
+             and stop this warning, write the names in place of \"*\" or \"?\", for example \
+             \"{name1,name2}\". To match nested folders again, use \"src/**/*.ts\"."
         );
     }
 
@@ -508,7 +509,7 @@ mod tests {
         assert!(
             found[0]
                 .message()
-                .contains("This file no longer matches: src/a/a.ts. To match")
+                .contains("This file no longer matches: src/a/a.ts. To keep")
         );
     }
 

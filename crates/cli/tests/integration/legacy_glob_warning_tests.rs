@@ -85,9 +85,9 @@ fn ignore_patterns_warns_with_the_globstar_rewrite() {
         &output,
         "fallow: ignorePatterns glob \"src/generated/*\" matches 1 fewer file than before fallow \
          3.34.0. A single \"*\" or \"?\" now matches in one folder level only. This file no \
-         longer matches: src/generated/nested/one.ts. To match one level only, write the names \
-         in place of \"*\" or \"?\", for example \"{name1,name2}\". To match nested folders \
-         again, use \"src/generated/**\".",
+         longer matches: src/generated/nested/one.ts. To keep the one-level match and stop this \
+         warning, write the names in place of \"*\" or \"?\", for example \"{name1,name2}\". To \
+         match nested folders again, use \"src/generated/**\".",
     );
 }
 
@@ -120,8 +120,8 @@ fn health_ignore_warns() {
     );
     assert_warning(
         &output,
-        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts. To match one \
-         level only",
+        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts. To keep the \
+         one-level match and stop this warning",
     );
     assert_warning(
         &output,
