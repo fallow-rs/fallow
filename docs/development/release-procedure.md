@@ -443,6 +443,15 @@ invariants in this file.
     is the only job that waits for the npm approval. If `Publish to npm`
     fails, the VSIX publishers do not start. Rerun the failed jobs.
 
+    The job stages the `fallow` root only after every other package is public,
+    because the root pins them. If one package fails, the job exits without a stage.
+    Sigstore sometimes answers a provenance entry with
+    `TLOG_CREATE_ENTRY_ERROR` and `(409)`, and npm then does not publish the
+    package. The job retries that error twice, after 20 and 40 seconds. Before
+    each retry it checks if the version is already on npm. Other errors do not
+    retry. If the retries fail, rerun the failed job. The rerun skips every
+    package that is already public.
+
     The workflow stages the `fallow` npm root instead of publishing it. Its
     trusted publisher grants stage publish only, so the version becomes
     installable only when the maintainer approves the stage with npm 2FA. The
