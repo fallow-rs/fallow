@@ -447,9 +447,13 @@ mod tests {
             .output()
             .expect("run Windows Job Object helper");
 
+        // libtest reports a helper panic on stdout, not stderr, so a
+        // stderr-only message prints nothing for the failure that matters.
         assert!(
             output.status.success(),
-            "helper failed: {}",
+            "helper failed with {}: {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(
@@ -492,7 +496,11 @@ mod tests {
         // scripts ping for about 29 seconds, so a bound well below that still
         // proves that termination, not a natural exit, ended the wait.
         const TERMINATION_BOUND: Duration = Duration::from_secs(10);
-        const STARTUP_BOUND: Duration = Duration::from_secs(10);
+        // The nested cmd.exe chain only writes `descendant-ready` once both
+        // shells are up, which a loaded runner can stretch past ten seconds
+        // (#4326); the bound only has to outlast that startup cost, and the
+        // ping sleeps cap how long a wedged helper can hold the job.
+        const STARTUP_BOUND: Duration = Duration::from_secs(30);
 
         let mut command = Command::new("cmd.exe");
         command
