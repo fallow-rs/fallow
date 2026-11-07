@@ -17,6 +17,11 @@ pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHash
 /// `styling:<code>:<sub kind>:<path>:<value>`, plus `:<selector hash>` when
 /// the finding has the selector of its rule.
 ///
+/// A duplicate block finding names one occurrence of its group, and the
+/// changed-file scope picks which one (issue #4344). Its `<path>` is the
+/// sorted, `|`-separated list of the distinct paths of all occurrences
+/// instead. The rename remap of the base keys reads that list form.
+///
 /// Line numbers are excluded, so a finding survives unrelated edits above it
 /// (issue #3956). A selector-complexity value is only a metric, such as
 /// `specificity 1-2-0`. The selector hash keeps a new rule with an equal
@@ -24,7 +29,17 @@ pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHash
 /// because a selector can contain the `:` and `|` key separators. Use
 /// [`styling_ledger_keys`] to tell repeated findings apart.
 pub fn styling_finding_key(finding: &fallow_output::StylingFinding, root: &Path) -> String {
-    let path = relative_key_path(Path::new(&finding.path), root);
+    let path = if finding.internal.group_paths.is_empty() {
+        relative_key_path(Path::new(&finding.path), root)
+    } else {
+        finding
+            .internal
+            .group_paths
+            .iter()
+            .map(|path| relative_key_path(Path::new(path), root))
+            .collect::<Vec<_>>()
+            .join("|")
+    };
     let base = format!(
         "styling:{}:{}:{path}:{}",
         finding.code, finding.sub_kind, finding.value
@@ -189,6 +204,28 @@ mod tests {
 
         assert_eq!(head_keys[1], base_keys[0]);
         assert_eq!(head_keys[0], format!("{}#2", base_keys[0]));
+    }
+
+    /// Issue #4344: the changed-file scope decides which occurrence a
+    /// duplicate block finding names. The key of the group stays the same.
+    /// A group with another file set gets another key.
+    #[test]
+    fn duplicate_block_key_ignores_the_named_occurrence() {
+        let root = PathBuf::from("/project");
+        let block = |named: &str, paths: &[&str]| {
+            let mut finding = styling_finding(named, 10, "4-declaration block repeated 2 times");
+            finding.code = "css-duplicate-block".to_string();
+            finding.sub_kind = "duplicate-declaration-block".to_string();
+            finding.internal.group_paths = paths.iter().map(ToString::to_string).collect();
+            finding
+        };
+
+        let base = styling_finding_key(&block("src/A.vue", &["src/A.vue", "src/B.vue"]), &root);
+        let scoped = styling_finding_key(&block("src/B.vue", &["src/A.vue", "src/B.vue"]), &root);
+        let other = styling_finding_key(&block("src/A.vue", &["src/A.vue", "src/C.vue"]), &root);
+
+        assert_eq!(base, scoped);
+        assert_ne!(base, other);
     }
 
     /// Issue #3956: the rule selector separates findings with an equal
