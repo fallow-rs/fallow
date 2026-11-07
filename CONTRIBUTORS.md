@@ -152,6 +152,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [ReallyFloppyPenguin](https://github.com/ReallyFloppyPenguin)
 - [Rednas83](https://github.com/Rednas83)
 - [revazi](https://github.com/revazi)
+- [rezamuliawijaya](https://github.com/rezamuliawijaya)
 - [riker-wamf](https://github.com/riker-wamf)
 - [robbtraister](https://github.com/robbtraister)
 - [robinvdvleuten](https://github.com/robinvdvleuten)
