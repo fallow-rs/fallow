@@ -243,27 +243,73 @@ fn trimmed_start_offset(source: &str, start: usize, end: usize) -> usize {
     start + (raw.len() - raw.trim_start().len())
 }
 
+/// Replace each `//` line comment with spaces, so offsets survive. A `//`
+/// inside parentheses, such as `url(//host/x)`, or inside a quoted string, or
+/// after a `:` (a protocol like `https://`), is part of the value, not a
+/// comment -- mirroring the keyframes scan's treatment from #4262. Without
+/// this, a `.scss` file whose only rule carries an absolute `url()` lowered
+/// to nothing and dropped out of `css_analytics` entirely (#4324).
 fn strip_preprocessor_comments(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let bytes = source.as_bytes();
-    let mut cursor = 0;
+    let mut bytes = source.as_bytes().to_vec();
+    let mut depth = 0usize;
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-            out.push_str(&source[cursor..i]);
-            out.push_str("  ");
-            i += 2;
-            while i < bytes.len() && bytes[i] != b'\n' {
-                out.push(' ');
-                i += 1;
+        let end = match bytes[i] {
+            quote @ (b'"' | b'\'') => {
+                i = skip_scss_string(&bytes, i + 1, quote);
+                continue;
             }
-            cursor = i;
-            continue;
+            b'/' if bytes.get(i + 1) == Some(&b'/')
+                && depth == 0
+                && (i == 0 || bytes[i - 1] != b':') =>
+            {
+                bytes[i..]
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .map_or(bytes.len(), |offset| i + offset)
+            }
+            b'(' => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+                continue;
+            }
+            b'{' | b'}' | b';' => {
+                depth = 0;
+                i += 1;
+                continue;
+            }
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        for byte in &mut bytes[i..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
         }
-        i += 1;
+        i = end;
     }
-    out.push_str(&source[cursor..]);
-    out
+    // Each blanked range starts and ends on an ASCII byte, so the bytes stay
+    // valid UTF-8.
+    String::from_utf8(bytes).unwrap_or_else(|_| source.to_owned())
+}
+
+/// Skip over a quoted string starting just after the opening quote.
+fn skip_scss_string(bytes: &[u8], mut i: usize, quote: u8) -> usize {
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b if b == quote => return i + 1,
+            _ => i += 1,
+        }
+    }
+    bytes.len()
 }
 
 fn render_preprocessor_children<'a>(
@@ -839,6 +885,31 @@ mod tests {
             .into_iter()
             .next()
             .unwrap()
+    }
+
+    #[test]
+    fn absolute_url_in_a_value_survives_the_line_comment_strip() {
+        // gh-4324: a `//` inside url() is part of the value, not an scss line
+        // comment. Every form of the absolute URL below used to blank the
+        // declaration (or the whole file's lowering) away.
+        for rule in [
+            ".x { background: url(//cdn.example.com/a.png); }",
+            ".x { background: url(https://cdn.example.com/a.png); }",
+            ".x { background: url(\"//cdn.example.com/a.png\"); }",
+        ] {
+            let source = format!("{rule}\n.y {{ color: red; }}\n");
+            let layer = main_layer(&source);
+            assert!(layer.contains("cdn.example.com"), "{rule} -> {layer}");
+            assert!(layer.contains("color: red"), "{rule} -> {layer}");
+        }
+    }
+
+    #[test]
+    fn real_line_comments_are_still_stripped() {
+        let layer = main_layer("// noted\n.x {\n  // inline note\n  color: red;\n}\n");
+        assert!(layer.contains("color: red"), "{layer}");
+        assert!(!layer.contains("noted"), "{layer}");
+        assert!(!layer.contains("inline note"), "{layer}");
     }
 
     fn line_of(output: &str, needle: &str) -> usize {
