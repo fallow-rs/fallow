@@ -9,6 +9,20 @@ export const LOOP_TIMEOUT_NAME = "FallowMutationLoopTimeout";
 // A clock read on each evaluation would slow a hot loop that ends.
 const LOOP_CHECK_MASK = 0x7f;
 
+// The real clock, read when the module loads. A test with fake timers can
+// replace `performance` or its `now` method, and fake time must not reach
+// the loop budget. The setup file loads this module before any test code.
+const realNow = performance.now.bind(performance);
+
+/** Gives the real time in ms, or null when the clock fails. */
+const readClock = () => {
+  try {
+    return realNow();
+  } catch {
+    return null;
+  }
+};
+
 const loopTimeout = (budgetMs) => {
   const error = new Error(
     `Test timed out in ${budgetMs}ms: the active mutant still ran after the loop budget`,
@@ -42,7 +56,8 @@ const createRuntime = () => {
     state.activeHits += 1;
     if ((state.activeHits & LOOP_CHECK_MASK) !== 0) return;
     if (state.loopBudget === null || state.running === 0) return;
-    if (state.loopSpent + performance.now() - state.testStarted <= state.loopBudget) return;
+    const now = readClock();
+    if (now === null || state.loopSpent + now - state.testStarted <= state.loopBudget) return;
     throw loopTimeout(state.loopBudget);
   };
   // `a` and `c` run inside user code. They read no property of `id`, and a
@@ -83,13 +98,18 @@ const createRuntime = () => {
     // A start does not clear `hits`: a concurrent test can still own them.
     // Each finish takes the hits so far, so no hit is lost.
     startTest: () => {
-      if (state.running === 0) state.testStarted = performance.now();
+      if (state.running === 0) {
+        state.testStarted = readClock() ?? 0;
+        state.activeHits = 0;
+      }
       state.running += 1;
     },
     finishTest: () => {
       const result = { hits: [...state.hits], staticHits: [...state.staticHits] };
       state.running = Math.max(0, state.running - 1);
-      if (state.running === 0) state.loopSpent += performance.now() - state.testStarted;
+      if (state.running === 0) {
+        state.loopSpent += Math.max(0, (readClock() ?? state.testStarted) - state.testStarted);
+      }
       state.hits = new Set();
       state.staticHits = new Set();
       return result;

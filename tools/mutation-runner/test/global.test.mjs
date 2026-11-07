@@ -118,6 +118,66 @@ test("the loop budget counts the time of the earlier tests of the file", () => {
   control.setLoopBudget(null);
 });
 
+test("a replaced performance clock neither throws from a() nor moves the loop budget", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  const original = Object.getOwnPropertyDescriptor(globalThis, "performance");
+  const evaluate = () => {
+    for (let i = 0; i < 1_000; i += 1) runtime.a("m1");
+  };
+  control.startFile();
+  control.setActive("m1");
+  control.setLoopBudget(1_000);
+  control.startTest();
+  try {
+    Object.defineProperty(globalThis, "performance", {
+      configurable: true,
+      value: { now: () => 1e12 },
+    });
+    assert.doesNotThrow(evaluate, "fake time moved the loop budget");
+    Object.defineProperty(globalThis, "performance", {
+      configurable: true,
+      value: {
+        now() {
+          throw new Error("stubbed clock");
+        },
+      },
+    });
+    assert.doesNotThrow(evaluate, "a stubbed clock error reached the caller of a()");
+  } finally {
+    Object.defineProperty(globalThis, "performance", original);
+    control.finishTest();
+    control.setActive(null);
+    control.setLoopBudget(null);
+  }
+});
+
+test("each test starts its own count of active evaluations", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  const evaluate = () => {
+    for (let i = 0; i < 100; i += 1) runtime.a("m1");
+  };
+  control.startFile();
+  control.setActive("m1");
+  control.setLoopBudget(1);
+  control.startTest();
+  evaluate();
+  control.finishTest();
+  control.startTest();
+  const until = performance.now() + 5;
+  while (performance.now() < until) {
+    // Spend test time with no evaluation of the active mutant.
+  }
+  try {
+    assert.doesNotThrow(evaluate, "the evaluations of the earlier test started a check");
+  } finally {
+    control.finishTest();
+    control.setActive(null);
+    control.setLoopBudget(null);
+  }
+});
+
 test("a() and c() never throw", () => {
   installFallowMutation();
   const runtime = globalThis.__fallowMutation;

@@ -231,6 +231,18 @@ for (const { packageName, version } of VITEST_MAJORS) {
       },
     );
 
+    test("fake time in a test does not reach the loop budget", async () => {
+      const result = await request({
+        type: "run",
+        mutant_id: "m12",
+        test_ids: [id("spins on fake time", FAULTS)],
+        timeout_ms: 60_000,
+        loop_budget_ms: 1_000,
+        bail: true,
+      });
+      assert.equal(result.status, "survived", JSON.stringify(result));
+    });
+
     test("a run after a short timeout_ms uses the next timeout_ms", async () => {
       const result = await run("m9", [id("pauses", FAULTS)]);
       assert.equal(result.status, "survived", JSON.stringify(result));

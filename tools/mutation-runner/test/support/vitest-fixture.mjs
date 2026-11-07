@@ -66,7 +66,7 @@ export function shout(text: string): string {
 
 export function spin(limit: number): number {
   let count = 0;
-  while (count < limit) {
+  while ((__fallow_m_a("m12") ? (count < limit) : (__fallow_m_c("m12"), (count < limit)))) {
     count = (__fallow_m_a("m11") ? (count) : (__fallow_m_c("m11"), (count + 1)));
   }
   return count;

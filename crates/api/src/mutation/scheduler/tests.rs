@@ -2926,6 +2926,11 @@ fn a_survivor_retry_runs_each_test_of_its_files_and_a_kill_by_a_new_test_is_kill
         "the first run stays narrow"
     );
     assert_eq!(runs[1].1.test_ids, vec![tid("t1"), tid("t2")]);
+    assert_eq!(
+        runs[1].1.loop_budget_ms,
+        Some(runs[1].1.timeout_ms - 5000 + 500),
+        "the loop budget of the retry follows the timeout of the retry tests"
+    );
     let controls = spawner.controls();
     assert_eq!(
         controls.last().map(|(_, run)| run.test_ids.clone()),

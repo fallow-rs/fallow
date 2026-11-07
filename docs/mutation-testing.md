@@ -602,6 +602,44 @@ The cache key and the journal header include the targets. A normal or full
 matrix result never supplies target evidence, and `--resume` with other
 targets is a mismatch. The order of the targets does not matter.
 
+## Timeouts
+
+Each mutant run has two time limits:
+
+- `timeout_ms` is `1.5` times the dry-run time of the covering tests, plus
+  5 seconds. The runner gets it as the test timeout. The watchdog of the
+  companion waits `timeout_ms`, the setup time of the covering test files,
+  and 2 seconds. When the watchdog fires, Fallow stops the companion, starts
+  a new one, and dry-runs again.
+- `loop_budget_ms` is `1.5` times the same dry-run time, plus 500 ms. It is
+  part of the `run` request. Only the Vitest adapter checks it. The
+  `node:test` and `bun test` adapters ignore it.
+
+A synchronous endless loop blocks the test worker, so the test timeout of
+the runner cannot stop it. When the loop runs through the active mutant
+inside a test, the mutant switch counts the evaluations. At every 128th
+evaluation, it compares the test time of the file so far with
+`loop_budget_ms`. The test time is the time between `beforeEach` and
+`afterEach` of the tests of the run. When the time is more, the switch
+throws an error, and the adapter reports the test as a `timeout`. The
+companion stays alive, so the next mutant needs no new companion and no new
+dry run.
+
+- The switch reads the real clock. Fake timers in a test do not move it.
+- A loop that does not run through the active mutant still waits for the
+  watchdog. So does a loop outside a test: at module scope (each static
+  mutant), or in a `beforeAll` or `afterAll` hook.
+- A `catch` block of the project can catch the error. The loop then
+  continues, the switch throws again after 128 more evaluations, and an
+  endless loop that catches each error waits for the watchdog.
+- The retry of a timeout doubles both limits. The retry of a survivor
+  computes both limits from the time of its retry tests.
+
+A mutant that only makes a test slow can also pass `loop_budget_ms`, for
+example under host load. Its status is then `timeout` in place of `killed`
+or `survived`. A `survived` mutant that becomes `timeout` raises the score.
+The retry with the doubled limits lowers this risk.
+
 ## Retries
 
 A `survived` or `timeout` result gets one retry in a new companion. Host
@@ -649,8 +687,9 @@ tests detect the mutant.
   first run. It names the tests that reached the mutant and need an
   assertion. A kill by a test of the retry can thus name a `killed_by` test
   that is not in `covering_tests`.
-- The retry of a `timeout` waits twice as long. Host load often lasts into
-  the retry, and a real infinite loop still times out.
+- The retry of a `timeout` waits twice as long, and it doubles
+  `loop_budget_ms`. Host load often lasts into the retry, and a real
+  infinite loop still times out.
 - A `killed` result gets no retry. In repeated runs under host load, no
   kill became a survivor, and a retry of each kill doubles the run time.
 - A retry starts only before the `--time-budget` deadline. A mutant that
@@ -689,7 +728,9 @@ tests detect the mutant.
   first line of the reason. A mutant without a retry, and a `cached`
   mutant, have no `attempts`. No fingerprint or baseline comparison uses
   the field.
-- A retry of a real infinite loop costs two more timeout windows.
+- A retry of a real infinite loop through the active mutant costs twice
+  `loop_budget_ms`. A retry of another infinite loop costs two more
+  timeout windows.
 - A `runtime_error` retry takes the mutant out of the score, also after a
   first `timeout`. The completion is then `partial` (`runtime-error`).
 - A `killed` result after a retry reports the duration of the retry. Each
