@@ -5,7 +5,7 @@
 //! `--save-baseline .fallow/dead-code.json`) cannot be committed, and a CI run
 //! on a fresh checkout does not find it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The directory that the warning recommends for committed baselines.
 const COMMITTED_BASELINE_DIR: &str = "fallow-baselines";
@@ -47,19 +47,12 @@ pub fn warn_if_in_cache_dir(baseline: &Path, cache_dir: &Path, root: &Path) {
     }
 }
 
-/// `path` relative to `root` with forward slashes when it is inside it, else
-/// the full path.
+/// `path` relative to `root` when it is inside it, else the full path.
 fn display_from(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root).map_or_else(
-        |_| path.display().to_string(),
-        |relative| {
-            relative
-                .components()
-                .map(|component| component.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/")
-        },
-    )
+    path.strip_prefix(root)
+        .map_or_else(|_| path.to_path_buf(), PathBuf::from)
+        .display()
+        .to_string()
 }
 
 #[cfg(test)]
