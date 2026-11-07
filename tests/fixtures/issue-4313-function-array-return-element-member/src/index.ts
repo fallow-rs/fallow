@@ -1,4 +1,5 @@
 import { Table } from "./table.js";
+import "./shadow.js";
 
 for (const table of all()) {
   table.setVip();

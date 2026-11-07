@@ -17975,3 +17975,80 @@ fn local_function_array_return_binds_element_class() {
         assert!(!has(member), "{member}: {:?}", info.member_accesses);
     }
 }
+
+/// Whether `info` credits `member` on `Table`.
+fn credits_table_member(info: &ModuleInfo, member: &str) -> bool {
+    info.member_accesses
+        .iter()
+        .any(|access| access.object == "Table" && access.member == member)
+}
+
+#[test]
+fn catch_parameter_hides_local_function_array_return() {
+    // Issue #4313: a catch parameter with the name of the function holds
+    // another value, so a call of it does not read the element class of the
+    // top-level `all(): Table[]`.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        export function all(): Table[] {
+            return [new Table()];
+        }
+
+        export function run() {
+            try {
+            } catch (all: any) {
+                all()[0].caught();
+                for (const item of all()) {
+                    item.caughtLoop();
+                }
+            }
+        }
+        ",
+    );
+
+    for member in ["caught", "caughtLoop"] {
+        assert!(
+            !credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn namespace_body_hides_local_function_array_return() {
+    // Issue #4313: a call in a namespace body can name a function of the
+    // namespace, so it does not read the element class of the top-level
+    // `all(): Table[]`.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        export function all(): Table[] {
+            return [new Table()];
+        }
+
+        export namespace Other {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            export const run = () => {
+                for (const item of all()) {
+                    item.namespaced();
+                }
+                all()[0].namespacedIndex();
+            };
+        }
+        ",
+    );
+
+    for member in ["namespaced", "namespacedIndex"] {
+        assert!(
+            !credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}

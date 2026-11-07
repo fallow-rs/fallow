@@ -94,9 +94,11 @@ impl<'a> ModuleInfoExtractor {
     /// array return type: `Table` for `all()` with `function all(): Table[]`.
     /// A loop over, an iteration callback on, an index into, and a local that
     /// holds such a call then read that class (issue #4313). The arguments do
-    /// not change the declared type. A nested declaration of the same name
-    /// hides the function, so it gives no class. A cast (`as`) can name
-    /// another type, so it gives no class.
+    /// not change the declared type. A nested declaration or a catch
+    /// parameter of the same name hides the function, so it gives no class.
+    /// A call in a namespace body can name a function of the namespace, so it
+    /// gives no class. A cast (`as`) can name another type, so it gives no
+    /// class.
     pub(super) fn local_call_array_element_type(&self, expr: &Expression<'_>) -> Option<String> {
         let call = match expr {
             Expression::ParenthesizedExpression(paren) => {
@@ -112,7 +114,12 @@ impl<'a> ModuleInfoExtractor {
             return None;
         };
         let name = callee.name.as_str();
-        if self.nested_scope_shadows(name) {
+        // `nested_declaration_stack` records neither a catch parameter nor a
+        // declaration in a namespace body, so both checks stay explicit.
+        if self.namespace_depth > 0
+            || self.is_catch_param_name(name)
+            || self.nested_scope_shadows(name)
+        {
             return None;
         }
         self.local_function_array_return_types.get(name).cloned()

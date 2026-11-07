@@ -126,8 +126,9 @@ impl ModuleInfoExtractor {
     ///
     /// The walk passes unexported local base classes. A class on the way that
     /// declares the member itself stops the walk, because its own declaration
-    /// overrides the base. The walk ends at a base that the file imports or
-    /// exports. A namespace base (`ns.Base`) gives no access.
+    /// overrides the base. The walk ends at the first base that is not an
+    /// unexported local class: an exported local class, an import, or any
+    /// other name. A namespace base (`ns.Base`) gives no access.
     fn record_unexported_subclass_this_accesses(&mut self) {
         if self.local_class_exports.is_empty() {
             return;
@@ -165,9 +166,9 @@ impl ModuleInfoExtractor {
         self.member_accesses.extend(accesses);
     }
 
-    /// The imported or exported base class of `class_name` whose `member`
-    /// the class inherits, or `None` when a local class on the way declares
-    /// `member`.
+    /// The first base of `class_name` that is not an unexported local class,
+    /// from which the class inherits `member`, or `None` when a local class
+    /// on the way declares `member`.
     fn member_declaring_base(
         &self,
         class_name: &str,
