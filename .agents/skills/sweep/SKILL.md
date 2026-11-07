@@ -20,9 +20,13 @@ at the end of every objective, without a prompt from the maintainer.
    `CONTRIBUTING.md`. Add an improvement idea with no known need to the
    "Possible follow-ups" section of the PR body, also after the merge, and
    open no issue for it. Track each item of needed work:
-   - in a `fallow-rs` repository, open a GitHub issue. When it needs a
-     maintainer decision, state the question and a recommended answer in
-     the issue;
+   - in a `fallow-rs` repository, open a GitHub issue only for work that is
+     known to be needed. Write it for the maintainer as the reader, not about
+     them. Put an open decision for the maintainer in the final report, with
+     a recommended answer, and open no issue for it;
+   - do not propose to move release-only checks (the full Windows suite,
+     arm64, the drift harness) into pull-request CI. They run only in
+     release validation on purpose;
    - before you create a public issue, check the body against the trust
      boundary in `CLAUDE.md`. Put private context in the private repository;
    - for a repository outside `fallow-rs`, write a draft issue in the final
