@@ -180,6 +180,10 @@ jobs:
               - 'crates/engine/src/base_worktree_orphans.rs'
               - 'crates/engine/src/shell_quote.rs'
               - 'crates/engine/src/write_guard.rs'
+              - 'crates/engine/src/baseline_location.rs'
+              - 'crates/cli/tests/integration/baseline_cache_dir_tests.rs'
+              - 'crates/graph/src/missed_probes.rs'
+              - 'crates/graph/src/read_trace.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/engine/src/health/scoring.rs'
               - 'crates/engine/src/health/scoring_tests.rs'
@@ -795,6 +799,7 @@ jobs:
       # separate environment or features, so one build and one run give the
       # same tests. Each filter group names the old call it replaces:
       #   - changed-file, churn, and repository reference path handling
+      #   - baseline path display in the cache-directory warning
       #   - write confinement and the null device
       #   - report files sent to the null device
       #   - source and manifest symlink containment
@@ -805,7 +810,8 @@ jobs:
       #   - config and workspace diagnostic path handling (`--lib` only)
       # The groups for fallow-graph, fallow-api and fallow-multicall run the
       # tests that hold Windows-only code: symlinked package sources, drive
-      # prefixes, verbatim paths and `.exe` binary names.
+      # prefixes, verbatim paths, `.exe` binary names and the missed probes
+      # of the resolver file system.
       # fallow-cli is in the package list for the null-device exit code tests.
       - name: Test Windows path and subprocess handling
         shell: bash
@@ -815,13 +821,16 @@ jobs:
           -p fallow-process -p fallow-cli -p fallow-config -p fallow-types
           -p fallow-graph -p fallow-api -p fallow-multicall
           -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests)))
+          | (package(fallow-engine) & test(baseline_location::tests))
           | (binary_id(fallow-cli::integration) & test(/^exit_code_tests::.*null_device/))
+          | (binary_id(fallow-cli::integration) & test(/^baseline_cache_dir_tests::/))
           | (package(fallow-core) & test(symlink))
           | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
           | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))
           | (package(fallow-process) & test(windows_job_object_terminates_descendants_without_taskkill_lookup))
           | ((package(fallow-config) | package(fallow-types)) & kind(lib))
           | (package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety)))
+          | (package(fallow-graph) & test(missed_probes::tests))
           | (package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file)))
           | (binary_id(fallow-multicall::integration) & test(/^parity::/))'
       - name: Upload test report

@@ -240,12 +240,38 @@ pub(crate) fn note(path: &Path) {
 
 /// Report `path` when `result` failed because the path does not exist.
 pub(crate) fn note_if_missing<T>(path: &Path, result: &io::Result<T>) {
-    if result
-        .as_ref()
-        .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
-    {
+    if result.as_ref().is_err_and(is_not_found) {
         note(path);
     }
+}
+
+/// True when `error` says that the path does not exist.
+///
+/// The resolver file system on Windows converts a Win32 error through an
+/// HRESULT. Its raw OS error is then `0x8007_0002`, not `2`, and `kind()` is
+/// not `NotFound`. Without this check, no resolver probe on Windows is a miss.
+fn is_not_found(error: &io::Error) -> bool {
+    if error.kind() == io::ErrorKind::NotFound {
+        return true;
+    }
+    if !cfg!(windows) {
+        return false;
+    }
+    error
+        .raw_os_error()
+        .and_then(win32_code_of_hresult)
+        .is_some_and(|code| io::Error::from_raw_os_error(code).kind() == io::ErrorKind::NotFound)
+}
+
+/// The Win32 error code inside an HRESULT of `FACILITY_WIN32`.
+fn win32_code_of_hresult(raw: i32) -> Option<i32> {
+    const FACILITY_WIN32_MASK: u32 = 0xFFFF_0000;
+    const FACILITY_WIN32: u32 = 0x8007_0000;
+    let bits = u32::from_ne_bytes(raw.to_ne_bytes());
+    if bits & FACILITY_WIN32_MASK != FACILITY_WIN32 {
+        return None;
+    }
+    u16::try_from(bits & 0xFFFF).ok().map(i32::from)
 }
 
 /// Report a read of `path`: a missing path as a missed probe, and a read
@@ -413,6 +439,51 @@ mod tests {
         note_if_missing(&below_file, &std::fs::metadata(&below_file));
         let absent = root.join("absent.ts");
         note_if_missing(&absent, &std::fs::metadata(&absent));
+        let missed: Vec<String> = recorder.finish().missed.paths().collect();
+        // Windows reports a path below a file as `ERROR_PATH_NOT_FOUND`, a
+        // `NotFound` error, where Unix reports `ENOTDIR`.
+        if cfg!(windows) {
+            assert_eq!(
+                missed,
+                vec!["absent.ts".to_string(), "file.ts/child.ts".to_string()]
+            );
+        } else {
+            assert_eq!(missed, vec!["absent.ts".to_string()]);
+        }
+    }
+
+    #[test]
+    fn an_hresult_of_facility_win32_gives_its_win32_code() {
+        let hresult = |bits: u32| i32::from_ne_bytes(bits.to_ne_bytes());
+        assert_eq!(win32_code_of_hresult(hresult(0x8007_0002)), Some(2));
+        assert_eq!(win32_code_of_hresult(hresult(0x8007_0003)), Some(3));
+        assert_eq!(win32_code_of_hresult(hresult(0x8004_0002)), None);
+        assert_eq!(win32_code_of_hresult(2), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_win32_not_found_hresult_is_a_miss() {
+        let not_found =
+            io::Error::from_raw_os_error(i32::from_ne_bytes(0x8007_0002_u32.to_ne_bytes()));
+        assert_ne!(not_found.kind(), io::ErrorKind::NotFound);
+        assert!(is_not_found(&not_found));
+        let denied =
+            io::Error::from_raw_os_error(i32::from_ne_bytes(0x8007_0005_u32.to_ne_bytes()));
+        assert!(!is_not_found(&denied));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_resolver_probe_of_a_missing_path_is_a_miss() {
+        use oxc_resolver::FileSystem as _;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let recorder = MissRecorder::start(root);
+        let fs = crate::read_trace::ProbeFs::new(false);
+        let absent = root.join("absent.ts");
+        assert!(fs.metadata(&absent).is_err());
         let missed: Vec<String> = recorder.finish().missed.paths().collect();
         assert_eq!(missed, vec!["absent.ts".to_string()]);
     }
