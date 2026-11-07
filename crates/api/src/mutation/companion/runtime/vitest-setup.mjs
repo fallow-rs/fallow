@@ -4,6 +4,7 @@ import { afterEach, beforeEach, inject } from "vitest";
 import { installFallowMutation } from "./global.mjs";
 
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
+const LOOP_BUDGET_KEY = "fallowLoopBudget";
 const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const REQUIRE_HOOK = Symbol.for("fallow.mutation.vitestRequireHook");
@@ -118,6 +119,7 @@ shareWithChildProcesses(requireHook.hooksReady, activeMutant());
 beforeEach(() => {
   const active = activeMutant();
   mutation.setActive(active);
+  mutation.setLoopBudget(inject(LOOP_BUDGET_KEY));
   shareWithChildProcesses(requireHook.hooksReady, active);
   mutation.startTest();
 });

@@ -207,6 +207,30 @@ for (const { packageName, version } of VITEST_MAJORS) {
       assert.ok(performance.now() - started < 10_000, "the run waited for the project timeout");
     });
 
+    test(
+      "an endless loop through the active mutant times out at loop_budget_ms in the same companion",
+      { timeout: 20_000 },
+      async () => {
+        const started = performance.now();
+        const result = await request({
+          type: "run",
+          mutant_id: "m11",
+          test_ids: [id("spins", FAULTS)],
+          timeout_ms: 60_000,
+          loop_budget_ms: 200,
+          bail: true,
+        });
+        assert.equal(result.status, "timeout", JSON.stringify(result));
+        assert.equal(result.killed_by, null);
+        assert.deepEqual(result.tests.map(withoutMessage), [
+          { test_id: id("spins", FAULTS), status: "fail", failure_kind: "timeout" },
+        ]);
+        assert.ok(performance.now() - started < 10_000, "the run waited past the loop budget");
+        const control = await run(null, [id("spins", FAULTS)]);
+        assert.equal(control.status, "survived", JSON.stringify(control));
+      },
+    );
+
     test("a run after a short timeout_ms uses the next timeout_ms", async () => {
       const result = await run("m9", [id("pauses", FAULTS)]);
       assert.equal(result.status, "survived", JSON.stringify(result));

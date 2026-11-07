@@ -28,9 +28,11 @@ pub(super) mod control;
 mod dry_facts;
 mod retry_set;
 pub mod targets;
+mod window;
 use classification::{attempt_record, classify, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run};
 use targets::{config_targets, job_targets};
+use window::{loop_budget_ms, scaled_ms, timeout_ms};
 mod stored;
 
 pub use stored::{CachedResult, OutcomeJournal, ResultLookup};
@@ -44,10 +46,6 @@ use control::{
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
 const WATCHDOG_GRACE_MS: u64 = 2000;
-/// The fixed part of `timeout_ms` (section 8, the Stryker default).
-const TIMEOUT_BASE_MS: u64 = 5000;
-/// The factor on the covering-test duration (section 8, the Stryker default).
-const TIMEOUT_FACTOR: f64 = 1.5;
 /// The factor on the first dry-run time, for each worker, in the dry-run
 /// timeout of a respawned companion.
 const RESPAWN_DRY_RUN_FACTOR: u32 = 2;
@@ -299,6 +297,10 @@ struct Job {
     /// outside target mode.
     targets: Vec<String>,
     timeout_ms: u64,
+    /// The test time after which the companion ends a test that still runs
+    /// the active mutant: `1.5 *` the covering-test time plus
+    /// [`window::LOOP_BUDGET_BASE_MS`].
+    loop_budget_ms: u64,
     /// `1.5 *` the setup time of the covering test files, rounded up. Only
     /// the watchdog waits for it (section 8).
     setup_ms: u64,
@@ -344,6 +346,7 @@ impl Job {
     /// and a real infinite loop still times out.
     fn with_doubled_timeout(mut self) -> Self {
         self.timeout_ms = self.timeout_ms.saturating_mul(2);
+        self.loop_budget_ms = self.loop_budget_ms.saturating_mul(2);
         self.setup_ms = self.setup_ms.saturating_mul(2);
         self
     }
@@ -354,6 +357,7 @@ impl Job {
     fn for_confirmation(mut self) -> Self {
         if let Some((tests, timeout_ms)) = self.confirmation.take() {
             self.first_tests = std::mem::replace(&mut self.tests, tests);
+            self.loop_budget_ms = loop_budget_ms(timeout_ms);
             self.timeout_ms = timeout_ms;
         }
         self
@@ -445,22 +449,6 @@ impl Attempt {
             settled: false,
         }
     }
-}
-
-/// `1.5 * duration`, rounded up. A duration that is not finite gives 0.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the duration sum is finite and non-negative"
-)]
-fn scaled_ms(duration_ms: f64) -> u64 {
-    let scaled = (duration_ms.max(0.0) * TIMEOUT_FACTOR).ceil();
-    if scaled.is_finite() { scaled as u64 } else { 0 }
-}
-
-/// `timeout_ms = 1.5 * covering-test duration + 5000`, rounded up.
-fn timeout_ms(total_duration_ms: f64) -> u64 {
-    scaled_ms(total_duration_ms) + TIMEOUT_BASE_MS
 }
 
 /// True for a kill with no executed test: an error outside each test is the
@@ -661,6 +649,7 @@ impl<'a> Worker<'a> {
             mutant_id: Some(job.id.clone()),
             test_ids: tests.clone(),
             timeout_ms: job.timeout_ms,
+            loop_budget_ms: Some(job.loop_budget_ms),
             bail,
         });
         let watchdog = Duration::from_millis(job.watchdog_ms());
@@ -948,6 +937,7 @@ impl<'a> Worker<'a> {
             mutant_id: None,
             test_ids: tests.clone(),
             timeout_ms,
+            loop_budget_ms: None,
             bail: false,
         });
         let watchdog = Duration::from_millis(timeout_ms + job.setup_ms + WATCHDOG_GRACE_MS);
@@ -1209,6 +1199,7 @@ fn build_jobs(
             tests,
             targets,
             timeout_ms: timeout_ms(total),
+            loop_budget_ms: loop_budget_ms(timeout_ms(total)),
             setup_ms,
             static_mutant,
             test_files,

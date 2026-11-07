@@ -113,6 +113,10 @@ export const validateRun = (request) => {
   expectRequest(isNonEmptyStringList(request.test_ids), "test_ids must be a non-empty list");
   expectRequest(isPositiveInteger(request.timeout_ms), "timeout_ms must be a positive integer");
   expectRequest(typeof request.bail === "boolean", "bail must be a boolean");
+  expectRequest(
+    request.loop_budget_ms === undefined || isPositiveInteger(request.loop_budget_ms),
+    "loop_budget_ms must be a positive integer when present",
+  );
 };
 
 /**

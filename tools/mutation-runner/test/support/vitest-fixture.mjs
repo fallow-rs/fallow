@@ -64,6 +64,14 @@ export function shout(text: string): string {
   return (__fallow_m_a("m6") ? (null) : (__fallow_m_c("m6"), (text))).toUpperCase();
 }
 
+export function spin(limit: number): number {
+  let count = 0;
+  while (count < limit) {
+    count = (__fallow_m_a("m11") ? (count) : (__fallow_m_c("m11"), (count + 1)));
+  }
+  return count;
+}
+
 export const READY = (__fallow_m_a("m7") ? ((() => { throw new Error("load failure"); })()) : (__fallow_m_c("m7"), (true)));
 `;
 

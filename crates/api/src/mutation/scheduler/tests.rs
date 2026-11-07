@@ -374,6 +374,7 @@ fn covering_tests_run_fastest_first_with_the_stryker_timeout() {
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].1.test_ids, vec![tid("t1"), tid("t2")]);
     assert_eq!(runs[0].1.timeout_ms, 5153, "ceil(1.5 * 102) + 5000");
+    assert_eq!(runs[0].1.loop_budget_ms, Some(653), "ceil(1.5 * 102) + 500");
     assert!(runs[0].1.bail);
 }
 
@@ -724,6 +725,11 @@ fn a_timeout_reruns_in_a_new_companion_and_a_survived_retry_is_flaky() {
         2 * runs[0].1.timeout_ms,
         "host load that slowed the first run can last, so the retry waits twice as long"
     );
+    assert_eq!(
+        runs[1].1.loop_budget_ms.map(|ms| ms / 2),
+        runs[0].1.loop_budget_ms,
+        "the loop budget of the retry is twice as long too"
+    );
 }
 
 /// Runs m1 with `first` in the first companion and `retry` in the next one.
@@ -863,6 +869,7 @@ fn a_kill_names_the_failure_kind_of_its_killing_test_or_an_error() {
         mutant_id: Some("m1".to_owned()),
         test_ids: vec![tid("t1")],
         timeout_ms: 1000,
+        loop_budget_ms: None,
         bail: true,
     };
     let Response::Run(mut result) = run_result(&request, RunStatus::Killed, Some(&tid("t1")))
@@ -2518,6 +2525,10 @@ fn a_control_run_waits_at_least_the_setup_timeout() {
         controls[0].1.timeout_ms, 60_000,
         "the setup timeout, not the 5003 ms of the mutant job"
     );
+    assert_eq!(
+        controls[0].1.loop_budget_ms, None,
+        "a control run has no active mutant, so it has no loop budget"
+    );
 }
 
 /// t1 hits m1. t2 and t3 hit m2 and m3.
@@ -2618,6 +2629,7 @@ fn load_kill_job() -> Job {
         tests: vec![tid("t1"), tid("t2")],
         targets: Vec::new(),
         timeout_ms: 6000,
+        loop_budget_ms: 1000,
         setup_ms: 0,
         static_mutant: false,
         test_files: vec!["test/a.test.ts".to_owned()],

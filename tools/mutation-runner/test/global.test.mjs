@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { installFallowMutation } from "../src/runtime/global.mjs";
+import { LOOP_TIMEOUT_NAME, installFallowMutation } from "../src/runtime/global.mjs";
 
 test("a() is true only for the active mutant", () => {
   const control = installFallowMutation();
@@ -55,6 +55,67 @@ test("a new test file starts with no running test", () => {
   control.startFile();
   runtime.c("m1");
   assert.deepEqual(control.finishTest(), { hits: [], staticHits: ["m1"] });
+});
+
+const spin = (runtime, id, until) => {
+  while (performance.now() < until) runtime.a(id);
+};
+
+test("a() throws a loop timeout when the active mutant runs past the loop budget in a test", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  control.startFile();
+  control.setActive("m1");
+  control.setLoopBudget(20);
+  control.startTest();
+  assert.throws(
+    () => spin(runtime, "m1", performance.now() + 5_000),
+    (error) => {
+      assert.equal(error.name, LOOP_TIMEOUT_NAME);
+      assert.match(error.message, /^Test timed out in 20ms/u);
+      return true;
+    },
+  );
+  control.finishTest();
+  control.setActive(null);
+  control.setLoopBudget(null);
+});
+
+test("a() never throws for an inactive mutant, outside a test, or without a loop budget", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  control.startFile();
+  control.setActive("m1");
+  control.setLoopBudget(5);
+  control.startTest();
+  assert.doesNotThrow(() => spin(runtime, "m2", performance.now() + 30));
+  control.finishTest();
+  assert.doesNotThrow(() => spin(runtime, "m1", performance.now() + 30));
+  control.setLoopBudget(null);
+  control.startTest();
+  assert.doesNotThrow(() => spin(runtime, "m1", performance.now() + 30));
+  control.finishTest();
+  control.setActive(null);
+});
+
+test("the loop budget counts the time of the earlier tests of the file", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  control.startFile();
+  control.setActive("m1");
+  control.setLoopBudget(40);
+  control.startTest();
+  spin(runtime, "m1", performance.now() + 30);
+  control.finishTest();
+  control.startTest();
+  assert.throws(() => spin(runtime, "m1", performance.now() + 5_000), { name: LOOP_TIMEOUT_NAME });
+  control.finishTest();
+  control.startFile();
+  control.startTest();
+  assert.doesNotThrow(() => spin(runtime, "m1", performance.now() + 20));
+  control.finishTest();
+  control.setActive(null);
+  control.setLoopBudget(null);
 });
 
 test("a() and c() never throw", () => {

@@ -10,4 +10,12 @@ export function shout(text: string): string {
   return text.toUpperCase();
 }
 
+export function spin(limit: number): number {
+  let count = 0;
+  while (count < limit) {
+    count = count + 1;
+  }
+  return count;
+}
+
 export const READY = true;
