@@ -1,0 +1,6 @@
+{
+  "name": "issue-4313-function-array-return-element-member",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

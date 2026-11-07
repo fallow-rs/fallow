@@ -17858,3 +17858,240 @@ fn unexported_local_base_class_folds_into_exported_subclass_heritage() {
     assert_eq!(heritage("Child").super_class.as_deref(), Some("Shared"));
     assert_eq!(heritage("Child").binding_super_class, None);
 }
+
+#[test]
+fn typed_parameter_chain_with_arguments_records_return_type_path() {
+    // Issue #4311: `local.rotate(1).translate(1, 1)` on a parameter typed
+    // `Point` records `translate` on the `rotate()` path of `Point`, as the
+    // call without arguments does.
+    let info = parse(
+        r"
+        import type { Point } from './point';
+
+        export function toWorld(local: Point): Point {
+            return local.rotate(1).translate(1, 1);
+        }
+        ",
+    );
+
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::TypedPropertyMemberAccess(access)
+                if access.type_name == "Point"
+                    && access.property_path == "rotate()"
+                    && access.member == "translate"
+        )),
+        "{:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn unexported_subclass_this_method_result_records_base_access() {
+    // Issue #4312: `this.find()?.setVip()` in an unexported subclass records
+    // `setVip` on `Floor.find()`, so the analysis resolves it through the
+    // return type of the base class. A subclass that declares `find()`
+    // itself records nothing on the base.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        class Viewer extends Floor {
+            mark(): void {
+                this.find()?.setVip();
+            }
+        }
+
+        class Owner extends Floor {
+            find() {
+                return undefined;
+            }
+            mark(): void {
+                this.find()?.ownOnly();
+            }
+        }
+
+        new Viewer().mark();
+        new Owner().mark();
+        ",
+    );
+
+    let has = |object: &str, member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+    assert!(has("Floor.find()", "setVip"), "{:?}", info.member_accesses);
+    assert!(
+        !has("Floor.find()", "ownOnly"),
+        "{:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn local_function_array_return_binds_element_class() {
+    // Issue #4313: an element of the array that `all(): Table[]` returns is
+    // a `Table`, in a `for...of` loop, an iteration callback, an index, and
+    // through a local that holds the result. A string key reads a property
+    // of the array, and a nested declaration of `all` hides the function.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        function all(): Table[] {
+            return [new Table()];
+        }
+
+        for (const table of all()) {
+            table.loop();
+        }
+        all().forEach((table) => table.callback());
+        all()[0].index();
+        const tables = all();
+        for (const table of tables) {
+            table.local();
+        }
+        all()['length'].stringKey();
+        function shadow() {
+            const all = () => [];
+            for (const item of all()) {
+                item.shadowed();
+            }
+        }
+        ",
+    );
+
+    let has = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Table" && access.member == member)
+    };
+    for member in ["loop", "callback", "index", "local"] {
+        assert!(has(member), "{member}: {:?}", info.member_accesses);
+    }
+    for member in ["stringKey", "shadowed"] {
+        assert!(!has(member), "{member}: {:?}", info.member_accesses);
+    }
+}
+
+/// Whether `info` credits `member` on `Table`.
+fn credits_table_member(info: &ModuleInfo, member: &str) -> bool {
+    info.member_accesses
+        .iter()
+        .any(|access| access.object == "Table" && access.member == member)
+}
+
+#[test]
+fn catch_parameter_hides_local_function_array_return() {
+    // Issue #4313: a catch parameter with the name of the function holds
+    // another value, so a call of it does not read the element class of the
+    // top-level `all(): Table[]`.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        export function all(): Table[] {
+            return [new Table()];
+        }
+
+        export function run() {
+            try {
+            } catch (all: any) {
+                all()[0].caught();
+                for (const item of all()) {
+                    item.caughtLoop();
+                }
+            }
+        }
+        ",
+    );
+
+    for member in ["caught", "caughtLoop"] {
+        assert!(
+            !credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn namespace_body_hides_local_function_array_return() {
+    // Issue #4313: a call in a namespace body can name a function of the
+    // namespace, so it does not read the element class of the top-level
+    // `all(): Table[]`. This holds for an exported namespace, a namespace
+    // without `export`, an exported namespace inside one without `export`,
+    // a dotted namespace name, and a `module` declaration.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        export function all(): Table[] {
+            return [new Table()];
+        }
+
+        export namespace Other {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            export const run = () => {
+                for (const item of all()) {
+                    item.namespaced();
+                }
+                all()[0].namespacedIndex();
+            };
+        }
+
+        namespace Local {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            all()[0].localIndex();
+            for (const item of all()) {
+                item.localLoop();
+            }
+        }
+
+        namespace Outer {
+            export namespace Inner {
+                function all(): { inner(): void }[] {
+                    return [];
+                }
+                all()[0].nestedIndex();
+            }
+        }
+
+        namespace Dotted.Name {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            all()[0].dottedIndex();
+        }
+
+        module Legacy {
+            function all(): { inner(): void }[] {
+                return [];
+            }
+            all()[0].legacyIndex();
+        }
+        ",
+    );
+
+    for member in [
+        "namespaced",
+        "namespacedIndex",
+        "localIndex",
+        "localLoop",
+        "nestedIndex",
+        "dottedIndex",
+        "legacyIndex",
+    ] {
+        assert!(
+            !credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}

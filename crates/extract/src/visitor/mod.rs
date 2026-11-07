@@ -754,12 +754,13 @@ pub(crate) struct ModuleInfoExtractor {
     /// callback scope, keyed by callback start. The param shadows a binding
     /// that is recorded in the outer scope, so that binding gets no credit.
     then_callback_namespace_bindings: FxHashMap<u32, String>,
-    /// Top-level local function name -> declared return element class
-    /// (`Promise<T>` / `T`, non-builtin). Populated by a `visit_program` pre-pass
-    /// so `Promise.all(arr.map(cb))` can type its result from a map callback whose
-    /// callee is declared after the consumer. Transient extractor state, not a
-    /// cached `ModuleInfo` field. See issue #1793.
+    /// Top-level local function name -> declared return element class (`Promise<T>`
+    /// / `T`, non-builtin), from a `visit_program` pre-pass, so `Promise.all(arr.map(cb))`
+    /// types its result also when the callee follows the consumer. Transient
+    /// extractor state, not a cached `ModuleInfo` field. See issue #1793.
     local_function_return_types: FxHashMap<String, String>,
+    /// Top-level local function name -> array return element class (issue #4313).
+    local_function_array_return_types: FxHashMap<String, String>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     /// Direct `new Class()` object-property target associations recorded during the AST
     /// walk. Combined with `object_binding_candidates` to keep both object
@@ -3565,8 +3566,7 @@ impl ModuleInfoExtractor {
         self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
         self.resolve_native_html_element_aliases();
-        self.enrich_local_class_exports();
-        self.lift_unexported_local_base_classes();
+        self.finalize_local_class_heritage();
         self.enrich_store_exports();
         self.finalize_di_key_sites();
         // Before `record_exported_instance_bindings` / `resolve_object_binding_candidates`,

@@ -58,6 +58,8 @@ pub(super) mod visit_dynamic_imports;
 mod visit_factory_properties;
 #[path = "visit_impl_factory_returns.rs"]
 mod visit_factory_returns;
+#[path = "visit_impl_function_returns.rs"]
+mod visit_function_returns;
 #[path = "visit_impl_helpers.rs"]
 mod visit_helpers;
 #[path = "visit_impl_jsx_runtime.rs"]
@@ -666,8 +668,10 @@ impl ModuleInfoExtractor {
         let map_value_type = (method_name == "forEach")
             .then(|| self.map_value_type_for(&receiver_name))
             .flatten();
-        let Some(element_type) =
-            map_value_type.or_else(|| self.iterable_element_type_for(&receiver_name))
+        let Some(element_type) = map_value_type
+            .or_else(|| self.iterable_element_type_for(&receiver_name))
+            // `all().forEach((t) => ...)` with `function all(): Table[]` (issue #4313).
+            .or_else(|| self.local_call_array_element_type(receiver_expr))
         else {
             return;
         };
@@ -941,16 +945,20 @@ impl ModuleInfoExtractor {
 
     /// Bind a `for (const util of utils)` loop variable to the element class of
     /// `utils` so member accesses on the loop variable (`util.getter`) credit the
-    /// class. Bare-identifier loop bindings over an identifier receiver only;
-    /// destructured bindings and non-identifier receivers are out of scope.
+    /// class. Bare-identifier loop bindings over a name path receiver or a
+    /// call of a local function with an array return type only; destructured
+    /// bindings and other receivers are out of scope.
     fn bind_for_of_element(&mut self, stmt: &ForOfStatement<'_>) {
-        let Some(receiver_name) = static_member_object_name(&stmt.right) else {
-            return;
-        };
         // Class-scope the `for (const x of this.<field>)` receiver so it matches
         // the same class's qualified query-list key (issue #1821).
-        let receiver_name = self.qualify_this_scope(&receiver_name);
-        let Some(element_type) = self.iterable_element_type_for(&receiver_name) else {
+        let receiver_name = static_member_object_name(&stmt.right)
+            .map(|receiver_name| self.qualify_this_scope(&receiver_name));
+        let Some(element_type) = receiver_name
+            .as_deref()
+            .and_then(|receiver_name| self.iterable_element_type_for(receiver_name))
+            // `for (const t of all())` with `function all(): Table[]` (issue #4313).
+            .or_else(|| self.local_call_array_element_type(&stmt.right))
+        else {
             return;
         };
         let ForStatementLeft::VariableDeclaration(decl) = &stmt.left else {
@@ -960,11 +968,11 @@ impl ModuleInfoExtractor {
             && let BindingPattern::BindingIdentifier(id) = &declarator.id
         {
             self.record_binding_declaration(id.name.as_str(), id.span);
-            {
+            if let Some(receiver_name) = receiver_name.as_deref() {
                 self.bind_iteration_class_proof(
                     receiver_name
                         .strip_suffix(".values()")
-                        .unwrap_or(&receiver_name),
+                        .unwrap_or(receiver_name),
                     id.name.as_str(),
                     iteration_source_reference(&stmt.right),
                 );
@@ -2119,78 +2127,6 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    /// Pre-pass over top-level declarations recording each local function's
-    /// declared return element class (`Promise<T>` / `T`, non-builtin) keyed by
-    /// name, so `promise_all_map_element_type` resolves a map callback's callee
-    /// even when it is declared AFTER its consumer (declaration-order
-    /// independence: the repro's `createDb` follows `generate`). See issue #1793.
-    fn record_local_function_return_types(&mut self, program: &Program<'a>) {
-        for statement in &program.body {
-            match statement {
-                Statement::FunctionDeclaration(function) => {
-                    self.record_local_function_return_type(function);
-                }
-                Statement::VariableDeclaration(decl) => {
-                    for declarator in &decl.declarations {
-                        self.record_local_const_function_return_type(declarator);
-                    }
-                }
-                Statement::ExportDeclaration(export) => match &export.declaration {
-                    Declaration::FunctionDeclaration(function) => {
-                        self.record_local_function_return_type(function);
-                    }
-                    Declaration::VariableDeclaration(decl) => {
-                        for declarator in &decl.declarations {
-                            self.record_local_const_function_return_type(declarator);
-                        }
-                    }
-                    _ => {}
-                },
-                Statement::ExportDefaultDeclaration(export) => {
-                    if let ExportDefaultDeclarationKind::FunctionDeclaration(function) =
-                        &export.declaration
-                    {
-                        self.record_local_function_return_type(function);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn record_local_function_return_type(&mut self, function: &Function<'_>) {
-        let Some(id) = function.id.as_ref() else {
-            return;
-        };
-        let Some(return_type) = function.return_type.as_deref() else {
-            return;
-        };
-        if let Some(element) = return_type_element_name(&return_type.type_annotation) {
-            self.local_function_return_types
-                .entry(id.name.to_string())
-                .or_insert(element);
-        }
-    }
-
-    fn record_local_const_function_return_type(&mut self, declarator: &VariableDeclarator<'_>) {
-        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
-            return;
-        };
-        let return_type = match declarator.init.as_ref() {
-            Some(Expression::ArrowFunctionExpression(arrow)) => arrow.return_type.as_deref(),
-            Some(Expression::FunctionExpression(function)) => function.return_type.as_deref(),
-            _ => None,
-        };
-        let Some(return_type) = return_type else {
-            return;
-        };
-        if let Some(element) = return_type_element_name(&return_type.type_annotation) {
-            self.local_function_return_types
-                .entry(id.name.to_string())
-                .or_insert(element);
-        }
-    }
-
     /// Infer the element class of `await Promise.all(<expr>.map(cb))` where `cb`
     /// returns a call to a same-module function whose declared return type is
     /// `Promise<T>` / `T` for a non-builtin class `T`. `Promise.allSettled` /
@@ -3004,6 +2940,15 @@ impl<'a> ModuleInfoExtractor {
             )
             .or_else(|| {
                 self.promise_all_map_element_type(init)
+                    .map(|name| (name, None))
+            })
+            // `const tables = all()` with `function all(): Table[]` (issue #4313).
+            .or_else(|| {
+                declarator
+                    .type_annotation
+                    .is_none()
+                    .then(|| self.local_call_array_element_type(init))
+                    .flatten()
                     .map(|name| (name, None))
             })
         {
@@ -5013,6 +4958,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
         if let Some(type_name) = self.map_get_value_type(&expr.object) {
+            self.member_accesses.push(MemberAccess {
+                object: type_name,
+                member: expr.property.name.to_string(),
+            });
+        }
+        if let Some(type_name) = self.local_call_array_index_type(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: type_name,
                 member: expr.property.name.to_string(),

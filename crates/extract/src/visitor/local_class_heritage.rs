@@ -1,13 +1,21 @@
 //! Builds the heritage of exported classes from the classes that the file
 //! declares locally.
 
-use fallow_types::extract::ClassHeritageInfo;
+use fallow_types::extract::{ClassHeritageInfo, MemberAccess, SemanticFact};
 use rustc_hash::FxHashSet;
 
 use super::ModuleInfoExtractor;
 
 impl ModuleInfoExtractor {
-    pub(super) fn enrich_local_class_exports(&mut self) {
+    /// Complete the class data of the file after the walk: the heritage of
+    /// exported classes, and the base class reads of unexported classes.
+    pub(super) fn finalize_local_class_heritage(&mut self) {
+        self.enrich_local_class_exports();
+        self.lift_unexported_local_base_classes();
+        self.record_unexported_subclass_this_accesses();
+    }
+
+    fn enrich_local_class_exports(&mut self) {
         if self.local_class_exports.is_empty() {
             return;
         }
@@ -64,7 +72,7 @@ impl ModuleInfoExtractor {
     /// A generic base stops the fold, because its bindings need the type
     /// arguments of the subclass. A name that the file also imports or
     /// exports stops the fold, because the analysis resolves that name itself.
-    pub(super) fn lift_unexported_local_base_classes(&mut self) {
+    fn lift_unexported_local_base_classes(&mut self) {
         if self.local_class_exports.is_empty() || self.class_heritage.is_empty() {
             return;
         }
@@ -105,6 +113,86 @@ impl ModuleInfoExtractor {
             if folded && let Some(outer) = next {
                 heritage.binding_super_class = Some((outer, next_type_args));
             }
+        }
+    }
+
+    /// Record a `this` read of an unexported class also on the base class
+    /// that declares the member: `this.find()?.setVip()` in
+    /// `class Viewer extends Floor` gives `Floor.find().setVip`. The analysis
+    /// resolves an exported class through its heritage, but an unexported
+    /// class has no heritage, so the read reaches no return type without this
+    /// access (issue #4312). The analysis then credits `setVip` on the
+    /// declared return type of `Floor.find()`.
+    ///
+    /// The walk passes unexported local base classes. A class on the way that
+    /// declares the member itself stops the walk, because its own declaration
+    /// overrides the base. The walk ends at the first base that is not an
+    /// unexported local class: an exported local class, an import, or any
+    /// other name. A namespace base (`ns.Base`) gives no access.
+    fn record_unexported_subclass_this_accesses(&mut self) {
+        if self.local_class_exports.is_empty() {
+            return;
+        }
+        let exported_locals: FxHashSet<&str> = self
+            .exports
+            .iter()
+            .filter_map(|export| export.local_name.as_deref())
+            .collect();
+        let mut accesses = Vec::new();
+        for fact in &self.semantic_facts {
+            let SemanticFact::ClassThisMemberAccess(access) = fact else {
+                continue;
+            };
+            if exported_locals.contains(access.class_local_name.as_str()) {
+                continue;
+            }
+            let Some(path) = access.object.strip_prefix("this.") else {
+                continue;
+            };
+            let root = path.split_once('.').map_or(path, |(root, _)| root);
+            let root = root.strip_suffix("()").unwrap_or(root);
+            if root.is_empty() || root.contains(['(', ')', '#']) {
+                continue;
+            }
+            if let Some(base) =
+                self.member_declaring_base(&access.class_local_name, root, &exported_locals)
+            {
+                accesses.push(MemberAccess {
+                    object: format!("{base}.{path}"),
+                    member: access.member.clone(),
+                });
+            }
+        }
+        self.member_accesses.extend(accesses);
+    }
+
+    /// The first base of `class_name` that is not an unexported local class,
+    /// from which the class inherits `member`, or `None` when a local class
+    /// on the way declares `member`.
+    fn member_declaring_base(
+        &self,
+        class_name: &str,
+        member: &str,
+        exported_locals: &FxHashSet<&str>,
+    ) -> Option<String> {
+        let mut visited: FxHashSet<&str> = FxHashSet::default();
+        let mut current = class_name;
+        loop {
+            if !visited.insert(current) {
+                return None;
+            }
+            let class = self.local_class_exports.get(current)?;
+            if class.members.iter().any(|declared| declared.name == member) {
+                return None;
+            }
+            let base = class.super_class.as_deref()?;
+            if base.contains('.') {
+                return None;
+            }
+            if exported_locals.contains(base) || !self.local_class_exports.contains_key(base) {
+                return Some(base.to_string());
+            }
+            current = base;
         }
     }
 }

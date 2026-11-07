@@ -1,0 +1,6 @@
+{
+  "name": "issue-4312-unexported-subclass-this-method-result",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

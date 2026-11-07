@@ -1,0 +1,6 @@
+{
+  "name": "issue-4311-typed-parameter-chain-member",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

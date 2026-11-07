@@ -716,6 +716,12 @@ mod issue_4184_method_call_arguments_chain_member;
 mod issue_4198_shadowed_this_method_result_local;
 #[path = "integration_test/issue_4199_class_member_unexported_base.rs"]
 mod issue_4199_class_member_unexported_base;
+#[path = "integration_test/issue_4311_typed_parameter_chain_member.rs"]
+mod issue_4311_typed_parameter_chain_member;
+#[path = "integration_test/issue_4312_unexported_subclass_this_method_result.rs"]
+mod issue_4312_unexported_subclass_this_method_result;
+#[path = "integration_test/issue_4313_function_array_return_element_member.rs"]
+mod issue_4313_function_array_return_element_member;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
