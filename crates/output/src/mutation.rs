@@ -681,9 +681,9 @@ pub struct MutationWorktreeCheck {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationRunIssue {
     /// A stable kebab-case code: `cache-write-failed`,
-    /// `journal-write-failed`, `runtime-error`, `static-map-miss`,
-    /// `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
-    /// or `worktree-check-failed`.
+    /// `duplicate-test-ids`, `journal-write-failed`, `runtime-error`,
+    /// `static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,
+    /// `worktree-changed` or `worktree-check-failed`.
     pub code: String,
     /// A description.
     pub message: String,

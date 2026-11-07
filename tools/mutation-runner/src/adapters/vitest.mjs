@@ -21,6 +21,7 @@ import {
   runResult,
   testErrorText,
   toPosix,
+  repeatedNameFlags,
   uniqueNames,
   unsupportedVersion,
   validateDryRun,
@@ -516,11 +517,14 @@ const dryRunReport = (testCase, base, directories) => {
 /** Reads each test of one dry-run module with its hits, its loaded paths and its report entry. */
 const readDryRunTests = (testModule, file, prefix, directories) => {
   const testCases = [...testModule.children.allTests()];
-  const names = uniqueNames(testCases.map((testCase) => testCase.fullName));
+  const fullNames = testCases.map((testCase) => testCase.fullName);
+  const names = uniqueNames(fullNames);
+  const repeated = repeatedNameFlags(fullNames);
   return testCases.map((testCase, index) => {
     const meta = testCase.meta();
     return {
       taskId: testCase.id,
+      repeated: repeated[index],
       shared: isConcurrent(testCase),
       hits: metaList(meta, "fallowHits"),
       staticHits: metaList(meta, "fallowStaticHits"),
@@ -651,6 +655,7 @@ export const createAdapter = async (init) => {
         taskId: entry.taskId,
       });
       for (const id of entry.staticHits) summary.staticHits.add(id);
+      if (entry.repeated) summary.duplicates.add(entry.report.test_id);
       summary.tests.push(entry.report);
     }
     Object.assign(summary.hits, Object.fromEntries(attributeHits(entries)));
@@ -668,7 +673,13 @@ export const createAdapter = async (init) => {
     const fileByModule = new Map(
       selected.map(([file, spec]) => [moduleKey(spec.project, spec.moduleId), file]),
     );
-    const summary = { tests: [], hits: {}, staticHits: new Set(), setup: {} };
+    const summary = {
+      tests: [],
+      hits: {},
+      staticHits: new Set(),
+      duplicates: new Set(),
+      setup: {},
+    };
     for (const testModule of result.testModules) {
       const file = fileByModule.get(moduleKey(testModule.project, testModule.moduleId));
       recordDryRunModule(testModule, file, summary);

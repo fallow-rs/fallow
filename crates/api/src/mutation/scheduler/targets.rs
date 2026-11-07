@@ -157,16 +157,44 @@ pub(super) fn job_targets(context: &JobContext<'_>, tests: &[String]) -> Vec<Str
 /// targets in `outcome`. `None` outside target mode.
 pub(super) fn config_targets(
     config: &ScheduleConfig,
-    tests: &[DryTest],
+    dry: &DryRunResult,
     caps: Capabilities,
     outcome: &mut ScheduleOutcome,
 ) -> Result<Option<FxHashSet<String>>, ScheduleError> {
     if config.targets.is_empty() {
         return Ok(None);
     }
-    let (targets, ids) = resolve_targets(&config.targets, tests, caps)?;
+    let (targets, ids) = resolve_targets(&config.targets, &dry.tests, caps)?;
+    refuse_duplicate_ids(&ids, &dry.duplicate_test_ids)?;
     outcome.targets = targets;
     Ok(Some(ids))
+}
+
+/// The message of the error for targets that select a test with a duplicate id.
+pub(super) fn duplicate_message(ids: &[String]) -> String {
+    format!(
+        "these --kill-matrix-for targets select tests with a duplicate test id: {}; the runner numbers tests that share a title in report order, so the kill evidence of these tests is not reliable; give each test a unique title",
+        ids.join(", ")
+    )
+}
+
+/// Refuses targets that select a test with a duplicate id. The companion
+/// numbers tests that share a title in report order, so the kills of such a
+/// test can belong to its twin.
+fn refuse_duplicate_ids(
+    selected: &FxHashSet<String>,
+    duplicate_ids: &[String],
+) -> Result<(), ScheduleError> {
+    let hit: Vec<String> = duplicate_ids
+        .iter()
+        .filter(|id| selected.contains(*id))
+        .cloned()
+        .collect();
+    if hit.is_empty() {
+        Ok(())
+    } else {
+        Err(ScheduleError::DuplicateTargetTestIds(hit))
+    }
 }
 
 /// Matches each `--kill-matrix-for` target against the tests of the dry run.

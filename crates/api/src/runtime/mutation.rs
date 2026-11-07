@@ -746,6 +746,9 @@ fn schedule_error(
         ScheduleError::UnmatchedTargets(_) | ScheduleError::TargetsNeedTestFilter => {
             ("FALLOW_MUTATION_TARGET_UNMATCHED", None)
         }
+        ScheduleError::DuplicateTargetTestIds(_) => {
+            ("FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID", None)
+        }
     };
     let mut help = Vec::new();
     if matches!(error, ScheduleError::RunnerVersion(_)) {

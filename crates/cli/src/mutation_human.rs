@@ -23,6 +23,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::report::{HumanStatus, Level, build_section_header, format_path, human_status_line};
 
+/// The code of the run issue for tests that share a test id. The run still
+/// has valid verdicts, so the footer shows it as a warning.
+const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
 /// The longest code fragment that a survivor line shows.
 const MAX_FRAGMENT_CHARS: usize = 60;
 /// The marker of a cut at the start or the end of a fragment.
@@ -570,16 +573,22 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         }
     }
     for error in &report.errors {
+        // A run with duplicate test ids still has valid verdicts for the other tests.
+        let label = if error.code == DUPLICATE_TEST_IDS_CODE {
+            "Warning"
+        } else {
+            "Error"
+        };
         match &error.mutant_id {
             Some(id) => {
                 let _ = writeln!(
                     footer,
-                    "Error ({}), mutant {id}: {}",
+                    "{label} ({}), mutant {id}: {}",
                     error.code, error.message
                 );
             }
             None => {
-                let _ = writeln!(footer, "Error ({}): {}", error.code, error.message);
+                let _ = writeln!(footer, "{label} ({}): {}", error.code, error.message);
             }
         }
     }

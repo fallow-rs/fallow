@@ -188,6 +188,7 @@ fn standard_dry() -> DryRunResult {
         unhandled_errors: Vec::new(),
         unloaded_paths: vec!["src/c.ts".to_owned()],
         file_setup_ms: BTreeMap::new(),
+        duplicate_test_ids: Vec::new(),
     }
 }
 
@@ -1017,6 +1018,7 @@ fn baseline_failures_never_decide_a_mutant() {
             }],
             unloaded_paths: Vec::new(),
             file_setup_ms: BTreeMap::new(),
+            duplicate_test_ids: Vec::new(),
         },
         |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
     ));
@@ -1598,6 +1600,7 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
         unhandled_errors: Vec::new(),
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
+        duplicate_test_ids: Vec::new(),
     };
     let spawner = FakeSpawner::new(script(dry, |_, run| {
         match run.mutant_id.as_deref().unwrap_or_default() {
@@ -1684,6 +1687,7 @@ fn a_respawned_dry_run_failure_keeps_the_error_of_the_test() {
         unhandled_errors: Vec::new(),
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
+        duplicate_test_ids: Vec::new(),
     };
     let spawner = FakeSpawner::new(script(dry, |_, run| {
         match run.mutant_id.as_deref().unwrap_or_default() {
@@ -1740,6 +1744,7 @@ fn a_first_dry_run_failure_keeps_the_error_of_the_test() {
             unhandled_errors: Vec::new(),
             unloaded_paths: Vec::new(),
             file_setup_ms: BTreeMap::new(),
+            duplicate_test_ids: Vec::new(),
         },
         |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
     ));
@@ -1787,6 +1792,7 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
         unhandled_errors: Vec::new(),
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
+        duplicate_test_ids: Vec::new(),
     };
     let spawner = FakeSpawner::new(script(dry, |_, run| {
         match run.mutant_id.as_deref().unwrap_or_default() {
@@ -1854,6 +1860,7 @@ fn a_dropped_test_cannot_be_the_killer() {
         unhandled_errors: Vec::new(),
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
+        duplicate_test_ids: Vec::new(),
     };
     let spawner = FakeSpawner::new(script(dry, |_, run| {
         match run.mutant_id.as_deref().unwrap_or_default() {

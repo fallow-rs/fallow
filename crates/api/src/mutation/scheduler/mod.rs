@@ -29,7 +29,7 @@ mod dry_facts;
 mod retry_set;
 pub mod targets;
 use classification::{attempt_record, classify, kill_kind, matrix_evidence};
-use dry_facts::{DryRunFacts, covering_tests, read_dry_run};
+use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run};
 use targets::{config_targets, job_targets};
 mod stored;
 
@@ -259,6 +259,8 @@ pub enum ScheduleError {
     /// The runner cannot run a subset of the tests of a file, so the target
     /// tests cannot run apart from the other tests.
     TargetsNeedTestFilter,
+    /// A `--kill-matrix-for` target selects a test with a duplicate test id.
+    DuplicateTargetTestIds(Vec<String>),
 }
 
 impl std::fmt::Display for ScheduleError {
@@ -285,6 +287,7 @@ impl std::fmt::Display for ScheduleError {
             Self::TargetsNeedTestFilter => f.write_str(
                 "the runner cannot run single tests, so --kill-matrix-for cannot run the target tests apart from the other tests",
             ),
+            Self::DuplicateTargetTestIds(ids) => f.write_str(&targets::duplicate_message(ids)),
         }
     }
 }
@@ -1977,14 +1980,10 @@ pub fn run_schedule_with_progress(
             return Err(error);
         }
     };
-    outcome.test_files = dry
-        .tests
-        .iter()
-        .map(|test| (test.test_id.clone(), test.file.clone()))
-        .collect();
+    record_dry_run(&mut outcome, &dry);
+    let target_ids =
+        config_targets(config, &dry, runner.caps, &mut outcome).inspect_err(|_| link.shutdown())?;
     outcome.unloaded_paths = dry.unloaded_paths;
-    let target_ids = config_targets(config, &dry.tests, runner.caps, &mut outcome)
-        .inspect_err(|_| link.shutdown())?;
     let context = JobContext {
         dry_files: &dry_files,
         kill_matrix: config.kill_matrix,

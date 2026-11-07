@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// The issue code for tests that share a test id in the dry run.
+pub(super) const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
+
 /// The facts of the dry run that the scheduler uses.
 pub(super) struct DryRunFacts {
     /// Each passing test that is not in an excluded file, with its duration.
@@ -155,4 +158,49 @@ pub(super) fn covering_tests(
         tests.extend(runtime.iter().cloned());
     }
     tests
+}
+
+/// Copies the test files and the duplicate test id issue of the dry run.
+pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) {
+    outcome.test_files = dry
+        .tests
+        .iter()
+        .map(|test| (test.test_id.clone(), test.file.clone()))
+        .collect();
+    outcome
+        .issues
+        .extend(duplicate_test_ids_issue(&dry.duplicate_test_ids));
+}
+
+/// The most test ids that the duplicate issue names.
+const MAX_DUPLICATE_IDS_SHOWN: usize = 5;
+
+/// The issue for tests that share a test id in the dry run. The companion
+/// numbers such tests in report order, so a kill or a survival of one of
+/// them can belong to the other. The verdicts of the other tests stay valid.
+fn duplicate_test_ids_issue(ids: &[String]) -> Option<ScheduleIssue> {
+    if ids.is_empty() {
+        return None;
+    }
+    let shown: Vec<&str> = ids
+        .iter()
+        .take(MAX_DUPLICATE_IDS_SHOWN)
+        .map(String::as_str)
+        .collect();
+    let more = ids.len() - shown.len();
+    let tail = if more == 0 {
+        String::new()
+    } else {
+        format!(" and {more} more")
+    };
+    Some(ScheduleIssue {
+        code: DUPLICATE_TEST_IDS_CODE,
+        message: format!(
+            "{} dry-run test ids belong to tests with the same title: {}{tail}; the runner numbers them in report order, so their kill evidence is not reliable (for example `test.each` without unique titles); give each test a unique title",
+            ids.len(),
+            shown.join(", ")
+        ),
+        mutant_id: None,
+        stderr_tail: None,
+    })
 }

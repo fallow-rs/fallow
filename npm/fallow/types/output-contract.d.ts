@@ -21284,9 +21284,9 @@ changed_paths: string[]
 export interface MutationRunIssue {
 /**
  * A stable kebab-case code: `cache-write-failed`,
- * `journal-write-failed`, `runtime-error`, `static-map-miss`,
- * `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
- * or `worktree-check-failed`.
+ * `duplicate-test-ids`, `journal-write-failed`, `runtime-error`,
+ * `static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,
+ * `worktree-changed` or `worktree-check-failed`.
  */
 code: string
 /**

@@ -34154,7 +34154,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "A stable kebab-case code: `cache-write-failed`,\n`journal-write-failed`, `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `typecheck-failed`, `worktree-changed`\nor `worktree-check-failed`."
+          "description": "A stable kebab-case code: `cache-write-failed`,\n`duplicate-test-ids`, `journal-write-failed`, `runtime-error`,\n`static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,\n`worktree-changed` or `worktree-check-failed`."
         },
         "message": {
           "type": "string",
