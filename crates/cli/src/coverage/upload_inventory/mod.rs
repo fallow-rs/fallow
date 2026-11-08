@@ -858,11 +858,11 @@ fn collect_routes(
         Ok(listing) => listing.entry_points.unwrap_or_default(),
         Err(err) => {
             eprintln!(
-                "{LOG_PREFIX}: {}: plugin stage failed, uploading without entry routes ({})",
+                "{LOG_PREFIX}: {}: plugin stage failed, uploading without file-based entry routes ({})",
                 "warning".yellow().bold(),
                 err.message(),
             );
-            return InventoryRoutes::default();
+            Vec::new()
         }
     };
     let config = session.config();

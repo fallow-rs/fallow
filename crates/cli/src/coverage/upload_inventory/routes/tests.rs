@@ -789,3 +789,11 @@ fn tanstack_route_ids_become_url_patterns() {
     assert_eq!(tanstack_pattern("/files/$").as_deref(), Some("/files/$"));
     assert_eq!(tanstack_pattern("/_auth"), None);
 }
+
+#[test]
+fn tanstack_index_route_under_pathless_layout_keeps_its_pattern() {
+    assert_eq!(tanstack_pattern("/_auth/").as_deref(), Some("/"));
+    assert_eq!(tanstack_pattern("/_auth/_nested/").as_deref(), Some("/"));
+    assert_eq!(tanstack_pattern("/blog/_layout/").as_deref(), Some("/blog"));
+    assert_eq!(tanstack_pattern("/_auth/_nested"), None);
+}

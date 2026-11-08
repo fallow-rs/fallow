@@ -11,9 +11,9 @@
 //! `app.get("/path", handler)` call is the route file.
 //!
 //! The result is "can reach", not "did reach". A pattern comes from the file
-//! name or the source code only, never from a request path. Reach is file-level: an import of one
-//! symbol from a file reaches every function in that file. Type-only imports do
-//! not reach, because they cannot run code.
+//! name or the source code only, never from a request path. Reach is
+//! file-level: an import of one symbol from a file reaches every function in
+//! that file. Type-only imports do not reach, because they cannot run code.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -359,10 +359,12 @@ fn derive_nuxt(dirs: &[&str], file: &str) -> Option<DerivedRoute> {
 ///
 /// A pathless segment (`_auth`) and a route group (`(group)`) add no URL
 /// segment. A trailing `_` (`posts_`) only opts out of the parent layout. A
-/// trailing `/` marks the index route of its parent.
+/// trailing `/` marks the index route of its parent, also under a pathless
+/// layout (`/_auth/` serves `/`).
 pub(super) fn tanstack_pattern(route_id: &str) -> Option<String> {
+    let is_index = route_id.ends_with('/');
     let segments: Vec<&str> = route_id.split('/').filter(|seg| !seg.is_empty()).collect();
-    if segments.last().is_some_and(|seg| seg.starts_with('_')) {
+    if !is_index && segments.last().is_some_and(|seg| seg.starts_with('_')) {
         return None;
     }
     let url = segments
