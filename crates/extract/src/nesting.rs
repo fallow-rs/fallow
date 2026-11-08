@@ -33,6 +33,32 @@ use crate::visitor::ModuleInfoExtractor;
 /// below this cap.
 pub const MAX_NESTING_DEPTH: u32 = 1024;
 
+/// Nesting depth of CSS color functions past which lightningcss does not parse
+/// a stylesheet.
+///
+/// When the content of `light-dark(`, `rgb(` or `hsl(` is not a valid color,
+/// lightningcss parses it a second time as a plain function. Each level of
+/// such nesting doubles the parse time. Real stylesheets nest a few color
+/// functions at most, for example `color-mix(in srgb, light-dark(rgb(...)))`.
+const MAX_COLOR_FUNCTION_DEPTH: usize = 8;
+
+/// The CSS functions that lightningcss tries to parse as a color first.
+const COLOR_FUNCTIONS: &[&[u8]] = &[
+    b"rgb",
+    b"rgba",
+    b"hsl",
+    b"hsla",
+    b"hwb",
+    b"lab",
+    b"lch",
+    b"oklab",
+    b"oklch",
+    b"color",
+    b"color-mix",
+    b"light-dark",
+    b"alpha",
+];
+
 /// The module of a file whose bracket nesting exceeds [`MAX_NESTING_DEPTH`].
 /// The module is a failed parse with no facts, so the file shows up as
 /// degraded instead of aborting the run.
@@ -85,9 +111,15 @@ pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) ->
 }
 
 /// [`parse_bounded`] for a lightningcss parse of stylesheet source. The
-/// nesting scan uses stylesheet rules.
+/// nesting scan uses stylesheet rules. Returns `None` also when color
+/// functions nest deeper than [`MAX_COLOR_FUNCTION_DEPTH`], because the parse
+/// time of lightningcss grows exponentially with that depth.
 pub fn parse_style_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
-    parse_bounded_as(source, Dialect::Style, parse)
+    let scan = scan_depth(source, MAX_NESTING_DEPTH, Dialect::Style);
+    if scan.max_colors > MAX_COLOR_FUNCTION_DEPTH {
+        return None;
+    }
+    run_bounded(source, scan.max_depth, parse)
 }
 
 /// [`parse_bounded`] for the file at `path`. A CSS, Sass or Less file is
@@ -110,7 +142,10 @@ fn parse_bounded_as<R: Send>(
     dialect: Dialect,
     parse: impl FnOnce() -> R + Send,
 ) -> Option<R> {
-    let depth = max_depth(source, MAX_NESTING_DEPTH, dialect);
+    run_bounded(source, max_depth(source, MAX_NESTING_DEPTH, dialect), parse)
+}
+
+fn run_bounded<R: Send>(source: &str, depth: u32, parse: impl FnOnce() -> R + Send) -> Option<R> {
     if depth > MAX_NESTING_DEPTH {
         return None;
     }
@@ -137,6 +172,10 @@ pub fn parse_bounded_or_default<T: Send + Default>(
 /// Maximum bracket nesting depth of `source`. The scan stops as soon as the
 /// depth passes `limit`, so the result is at most `limit + 1`.
 fn max_depth(source: &str, limit: u32, dialect: Dialect) -> u32 {
+    scan_depth(source, limit, dialect).max_depth
+}
+
+fn scan_depth(source: &str, limit: u32, dialect: Dialect) -> Scanner<'_> {
     let mut scanner = Scanner {
         bytes: source.as_bytes(),
         pos: 0,
@@ -146,9 +185,11 @@ fn max_depth(source: &str, limit: u32, dialect: Dialect) -> u32 {
         dialect,
         templates: Vec::new(),
         regex_allowed: true,
+        colors: Vec::new(),
+        max_colors: 0,
     };
     scanner.scan();
-    scanner.max_depth
+    scanner
 }
 
 struct Scanner<'a> {
@@ -164,12 +205,16 @@ struct Scanner<'a> {
     /// Whether a `/` at this point starts a regex literal instead of a
     /// division, judged from the previous significant byte.
     regex_allowed: bool,
+    /// Depth of each open stylesheet color function, innermost last.
+    colors: Vec<u32>,
+    /// Maximum number of color functions open at one time.
+    max_colors: usize,
 }
 
 impl Scanner<'_> {
     fn scan(&mut self) {
         while let Some(&byte) = self.bytes.get(self.pos) {
-            if self.max_depth > self.limit {
+            if self.max_depth > self.limit || self.max_colors > MAX_COLOR_FUNCTION_DEPTH {
                 return;
             }
             self.pos += 1;
@@ -177,6 +222,11 @@ impl Scanner<'_> {
                 b'\\' if self.dialect == Dialect::Style => self.skip_escape(),
                 b'(' if self.dialect == Dialect::Style && self.at_unquoted_url() => {
                     self.skip_unquoted_url();
+                }
+                b'(' if self.dialect == Dialect::Style && self.at_color_function() => {
+                    self.open();
+                    self.colors.push(self.depth);
+                    self.max_colors = self.max_colors.max(self.colors.len());
                 }
                 b'(' | b'[' | b'{' => {
                     self.open();
@@ -190,6 +240,9 @@ impl Scanner<'_> {
                 b')' | b']' | b'}' => {
                     self.depth = self.depth.saturating_sub(1);
                     self.regex_allowed = byte == b'}';
+                    while self.colors.last().is_some_and(|open| *open > self.depth) {
+                        self.colors.pop();
+                    }
                 }
                 b'\'' | b'"' => {
                     self.skip_string(byte);
@@ -239,6 +292,45 @@ impl Scanner<'_> {
         name.eq_ignore_ascii_case(b"url")
             && starts_word
             && !matches!(body.first(), Some(b'\'' | b'"'))
+    }
+
+    /// Whether the `(` at `pos - 1` opens one of the [`COLOR_FUNCTIONS`]. A
+    /// name with a CSS escape such as `r\67 b(` can spell any function, so it
+    /// counts as a color function.
+    fn at_color_function(&self) -> bool {
+        let open = self.pos - 1;
+        let mut start = open;
+        loop {
+            while start > 0 && is_css_name_byte_or_escape(self.bytes[start - 1]) {
+                start -= 1;
+            }
+            match start.checked_sub(1).map(|before| self.bytes[before]) {
+                // The whitespace after a hex escape belongs to the name.
+                Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0C) if self.ends_hex_escape(start - 1) => {
+                    start -= 1;
+                }
+                _ => break,
+            }
+        }
+        let name = &self.bytes[start..open];
+        name.contains(&b'\\')
+            || COLOR_FUNCTIONS
+                .iter()
+                .any(|color| name.eq_ignore_ascii_case(color))
+    }
+
+    /// Whether a hex escape such as `\67` ends right before `end`.
+    fn ends_hex_escape(&self, end: usize) -> bool {
+        let digits = self.bytes[..end]
+            .iter()
+            .rev()
+            .take(MAX_HEX_ESCAPE_DIGITS + 1)
+            .take_while(|byte| byte.is_ascii_hexdigit())
+            .count();
+        (1..=MAX_HEX_ESCAPE_DIGITS).contains(&digits)
+            && end
+                .checked_sub(digits + 1)
+                .is_some_and(|slash| self.bytes[slash] == b'\\')
     }
 
     /// Skips an unquoted `url(` body up to its `)`. Quotes and `/*` in it are
@@ -368,6 +460,13 @@ const fn is_css_name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') || byte >= 0x80
 }
 
+/// Maximum number of hex digits in a CSS escape such as `\67`.
+const MAX_HEX_ESCAPE_DIGITS: usize = 6;
+
+const fn is_css_name_byte_or_escape(byte: u8) -> bool {
+    is_css_name_byte(byte) || byte == b'\\'
+}
+
 /// Keywords after which a `/` starts a regex literal.
 const REGEX_KEYWORDS: &[&[u8]] = &[
     b"await",
@@ -472,6 +571,40 @@ mod tests {
         // nothing.
         assert_eq!(style_depth_of("#url({{{{"), 5);
         assert_eq!(style_depth_of(".n{a:\"x\u{c}((((1"), 5);
+    }
+
+    fn color_depth_of(source: &str) -> usize {
+        scan_depth(source, u32::MAX, Dialect::Style).max_colors
+    }
+
+    #[test]
+    fn counts_nested_color_functions() {
+        assert_eq!(color_depth_of(".a{color:red}"), 0);
+        assert_eq!(
+            color_depth_of(".a{color:color-mix(in srgb, LIGHT-DARK(rgb(0 0 0), red), red)}"),
+            3
+        );
+        // Sibling functions and plain brackets do not add depth.
+        assert_eq!(color_depth_of(".a{x:rgb(1 2 3) hsl(1 2% 3%) calc((1))}"), 1);
+        assert_eq!(color_depth_of(".a{x:rgb(var(--a, hsl(1 2% 3%)))}"), 2);
+        // A longer name, a string and a comment are not color functions.
+        assert_eq!(color_depth_of(".a{x:myrgb(no-hsl(1))}"), 0);
+        assert_eq!(color_depth_of(".a{content:\"rgb(rgb(\"}/* hsl(hsl( */"), 0);
+        // An unclosed color function stays open.
+        assert_eq!(color_depth_of(".a{x:light-dark(((light-dark(}"), 2);
+    }
+
+    #[test]
+    fn an_escaped_function_name_counts_as_a_color_function() {
+        assert_eq!(color_depth_of(".a{x:r\\67 b(r\\gb(\\72\tgb(1)))}"), 3);
+        assert_eq!(color_depth_of(".a{x:f\\(1)}"), 0);
+    }
+
+    #[test]
+    fn color_function_depth_at_the_cap_is_allowed() {
+        let at_limit = format!(".a{{x:{}", "rgb(".repeat(MAX_COLOR_FUNCTION_DEPTH));
+        assert!(parse_style_bounded(&at_limit, || ()).is_some());
+        assert!(parse_style_bounded(&format!("{at_limit}hsl("), || ()).is_none());
     }
 
     #[test]
