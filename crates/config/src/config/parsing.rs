@@ -84,7 +84,7 @@ pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, mi
 
     match ConfigFormat::from_path(path) {
         ConfigFormat::Toml => {
-            let toml_value: toml::Value = toml::from_str(content).map_err(|e| {
+            let toml_value: toml::Value = crate::toml_input::from_str(content).map_err(|e| {
                 miette::miette!("Failed to parse config file {}: {}", path.display(), e)
             })?;
             serde_json::to_value(toml_value).map_err(|e| {

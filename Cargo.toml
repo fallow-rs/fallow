@@ -66,6 +66,7 @@ semver = "1"
 jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
 toml = "1.1"
 toml_edit = "0.25"
+toml_parser = "1.1"
 schemars = { version = "1", features = ["chrono04"] }
 flate2 = "1"
 

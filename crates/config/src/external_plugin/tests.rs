@@ -1060,3 +1060,24 @@ fn parse_plugin_invalid_jsonc_returns_none() {
     let result = parse_plugin(content, &PluginFormat::Jsonc, Path::new("bad.jsonc"));
     assert!(result.is_none());
 }
+
+/// Each `[]` inside an inline table that expects a key lowers the depth
+/// counter of the TOML parser, so the nested array after it would overflow
+/// the stack without the nesting check.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn discover_skips_toml_plugin_with_nesting_that_evades_the_parser_limit() {
+    const REPEATS: usize = 200_000;
+    let dir = tempfile::tempdir().unwrap();
+    let plugins_dir = dir.path().join(".fallow").join("plugins");
+    std::fs::create_dir_all(&plugins_dir).unwrap();
+    let content = format!(
+        "name = \"deep\"\na = {{{}}}\nb = {}{}\n",
+        "[]".repeat(REPEATS),
+        "[".repeat(REPEATS),
+        "]".repeat(REPEATS)
+    );
+    std::fs::write(plugins_dir.join("deep.toml"), content).unwrap();
+
+    assert!(discover_external_plugins(dir.path(), &[]).is_empty());
+}

@@ -131,6 +131,63 @@ fn css_analytics_skip_a_too_deep_stylesheet() {
     assert!(crate::css_metrics::compute_css_analytics(&deep_custom_property()).is_none());
 }
 
+/// Depth of the nested color functions. lightningcss parses the content of an
+/// unclosed `light-dark(`, `rgb(` or `hsl(` twice at each level, so at this
+/// depth a parse takes far longer than the time limit of the test.
+const COLOR_DEPTH: usize = 40;
+
+/// Extract the CSS Modules classes of `source` on another thread and fail when
+/// the extraction does not end in time.
+fn css_module_exports_in_time(source: String) -> Vec<String> {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let names = crate::css::extract_css_module_exports(&source, false)
+            .iter()
+            .map(|export| export.name.to_string())
+            .collect::<Vec<_>>();
+        let _ = done.send(names);
+    });
+    finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("CSS Modules extraction must end in time")
+}
+
+#[test]
+fn deeply_nested_color_functions_skip_the_css_parser() {
+    for name in [
+        "light-dark(",
+        "rgb(from red r g b / ",
+        "HSL(",
+        "light-dark(red, ",
+    ] {
+        let source = format!(".keep{{color:red}}\n.a{{x:{}]}}", name.repeat(COLOR_DEPTH));
+        let names = css_module_exports_in_time(source.clone());
+        assert!(names.contains(&"keep".to_string()), "{name}: {names:?}");
+        assert!(
+            crate::parse_style_bounded(&source, || ()).is_none(),
+            "{name} nesting must skip the parser"
+        );
+        assert!(crate::css_metrics::compute_css_analytics(&source).is_none());
+    }
+}
+
+#[test]
+fn ordinary_color_function_nesting_still_parses() {
+    let source = ".a{color:color-mix(in srgb, light-dark(rgb(from var(--x) r g b / 50%), \
+                  hsl(0 0% 0%)), red)}\n.b{--c:light-dark(rgb(0 0 0), hsl(0 0% 100%))}";
+    assert!(crate::parse_style_bounded(source, || ()).is_some());
+    assert!(crate::css_metrics::compute_css_analytics(source).is_some());
+}
+
+/// Open color functions stop only the lightningcss parse. The bracket depth
+/// of a stylesheet must still count every bracket after them.
+#[test]
+fn color_functions_do_not_hide_bracket_nesting() {
+    let source = format!(".a{{x:{}{}", "rgb(".repeat(COLOR_DEPTH), "(".repeat(5000));
+    assert!(crate::nesting::parse_file_bounded(Path::new("a.css"), &source, || ()).is_none());
+    assert_degraded(&parse("a.css", &source));
+}
+
 #[test]
 fn a_hash_or_at_url_prefix_does_not_hide_nesting() {
     for prefix in ["#url(", "@url(", "url("] {

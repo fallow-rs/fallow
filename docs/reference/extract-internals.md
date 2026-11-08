@@ -87,6 +87,13 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   `fallow_extract::parse_style_bounded`. Past the cap, CSS Modules class
   extraction falls back to the plain class scan, and CSS analytics and color
   parsing return `None`.
+  - The same scan also counts nested color functions (`rgb(`, `hsl(`,
+    `light-dark(` and the other names in `COLOR_FUNCTIONS` in
+    `crates/extract/src/nesting.rs`). lightningcss parses the content of a
+    color function again as a plain function when the color is not valid, so
+    its parse time doubles at each nested level. Past
+    `MAX_COLOR_FUNCTION_DEPTH`, the same fallback applies. A function name
+    with a CSS escape counts as a color function.
 - A walk that the visitor runs at each link of a member or call chain stops
   after `MAX_RECORDED_CHAIN_LINKS` links
   (`crates/extract/src/visitor/visit_impl_chain_names.rs`). Past the cap, the

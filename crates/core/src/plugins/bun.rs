@@ -35,7 +35,7 @@ define_plugin! {
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
 
-        let Ok(value) = source.parse::<toml::Table>() else {
+        let Ok(value) = fallow_config::toml_input::from_str::<toml::Table>(source) else {
             return result;
         };
 
@@ -60,7 +60,7 @@ pub(super) fn preload_files(root: &Path) -> Vec<PathBuf> {
     let Ok(source) = std::fs::read_to_string(&config_path) else {
         return Vec::new();
     };
-    let Ok(value) = source.parse::<toml::Table>() else {
+    let Ok(value) = fallow_config::toml_input::from_str::<toml::Table>(&source) else {
         return Vec::new();
     };
     extract_preload_entries(&value, &config_path, root)
