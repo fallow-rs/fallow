@@ -18095,3 +18095,216 @@ fn namespace_body_hides_local_function_array_return() {
         );
     }
 }
+
+#[test]
+fn for_of_element_class_applies_only_in_the_loop_body() {
+    // Issue #4352: the element class of a `for...of` loop variable applies
+    // only in the loop body, for a loop over an array and over a call. A
+    // binding of the same name in another scope has another type.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        const tables: Table[] = [new Table()];
+        function all(): Table[] {
+            return tables;
+        }
+        for (const t of tables) {
+            t.inArrayLoop();
+        }
+        for (const u of all()) {
+            u.inCallLoop();
+        }
+        export function g(t: { other(): void }) {
+            t.paramOfArrayLoopName();
+        }
+        export function h(u: { other(): void }) {
+            u.paramOfCallLoopName();
+        }
+        const t = { local() {} };
+        t.moduleLocal();
+        ",
+    );
+
+    for member in ["inArrayLoop", "inCallLoop"] {
+        assert!(
+            credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+    for member in ["paramOfArrayLoopName", "paramOfCallLoopName", "moduleLocal"] {
+        assert!(
+            !credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn this_in_function_with_own_this_gives_no_class_this_fact() {
+    // Issue #4351: `this` in a nested `function` or an object-literal method
+    // inside a class method is not the class instance, so a read there gives
+    // no class `this` fact. An arrow function keeps the `this` of the method.
+    // A class declared inside such a function has its own instance `this`.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        export class Viewer extends Floor {
+            mark(): void {
+                function g(this: unknown) {
+                    this.find().inFunction();
+                }
+                const handlers = {
+                    run() {
+                        this.find().inObjectMethod();
+                    },
+                };
+                const visit = () => this.find().inArrow();
+                this.find().inMethod();
+            }
+        }
+
+        export function make() {
+            return function () {
+                class Local extends Floor {
+                    field = this.find().inNestedClassField();
+                }
+                return Local;
+            };
+        }
+        ",
+    );
+
+    let has_fact = |class: &str, member: &str| {
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::ClassThisMemberAccess(access)
+                    if access.class_local_name == class
+                        && access.object == "this.find()"
+                        && access.member == member
+            )
+        })
+    };
+    for member in ["inArrow", "inMethod"] {
+        assert!(
+            has_fact("Viewer", member),
+            "{member}: {:?}",
+            info.semantic_facts
+        );
+    }
+    assert!(
+        has_fact("Local", "inNestedClassField"),
+        "{:?}",
+        info.semantic_facts
+    );
+    for member in ["inFunction", "inObjectMethod"] {
+        assert!(
+            !has_fact("Viewer", member),
+            "{member}: {:?}",
+            info.semantic_facts
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object.starts_with("Floor.") && access.member == member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn this_read_in_function_with_own_this_gives_no_this_member_access() {
+    // Issue #4351: a bare `this.<member>` read in a nested `function` or an
+    // object-literal method inside a class method is not a read on the class
+    // instance. A function that the code gives the instance keeps the `this`
+    // of the method: `.bind(this)`, `.call(this)` or `.apply(this)` on the
+    // function or its name, a call that also passes `this`, an assignment to a
+    // `this.<field>` or a class field, and a `this` parameter with a named
+    // type. This holds for the bare read and for the class `this` fact of a
+    // chain.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        export class Viewer extends Floor {
+            mark(): void {
+                function g(this: unknown) {
+                    this.inFunction();
+                }
+                const handlers = {
+                    run() {
+                        this.inObjectMethod();
+                    },
+                };
+                const visit = () => this.inArrow();
+                setTimeout(function () { this.inBound(); this.find().inBoundChain(); }.bind(this), 0);
+                (function () { this.inCalled(); }).call(this);
+                (function () { this.inApplied(); }).apply(this, []);
+                (function () { this.inCalledOther(); }).call({});
+                function named() { this.inNamedCalled(); }
+                named.call(this);
+                const later = function () { this.inNamedBound(); };
+                setTimeout(later.bind(this), 0);
+                [1].forEach(function () { this.inThisArg(); }, this);
+                Object.defineProperty(this, 'x', { get() { return this.inDescriptor(); } });
+                this.handler = function () { this.inThisField(); };
+                function typed(this: Viewer) { this.inTypedThis(); }
+                el.onclick = function () { this.inElementHandler(); };
+                this.on('ready', function () { this.inOwnListener(); });
+                this.items.forEach(function () { this.inOtherReceiver(); });
+                this.inMethod();
+            }
+            field = function () { this.inClassField(); };
+        }
+        ",
+    );
+
+    let reads_this = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "this" && access.member == member)
+    };
+    for member in [
+        "inArrow",
+        "inBound",
+        "inCalled",
+        "inApplied",
+        "inNamedCalled",
+        "inNamedBound",
+        "inThisArg",
+        "inOwnListener",
+        "inDescriptor",
+        "inThisField",
+        "inTypedThis",
+        "inClassField",
+        "inMethod",
+    ] {
+        assert!(reads_this(member), "{member}: {:?}", info.member_accesses);
+    }
+    for member in [
+        "inFunction",
+        "inObjectMethod",
+        "inCalledOther",
+        "inElementHandler",
+        "inOtherReceiver",
+    ] {
+        assert!(!reads_this(member), "{member}: {:?}", info.member_accesses);
+    }
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::ClassThisMemberAccess(access)
+                if access.class_local_name == "Viewer"
+                    && access.object == "this.find()"
+                    && access.member == "inBoundChain"
+        )),
+        "{:?}",
+        info.semantic_facts
+    );
+}
