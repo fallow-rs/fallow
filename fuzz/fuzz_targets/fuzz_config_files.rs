@@ -81,10 +81,10 @@ fuzz_target!(|data: &[u8]| {
             }
         }
         _ => {
-            if let Ok(plugin) = toml::from_str::<ExternalPluginDef>(source) {
+            if let Ok(plugin) = fallow_config::toml_input::from_str::<ExternalPluginDef>(source) {
                 check_plugin(&plugin);
             }
-            if let Ok(config) = toml::from_str::<FallowConfig>(source) {
+            if let Ok(config) = fallow_config::toml_input::from_str::<FallowConfig>(source) {
                 let _ = config.validate_user_globs();
             }
         }

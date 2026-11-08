@@ -1216,6 +1216,7 @@ dependencies = [
  "tempfile",
  "toml",
  "toml_edit",
+ "toml_parser",
  "tracing",
  "ureq",
  "xxhash-rust",
