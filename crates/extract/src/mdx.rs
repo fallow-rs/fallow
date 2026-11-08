@@ -777,6 +777,23 @@ mod tests {
     }
 
     #[test]
+    fn nested_type_argument_candidates_do_not_stall_the_statement_probe() {
+        // Each `t<{[` makes the TypeScript parser try the rest twice, once as
+        // type arguments and once as a comparison.
+        let source = format!(
+            "import({})\nimport {{ Card }} from './card';\n<Card />\n",
+            "t<{[".repeat(24)
+        );
+        let started = std::time::Instant::now();
+        assert!(!extract_mdx_statements_mapped(&source).body.contains("t<{["));
+        assert_eq!(import_sources(&source), vec!["./card".to_string()]);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "nested type-argument candidates must not reach the parser"
+        );
+    }
+
+    #[test]
     fn inline_line_terminators_end_comments_before_closing_delimiters() {
         for separator in ["\r", "\u{2028}", "\u{2029}"] {
             let source = format!(
