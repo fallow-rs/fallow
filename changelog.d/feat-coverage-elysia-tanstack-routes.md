@@ -1,0 +1,3 @@
+### Added
+
+- **`fallow coverage upload-inventory --with-callers` now finds the entry routes of Elysia and TanStack Router projects.** A TanStack Router route file takes its pattern from the string argument of `createFileRoute("/repo/$repo")`, with `method: null`. An Elysia route comes from a call such as `app.get("/repos/:repo", handler)`. The pattern joins the `prefix` of the instance, the `.group()` prefixes and the prefixes of the apps that mount the plugin with `.use()`. The file of the handler is the route entry. A route with a path or a prefix that is not a string literal is not uploaded. The route caps and the `routeLimits` header do not change. (Closes [#4271](https://github.com/fallow-rs/fallow/issues/4271))

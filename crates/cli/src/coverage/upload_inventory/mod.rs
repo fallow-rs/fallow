@@ -842,8 +842,9 @@ fn collect_graph_context(
     (caller_edges, routes)
 }
 
-/// Find the framework route files among the plugin entry points and attach the
-/// routes that reach each function. Empty when no route plugin is active.
+/// Find the framework route files among the plugin entry points and the routes
+/// that Elysia code defines, and attach the routes that reach each function.
+/// Empty when the project has no route framework.
 fn collect_routes(
     session: &AnalysisSession,
     graph: &fallow_engine::module_graph::RetainedModuleGraph,
@@ -857,11 +858,11 @@ fn collect_routes(
         Ok(listing) => listing.entry_points.unwrap_or_default(),
         Err(err) => {
             eprintln!(
-                "{LOG_PREFIX}: {}: plugin stage failed, uploading without entry routes ({})",
+                "{LOG_PREFIX}: {}: plugin stage failed, uploading without file-based entry routes ({})",
                 "warning".yellow().bold(),
                 err.message(),
             );
-            return InventoryRoutes::default();
+            Vec::new()
         }
     };
     let config = session.config();
@@ -877,13 +878,23 @@ fn collect_routes(
             .iter()
             .map(|e| (e.file_id.0 as usize, e.name.as_str())),
     );
-    let candidates = routes::route_candidates(
+    let mut candidates = routes::route_candidates(
         &entry_points,
         &roots,
         &config.root,
         &file_index_by_path,
         &exports,
     );
+    let path_by_index: FxHashMap<usize, &Path> = file_index_by_path
+        .iter()
+        .map(|(&path, &index)| (index, path))
+        .collect();
+    candidates.extend(routes::code_route_candidates(
+        &fallow_engine::code_routes::elysia_routes(graph),
+        &roots,
+        &config.root,
+        &path_by_index,
+    ));
     let file_index_by_repo_path: FxHashMap<String, usize> = repo_relative_by_id
         .iter()
         .map(|(id, path)| (path.clone(), id.0 as usize))

@@ -5,16 +5,22 @@
 //! forward from each route file. A function then carries the ids of the routes
 //! whose files can statically reach the file of the function.
 //!
+//! Two route sources read the source code instead of the path. A TanStack
+//! Router route file takes its pattern from the `createFileRoute` argument. An
+//! Elysia app defines its routes in code, so the handler file of each
+//! `app.get("/path", handler)` call is the route file.
+//!
 //! The result is "can reach", not "did reach". A pattern comes from the file
-//! name only, never from a request path. Reach is file-level: an import of one
-//! symbol from a file reaches every function in that file. Type-only imports do
-//! not reach, because they cannot run code.
+//! name or the source code only, never from a request path. Reach is
+//! file-level: an import of one symbol from a file reaches every function in
+//! that file. Type-only imports do not reach, because they cannot run code.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
 use colored::Colorize as _;
+use fallow_engine::code_routes::CodeRoute;
 use fallow_engine::discover::{EntryPoint, EntryPointSource};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -64,6 +70,13 @@ const SCRIPT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mt
 const NEXT_PAGE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "mdx", "md",
 ];
+
+/// Plugin name of TanStack Router. Its route files take their pattern from the
+/// `createFileRoute` argument, not from the file name.
+const TANSTACK_ROUTER: &str = "tanstack-router";
+
+/// Framework name of the routes that Elysia code defines.
+const ELYSIA: &str = "elysia";
 
 /// How a derived route gets its HTTP method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -341,6 +354,38 @@ fn derive_nuxt(dirs: &[&str], file: &str) -> Option<DerivedRoute> {
     Some(route("nuxt", join_pattern(url), methods))
 }
 
+/// The URL pattern of a TanStack Router route id (the `createFileRoute`
+/// argument). `None` for a pathless layout route (`/_auth`).
+///
+/// A pathless segment (`_auth`) and a route group (`(group)`) add no URL
+/// segment. A trailing `_` (`posts_`) only opts out of the parent layout. A
+/// trailing `/` marks the index route of its parent, also under a pathless
+/// layout (`/_auth/` serves `/`).
+pub(super) fn tanstack_pattern(route_id: &str) -> Option<String> {
+    let is_index = route_id.ends_with('/');
+    let segments: Vec<&str> = route_id.split('/').filter(|seg| !seg.is_empty()).collect();
+    if !is_index && segments.last().is_some_and(|seg| seg.starts_with('_')) {
+        return None;
+    }
+    let url = segments
+        .into_iter()
+        .filter(|seg| !seg.starts_with('_') && !is_group(seg))
+        .map(|seg| seg.strip_suffix('_').unwrap_or(seg));
+    Some(join_pattern(url))
+}
+
+/// The route of a TanStack Router route file, from the `createFileRoute`
+/// argument in its source. `None` when the file has no literal route id.
+fn tanstack_route(path: &Path) -> Option<DerivedRoute> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let route_id = fallow_engine::code_routes::file_route_id(path, &source)?;
+    Some(route(
+        TANSTACK_ROUTER,
+        tanstack_pattern(&route_id)?,
+        MethodRule::Any,
+    ))
+}
+
 /// Stable id of a route: a hash of its framework, package root, pattern and
 /// method, so the id does not change between uploads while the pattern stays.
 fn route_id(framework: &str, root: &str, pattern: &str, method: Option<&str>) -> String {
@@ -397,6 +442,15 @@ fn repo_relative(path: &Path, project_root: &Path) -> String {
         .map_or_else(|_| to_posix_string(path), to_posix_string)
 }
 
+/// The longest root in `roots` that holds `path`.
+fn root_of<'a>(path: &Path, roots: &[&'a Path]) -> Option<&'a Path> {
+    roots
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .copied()
+}
+
 /// The route candidates of the plugin entry points. `roots` holds the project
 /// root and every workspace root; a file takes its pattern relative to the
 /// longest root that holds it.
@@ -415,17 +469,18 @@ pub(super) fn route_candidates(
         let Some(&file_index) = file_index_by_path.get(entry.path.as_path()) else {
             continue;
         };
-        let Some(root) = roots
-            .iter()
-            .filter(|root| entry.path.starts_with(root))
-            .max_by_key(|root| root.components().count())
-        else {
+        let Some(root) = root_of(&entry.path, roots) else {
             continue;
         };
         let Ok(rel) = entry.path.strip_prefix(root) else {
             continue;
         };
-        let Some(derived) = derive_route(name, &to_posix_string(rel)) else {
+        let derived = if name == TANSTACK_ROUTER {
+            tanstack_route(&entry.path)
+        } else {
+            derive_route(name, &to_posix_string(rel))
+        };
+        let Some(derived) = derived else {
             continue;
         };
         let root = repo_relative(root, project_root);
@@ -441,6 +496,37 @@ pub(super) fn route_candidates(
         }
     }
     out
+}
+
+/// The route candidates of the routes that Elysia code defines. Each route
+/// starts at the file of its handler. `path_by_index` maps a graph file index
+/// to its absolute path.
+pub(super) fn code_route_candidates(
+    code_routes: &[CodeRoute],
+    roots: &[&Path],
+    project_root: &Path,
+    path_by_index: &FxHashMap<usize, &Path>,
+) -> Vec<RouteCandidate> {
+    code_routes
+        .iter()
+        .filter_map(|code_route| {
+            let file_index = code_route.file_id.0 as usize;
+            let path = *path_by_index.get(&file_index)?;
+            let root = repo_relative(root_of(path, roots)?, project_root);
+            let file = repo_relative(path, project_root);
+            Some(RouteCandidate {
+                file_index,
+                payload: RoutePayload {
+                    id: route_id(ELYSIA, &root, &code_route.pattern, code_route.method),
+                    pattern: code_route.pattern.clone(),
+                    method: code_route.method,
+                    files: vec![file.clone()],
+                    file,
+                    framework: ELYSIA,
+                },
+            })
+        })
+        .collect()
 }
 
 /// Primary file order: a file outside a parallel slot (`@slot`) first, then the
