@@ -159,6 +159,13 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
    FALLOW_PR_DECISION_FILE="$PR_DECISION_FILE" \
    FALLOW_PR_DETAILS_FILE="$PR_DETAILS_FILE" \
    render_with_fallow pr-comment-github "$PR_COMMENT_FILE"; then
+  if [ -n "${FALLOW_MUTATION_SECTION_FILE:-}" ] && [ -s "$FALLOW_MUTATION_SECTION_FILE" ]; then
+    # shellcheck source=../../ci/scripts/mutation_common.sh
+    source "$(dirname -- "${BASH_SOURCE[0]}")/../../ci/scripts/mutation_common.sh"
+    fallow_mutation_insert_section "$PR_COMMENT_FILE" "$PR_COMMENT_ENVELOPE_FILE" \
+      "$FALLOW_MUTATION_SECTION_FILE" "${FALLOW_MUTATION_CLEAN:-true}" \
+      || echo "::warning::Failed to add the mutation section to the PR comment"
+  fi
   PLAN_FILE=$(artifact_path fallow-pr-comment-plan.json)
   POST_COMMENT_ARGS=(
     ci post-pr-comment

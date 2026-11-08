@@ -1,0 +1,493 @@
+{
+  "kind": "mutation",
+  "schema_version": "2",
+  "version": "3.41.0",
+  "elapsed_ms": 1989,
+  "completion": {
+    "status": "partial",
+    "reasons": [
+      "mutant-limit"
+    ]
+  },
+  "kill_matrix": {
+    "status": "unavailable",
+    "reasons": [
+      "kill-matrix-disabled"
+    ],
+    "tests": [],
+    "candidates": [],
+    "coverage_without_kills": []
+  },
+  "scope": {
+    "kind": "all"
+  },
+  "runner": {
+    "name": "vitest",
+    "version": "4.1.12",
+    "protocol_version": 1,
+    "runtime": {
+      "name": "node",
+      "version": "v24.22.1"
+    },
+    "concurrency": 2
+  },
+  "cache": {
+    "hits": 0,
+    "stored": 2,
+    "not_keyed": [
+      "dynamic-imports",
+      "file-reads"
+    ]
+  },
+  "summary": {
+    "counts": {
+      "total": 13,
+      "killed": 1,
+      "timeout": 0,
+      "survived": 1,
+      "no_coverage": 9,
+      "runtime_error": 0,
+      "flaky": 0,
+      "pruned": 0,
+      "pending": 2,
+      "equivalent": 0,
+      "compile_error": 0
+    },
+    "score": 0.5,
+    "coverage": 0.3076923076923077
+  },
+  "mutants": [
+    {
+      "mutant_id": "490c67f791b7e37d",
+      "file": "src/math.js",
+      "line": 2,
+      "column": 7,
+      "span": [
+        44,
+        50
+      ],
+      "operator": "relational-operator",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 1,
+      "change": {
+        "from": "<expression>",
+        "to": "false"
+      },
+      "status": "killed",
+      "killed_by": "src/math.test.js::clamp low",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "covering_tests": [
+        "src/math.test.js::clamp low"
+      ],
+      "duration_ms": 123
+    },
+    {
+      "mutant_id": "b7cd788c13dcf918",
+      "file": "src/math.js",
+      "line": 2,
+      "column": 9,
+      "span": [
+        46,
+        47
+      ],
+      "operator": "relational-operator",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 2,
+      "change": {
+        "from": "<",
+        "to": "<="
+      },
+      "status": "survived",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "covering_tests": [
+        "src/math.test.js::clamp low"
+      ],
+      "duration_ms": 113,
+      "retried": true,
+      "attempts": [
+        {
+          "status": "survived",
+          "duration_ms": 113,
+          "killing_tests": [],
+          "kill_matrix_complete": false
+        },
+        {
+          "status": "survived",
+          "duration_ms": 139,
+          "killing_tests": [],
+          "kill_matrix_complete": false
+        }
+      ]
+    },
+    {
+      "mutant_id": "cc03cacd30a95a66",
+      "file": "src/math.js",
+      "line": 2,
+      "column": 9,
+      "span": [
+        46,
+        47
+      ],
+      "operator": "relational-operator",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 3,
+      "change": {
+        "from": "<",
+        "to": "!="
+      },
+      "status": "pending",
+      "killing_tests": [],
+      "kill_matrix_complete": false
+    },
+    {
+      "mutant_id": "958b26382c371bbf",
+      "file": "src/math.js",
+      "line": 2,
+      "column": 22,
+      "span": [
+        59,
+        61
+      ],
+      "operator": "return-value",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 4,
+      "change": {
+        "from": "<expression>",
+        "to": "undefined"
+      },
+      "status": "pending",
+      "killing_tests": [],
+      "kill_matrix_complete": false
+    },
+    {
+      "mutant_id": "0f0818995406a6b7",
+      "file": "src/math.js",
+      "line": 3,
+      "column": 7,
+      "span": [
+        69,
+        75
+      ],
+      "operator": "relational-operator",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 5,
+      "change": {
+        "from": "<expression>",
+        "to": "false"
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "direct",
+        "export_name": "clamp"
+      }
+    },
+    {
+      "mutant_id": "4db04d4166122642",
+      "file": "src/math.js",
+      "line": 3,
+      "column": 9,
+      "span": [
+        71,
+        72
+      ],
+      "operator": "relational-operator",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 6,
+      "change": {
+        "from": ">",
+        "to": ">="
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "direct",
+        "export_name": "clamp"
+      }
+    },
+    {
+      "mutant_id": "bc909ab33fe3df00",
+      "file": "src/math.js",
+      "line": 3,
+      "column": 9,
+      "span": [
+        71,
+        72
+      ],
+      "operator": "relational-operator",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 7,
+      "change": {
+        "from": ">",
+        "to": "!="
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "direct",
+        "export_name": "clamp"
+      }
+    },
+    {
+      "mutant_id": "3e08b7db87d0baf9",
+      "file": "src/math.js",
+      "line": 3,
+      "column": 22,
+      "span": [
+        84,
+        86
+      ],
+      "operator": "return-value",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 8,
+      "change": {
+        "from": "<expression>",
+        "to": "undefined"
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "direct",
+        "export_name": "clamp"
+      }
+    },
+    {
+      "mutant_id": "c1183579195fa301",
+      "file": "src/math.js",
+      "line": 4,
+      "column": 10,
+      "span": [
+        97,
+        98
+      ],
+      "operator": "return-value",
+      "function": "clamp",
+      "function_line": 1,
+      "rank": 9,
+      "change": {
+        "from": "<expression>",
+        "to": "undefined"
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "direct",
+        "export_name": "clamp"
+      }
+    },
+    {
+      "mutant_id": "5f1b39807e864c29",
+      "file": "src/math.js",
+      "line": 6,
+      "column": 32,
+      "span": [
+        134,
+        135
+      ],
+      "operator": "arithmetic-operator",
+      "function": "add",
+      "function_line": 6,
+      "rank": 10,
+      "change": {
+        "from": "+",
+        "to": "-"
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "none",
+        "export_name": "add"
+      }
+    },
+    {
+      "mutant_id": "495f0e4d65f4c833",
+      "file": "src/math.js",
+      "line": 7,
+      "column": 33,
+      "span": [
+        171,
+        180
+      ],
+      "operator": "relational-operator",
+      "function": "isAdult",
+      "function_line": 7,
+      "rank": 11,
+      "change": {
+        "from": "<expression>",
+        "to": "true"
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "none",
+        "export_name": "isAdult"
+      }
+    },
+    {
+      "mutant_id": "0a56032f53422895",
+      "file": "src/math.js",
+      "line": 7,
+      "column": 37,
+      "span": [
+        175,
+        177
+      ],
+      "operator": "relational-operator",
+      "function": "isAdult",
+      "function_line": 7,
+      "rank": 12,
+      "change": {
+        "from": ">=",
+        "to": ">"
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "none",
+        "export_name": "isAdult"
+      }
+    },
+    {
+      "mutant_id": "9b38f59503a68a24",
+      "file": "src/math.js",
+      "line": 7,
+      "column": 37,
+      "span": [
+        175,
+        177
+      ],
+      "operator": "relational-operator",
+      "function": "isAdult",
+      "function_line": 7,
+      "rank": 13,
+      "change": {
+        "from": ">=",
+        "to": "=="
+      },
+      "status": "no_coverage",
+      "killing_tests": [],
+      "kill_matrix_complete": false,
+      "test_reach": {
+        "reach": "none",
+        "export_name": "isAdult"
+      }
+    }
+  ],
+  "functions": [
+    {
+      "file": "src/math.js",
+      "name": "clamp",
+      "line": 1,
+      "end_line": 5,
+      "in_diff": false,
+      "cyclomatic": 3,
+      "counts": {
+        "total": 9,
+        "killed": 1,
+        "timeout": 0,
+        "survived": 1,
+        "no_coverage": 5,
+        "runtime_error": 0,
+        "flaky": 0,
+        "pruned": 0,
+        "pending": 2,
+        "equivalent": 0,
+        "compile_error": 0
+      },
+      "score": 0.5,
+      "survived": [
+        "b7cd788c13dcf918"
+      ]
+    },
+    {
+      "file": "src/math.js",
+      "name": "add",
+      "line": 6,
+      "end_line": 6,
+      "in_diff": false,
+      "cyclomatic": 1,
+      "counts": {
+        "total": 1,
+        "killed": 0,
+        "timeout": 0,
+        "survived": 0,
+        "no_coverage": 1,
+        "runtime_error": 0,
+        "flaky": 0,
+        "pruned": 0,
+        "pending": 0,
+        "equivalent": 0,
+        "compile_error": 0
+      },
+      "score": null
+    },
+    {
+      "file": "src/math.js",
+      "name": "isAdult",
+      "line": 7,
+      "end_line": 7,
+      "in_diff": false,
+      "cyclomatic": 1,
+      "counts": {
+        "total": 3,
+        "killed": 0,
+        "timeout": 0,
+        "survived": 0,
+        "no_coverage": 3,
+        "runtime_error": 0,
+        "flaky": 0,
+        "pruned": 0,
+        "pending": 0,
+        "equivalent": 0,
+        "compile_error": 0
+      },
+      "score": null
+    }
+  ],
+  "no_test_files": false,
+  "baseline_failures": [],
+  "skipped_files": [],
+  "unmatched_paths": [],
+  "unloaded_paths": [],
+  "worktree": {
+    "checked": true,
+    "allow_dirty": false,
+    "changed_paths": []
+  },
+  "errors": [],
+  "timings": {
+    "plan_ms": 323,
+    "setup_ms": 373,
+    "dry_run_ms": 254,
+    "mutants_ms": 566,
+    "retry_ms": 442,
+    "typecheck_ms": 0
+  },
+  "files": [
+    {
+      "path": "src/math.js",
+      "source_sha256": "7dc9623b8df7ad53f5407f697ac91d17020820a5bc38a3685ad5fd1664acb785",
+      "static_test_files": [
+        "src/math.test.js"
+      ]
+    }
+  ]
+}

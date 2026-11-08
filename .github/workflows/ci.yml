@@ -345,6 +345,8 @@ jobs:
             action-current:
               - 'action/**'
               - 'action.yml'
+              - 'ci/scripts/mutation_common.sh'
+              - 'ci/tests/fixtures/mutation-*.json'
               - 'crates/**'
               - 'tests/fixtures/basic-project/**'
               - 'Cargo.toml'

@@ -138,6 +138,12 @@ envelope. They describe different runs, which is why both exist: the advisory
 judges the whole project, and the gate line reports what the scoped run
 concluded, which on a pull request is that it stood down.
 
+### Mutation testing
+
+Set `mutation: true` to run `fallow mutation` before the analysis. The step runs the tests of the project, so install the dependencies in an earlier step. The default scope is the lines that the PR adds, with a time budget of `10m`. The PR comment and the job summary get one "Mutation testing" section with the counts, the budget state and the top survivors. A partial run says "Partial run".
+
+Exit code 2 of `fallow mutation` (a tool failure) and a failed `mutation-min-score` fail the job in the last step, after the comment. The step runs only for the `pull_request`, `push`, `schedule`, `workflow_dispatch` and `merge_group` events. It refuses events such as `pull_request_target`, because they give the job the secrets of the base repository and can check out the code of a fork. The step never passes `--allow-dirty`: run code generation and build steps before the action, and commit or ignore the files that they write. See `docs/mutation-testing.md` (section CI) for the inputs, the cache, and the fork rules.
+
 ### Bot identity
 
 The markdown comment keeps fallow branding intentionally light. Repository-visible identity such as avatar, bot name, checks, and richer app affordances should come from the GitHub App installation rather than from decorative markdown inside each comment.

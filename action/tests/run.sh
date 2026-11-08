@@ -5836,6 +5836,11 @@ assert_not_contains "$OUT" "no merge base" "merge base: PR head checkout gets a 
 
 rm -rf "$MB_TMP"
 
+# --- Mutation testing ---
+
+# shellcheck source=mutation.sh
+source "$DIR/mutation.sh"
+
 # --- Summary ---
 
 echo ""
