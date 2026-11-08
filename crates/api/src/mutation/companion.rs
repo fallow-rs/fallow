@@ -40,12 +40,14 @@ pub const COMPANION_FILES: &[EmbeddedFile] = embedded!(
     "generated-protocol.mjs",
     "protocol.mjs",
     "runtime/bun-test-preload.mjs",
+    "runtime/child-coverage.mjs",
     "runtime/child-hooks.mjs",
     "runtime/child.mjs",
     "runtime/global.mjs",
     "runtime/node-subprocess-preload.mjs",
     "runtime/node-test-preload.mjs",
     "runtime/overlay-hook.mjs",
+    "runtime/subprocess-options.mjs",
     "runtime/vitest-setup.mjs",
 );
 

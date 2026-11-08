@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, inject } from "vitest";
 
 import { installFallowMutation } from "./global.mjs";
+import { setSubprocessPreload } from "./subprocess-options.mjs";
 
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
 const LOOP_BUDGET_KEY = "fallowLoopBudget";
@@ -81,30 +82,34 @@ const installRequireHook = async () => {
   return state;
 };
 
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-
 /**
  * Sets the subprocess preload in NODE_OPTIONS with the active mutant, so a
  * Node process that a test starts (spawn, exec, execFile or fork) loads the
- * instrumented files and runs the same mutant. The function first removes
- * the flag of an earlier file or run in this worker, because a worker that
- * does not isolate its test files keeps its environment. The preload URL has
- * no space or quote, so the NODE_OPTIONS parse keeps it as one argument. The
- * existing value comes first, so a loader of the project keeps its order.
+ * instrumented files and runs the same mutant. `test` is the token of the
+ * child coverage in a dry run, or null. A worker that does not isolate its
+ * test files keeps its environment, so each call replaces the flag of an
+ * earlier file or run.
  *
  * Without the synchronous hook API, the preload cannot serve a file, so the
  * value stays as it is.
  */
-const shareWithChildProcesses = (hooksReady, active) => {
+const shareWithChildProcesses = (hooksReady, active, test) => {
   const preload = inject(SUBPROCESS_PRELOAD_KEY);
   if (!hooksReady || typeof preload !== "string") return;
-  const url = new URL(preload);
-  const base = preload.split("?", 1)[0];
-  const earlier = new RegExp(`(?:^|\\s+)--import=${escapeRegExp(base)}(?:\\?\\S*)?(?=\\s|$)`, "gu");
-  const current = (process.env.NODE_OPTIONS ?? "").replace(earlier, "").trim();
-  if (active !== null) url.searchParams.set("active", active);
-  const flag = `--import=${url.href}`;
-  process.env.NODE_OPTIONS = current ? `${current} ${flag}` : flag;
+  setSubprocessPreload(preload, { active, test });
+};
+
+/**
+ * Loads the child coverage of this test file, or null without the synchronous
+ * hook API. A Node child of a test then has no overlay and no hits to give.
+ */
+const loadChildCoverage = async (hooksReady) => {
+  const preload = inject(SUBPROCESS_PRELOAD_KEY);
+  if (!hooksReady || typeof preload !== "string") return null;
+  const overlayPath = new URL(preload).searchParams.get("overlay");
+  if (overlayPath === null) return null;
+  const { createChildCoverage } = await import("./child-coverage.mjs");
+  return createChildCoverage(overlayPath);
 };
 
 // The setup file runs before the test file imports any source module. The
@@ -114,19 +119,23 @@ const mutation = installFallowMutation();
 mutation.startFile();
 mutation.setActive(activeMutant());
 const requireHook = await installRequireHook();
-shareWithChildProcesses(requireHook.hooksReady, activeMutant());
+shareWithChildProcesses(requireHook.hooksReady, activeMutant(), null);
+const childCoverage = await loadChildCoverage(requireHook.hooksReady);
 
 beforeEach(() => {
   const active = activeMutant();
   mutation.setActive(active);
   mutation.setLoopBudget(inject(LOOP_BUDGET_KEY));
-  shareWithChildProcesses(requireHook.hooksReady, active);
+  // Only a dry run reads hits, so a mutant run gives the children no token.
+  const token = childCoverage?.startTest() ?? null;
+  shareWithChildProcesses(requireHook.hooksReady, active, active === null ? token : null);
   mutation.startTest();
 });
 
 afterEach((context) => {
   const { hits, staticHits } = mutation.finishTest();
-  context.task.meta.fallowHits = hits;
+  const children = childCoverage?.finishTest() ?? { hits: [], loaded: [] };
+  context.task.meta.fallowHits = [...new Set([...hits, ...children.hits])];
   context.task.meta.fallowStaticHits = staticHits;
-  context.task.meta.fallowLoaded = [...requireHook.loaded];
+  context.task.meta.fallowLoaded = [...new Set([...requireHook.loaded, ...children.loaded])];
 });

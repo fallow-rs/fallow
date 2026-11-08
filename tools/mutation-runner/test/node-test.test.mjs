@@ -228,6 +228,13 @@ const createSubprocessProject = () => {
       '  const out = execFileSync(process.execPath, [copied, "2", "2"], { encoding: "utf8" });',
       '  assert.equal(out.trim(), "4");',
       "});",
+      'test("child only", () => {',
+      '  const out = execFileSync(process.execPath, [path("math.mjs"), "2", "2"], { encoding: "utf8" });',
+      '  assert.equal(out.trim(), "4");',
+      "});",
+      'test("no child", () => {',
+      "  assert.equal(1 + 1, 2);",
+      "});",
       'test("env", () => {',
       "  assert.ok(Number.isFinite(add(2, 2)));",
       '  assert.deepEqual(Object.keys(process.env).filter((key) => key.startsWith("FALLOW_MUTATION")), []);',
@@ -279,7 +286,7 @@ describe("node-test adapter with a test that starts a Node child process", () =>
     project?.cleanup();
   });
 
-  test("the dry run passes and the hits of the test process select each test", async () => {
+  test("the dry run passes and the hits of the test process and its children select each test", async () => {
     const dryRun = await request({ type: "dry_run", test_files: [CLI_TEST] });
     assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
     assert.deepEqual(dryRun.unhandled_errors, []);
@@ -289,6 +296,8 @@ describe("node-test adapter with a test that starts a Node child process", () =>
         { name: "cli", status: "pass" },
         { name: "fork", status: "pass" },
         { name: "copy", status: "pass" },
+        { name: "child only", status: "pass" },
+        { name: "no child", status: "pass" },
         { name: "env", status: "pass" },
       ],
     );
@@ -296,11 +305,12 @@ describe("node-test adapter with a test that starts a Node child process", () =>
       [`${CLI_TEST}::cli`]: ["s1"],
       [`${CLI_TEST}::fork`]: ["s1"],
       [`${CLI_TEST}::copy`]: ["s1"],
+      [`${CLI_TEST}::child only`]: ["s1"],
       [`${CLI_TEST}::env`]: ["s1"],
     });
   });
 
-  for (const name of ["cli", "fork", "copy"]) {
+  for (const name of ["cli", "fork", "copy", "child only"]) {
     test(`the child process of the ${name} test loads the active mutant`, async () => {
       const result = await request({
         type: "run",
