@@ -680,6 +680,7 @@ fn resolve_elysia_routes(
     }
 
     let mut prefixes: FxHashMap<InstanceKey, Vec<String>> = FxHashMap::default();
+    let mut visiting: FxHashSet<InstanceKey> = FxHashSet::default();
     let mut routes = Vec::new();
     let mut file_ids: Vec<&FileId> = files.keys().collect();
     file_ids.sort_unstable_by_key(|id| id.0);
@@ -687,10 +688,7 @@ fn resolve_elysia_routes(
         let file = &files[&file_id];
         for route in &file.routes {
             let key = (file_id, route.instance);
-            let instance_prefixes = prefixes
-                .entry(key)
-                .or_insert_with(|| mount_prefixes(key, &parents, 0))
-                .clone();
+            let instance_prefixes = mount_prefixes(key, &parents, &mut prefixes, &mut visiting);
             let handler_file =
                 resolve(file_id, &route.handler).map_or(file_id, |(origin, _)| origin);
             for prefix in instance_prefixes {
@@ -715,30 +713,44 @@ fn resolve_elysia_routes(
 /// The path prefixes under which an instance serves its routes: `[""]` for a
 /// root app, one prefix per mount path otherwise. A mount under a prefix that
 /// is not literal adds no prefix.
+///
+/// `memo` keeps the prefixes of each instance, so each instance is walked once.
+/// Without it, a file with many mounts on each level makes a number of walks
+/// that grows exponentially with the depth. `visiting` holds the instances on
+/// the current mount chain: a mount cycle and a chain longer than
+/// `MAX_MOUNT_DEPTH` add no prefix.
 fn mount_prefixes(
     key: InstanceKey,
     parents: &FxHashMap<InstanceKey, Vec<(InstanceKey, Option<String>)>>,
-    depth: usize,
+    memo: &mut FxHashMap<InstanceKey, Vec<String>>,
+    visiting: &mut FxHashSet<InstanceKey>,
 ) -> Vec<String> {
+    if let Some(known) = memo.get(&key) {
+        return known.clone();
+    }
     let Some(mounts) = parents.get(&key) else {
         return vec![String::new()];
     };
-    if depth >= MAX_MOUNT_DEPTH {
+    if visiting.len() >= MAX_MOUNT_DEPTH || !visiting.insert(key) {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    for (parent, base) in mounts {
+    let mut out: Vec<String> = Vec::new();
+    'mounts: for (parent, base) in mounts {
         let Some(base) = base else {
             continue;
         };
-        for prefix in mount_prefixes(*parent, parents, depth + 1) {
+        for prefix in mount_prefixes(*parent, parents, memo, visiting) {
             let joined = format!("{prefix}{base}");
             if !out.contains(&joined) {
                 out.push(joined);
+                if out.len() == MAX_PREFIXES_PER_INSTANCE {
+                    break 'mounts;
+                }
             }
         }
     }
-    out.truncate(MAX_PREFIXES_PER_INSTANCE);
+    visiting.remove(&key);
+    memo.insert(key, out.clone());
     out
 }
 

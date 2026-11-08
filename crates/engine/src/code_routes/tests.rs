@@ -130,14 +130,71 @@ fn mount_prefixes_follow_every_mount_and_stop_on_a_cycle() {
         c,
         vec![(b, Some("/v1".to_owned())), (a, Some("/v2".to_owned()))],
     );
-    assert_eq!(mount_prefixes(a, &parents, 0), vec![String::new()]);
+    assert_eq!(prefixes_of(a, &parents), vec![String::new()]);
     assert_eq!(
-        mount_prefixes(c, &parents, 0),
+        prefixes_of(c, &parents),
         vec!["/api/v1".to_owned(), "/v2".to_owned()]
     );
     let mut cycle: FxHashMap<InstanceKey, Vec<(InstanceKey, Option<String>)>> =
         FxHashMap::default();
     cycle.insert(a, vec![(b, Some("/a".to_owned()))]);
     cycle.insert(b, vec![(a, Some("/b".to_owned()))]);
-    assert!(mount_prefixes(a, &cycle, 0).is_empty());
+    assert!(prefixes_of(a, &cycle).is_empty());
+}
+
+type Parents = FxHashMap<InstanceKey, Vec<(InstanceKey, Option<String>)>>;
+
+fn prefixes_of(key: InstanceKey, parents: &Parents) -> Vec<String> {
+    mount_prefixes(
+        key,
+        parents,
+        &mut FxHashMap::default(),
+        &mut FxHashSet::default(),
+    )
+}
+
+/// 16 layers of 8 instances. Each instance mounts under every instance of the
+/// layer above, so the number of mount paths grows as 8^16.
+fn layered_mounts() -> (Parents, InstanceKey) {
+    const LAYERS: usize = 16;
+    const WIDTH: usize = 8;
+    let key = |layer: usize, slot: usize| (FileId(0), layer * WIDTH + slot);
+    let mut parents = Parents::default();
+    for layer in 1..LAYERS {
+        for slot in 0..WIDTH {
+            let edges = (0..WIDTH)
+                .map(|up| (key(layer - 1, up), Some(format!("/l{layer}s{up}"))))
+                .collect();
+            parents.insert(key(layer, slot), edges);
+        }
+    }
+    (parents, key(LAYERS - 1, 0))
+}
+
+#[test]
+fn wide_and_deep_mounts_stay_bounded() {
+    let (parents, leaf) = layered_mounts();
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(prefixes_of(leaf, &parents));
+    });
+    let prefixes = receive
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("mount prefixes of a wide and deep mount graph finish quickly");
+    assert_eq!(prefixes.len(), MAX_PREFIXES_PER_INSTANCE);
+}
+
+#[test]
+fn a_repeated_mount_edge_gives_one_prefix() {
+    let root = (FileId(0), 0);
+    let child = (FileId(0), 1);
+    let mut parents = Parents::default();
+    parents.insert(
+        child,
+        vec![
+            (root, Some("/v1".to_owned())),
+            (root, Some("/v1".to_owned())),
+        ],
+    );
+    assert_eq!(prefixes_of(child, &parents), vec!["/v1".to_owned()]);
 }
