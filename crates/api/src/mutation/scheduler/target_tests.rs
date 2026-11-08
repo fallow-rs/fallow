@@ -50,6 +50,7 @@ fn killed_by_each_always(run: &RunRequest, killers: &[String]) -> Response {
         tests_executed: tests.len(),
         tests,
         unhandled_errors: Vec::new(),
+        loop_timeout: false,
     })
 }
 

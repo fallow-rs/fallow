@@ -269,10 +269,22 @@ const runStatus = (tests, errors, requestedCount) => {
   return tests.length === requestedCount ? "survived" : "runtime_error";
 };
 
-/** Builds a `run_result` body from the tests and the errors of a run. */
-export const runResult = ({ mutantId, tests, errors, requestedCount, durationMs }) => {
+/**
+ * Builds a `run_result` body from the tests and the errors of a run.
+ * `loopTimeout` is true when the loop budget failed the first failing test.
+ * The body then has `loop_timeout: true` when the status is `timeout`.
+ */
+export const runResult = ({
+  mutantId,
+  tests,
+  errors,
+  requestedCount,
+  durationMs,
+  loopTimeout = false,
+}) => {
   const status = runStatus(tests, errors, requestedCount);
   return {
+    ...(loopTimeout && status === "timeout" ? { loop_timeout: true } : {}),
     mutant_id: mutantId,
     status,
     // With no failing test, a kill comes from an error outside a test, so

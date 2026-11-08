@@ -226,6 +226,10 @@ pub struct RunResult {
     pub tests: Vec<RunTest>,
     #[serde(default)]
     pub unhandled_errors: Vec<UnhandledError>,
+    /// True when the loop budget of the request decided a `timeout` status:
+    /// the first failing test still ran the active mutant after the budget.
+    #[serde(default)]
+    pub loop_timeout: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

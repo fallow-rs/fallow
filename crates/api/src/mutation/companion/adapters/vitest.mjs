@@ -163,9 +163,12 @@ const testStatus = (testCase) => STATUS_BY_STATE[testCase.result().state]?.(test
 const isConcurrent = (testCase) =>
   testCase.options.concurrent === true || testCase.project.config.sequence?.concurrent === true;
 
+const isLoopTimeout = (testCase) =>
+  (testCase.result().errors ?? []).some((error) => error?.name === LOOP_TIMEOUT_NAME);
+
 const failureKind = (testCase) => {
   const errors = testCase.result().errors ?? [];
-  if (errors.some((error) => error?.name === LOOP_TIMEOUT_NAME)) return "timeout";
+  if (isLoopTimeout(testCase)) return "timeout";
   if (errors.some((error) => TIMEOUT_MESSAGE.test(errorMessage(error)))) return "timeout";
   return errors.some((error) => error?.name === "AssertionError") ? "assertion" : "error";
 };
@@ -739,12 +742,16 @@ export const createAdapter = async (init) => {
       timeoutMs: request.timeout_ms,
       loopBudgetMs: request.loop_budget_ms ?? null,
     });
+    const firstFailure = result.testModules
+      .flatMap((testModule) => [...testModule.children.allTests()])
+      .find((testCase) => testIdByTask.has(testCase.id) && testStatus(testCase) === "fail");
     return runResult({
       mutantId: request.mutant_id,
       tests: collectRunTests(result.testModules, testIdByTask, directories),
       errors: runErrors(result, root),
       requestedCount: requested.length,
       durationMs: performance.now() - started,
+      loopTimeout: firstFailure !== undefined && isLoopTimeout(firstFailure),
     });
   };
 

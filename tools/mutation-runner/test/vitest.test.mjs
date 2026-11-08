@@ -200,6 +200,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
       const started = performance.now();
       const result = await run("m5", [id("pauses", FAULTS)], 500);
       assert.equal(result.status, "timeout", JSON.stringify(result));
+      assert.equal(result.loop_timeout, undefined, "the test timeout is no loop timeout");
       assert.equal(result.killed_by, null);
       assert.deepEqual(result.tests.map(withoutMessage), [
         { test_id: id("pauses", FAULTS), status: "fail", failure_kind: "timeout" },
@@ -221,6 +222,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
           bail: true,
         });
         assert.equal(result.status, "timeout", JSON.stringify(result));
+        assert.equal(result.loop_timeout, true);
         assert.equal(result.killed_by, null);
         assert.deepEqual(result.tests.map(withoutMessage), [
           { test_id: id("spins", FAULTS), status: "fail", failure_kind: "timeout" },

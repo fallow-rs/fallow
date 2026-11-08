@@ -178,6 +178,25 @@ test("each test starts its own count of active evaluations", () => {
   }
 });
 
+test("time that a test spends waiting does not use the loop budget", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  control.startFile();
+  control.setActive("m1");
+  control.setLoopBudget(20);
+  control.startTest();
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60);
+  try {
+    assert.doesNotThrow(() => {
+      for (let i = 0; i < 1_000; i += 1) runtime.a("m1");
+    }, "a wait of 60 ms used a loop budget of 20 ms");
+  } finally {
+    control.finishTest();
+    control.setActive(null);
+    control.setLoopBudget(null);
+  }
+});
+
 test("a() and c() never throw", () => {
   installFallowMutation();
   const runtime = globalThis.__fallowMutation;

@@ -9,15 +9,25 @@ export const LOOP_TIMEOUT_NAME = "FallowMutationLoopTimeout";
 // A clock read on each evaluation would slow a hot loop that ends.
 const LOOP_CHECK_MASK = 0x7f;
 
-// The real clock, read when the module loads. A test with fake timers can
-// replace `performance` or its `now` method, and fake time must not reach
-// the loop budget. The setup file loads this module before any test code.
-const realNow = performance.now.bind(performance);
+// The CPU time of the test thread, in ms. A test that waits uses no CPU
+// time, and other load on the host does not count, so the loop budget
+// measures only the work of the test. The function is read when the module
+// loads, so fake timers of a test cannot replace it. The setup file loads
+// this module before any test code. Without `process` (for example in
+// browser mode), the clock is null and the loop check is off.
+const cpuUsage = (() => {
+  const proc = globalThis.process;
+  if (typeof proc?.threadCpuUsage === "function") return proc.threadCpuUsage.bind(proc);
+  if (typeof proc?.cpuUsage === "function") return proc.cpuUsage.bind(proc);
+  return null;
+})();
 
-/** Gives the real time in ms, or null when the clock fails. */
+/** Gives the CPU time of the test thread in ms, or null without a clock. */
 const readClock = () => {
+  if (cpuUsage === null) return null;
   try {
-    return realNow();
+    const usage = cpuUsage();
+    return (usage.user + usage.system) / 1000;
   } catch {
     return null;
   }
@@ -34,9 +44,10 @@ const loopTimeout = (budgetMs) => {
 const createRuntime = () => {
   // `running` counts the tests that started and did not finish. Concurrent
   // tests overlap, so a hit belongs to a test while any test runs.
-  // `loopBudget` is the time in ms that the tests of one file can run with
-  // the active mutant. `loopSpent` is the test time of the earlier tests of
-  // the file, and `testStarted` the start of the current test time.
+  // `loopBudget` is the CPU time in ms that the tests of one file can use
+  // with the active mutant. `loopSpent` is the CPU time of the earlier tests
+  // of the file, and `testStarted` the clock value at the start of the
+  // current test time.
   const state = {
     active: null,
     running: 0,
