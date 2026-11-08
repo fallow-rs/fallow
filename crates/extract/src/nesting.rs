@@ -41,7 +41,7 @@ use crate::visitor::ModuleInfoExtractor;
 /// `(` or `[`. One level can cost up to four times the level inside it, so
 /// the cap keeps the worst case near a million steps. Real code, minified
 /// bundles and generated declaration files included, stays below this cap.
-pub const MAX_TYPE_ARGUMENT_NESTING: u32 = 10;
+const MAX_TYPE_ARGUMENT_NESTING: u32 = 10;
 
 /// Bracket nesting depth past which a file is not parsed.
 ///
@@ -118,7 +118,7 @@ enum Dialect {
 /// Run `parse`, which parses `source` with Oxc and walks the result, without
 /// a stack overflow. Returns `None` when the bracket nesting of `source`
 /// exceeds [`MAX_NESTING_DEPTH`], its type-argument nesting exceeds
-/// [`MAX_TYPE_ARGUMENT_NESTING`], or the stack it needs exceeds the cap in
+/// `MAX_TYPE_ARGUMENT_NESTING` (10), or the stack it needs exceeds the cap in
 /// `stack.rs`, so the caller treats the file as a failed parse.
 ///
 /// Every parse of user source goes through this function. It sizes the stack
