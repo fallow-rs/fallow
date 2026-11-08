@@ -142,8 +142,17 @@ fn json_override_rule_range(content: &str, rule: &str, files: &[String]) -> Opti
         })
 }
 
+/// Parse the text of a TOML config file. This text comes from a second read
+/// of the file, so it can differ from the text that the loader checked.
+/// [`crate::toml_input::check_nesting`] runs first, so crafted nesting cannot
+/// overflow the stack of the parser.
+fn parse_toml_document(content: &str) -> Option<toml_edit::Document<&str>> {
+    crate::toml_input::check_nesting(content).ok()?;
+    toml_edit::Document::parse(content).ok()
+}
+
 fn toml_override_rule_range(content: &str, rule: &str, files: &[String]) -> Option<(usize, usize)> {
-    let document = toml_edit::Document::parse(content).ok()?;
+    let document = parse_toml_document(content)?;
     let overrides = document.as_table().get("overrides")?;
     let entries: Vec<&dyn toml_edit::TableLike> = match overrides.as_array_of_tables() {
         Some(tables) => tables
@@ -212,7 +221,7 @@ fn json_entry_range(content: &str, setting: &str, entry: &str) -> Option<(usize,
 }
 
 fn toml_entry_range(content: &str, setting: &str, entry: &str) -> Option<(usize, usize)> {
-    let document = toml_edit::Document::parse(content).ok()?;
+    let document = parse_toml_document(content)?;
     document
         .as_table()
         .get(setting)?
@@ -436,6 +445,34 @@ mod tests {
         let span = FallowConfig::locate_list_entry(&path, "ignoreFindings", "a/**").expect("entry");
 
         assert_eq!(located_text(&span), "\"a/**\"");
+    }
+
+    /// Each `[]` inside an inline table that expects a key lowers the depth
+    /// counter of the TOML parser. Without a nesting check before the parse,
+    /// the nested array that follows overflows the stack.
+    fn toml_that_evades_the_parser_depth_limit() -> String {
+        const REPEATS: usize = 200_000;
+        format!(
+            "a = {{{}}}\nb = {}{}\n",
+            "[]".repeat(REPEATS),
+            "[".repeat(REPEATS),
+            "]".repeat(REPEATS)
+        )
+    }
+
+    #[test]
+    fn toml_entry_range_rejects_nesting_that_evades_the_parser_limit() {
+        let source = toml_that_evades_the_parser_depth_limit();
+        assert_eq!(toml_entry_range(&source, "b", "x"), None);
+    }
+
+    #[test]
+    fn toml_override_rule_range_rejects_nesting_that_evades_the_parser_limit() {
+        let source = toml_that_evades_the_parser_depth_limit();
+        assert_eq!(
+            toml_override_rule_range(&source, "unused-files", &["a".to_string()]),
+            None
+        );
     }
 
     #[test]
