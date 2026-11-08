@@ -11,8 +11,12 @@ import { installFallowMutation } from "./global.mjs";
  * when tests ran at the same time (for example concurrent tests). The hits
  * then cannot name their test, so the adapter gives each test of the file
  * the hits of the file.
+ *
+ * `children` is the optional child coverage of the Node processes that a
+ * test starts: `startTest()` runs before each test, and the hits that
+ * `finishTest()` gives join the hits of the test.
  */
-export const installChildHooks = ({ active, beforeEach, afterEach, report }) => {
+export const installChildHooks = ({ active, beforeEach, afterEach, report, children = null }) => {
   const mutation = installFallowMutation();
   mutation.startFile();
   mutation.setActive(active);
@@ -22,6 +26,7 @@ export const installChildHooks = ({ active, beforeEach, afterEach, report }) => 
   beforeEach(() => {
     running += 1;
     overlap ||= running > 1;
+    children?.startTest();
     mutation.startTest();
   });
 
@@ -30,6 +35,10 @@ export const installChildHooks = ({ active, beforeEach, afterEach, report }) => 
   afterEach((...args) => {
     running = Math.max(0, running - 1);
     const { hits, staticHits } = mutation.finishTest();
-    report({ hits, static_hits: staticHits, overlap }, args[0]);
+    const childHits = children?.finishTest() ?? [];
+    report(
+      { hits: [...new Set([...hits, ...childHits])], static_hits: staticHits, overlap },
+      args[0],
+    );
   });
 };

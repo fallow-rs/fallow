@@ -1098,11 +1098,11 @@ test run.
   earlier run, so a worker with `isolate: false` gives each child the
   current mutant. The adapter clears the integrity log of the overlay
   before each run and reads it after the run, so a copy that matches more
-  than one planned file reports `overlay-incomplete`. The hits of a child
-  process do not count as coverage, so a mutant that only a child process
-  reaches stays `no_coverage`. Without the hook API (Node older than
-  22.15) and in browser mode, the value stays as it is and a child loads
-  the original files.
+  than one planned file reports `overlay-incomplete`. In a dry run, the
+  hits of a child process count for the test that started it (see "Child
+  process coverage" below). Without the hook API (Node older than 22.15)
+  and in browser mode, the value stays as it is and a child loads the
+  original files.
 
 ### `node:test` and `bun test`
 
@@ -1160,11 +1160,11 @@ test run.
   process. So a Node process that a test starts (`spawn`, `exec`,
   `execFile` or `fork`) also loads the instrumented files with the active
   mutant. The URL of that import carries the overlay path and the mutant
-  id, so the test environment has no `FALLOW_MUTATION_*` variable. The hits
-  of such a child process do not count as coverage, so a mutant that only a
-  child process reaches stays `no_coverage`. A child that is not Node (for
+  id, so the test environment has no `FALLOW_MUTATION_*` variable. In a dry
+  run, the hits of such a child process count for the test that started it
+  (see "Child process coverage" below). A child that is not Node (for
   example `bun`), or a child that gets an environment without
-  `NODE_OPTIONS`, loads the original files.
+  `NODE_OPTIONS`, loads the original files and reports no hits.
 - A Node overlay also recognizes byte-identical copies of planned source
   files, including renamed temporary files. It serves the instrumented
   source only when the bytes identify one planned file. Original paths keep
@@ -1188,6 +1188,31 @@ test run.
   files (`plan_mutations_for_session_with`). The run keeps the runner of
   the first decision. `--plan` uses the same rule, so the plan and the run
   agree.
+
+### Child process coverage
+
+A test can assert only on the output of a Node child process, for example a
+CLI test. The Vitest and `node:test` adapters count the hits of such a child
+for the test that started it, so the scheduler selects that test for the
+mutants that the child reaches
+(`tools/mutation-runner/src/runtime/child-coverage.mjs`).
+
+- Before each test of a dry run, the test process sets a new token in the
+  URL of the subprocess preload in `NODE_OPTIONS`. Tests that run at the
+  same time share one token, as they share the hits of the test process.
+- At exit, a child with a token writes its hits and its loaded paths to one
+  file in `<overlay file>.hits/` of the private work directory. The child
+  writes under a temporary name and renames the file, so the test process
+  never reads a part of a file.
+- After the test, the test process takes the files of its token. The hits
+  join the hits of the test, and the loaded paths join `loaded`, so a path
+  that only a child loads is not in `unloaded_paths`.
+- All hits of a child count as test hits, also its module-scope hits,
+  because the child runs for the test.
+- A mutant run gives no token, so a child writes no file.
+- A child that a signal ends, or that runs after the end of its test, gives
+  no hits to the test. `bun test` has no subprocess preload, so its children
+  give no hits.
 
 ### Type tests
 

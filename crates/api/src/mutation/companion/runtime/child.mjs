@@ -22,6 +22,9 @@ export const HITS_DIAGNOSTIC = "fallow-mutation-hits:";
 /** The private integrity log shared by a test process and its Node children. */
 export const overlayErrorsPath = (overlayPath) => `${overlayPath}.errors`;
 
+/** The private directory where each Node child of a test writes its hits. */
+export const childHitsPath = (overlayPath) => `${overlayPath}.hits`;
+
 /** Records incomplete instrumentation even when a test ignores its child's result. */
 export const recordOverlayError = (overlayPath, message) => {
   appendFileSync(overlayErrorsPath(overlayPath), `${message}\n`);

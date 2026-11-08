@@ -1,6 +1,7 @@
 // Generated from tools/mutation-runner/src/runtime/node-test-preload.mjs. Do not edit.
 import { afterEach, beforeEach } from "node:test";
 
+import { createChildCoverage } from "./child-coverage.mjs";
 import { installChildHooks } from "./child-hooks.mjs";
 import {
   CHILD_ENV,
@@ -10,23 +11,26 @@ import {
   takeChildEnv,
 } from "./child.mjs";
 import { registerOverlayHook } from "./overlay-hook.mjs";
+import { setSubprocessPreload } from "./subprocess-options.mjs";
 
 const SUBPROCESS_PRELOAD = new URL("./node-subprocess-preload.mjs", import.meta.url);
 
 /**
- * Adds the subprocess preload to NODE_OPTIONS, so a Node process that a test
- * starts (spawn, exec, execFile or fork) also loads the instrumented files
- * with the active mutant. The value is a URL, which has no space or quote,
- * so the NODE_OPTIONS parse keeps it as one argument. The existing value
- * comes first, so a loader of the project keeps its order.
+ * Gives the child coverage of a dry run to the test hooks. Before each test,
+ * the subprocess preload in NODE_OPTIONS gets the token of the test, so the
+ * Node children of the test give their hits to it. The paths that a child
+ * loads join `loaded`. A mutant run reads no hits, so it needs none.
  */
-const shareWithChildProcesses = (overlayPath, active) => {
-  const url = new URL(SUBPROCESS_PRELOAD);
-  url.searchParams.set("overlay", overlayPath);
-  if (active !== null) url.searchParams.set("active", active);
-  const flag = `--import=${url.href}`;
-  const current = process.env.NODE_OPTIONS?.trim();
-  process.env.NODE_OPTIONS = current ? `${current} ${flag}` : flag;
+const childHooks = (preload, overlayPath, loaded) => {
+  const coverage = createChildCoverage(overlayPath);
+  return {
+    startTest: () => setSubprocessPreload(preload, { test: coverage.startTest() }),
+    finishTest: () => {
+      const children = coverage.finishTest();
+      for (const source of children.loaded) loaded.add(source);
+      return children.hits;
+    },
+  };
 };
 
 const start = (overlayPath) => {
@@ -37,13 +41,19 @@ const start = (overlayPath) => {
     (entry) => loaded.add(entry.source),
     (message) => recordOverlayError(overlayPath, message),
   );
-  shareWithChildProcesses(overlayPath, active);
+  // A Node process that a test starts (spawn, exec, execFile or fork) also
+  // loads the instrumented files with the active mutant.
+  const preload = new URL(SUBPROCESS_PRELOAD);
+  preload.searchParams.set("overlay", overlayPath);
+  if (active !== null) preload.searchParams.set("active", active);
+  setSubprocessPreload(preload.href, {});
   // The diagnostic of a test follows its result event, with the same file,
   // line and column. The adapter joins the two.
   installChildHooks({
     active,
     beforeEach,
     afterEach,
+    children: active === null ? childHooks(preload.href, overlayPath, loaded) : null,
     report: (row, context) => {
       context.diagnostic(`${HITS_DIAGNOSTIC}${JSON.stringify({ ...row, loaded: [...loaded] })}`);
     },
