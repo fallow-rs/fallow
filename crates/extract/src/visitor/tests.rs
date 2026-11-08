@@ -18095,3 +18095,125 @@ fn namespace_body_hides_local_function_array_return() {
         );
     }
 }
+
+#[test]
+fn for_of_element_class_applies_only_in_the_loop_body() {
+    // Issue #4352: the element class of a `for...of` loop variable applies
+    // only in the loop body, for a loop over an array and over a call. A
+    // binding of the same name in another scope has another type.
+    let info = parse(
+        r"
+        import { Table } from './table';
+
+        const tables: Table[] = [new Table()];
+        function all(): Table[] {
+            return tables;
+        }
+        for (const t of tables) {
+            t.inArrayLoop();
+        }
+        for (const u of all()) {
+            u.inCallLoop();
+        }
+        export function g(t: { other(): void }) {
+            t.paramOfArrayLoopName();
+        }
+        export function h(u: { other(): void }) {
+            u.paramOfCallLoopName();
+        }
+        const t = { local() {} };
+        t.moduleLocal();
+        ",
+    );
+
+    for member in ["inArrayLoop", "inCallLoop"] {
+        assert!(
+            credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+    for member in ["paramOfArrayLoopName", "paramOfCallLoopName", "moduleLocal"] {
+        assert!(
+            !credits_table_member(&info, member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn this_in_function_with_own_this_gives_no_class_this_fact() {
+    // Issue #4351: `this` in a nested `function` or an object-literal method
+    // inside a class method is not the class instance, so a read there gives
+    // no class `this` fact. An arrow function keeps the `this` of the method.
+    // A class declared inside such a function has its own instance `this`.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        export class Viewer extends Floor {
+            mark(): void {
+                function g(this: unknown) {
+                    this.find().inFunction();
+                }
+                const handlers = {
+                    run() {
+                        this.find().inObjectMethod();
+                    },
+                };
+                const visit = () => this.find().inArrow();
+                this.find().inMethod();
+            }
+        }
+
+        export function make() {
+            return function () {
+                class Local extends Floor {
+                    field = this.find().inNestedClassField();
+                }
+                return Local;
+            };
+        }
+        ",
+    );
+
+    let has_fact = |class: &str, member: &str| {
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::ClassThisMemberAccess(access)
+                    if access.class_local_name == class
+                        && access.object == "this.find()"
+                        && access.member == member
+            )
+        })
+    };
+    for member in ["inArrow", "inMethod"] {
+        assert!(
+            has_fact("Viewer", member),
+            "{member}: {:?}",
+            info.semantic_facts
+        );
+    }
+    assert!(
+        has_fact("Local", "inNestedClassField"),
+        "{:?}",
+        info.semantic_facts
+    );
+    for member in ["inFunction", "inObjectMethod"] {
+        assert!(
+            !has_fact("Viewer", member),
+            "{member}: {:?}",
+            info.semantic_facts
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object.starts_with("Floor.") && access.member == member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}

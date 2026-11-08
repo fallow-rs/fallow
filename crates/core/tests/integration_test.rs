@@ -722,6 +722,10 @@ mod issue_4311_typed_parameter_chain_member;
 mod issue_4312_unexported_subclass_this_method_result;
 #[path = "integration_test/issue_4313_function_array_return_element_member.rs"]
 mod issue_4313_function_array_return_element_member;
+#[path = "integration_test/issue_4351_nested_function_this_member.rs"]
+mod issue_4351_nested_function_this_member;
+#[path = "integration_test/issue_4352_for_of_element_binding_scope.rs"]
+mod issue_4352_for_of_element_binding_scope;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

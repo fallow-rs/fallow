@@ -1,0 +1,6 @@
+{
+  "name": "issue-4352-for-of-element-binding-scope",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
