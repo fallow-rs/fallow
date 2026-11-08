@@ -310,20 +310,29 @@ impl Scanner<'_> {
         if self.bytes.get(self.pos) == Some(&b'=') {
             return;
         }
-        if self
+        // A sibling `<` at the same depth keeps the level of the list that it
+        // replaces. The levels match for code, and a list carried out of a
+        // regex body keeps its nesting.
+        let replaced = if self
             .type_arguments
             .last()
             .is_some_and(|open| open.depth == self.depth)
         {
-            self.type_arguments.pop();
-        }
-        let level = self.type_arguments.last().map_or(1, |outer| {
-            let behind_expression = self
-                .expression_brackets
-                .last()
-                .is_some_and(|&bracket| bracket > outer.depth);
-            outer.level + u32::from(behind_expression)
-        });
+            self.type_arguments.pop().map_or(0, |open| open.level)
+        } else {
+            0
+        };
+        let level = self
+            .type_arguments
+            .last()
+            .map_or(1, |outer| {
+                let behind_expression = self
+                    .expression_brackets
+                    .last()
+                    .is_some_and(|&bracket| bracket > outer.depth);
+                outer.level + u32::from(behind_expression)
+            })
+            .max(replaced);
         self.type_arguments.push(TypeArguments {
             depth: self.depth,
             level,
@@ -495,8 +504,9 @@ impl Scanner<'_> {
                 b')' | b']' | b'}' => local = local.saturating_sub(1),
                 b'/' if class_base.is_none() => {
                     self.max_depth = self.max_depth.max(self.depth + peak);
+                    let base = self.depth;
                     self.depth += local;
-                    self.count_regex_type_arguments(start, self.pos - 1);
+                    self.count_regex_type_arguments(start, self.pos - 1, base);
                     return true;
                 }
                 _ => {}
@@ -508,30 +518,64 @@ impl Scanner<'_> {
 
     /// Counts the `<` of the regex body `start..end` as type arguments. The
     /// parser can read the `/` as a division, so the body can be code whose
-    /// type arguments nest. The body is scanned as code, and its nesting adds
-    /// to the level that is open here. Inside such a scan, a further regex
-    /// body adds its number of `<`, so the work stays linear.
-    fn count_regex_type_arguments(&mut self, start: usize, end: usize) {
+    /// type arguments nest. The body is scanned as code from bracket depth
+    /// `base`, its nesting adds to the level that is open here, and the lists
+    /// that stay open at its end stay open after the `/`. Inside such a scan,
+    /// a further regex body counts each of its `<` as one more open level, so
+    /// the work stays linear.
+    fn count_regex_type_arguments(&mut self, start: usize, end: usize, base: u32) {
         let body = &self.bytes[start..end];
         if !body.contains(&b'<') {
             return;
         }
         let open = self.type_arguments.last().map_or(0, |outer| outer.level);
-        let nested = if self.regex_body {
-            body.iter().fold(0_u32, |count, &byte| {
+        if self.regex_body {
+            let count = body.iter().fold(0_u32, |count, &byte| {
                 count.saturating_add(u32::from(byte == b'<'))
-            })
-        } else {
-            // The body starts and ends next to an ASCII `/`, so it is UTF-8.
-            let Ok(text) = std::str::from_utf8(body) else {
-                return;
-            };
-            let mut scanner = Scanner::new(text, u32::MAX, Dialect::Script);
-            scanner.regex_body = true;
-            scanner.scan();
-            scanner.max_type_arguments
+            });
+            self.carry_type_arguments(self.depth, open.saturating_add(count));
+            return;
+        }
+        // The body starts and ends next to an ASCII `/`, so it is UTF-8.
+        let Ok(text) = std::str::from_utf8(body) else {
+            return;
         };
-        self.max_type_arguments = self.max_type_arguments.max(open.saturating_add(nested));
+        let mut scanner = Scanner::new(text, u32::MAX, Dialect::Script);
+        scanner.regex_body = true;
+        scanner.scan();
+        for list in &scanner.type_arguments {
+            self.carry_type_arguments(base + list.depth, open.saturating_add(list.level));
+        }
+        for &bracket in &scanner.expression_brackets {
+            let depth = (base + bracket).min(self.depth);
+            if self
+                .expression_brackets
+                .last()
+                .is_none_or(|&last| last < depth)
+            {
+                self.expression_brackets.push(depth);
+            }
+        }
+        self.max_type_arguments = self
+            .max_type_arguments
+            .max(open.saturating_add(scanner.max_type_arguments));
+    }
+
+    /// Keeps a type-argument list of a regex body open at `depth` with
+    /// `level`. The depth is at most the running depth, so a later closing
+    /// bracket ends it. A list at the same depth or deeper is merged into it
+    /// and keeps the higher level.
+    fn carry_type_arguments(&mut self, depth: u32, level: u32) {
+        let depth = depth.min(self.depth);
+        let mut level = level;
+        while let Some(last) = self.type_arguments.last().copied()
+            && last.depth >= depth
+        {
+            level = level.max(last.level);
+            self.type_arguments.pop();
+        }
+        self.type_arguments.push(TypeArguments { depth, level });
+        self.max_type_arguments = self.max_type_arguments.max(level);
     }
 
     /// Skips template text up to the closing backtick or the next `${`,
@@ -776,6 +820,25 @@ mod tests {
             "x = {{}} / {nested}{close}/ 1"
         )));
         assert!(!exceeds_nesting_limit("const re = /<a<b<c>/; f(re)"));
+    }
+
+    /// The type-argument lists that stay open at the end of a guessed regex
+    /// body stay open after its `/`, as in the parse of a division.
+    #[test]
+    fn open_type_arguments_of_a_guessed_regex_body_stay_open() {
+        let half = MAX_TYPE_ARGUMENT_NESTING as usize / 2 + 1;
+        let body = format!("{}]", "t<{[".repeat(half));
+        let after = "t<{[".repeat(half);
+        assert!(exceeds_nesting_limit(&format!(
+            "x = {{}} / {body}/ {after}"
+        )));
+        // A regex class can hold a further guessed regex after an escaped
+        // `\]`, which ends the class bracket only in code. That regex body
+        // carries its open lists too.
+        let inner = format!("[\\] {{}} / {}/ ]", "t<".repeat(half));
+        assert!(exceeds_nesting_limit(&format!(
+            "x = {{}} / {inner}/ {after}"
+        )));
     }
 
     #[test]
