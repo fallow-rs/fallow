@@ -208,6 +208,9 @@ struct Scanner<'a> {
     /// Depth of each open `(` and `[`, innermost last. Only these brackets
     /// can hold an expression inside a type.
     expression_brackets: Vec<u32>,
+    /// Whether this scanner reads the body of a guessed regex as code, see
+    /// [`Scanner::count_regex_type_arguments`].
+    regex_body: bool,
 }
 
 /// An open `<` that can start a type-argument list.
@@ -233,6 +236,7 @@ impl<'a> Scanner<'a> {
             type_arguments: Vec::new(),
             max_type_arguments: 0,
             expression_brackets: Vec::new(),
+            regex_body: false,
         }
     }
 }
@@ -492,6 +496,7 @@ impl Scanner<'_> {
                 b'/' if class_base.is_none() => {
                     self.max_depth = self.max_depth.max(self.depth + peak);
                     self.depth += local;
+                    self.count_regex_type_arguments(start, self.pos - 1);
                     return true;
                 }
                 _ => {}
@@ -499,6 +504,34 @@ impl Scanner<'_> {
         }
         self.pos = start;
         false
+    }
+
+    /// Counts the `<` of the regex body `start..end` as type arguments. The
+    /// parser can read the `/` as a division, so the body can be code whose
+    /// type arguments nest. The body is scanned as code, and its nesting adds
+    /// to the level that is open here. Inside such a scan, a further regex
+    /// body adds its number of `<`, so the work stays linear.
+    fn count_regex_type_arguments(&mut self, start: usize, end: usize) {
+        let body = &self.bytes[start..end];
+        if !body.contains(&b'<') {
+            return;
+        }
+        let open = self.type_arguments.last().map_or(0, |outer| outer.level);
+        let nested = if self.regex_body {
+            body.iter().fold(0_u32, |count, &byte| {
+                count.saturating_add(u32::from(byte == b'<'))
+            })
+        } else {
+            // The body starts and ends next to an ASCII `/`, so it is UTF-8.
+            let Ok(text) = std::str::from_utf8(body) else {
+                return;
+            };
+            let mut scanner = Scanner::new(text, u32::MAX, Dialect::Script);
+            scanner.regex_body = true;
+            scanner.scan();
+            scanner.max_type_arguments
+        };
+        self.max_type_arguments = self.max_type_arguments.max(open.saturating_add(nested));
     }
 
     /// Skips template text up to the closing backtick or the next `${`,
@@ -730,6 +763,19 @@ mod tests {
         let at_limit = "t<{[".repeat(MAX_TYPE_ARGUMENT_NESTING as usize);
         assert!(!exceeds_nesting_limit(&at_limit));
         assert!(exceeds_nesting_limit(&format!("{at_limit}t<")));
+    }
+
+    /// After `{}` the scanner reads `/` as the start of a regex, but the
+    /// parser can read it as a division. The `<` in such a body must still
+    /// count.
+    #[test]
+    fn type_arguments_in_a_guessed_regex_body_count() {
+        let nested = "t<{[".repeat(MAX_TYPE_ARGUMENT_NESTING as usize + 2);
+        let close = "]".repeat(MAX_TYPE_ARGUMENT_NESTING as usize + 2);
+        assert!(exceeds_nesting_limit(&format!(
+            "x = {{}} / {nested}{close}/ 1"
+        )));
+        assert!(!exceeds_nesting_limit("const re = /<a<b<c>/; f(re)"));
     }
 
     #[test]
