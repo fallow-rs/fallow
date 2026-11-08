@@ -5,8 +5,9 @@
 //! its own `this`, which is usually not the class instance. A read there gives
 //! no file-level `this` credit, unless the code gives the function the
 //! instance: `.bind(this)`, `.call(this)`, `.apply(this)`, a call that also
-//! passes `this` (`items.forEach(function () {}, this)`), an assignment to a
-//! `this.<field>` or a class field, or a `this` parameter with a named type.
+//! passes `this` (`items.forEach(function () {}, this)`), a method call on
+//! `this` (`this.on("x", function () {})`), an assignment to a `this.<field>`
+//! or a class field, or a `this` parameter with a named type.
 
 use fallow_types::extract::MemberAccess;
 use oxc_ast::ast::*;
@@ -130,14 +131,22 @@ impl ModuleInfoExtractor {
     }
 
     /// Record the functions that a call gives the class instance:
-    /// `fn.bind(this)`, `fn.call(this)`, `fn.apply(this)`, and each function
-    /// argument of a call that also passes `this`.
+    /// `fn.bind(this)`, `fn.call(this)`, `fn.apply(this)`, each function
+    /// argument of a call that also passes `this`, and each function argument
+    /// of a method call on `this`. The last case covers a listener of an
+    /// `EventEmitter` subclass, `this.on("x", function () {})`, which the
+    /// emitter calls with itself as `this`.
     pub(super) fn record_this_binding_call(&mut self, call: &CallExpression<'_>) {
         let passes_this = call
             .arguments
             .iter()
             .any(|argument| matches!(argument, Argument::ThisExpression(_)));
-        if !passes_this {
+        let on_this = matches!(
+            call.callee.get_inner_expression(),
+            Expression::StaticMemberExpression(callee)
+                if matches!(callee.object, Expression::ThisExpression(_))
+        );
+        if !passes_this && !on_this {
             return;
         }
         if let Expression::StaticMemberExpression(callee) = call.callee.get_inner_expression()

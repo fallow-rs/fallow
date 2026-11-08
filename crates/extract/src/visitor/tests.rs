@@ -18256,6 +18256,8 @@ fn this_read_in_function_with_own_this_gives_no_this_member_access() {
                 this.handler = function () { this.inThisField(); };
                 function typed(this: Viewer) { this.inTypedThis(); }
                 el.onclick = function () { this.inElementHandler(); };
+                this.on('ready', function () { this.inOwnListener(); });
+                this.items.forEach(function () { this.inOtherReceiver(); });
                 this.inMethod();
             }
             field = function () { this.inClassField(); };
@@ -18276,6 +18278,7 @@ fn this_read_in_function_with_own_this_gives_no_this_member_access() {
         "inNamedCalled",
         "inNamedBound",
         "inThisArg",
+        "inOwnListener",
         "inDescriptor",
         "inThisField",
         "inTypedThis",
@@ -18289,6 +18292,7 @@ fn this_read_in_function_with_own_this_gives_no_this_member_access() {
         "inObjectMethod",
         "inCalledOther",
         "inElementHandler",
+        "inOtherReceiver",
     ] {
         assert!(!reads_this(member), "{member}: {:?}", info.member_accesses);
     }
