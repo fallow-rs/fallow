@@ -422,12 +422,12 @@ mod tests {
         compile_fake_taskkill(root.path(), TASKKILL_MARKER_ENV);
         std::fs::write(
             root.path().join("descendant.cmd"),
-            "@echo off\r\necho ready>descendant-ready\r\nping.exe -n 30 127.0.0.1 >NUL\r\n",
+            "@echo off\r\necho ready>descendant-ready\r\nping.exe -n 60 127.0.0.1 >NUL\r\n",
         )
         .expect("write descendant script");
         std::fs::write(
             root.path().join("leader.cmd"),
-            "@echo off\r\nstart \"\" /B cmd.exe /D /S /C call descendant.cmd\r\nping.exe -n 30 127.0.0.1 >NUL\r\n",
+            "@echo off\r\nstart \"\" /B cmd.exe /D /S /C call descendant.cmd\r\nping.exe -n 60 127.0.0.1 >NUL\r\n",
         )
         .expect("write leader script");
         let mut search_paths = vec![root.path().to_path_buf()];
@@ -447,8 +447,7 @@ mod tests {
             .output()
             .expect("run Windows Job Object helper");
 
-        // libtest reports a helper panic on stdout, not stderr, so a
-        // stderr-only message prints nothing for the failure that matters.
+        // libtest prints the panic of the helper on stdout, not on stderr.
         assert!(
             output.status.success(),
             "helper failed with {}: {}{}",
@@ -492,14 +491,14 @@ mod tests {
         use std::time::{Duration, Instant};
 
         // TerminateJobObject only starts termination. On a loaded CI runner the
-        // kernel can need several seconds before the leader handle signals. The
-        // scripts ping for about 29 seconds, so a bound well below that still
-        // proves that termination, not a natural exit, ended the wait.
+        // kernel can need several seconds before the leader handle signals.
         const TERMINATION_BOUND: Duration = Duration::from_secs(10);
-        // The nested cmd.exe chain only writes `descendant-ready` once both
-        // shells are up, which a loaded runner can stretch past ten seconds
-        // (#4326); the bound only has to outlast that startup cost, and the
-        // ping sleeps cap how long a wedged helper can hold the job.
+        // The nested cmd.exe chain writes `descendant-ready` only when both
+        // shells run. A loaded runner can need more than ten seconds for that
+        // (#4326). The scripts ping for about 59 seconds, which is longer than
+        // this bound plus TERMINATION_BOUND. So the leader cannot exit
+        // naturally before the termination, and a fast wait proves that the
+        // termination ended it.
         const STARTUP_BOUND: Duration = Duration::from_secs(30);
 
         let mut command = Command::new("cmd.exe");
