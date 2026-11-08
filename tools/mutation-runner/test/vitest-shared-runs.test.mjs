@@ -92,14 +92,6 @@ for (const { packageName, version } of VITEST_MAJORS) {
       assert.equal(result.status, "survived", JSON.stringify(result));
     });
 
-    test("an isolated request gives each test file its own worker", async () => {
-      writeFileSync(pidLog, "");
-      const result = await shared.run("m9", [FIRST, SECOND], { isolated: true });
-      assert.equal(result.status, "survived", JSON.stringify(result));
-      const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
-      assert.equal(pids.size, 2, "one worker for each file");
-    });
-
     test("a kill that only the state of an earlier file of the worker causes is not a kill", async () => {
       const control = await storeLeak.run(null, [STORE_A, STORE_B]);
       assert.equal(control.status, "survived", JSON.stringify(control));

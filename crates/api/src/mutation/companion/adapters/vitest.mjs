@@ -882,9 +882,8 @@ export const createAdapter = async (init) => {
   const run = async (request) => {
     validateRun(request);
     const requested = [...new Set(request.test_ids)];
-    const shared = sharedRuns && request.isolated !== true;
-    const outcome = await runRequested(request, requested, shared);
-    if (!shared || !DETECTED.has(outcome.body.status)) return outcome.body;
+    const outcome = await runRequested(request, requested, sharedRuns);
+    if (!sharedRuns || !DETECTED.has(outcome.body.status)) return outcome.body;
     // A mutant can leave state in a module that a later test file of the
     // shared worker reads, which an isolated run never shows. A kill in a
     // later file must also kill in a fresh worker, or the run is repeated

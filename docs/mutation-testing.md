@@ -1136,8 +1136,9 @@ control runs with `isolate: false`.
   with the mutant. When that run does not detect the mutant, the companion
   runs the whole request again with each file in its own worker, and that
   result counts.
-- The retry of a survivor and its control run always use one worker for
-  each file (`isolated: true` in the `run` request).
+- A mutant can also stay `survived` when global state of an earlier file
+  of the worker hides it. This error lowers the score and never raises it.
+  The retry of a survivor shares a worker in the same way.
 - A test that depends on a fresh worker for each file in the dry run, for
   example a global that another test file sets, makes the two dry runs
   differ. The companion then keeps isolated runs.
