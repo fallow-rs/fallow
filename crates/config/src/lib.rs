@@ -38,6 +38,7 @@ pub mod levenshtein;
 mod package_manager;
 mod rule_pack;
 mod source_walk;
+pub mod toml_input;
 mod workspace;
 /// YAML parsing behind one internal API.
 pub mod yaml;

@@ -4542,3 +4542,24 @@ fn extends_npm_exports_require_condition() {
     let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
     assert_eq!(config.rules.unused_class_members, Severity::Warn);
 }
+
+/// Each `[]` inside an inline table that still needs a key lowers the
+/// recursion counter of the TOML parser by one, so the nested array after it
+/// recurses past the parser's depth limit and overflows the stack.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn parse_config_to_value_rejects_toml_nesting_that_evades_the_parser_limit() {
+    const REPEATS: usize = 200_000;
+    let dir = test_dir("parse-toml-deep-nesting");
+    let path = dir.path().join("fallow.toml");
+    let content = format!(
+        "a = {{{}}}\nb = {}{}\n",
+        "[]".repeat(REPEATS),
+        "[".repeat(REPEATS),
+        "]".repeat(REPEATS)
+    );
+    std::fs::write(&path, content).unwrap();
+
+    let err = parse_config_to_value(&path).unwrap_err().to_string();
+    assert!(err.contains("Failed to parse config file"), "{err}");
+}

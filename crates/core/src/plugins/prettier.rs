@@ -45,7 +45,7 @@ fn extract_data_format_plugins(format: DataFormat, source: &str) -> Vec<String> 
                     .map(|seq| seq.filter_map(|v| v.as_str().map(str::to_string)).collect())
             })
             .unwrap_or_default(),
-        DataFormat::Toml => toml::from_str::<toml::Value>(source)
+        DataFormat::Toml => fallow_config::toml_input::from_str::<toml::Value>(source)
             .ok()
             .and_then(|value| {
                 value

@@ -100,7 +100,7 @@ impl Plugin for MisePlugin {
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
-        let Ok(config) = source.parse::<toml::Table>() else {
+        let Ok(config) = fallow_config::toml_input::from_str::<toml::Table>(source) else {
             return PluginResult::default();
         };
         let credits = collect_task_credits(&config, config_path);

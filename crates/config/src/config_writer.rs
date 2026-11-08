@@ -21,6 +21,9 @@ pub enum ConfigWriteError {
     JsonParse(jsonc_parser::errors::ParseError),
     /// The existing TOML config could not be parsed.
     TomlParse(toml_edit::TomlError),
+    /// The existing TOML config nests arrays or inline tables too deep to
+    /// parse safely.
+    TomlTooDeep(crate::toml_input::NestingTooDeep),
     /// The config parsed but a key has a shape the writer cannot edit (e.g.
     /// a non-object root, or `ignoreExports` that is not an array). The
     /// message describes the expected shape.
@@ -33,6 +36,7 @@ impl fmt::Display for ConfigWriteError {
             Self::Io(e) => write!(f, "{e}"),
             Self::JsonParse(e) => write!(f, "{e}"),
             Self::TomlParse(e) => write!(f, "{e}"),
+            Self::TomlTooDeep(e) => write!(f, "{e}"),
             Self::InvalidShape(msg) => f.write_str(msg),
         }
     }
@@ -44,6 +48,7 @@ impl Error for ConfigWriteError {
             Self::Io(e) => Some(e),
             Self::JsonParse(e) => Some(e),
             Self::TomlParse(e) => Some(e),
+            Self::TomlTooDeep(e) => Some(e),
             Self::InvalidShape(_) => None,
         }
     }
@@ -250,14 +255,19 @@ fn append_json_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResu
     Ok((root.to_string(), true))
 }
 
+fn parse_toml_document(content: &str) -> ConfigWriteResult<DocumentMut> {
+    crate::toml_input::check_nesting(content).map_err(ConfigWriteError::TomlTooDeep)?;
+    content
+        .parse::<DocumentMut>()
+        .map_err(ConfigWriteError::TomlParse)
+}
+
 fn append_toml_ignore_exports(
     content: &str,
     entries: &[IgnoreExportRule],
     config_dir: &Path,
 ) -> ConfigWriteResult<String> {
-    let mut doc = content
-        .parse::<DocumentMut>()
-        .map_err(ConfigWriteError::TomlParse)?;
+    let mut doc = parse_toml_document(content)?;
     match doc
         .as_table_mut()
         .entry("ignoreExports")
@@ -288,9 +298,7 @@ fn append_toml_ignore_exports(
 }
 
 fn append_toml_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResult<(String, bool)> {
-    let mut doc = content
-        .parse::<DocumentMut>()
-        .map_err(ConfigWriteError::TomlParse)?;
+    let mut doc = parse_toml_document(content)?;
     match doc.as_table_mut().entry("rulePacks").or_insert(Item::None) {
         Item::None => {
             let mut array = Array::new();
@@ -433,6 +441,23 @@ mod tests {
         assert!(output.contains("\"ignoreExports\": ["));
         assert!(output.contains("\"file\": \"src/index.ts\""));
         assert!(output.ends_with('\n'));
+    }
+
+    /// Each `[]` inside an inline table that expects a key lowers the depth
+    /// counter of the TOML parser, so the nested array after it would
+    /// overflow the stack without the nesting check.
+    #[test]
+    fn rejects_toml_config_nesting_that_evades_the_parser_limit() {
+        const REPEATS: usize = 200_000;
+        let input = format!(
+            "a = {{{}}}\nb = {}{}\n",
+            "[]".repeat(REPEATS),
+            "[".repeat(REPEATS),
+            "]".repeat(REPEATS)
+        );
+        let err = add_rule_pack_path_to_string(Path::new("fallow.toml"), &input, "pack.toml")
+            .unwrap_err();
+        assert!(matches!(err, ConfigWriteError::TomlTooDeep(_)), "{err}");
     }
 
     #[test]

@@ -752,7 +752,7 @@ fn is_plugin_file(path: &Path) -> bool {
 /// Parse a plugin definition from file content based on format.
 fn parse_plugin(content: &str, format: &PluginFormat, path: &Path) -> Option<ExternalPluginDef> {
     match format {
-        PluginFormat::Toml => match toml::from_str::<ExternalPluginDef>(content) {
+        PluginFormat::Toml => match crate::toml_input::from_str::<ExternalPluginDef>(content) {
             Ok(plugin) => Some(plugin),
             Err(e) => {
                 tracing::warn!("failed to parse external plugin {}: {e}", path.display());

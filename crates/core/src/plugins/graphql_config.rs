@@ -244,7 +244,7 @@ fn yaml_config_globs(source: &str) -> Vec<String> {
 }
 
 fn toml_config_globs(source: &str) -> Vec<String> {
-    let Ok(value) = toml::from_str::<toml::Value>(source) else {
+    let Ok(value) = fallow_config::toml_input::from_str::<toml::Value>(source) else {
         return Vec::new();
     };
     let mut projects = vec![&value];

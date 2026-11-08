@@ -91,7 +91,7 @@ fn extract_js_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec
 }
 
 fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
-    let Ok(value) = source.parse::<toml::Table>() else {
+    let Ok(value) = fallow_config::toml_input::from_str::<toml::Table>(source) else {
         return Vec::new();
     };
 
@@ -128,6 +128,26 @@ mod tests {
                 .entry_patterns()
                 .contains(&"src/worker.{ts,tsx,js,jsx,mts,mjs}")
         );
+    }
+
+    /// Each `[]` inside an inline table that expects a key lowers the depth
+    /// counter of the TOML parser, so the nested array after it would
+    /// overflow the stack without the nesting check.
+    #[test]
+    fn toml_config_with_nesting_that_evades_the_parser_limit_is_skipped() {
+        const REPEATS: usize = 200_000;
+        let source = format!(
+            "main = \"src/index.ts\"\na = {{{}}}\nb = {}{}\n",
+            "[]".repeat(REPEATS),
+            "[".repeat(REPEATS),
+            "]".repeat(REPEATS)
+        );
+        let result = WranglerPlugin.resolve_config(
+            Path::new("/repo/wrangler.toml"),
+            &source,
+            Path::new("/repo"),
+        );
+        assert!(result.entry_patterns.is_empty());
     }
 
     #[test]
