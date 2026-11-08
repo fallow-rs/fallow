@@ -507,11 +507,20 @@ version 1 or version 2 body keeps its exact wire shape.
   (`null` when the route serves any method), `file`, `files` and `framework`.
   `routeIds` names the routes whose files can statically reach the file of the
   function through runtime imports. Emitted only for
-  `upload-inventory --with-callers`, and only when a route plugin (`nextjs`,
-  `remix`, `sveltekit`, `nuxt`) finds route files.
+  `upload-inventory --with-callers`, and only when the project has routes of a
+  supported framework. The `framework` values are `nextjs`, `remix`,
+  `sveltekit`, `nuxt`, `tanstack-router` and `elysia`. The set is open: a later
+  version can add a value.
 
-A `routes` pattern comes from the route file name, never from a request path.
-Dynamic segments keep the spelling of the framework (`[id]`, `$id`). A
+A `routes` pattern comes from the source, never from a request path. For
+`nextjs`, `remix`, `sveltekit` and `nuxt` the pattern comes from the route file
+name. For `tanstack-router` it comes from the string argument of
+`createFileRoute`, and `method` is `null`. For `elysia` it comes from route
+calls such as `app.get("/repos/:repo", handler)`, joined with the `prefix` of
+the instance, the `.group()` prefixes and the mount prefixes of `.use()`. The
+`file` of an Elysia route is the file of its handler. An Elysia route whose
+path or prefix is not a string literal is not in `routes`.
+Dynamic segments keep the spelling of the framework (`[id]`, `$id`, `:id`). A
 `routeLimits` header travels with `routes`: `maxRoutes`, the
 `maxRoutesPerFunction` cap that applied, `droppedRoutes` and
 `truncatedFunctions`. When `routes` is present, a function without `routeIds`

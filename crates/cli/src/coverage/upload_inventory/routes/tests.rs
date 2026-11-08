@@ -545,3 +545,247 @@ fn project_without_route_framework_emits_no_routes() {
     assert!(routes.limits().is_none());
     assert!(functions.iter().all(|f| f.route_ids.is_empty()));
 }
+
+/// One wire route as `(framework, pattern, method, file)`.
+type RouteRow = (String, String, Option<String>, String);
+
+/// Collect the wire routes of a project, plus the `"METHOD pattern"` of each
+/// route that reaches each named function.
+fn project_routes(root: &Path) -> (Vec<RouteRow>, BTreeMap<String, Vec<String>>) {
+    let config = upload_common::load_resolved_config(root).expect("config loads");
+    let session = AnalysisSession::from_resolved_config(config).expect("session");
+    let include_all = compile_exclude_matcher(&[]).expect("matcher");
+    let mut functions = collect_inventory(&session, &include_all, None);
+    let (_, routes) = collect_graph_context(&session, &mut functions);
+    let rows = routes
+        .routes
+        .iter()
+        .map(|r| {
+            (
+                r.framework.to_owned(),
+                r.pattern.clone(),
+                r.method.map(str::to_owned),
+                r.file.clone(),
+            )
+        })
+        .collect();
+    let patterns_by_id: FxHashMap<&str, String> = routes
+        .routes
+        .iter()
+        .map(|r| {
+            let method = r.method.unwrap_or("*");
+            (r.id.as_str(), format!("{method} {}", r.pattern))
+        })
+        .collect();
+    let reach = functions
+        .iter()
+        .map(|f| {
+            let patterns = f
+                .route_ids
+                .iter()
+                .map(|id| patterns_by_id[id.as_str()].clone())
+                .collect();
+            (f.function_name.clone(), patterns)
+        })
+        .collect();
+    (rows, reach)
+}
+
+fn row(framework: &str, pattern: &str, method: Option<&str>, file: &str) -> RouteRow {
+    (
+        framework.to_owned(),
+        pattern.to_owned(),
+        method.map(str::to_owned),
+        file.to_owned(),
+    )
+}
+
+/// An Elysia API: a root app with a prefix mounts a plugin directly and a
+/// second plugin inside a group. A route with a computed path stays out.
+fn elysia_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"api","main":"src/index.ts","dependencies":{"elysia":"1.2.0"}}"#,
+    );
+    write(
+        root,
+        "src/index.ts",
+        "import { Elysia } from 'elysia';\nimport { repos } from './repos';\nimport { health } from './health';\nconst version = 'v9';\nexport const app = new Elysia({ prefix: '/api' })\n  .use(health)\n  .group('/v1', (v1) => v1.use(repos).get('/ping', () => 'pong'))\n  .get(`/dyn/${version}`, () => 1)\n  .listen(3000);\n",
+    );
+    write(
+        root,
+        "src/repos.ts",
+        "import { Elysia } from 'elysia';\nimport { getRepo } from './handlers/repo';\nexport const repos = new Elysia({ prefix: '/repos' })\n  .get('/:repo', getRepo)\n  .post('/', ({ body }) => body);\n",
+    );
+    write(
+        root,
+        "src/handlers/repo.ts",
+        "import { load } from '../lib/load';\nexport function getRepo() {\n  return load();\n}\n",
+    );
+    write(
+        root,
+        "src/lib/load.ts",
+        "export function load() {\n  return 1;\n}\n",
+    );
+    write(
+        root,
+        "src/health.ts",
+        "import { Elysia } from 'elysia';\nexport const health = new Elysia().get('/health', () => 'ok');\n",
+    );
+    dir
+}
+
+#[test]
+fn elysia_fixture_joins_group_and_plugin_prefixes() {
+    let project = elysia_project();
+    let (rows, reach) = project_routes(project.path());
+    assert_eq!(
+        rows,
+        vec![
+            row("elysia", "/api/health", Some("GET"), "src/health.ts"),
+            row("elysia", "/api/v1/ping", Some("GET"), "src/index.ts"),
+            row("elysia", "/api/v1/repos", Some("POST"), "src/repos.ts"),
+            row(
+                "elysia",
+                "/api/v1/repos/:repo",
+                Some("GET"),
+                "src/handlers/repo.ts"
+            ),
+        ]
+    );
+    // The handler file is the route entry. Reach is file-level, so a route
+    // with an inline handler starts at the file that defines it and reaches
+    // every file that file imports.
+    let strings =
+        |items: &[&str]| -> Vec<String> { items.iter().map(|s| (*s).to_owned()).collect() };
+    assert_eq!(
+        reach["load"],
+        strings(&[
+            "GET /api/v1/ping",
+            "POST /api/v1/repos",
+            "GET /api/v1/repos/:repo"
+        ])
+    );
+    assert_eq!(
+        reach["getRepo"],
+        strings(&[
+            "GET /api/v1/ping",
+            "POST /api/v1/repos",
+            "GET /api/v1/repos/:repo"
+        ])
+    );
+    // Only the root file imports the health plugin.
+    assert!(!reach["load"].contains(&"GET /api/health".to_owned()));
+}
+
+/// A TanStack Router app: the `createFileRoute` argument gives the pattern.
+fn tanstack_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"web","dependencies":{"@tanstack/react-router":"1.120.0","react":"19.0.0"}}"#,
+    );
+    let file_route = |path: &str, body: &str| {
+        format!(
+            "import {{ createFileRoute }} from '@tanstack/react-router';\n{body}export const Route = createFileRoute('{path}')({{\n  component: () => null,\n}});\n"
+        )
+    };
+    write(
+        root,
+        "src/routes/__root.tsx",
+        "import { createRootRoute } from '@tanstack/react-router';\nexport const Route = createRootRoute({});\n",
+    );
+    write(root, "src/routes/index.tsx", &file_route("/", ""));
+    write(
+        root,
+        "src/routes/repo.$repo.tsx",
+        &file_route(
+            "/repo/$repo",
+            "import { loadRepo } from '../lib/repo';\nexport const load = () => loadRepo();\n",
+        ),
+    );
+    write(root, "src/routes/_auth.tsx", &file_route("/_auth", ""));
+    write(
+        root,
+        "src/routes/_auth.settings.tsx",
+        &file_route("/_auth/settings", ""),
+    );
+    write(
+        root,
+        "src/routes/posts_.$id.edit.tsx",
+        &file_route("/posts_/$id/edit", ""),
+    );
+    write(root, "src/routes/blog.index.tsx", &file_route("/blog/", ""));
+    write(
+        root,
+        "src/lib/repo.ts",
+        "export function loadRepo() {\n  return 1;\n}\n",
+    );
+    dir
+}
+
+#[test]
+fn tanstack_fixture_takes_patterns_from_create_file_route() {
+    let project = tanstack_project();
+    let (rows, reach) = project_routes(project.path());
+    assert_eq!(
+        rows,
+        vec![
+            row("tanstack-router", "/", None, "src/routes/index.tsx"),
+            row(
+                "tanstack-router",
+                "/blog",
+                None,
+                "src/routes/blog.index.tsx"
+            ),
+            row(
+                "tanstack-router",
+                "/posts/$id/edit",
+                None,
+                "src/routes/posts_.$id.edit.tsx"
+            ),
+            row(
+                "tanstack-router",
+                "/repo/$repo",
+                None,
+                "src/routes/repo.$repo.tsx"
+            ),
+            row(
+                "tanstack-router",
+                "/settings",
+                None,
+                "src/routes/_auth.settings.tsx"
+            ),
+        ]
+    );
+    assert_eq!(reach["loadRepo"], vec!["* /repo/$repo".to_owned()]);
+}
+
+#[test]
+fn tanstack_route_ids_become_url_patterns() {
+    assert_eq!(tanstack_pattern("/").as_deref(), Some("/"));
+    assert_eq!(tanstack_pattern("/blog/").as_deref(), Some("/blog"));
+    assert_eq!(
+        tanstack_pattern("/repo/$repo").as_deref(),
+        Some("/repo/$repo")
+    );
+    assert_eq!(
+        tanstack_pattern("/_auth/settings").as_deref(),
+        Some("/settings")
+    );
+    assert_eq!(
+        tanstack_pattern("/posts_/$id/edit").as_deref(),
+        Some("/posts/$id/edit")
+    );
+    assert_eq!(
+        tanstack_pattern("/(marketing)/about").as_deref(),
+        Some("/about")
+    );
+    assert_eq!(tanstack_pattern("/files/$").as_deref(), Some("/files/$"));
+    assert_eq!(tanstack_pattern("/_auth"), None);
+}
