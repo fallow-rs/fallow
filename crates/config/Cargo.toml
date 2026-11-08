@@ -25,6 +25,7 @@ deser-yaml = { workspace = true }
 jsonc-parser = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
+toml_parser = { workspace = true }
 schemars = { workspace = true }
 glob = { workspace = true }
 globset = { workspace = true }

@@ -10,6 +10,7 @@
 use std::fmt;
 
 use serde::de::DeserializeOwned;
+use toml_parser::lexer::TokenKind;
 
 /// The deepest bracket nesting that [`check_nesting`] accepts.
 ///
@@ -54,29 +55,30 @@ impl std::error::Error for TomlInputError {}
 
 /// Reject `source` when its `[`/`{` brackets nest deeper than [`MAX_NESTING`].
 ///
-/// The check reads brackets inside strings and comments too. A closing
-/// bracket closes the innermost open bracket only when the two match, as in
-/// the parser. The result is an upper bound of the recursion depth of the
-/// `toml` and `toml_edit` parsers, so a source that passes cannot overflow
+/// The check reads the tokens of the lexer that the `toml` and `toml_edit`
+/// parsers use, so a bracket in a string or a comment neither opens nor closes
+/// a level, exactly as in the parser. A closing bracket closes the innermost
+/// open bracket only when the two match. The result is an upper bound of the
+/// recursion depth of both parsers, so a source that passes cannot overflow
 /// the stack.
 ///
 /// # Errors
 ///
 /// Returns [`NestingTooDeep`] when the nesting exceeds [`MAX_NESTING`].
 pub fn check_nesting(source: &str) -> Result<(), NestingTooDeep> {
-    let mut open: Vec<u8> = Vec::new();
-    for byte in source.bytes() {
-        match byte {
-            b'[' | b'{' => {
+    let mut open: Vec<TokenKind> = Vec::new();
+    for token in toml_parser::Source::new(source).lex() {
+        match token.kind() {
+            kind @ (TokenKind::LeftSquareBracket | TokenKind::LeftCurlyBracket) => {
                 if open.len() == MAX_NESTING {
                     return Err(NestingTooDeep);
                 }
-                open.push(byte);
+                open.push(kind);
             }
-            b']' if open.last() == Some(&b'[') => {
+            TokenKind::RightSquareBracket if open.last() == Some(&TokenKind::LeftSquareBracket) => {
                 open.pop();
             }
-            b'}' if open.last() == Some(&b'{') => {
+            TokenKind::RightCurlyBracket if open.last() == Some(&TokenKind::LeftCurlyBracket) => {
                 open.pop();
             }
             _ => {}
@@ -144,6 +146,39 @@ mod tests {
         );
         let err = from_str::<toml::Value>(&source).unwrap_err();
         assert!(matches!(err, TomlInputError::TooDeep(_)), "{err}");
+    }
+
+    /// A closing bracket inside a string or a comment is not structure. If the
+    /// check read it as one, nested arrays with such strings would pass with
+    /// any depth.
+    #[test]
+    fn closing_brackets_in_strings_and_comments_do_not_lower_the_depth() {
+        let depth = MAX_NESTING + 1;
+        for element in [
+            "\"]\", ",
+            "'}]', ",
+            "\"\"\"]\n]\"\"\", ",
+            "'''\n]]\n''', ",
+            "\"\\\"]\", ",
+            "# ]\n",
+        ] {
+            let source = format!(
+                "a = {}{}",
+                format!("[{element}").repeat(depth),
+                "]".repeat(depth)
+            );
+            assert_eq!(check_nesting(&source), Err(NestingTooDeep), "{element:?}");
+        }
+    }
+
+    #[test]
+    fn brackets_in_strings_and_comments_are_not_counted() {
+        let deep = "[".repeat(MAX_NESTING * 2);
+        let source = format!(
+            "# {deep}\na = \"{deep}\"\nb = '{deep}'\nc = \"\"\"\n{deep}\n\"\"\"\nd = '''{deep}'''\n"
+        );
+        assert_eq!(check_nesting(&source), Ok(()));
+        assert!(from_str::<toml::Value>(&source).is_ok());
     }
 
     #[test]
