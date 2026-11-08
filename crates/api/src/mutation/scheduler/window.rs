@@ -5,9 +5,10 @@
 const TIMEOUT_BASE_MS: u64 = 5000;
 /// The factor on the covering-test duration (section 8, the Stryker default).
 const TIMEOUT_FACTOR: f64 = 1.5;
-/// The fixed part of `loop_budget_ms`. The companion stops a test that still
-/// runs the active mutant after the budget, so an endless loop through the
-/// mutant ends in under a second instead of at the watchdog.
+/// The fixed part of `loop_budget_ms`. The companion stops a test of a mutant
+/// run that still evaluates instrumented code after the budget, so an
+/// endless loop through instrumented code ends in under a second instead of
+/// at the watchdog.
 pub(super) const LOOP_BUDGET_BASE_MS: u64 = 500;
 /// The largest loop budget whose loop timeout needs no retry. The companion
 /// measures the budget in the CPU time of the test thread, so other load on

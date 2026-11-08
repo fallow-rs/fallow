@@ -5,7 +5,7 @@ const CONTROL = Symbol.for("fallow.mutation.control");
 /** The `name` of the error that ends a test whose mutant runs past the loop budget. */
 export const LOOP_TIMEOUT_NAME = "FallowMutationLoopTimeout";
 
-// `a` reads the clock once per this many evaluations of the active mutant.
+// `a` reads the clock once per this many site evaluations of a mutant run.
 // A clock read on each evaluation would slow a hot loop that ends.
 const LOOP_CHECK_MASK = 0x7f;
 
@@ -35,7 +35,7 @@ const readClock = () => {
 
 const loopTimeout = (budgetMs) => {
   const error = new Error(
-    `Test timed out in ${budgetMs}ms: the active mutant still ran after the loop budget`,
+    `Test timed out in ${budgetMs}ms: the mutant run still evaluated instrumented code after the loop budget`,
   );
   error.name = LOOP_TIMEOUT_NAME;
   return error;
@@ -45,7 +45,7 @@ const createRuntime = () => {
   // `running` counts the tests that started and did not finish. Concurrent
   // tests overlap, so a hit belongs to a test while any test runs.
   // `loopBudget` is the CPU time in ms that the tests of one file can use
-  // with the active mutant. `loopSpent` is the CPU time of the earlier tests
+  // in a mutant run. `loopSpent` is the CPU time of the earlier tests
   // of the file, and `testStarted` the clock value at the start of the
   // current test time.
   const state = {
@@ -56,16 +56,17 @@ const createRuntime = () => {
     loopBudget: null,
     loopSpent: 0,
     testStarted: 0,
-    activeHits: 0,
+    evaluations: 0,
   };
   // A synchronous endless loop blocks the test worker, so no timer can stop
-  // it. When the loop passes through the active mutant, this check ends it
-  // with an error that the adapter reports as a timeout. The companion then
-  // stays alive. A loop that does not pass through the mutant waits for the
-  // watchdog of the API.
+  // it. In a mutant run, each instrumented site calls `a` on each
+  // evaluation. When a loop runs through any instrumented code, this check
+  // ends it with an error that the adapter reports as a timeout, and the
+  // companion stays alive. A loop through code with no site (test code or a
+  // dependency) waits for the watchdog of the API.
   const checkLoop = () => {
-    state.activeHits += 1;
-    if ((state.activeHits & LOOP_CHECK_MASK) !== 0) return;
+    state.evaluations += 1;
+    if ((state.evaluations & LOOP_CHECK_MASK) !== 0) return;
     if (state.loopBudget === null || state.running === 0) return;
     const now = readClock();
     if (now === null || state.loopSpent + now - state.testStarted <= state.loopBudget) return;
@@ -82,7 +83,7 @@ const createRuntime = () => {
       } catch {
         return false;
       }
-      if (active) checkLoop();
+      if (state.active !== null) checkLoop();
       return active;
     },
     c: (id) => {
@@ -111,7 +112,7 @@ const createRuntime = () => {
     startTest: () => {
       if (state.running === 0) {
         state.testStarted = readClock() ?? 0;
-        state.activeHits = 0;
+        state.evaluations = 0;
       }
       state.running += 1;
     },

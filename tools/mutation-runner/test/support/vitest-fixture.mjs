@@ -72,6 +72,15 @@ export function spin(limit: number): number {
   return count;
 }
 
+export function drain(limit: number): number {
+  const step = (__fallow_m_a("m13") ? (0) : (__fallow_m_c("m13"), (1)));
+  let count = 0;
+  while ((__fallow_m_a("m14") ? (count < limit) : (__fallow_m_c("m14"), (count < limit)))) {
+    count += step;
+  }
+  return count;
+}
+
 export const READY = (__fallow_m_a("m7") ? ((() => { throw new Error("load failure"); })()) : (__fallow_m_c("m7"), (true)));
 `;
 

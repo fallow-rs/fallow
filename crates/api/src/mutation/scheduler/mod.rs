@@ -300,8 +300,8 @@ struct Job {
     /// outside target mode.
     targets: Vec<String>,
     timeout_ms: u64,
-    /// The test time after which the companion ends a test that still runs
-    /// the active mutant: `1.5 *` the covering-test time plus
+    /// The test CPU time after which the companion ends a test that still
+    /// evaluates instrumented code: `1.5 *` the covering-test time plus
     /// [`window::LOOP_BUDGET_BASE_MS`].
     loop_budget_ms: u64,
     /// `1.5 *` the setup time of the covering test files, rounded up. Only

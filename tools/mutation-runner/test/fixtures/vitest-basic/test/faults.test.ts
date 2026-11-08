@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { pause, settle, shout, spin } from "../src/faults";
+import { drain, pause, settle, shout, spin } from "../src/faults";
 
 test("settles", () => {
   expect(settle(1)).toBe(1);
@@ -26,4 +26,8 @@ test("spins on fake time", () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("drains", () => {
+  expect(drain(3)).toBe(3);
 });

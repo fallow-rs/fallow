@@ -233,6 +233,23 @@ for (const { packageName, version } of VITEST_MAJORS) {
       },
     );
 
+    test(
+      "an endless loop through other instrumented code times out at loop_budget_ms",
+      { timeout: 20_000 },
+      async () => {
+        const result = await request({
+          type: "run",
+          mutant_id: "m13",
+          test_ids: [id("drains", FAULTS)],
+          timeout_ms: 60_000,
+          loop_budget_ms: 200,
+          bail: true,
+        });
+        assert.equal(result.status, "timeout", JSON.stringify(result));
+        assert.equal(result.loop_timeout, true);
+      },
+    );
+
     test("fake time in a test does not reach the loop budget", async () => {
       const result = await request({
         type: "run",

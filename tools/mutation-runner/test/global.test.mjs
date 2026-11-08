@@ -81,15 +81,30 @@ test("a() throws a loop timeout when the active mutant runs past the loop budget
   control.setLoopBudget(null);
 });
 
-test("a() never throws for an inactive mutant, outside a test, or without a loop budget", () => {
+test("a mutant run throws a loop timeout from any site that it evaluates past the budget", () => {
   const control = installFallowMutation();
   const runtime = globalThis.__fallowMutation;
   control.startFile();
   control.setActive("m1");
   control.setLoopBudget(5);
   control.startTest();
+  assert.throws(() => spin(runtime, "m2", performance.now() + 5_000), {
+    name: LOOP_TIMEOUT_NAME,
+  });
+  control.finishTest();
+  control.setActive(null);
+  control.setLoopBudget(null);
+});
+
+test("a() never throws without an active mutant, outside a test, or without a loop budget", () => {
+  const control = installFallowMutation();
+  const runtime = globalThis.__fallowMutation;
+  control.startFile();
+  control.setLoopBudget(5);
+  control.startTest();
   assert.doesNotThrow(() => spin(runtime, "m2", performance.now() + 30));
   control.finishTest();
+  control.setActive("m1");
   assert.doesNotThrow(() => spin(runtime, "m1", performance.now() + 30));
   control.setLoopBudget(null);
   control.startTest();
@@ -152,7 +167,7 @@ test("a replaced performance clock neither throws from a() nor moves the loop bu
   }
 });
 
-test("each test starts its own count of active evaluations", () => {
+test("each test starts its own count of site evaluations", () => {
   const control = installFallowMutation();
   const runtime = globalThis.__fallowMutation;
   const evaluate = () => {

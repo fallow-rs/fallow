@@ -44,10 +44,10 @@ pub struct RunRequest {
     pub mutant_id: Option<String>,
     pub test_ids: Vec<String>,
     pub timeout_ms: u64,
-    /// The test time in ms after which the companion ends a test that still
-    /// runs the active mutant, and reports it as a timeout. It stops a
-    /// synchronous endless loop that blocks the test worker before the
-    /// watchdog fires. `None` sends no field: the run has no loop check.
+    /// The test CPU time in ms after which the companion ends a test that
+    /// still evaluates instrumented code, and reports it as a timeout. It
+    /// stops a synchronous endless loop that blocks the test worker before
+    /// the watchdog fires. `None` sends no field: the run has no loop check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loop_budget_ms: Option<u64>,
     pub bail: bool,
@@ -227,7 +227,8 @@ pub struct RunResult {
     #[serde(default)]
     pub unhandled_errors: Vec<UnhandledError>,
     /// True when the loop budget of the request decided a `timeout` status:
-    /// the first failing test still ran the active mutant after the budget.
+    /// the first failing test still evaluated instrumented code after the
+    /// budget.
     #[serde(default)]
     pub loop_timeout: bool,
 }

@@ -631,9 +631,9 @@ Each mutant run has two time limits:
   `node:test` and `bun test` adapters ignore it.
 
 A synchronous endless loop blocks the test worker, so the test timeout of
-the runner cannot stop it. When the loop runs through the active mutant
-inside a test, the mutant switch counts the evaluations. At every 128th
-evaluation, it compares the CPU time of the tests of the file so far with
+the runner cannot stop it. In a mutant run, each instrumented site calls the
+mutant switch on each evaluation. The switch counts these calls inside a
+test. At every 128th call, it compares the CPU time of the tests of the file so far with
 `loop_budget_ms`. The CPU time is the time that the test thread works
 between `beforeEach` and `afterEach` of the tests of the run. When the time
 is more, the switch throws an error, and the adapter reports the test as a
@@ -645,11 +645,12 @@ alive, so the next mutant needs no new companion and no new dry run.
   that waits uses no CPU time, load from other processes on the host does
   not count, and fake timers in a test do not move the clock. Without
   `process`, for example in browser mode, the check is off.
-- A loop that does not run through the active mutant still waits for the
-  watchdog. So does a loop outside a test: at module scope (each static
-  mutant), or in a `beforeAll` or `afterAll` hook.
+- A loop through code with no instrumented site, such as test code or a
+  dependency, still waits for the watchdog. So does a loop outside a test:
+  at module scope (each static mutant), or in a `beforeAll` or `afterAll`
+  hook.
 - A `catch` block of the project can catch the error. The loop then
-  continues, the switch throws again after 128 more evaluations, and an
+  continues, the switch throws again after 128 more calls, and an
   endless loop that catches each error waits for the watchdog.
 - The retry of a timeout doubles both limits. The retry of a survivor
   computes both limits from the time of its retry tests.
@@ -751,7 +752,7 @@ exception (see [Timeouts](#timeouts)).
   first line of the reason. A mutant without a retry, and a `cached`
   mutant, have no `attempts`. No fingerprint or baseline comparison uses
   the field.
-- A real infinite loop through the active mutant gets no retry when its
+- A real infinite loop through instrumented code gets no retry when its
   covering tests take 200 ms or less. Else its retry costs twice
   `loop_budget_ms`. A retry of another infinite loop costs two more
   timeout windows.
