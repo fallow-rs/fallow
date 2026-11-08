@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
 
-use super::{DryRunFacts, timeout_ms};
+use super::DryRunFacts;
+use super::window::timeout_ms;
 
 /// Widens `tests` to each passing test of their files. Without
 /// `test_filter` the runner runs whole test files (`protocol.md` section 5).

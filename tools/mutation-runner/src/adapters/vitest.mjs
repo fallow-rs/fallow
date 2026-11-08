@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
+import { LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
 import { createWorkDir } from "./child-process.mjs";
 import {
   TEST_ID_SEPARATOR,
@@ -31,6 +32,7 @@ import {
 
 const RUNNER_NAME = "vitest";
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
+const LOOP_BUDGET_KEY = "fallowLoopBudget";
 const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", import.meta.url);
@@ -162,6 +164,7 @@ const isConcurrent = (testCase) =>
 
 const failureKind = (testCase) => {
   const errors = testCase.result().errors ?? [];
+  if (errors.some((error) => error?.name === LOOP_TIMEOUT_NAME)) return "timeout";
   if (errors.some((error) => TIMEOUT_MESSAGE.test(errorMessage(error)))) return "timeout";
   return errors.some((error) => error?.name === "AssertionError") ? "assertion" : "error";
 };
@@ -252,9 +255,15 @@ const createVitestInstance = async ({ createVitest, version, init, plugin }) => 
   }
 };
 
-const provideActiveMutant = (vitest, mutantId) => {
+/**
+ * Gives each project the active mutant and its loop budget. A run without a
+ * budget (a dry run or a control run) provides null, so a worker never keeps
+ * the budget of an earlier run.
+ */
+const provideActiveMutant = (vitest, mutantId, loopBudgetMs) => {
   for (const project of vitest.projects) {
     project.provide(ACTIVE_MUTANT_KEY, mutantId);
+    project.provide(LOOP_BUDGET_KEY, loopBudgetMs);
   }
 };
 
@@ -624,8 +633,11 @@ export const createAdapter = async (init) => {
   const testIdPrefix = (project) =>
     vitest.projects.length > 1 ? `${project.name}${TEST_ID_SEPARATOR}` : "";
 
-  const runSpecifications = async (specifications, { mutantId, bail, timeoutMs = null }) => {
-    provideActiveMutant(vitest, mutantId);
+  const runSpecifications = async (
+    specifications,
+    { mutantId, bail, timeoutMs = null, loopBudgetMs = null },
+  ) => {
+    provideActiveMutant(vitest, mutantId, loopBudgetMs);
     setTimeouts(timeoutMs);
     setBail(vitest, bail);
     const result = await withOverlayCheck(workDir.overlayPath, () =>
@@ -724,6 +736,7 @@ export const createAdapter = async (init) => {
       mutantId: request.mutant_id,
       bail: request.bail,
       timeoutMs: request.timeout_ms,
+      loopBudgetMs: request.loop_budget_ms ?? null,
     });
     return runResult({
       mutantId: request.mutant_id,

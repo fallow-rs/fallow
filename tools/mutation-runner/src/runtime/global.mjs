@@ -2,19 +2,77 @@ import { GLOBAL_NAME } from "../generated-protocol.mjs";
 
 const CONTROL = Symbol.for("fallow.mutation.control");
 
+/** The `name` of the error that ends a test whose mutant runs past the loop budget. */
+export const LOOP_TIMEOUT_NAME = "FallowMutationLoopTimeout";
+
+// `a` reads the clock once per this many evaluations of the active mutant.
+// A clock read on each evaluation would slow a hot loop that ends.
+const LOOP_CHECK_MASK = 0x7f;
+
+// The real clock, read when the module loads. A test with fake timers can
+// replace `performance` or its `now` method, and fake time must not reach
+// the loop budget. The setup file loads this module before any test code.
+const realNow = performance.now.bind(performance);
+
+/** Gives the real time in ms, or null when the clock fails. */
+const readClock = () => {
+  try {
+    return realNow();
+  } catch {
+    return null;
+  }
+};
+
+const loopTimeout = (budgetMs) => {
+  const error = new Error(
+    `Test timed out in ${budgetMs}ms: the active mutant still ran after the loop budget`,
+  );
+  error.name = LOOP_TIMEOUT_NAME;
+  return error;
+};
+
 const createRuntime = () => {
   // `running` counts the tests that started and did not finish. Concurrent
   // tests overlap, so a hit belongs to a test while any test runs.
-  const state = { active: null, running: 0, hits: new Set(), staticHits: new Set() };
+  // `loopBudget` is the time in ms that the tests of one file can run with
+  // the active mutant. `loopSpent` is the test time of the earlier tests of
+  // the file, and `testStarted` the start of the current test time.
+  const state = {
+    active: null,
+    running: 0,
+    hits: new Set(),
+    staticHits: new Set(),
+    loopBudget: null,
+    loopSpent: 0,
+    testStarted: 0,
+    activeHits: 0,
+  };
+  // A synchronous endless loop blocks the test worker, so no timer can stop
+  // it. When the loop passes through the active mutant, this check ends it
+  // with an error that the adapter reports as a timeout. The companion then
+  // stays alive. A loop that does not pass through the mutant waits for the
+  // watchdog of the API.
+  const checkLoop = () => {
+    state.activeHits += 1;
+    if ((state.activeHits & LOOP_CHECK_MASK) !== 0) return;
+    if (state.loopBudget === null || state.running === 0) return;
+    const now = readClock();
+    if (now === null || state.loopSpent + now - state.testStarted <= state.loopBudget) return;
+    throw loopTimeout(state.loopBudget);
+  };
   // `a` and `c` run inside user code. They read no property of `id`, and a
-  // failure inside them must never change the result of a test.
+  // failure inside them must never change the result of a test. The only
+  // error that `a` throws is the loop timeout.
   const runtime = {
     a: (id) => {
+      let active;
       try {
-        return state.active !== null && state.active === id;
+        active = state.active !== null && state.active === id;
       } catch {
         return false;
       }
+      if (active) checkLoop();
+      return active;
     },
     c: (id) => {
       try {
@@ -28,19 +86,30 @@ const createRuntime = () => {
     setActive: (id) => {
       state.active = typeof id === "string" ? id : null;
     },
+    setLoopBudget: (ms) => {
+      state.loopBudget = Number.isFinite(ms) && ms > 0 ? ms : null;
+    },
     // A test that never finished (for example a killed worker) must not
     // turn the module-scope hits of the next file into test hits.
     startFile: () => {
       state.running = 0;
+      state.loopSpent = 0;
     },
     // A start does not clear `hits`: a concurrent test can still own them.
     // Each finish takes the hits so far, so no hit is lost.
     startTest: () => {
+      if (state.running === 0) {
+        state.testStarted = readClock() ?? 0;
+        state.activeHits = 0;
+      }
       state.running += 1;
     },
     finishTest: () => {
       const result = { hits: [...state.hits], staticHits: [...state.staticHits] };
       state.running = Math.max(0, state.running - 1);
+      if (state.running === 0) {
+        state.loopSpent += Math.max(0, (readClock() ?? state.testStarted) - state.testStarted);
+      }
       state.hits = new Set();
       state.staticHits = new Set();
       return result;
