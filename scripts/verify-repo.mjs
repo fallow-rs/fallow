@@ -118,6 +118,13 @@ const FAST_COMMANDS = [
     command: "node",
     args: ["--test", "scripts/workflow-policy.test.mjs"],
   },
+  {
+    // The Miri CI job is path-filtered and slow. This step finds a test in
+    // a Miri crate that calls the file system and has no Miri ignore mark.
+    label: "Miri file system tests",
+    command: "npm",
+    args: ["run", "check:miri-fs-tests"],
+  },
 ];
 
 const FULL_ONLY_COMMANDS = [
