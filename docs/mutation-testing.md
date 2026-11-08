@@ -2012,7 +2012,10 @@ The run refuses a dirty worktree, and the CI step never passes
    the worktree dirty.
 3. Run the code generation and the build steps that the tests need. Each file
    that they write must be committed or ignored by `.gitignore`. Otherwise the
-   run stops with exit code 2 and `FALLOW_MUTATION_DIRTY_WORKTREE`.
+   run stops with exit code 2 and `FALLOW_MUTATION_DIRTY_WORKTREE`. A package
+   manager cache inside the project is such a file too, for example a pnpm
+   store at `.pnpm-store/` (the usual GitLab cache setup). Ignore it in
+   `.gitignore`, or put the store outside the project.
 4. Run the Fallow step. It runs the mutation run first, because the analysis
    writes its result files into the workspace.
 
@@ -2104,6 +2107,13 @@ that the job has.
   has the CI/CD variables of the target project. The job refuses it. A
   pipeline that runs in the fork project has only the variables of the fork,
   and the job runs.
+
+- The run removes `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, the GitHub
+  OIDC request token and the Actions runtime token from the environment of
+  the tests. Only `gh pr diff` gets the token of the Action. `CI_JOB_TOKEN`
+  stays, because a test can need it for a package registry. Other secrets
+  that the workflow puts into the environment of the job stay visible to the
+  tests.
 
 ### Result cache in CI
 

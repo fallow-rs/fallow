@@ -529,7 +529,9 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         EVENT_NAME: ${{ github.event_name }}
-        GH_TOKEN: ${{ inputs.github-token }}
+        # Only `gh pr diff` gets the token. The run removes the credential
+        # variables before it starts the tests of the project.
+        FALLOW_MUTATION_GH_TOKEN: ${{ inputs.github-token }}
         GH_REPO: ${{ github.repository }}
       run: bash ${{ github.action_path }}/action/scripts/mutation.sh run
 

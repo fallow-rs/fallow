@@ -32,6 +32,8 @@ if [ "${1:-}" = "mutation" ] && [ "${2:-}" = "tasks" ]; then
   exit 0
 fi
 if [ "${1:-}" = "mutation" ]; then
+  env | grep -E '^(GH_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|FALLOW_MUTATION_GH_TOKEN|ACTIONS_ID_TOKEN_REQUEST_TOKEN)=' \
+    | sed 's/=.*/=<leaked>/' >> "$MOCK_LOG"
   out=""
   prev=""
   for arg in "$@"; do
@@ -176,6 +178,23 @@ rm -rf "$W"; mkdir -p "$W"
 assert_not_contains "$(cat "$W/fallow-mutation-section.md")" "hunter2" "mutation section: stderr of the run never reaches the comment"
 assert_contains "$(cat "$W/fallow-mutation-stderr.log")" "hunter2" "mutation: stderr of the run stays in the log file"
 
+# --- A very long error message ---
+
+LONG_PATHS=$(printf '.pnpm-store/v10/files/%05d, ' $(seq 1 3000))
+W="$MUT_TMP/long"
+mut_run_main "$W" FALLOW_MUTATION_SCOPE=all MOCK_MUTATION_EXIT=2 \
+  MOCK_MUTATION_STDOUT="$(jq -cn --arg m "the git worktree has 3000 uncommitted paths: $LONG_PATHS" '{error: true, message: $m, exit_code: 2, code: "FALLOW_MUTATION_DIRTY_WORKTREE"}')" > /dev/null
+SECTION_CHARS=$(wc -c < "$W/fallow-mutation-section.md" | tr -d ' ')
+if [ "$SECTION_CHARS" -lt 3000 ]; then
+  pass "mutation section: a long error message is shortened"
+else
+  fail "mutation section: a long error message is shortened" "section has $SECTION_CHARS characters"
+fi
+assert_contains "$(cat "$W/fallow-mutation-section.md")" "(shortened; fallow-mutation-status.json of this job has the full text)" \
+  "mutation section: a shortened message says where the full text is"
+assert_contains "$(jq -r '.message' "$W/fallow-mutation-status.json")" ".pnpm-store/v10/files/03000" \
+  "mutation: the status file keeps the full message"
+
 # --- Signal ---
 
 W="$MUT_TMP/signal"
@@ -267,8 +286,9 @@ mut_run_gitlab() {
     for pair in "$@"; do export "${pair?}"; done
     export PATH="$MUT_BIN:$PATH" MOCK_LOG="$work/mock.log" TMPDIR="$MUT_TMP"
     : > "$MOCK_LOG"
-    bash "$MUT_SCRIPTS/mutation.sh" > "$work/stdout.log" 2>&1
-    printf '%s' "$?"
+    rc=0
+    bash "$MUT_SCRIPTS/mutation.sh" > "$work/stdout.log" 2>&1 || rc=$?
+    printf '%s' "$rc"
   )
 }
 
@@ -280,6 +300,11 @@ mut_assert_eq "$(jq -r '.outcome' "$W/fallow-mutation-status.json")" "refused" \
   "gitlab mutation: a fork MR in the target project is refused"
 mut_assert_eq "$(grep -c 'fallow mutation' "$W/mock.log")" "0" "gitlab mutation: a refused run does not start the tests"
 assert_contains "$(cat "$W/fallow-mutation-section.md")" "**Mutation testing did not run.**" "gitlab mutation: the section says that the run was refused"
+
+W="$MUT_TMP/gl-token"
+mut_run_gitlab "$W" GITLAB_TOKEN=secret-token FALLOW_MUTATION_SCOPE=all \
+  MOCK_MUTATION_REPORT="$FIXTURES/mutation-clean.json" > /dev/null
+assert_not_contains "$(cat "$W/mock.log")" "<leaked>" "gitlab mutation: the tests of the project get no GITLAB_TOKEN"
 
 W="$MUT_TMP/gl-forkproject"
 mut_run_gitlab "$W" CI_MERGE_REQUEST_IID=7 CI_MERGE_REQUEST_SOURCE_PROJECT_ID=200 CI_PROJECT_ID=200 \

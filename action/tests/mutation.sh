@@ -31,6 +31,8 @@ if [ "${1:-}" = "mutation" ] && [ "${2:-}" = "tasks" ]; then
   exit 0
 fi
 if [ "${1:-}" = "mutation" ]; then
+  env | grep -E '^(GH_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|FALLOW_MUTATION_GH_TOKEN|ACTIONS_ID_TOKEN_REQUEST_TOKEN)=' \
+    | sed 's/=.*/=<leaked>/' >> "$MOCK_LOG"
   out=""
   prev=""
   for arg in "$@"; do
@@ -85,8 +87,9 @@ am_run() {
     for pair in "$@"; do export "${pair?}"; done
     export PATH="$AM_BIN:$PATH" MOCK_LOG="$work/mock.log" RUNNER_TEMP="$AM_TMP"
     export GITHUB_OUTPUT="$work/github-output" GITHUB_STEP_SUMMARY="$work/summary.md"
-    bash "$AM_SCRIPTS/mutation.sh" "$mode" > "$work/stdout.log" 2>&1
-    printf '%s' "$?"
+    rc=0
+    bash "$AM_SCRIPTS/mutation.sh" "$mode" > "$work/stdout.log" 2>&1 || rc=$?
+    printf '%s' "$rc"
   )
 }
 
@@ -127,6 +130,16 @@ W="$AM_TMP/event-push"
 am_run "$W" run EVENT_NAME=push GH_REPO=owner/repo FALLOW_MUTATION_SCOPE=all \
   MOCK_MUTATION_REPORT="$AM_FIXTURES/mutation-clean.json" > /dev/null
 am_assert_eq "$(am_output "$W" outcome)" "ok" "action mutation: a push job runs"
+
+# --- Credentials ---
+
+W="$AM_TMP/token"
+am_run "$W" run EVENT_NAME=pull_request PR_NUMBER=12 PR_HEAD_REPO=owner/repo GH_REPO=owner/repo \
+  FALLOW_MUTATION_GH_TOKEN=secret-token GH_TOKEN=secret-token GITHUB_TOKEN=secret-token \
+  ACTIONS_ID_TOKEN_REQUEST_TOKEN=secret-token FALLOW_MUTATION_SCOPE=changed \
+  MOCK_MUTATION_REPORT="$AM_FIXTURES/mutation-clean.json" > /dev/null
+assert_contains "$(cat "$W/mock.log")" "gh pr diff 12" "action mutation: gh pr diff still runs with the scoped token"
+assert_not_contains "$(cat "$W/mock.log")" "<leaked>" "action mutation: the tests of the project get no token"
 
 # --- Stale result files ---
 
@@ -193,6 +206,18 @@ am_run "$W" run EVENT_NAME=push FALLOW_MUTATION_SCOPE=all FALLOW_MUTATION_MIN_SC
 RC=$(am_run "$W" gate FALLOW_MUTATION_STATUS_FILE="$W/fallow-mutation-status.json" FALLOW_MUTATION_SECTION_FILE="$W/fallow-mutation-section.md")
 am_assert_eq "$RC" "1" "action mutation: a failed score gate fails the result step with 1"
 assert_contains "$(cat "$W/stdout.log")" "The mutation score 50% is lower than the minimum of 80%." "action mutation: the score gate error names both values"
+
+LONG_PATHS=$(printf 'src/file-%05d.ts, ' $(seq 1 3000))
+W="$AM_TMP/long"
+am_run "$W" run EVENT_NAME=push FALLOW_MUTATION_SCOPE=all MOCK_MUTATION_EXIT=2 \
+  MOCK_MUTATION_STDOUT="$(jq -cn --arg m "dirty: $LONG_PATHS" '{error: true, message: $m, exit_code: 2, code: "FALLOW_MUTATION_DIRTY_WORKTREE"}')" > /dev/null
+am_run "$W" gate FALLOW_MUTATION_STATUS_FILE="$W/fallow-mutation-status.json" > /dev/null
+ERROR_LINE=$(grep '::error' "$W/stdout.log" || true)
+if [ -n "$ERROR_LINE" ] && [ "${#ERROR_LINE}" -lt 1500 ]; then
+  pass "action mutation: a long error message gives a short error line"
+else
+  fail "action mutation: a long error message gives a short error line" "line has ${#ERROR_LINE} characters: $(head -c 300 "$W/stdout.log")"
+fi
 
 RC=$(am_run "$AM_TMP/nostatus" gate FALLOW_MUTATION_STATUS_FILE="$AM_TMP/missing.json")
 am_assert_eq "$RC" "2" "action mutation: a missing status file fails the result step"

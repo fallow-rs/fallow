@@ -1881,22 +1881,26 @@ variables:
       # A failed score gate joins the other gates. A tool failure, a refusal
       # or a signal exits 2 after the other gates print.
       MUTATION_FAILURE=""
+      if [ -n "$MUTATION_OUTCOME" ]; then
+        # shellcheck source=scripts/mutation_common.sh
+        source /tmp/fallow-scripts/mutation_common.sh
+      fi
       case "$MUTATION_OUTCOME" in
         gate-failed)
           GATE_FAILURES+=("$(jq -r '"Fallow mutation score " + (if .score == null then "n/a" else "\((.score * 1000 | round) / 10)%" end) + " is lower than " + (if .min_score == null then "the minimum score of the config" else "the minimum of \(.min_score)%" end)' fallow-mutation-status.json)")
           ;;
         refused)
-          MUTATION_FAILURE="Mutation testing did not run. $(jq -r '.message // ""' fallow-mutation-status.json)"
+          MUTATION_FAILURE="Mutation testing did not run. $(fallow_mutation_status_message fallow-mutation-status.json)"
           ;;
         invalid-input)
-          MUTATION_FAILURE="The mutation testing input is invalid. $(jq -r '.message // ""' fallow-mutation-status.json)"
+          MUTATION_FAILURE="The mutation testing input is invalid. $(fallow_mutation_status_message fallow-mutation-status.json)"
           ;;
         interrupted)
           MUTATION_FAILURE="A signal stopped fallow mutation (exit code $(jq -r '.exit_code // "unknown"' fallow-mutation-status.json))."
           ;;
         tool-failed)
           if jq -e '.outcome == "tool-failed"' fallow-mutation-status.json > /dev/null 2>&1; then
-            MUTATION_FAILURE=$(jq -r '"fallow mutation failed with exit code \(.exit_code // "unknown")" + (if .code == null then "" else " (\(.code))" end) + ": " + (.message // "no error message")' fallow-mutation-status.json)
+            MUTATION_FAILURE="$(jq -r '"fallow mutation failed with exit code \(.exit_code // "unknown")" + (if .code == null then "" else " (\(.code))" end)' fallow-mutation-status.json): $(fallow_mutation_status_message fallow-mutation-status.json)"
           else
             MUTATION_FAILURE="fallow mutation failed and wrote no status file."
           fi

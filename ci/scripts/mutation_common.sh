@@ -23,7 +23,20 @@
 #   fallow-mutation-section.md    the section for the sticky comment
 
 FALLOW_MUTATION_TOP_ITEMS=5
+
+# Credentials that the CI job has and the tests of the project do not need.
+# The run removes them from the environment of `fallow mutation`, so a test
+# cannot read them. CI_JOB_TOKEN stays: a test can need it for a package
+# registry, and GitLab limits its scope.
+FALLOW_MUTATION_UNSET_ENV=(
+  GH_TOKEN GITHUB_TOKEN GITLAB_TOKEN FALLOW_MUTATION_GH_TOKEN
+  ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_RUNTIME_TOKEN
+)
 FALLOW_MUTATION_MAX_LINE_CHARS=160
+# An error message can list each changed path of a worktree. The comment and
+# the job log show at most this many characters of a message; the status file
+# keeps the full text. GitHub rejects a comment over 65536 characters.
+FALLOW_MUTATION_MAX_MESSAGE_CHARS=1000
 
 # The report fields that the status and the section read. A report of another
 # shape counts as a tool failure, so a gate result is never lost.
@@ -217,7 +230,10 @@ def duration:
     else "\($s)s" end;
 def clip: if length > $max_chars then .[0:$max_chars] + " ..." else . end;
 def block($sign): split("\n") | map("   " + $sign + (gsub("\r"; "") | clip)) | join("\n");
-def text_block: "```text\n" + (tostring | gsub("```"; quote + quote + quote)) + "\n```";
+def shorten:
+  if length > $max_message then .[0:$max_message] + " ... (shortened; fallow-mutation-status.json of this job has the full text)"
+  else . end;
+def text_block: "```text\n" + (tostring | shorten | gsub("```"; quote + quote + quote)) + "\n```";
 
 ($status[0]) as $st
 | ($report[0] // null) as $r
@@ -331,6 +347,7 @@ fallow_mutation_render_section() {
     --slurpfile tasks "$tasks" \
     --argjson top "$FALLOW_MUTATION_TOP_ITEMS" \
     --argjson max_chars "$FALLOW_MUTATION_MAX_LINE_CHARS" \
+    --argjson max_message "$FALLOW_MUTATION_MAX_MESSAGE_CHARS" \
     "$FALLOW_MUTATION_SECTION_JQ"
 }
 
@@ -371,6 +388,13 @@ fallow_mutation_insert_section() {
     mv "$tmp" "$envelope"
   fi
   return 0
+}
+
+# Prints the message of a status file, shortened for a job log line.
+fallow_mutation_status_message() {
+  jq -r --argjson n "$FALLOW_MUTATION_MAX_MESSAGE_CHARS" \
+    '(.message // "") | if length > $n then .[0:$n] + " ... (shortened; fallow-mutation-status.json has the full text)" else . end' \
+    "$1"
 }
 
 # Prints one field of the error envelope that `fallow mutation` printed.
@@ -419,7 +443,11 @@ fallow_mutation_main() {
       # stderr go to the temp directory: a new file in the worktree would
       # make the dirty-worktree check of the run refuse the run.
       exit_code=0
-      fallow "${FALLOW_MUTATION_ARGS[@]}" > "$tmp/stdout.json" 2> "$tmp/stderr.log" || exit_code=$?
+      local unset_args=() var
+      for var in "${FALLOW_MUTATION_UNSET_ENV[@]}"; do
+        unset_args+=(-u "$var")
+      done
+      env "${unset_args[@]}" fallow "${FALLOW_MUTATION_ARGS[@]}" > "$tmp/stdout.json" 2> "$tmp/stderr.log" || exit_code=$?
       outcome=$(fallow_mutation_outcome_for_exit "$exit_code")
       code=$(fallow_mutation_error_field "$tmp/stdout.json" code)
       message=$(fallow_mutation_error_field "$tmp/stdout.json" message)

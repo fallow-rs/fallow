@@ -55,7 +55,8 @@ prepare_changed_scope() {
   [ -z "${FALLOW_MUTATION_DIFF_FILE:-}" ] || return 0
   if [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
     local diff_file="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fallow-mutation-pr.diff"
-    if gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$diff_file" 2> /dev/null && [ -s "$diff_file" ]; then
+    if GH_TOKEN="${FALLOW_MUTATION_GH_TOKEN:-}" gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$diff_file" 2> /dev/null \
+        && [ -s "$diff_file" ]; then
       export FALLOW_MUTATION_DIFF_FILE="$diff_file"
       return 0
     fi
@@ -126,7 +127,7 @@ gate_step() {
   outcome=$(jq -r '.outcome // ""' "$status" 2> /dev/null || true)
   exit_code=$(jq -r '.exit_code // ""' "$status")
   code=$(jq -r '.code // ""' "$status")
-  message=$(jq -r '.message // ""' "$status")
+  message=$(fallow_mutation_status_message "$status")
   case "$outcome" in
     ok|skipped)
       exit 0
