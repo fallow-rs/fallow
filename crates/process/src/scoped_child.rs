@@ -450,7 +450,7 @@ mod tests {
         // libtest prints the panic of the helper on stdout, not on stderr.
         assert!(
             output.status.success(),
-            "helper failed with {}: {}{}",
+            "helper failed with {}\nstdout:\n{}\nstderr:\n{}",
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -517,7 +517,10 @@ mod tests {
         while !ready.exists() && Instant::now() < ready_deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(ready.exists(), "descendant did not start inside the job");
+        assert!(
+            ready.exists(),
+            "descendant did not start inside the job within {STARTUP_BOUND:?}"
+        );
 
         let started = Instant::now();
         terminator
