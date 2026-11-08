@@ -47,6 +47,12 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     Sass or Less file is scanned with stylesheet rules: strings, escapes,
     `/* */` comments and unquoted `url()` only, because `//` in
     `url(//host/a.png)` is not a comment.
+  - The same scan counts the `<` tokens that the TypeScript parser can try
+    as nested type-argument lists: an open `<` with a later `<` behind a
+    deeper `(` or `[`. Each such level makes the parser try the inner part
+    again, so the parse time grows exponentially with the level. A file past
+    `MAX_TYPE_ARGUMENT_NESTING` returns `None` in the same way as a file
+    past `MAX_NESTING_DEPTH`.
   - It then runs the parse on a stack of
     `256 KiB + 1024 * source length + 4096 * bracket depth`
     (`crates/extract/src/stack.rs`). A need over 64 GiB (a source over 64 MB in

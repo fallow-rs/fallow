@@ -777,6 +777,21 @@ mod tests {
     }
 
     #[test]
+    fn nested_type_argument_candidates_do_not_stall_the_statement_probe() {
+        // Each `t<{[` makes the TypeScript parser try the rest twice, once as
+        // type arguments and once as a comparison. A parse of this candidate
+        // takes minutes.
+        let candidate = format!("import({})\n", "t<{[".repeat(24));
+        assert!(
+            crate::parse_bounded(&candidate, || ()).is_none(),
+            "the statement probe must refuse the candidate before it parses"
+        );
+        let source = format!("{candidate}import {{ Card }} from './card';\n<Card />\n");
+        assert!(!extract_mdx_statements_mapped(&source).body.contains("t<{["));
+        assert_eq!(import_sources(&source), vec!["./card".to_string()]);
+    }
+
+    #[test]
     fn inline_line_terminators_end_comments_before_closing_delimiters() {
         for separator in ["\r", "\u{2028}", "\u{2029}"] {
             let source = format!(
