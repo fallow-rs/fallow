@@ -10,9 +10,11 @@ const FIRST = "shared/first.test.ts::adds";
 const SECOND = "shared/second.test.ts::adds";
 const LEAK_A = "leak/a.test.ts::marks the module";
 const LEAK_B = "leak/b.test.ts::expects a fresh worker";
+const STORE_A = "storeleak/a.test.ts::fills the store";
+const STORE_B = "storeleak/b.test.ts::starts empty";
 
-const startProject = async (packageName, configPath, env = {}) => {
-  const fixture = createFixtureProject({ packageName });
+const startProject = async (packageName, configPath, env = {}, options = {}) => {
+  const fixture = createFixtureProject({ packageName, ...options });
   const companion = startCompanion();
   let nextId = 1;
   const request = (message) => companion.request({ v: 1, id: nextId++, ...message });
@@ -28,13 +30,14 @@ const startProject = async (packageName, configPath, env = {}) => {
   assert.equal(ready.type, "ready", JSON.stringify(ready));
   const dryRun = await request({ type: "dry_run", test_files: [] });
   assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
-  const run = (mutantId, testIds) =>
+  const run = (mutantId, testIds, extra = {}) =>
     request({
       type: "run",
       mutant_id: mutantId,
       test_ids: testIds,
       timeout_ms: 10_000,
       bail: true,
+      ...extra,
     });
   return { fixture, companion, run };
 };
@@ -43,6 +46,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
   describe(`vitest ${version} shared mutant runs`, () => {
     let shared;
     let leak;
+    let storeLeak;
     let pidLog;
 
     before(async () => {
@@ -52,10 +56,16 @@ for (const { packageName, version } of VITEST_MAJORS) {
         FALLOW_PID_LOG: pidLog,
       });
       leak = await startProject(packageName, "vitest.leak.config.mjs");
+      storeLeak = await startProject(
+        packageName,
+        "vitest.storeleak.config.mjs",
+        {},
+        { store: true },
+      );
     });
 
     after(() => {
-      for (const project of [shared, leak]) {
+      for (const project of [shared, leak, storeLeak]) {
         project?.companion.stop();
         project?.fixture.cleanup();
       }
@@ -79,6 +89,21 @@ for (const { packageName, version } of VITEST_MAJORS) {
 
     test("a project whose tests differ in a shared worker keeps isolated runs", async () => {
       const result = await leak.run("m9", [LEAK_A, LEAK_B]);
+      assert.equal(result.status, "survived", JSON.stringify(result));
+    });
+
+    test("an isolated request gives each test file its own worker", async () => {
+      writeFileSync(pidLog, "");
+      const result = await shared.run("m9", [FIRST, SECOND], { isolated: true });
+      assert.equal(result.status, "survived", JSON.stringify(result));
+      const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
+      assert.equal(pids.size, 2, "one worker for each file");
+    });
+
+    test("a kill that only the state of an earlier file of the worker causes is not a kill", async () => {
+      const control = await storeLeak.run(null, [STORE_A, STORE_B]);
+      assert.equal(control.status, "survived", JSON.stringify(control));
+      const result = await storeLeak.run("m30", [STORE_A, STORE_B]);
       assert.equal(result.status, "survived", JSON.stringify(result));
     });
   });

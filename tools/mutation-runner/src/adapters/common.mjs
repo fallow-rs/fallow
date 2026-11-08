@@ -116,6 +116,10 @@ export const validateRun = (request) => {
     request.loop_budget_ms === undefined || isPositiveInteger(request.loop_budget_ms),
     "loop_budget_ms must be a positive integer when present",
   );
+  expectRequest(
+    request.isolated === undefined || typeof request.isolated === "boolean",
+    "isolated must be a boolean when present",
+  );
 };
 
 /**

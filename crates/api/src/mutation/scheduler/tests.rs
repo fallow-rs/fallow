@@ -943,6 +943,7 @@ fn a_kill_names_the_failure_kind_of_its_killing_test_or_an_error() {
         test_ids: vec![tid("t1")],
         timeout_ms: 1000,
         loop_budget_ms: None,
+        isolated: false,
         bail: true,
     };
     let Response::Run(mut result) = run_result(&request, RunStatus::Killed, Some(&tid("t1")))
@@ -2719,6 +2720,7 @@ fn load_kill_job() -> Job {
         cache_key: None,
         confirmation: None,
         first_tests: Vec::new(),
+        isolated: false,
         retry_extra_ms: 0,
     }
 }
@@ -3009,6 +3011,11 @@ fn a_survivor_retry_runs_each_test_of_its_files_and_a_kill_by_a_new_test_is_kill
         "the first run stays narrow"
     );
     assert_eq!(runs[1].1.test_ids, vec![tid("t1"), tid("t2")]);
+    assert!(!runs[0].1.isolated, "a first run may share a worker");
+    assert!(
+        runs[1].1.isolated,
+        "the retry of a survivor runs each test file in its own worker"
+    );
     assert_eq!(
         runs[1].1.loop_budget_ms,
         Some(runs[1].1.timeout_ms - 5000 + 500),
@@ -3019,6 +3026,10 @@ fn a_survivor_retry_runs_each_test_of_its_files_and_a_kill_by_a_new_test_is_kill
         controls.last().map(|(_, run)| run.test_ids.clone()),
         Some(vec![tid("t1"), tid("t2")]),
         "a kill by a new test needs a control run of the retry tests"
+    );
+    assert!(
+        controls.last().is_some_and(|(_, run)| run.isolated),
+        "the control run of a survivor retry uses the isolation of the retry"
     );
 }
 

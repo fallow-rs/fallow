@@ -29,7 +29,7 @@ mod dry_facts;
 mod retry_set;
 pub mod targets;
 mod window;
-use classification::{attempt_record, classify, kill_kind, matrix_evidence};
+use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use targets::{config_targets, job_targets};
 use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
@@ -322,6 +322,9 @@ struct Job {
     /// confirmation set. A kill by a test outside this set is no
     /// disagreement with the first run. Empty for each other job.
     first_tests: Vec<String>,
+    /// True for the retry of a survivor: the companion runs each test file in
+    /// its own worker, so state of another file cannot hide or fake a kill.
+    isolated: bool,
     /// The dry-run time that the retry tests of a survivor add to `tests`.
     /// The time reserve of a budgeted first pass uses it (issue #3665).
     retry_extra_ms: u64,
@@ -358,6 +361,7 @@ impl Job {
     /// set, when the job has one. The test files and the cache key stay the
     /// same, because the set has only tests of the same files.
     fn for_confirmation(mut self) -> Self {
+        self.isolated = true;
         if let Some((tests, timeout_ms)) = self.confirmation.take() {
             self.first_tests = std::mem::replace(&mut self.tests, tests);
             self.loop_budget_ms = loop_budget_ms(timeout_ms);
@@ -452,13 +456,6 @@ impl Attempt {
             settled: false,
         }
     }
-}
-
-/// True for a kill with no executed test: an error outside each test is the
-/// only evidence. A mutant that throws at module load gives this result, and
-/// so does a run path that executes no test at all.
-fn is_load_kill(result: &RunResult, status: MutantStatus, killed_by: Option<&String>) -> bool {
-    status == MutantStatus::Killed && killed_by.is_none() && result.tests_executed == 0
 }
 
 /// A companion that has sent `ready` and a dry run.
@@ -642,6 +639,7 @@ impl<'a> Worker<'a> {
             test_ids: tests.clone(),
             timeout_ms: job.timeout_ms,
             loop_budget_ms: Some(job.loop_budget_ms),
+            isolated: job.isolated,
             bail,
         });
         let watchdog = Duration::from_millis(job.watchdog_ms());
@@ -933,6 +931,7 @@ impl<'a> Worker<'a> {
             test_ids: tests.clone(),
             timeout_ms,
             loop_budget_ms: None,
+            isolated: job.isolated,
             bail: false,
         });
         let watchdog = Duration::from_millis(timeout_ms + job.setup_ms + WATCHDOG_GRACE_MS);
@@ -1201,6 +1200,7 @@ fn build_jobs(
             cache_key,
             confirmation,
             first_tests: Vec::new(),
+            isolated: false,
             retry_extra_ms,
         };
         if static_mutant {

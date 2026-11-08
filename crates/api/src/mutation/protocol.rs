@@ -50,6 +50,11 @@ pub struct RunRequest {
     /// the watchdog fires. `None` sends no field: the run has no loop check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loop_budget_ms: Option<u64>,
+    /// True when each test file of the run needs its own worker, also when
+    /// the companion shares one worker for the files of other runs. `false`
+    /// sends no field.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub isolated: bool,
     pub bail: bool,
 }
 
@@ -526,18 +531,20 @@ mod tests {
             test_ids: vec!["t::a".to_owned()],
             timeout_ms: 6500,
             loop_budget_ms: Some(650),
+            isolated: true,
             bail: true,
         })
         .to_line(1, 3);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&line).unwrap(),
-            serde_json::json!({"v":1,"id":3,"type":"run","mutant_id":"m1","test_ids":["t::a"],"timeout_ms":6500,"loop_budget_ms":650,"bail":true})
+            serde_json::json!({"v":1,"id":3,"type":"run","mutant_id":"m1","test_ids":["t::a"],"timeout_ms":6500,"loop_budget_ms":650,"isolated":true,"bail":true})
         );
         let control = Request::Run(RunRequest {
             mutant_id: None,
             test_ids: vec!["t::a".to_owned()],
             timeout_ms: 6500,
             loop_budget_ms: None,
+            isolated: false,
             bail: true,
         })
         .to_line(1, 4);

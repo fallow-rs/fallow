@@ -153,3 +153,14 @@ pub(super) fn matrix_evidence(tests: &[String], result: &RunResult) -> (Vec<Stri
         && requested.len() == tests.len();
     (killers, complete)
 }
+
+/// True for a kill with no executed test: an error outside each test is the
+/// only evidence. A mutant that throws at module load gives this result, and
+/// so does a run path that executes no test at all.
+pub(super) fn is_load_kill(
+    result: &RunResult,
+    status: MutantStatus,
+    killed_by: Option<&String>,
+) -> bool {
+    status == MutantStatus::Killed && killed_by.is_none() && result.tests_executed == 0
+}

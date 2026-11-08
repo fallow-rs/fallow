@@ -127,8 +127,18 @@ const PATH_MAP = {
   "src/unused.ts": "files/src/unused.ts",
 };
 
+const INSTRUMENTED_STORE = `// @ts-nocheck
+${PRELUDE}
+export const store: { value?: number } = (globalThis.fallowStore ??= {});
+
+export function reset(): void {
+  if ((__fallow_m_a("m30") ? (false) : (__fallow_m_c("m30"), (true)))) delete store.value;
+}
+`;
+
 /** The optional run files, each with its path-map key. */
 const OPTIONAL_FILES = {
+  store: { source: "src/store.ts", text: INSTRUMENTED_STORE },
   components: { source: "src/Badge.vue", text: INSTRUMENTED_BADGE },
   commonjs: { source: "require/shipping.cjs", text: INSTRUMENTED_SHIPPING },
 };
@@ -169,6 +179,7 @@ export const createFixtureProject = ({
   fixture = "vitest-basic",
   components = false,
   commonjs = false,
+  store = false,
 } = {}) => {
   const installed = join(PACKAGE_ROOT, "node_modules", packageName);
   // Without this check the symlink below dangles, and each test then fails
@@ -189,7 +200,7 @@ export const createFixtureProject = ({
     mkdirSync(join(root, "node_modules"));
     symlinkSync(installed, join(root, "node_modules", "vitest"), "dir");
   }
-  const { runFiles, pathMap } = fixtureFiles({ components, commonjs });
+  const { runFiles, pathMap } = fixtureFiles({ components, commonjs, store });
   for (const [path, text] of Object.entries(runFiles)) write(runDir, path, text);
   return {
     root,

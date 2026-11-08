@@ -25,3 +25,15 @@ test("a loop_budget_ms that is not a positive integer is a bad request", () => {
     );
   }
 });
+
+test("an isolated field that is not a boolean is a bad request", () => {
+  assert.doesNotThrow(() => validateRun(request({ isolated: true })));
+  assert.doesNotThrow(() => validateRun(request({ isolated: false })));
+  for (const value of [1, "true", null]) {
+    assert.throws(
+      () => validateRun(request({ isolated: value })),
+      (error) => error.code === "bad-request" && /isolated/u.test(error.message),
+      `isolated ${JSON.stringify(value)}`,
+    );
+  }
+});

@@ -1120,22 +1120,33 @@ test run.
 
 Vitest starts one worker for each test file of a run when module isolation
 is on (the default). After the dry run, the adapter runs the same test files
-once more in one shared worker, with no active mutant. When each test gives
-the same status in both runs, and the shared run has no more errors outside
-a test, the adapter runs each later `run` request of the companion (mutant
-and control runs) with `isolate: false`.
+once more with `isolate: false`, with no active mutant. When each test gives
+the same status in both runs, and the shared run has no error outside a test
+that the isolated run does not have, the companion runs its later mutant and
+control runs with `isolate: false`.
 
-- Vitest then runs the test files of the run in one worker. Each run still
-  starts a new worker, so the modules are fresh for each mutant.
-- A run of one test file costs the same as before. A mutant with covering
-  tests in more than one file needs fewer workers.
-- A test that depends on a fresh worker for each file, for example a global
-  that another test file sets, makes the two dry runs differ. The companion
-  then keeps the isolated runs.
-- A project with `isolate: false` and a project in browser mode keep their
-  own setting. A dry run of one test file needs no check.
-- The check doubles the dry-run time. `duration_ms` of the dry run includes
-  both runs.
+- Vitest then gives the test files of the run that have the same project,
+  environment and `sequence.groupOrder` to one worker. Each run still
+  starts a new worker, and Vitest loads the source modules again for each
+  test file, so state on the global object is the only state that crosses
+  files.
+- A mutant can change state on the global object that a later file of the
+  worker reads. When a shared run detects a mutant in a test file that did
+  not run first in the worker, the companion runs that file again alone,
+  with the mutant. When that run does not detect the mutant, the companion
+  runs the whole request again with each file in its own worker, and that
+  result counts.
+- The retry of a survivor and its control run always use one worker for
+  each file (`isolated: true` in the `run` request).
+- A test that depends on a fresh worker for each file in the dry run, for
+  example a global that another test file sets, makes the two dry runs
+  differ. The companion then keeps isolated runs.
+- When any project has `isolate: false`, or the dry run has one test
+  specification, the companion does not share workers. A project in browser
+  mode keeps its own setting.
+- The check repeats the dry run, and `duration_ms` of the dry run includes
+  both runs. The check is skipped when the isolated dry run takes more than
+  45 seconds. A failed shared run keeps isolated runs.
 
 ### `node:test` and `bun test`
 
