@@ -41,9 +41,31 @@ test("fails and names each folder that the command leaves", () => {
     'require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "fallow-leak-"))';
   const result = runCheck(nodeEval(leak));
   assert.equal(result.status, 1, result.stderr);
-  const [leaked] = readdirSync(result.tempDir);
-  assert.match(leaked, /^fallow-leak-/);
-  assert.match(result.stderr, new RegExp(leaked));
+  assert.match(result.stderr, /fallow-leak-\w+/);
+});
+
+test("a folder that another process adds to the system temp directory is no leak", () => {
+  // The command writes to the outer temp directory by its path, as a
+  // parallel session on the same machine does. Only the temp directory of
+  // the command counts.
+  const other =
+    'require("node:fs").mkdtempSync(require("node:path").join(process.env.OUTER_TEMP, "fallow-other-"))';
+  const tempDir = makeTempDir("fallow-temp-leaks-test-");
+  const env = { ...process.env, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir, OUTER_TEMP: tempDir };
+  const result = spawnSync(process.execPath, [SCRIPT, "--", ...nodeEval(other)], {
+    encoding: "utf8",
+    env,
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("the command gets its own temp directory, and the check removes it", () => {
+  const show = 'console.log(require("node:os").tmpdir())';
+  const result = runCheck(nodeEval(show));
+  assert.equal(result.status, 0, result.stderr);
+  const used = result.stdout.trim();
+  assert.notEqual(used, result.tempDir);
+  assert.deepEqual(readdirSync(result.tempDir), [], "the private temp directory stayed");
 });
 
 test("passes when the command removes its folders or leaves only ignored ones", () => {
