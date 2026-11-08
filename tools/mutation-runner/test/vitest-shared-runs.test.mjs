@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
@@ -47,10 +48,12 @@ for (const { packageName, version } of VITEST_MAJORS) {
     let shared;
     let leak;
     let storeLeak;
+    let pidDir;
     let pidLog;
 
     before(async () => {
-      pidLog = join(createFixtureProject({ packageName }).root, "..", `pids-${version}.log`);
+      pidDir = mkdtempSync(join(tmpdir(), "fallow-mutation-pids-"));
+      pidLog = join(pidDir, "pids.log");
       writeFileSync(pidLog, "");
       shared = await startProject(packageName, "vitest.shared.config.mjs", {
         FALLOW_PID_LOG: pidLog,
@@ -69,6 +72,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
         project?.companion.stop();
         project?.fixture.cleanup();
       }
+      if (pidDir) rmSync(pidDir, { recursive: true, force: true });
     });
 
     test("the test files of one mutant run share one worker", async () => {
