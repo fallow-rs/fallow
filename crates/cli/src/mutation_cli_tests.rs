@@ -454,6 +454,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         cached: false,
         resumed: false,
         type_error_codes: Vec::new(),
+        equivalent_reason: None,
     }
 }
 
@@ -1132,6 +1133,7 @@ fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
         survivors: 3,
         checked: 2,
         compile_errors: 1,
+        equivalent: 0,
         skipped: vec![fallow_output::MutationTypecheckSkip {
             reason: fallow_output::MutationTypecheckSkipReason::NoProject,
             count: 1,
@@ -1145,10 +1147,24 @@ fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
         "{text}"
     );
     checked.typecheck = Some(fallow_output::MutationTypecheckOutput {
+        completed: true,
+        survivors: 3,
+        checked: 1,
+        compile_errors: 0,
+        equivalent: 2,
+        skipped: Vec::new(),
+    });
+    let text = run_text(&checked, &OPTIONS);
+    assert!(
+        text.contains("Survivor type check: 1 checked, 0 do not type-check, 2 proven equivalent\n"),
+        "{text}"
+    );
+    checked.typecheck = Some(fallow_output::MutationTypecheckOutput {
         completed: false,
         survivors: 2,
         checked: 0,
         compile_errors: 0,
+        equivalent: 0,
         skipped: Vec::new(),
     });
     let text = run_text(&checked, &OPTIONS);

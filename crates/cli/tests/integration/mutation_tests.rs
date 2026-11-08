@@ -1122,6 +1122,93 @@ mod end_to_end {
         assert_eq!(checked["completion"]["status"], "complete", "{checked}");
     }
 
+    /// `readB` reads `a?.b` where `a` is a plain object type. No test can
+    /// tell `a?.b` from `a.b`, so the mutant survives the tests. With
+    /// `strictNullChecks` and `noUncheckedIndexedAccess`, the type check
+    /// proves the receiver never nullish and moves the mutant to
+    /// `equivalent`, out of the score. Without `--typecheck` it stays a
+    /// survivor.
+    #[test]
+    fn a_typecheck_run_proves_an_optional_link_on_a_non_nullable_receiver_equivalent() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        if !type_aware_companion_installed() {
+            return;
+        }
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function readB(a: { b: number }): number | undefined {\n  return a?.b;\n}\n",
+        );
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .expect("tsconfig");
+        fs::write(
+            root.join("test/chain.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { readB } from \"../src/math\";\n\ntest(\"reads b\", () => {\n  expect(readB({ b: 4 })).toBe(4);\n});\n",
+        )
+        .expect("chain test");
+        commit_all(&root, "chain");
+
+        let args = ["src/math.ts", "--concurrency", "1"];
+        let (plain_output, plain) = json_mutation(&root, &args);
+        assert_eq!(plain_output.code, 0, "{}", plain_output.stderr);
+        let link = |report: &serde_json::Value| -> serde_json::Value {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == "readB" && mutant["operator"] == "optional-chaining"
+                })
+                .cloned()
+                .expect("an optional-chaining mutant of readB")
+        };
+        assert_eq!(link(&plain)["status"], "survived", "{plain}");
+        assert!(link(&plain).get("equivalent_reason").is_none(), "{plain}");
+
+        let mut command = std::process::Command::new(crate::common::fallow_bin());
+        command
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .args(["mutation", "--root"])
+            .arg(&root)
+            .args(args)
+            .args(["--typecheck", "--format", "json", "--quiet"]);
+        crate::common::configure_type_aware_sidecar(&mut command);
+        let output = command.output().expect("fallow runs");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let checked: serde_json::Value =
+            serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
+        let mutant = link(&checked);
+        assert_eq!(mutant["status"], "equivalent", "{checked}");
+        assert_eq!(
+            mutant["equivalent_reason"], "type-proven-never-nullish",
+            "{checked}"
+        );
+        assert_eq!(checked["typecheck"]["completed"], true, "{checked}");
+        assert_eq!(checked["typecheck"]["equivalent"], 1, "{checked}");
+        assert_eq!(checked["summary"]["counts"]["equivalent"], 1, "{checked}");
+        let counts = &checked["summary"]["counts"];
+        assert_eq!(
+            counts["survived"].as_u64().expect("survived")
+                + counts["equivalent"].as_u64().expect("equivalent")
+                + counts["compile_error"].as_u64().expect("compile errors"),
+            plain["summary"]["counts"]["survived"]
+                .as_u64()
+                .expect("survived"),
+            "{checked}"
+        );
+        assert_eq!(checked["completion"]["status"], "complete", "{checked}");
+    }
+
     /// A component compiler in the shape of the Vue plugin: its `transform`
     /// hook keeps the script block of a `.vue` file.
     const COMPONENT_CONFIG: &str = r#"const componentPlugin = () => ({

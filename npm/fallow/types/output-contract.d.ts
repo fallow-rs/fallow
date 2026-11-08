@@ -1833,6 +1833,10 @@ export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | 
  */
 export type MutantFailureKind = ("assertion" | "error" | "timeout")
 /**
+ * The proof that makes a mutant `equivalent` without a verdict.
+ */
+export type MutantEquivalentReason = "type-proven-never-nullish"
+/**
  * Why the type check did not check a survivor.
  */
 export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing" | "unsupported-file")
@@ -21092,6 +21096,12 @@ resumed?: boolean
  * `compile_error` mutant, sorted, at most 8.
  */
 type_error_codes?: number[]
+/**
+ * Why an `equivalent` mutant is equivalent, when a check in the run
+ * proved it. Absent for a mutant that only a verdict marks as
+ * equivalent.
+ */
+equivalent_reason?: (MutantEquivalentReason | null)
 }
 /**
  * The edit of a mutant, without project text.
@@ -21402,6 +21412,12 @@ checked: number
  * `compile_error`.
  */
 compile_errors: number
+/**
+ * The survivors that the checker proved equivalent. They have the
+ * status `equivalent` and the `equivalent_reason` field. They do not
+ * count in `checked`.
+ */
+equivalent?: number
 /**
  * The survivors that the checker did not check, by reason.
  */

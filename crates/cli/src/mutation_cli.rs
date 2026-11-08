@@ -124,7 +124,8 @@ pub struct MutationArgs {
     pub runner_config: Option<PathBuf>,
     /// Type-check each survived mutant through the `--type-aware`
     /// companion. A survivor that does not type-check becomes
-    /// `compile_error` and leaves the score.
+    /// `compile_error` and leaves the score. An optional-chaining survivor on a
+    /// receiver that the types prove never nullish becomes `equivalent`.
     #[arg(long)]
     pub typecheck: bool,
     /// Continue an interrupted or partial run: reuse the killed and confirmed

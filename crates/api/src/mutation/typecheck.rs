@@ -2,8 +2,10 @@
 //!
 //! The check runs after the tests and reads only the survivors. A survivor
 //! whose mutated file does not type-check becomes `compile_error`, which the
-//! score does not count. A survivor that the checker cannot check keeps the
-//! status `survived`.
+//! score does not count. A survivor that removes an optional-chaining link
+//! from a receiver that the types prove never nullish becomes `equivalent`
+//! with a reason, which the score does not count either. A survivor that the
+//! checker cannot check keeps the status `survived`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -88,7 +90,7 @@ pub fn survivor_request(plan: &MutationPlan, results: &[MutantResult]) -> Surviv
 
 /// Applies the checker outcomes to `results` and returns the summary. Only a
 /// `survived` mutant can change: a compile error sets `compile_error` and
-/// the diagnostic codes.
+/// the diagnostic codes, and a type proof sets `equivalent` and its reason.
 pub fn apply_outcomes(
     results: &mut [MutantResult],
     outcomes: Vec<(String, TypecheckOutcome)>,
@@ -99,6 +101,7 @@ pub fn apply_outcomes(
         survivors: by_id.len(),
         checked: 0,
         compile_errors: 0,
+        equivalent: 0,
         skipped: Vec::new(),
     };
     let mut skipped = BTreeMap::new();
@@ -116,6 +119,11 @@ pub fn apply_outcomes(
                 output.compile_errors += 1;
                 result.status = MutantStatus::CompileError;
                 result.type_error_codes = codes;
+            }
+            TypecheckOutcome::Equivalent(reason) => {
+                output.equivalent += 1;
+                result.status = MutantStatus::Equivalent;
+                result.equivalent_reason = Some(reason);
             }
             TypecheckOutcome::Unchecked(reason) => *skipped.entry(reason).or_insert(0) += 1,
         }
@@ -149,6 +157,7 @@ pub fn failed_output(
             survivors,
             checked: 0,
             compile_errors: 0,
+            equivalent: 0,
             skipped,
         },
         MutationRunIssue {
@@ -215,7 +224,7 @@ mod tests {
         Mutant, MutantDisposition, MutantId, MutationPlanCounts, Operator, PlannedFile,
         PlannedMutant,
     };
-    use fallow_output::{MutantLocation, MutationSummary};
+    use fallow_output::{MutantEquivalentReason, MutantLocation, MutationSummary};
 
     use super::*;
 
@@ -292,7 +301,44 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalent_reason: None,
         }
+    }
+
+    #[test]
+    fn a_type_proven_survivor_is_equivalent_and_leaves_the_score() {
+        let mut results = vec![
+            result("killed", MutantStatus::Killed),
+            result("proven", MutantStatus::Survived),
+            result("compiles", MutantStatus::Survived),
+        ];
+        assert_eq!(
+            MutationSummary::from_results(&results).score,
+            Some(1.0 / 3.0)
+        );
+        let output = apply_outcomes(
+            &mut results,
+            vec![
+                (
+                    "proven".to_owned(),
+                    TypecheckOutcome::Equivalent(MutantEquivalentReason::TypeProvenNeverNullish),
+                ),
+                ("compiles".to_owned(), TypecheckOutcome::Compiles),
+            ],
+        );
+        assert_eq!(output.survivors, 2);
+        assert_eq!(output.checked, 1);
+        assert_eq!(output.equivalent, 1);
+        assert_eq!(output.compile_errors, 0);
+        assert_eq!(results[1].status, MutantStatus::Equivalent);
+        assert_eq!(
+            results[1].equivalent_reason,
+            Some(MutantEquivalentReason::TypeProvenNeverNullish)
+        );
+        assert_eq!(results[2].equivalent_reason, None);
+        let summary = MutationSummary::from_results(&results);
+        assert_eq!(summary.counts.equivalent, 1);
+        assert_eq!(summary.score, Some(0.5));
     }
 
     #[test]
@@ -325,6 +371,7 @@ mod tests {
                 survivors: 3,
                 checked: 2,
                 compile_errors: 1,
+                equivalent: 0,
                 skipped: vec![MutationTypecheckSkip {
                     reason: MutationTypecheckSkipReason::NoProject,
                     count: 1,

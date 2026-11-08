@@ -1608,6 +1608,28 @@ are not checked, so the cost grows with the number of survivors only.
   file, for example a caller of a function with an inferred return type,
   stays `survived`. The check also does not run Vitest type tests, so the
   `typecheck-not-run` note stays.
+- A survivor that removes an optional-chaining link can become `equivalent`.
+  The mutants `a?.b` to `a.b`, `a?.()` to `a()` and `a?.[k]` to `a[k]` change
+  nothing when the type of `a` excludes `null` and `undefined`. The companion
+  checks the type of `a` in the original file. When the type is never nullish,
+  the mutant gets the status `equivalent` and `equivalent_reason:
+  "type-proven-never-nullish"`. The mutant does not count in the score.
+  `typecheck.equivalent` counts these mutants. They do not count in
+  `typecheck.checked`. A mutant that a verdict marks as equivalent has no
+  `equivalent_reason`.
+- The proof is strict. It needs `strictNullChecks` (or `strict`) and
+  `noUncheckedIndexedAccess` in the `tsconfig.json` of the file, because
+  without the second option `xs[0]` has a non-nullable type and is `undefined`
+  for an empty array. The file must be a TypeScript file. The proof does not
+  hold for `any`, `unknown`, a type parameter, a union with `null` or
+  `undefined`, or a receiver that is a cast (`as`, `<T>x`) or a non-null
+  assertion (`x!`). In each of these cases the mutant gets the normal check.
+  Control-flow narrowing counts: `if (a) { a?.b }` is proven.
+- The report names a code, not the expression, because the report holds no
+  project text. The `file`, `line` and `column` of the mutant locate the
+  receiver. The proof runs after the tests and only for survivors, in the
+  same companion request as the compile check. A proof before the tests
+  would need a type-aware pass in the plan.
 - A survivor that the checker cannot check stays `survived`. The reasons are
   `no-project` (no `tsconfig.json` includes the file), `not-type-checked`
   (`// @ts-nocheck`, or a JavaScript file without `checkJs`),

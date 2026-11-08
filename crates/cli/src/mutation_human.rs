@@ -721,6 +721,9 @@ fn typecheck_line(typecheck: &MutationTypecheckOutput) -> String {
         typecheck.compile_errors,
         plural(typecheck.compile_errors, "does", "do")
     );
+    if typecheck.equivalent > 0 {
+        let _ = write!(line, ", {} proven equivalent", typecheck.equivalent);
+    }
     if !typecheck.skipped.is_empty() {
         let reasons: Vec<String> = typecheck
             .skipped

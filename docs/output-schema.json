@@ -33957,6 +33957,17 @@
             "type": "integer"
           },
           "description": "The TypeScript diagnostic codes of the new errors of a\n`compile_error` mutant, sorted, at most 8."
+        },
+        "equivalent_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantEquivalentReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why an `equivalent` mutant is equivalent, when a check in the run\nproved it. Absent for a mutant that only a verdict marks as\nequivalent."
         }
       },
       "required": [
@@ -34648,6 +34659,10 @@
         "compile_errors": {
           "type": "integer",
           "description": "The checked survivors that do not type-check. They have the status\n`compile_error`."
+        },
+        "equivalent": {
+          "type": "integer",
+          "description": "The survivors that the checker proved equivalent. They have the\nstatus `equivalent` and the `equivalent_reason` field. They do not\ncount in `checked`."
         },
         "skipped": {
           "type": "array",
@@ -36742,6 +36757,16 @@
         }
       ],
       "description": "The quality of the evidence of one `--kill-matrix-for` target."
+    },
+    "MutantEquivalentReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "type-proven-never-nullish",
+          "description": "The mutant removes an optional-chaining link (`?.`), and the type\ncheck shows that the receiver is never `null` or `undefined`. The\nproof needs `strictNullChecks` and `noUncheckedIndexedAccess`, and it\ndoes not hold for a cast, `any`, `unknown` or a generic type."
+        }
+      ],
+      "description": "The proof that makes a mutant `equivalent` without a verdict."
     }
   }
 }

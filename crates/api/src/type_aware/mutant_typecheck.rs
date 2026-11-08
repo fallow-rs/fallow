@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use fallow_output::MutationTypecheckSkipReason;
+use fallow_output::{MutantEquivalentReason, MutationTypecheckSkipReason};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,8 @@ pub enum TypecheckOutcome {
     Compiles,
     /// The mutated file has new errors, with these diagnostic codes.
     CompileError(Vec<u32>),
+    /// The checker proved that the mutant changes nothing.
+    Equivalent(MutantEquivalentReason),
     /// The checker did not check the file.
     Unchecked(MutationTypecheckSkipReason),
 }
@@ -63,7 +65,17 @@ struct Request<'a> {
 enum WireOutcome {
     Compiles,
     CompileError,
+    Equivalent,
     Unchecked,
+}
+
+/// The `reason` of a wire result: a skip reason of an `unchecked` result, or
+/// the proof of an `equivalent` result.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WireReason {
+    Skip(MutationTypecheckSkipReason),
+    Proof(MutantEquivalentReason),
 }
 
 #[derive(Deserialize)]
@@ -73,7 +85,7 @@ struct WireResult {
     #[serde(default)]
     codes: Vec<u32>,
     #[serde(default)]
-    reason: Option<MutationTypecheckSkipReason>,
+    reason: Option<WireReason>,
 }
 
 #[derive(Deserialize)]
@@ -151,7 +163,12 @@ fn validate(
                 codes.truncate(MAX_CODES);
                 TypecheckOutcome::CompileError(codes)
             }
-            (WireOutcome::Unchecked, Some(reason)) if result.codes.is_empty() => {
+            (WireOutcome::Equivalent, Some(WireReason::Proof(reason)))
+                if result.codes.is_empty() =>
+            {
+                TypecheckOutcome::Equivalent(reason)
+            }
+            (WireOutcome::Unchecked, Some(WireReason::Skip(reason))) if result.codes.is_empty() => {
                 TypecheckOutcome::Unchecked(reason)
             }
             _ => return Err(mismatch(&format!("an invalid result for `{}`", result.id))),
@@ -225,6 +242,39 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn an_equivalent_outcome_carries_its_reason() {
+        let results = validate(
+            &files(),
+            response(&serde_json::json!([
+                { "id": "m1", "outcome": "equivalent", "reason": "type-proven-never-nullish" },
+                { "id": "m2", "outcome": "compiles" },
+                { "id": "m3", "outcome": "unchecked", "reason": "no-project" },
+            ])),
+        )
+        .expect("a valid response");
+        assert_eq!(
+            results[0],
+            (
+                "m1".to_owned(),
+                TypecheckOutcome::Equivalent(MutantEquivalentReason::TypeProvenNeverNullish)
+            )
+        );
+        for invalid in [
+            serde_json::json!({ "id": "m1", "outcome": "equivalent" }),
+            serde_json::json!({ "id": "m1", "outcome": "equivalent", "reason": "no-project" }),
+            serde_json::json!({ "id": "m1", "outcome": "compiles", "reason": "type-proven-never-nullish" }),
+            serde_json::json!({ "id": "m1", "outcome": "equivalent", "reason": "type-proven-never-nullish", "codes": [2322] }),
+        ] {
+            let response = response(&serde_json::json!([
+                invalid,
+                { "id": "m2", "outcome": "compiles" },
+                { "id": "m3", "outcome": "compiles" },
+            ]));
+            assert!(validate(&files(), response).is_err());
+        }
     }
 
     #[test]

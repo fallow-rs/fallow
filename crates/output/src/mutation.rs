@@ -416,6 +416,23 @@ pub struct MutantResult {
     /// `compile_error` mutant, sorted, at most 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_error_codes: Vec<u32>,
+    /// Why an `equivalent` mutant is equivalent, when a check in the run
+    /// proved it. Absent for a mutant that only a verdict marks as
+    /// equivalent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equivalent_reason: Option<MutantEquivalentReason>,
+}
+
+/// The proof that makes a mutant `equivalent` without a verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutantEquivalentReason {
+    /// The mutant removes an optional-chaining link (`?.`), and the type
+    /// check shows that the receiver is never `null` or `undefined`. The
+    /// proof needs `strictNullChecks` and `noUncheckedIndexedAccess`, and it
+    /// does not hold for a cast, `any`, `unknown` or a generic type.
+    TypeProvenNeverNullish,
 }
 
 /// One run of a retried mutant.
@@ -761,9 +778,22 @@ pub struct MutationTypecheckOutput {
     /// The checked survivors that do not type-check. They have the status
     /// `compile_error`.
     pub compile_errors: usize,
+    /// The survivors that the checker proved equivalent. They have the
+    /// status `equivalent` and the `equivalent_reason` field. They do not
+    /// count in `checked`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub equivalent: usize,
     /// The survivors that the checker did not check, by reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<MutationTypecheckSkip>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip predicate signature"
+)]
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 /// The quality of observed test-to-mutant evidence.
@@ -1522,6 +1552,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalent_reason: None,
         }
     }
 
@@ -1663,6 +1694,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalent_reason: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(
@@ -1728,6 +1760,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalent_reason: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

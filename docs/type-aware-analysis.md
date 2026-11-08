@@ -140,7 +140,9 @@ never forwards a compiler diagnostic as a Fallow issue.
 `fallow mutation --typecheck` uses the same companion with the one-shot
 `mutant-typecheck` operation. It compares the error diagnostics of a mutated
 file with the original file and returns only the diagnostic codes of new
-errors. See [`mutation-testing.md`](mutation-testing.md).
+errors. For a mutant that removes an optional-chaining link, it also returns
+the outcome `equivalent` when the type of the receiver is never nullish. See
+[`mutation-testing.md`](mutation-testing.md).
 
 ## Five semantic capabilities
 

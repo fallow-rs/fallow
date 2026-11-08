@@ -186,3 +186,119 @@ test("the executable answers a one-shot mutant-typecheck request", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+const CHAIN_SOURCE = [
+  "export const member = (m1: { b: number }): number => m1?.b ?? 0;",
+  "export const call = (c1: () => number): number => c1?.() ?? 0;",
+  'export const element = (e1: { b: number }): number => e1?.["b"] ?? 0;',
+  "export const maybe = (u1: { b: number } | undefined): number => u1?.b ?? 0;",
+  "export const indexed = (xs: { b: number }[]): number => xs[0]?.b ?? 0;",
+  "export const loose = (l1: any): number => (l1 as any)?.b ?? 0;",
+  "export const cast = (k1: unknown): number => (k1 as { b: number })?.b ?? 0;",
+  "export const asserted = (n1: { b: number } | null): number => n1!?.b ?? 0;",
+  "export const narrowed = (w1: { b: number } | undefined): number => (w1 ? w1?.b : 0);",
+  "export const generic = <T extends { b: number }>(g1: T): number => g1?.b ?? 0;",
+  'export const wide = "é€😀"; export const later = (z1: { b: number }): number => z1?.b ?? 0;',
+  "export const spaced = (s1: { b: number }): number => s1",
+  "  ?.b ?? 0;",
+  "",
+].join("\n");
+
+const linkAfter = (source, id, anchor, replacement) => {
+  const index = source.indexOf(anchor) + anchor.length;
+  assert.equal(source.slice(index, index + 2), "?.", `${id} anchor`);
+  const start = Buffer.byteLength(source.slice(0, index), "utf8");
+  return { id, start, end: start + 2, replacement };
+};
+
+const chainMutants = (source) => [
+  linkAfter(source, "member", "=> m1", "."),
+  linkAfter(source, "call", "=> c1", ""),
+  linkAfter(source, "element", "=> e1", ""),
+  linkAfter(source, "maybe", "=> u1", "."),
+  linkAfter(source, "indexed", "=> xs[0]", "."),
+  linkAfter(source, "loose", "(l1 as any)", "."),
+  linkAfter(source, "cast", "(k1 as { b: number })", "."),
+  linkAfter(source, "asserted", "=> n1!", "."),
+  linkAfter(source, "narrowed", "? w1", "."),
+  linkAfter(source, "generic", "=> g1", "."),
+  linkAfter(source, "later", "=> z1", "."),
+  linkAfter(source, "spaced", "=> s1\n  ", "."),
+];
+
+const TYPE_PROVEN = "type-proven-never-nullish";
+
+const checkChains = (compilerOptions) => {
+  const root = makeProject({ "src/chain.ts": CHAIN_SOURCE }, compilerOptions);
+  try {
+    const parsed = parseRequest(
+      request(root, [
+        {
+          path: "src/chain.ts",
+          source_sha256: sha256(CHAIN_SOURCE),
+          mutants: chainMutants(CHAIN_SOURCE),
+        },
+      ]),
+    );
+    return Object.fromEntries(checkMutants(parsed).map((result) => [result.id, result]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+const equivalent = (id) => ({ id, outcome: "equivalent", reason: TYPE_PROVEN });
+
+test("an optional link on a type that is never nullish is equivalent", () => {
+  const results = checkChains({ noUncheckedIndexedAccess: true });
+  assert.deepEqual(results.member, equivalent("member"));
+  assert.deepEqual(results.call, equivalent("call"));
+  assert.deepEqual(results.element, equivalent("element"));
+  assert.deepEqual(results.narrowed, equivalent("narrowed"));
+  assert.deepEqual(results.later, equivalent("later"));
+  assert.deepEqual(results.spaced, equivalent("spaced"));
+});
+
+test("an optional link whose receiver may be nullish or is unsound keeps the normal check", () => {
+  const results = checkChains({ noUncheckedIndexedAccess: true });
+  assert.equal(results.maybe.outcome, "compile-error");
+  assert.equal(results.indexed.outcome, "compile-error");
+  for (const id of ["loose", "cast", "asserted", "generic"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("the proof needs strictNullChecks and noUncheckedIndexedAccess", () => {
+  const settings = [
+    { noUncheckedIndexedAccess: false },
+    { noUncheckedIndexedAccess: undefined },
+    { strict: false, noUncheckedIndexedAccess: true },
+    { strictNullChecks: false, noUncheckedIndexedAccess: true },
+  ];
+  for (const compilerOptions of settings) {
+    const results = checkChains(compilerOptions);
+    assert.equal(results.member.outcome, "compiles", JSON.stringify(compilerOptions));
+    assert.equal(results.later.outcome, "compiles", JSON.stringify(compilerOptions));
+  }
+  const explicit = checkChains({
+    strict: false,
+    strictNullChecks: true,
+    noUncheckedIndexedAccess: true,
+  });
+  assert.deepEqual(explicit.member, equivalent("member"));
+});
+
+test("a JavaScript file is never proven equivalent", () => {
+  const javascript = "export const get = (a) => a?.b;\n";
+  const root = makeProject(
+    { "src/get.js": javascript },
+    { allowJs: true, checkJs: true, noUncheckedIndexedAccess: true },
+  );
+  try {
+    const parsed = parseRequest(
+      request(root, [{ path: "src/get.js", mutants: [linkAfter(javascript, "js", "=> a", ".")] }]),
+    );
+    assert.deepEqual(checkMutants(parsed), [{ id: "js", outcome: "compiles" }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
