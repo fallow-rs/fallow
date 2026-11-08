@@ -856,6 +856,14 @@ mod tests {
     }
 
     #[test]
+    fn a_string_inside_an_unquoted_url_keeps_its_parenthesis() {
+        let layer =
+            main_layer(".x { background: url($a + \"x)//y\"); }\n.y { color: blue; } // gone\n");
+        assert!(layer.contains("\"x)//y\")"), "{layer}");
+        assert!(!layer.contains("gone"), "{layer}");
+    }
+
+    #[test]
     fn an_unclosed_quote_ends_at_the_line_end() {
         let layer = main_layer(".x { font-family: Bob's; }\n// gone\n.y { color: blue; }\n");
         assert!(!layer.contains("gone"), "{layer}");

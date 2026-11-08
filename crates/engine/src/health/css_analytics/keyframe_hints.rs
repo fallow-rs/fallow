@@ -215,7 +215,8 @@ fn opens_url(bytes: &[u8], paren: usize) -> bool {
 }
 
 /// Skip the body of an unquoted `url(...)` that starts at `from`. A quoted
-/// body is left to the string scan. The body ends at `)` or at the line end.
+/// body is left to the string scan. The body ends at `)`, at the line end, or
+/// at a quote, which the string scan then reads.
 fn skip_unquoted_url(bytes: &[u8], from: usize) -> usize {
     let body = from
         + bytes[from..]
@@ -227,7 +228,7 @@ fn skip_unquoted_url(bytes: &[u8], from: usize) -> usize {
     }
     bytes[body..]
         .iter()
-        .position(|&b| b == b')' || b == b'\n')
+        .position(|&b| matches!(b, b')' | b'\n' | b'"' | b'\''))
         .map_or(bytes.len(), |offset| body + offset)
 }
 
