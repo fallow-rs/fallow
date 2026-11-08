@@ -777,6 +777,11 @@ exception (see [Timeouts](#timeouts)).
 - A retry starts only before the `--time-budget` deadline. A mutant that
   gets no retry keeps its first status, and the completion is `partial`
   (`time-budget`).
+- With `--time-budget`, the first pass starts the mutants with the lowest
+  estimated test time first. The estimate is the sum of the dry-run times of
+  the tests that cover the mutant. Thus the budget settles more mutants.
+  Static mutants stay last. Without `--time-budget`, the jobs keep the plan
+  order.
 - With `--time-budget`, the first pass keeps time free for the retries of
   the survivors and timeouts that it found. Before each new mutant run, it
   adds these parts to the current time: the estimated retry time of each

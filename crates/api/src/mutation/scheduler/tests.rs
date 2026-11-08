@@ -380,6 +380,40 @@ fn covering_tests_run_fastest_first_with_the_stryker_timeout() {
     assert!(runs[0].1.bail);
 }
 
+fn mutant_run_order(spawner: &FakeSpawner) -> Vec<String> {
+    spawner
+        .runs()
+        .iter()
+        .filter_map(|(_, run)| run.mutant_id.clone())
+        .collect()
+}
+
+#[test]
+fn a_time_budget_starts_the_job_with_the_cheapest_tests_first() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let mut config = config(1);
+    config.deadline = Some(Instant::now() + Duration::from_secs(3600));
+    run_schedule(&spawner, &plan(&["m2", "m1"]), &config).expect("run");
+    assert_eq!(
+        mutant_run_order(&spawner),
+        ["m1", "m2"],
+        "m1 runs t1 (2 ms), m2 runs t1 and t2 (102 ms)"
+    );
+}
+
+#[test]
+fn without_a_time_budget_the_jobs_keep_the_plan_order() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    run_schedule(&spawner, &plan(&["m2", "m1"]), &config(1)).expect("run");
+    assert_eq!(mutant_run_order(&spawner), ["m2", "m1"]);
+}
+
 #[test]
 fn the_watchdog_adds_the_setup_time_of_each_covering_file() {
     let spawner = FakeSpawner::new(script(
