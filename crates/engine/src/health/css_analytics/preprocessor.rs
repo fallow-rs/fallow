@@ -2,6 +2,8 @@ use fallow_extract::css_metrics::{
     MAX_DECLARATION_BLOCKS, MAX_NOTABLE_RULES, MAX_RAW_STYLE_VALUES,
 };
 
+use super::keyframe_hints::{BlockComments, blank_comments};
+
 /// Upper bound on a compiled (flat) parent selector. Each `&` copies the whole
 /// parent, so repeated `& &` nesting doubles it per level; past this size the
 /// parent is treated as unknown and suffixes below it stay as written. Real
@@ -20,7 +22,7 @@ const MAX_COMPILED_SELECTOR_BYTES: usize = 4096;
 /// descendant `&`. The layers are analysed separately and merged with
 /// [`merge_css_analytics`].
 pub(super) fn preprocessor_virtual_stylesheets(source: &str) -> Vec<String> {
-    let clean = strip_preprocessor_comments(source);
+    let clean = blank_comments(source, BlockComments::Keep);
     let mut out = LayeredWriter::new(&clean);
     let context = RenderContext {
         layer: 0,
@@ -241,29 +243,6 @@ struct RenderContext<'a> {
 fn trimmed_start_offset(source: &str, start: usize, end: usize) -> usize {
     let raw = &source[start..end];
     start + (raw.len() - raw.trim_start().len())
-}
-
-fn strip_preprocessor_comments(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let bytes = source.as_bytes();
-    let mut cursor = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-            out.push_str(&source[cursor..i]);
-            out.push_str("  ");
-            i += 2;
-            while i < bytes.len() && bytes[i] != b'\n' {
-                out.push(' ');
-                i += 1;
-            }
-            cursor = i;
-            continue;
-        }
-        i += 1;
-    }
-    out.push_str(&source[cursor..]);
-    out
 }
 
 fn render_preprocessor_children<'a>(
@@ -839,6 +818,64 @@ mod tests {
             .into_iter()
             .next()
             .unwrap()
+    }
+
+    #[test]
+    fn absolute_url_in_a_value_survives_the_line_comment_strip() {
+        // A `//` inside url() or a string is part of the value. When the
+        // strip blanked it, the file lowered to nothing and dropped out of
+        // css_analytics (#4324).
+        for rule in [
+            ".x { background: url(//cdn.example.com/a.png); }",
+            ".x { background: url(https://cdn.example.com/a.png); }",
+            ".x { background: url(\"//cdn.example.com/a.png\"); }",
+        ] {
+            let source = format!("{rule}\n.y {{ color: red; }}\n");
+            let layer = main_layer(&source);
+            assert!(layer.contains("cdn.example.com"), "{rule} -> {layer}");
+            assert!(layer.contains("color: red"), "{rule} -> {layer}");
+        }
+    }
+
+    #[test]
+    fn a_quote_inside_a_block_comment_does_not_hide_later_line_comments() {
+        let source = "/* Don't edit */\n.x { color: red; } // drop me\n/* it's // here */ .y { color: blue; }\n";
+        let layer = main_layer(source);
+        assert!(!layer.contains("drop me"), "{layer}");
+        assert!(layer.contains("color: blue"), "{layer}");
+        assert!(layer.contains("Don't edit"), "{layer}");
+    }
+
+    #[test]
+    fn line_comments_inside_parentheses_are_stripped() {
+        let source = "$map: (\n  a: 1, // don't\n  b: 2\n);\n.x { color: red; } // gone\n.y { color: blue; }\n";
+        let layer = main_layer(source);
+        assert!(!layer.contains("don't"), "{layer}");
+        assert!(!layer.contains("gone"), "{layer}");
+        assert!(layer.contains("color: blue"), "{layer}");
+    }
+
+    #[test]
+    fn a_string_inside_an_unquoted_url_keeps_its_parenthesis() {
+        let layer =
+            main_layer(".x { background: url($a + \"x)//y\"); }\n.y { color: blue; } // gone\n");
+        assert!(layer.contains("\"x)//y\")"), "{layer}");
+        assert!(!layer.contains("gone"), "{layer}");
+    }
+
+    #[test]
+    fn an_unclosed_quote_ends_at_the_line_end() {
+        let layer = main_layer(".x { font-family: Bob's; }\n// gone\n.y { color: blue; }\n");
+        assert!(!layer.contains("gone"), "{layer}");
+        assert!(layer.contains("color: blue"), "{layer}");
+    }
+
+    #[test]
+    fn real_line_comments_are_still_stripped() {
+        let layer = main_layer("// noted\n.x {\n  // inline note\n  color: red;\n}\n");
+        assert!(layer.contains("color: red"), "{layer}");
+        assert!(!layer.contains("noted"), "{layer}");
+        assert!(!layer.contains("inline note"), "{layer}");
     }
 
     fn line_of(output: &str, needle: &str) -> usize {

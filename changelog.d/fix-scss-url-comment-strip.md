@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow health --css` keeps a `.scss` or `.less` file with an absolute `url()` in `css_analytics`.** Before, the Sass and Less lowering read the `//` of `url(//cdn.example.com/a.png)`, `url(https://...)` or `url("//...")` as a line comment, so the file lowered to nothing and dropped out of the analytics. As in Sass, a `//` inside a string or an unquoted `url()`, or after a `:`, is now part of the value. A `//` or a quote inside a `/* */` comment no longer hides the end of that comment or a later line comment. Thanks [@rezamuliawijaya](https://github.com/rezamuliawijaya) for the fix. (Closes [#4324](https://github.com/fallow-rs/fallow/issues/4324))
