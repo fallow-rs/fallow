@@ -429,6 +429,47 @@ const createTimeoutControl = (projects) => {
  * inline project only when it creates the project. Each run sets the value
  * again, so a run without bail never keeps the value of a mutant run.
  */
+/**
+ * Turns module isolation off for a run, so that Vitest runs the test files of
+ * the run in one worker. Each run still starts a new worker, so the modules
+ * stay fresh for each mutant. A project in browser mode keeps its value.
+ * `shared: false` gives each project its own value back.
+ */
+const createIsolationControl = (projects) => {
+  const original = new Map(projects.map((project) => [project, project.config.isolate]));
+  return (shared) => {
+    for (const [project, isolate] of original) {
+      const browser = project.config.browser?.enabled === true;
+      project.config.isolate = shared && !browser ? false : isolate;
+    }
+  };
+};
+
+/** Gives the status of each test of a run, keyed by module and test name. */
+const statusByTest = (result) =>
+  new Map(
+    result.testModules.flatMap((testModule) =>
+      [...testModule.children.allTests()].map((testCase) => [
+        `${moduleKey(testModule.project, testModule.moduleId)}\u0000${testCase.fullName}`,
+        testStatus(testCase),
+      ]),
+    ),
+  );
+
+/**
+ * True when a run in one shared worker gives each test the status of the
+ * isolated run, with no extra error outside a test. A test that depends on a
+ * fresh worker for each file (for example a global that another file sets)
+ * makes the two runs differ.
+ */
+const sameOutcome = (isolated, shared, root) => {
+  const left = statusByTest(isolated);
+  const right = statusByTest(shared);
+  if (left.size !== right.size) return false;
+  for (const [key, status] of left) if (right.get(key) !== status) return false;
+  return runErrors(shared, root).length <= runErrors(isolated, root).length;
+};
+
 const setBail = (vitest, bail) => {
   const value = bail ? 1 : 0;
   vitest.config.bail = value;
@@ -641,13 +682,18 @@ export const createAdapter = async (init) => {
   const testIdPrefix = (project) =>
     vitest.projects.length > 1 ? `${project.name}${TEST_ID_SEPARATOR}` : "";
 
+  const setShared = createIsolationControl(vitest.projects);
+  // Mutant and control runs share one worker for their test files only after
+  // a dry run proves that the tests give the same results that way.
+  let sharedRuns = false;
   const runSpecifications = async (
     specifications,
-    { mutantId, bail, timeoutMs = null, loopBudgetMs = null },
+    { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false },
   ) => {
     provideActiveMutant(vitest, mutantId, loopBudgetMs);
     setTimeouts(timeoutMs);
     setBail(vitest, bail);
+    setShared(shared);
     const result = await withOverlayCheck(workDir.overlayPath, () =>
       vitest.runTestSpecifications(specifications),
     );
@@ -689,10 +735,16 @@ export const createAdapter = async (init) => {
     validateDryRun(request);
     const selected = dryRunSelection(request.test_files);
     const started = performance.now();
-    const result = await runSpecifications(
-      selected.map(([, specification]) => specification),
-      { mutantId: null, bail: false },
-    );
+    const specifications = selected.map(([, specification]) => specification);
+    const result = await runSpecifications(specifications, { mutantId: null, bail: false });
+    sharedRuns =
+      freshModulesPerRun &&
+      specifications.length > 1 &&
+      sameOutcome(
+        result,
+        await runSpecifications(specifications, { mutantId: null, bail: false, shared: true }),
+        root,
+      );
     const fileByModule = new Map(
       selected.map(([file, spec]) => [moduleKey(spec.project, spec.moduleId), file]),
     );
@@ -745,6 +797,7 @@ export const createAdapter = async (init) => {
       bail: request.bail,
       timeoutMs: request.timeout_ms,
       loopBudgetMs: request.loop_budget_ms ?? null,
+      shared: sharedRuns,
     });
     const firstFailure = result.testModules
       .flatMap((testModule) => [...testModule.children.allTests()])

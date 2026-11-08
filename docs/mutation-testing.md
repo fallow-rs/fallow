@@ -1116,6 +1116,27 @@ test run.
   22.15) and in browser mode, the value stays as it is and a child loads
   the original files.
 
+### Vitest shared workers
+
+Vitest starts one worker for each test file of a run when module isolation
+is on (the default). After the dry run, the adapter runs the same test files
+once more in one shared worker, with no active mutant. When each test gives
+the same status in both runs, and the shared run has no more errors outside
+a test, the adapter runs each later `run` request of the companion (mutant
+and control runs) with `isolate: false`.
+
+- Vitest then runs the test files of the run in one worker. Each run still
+  starts a new worker, so the modules are fresh for each mutant.
+- A run of one test file costs the same as before. A mutant with covering
+  tests in more than one file needs fewer workers.
+- A test that depends on a fresh worker for each file, for example a global
+  that another test file sets, makes the two dry runs differ. The companion
+  then keeps the isolated runs.
+- A project with `isolate: false` and a project in browser mode keep their
+  own setting. A dry run of one test file needs no check.
+- The check doubles the dry-run time. `duration_ms` of the dry run includes
+  both runs.
+
 ### `node:test` and `bun test`
 
 - Each dry run and each mutant run starts one test process for each test
