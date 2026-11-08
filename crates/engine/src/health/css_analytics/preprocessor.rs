@@ -2,6 +2,8 @@ use fallow_extract::css_metrics::{
     MAX_DECLARATION_BLOCKS, MAX_NOTABLE_RULES, MAX_RAW_STYLE_VALUES,
 };
 
+use super::keyframe_hints::{BlockComments, blank_comments};
+
 /// Upper bound on a compiled (flat) parent selector. Each `&` copies the whole
 /// parent, so repeated `& &` nesting doubles it per level; past this size the
 /// parent is treated as unknown and suffixes below it stay as written. Real
@@ -20,7 +22,7 @@ const MAX_COMPILED_SELECTOR_BYTES: usize = 4096;
 /// descendant `&`. The layers are analysed separately and merged with
 /// [`merge_css_analytics`].
 pub(super) fn preprocessor_virtual_stylesheets(source: &str) -> Vec<String> {
-    let clean = strip_preprocessor_comments(source);
+    let clean = blank_comments(source, BlockComments::Keep);
     let mut out = LayeredWriter::new(&clean);
     let context = RenderContext {
         layer: 0,
@@ -241,75 +243,6 @@ struct RenderContext<'a> {
 fn trimmed_start_offset(source: &str, start: usize, end: usize) -> usize {
     let raw = &source[start..end];
     start + (raw.len() - raw.trim_start().len())
-}
-
-/// Replace each `//` line comment with spaces, so offsets survive. A `//`
-/// inside parentheses, such as `url(//host/x)`, or inside a quoted string, or
-/// after a `:` (a protocol like `https://`), is part of the value, not a
-/// comment -- mirroring the keyframes scan's treatment from #4262. Without
-/// this, a `.scss` file whose only rule carries an absolute `url()` lowered
-/// to nothing and dropped out of `css_analytics` entirely (#4324).
-fn strip_preprocessor_comments(source: &str) -> String {
-    let mut bytes = source.as_bytes().to_vec();
-    let mut depth = 0usize;
-    let mut i = 0;
-    while i < bytes.len() {
-        let end = match bytes[i] {
-            quote @ (b'"' | b'\'') => {
-                i = skip_scss_string(&bytes, i + 1, quote);
-                continue;
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'/')
-                && depth == 0
-                && (i == 0 || bytes[i - 1] != b':') =>
-            {
-                bytes[i..]
-                    .iter()
-                    .position(|&b| b == b'\n')
-                    .map_or(bytes.len(), |offset| i + offset)
-            }
-            b'(' => {
-                depth += 1;
-                i += 1;
-                continue;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-                continue;
-            }
-            b'{' | b'}' | b';' => {
-                depth = 0;
-                i += 1;
-                continue;
-            }
-            _ => {
-                i += 1;
-                continue;
-            }
-        };
-        for byte in &mut bytes[i..end] {
-            if *byte != b'\n' {
-                *byte = b' ';
-            }
-        }
-        i = end;
-    }
-    // Each blanked range starts and ends on an ASCII byte, so the bytes stay
-    // valid UTF-8.
-    String::from_utf8(bytes).unwrap_or_else(|_| source.to_owned())
-}
-
-/// Skip over a quoted string starting just after the opening quote.
-fn skip_scss_string(bytes: &[u8], mut i: usize, quote: u8) -> usize {
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 2,
-            b if b == quote => return i + 1,
-            _ => i += 1,
-        }
-    }
-    bytes.len()
 }
 
 fn render_preprocessor_children<'a>(
@@ -889,9 +822,9 @@ mod tests {
 
     #[test]
     fn absolute_url_in_a_value_survives_the_line_comment_strip() {
-        // gh-4324: a `//` inside url() is part of the value, not an scss line
-        // comment. Every form of the absolute URL below used to blank the
-        // declaration (or the whole file's lowering) away.
+        // A `//` inside url() or a string is part of the value. When the
+        // strip blanked it, the file lowered to nothing and dropped out of
+        // css_analytics (#4324).
         for rule in [
             ".x { background: url(//cdn.example.com/a.png); }",
             ".x { background: url(https://cdn.example.com/a.png); }",
@@ -902,6 +835,15 @@ mod tests {
             assert!(layer.contains("cdn.example.com"), "{rule} -> {layer}");
             assert!(layer.contains("color: red"), "{rule} -> {layer}");
         }
+    }
+
+    #[test]
+    fn a_quote_inside_a_block_comment_does_not_hide_later_line_comments() {
+        let source = "/* Don't edit */\n.x { color: red; } // drop me\n/* it's // here */ .y { color: blue; }\n";
+        let layer = main_layer(source);
+        assert!(!layer.contains("drop me"), "{layer}");
+        assert!(layer.contains("color: blue"), "{layer}");
+        assert!(layer.contains("Don't edit"), "{layer}");
     }
 
     #[test]

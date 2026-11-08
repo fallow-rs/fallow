@@ -38,7 +38,7 @@ pub(super) fn preprocessor_keyframe_hints(source: &str) -> KeyframeHints {
     // One entry per open `{` block: the parameters of a mixin definition, or
     // an empty list for any other block.
     let mut scopes: Vec<Vec<String>> = Vec::new();
-    let source = blank_comments(source);
+    let source = blank_comments(source, BlockComments::Blank);
     for (statement, terminator) in statements(&source) {
         let statement = statement.trim();
         match terminator {
@@ -84,10 +84,19 @@ fn scan_declaration(statement: &str, scopes: &[Vec<String>], hints: &mut Keyfram
     }
 }
 
-/// Replace each comment with spaces, so that a comment above a declaration
-/// does not become part of the declaration statement. A `//` inside
-/// parentheses, such as `url(//host/x)`, or after a `:` is no comment.
-fn blank_comments(source: &str) -> String {
+/// What [`blank_comments`] does with a `/* */` block comment.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BlockComments {
+    Blank,
+    Keep,
+}
+
+/// Replace each `//` line comment, and each block comment when `block` is
+/// [`BlockComments::Blank`], with spaces. Offsets and newlines stay, so line
+/// numbers do not change. A `//` inside a quoted string, inside parentheses
+/// such as `url(//host/x)`, or after a `:` is no comment. A kept block
+/// comment is still skipped, so a quote inside it does not open a string.
+pub(super) fn blank_comments(source: &str, block: BlockComments) -> String {
     let mut bytes = source.as_bytes().to_vec();
     let mut depth = 0usize;
     let mut i = 0;
@@ -97,7 +106,14 @@ fn blank_comments(source: &str) -> String {
                 i = skip_string(&bytes, i + 1, quote);
                 continue;
             }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => skip_block_comment(&bytes, i + 2),
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                let end = skip_block_comment(&bytes, i + 2);
+                if block == BlockComments::Keep {
+                    i = end;
+                    continue;
+                }
+                end
+            }
             b'/' if bytes.get(i + 1) == Some(&b'/')
                 && depth == 0
                 && (i == 0 || bytes[i - 1] != b':') =>
