@@ -423,6 +423,69 @@ const createTimeoutControl = (projects) => {
 };
 
 /**
+ * Turns module isolation off for a run, so that Vitest runs the test files of
+ * the run in one worker. Each run still starts a new worker, so the modules
+ * stay fresh for each mutant. A project in browser mode keeps its value.
+ * `shared: false` gives each project its own value back.
+ */
+const createIsolationControl = (projects) => {
+  const original = new Map(projects.map((project) => [project, project.config.isolate]));
+  return (shared) => {
+    for (const [project, isolate] of original) {
+      const browser = project.config.browser?.enabled === true;
+      project.config.isolate = shared && !browser ? false : isolate;
+    }
+  };
+};
+
+const DETECTED = new Set(["killed", "timeout"]);
+
+// The longest isolated dry run that still gets the check for shared runs.
+// The check repeats the dry run, and the API waits at most `--setup-timeout`
+// (2 minutes by default) for the first dry run of a companion.
+const SHARED_CHECK_MAX_DRY_RUN_MS = 45_000;
+
+/** The start time of a test module in its worker, or infinity when unknown. */
+const startTime = (testModule) => testModule.task?.result?.startTime ?? Number.POSITIVE_INFINITY;
+
+/**
+ * Gives the status of each test of a run, keyed by module, test name and
+ * the position among the tests of the module with the same name.
+ */
+const statusByTest = (result) => {
+  const statuses = new Map();
+  for (const testModule of result.testModules) {
+    const seen = new Map();
+    for (const testCase of testModule.children.allTests()) {
+      const name = `${moduleKey(testModule.project, testModule.moduleId)}\u0000${testCase.fullName}`;
+      const position = seen.get(name) ?? 0;
+      seen.set(name, position + 1);
+      statuses.set(`${name}\u0000${position}`, testStatus(testCase));
+    }
+  }
+  return statuses;
+};
+
+/** Gives the errors outside a test of a run as a set of file and message. */
+const errorSet = (result, root) =>
+  new Set(runErrors(result, root).map(({ file, message }) => `${file}\u0000${message}`));
+
+/**
+ * True when a run in one shared worker gives each test the status of the
+ * isolated run, with no extra error outside a test. A test that depends on a
+ * fresh worker for each file (for example a global that another file sets)
+ * makes the two runs differ.
+ */
+const sameOutcome = (isolated, shared, root) => {
+  const left = statusByTest(isolated);
+  const right = statusByTest(shared);
+  if (left.size !== right.size) return false;
+  for (const [key, status] of left) if (right.get(key) !== status) return false;
+  const isolatedErrors = errorSet(isolated, root);
+  return [...errorSet(shared, root)].every((error) => isolatedErrors.has(error));
+};
+
+/**
  * Sets the fail-fast value of a run on the root config and on each project.
  * The root value controls the cancellation of the pool. A worker reads the
  * serialized project config, and Vitest copies the root `bail` value into an
@@ -641,13 +704,18 @@ export const createAdapter = async (init) => {
   const testIdPrefix = (project) =>
     vitest.projects.length > 1 ? `${project.name}${TEST_ID_SEPARATOR}` : "";
 
+  const setShared = createIsolationControl(vitest.projects);
+  // Mutant and control runs share one worker for their test files only after
+  // a dry run proves that the tests give the same results that way.
+  let sharedRuns = false;
   const runSpecifications = async (
     specifications,
-    { mutantId, bail, timeoutMs = null, loopBudgetMs = null },
+    { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false },
   ) => {
     provideActiveMutant(vitest, mutantId, loopBudgetMs);
     setTimeouts(timeoutMs);
     setBail(vitest, bail);
+    setShared(shared);
     const result = await withOverlayCheck(workDir.overlayPath, () =>
       vitest.runTestSpecifications(specifications),
     );
@@ -685,14 +753,35 @@ export const createAdapter = async (init) => {
     summary.setup[file] = (summary.setup[file] ?? 0) + moduleSetupMs(testModule, entries);
   };
 
+  /**
+   * Runs the dry-run files once more in one shared worker and compares the
+   * outcome with the isolated dry run. A failure of the shared run turns
+   * sharing off and keeps the dry run.
+   */
+  const sharesLikeIsolated = async (specifications, isolated) => {
+    try {
+      const shared = await runSpecifications(specifications, {
+        mutantId: null,
+        bail: false,
+        shared: true,
+      });
+      return sameOutcome(isolated, shared, root);
+    } catch {
+      return false;
+    }
+  };
+
   const dryRun = async (request) => {
     validateDryRun(request);
     const selected = dryRunSelection(request.test_files);
     const started = performance.now();
-    const result = await runSpecifications(
-      selected.map(([, specification]) => specification),
-      { mutantId: null, bail: false },
-    );
+    const specifications = selected.map(([, specification]) => specification);
+    const result = await runSpecifications(specifications, { mutantId: null, bail: false });
+    sharedRuns =
+      freshModulesPerRun &&
+      specifications.length > 1 &&
+      performance.now() - started <= SHARED_CHECK_MAX_DRY_RUN_MS &&
+      (await sharesLikeIsolated(specifications, result));
     const fileByModule = new Map(
       selected.map(([file, spec]) => [moduleKey(spec.project, spec.moduleId), file]),
     );
@@ -735,9 +824,27 @@ export const createAdapter = async (init) => {
     return { specifications, testIdByTask };
   };
 
-  const run = async (request) => {
-    validateRun(request);
-    const requested = [...new Set(request.test_ids)];
+  /** Builds the `run_result` body of one run of `requested`. */
+  const describeRun = (request, requested, testIdByTask, result, started) => {
+    const firstFailure = result.testModules
+      .flatMap((testModule) => [...testModule.children.allTests()])
+      .find((testCase) => testIdByTask.has(testCase.id) && testStatus(testCase) === "fail");
+    return {
+      firstFailure,
+      body: runResult({
+        mutantId: request.mutant_id,
+        tests: collectRunTests(result.testModules, testIdByTask, directories),
+        errors: runErrors(result, root),
+        requestedCount: requested.length,
+        durationMs: performance.now() - started,
+        // Only the thread CPU clock makes a loop timeout final. Host load can
+        // use wall time, so a wall-clock loop timeout gets the normal retry.
+        loopTimeout: firstFailure !== undefined && hasErrorNamed(firstFailure, [LOOP_TIMEOUT_NAME]),
+      }),
+    };
+  };
+
+  const runRequested = async (request, requested, shared) => {
     const { specifications, testIdByTask } = specificationsFor(requested);
     const started = performance.now();
     const result = await runSpecifications(specifications, {
@@ -745,20 +852,47 @@ export const createAdapter = async (init) => {
       bail: request.bail,
       timeoutMs: request.timeout_ms,
       loopBudgetMs: request.loop_budget_ms ?? null,
+      shared,
     });
-    const firstFailure = result.testModules
-      .flatMap((testModule) => [...testModule.children.allTests()])
-      .find((testCase) => testIdByTask.has(testCase.id) && testStatus(testCase) === "fail");
-    return runResult({
-      mutantId: request.mutant_id,
-      tests: collectRunTests(result.testModules, testIdByTask, directories),
-      errors: runErrors(result, root),
-      requestedCount: requested.length,
-      durationMs: performance.now() - started,
-      // Only the thread CPU clock makes a loop timeout final. Host load can
-      // use wall time, so a wall-clock loop timeout gets the normal retry.
-      loopTimeout: firstFailure !== undefined && hasErrorNamed(firstFailure, [LOOP_TIMEOUT_NAME]),
+    return { result, ...describeRun(request, requested, testIdByTask, result, started) };
+  };
+
+  /**
+   * The requested tests of the module that decided a kill in a shared run,
+   * or null when that module ran first in the worker. A module that ran
+   * first had a fresh worker, as in an isolated run.
+   */
+  const laterDecidingTests = (requested, result, firstFailure) => {
+    const deciding =
+      firstFailure?.module ??
+      result.testModules.find((testModule) => moduleErrors(testModule, root).length > 0);
+    if (deciding === undefined || result.testModules.length < 2) return null;
+    const first = result.testModules.reduce((earliest, testModule) =>
+      startTime(testModule) < startTime(earliest) ? testModule : earliest,
+    );
+    if (first === deciding) return null;
+    const key = moduleKey(deciding.project, deciding.moduleId);
+    const tests = requested.filter((testId) => {
+      const entry = testIndex.get(testId);
+      return moduleKey(entry.project, entry.moduleId) === key;
     });
+    return tests.length > 0 ? tests : null;
+  };
+
+  const run = async (request) => {
+    validateRun(request);
+    const requested = [...new Set(request.test_ids)];
+    const outcome = await runRequested(request, requested, sharedRuns);
+    if (!sharedRuns || !DETECTED.has(outcome.body.status)) return outcome.body;
+    // A mutant can leave state in a module that a later test file of the
+    // shared worker reads, which an isolated run never shows. A kill in a
+    // later file must also kill in a fresh worker, or the run is repeated
+    // with each file in its own worker.
+    const later = laterDecidingTests(requested, outcome.result, outcome.firstFailure);
+    if (later === null) return outcome.body;
+    const alone = await runRequested(request, later, false);
+    if (DETECTED.has(alone.body.status)) return outcome.body;
+    return (await runRequested(request, requested, false)).body;
   };
 
   return {

@@ -29,7 +29,7 @@ mod dry_facts;
 mod retry_set;
 pub mod targets;
 mod window;
-use classification::{attempt_record, classify, kill_kind, matrix_evidence};
+use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use targets::{config_targets, job_targets};
 use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
@@ -452,13 +452,6 @@ impl Attempt {
             settled: false,
         }
     }
-}
-
-/// True for a kill with no executed test: an error outside each test is the
-/// only evidence. A mutant that throws at module load gives this result, and
-/// so does a run path that executes no test at all.
-fn is_load_kill(result: &RunResult, status: MutantStatus, killed_by: Option<&String>) -> bool {
-    status == MutantStatus::Killed && killed_by.is_none() && result.tests_executed == 0
 }
 
 /// A companion that has sent `ready` and a dry run.

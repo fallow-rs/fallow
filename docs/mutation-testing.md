@@ -1116,6 +1116,39 @@ test run.
   and in browser mode, the value stays as it is and a child loads the
   original files.
 
+### Vitest shared workers
+
+Vitest starts one worker for each test file of a run when module isolation
+is on (the default). After the dry run, the adapter runs the same test files
+once more with `isolate: false`, with no active mutant. When each test gives
+the same status in both runs, and the shared run has no error outside a test
+that the isolated run does not have, the companion runs its later mutant and
+control runs with `isolate: false`.
+
+- Vitest then gives the test files of the run that have the same project,
+  environment and `sequence.groupOrder` to one worker. Each run still
+  starts a new worker, and Vitest loads the source modules again for each
+  test file, so state on the global object is the only state that crosses
+  files.
+- A mutant can change state on the global object that a later file of the
+  worker reads. When a shared run detects a mutant in a test file that did
+  not run first in the worker, the companion runs that file again alone,
+  with the mutant. When that run does not detect the mutant, the companion
+  runs the whole request again with each file in its own worker, and that
+  result counts.
+- A mutant can also stay `survived` when global state of an earlier file
+  of the worker hides it. This error lowers the score and never raises it.
+  The retry of a survivor shares a worker in the same way.
+- A test that depends on a fresh worker for each file in the dry run, for
+  example a global that another test file sets, makes the two dry runs
+  differ. The companion then keeps isolated runs.
+- When any project has `isolate: false`, or the dry run has one test
+  specification, the companion does not share workers. A project in browser
+  mode keeps its own setting.
+- The check repeats the dry run, and `duration_ms` of the dry run includes
+  both runs. The check is skipped when the isolated dry run takes more than
+  45 seconds. A failed shared run keeps isolated runs.
+
 ### `node:test` and `bun test`
 
 - Each dry run and each mutant run starts one test process for each test
