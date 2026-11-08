@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // Runs a command and fails when the command leaves new `fallow-*` entries in
-// the system temp directory. Test suites must remove their own temp folders,
-// because a developer machine and a reused CI runner keep them.
+// its temp directory. Test suites must remove their own temp folders, because
+// a developer machine and a reused CI runner keep them.
+//
+// The command gets its own temp directory in `TMPDIR`, `TMP` and `TEMP`, and
+// the check reads only that directory. Other processes on the machine (a
+// second test run, another session) then cannot add a false leak. The check
+// removes the directory at the end.
 //
 // Usage: node scripts/check-temp-leaks.mjs -- <command> [args...]
 //
@@ -9,7 +14,7 @@
 // command passes and new entries exist, the exit code is 1.
 
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,19 +67,24 @@ const main = () => {
     return 2;
   }
 
-  const dir = tmpdir();
-  const before = snapshotTempEntries(dir);
-  const result = spawnSync(command[0], command.slice(1), {
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  });
-  if (result.error) {
-    console.error(`check-temp-leaks: cannot run ${command[0]}: ${result.error.message}`);
-    return 2;
+  const dir = mkdtempSync(join(tmpdir(), "leak-check-"));
+  try {
+    const before = snapshotTempEntries(dir);
+    const result = spawnSync(command[0], command.slice(1), {
+      stdio: "inherit",
+      shell: process.platform === "win32",
+      env: { ...process.env, TMPDIR: dir, TMP: dir, TEMP: dir },
+    });
+    if (result.error) {
+      console.error(`check-temp-leaks: cannot run ${command[0]}: ${result.error.message}`);
+      return 2;
+    }
+    const leaked = newEntries(before, snapshotTempEntries(dir));
+    if (leaked.length > 0) reportLeaks(dir, leaked);
+    return exitCode(result.status, leaked);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  const leaked = newEntries(before, snapshotTempEntries(dir));
-  if (leaked.length > 0) reportLeaks(dir, leaked);
-  return exitCode(result.status, leaked);
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
