@@ -72,23 +72,29 @@ const listTokenFiles = (dir, token) => {
  * Creates the test-process side of the child coverage. `startTest()` gives
  * the token for the Node children of the test. Tests that run at the same
  * time share one token, as they share the hits of the test process.
- * `finishTest()` takes the hits and the loaded paths that the children of
- * the token wrote so far.
+ * `finishTest()` gives the hits and the loaded paths that the children of
+ * the token wrote so far. The reports of a token stay in memory until the
+ * last test of the token finishes, so each concurrent test gets the reports
+ * that an earlier test of the same token already read.
  */
 export const createChildCoverage = (overlayPath) => {
   const dir = childHitsPath(overlayPath);
   let running = 0;
   let token = null;
+  let reports = [];
   return {
     startTest: () => {
-      if (running === 0) token = randomUUID();
+      if (running === 0) {
+        token = randomUUID();
+        reports = [];
+      }
       running += 1;
       return token;
     },
     finishTest: () => {
       running = Math.max(0, running - 1);
       const files = token === null ? [] : listTokenFiles(dir, token);
-      const reports = files.map((name) => readChildFile(join(dir, name)));
+      reports.push(...files.map((name) => readChildFile(join(dir, name))));
       return {
         hits: reports.flatMap((report) => report.hits),
         loaded: reports.flatMap((report) => report.loaded),
