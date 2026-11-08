@@ -1158,11 +1158,15 @@ custom pool of the adapter (`adapters/vitest-reuse.mjs`) wraps the `forks`
 or `threads` worker of Vitest and answers its `start` and `stop` messages
 itself, so the next mutant run gets the same process.
 
-- After the shared check, the dry run runs two more times in one reused
-  process, with no active mutant. When a test gives another status than in
-  the isolated dry run, for example because a module fails when it loads a
-  second time in one process, the companion keeps a new process for each
-  run.
+- The check runs the dry-run files two more times in one reused process,
+  with no active mutant. The first round shares one worker for all files in
+  a fresh process, so it also decides the shared workers above. When it
+  differs from the isolated dry run, the plain shared check of the section
+  above decides, and each run gets a new process. The second round loads
+  each module a second time in the same process. When a test then gives
+  another status, for example because a module fails when it loads a second
+  time, the companion shares workers within a run but keeps a new process
+  for each run.
 - Only mutant runs with bail use the reused process. Dry runs, control runs
   and runs without bail (`--kill-matrix`) start a new worker.
 - Vitest sends the active mutant with each run. At the start of each test

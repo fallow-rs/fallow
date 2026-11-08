@@ -474,6 +474,7 @@ const createReuseControl = (projects, workers) => {
     ];
   });
   return {
+    available: entries.length > 0,
     select: async (reused) => {
       for (const entry of entries) {
         const { project, reused: pool } = entry;
@@ -841,30 +842,42 @@ export const createAdapter = async (init) => {
   };
 
   /**
-   * Runs the dry-run files two times in one reused worker process and
-   * compares each outcome with the isolated dry run. The second run loads
-   * each module a second time in the same process, which shows a module that
-   * fails when it loads again. The check runs without bail, so it gets the
-   * status of each test. Mutant runs use bail, so they start a new process.
+   * Decides how later runs use worker processes, from the outcome of the
+   * isolated dry run. The dry-run files run again in one reused process: the
+   * first round shares one worker for all files in a fresh process, and the
+   * second round loads each module a second time in the same process, which
+   * shows a module that fails when it loads again. A first round that
+   * differs falls back to the plain shared check. The rounds run without
+   * bail, so they get the status of each test. Mutant runs use bail, so they
+   * start a new process.
    */
-  const reusesLikeIsolated = async (specifications, isolated) => {
+  const workerModes = async (specifications, isolated) => {
+    if (!reuse.available) {
+      return { shared: await sharesLikeIsolated(specifications, isolated), reused: false };
+    }
     const again = () =>
       specifications.map((specification) =>
         specification.project.createSpecification(specification.moduleId),
       );
-    try {
-      for (let round = 0; round < 2; round += 1) {
+    const round = async () => {
+      try {
         const reused = await runSpecifications(again, {
           mutantId: null,
           bail: false,
           shared: true,
           reuseProcess: true,
         });
-        if (!sameOutcome(isolated, reused, root)) return false;
+        return sameOutcome(isolated, reused, root);
+      } catch {
+        return false;
       }
-      return true;
-    } catch {
-      return false;
+    };
+    try {
+      if (!(await round())) {
+        await reuse.recycle();
+        return { shared: await sharesLikeIsolated(specifications, isolated), reused: false };
+      }
+      return { shared: true, reused: await round() };
     } finally {
       await reuse.recycle();
     }
@@ -876,12 +889,15 @@ export const createAdapter = async (init) => {
     const started = performance.now();
     const specifications = selected.map(([, specification]) => specification);
     const result = await runSpecifications(specifications, { mutantId: null, bail: false });
-    sharedRuns =
+    const checked =
       freshModulesPerRun &&
       specifications.length > 1 &&
-      performance.now() - started <= SHARED_CHECK_MAX_DRY_RUN_MS &&
-      (await sharesLikeIsolated(specifications, result));
-    reusedRuns = sharedRuns && (await reusesLikeIsolated(specifications, result));
+      performance.now() - started <= SHARED_CHECK_MAX_DRY_RUN_MS;
+    const modes = checked
+      ? await workerModes(specifications, result)
+      : { shared: false, reused: false };
+    sharedRuns = modes.shared;
+    reusedRuns = modes.reused;
     const fileByModule = new Map(
       selected.map(([file, spec]) => [moduleKey(spec.project, spec.moduleId), file]),
     );
