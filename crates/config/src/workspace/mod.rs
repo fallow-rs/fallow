@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
+use crate::permutation::{PermutationSite, permute};
 pub use deno_json::{
     DirManifestProbe, dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
     load_deno_import_map, load_dir_package_json, load_member_package_manifest,
@@ -256,9 +257,8 @@ fn collect_workspaces_and_diagnostics(
         ));
     }
 
-    if !workspaces.is_empty() {
-        mark_internal_dependencies(&mut workspaces);
-    }
+    permute(&mut workspaces, PermutationSite::Workspaces);
+    mark_internal_dependencies(&mut workspaces);
     let workspaces = workspaces.into_iter().map(|(ws, _)| ws).collect();
     Ok((
         workspaces,

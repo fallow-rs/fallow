@@ -133,6 +133,8 @@ path = "src/lib.rs"
 doctest = false
 
 [dev-dependencies]
+# The permutation oracle runs the test build of the binary with the hook on.
+fallow-config = { workspace = true, features = ["permutation-hook"] }
 insta = { workspace = true }
 jsonschema = { workspace = true }
 fallow-types = { workspace = true }

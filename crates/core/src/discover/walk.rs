@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fallow_config::{
-    DEFAULT_IGNORE_PATTERNS, IgnorePatternSet, ResolvedConfig, WorkspaceDiagnostic,
-    WorkspaceDiagnosticKind,
+    DEFAULT_IGNORE_PATTERNS, IgnorePatternSet, PermutationSite, ResolvedConfig,
+    WorkspaceDiagnostic, WorkspaceDiagnosticKind, sort_permuted,
 };
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::path_util::display_relative;
@@ -1533,12 +1533,12 @@ pub fn discover_files_config_candidates_and_diagnostics(
     // file set yields identical FileIds, so a cache hit (same paths +
     // fingerprints) can trust graph data persisted by FileId. Do not replace
     // this with insertion-order assignment.
-    raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    sort_permuted(&mut raw, PermutationSite::Files, |a, b| a.0.cmp(&b.0));
 
     let mut config_candidates = config_collected
         .into_inner()
         .expect("walk config collector lock poisoned");
-    config_candidates.sort_unstable();
+    sort_permuted(&mut config_candidates, PermutationSite::Configs, Ord::cmp);
 
     let excluded_by_default_ignore = excluded_collected
         .into_inner()
@@ -1550,7 +1550,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
     let mut dotdir_candidates = skipped_dotdirs
         .lock()
         .map_or_else(|_| Vec::new(), |mut guard| std::mem::take(&mut *guard));
-    dotdir_candidates.sort_unstable();
+    sort_permuted(&mut dotdir_candidates, PermutationSite::Dotdirs, Ord::cmp);
     dotdir_candidates.dedup();
 
     let (kept, skipped) = partition_by_size(raw, config.max_file_size_bytes);

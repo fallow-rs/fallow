@@ -38,6 +38,11 @@ tracing = { workspace = true }
 ureq = { workspace = true }
 xxhash-rust = { workspace = true }
 
+[features]
+# Test-only hook that permutes the discovery lists with the seed in
+# FALLOW_PERMUTATION_SEED. See src/permutation.rs. Release builds leave it off.
+permutation-hook = []
+
 [dev-dependencies]
 proptest = { workspace = true }
 
