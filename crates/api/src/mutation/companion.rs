@@ -35,6 +35,7 @@ pub const COMPANION_FILES: &[EmbeddedFile] = embedded!(
     "adapters/child-process.mjs",
     "adapters/common.mjs",
     "adapters/node-test.mjs",
+    "adapters/vitest-reuse.mjs",
     "adapters/vitest.mjs",
     "companion.mjs",
     "generated-protocol.mjs",

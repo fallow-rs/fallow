@@ -7,6 +7,7 @@ import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
 import { LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
 import { createWorkDir } from "./child-process.mjs";
+import { REUSED_POOLS, createReusedPool } from "./vitest-reuse.mjs";
 import {
   TEST_ID_SEPARATOR,
   attributeHits,
@@ -32,6 +33,7 @@ import {
 
 const RUNNER_NAME = "vitest";
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
+const FRESH_MODULES_KEY = "fallowFreshModules";
 const LOOP_BUDGET_KEY = "fallowLoopBudget";
 const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
@@ -62,7 +64,11 @@ const loadProjectVitest = async (root) => {
   }
   try {
     const node = await import(pathToFileURL(projectRequire.resolve("vitest/node")).href);
-    return { createVitest: node.createVitest, version };
+    return {
+      createVitest: node.createVitest,
+      version,
+      workers: { forks: node.ForksPoolWorker, threads: node.ThreadsPoolWorker },
+    };
   } catch (error) {
     throw new CompanionError("runner-load-failed", `cannot import vitest/node: ${error.message}`);
   }
@@ -437,6 +443,56 @@ const createIsolationControl = (projects) => {
   };
 };
 
+// A reused worker reads `testTimeout` only when it starts. A run rounds its
+// timeout up to a multiple of this step, so that most runs keep the process.
+// Rounding up never ends a test earlier than `timeout_ms`.
+const REUSED_TIMEOUT_STEP_MS = 5000;
+
+const reusedTimeout = (timeoutMs) =>
+  timeoutMs === null
+    ? null
+    : Math.ceil(timeoutMs / REUSED_TIMEOUT_STEP_MS) * REUSED_TIMEOUT_STEP_MS;
+
+/**
+ * Switches each `forks` or `threads` project to a reused pool for a run, and
+ * back to its own pool for each other run. Each project gets its own process,
+ * because the worker reads the project config at start.
+ */
+const createReuseControl = (projects, workers) => {
+  const entries = projects.flatMap((project) => {
+    const pool = project.config.pool;
+    const WorkerClass = workers?.[pool];
+    if (typeof WorkerClass !== "function" || project.config.browser?.enabled === true) return [];
+    return [
+      {
+        project,
+        pool,
+        poolRunner: project.config.poolRunner,
+        reused: createReusedPool(REUSED_POOLS[pool], WorkerClass),
+      },
+    ];
+  });
+  return {
+    select: async (reused) => {
+      for (const entry of entries) {
+        const { project, reused: pool } = entry;
+        if (reused) {
+          await pool.prepare(`${project.config.testTimeout}\u0000${project.config.hookTimeout}`);
+        }
+        project.config.pool = reused ? pool.name : entry.pool;
+        project.config.poolRunner = reused ? pool : entry.poolRunner;
+        project.provide(FRESH_MODULES_KEY, reused);
+      }
+    },
+    recycle: async () => {
+      for (const entry of entries) await entry.reused.close();
+    },
+    close: async () => {
+      for (const entry of entries) await entry.reused.close();
+    },
+  };
+};
+
 const DETECTED = new Set(["killed", "timeout"]);
 
 // The longest isolated dry run that still gets the check for shared runs.
@@ -674,7 +730,7 @@ const setVitestEnv = () => {
 export const createAdapter = async (init) => {
   validateInit(init);
   const root = resolve(init.root);
-  const { createVitest, version } = await loadProjectVitest(root);
+  const { createVitest, version, workers } = await loadProjectVitest(root);
   const overlay = buildOverlay(root, init.run_dir, init.path_map);
   const directories = errorDirectories(root, init.run_dir);
   const loaded = new Set();
@@ -707,19 +763,27 @@ export const createAdapter = async (init) => {
   // Mutant and control runs share one worker for their test files only after
   // a dry run proves that the tests give the same results that way.
   let sharedRuns = false;
+  const reuse = createReuseControl(vitest.projects, workers);
   const runSpecifications = async (
     specifications,
     { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false },
   ) => {
     provideActiveMutant(vitest, mutantId, loopBudgetMs);
-    setTimeouts(timeoutMs);
+    // A mutant run in a shared worker keeps the worker process for the next
+    // mutant run. Control and dry runs, and runs without bail, start a new one.
+    const reused = shared && bail && mutantId !== null;
+    setTimeouts(reused ? reusedTimeout(timeoutMs) : timeoutMs);
     setBail(vitest, bail);
     setShared(shared);
+    await reuse.select(reused);
+    // Vitest copies the pool of the project into a specification when it
+    // creates it, so a caller can create them only after the pool is set.
+    const specs = typeof specifications === "function" ? specifications() : specifications;
     const result = await withOverlayCheck(workDir.overlayPath, () =>
-      vitest.runTestSpecifications(specifications),
+      vitest.runTestSpecifications(specs),
     );
     return {
-      testModules: modulesOfRun(result.testModules, specifications),
+      testModules: modulesOfRun(result.testModules, specs),
       unhandledErrors: result.unhandledErrors ?? [],
     };
   };
@@ -844,7 +908,12 @@ export const createAdapter = async (init) => {
   };
 
   const runRequested = async (request, requested, shared) => {
-    const { specifications, testIdByTask } = specificationsFor(requested);
+    let testIdByTask;
+    const specifications = () => {
+      const selected = specificationsFor(requested);
+      testIdByTask = selected.testIdByTask;
+      return selected.specifications;
+    };
     const started = performance.now();
     const result = await runSpecifications(specifications, {
       mutantId: request.mutant_id,
@@ -861,15 +930,29 @@ export const createAdapter = async (init) => {
    * or null when that module ran first in the worker. A module that ran
    * first had a fresh worker, as in an isolated run.
    */
-  const laterDecidingTests = (requested, result, firstFailure) => {
-    const deciding =
-      firstFailure?.module ??
-      result.testModules.find((testModule) => moduleErrors(testModule, root).length > 0);
-    if (deciding === undefined || result.testModules.length < 2) return null;
-    const first = result.testModules.reduce((earliest, testModule) =>
-      startTime(testModule) < startTime(earliest) ? testModule : earliest,
+  const laterDecidingTests = (requested, result, firstFailure, polluted) => {
+    const failing = result.testModules.filter(
+      (testModule) =>
+        moduleErrors(testModule, root).length > 0 ||
+        [...testModule.children.allTests()].some((testCase) => testStatus(testCase) === "fail"),
     );
-    if (first === deciding) return null;
+    if (firstFailure === undefined && failing.length === 0) return null;
+    // The module that failed first in the worker decided the status.
+    const deciding = failing.reduce(
+      (earliest, testModule) =>
+        earliest === undefined || startTime(testModule) < startTime(earliest)
+          ? testModule
+          : earliest,
+      undefined,
+    );
+    if (deciding === undefined) return null;
+    if (!polluted) {
+      if (result.testModules.length < 2) return null;
+      const first = result.testModules.reduce((earliest, testModule) =>
+        startTime(testModule) < startTime(earliest) ? testModule : earliest,
+      );
+      if (first === deciding) return null;
+    }
     const key = moduleKey(deciding.project, deciding.moduleId);
     const tests = requested.filter((testId) => {
       const entry = testIndex.get(testId);
@@ -882,12 +965,18 @@ export const createAdapter = async (init) => {
     validateRun(request);
     const requested = [...new Set(request.test_ids)];
     const outcome = await runRequested(request, requested, sharedRuns);
+    // A reused worker whose tests added a global or changed the environment
+    // gets a new process, so that the next mutant starts clean.
+    const polluted = outcome.result.testModules.some((testModule) =>
+      [...testModule.children.allTests()].some((testCase) => testCase.meta().fallowPolluted),
+    );
+    if (polluted) await reuse.recycle();
     if (!sharedRuns || !DETECTED.has(outcome.body.status)) return outcome.body;
     // A mutant can leave state in a module that a later test file of the
     // shared worker reads, which an isolated run never shows. A kill in a
-    // later file must also kill in a fresh worker, or the run is repeated
-    // with each file in its own worker.
-    const later = laterDecidingTests(requested, outcome.result, outcome.firstFailure);
+    // later file, or in a worker with changed globals, must also kill in a
+    // fresh worker, or the run is repeated with each file in its own worker.
+    const later = laterDecidingTests(requested, outcome.result, outcome.firstFailure, polluted);
     if (later === null) return outcome.body;
     const alone = await runRequested(request, later, false);
     if (DETECTED.has(alone.body.status)) return outcome.body;
@@ -911,6 +1000,7 @@ export const createAdapter = async (init) => {
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),
     close: async () => {
       try {
+        await reuse.close();
         await vitest.close();
       } finally {
         workDir.remove();

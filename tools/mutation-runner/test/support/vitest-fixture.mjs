@@ -136,8 +136,24 @@ export function reset(): void {
 }
 `;
 
+const INSTRUMENTED_REUSE = `// @ts-nocheck
+${PRELUDE}
+const memo = new Map();
+
+export function double(value: number): number {
+  if (!memo.has(value)) memo.set(value, (__fallow_m_a("m40") ? (value * 3) : (__fallow_m_c("m40"), (value * 2))));
+  return memo.get(value);
+}
+
+export function stays(): number {
+  if ((__fallow_m_a("m41") ? (true) : (__fallow_m_c("m41"), (false)))) process.exit(3);
+  return 1;
+}
+`;
+
 /** The optional run files, each with its path-map key. */
 const OPTIONAL_FILES = {
+  reuse: { source: "src/reuse.ts", text: INSTRUMENTED_REUSE },
   store: { source: "src/store.ts", text: INSTRUMENTED_STORE },
   components: { source: "src/Badge.vue", text: INSTRUMENTED_BADGE },
   commonjs: { source: "require/shipping.cjs", text: INSTRUMENTED_SHIPPING },
@@ -180,6 +196,7 @@ export const createFixtureProject = ({
   components = false,
   commonjs = false,
   store = false,
+  reuse = false,
 } = {}) => {
   const installed = join(PACKAGE_ROOT, "node_modules", packageName);
   // Without this check the symlink below dangles, and each test then fails
@@ -200,7 +217,7 @@ export const createFixtureProject = ({
     mkdirSync(join(root, "node_modules"));
     symlinkSync(installed, join(root, "node_modules", "vitest"), "dir");
   }
-  const { runFiles, pathMap } = fixtureFiles({ components, commonjs, store });
+  const { runFiles, pathMap } = fixtureFiles({ components, commonjs, store, reuse });
   for (const [path, text] of Object.entries(runFiles)) write(runDir, path, text);
   return {
     root,

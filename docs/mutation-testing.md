@@ -1149,6 +1149,33 @@ control runs with `isolate: false`.
   both runs. The check is skipped when the isolated dry run takes more than
   45 seconds. A failed shared run keeps isolated runs.
 
+### Vitest reused workers
+
+After the shared-worker check passes, the companion also keeps one Vitest
+worker process for many mutant runs. Vitest stops the worker of a run when
+the run ends, and a new process costs more CPU than most mutant runs. A
+custom pool of the adapter (`adapters/vitest-reuse.mjs`) wraps the `forks`
+or `threads` worker of Vitest and answers its `start` and `stop` messages
+itself, so the next mutant run gets the same process.
+
+- Only mutant runs with bail use the reused process. Dry runs, control runs
+  and runs without bail (`--kill-matrix`) start a new worker.
+- Vitest sends the active mutant with each run. At the start of each test
+  file of a reused run, the setup file calls `vi.resetModules()`, so the
+  source modules load again with the current mutant. A static mutant is
+  therefore active when its module loads.
+- The setup file records the keys of `globalThis` and the values of
+  `process.env` when the process starts. When a test adds a global or
+  changes the environment, the companion ends the reused process after the
+  run, and a kill in that run counts only when the test file also detects
+  the mutant alone in a new worker.
+- The worker reads `testTimeout` and `hookTimeout` only when it starts. A
+  reused run rounds `timeout_ms` up to a multiple of 5 seconds, and a run
+  with another value starts a new process. A test can therefore run up to
+  5 seconds longer than `timeout_ms` before Vitest stops it.
+- A process ends after 200 runs, and a process that exits (for example
+  because a mutant calls `process.exit`) is replaced.
+
 ### `node:test` and `bun test`
 
 - Each dry run and each mutant run starts one test process for each test

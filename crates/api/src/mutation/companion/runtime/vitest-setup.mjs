@@ -1,5 +1,5 @@
 // Generated from tools/mutation-runner/src/runtime/vitest-setup.mjs. Do not edit.
-import { afterEach, beforeEach, inject } from "vitest";
+import { afterEach, beforeEach, inject, vi } from "vitest";
 
 import { installFallowMutation } from "./global.mjs";
 import { setSubprocessPreload } from "./subprocess-options.mjs";
@@ -9,6 +9,7 @@ const LOOP_BUDGET_KEY = "fallowLoopBudget";
 const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const REQUIRE_HOOK = Symbol.for("fallow.mutation.vitestRequireHook");
+const FRESH_MODULES_KEY = "fallowFreshModules";
 
 const activeMutant = () => {
   const value = inject(ACTIVE_MUTANT_KEY);
@@ -115,12 +116,39 @@ const loadChildCoverage = async (hooksReady) => {
 // The setup file runs before the test file imports any source module. The
 // active mutant is set here at the top level, so a mutant in module scope
 // (a static mutant) is active when the module evaluates.
+const GLOBAL_BASELINE = Symbol.for("fallow.mutation.globalBaseline");
+// Variables that Vitest and the adapter set for each file or test.
+const OWN_ENV = /^(?:VITEST|NODE_OPTIONS$)/u;
+
+const envSnapshot = () =>
+  Object.fromEntries(Object.entries(process.env ?? {}).filter(([key]) => !OWN_ENV.test(key)));
+
+/**
+ * True when a test file of an earlier run of this worker added a global or
+ * changed the environment. The first file of the worker records the state.
+ */
+const globalsChanged = () => {
+  const baseline = (globalThis[GLOBAL_BASELINE] ??= {
+    keys: new Set(Object.getOwnPropertyNames(globalThis)),
+    env: JSON.stringify(envSnapshot()),
+  });
+  return (
+    Object.getOwnPropertyNames(globalThis).some((key) => !baseline.keys.has(key)) ||
+    JSON.stringify(envSnapshot()) !== baseline.env
+  );
+};
+
+// A worker that the adapter keeps for more than one run still has the
+// modules of the earlier runs. Each test file then loads them again.
+const freshModules = inject(FRESH_MODULES_KEY) === true;
+if (freshModules) vi.resetModules();
 const mutation = installFallowMutation();
 mutation.startFile();
 mutation.setActive(activeMutant());
 const requireHook = await installRequireHook();
 shareWithChildProcesses(requireHook.hooksReady, activeMutant(), null);
 const childCoverage = await loadChildCoverage(requireHook.hooksReady);
+const pollutedAtStart = freshModules && globalsChanged();
 
 beforeEach(() => {
   const active = activeMutant();
@@ -138,4 +166,5 @@ afterEach((context) => {
   context.task.meta.fallowHits = [...new Set([...hits, ...children.hits])];
   context.task.meta.fallowStaticHits = staticHits;
   context.task.meta.fallowLoaded = [...new Set([...requireHook.loaded, ...children.loaded])];
+  if (freshModules) context.task.meta.fallowPolluted = pollutedAtStart || globalsChanged();
 });
