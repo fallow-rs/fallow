@@ -633,18 +633,19 @@ Each mutant run has two time limits:
 A synchronous endless loop blocks the test worker, so the test timeout of
 the runner cannot stop it. In a mutant run, each instrumented site calls the
 mutant switch on each evaluation. The switch counts these calls inside a
-test. At every 128th call, it compares the CPU time of the tests of the file so far with
-`loop_budget_ms`. The CPU time is the time that the test thread works
-between `beforeEach` and `afterEach` of the tests of the run. When the time
-is more, the switch throws an error, and the adapter reports the test as a
-`timeout` with `loop_timeout: true` in the `run_result`. The companion stays
-alive, so the next mutant needs no new companion and no new dry run.
+test. At every 128th call, it compares the CPU time of the tests of the file
+so far with `loop_budget_ms`. The CPU time is the time that the test thread
+works between `beforeEach` and `afterEach` of the tests of the run. When the
+time is more, the switch throws an error, and the adapter reports the test
+as a `timeout` with `loop_timeout: true` in the `run_result`. The companion
+stays alive, so the next mutant needs no new companion and no new dry run.
 
 - The switch reads the CPU time of the test thread
-  (`process.threadCpuUsage`, or `process.cpuUsage` on an older Node). A test
-  that waits uses no CPU time, load from other processes on the host does
-  not count, and fake timers in a test do not move the clock. Without
-  `process`, for example in browser mode, the check is off.
+  (`process.threadCpuUsage`). A test that waits uses no CPU time, load from
+  other processes on the host does not count, and fake timers in a test do
+  not move the clock. A runtime without `process.threadCpuUsage` (Node
+  before 22.19 and 23.9, or browser mode) uses the wall time. Its loop
+  timeout has no `loop_timeout` flag, so it always gets the retry.
 - A loop through code with no instrumented site, such as test code or a
   dependency, still waits for the watchdog. So does a loop outside a test:
   at module scope (each static mutant), or in a `beforeAll` or `afterAll`
@@ -654,10 +655,11 @@ alive, so the next mutant needs no new companion and no new dry run.
   endless loop that catches each error waits for the watchdog.
 - The retry of a timeout doubles both limits. The retry of a survivor
   computes both limits from the time of its retry tests.
-- A loop timeout gets no retry when `loop_budget_ms` is 800 ms or less, that
-  is, when the covering tests take 200 ms or less in the dry run. The
-  budget is then at least four times the CPU time that the tests need, and
-  host load does not use it. Each other timeout gets the retry.
+- A loop timeout on the thread CPU clock gets no retry when the covering
+  tests take more than 0 ms and at most 200 ms in the dry run, so when
+  `loop_budget_ms` is more than 500 ms and at most 800 ms. The budget is
+  then at least four times the CPU time that the tests need, and host load
+  does not use it. Each other timeout gets the retry.
 
 A mutant that makes a test do much more work can also pass
 `loop_budget_ms`. Its status is then `timeout` in place of `killed` or

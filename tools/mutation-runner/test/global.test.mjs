@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 
 import { LOOP_TIMEOUT_NAME, installFallowMutation } from "../src/runtime/global.mjs";
@@ -133,10 +134,11 @@ test("the loop budget counts the time of the earlier tests of the file", () => {
   control.setLoopBudget(null);
 });
 
-test("a replaced performance clock neither throws from a() nor moves the loop budget", () => {
+test("a replaced clock in a test neither throws from a() nor moves the loop budget", () => {
   const control = installFallowMutation();
   const runtime = globalThis.__fallowMutation;
-  const original = Object.getOwnPropertyDescriptor(globalThis, "performance");
+  const thread = Object.getOwnPropertyDescriptor(process, "threadCpuUsage");
+  const perf = Object.getOwnPropertyDescriptor(globalThis, "performance");
   const evaluate = () => {
     for (let i = 0; i < 1_000; i += 1) runtime.a("m1");
   };
@@ -145,11 +147,15 @@ test("a replaced performance clock neither throws from a() nor moves the loop bu
   control.setLoopBudget(1_000);
   control.startTest();
   try {
+    process.threadCpuUsage = () => ({ user: 1e15, system: 0 });
     Object.defineProperty(globalThis, "performance", {
       configurable: true,
       value: { now: () => 1e12 },
     });
-    assert.doesNotThrow(evaluate, "fake time moved the loop budget");
+    assert.doesNotThrow(evaluate, "a replaced clock moved the loop budget");
+    process.threadCpuUsage = () => {
+      throw new Error("stubbed clock");
+    };
     Object.defineProperty(globalThis, "performance", {
       configurable: true,
       value: {
@@ -160,11 +166,37 @@ test("a replaced performance clock neither throws from a() nor moves the loop bu
     });
     assert.doesNotThrow(evaluate, "a stubbed clock error reached the caller of a()");
   } finally {
-    Object.defineProperty(globalThis, "performance", original);
+    Object.defineProperty(process, "threadCpuUsage", thread);
+    Object.defineProperty(globalThis, "performance", perf);
     control.finishTest();
     control.setActive(null);
     control.setLoopBudget(null);
   }
+});
+
+test("without a thread CPU clock, the loop budget uses wall time and its own error name", () => {
+  const script = `
+    delete process.threadCpuUsage;
+    const { installFallowMutation, WALL_LOOP_TIMEOUT_NAME } = await import(${JSON.stringify(
+      new URL("../src/runtime/global.mjs", import.meta.url).href,
+    )});
+    const control = installFallowMutation();
+    control.startFile();
+    control.setActive("m1");
+    control.setLoopBudget(20);
+    control.startTest();
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60);
+    try {
+      for (let i = 0; i < 1_000; i += 1) globalThis.__fallowMutation.a("m1");
+      console.log("no-throw");
+    } catch (error) {
+      console.log(error.name === WALL_LOOP_TIMEOUT_NAME ? "wall" : error.name);
+    }
+  `;
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+  });
+  assert.equal(output.trim(), "wall");
 });
 
 test("each test starts its own count of site evaluations", () => {

@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
-import { LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
+import { LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
 import { createWorkDir } from "./child-process.mjs";
 import {
   TEST_ID_SEPARATOR,
@@ -162,8 +162,12 @@ const testStatus = (testCase) => STATUS_BY_STATE[testCase.result().state]?.(test
 const isConcurrent = (testCase) =>
   testCase.options.concurrent === true || testCase.project.config.sequence?.concurrent === true;
 
+const hasErrorNamed = (testCase, names) =>
+  (testCase.result().errors ?? []).some((error) => names.includes(error?.name));
+
+/** True for a test that the loop budget ended, on either clock. */
 const isLoopTimeout = (testCase) =>
-  (testCase.result().errors ?? []).some((error) => error?.name === LOOP_TIMEOUT_NAME);
+  hasErrorNamed(testCase, [LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME]);
 
 const failureKind = (testCase) => {
   const errors = testCase.result().errors ?? [];
@@ -750,7 +754,9 @@ export const createAdapter = async (init) => {
       errors: runErrors(result, root),
       requestedCount: requested.length,
       durationMs: performance.now() - started,
-      loopTimeout: firstFailure !== undefined && isLoopTimeout(firstFailure),
+      // Only the thread CPU clock makes a loop timeout final. Host load can
+      // use wall time, so a wall-clock loop timeout gets the normal retry.
+      loopTimeout: firstFailure !== undefined && hasErrorNamed(firstFailure, [LOOP_TIMEOUT_NAME]),
     });
   };
 

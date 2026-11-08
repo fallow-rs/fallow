@@ -11,9 +11,10 @@ const TIMEOUT_FACTOR: f64 = 1.5;
 /// at the watchdog.
 pub(super) const LOOP_BUDGET_BASE_MS: u64 = 500;
 /// The largest loop budget whose loop timeout needs no retry. The companion
-/// measures the budget in the CPU time of the test thread, so other load on
-/// the host does not use it. Up to this value, the budget is at least four
-/// times the covering-test time of the dry run.
+/// sends `loop_timeout` only when it measures the budget in the CPU time of
+/// the test thread, so other load on the host does not use it. Up to this
+/// value, the budget is at least four times the covering-test time of the
+/// dry run.
 const SETTLED_LOOP_BUDGET_MS: u64 = 800;
 
 /// `1.5 * duration`, rounded up. A duration that is not finite gives 0.
@@ -52,9 +53,11 @@ pub(super) fn round_ms(value: Option<f64>) -> Option<u64> {
 }
 
 /// True when a loop timeout of a job with `loop_budget_ms` is the final
-/// status, so the job gets no retry.
+/// status, so the job gets no retry. A budget with no measured test time
+/// (only [`LOOP_BUDGET_BASE_MS`]) gives no evidence about the work of the
+/// tests, so it does not settle.
 pub(super) const fn settles_loop_timeout(loop_budget_ms: u64) -> bool {
-    loop_budget_ms <= SETTLED_LOOP_BUDGET_MS
+    loop_budget_ms > LOOP_BUDGET_BASE_MS && loop_budget_ms <= SETTLED_LOOP_BUDGET_MS
 }
 
 #[cfg(test)]
@@ -78,6 +81,12 @@ mod tests {
     fn a_loop_timeout_settles_up_to_covering_tests_of_200_ms() {
         assert!(settles_loop_timeout(loop_budget_ms(timeout_ms(200.0))));
         assert!(!settles_loop_timeout(loop_budget_ms(timeout_ms(201.0))));
+    }
+
+    #[test]
+    fn a_loop_timeout_with_no_measured_test_time_does_not_settle() {
+        assert!(!settles_loop_timeout(loop_budget_ms(timeout_ms(0.0))));
+        assert!(settles_loop_timeout(loop_budget_ms(timeout_ms(0.5))));
     }
 
     #[test]

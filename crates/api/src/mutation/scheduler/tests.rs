@@ -734,6 +734,28 @@ fn a_loop_timeout_of_short_covering_tests_gets_no_retry() {
 }
 
 #[test]
+fn a_survivor_with_a_loop_timeout_flag_still_gets_its_confirmation() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| {
+            let Response::Run(result) = run_result(run, RunStatus::Survived, None) else {
+                unreachable!("run_result gives a run response")
+            };
+            Ok(Response::Run(RunResult {
+                loop_timeout: true,
+                ..result
+            }))
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m2"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Survived);
+    assert!(
+        outcome.results["m2"].retried,
+        "only a timeout status settles"
+    );
+}
+
+#[test]
 fn a_loop_timeout_of_slow_covering_tests_gets_the_doubled_retry() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
