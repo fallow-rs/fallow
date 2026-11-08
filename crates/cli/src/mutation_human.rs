@@ -287,6 +287,9 @@ fn summary_line(report: &MutationReport) -> String {
         if count > 0 {
             let _ = write!(line, "  {label} {count}");
         }
+        if label == "pending" && report.summary.sampled_out > 0 {
+            let _ = write!(line, "  sampled out {}", report.summary.sampled_out);
+        }
     }
     let _ = write!(line, "  {}", completion_text(report));
     line
@@ -1030,9 +1033,14 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
         + counts.pruned_generated
         + counts.pruned_side_effect_sink
         + counts.pruned_framework_config;
+    let sampled = if counts.sampled_out > 0 {
+        format!(" ({} sampled out)", counts.sampled_out)
+    } else {
+        String::new()
+    };
     let _ = writeln!(
         out,
-        "Mutants: {} planned, {} pending, {} no coverage, {pruned} pruned",
+        "Mutants: {} planned, {} pending{sampled}, {} no coverage, {pruned} pruned",
         counts.planned, counts.pending, counts.no_coverage
     );
     let _ = writeln!(

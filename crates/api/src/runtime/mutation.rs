@@ -80,6 +80,13 @@ fn validate(options: &MutationRunOptions) -> ProgrammaticResult<()> {
         )
         .with_context("mutation.maxMutants"));
     }
+    if options.mutants_per_line == Some(0) {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "the mutants per line limit must be at least 1",
+        )
+        .with_context("mutation.mutantsPerLine"));
+    }
     if options.kill_matrix && !options.kill_matrix_targets.is_empty() {
         return Err(mutation_error(
             "FALLOW_INVALID_MUTATION_OPTIONS",
@@ -409,6 +416,7 @@ fn plan_for(
         operators,
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
+        mutants_per_line: options.mutants_per_line,
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
@@ -809,6 +817,7 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
         mutants: scheduled(plan, MutantDisposition::Planned),
         unreached: scheduled(plan, MutantDisposition::NoCoverage),
         pending: scheduled(plan, MutantDisposition::Pending),
+        sampled_out: scheduled(plan, MutantDisposition::SampledOut),
         known_ids: plan
             .mutants
             .iter()

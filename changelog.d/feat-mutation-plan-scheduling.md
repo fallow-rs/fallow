@@ -1,3 +1,4 @@
 ### Added
 
 - **`fallow mutation --time-budget` now runs the cheapest mutants first.** With a time budget, the first pass starts the mutants with the lowest estimated test time first. The estimate is the sum of the dry-run times of the covering tests. The budget now settles more mutants. Without a budget, the order does not change.
+- **`fallow mutation --mutants-per-line <n>` limits the mutants on each source line.** The config key is `mutation.mutantsPerLine`. The plan keeps the most productive mutants of a line, in a fixed operator order, and ranks equal operators by a stable hash of the mutant id. The other mutants are `pending` with the reason `sampled-out`, and the run does not execute them. The summary and the plan counts give the number as `sampled_out`. The completion of such a run is `partial` with the reason `sampled-out`.

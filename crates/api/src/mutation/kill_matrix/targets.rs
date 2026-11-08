@@ -329,6 +329,7 @@ mod tests {
             },
             status,
             prune_reason: None,
+            pending_reason: None,
             killed_by: killers.first().map(|s| (*s).to_owned()),
             killing_tests: killers.iter().map(|s| (*s).to_owned()).collect(),
             kill_matrix_complete: true,

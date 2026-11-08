@@ -33666,6 +33666,11 @@
         },
         {
           "type": "string",
+          "const": "sampled-out",
+          "description": "The `--mutants-per-line` limit left mutants out of the plan. They are\n`pending` with the reason `sampled-out`."
+        },
+        {
+          "type": "string",
           "const": "time-budget",
           "description": "The time budget ended before each mutant ran."
         },
@@ -33885,6 +33890,13 @@
           ],
           "description": "The static rule of a `pruned` mutant, kebab-case."
         },
+        "pending_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why a `pending` mutant did not run, kebab-case. Only `sampled-out` has\na reason: the `--mutants-per-line` limit left the mutant out of the\nplan. A mutant that the mutant limit or the time budget left out has\nno reason."
+        },
         "killed_by": {
           "type": [
             "string",
@@ -34068,10 +34080,15 @@
             "null"
           ],
           "description": "The share of mutants that a test reaches, a fraction from 0 to 1:\n`covered / (covered + no_coverage)` over the whole plan. `covered`\ncounts each executed mutant with a covering test and each `pending`\nmutant that a passing dry-run test covers. A `pending` mutant that no\ndry-run test covers is `no_coverage`, so a run that `--max-mutants`\ncaps reports the coverage of the full run. `equivalent` and `pruned`\nmutants never count. `null` when no mutant is covered or unreached."
+        },
+        "sampled_out": {
+          "type": "integer",
+          "description": "The `pending` mutants that the `--mutants-per-line` limit left out of\nthe plan. They are part of `counts.pending`."
         }
       },
       "required": [
-        "counts"
+        "counts",
+        "sampled_out"
       ],
       "description": "The totals of a run."
     },
@@ -34442,6 +34459,13 @@
           ],
           "description": "The static rule of a `pruned` mutant, kebab-case."
         },
+        "pending_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why a `pending` mutant did not run, kebab-case. Only `sampled-out` has\na reason: the `--mutants-per-line` limit left the mutant out of the\nplan. A mutant that the mutant limit or the time budget left out has\nno reason."
+        },
         "test_reach": {
           "anyOf": [
             {
@@ -34478,7 +34502,11 @@
         },
         "pending": {
           "type": "integer",
-          "description": "Mutants after the mutant limit."
+          "description": "Mutants after the mutant limit, and the sampled-out mutants."
+        },
+        "sampled_out": {
+          "type": "integer",
+          "description": "The `pending` mutants that the `--mutants-per-line` limit left out."
         },
         "no_coverage": {
           "type": "integer",
@@ -34505,6 +34533,7 @@
         "total",
         "planned",
         "pending",
+        "sampled_out",
         "no_coverage",
         "pruned_dead_code",
         "pruned_generated",

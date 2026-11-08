@@ -435,6 +435,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         },
         status,
         prune_reason: (status == MutantStatus::Pruned).then(|| "side-effect-sink".to_owned()),
+        pending_reason: None,
         killed_by: (status == MutantStatus::Killed).then(|| "test/a.test.ts::adds".to_owned()),
         covering_tests: if matches!(status, MutantStatus::Survived | MutantStatus::Killed) {
             vec![
@@ -830,6 +831,58 @@ fn human_summary_names_pending_equivalent_errors_and_flaky_only_when_not_zero() 
     assert_eq!(
         text.lines().nth(2).unwrap_or_default(),
         "Score 50.0%  killed 1  survived 1  timeout 0  complete",
+        "{text}"
+    );
+}
+
+#[test]
+fn the_summary_line_names_the_sampled_out_mutants() {
+    let mut sampled = mutant("m2", "src/a.ts", 2, MutantStatus::Pending);
+    sampled.pending_reason = Some("sampled-out".to_owned());
+    let sampled_report = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
+            sampled,
+            mutant("m3", "src/a.ts", 3, MutantStatus::Pending),
+        ],
+        vec![MutationIncompleteReason::SampledOut],
+    );
+    let text = run_text(&sampled_report, &OPTIONS);
+    assert_eq!(
+        text.lines().nth(2).unwrap_or_default(),
+        "Score 100.0%  killed 1  survived 0  timeout 0  pending 2  sampled out 1  partial (sampled-out)",
+        "{text}"
+    );
+}
+
+#[test]
+fn the_plan_line_names_the_sampled_out_mutants() {
+    let plan = MutationPlanOutput {
+        schema_version: MutationPlanSchemaVersion::V1,
+        version: ToolVersion("0.0.0".to_owned()),
+        elapsed_ms: ElapsedMs(0),
+        scope: MutationScopeOutput {
+            kind: MutationScopeKind::All,
+            base_ref: None,
+        },
+        counts: MutationPlanCountsOutput {
+            total: 4,
+            planned: 1,
+            pending: 3,
+            sampled_out: 2,
+            ..MutationPlanCountsOutput::default()
+        },
+        mutants: Vec::new(),
+        files: Vec::new(),
+        test_files: Vec::new(),
+        no_test_files: false,
+        framework_config_checked: true,
+        skipped_files: Vec::new(),
+        unmatched_paths: Vec::new(),
+    };
+    let text = plain(&render_plan(&plan));
+    assert!(
+        text.contains("Mutants: 1 planned, 3 pending (2 sampled out), 0 no coverage, 0 pruned\n"),
         "{text}"
     );
 }
@@ -1260,6 +1313,7 @@ fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
         location: mutant(id, "src/a.ts", 1, MutantStatus::Pending).location,
         disposition: MutationPlanDisposition::NoCoverage,
         prune_reason: None,
+        pending_reason: None,
         test_reach: reach.map(|reach| MutantTestReach {
             reach,
             export_name: None,
@@ -1305,6 +1359,7 @@ fn human_plan_lists_planned_mutants_and_prune_reasons() {
         location: mutant(id, "src/a.ts", rank, MutantStatus::Pending).location,
         disposition,
         prune_reason: reason.map(str::to_owned),
+        pending_reason: None,
         test_reach: None,
     };
     let plan = MutationPlanOutput {
@@ -1767,6 +1822,7 @@ fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
                     .location,
                 disposition: MutationPlanDisposition::Planned,
                 prune_reason: None,
+                pending_reason: None,
                 test_reach: None,
             })
             .collect(),

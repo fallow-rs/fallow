@@ -253,6 +253,7 @@ fn plan(ids: &[&str]) -> SchedulePlan {
             .collect(),
         unreached: Vec::new(),
         pending: Vec::new(),
+        sampled_out: Vec::new(),
         known_ids: ids
             .iter()
             .copied()

@@ -9,7 +9,8 @@ use fallow_output::{
     MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
     MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
     MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationReport,
-    MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary, TestReachClass,
+    MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
+    SAMPLED_OUT_REASON, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
 use rustc_hash::FxHashSet;
@@ -60,6 +61,11 @@ fn prune_reason(mutant: &PlannedMutant) -> Option<String> {
     }
 }
 
+/// Why a `pending` plan mutant did not run, when a reason exists.
+fn pending_reason(mutant: &PlannedMutant) -> Option<String> {
+    (mutant.disposition == MutantDisposition::SampledOut).then(|| SAMPLED_OUT_REASON.to_owned())
+}
+
 /// The public test reach of a plan mutant.
 fn test_reach(mutant: &PlannedMutant) -> Option<MutantTestReach> {
     let reach = mutant.test_reach.as_ref()?;
@@ -96,11 +102,14 @@ pub fn plan_mutants(plan: &MutationPlan) -> Vec<MutationPlanMutant> {
             location: location(mutant),
             disposition: match mutant.disposition {
                 MutantDisposition::Planned => MutationPlanDisposition::Planned,
-                MutantDisposition::Pending => MutationPlanDisposition::Pending,
+                MutantDisposition::Pending | MutantDisposition::SampledOut => {
+                    MutationPlanDisposition::Pending
+                }
                 MutantDisposition::NoCoverage => MutationPlanDisposition::NoCoverage,
                 MutantDisposition::Pruned(_) => MutationPlanDisposition::Pruned,
             },
             prune_reason: prune_reason(mutant),
+            pending_reason: pending_reason(mutant),
             test_reach: (mutant.disposition == MutantDisposition::NoCoverage)
                 .then(|| test_reach(mutant))
                 .flatten(),
@@ -113,7 +122,8 @@ pub const fn plan_counts(plan: &MutationPlan) -> MutationPlanCountsOutput {
     MutationPlanCountsOutput {
         total: plan.counts.total,
         planned: plan.counts.planned,
-        pending: plan.counts.pending,
+        pending: plan.counts.pending + plan.counts.sampled_out,
+        sampled_out: plan.counts.sampled_out,
         no_coverage: plan.counts.no_coverage,
         pruned_dead_code: plan.counts.pruned.dead_code,
         pruned_generated: plan.counts.pruned.generated,
@@ -160,6 +170,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         location: location(mutant),
         status: MutantStatus::Pending,
         prune_reason: prune_reason(mutant),
+        pending_reason: pending_reason(mutant),
         killing_tests: Vec::new(),
         kill_matrix_complete: false,
         killed_by: None,
@@ -181,10 +192,14 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             ..base
         },
         (
-            MutantDisposition::Planned | MutantDisposition::Pending | MutantDisposition::NoCoverage,
+            MutantDisposition::Planned
+            | MutantDisposition::Pending
+            | MutantDisposition::SampledOut
+            | MutantDisposition::NoCoverage,
             Some(result),
         ) => MutantResult {
             status: result.status,
+            pending_reason: None,
             killing_tests: result.killing_tests.clone(),
             kill_matrix_complete: result.kill_matrix_complete,
             killed_by: result.killed_by.clone(),
@@ -204,7 +219,10 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             status: MutantStatus::NoCoverage,
             ..base
         },
-        (MutantDisposition::Planned | MutantDisposition::Pending, _) => base,
+        (
+            MutantDisposition::Planned | MutantDisposition::Pending | MutantDisposition::SampledOut,
+            _,
+        ) => base,
     }
 }
 
@@ -290,6 +308,7 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
     }
     let promoted: FxHashSet<&str> = facts.promoted.iter().map(String::as_str).collect();
     let mut limit_pending = false;
+    let mut sampled_pending = false;
     let mut budget_pending = false;
     for (mutant, result) in facts.plan.mutants.iter().zip(facts.results) {
         if result.status != MutantStatus::Pending {
@@ -299,10 +318,15 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
             budget_pending = true;
         } else if mutant.disposition == MutantDisposition::Pending {
             limit_pending = true;
+        } else if mutant.disposition == MutantDisposition::SampledOut {
+            sampled_pending = true;
         }
     }
     if limit_pending {
         reasons.push(MutationIncompleteReason::MutantLimit);
+    }
+    if sampled_pending {
+        reasons.push(MutationIncompleteReason::SampledOut);
     }
     if budget_pending || facts.unretried {
         reasons.push(MutationIncompleteReason::TimeBudget);
@@ -338,7 +362,9 @@ fn is_scheduled(mutant: &PlannedMutant, promoted: &FxHashSet<&str>) -> bool {
     match mutant.disposition {
         MutantDisposition::Planned => true,
         MutantDisposition::Pending => promoted.contains(mutant.mutant.id.as_str()),
-        MutantDisposition::NoCoverage | MutantDisposition::Pruned(_) => false,
+        MutantDisposition::SampledOut
+        | MutantDisposition::NoCoverage
+        | MutantDisposition::Pruned(_) => false,
     }
 }
 
@@ -830,6 +856,59 @@ mod tests {
             ],
             "m3 is planned with no outcome, m4 is after the limit"
         );
+    }
+
+    #[test]
+    fn a_sampled_out_mutant_is_pending_with_a_reason_and_makes_the_run_partial() {
+        let mut plan = plan(
+            vec![
+                planned("m1", Some(1), MutantDisposition::Planned, None),
+                planned("m2", None, MutantDisposition::SampledOut, None),
+            ],
+            0,
+        );
+        plan.counts.sampled_out = 1;
+        let outcome = outcome(&[("m1", MutantStatus::Killed)]);
+        let results = mutant_results(&plan, Some(&outcome));
+        assert_eq!(results[1].status, MutantStatus::Pending);
+        assert_eq!(results[1].pending_reason.as_deref(), Some("sampled-out"));
+        assert_eq!(results[0].pending_reason, None);
+        let summary = summary(&results);
+        assert_eq!(summary.counts.pending, 1);
+        assert_eq!(summary.sampled_out, 1);
+        let counts = plan_counts(&plan);
+        assert_eq!((counts.pending, counts.sampled_out), (1, 1));
+        let entries = plan_mutants(&plan);
+        assert_eq!(entries[1].disposition, MutationPlanDisposition::Pending);
+        assert_eq!(entries[1].pending_reason.as_deref(), Some("sampled-out"));
+        let completion = completion(&CompletionFacts {
+            plan: &plan,
+            results: &results,
+            baseline_failures: &[],
+            worktree_changed: false,
+            worktree_unchecked: false,
+            unretried: false,
+            unloaded_paths: &[],
+            undiscovered_test_files: &[],
+            typecheck_failed: false,
+            promoted: &[],
+        });
+        assert_eq!(
+            completion.reasons,
+            vec![MutationIncompleteReason::SampledOut]
+        );
+    }
+
+    #[test]
+    fn a_sampled_out_mutant_that_no_test_covers_is_no_coverage_without_a_reason() {
+        let plan = plan(
+            vec![planned("m1", None, MutantDisposition::SampledOut, None)],
+            0,
+        );
+        let outcome = outcome(&[("m1", MutantStatus::NoCoverage)]);
+        let results = mutant_results(&plan, Some(&outcome));
+        assert_eq!(results[0].status, MutantStatus::NoCoverage);
+        assert_eq!(results[0].pending_reason, None);
     }
 
     #[test]

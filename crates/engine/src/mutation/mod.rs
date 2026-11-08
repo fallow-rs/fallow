@@ -21,6 +21,7 @@ mod database_write;
 mod layout;
 mod plan;
 mod reach;
+mod sampling;
 #[cfg(test)]
 mod tests;
 
@@ -95,6 +96,10 @@ pub struct MutationPlanRequest {
     /// The maximum number of planned mutants. The mutants after this limit,
     /// in rank order, become `pending`.
     pub max_mutants: Option<usize>,
+    /// The maximum number of planned mutants on one source line. The plan
+    /// keeps the most productive mutants of the line and marks the others
+    /// [`MutantDisposition::SampledOut`]. `None` keeps each mutant.
+    pub mutants_per_line: Option<usize>,
     /// Leave each Vue, Svelte and Astro component file out of the plan,
     /// with the skip reason [`SkipReason::RunnerCannotLoad`]. Set it when
     /// the test runner has no loader for a component file.
@@ -114,6 +119,7 @@ impl MutationPlanRequest {
             operators: None,
             allow_side_effects: false,
             max_mutants: None,
+            mutants_per_line: None,
             skip_component_files: false,
             mutant_ids: None,
         }
@@ -216,6 +222,9 @@ pub enum MutantDisposition {
     Planned,
     /// A planned mutant after the `max_mutants` limit.
     Pending,
+    /// A planned mutant that the `mutants_per_line` limit left out. It has
+    /// no rank, and the scheduler never runs it.
+    SampledOut,
     /// No test file reaches the file of the mutant.
     NoCoverage,
     /// A static rule removes the mutant.
@@ -356,6 +365,9 @@ pub struct MutationPlanCounts {
     pub planned: usize,
     /// Planned mutants after the `max_mutants` limit.
     pub pending: usize,
+    /// Planned mutants that the `mutants_per_line` limit left out. They are
+    /// not part of `pending`.
+    pub sampled_out: usize,
     /// Mutants that no test file reaches.
     pub no_coverage: usize,
     /// Pruned mutants, by reason.

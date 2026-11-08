@@ -1262,6 +1262,12 @@
           "description": "Run at most N covered mutants, in rank order. Uncovered mutants do not count. The others are `pending`"
         },
         {
+          "name": "--mutants-per-line",
+          "type": "string",
+          "required": false,
+          "description": "Keep at most N mutants on each source line. The plan keeps the most productive mutants of the line (relational, condition, arithmetic and logical operators first). The others are `pending` with the reason `sampled-out` and do not run (default: the `mutation.mutantsPerLine` key, else each mutant)"
+        },
+        {
           "name": "--time-budget",
           "type": "string",
           "required": false,

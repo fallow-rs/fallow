@@ -191,6 +191,9 @@ pub(super) fn build(
             }
         }
     }
+    if let Some(per_line) = request.mutants_per_line {
+        super::sampling::sample_per_line(&mut mutants, per_line);
+    }
     rank(&mut mutants, request.max_mutants);
     let mutants: Vec<PlannedMutant> = mutants.into_iter().map(|entry| entry.planned).collect();
 
@@ -1046,6 +1049,7 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
         match entry.disposition {
             MutantDisposition::Planned => counts.planned += 1,
             MutantDisposition::Pending => counts.pending += 1,
+            MutantDisposition::SampledOut => counts.sampled_out += 1,
             MutantDisposition::NoCoverage => counts.no_coverage += 1,
             MutantDisposition::Pruned(PruneReason::DeadCode) => counts.pruned.dead_code += 1,
             MutantDisposition::Pruned(PruneReason::Generated) => counts.pruned.generated += 1,

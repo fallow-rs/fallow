@@ -556,6 +556,59 @@ fn max_mutants_applies_after_ranking_and_marks_the_rest_pending() {
 }
 
 #[test]
+fn mutants_per_line_keeps_one_planned_mutant_per_line_and_is_stable() {
+    let root = fixture("mutation-plan");
+    let mut sampled = MutationPlanRequest::new(MutationScope::All);
+    sampled.mutants_per_line = Some(1);
+    let [full, first, second] = plans(
+        &root,
+        None,
+        &[
+            MutationPlanRequest::new(MutationScope::All),
+            sampled.clone(),
+            sampled,
+        ],
+    )
+    .try_into()
+    .expect("three plans");
+    let mut per_line: BTreeMap<(&str, u32), usize> = BTreeMap::new();
+    for entry in first
+        .mutants
+        .iter()
+        .filter(|entry| entry.disposition == PLANNED)
+    {
+        *per_line
+            .entry((entry.file.as_str(), entry.mutant.line))
+            .or_default() += 1;
+    }
+    assert!(per_line.values().all(|&count| count == 1), "{per_line:?}");
+    assert!(
+        first.counts.sampled_out > 0,
+        "the fixture has a crowded line"
+    );
+    assert_eq!(
+        first.counts.planned + first.counts.sampled_out,
+        full.counts.planned
+    );
+    assert_eq!(first.counts.total, full.counts.total);
+    let sampled_ids = |plan: &MutationPlan| -> Vec<String> {
+        plan.mutants
+            .iter()
+            .filter(|entry| entry.disposition == MutantDisposition::SampledOut)
+            .map(|entry| entry.mutant.id.to_string())
+            .collect()
+    };
+    assert_eq!(sampled_ids(&first), sampled_ids(&second));
+    assert!(
+        first
+            .mutants
+            .iter()
+            .filter(|entry| entry.disposition == MutantDisposition::SampledOut)
+            .all(|entry| entry.rank.is_none())
+    );
+}
+
+#[test]
 fn changed_scope_mutates_only_the_added_lines() {
     let root = fixture("mutation-plan");
     let diff = "\

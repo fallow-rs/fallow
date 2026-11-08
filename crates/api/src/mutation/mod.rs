@@ -133,6 +133,11 @@ pub struct MutationRunOptions {
     /// mutant that no dry-run test covers is `no_coverage` and does not
     /// count. The others become `pending`.
     pub max_mutants: Option<usize>,
+    /// The maximum number of mutants on one source line, chosen at plan time
+    /// in a fixed operator order. The others become `pending` with the reason
+    /// `sampled-out`, and the run never executes them. `None` keeps each
+    /// mutant.
+    pub mutants_per_line: Option<usize>,
     /// Run in a dirty git worktree, or outside a git worktree. The run still
     /// compares the worktree after the run.
     pub allow_dirty: bool,

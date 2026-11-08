@@ -75,6 +75,11 @@ pub struct SchedulePlan {
     /// covering test does not use the limit: the first covered pending
     /// mutants in rank order run in its place.
     pub pending: Vec<ScheduledMutant>,
+    /// The mutants that the `--mutants-per-line` limit left out. The
+    /// scheduler never runs them. A mutant that no passing dry-run test
+    /// covers gets `no_coverage`, so the coverage does not depend on the
+    /// limit.
+    pub sampled_out: Vec<ScheduledMutant>,
     /// Each mutant id of the plan. A hit outside this set stops the run.
     pub known_ids: FxHashSet<String>,
     /// The static test files of the plan.
@@ -1519,7 +1524,7 @@ fn mark_unreached_pending(
     dry_files: &[String],
     outcome: &mut ScheduleOutcome,
 ) {
-    for mutant in &plan.pending {
+    for mutant in plan.pending.iter().chain(&plan.sampled_out) {
         let static_mutant = facts.static_ids.contains(&mutant.id);
         if covering_tests(plan, facts, dry_files, mutant, static_mutant, false).is_empty() {
             outcome.results.insert(

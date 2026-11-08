@@ -26,7 +26,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 - `--workspace` and `--changed-workspaces` exit with code 2 in version 1,
   because the plan cannot narrow to a workspace yet. Pass the workspace
   directory as a path.
-- The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
+- The run flags are `--max-mutants`, `--mutants-per-line`, `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
@@ -494,6 +494,33 @@ coverage. The scheduler corrects this after the dry run:
 `--plan` runs no dry run, so its `planned` and `pending` dispositions are a
 view before the coverage is known. A run can execute a mutant that the plan
 shows as `pending`.
+
+## Mutants per line
+
+`--mutants-per-line N` (config key `mutation.mutantsPerLine`) keeps at most
+`N` planned mutants on each source line. The flag wins over the config key.
+`N` must be at least 1.
+
+- The plan makes the choice, before the dry run and before `--max-mutants`.
+  The result cache does not change it.
+- A line keeps its mutants in this operator order: `relational-operator`,
+  `negate-condition`, `arithmetic-operator`, `logical-operator`,
+  `unary-operator`, `update-operator`, `return-value`, `removed-call`,
+  `optional-chaining`, `boolean-literal`, `string-literal`, `regex-literal`
+  and `removed-chain-link`.
+- Mutants of the same operator on one line keep the order of a SHA-256 hash
+  of the mutant id. A second run on the same code keeps the same mutants.
+- Each mutant that the limit leaves out is `pending` with
+  `pending_reason: "sampled-out"`. The run never executes it. `--plan` shows
+  the same mutant as `pending` with the same `pending_reason`.
+- A left-out mutant that no dry-run test covers is `no_coverage`, so the
+  coverage does not depend on the limit. The coverage counts the other
+  left-out mutants as covered.
+- `summary.sampled_out` and `plan.counts.sampled_out` give the number of
+  left-out mutants. They are part of the `pending` count.
+- The completion is `partial` with the reason `sampled-out` when a left-out
+  mutant stays `pending`.
+- `--recheck` does not accept the flag.
 
 ## Score and coverage
 
@@ -2051,6 +2078,7 @@ reads files only. It runs no test.
     "operators": ["arithmetic-operator", "relational-operator"],
     "minScore": 80,
     "concurrency": 4,
+    "mutantsPerLine": 2,
     "typecheck": true,
     "runnerConfig": "vitest.integration.config.mjs"
   }
@@ -2059,7 +2087,8 @@ reads files only. It runs no test.
 
 - `runner` is `auto`, `vitest`, `node-test` or `bun-test`. See
   [Runners](#runners).
-- `operators`, `minScore` and `concurrency` apply to each run. A CLI flag wins.
+- `operators`, `minScore`, `concurrency` and `mutantsPerLine` apply to each run.
+  A CLI flag wins.
 - `runnerConfig` selects the runner config file for each run.
   `--runner-config` wins. See [Runner config](#runner-config).
 - `typecheck: true` turns on the survivor type check for each run.
