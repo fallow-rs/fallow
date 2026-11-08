@@ -34,6 +34,7 @@ export const MUTATION_COMPANION_FILES = Object.freeze([
   "runtime/overlay-hook.mjs",
   "runtime/subprocess-options.mjs",
   "runtime/vitest-setup.mjs",
+  "runtime/worker-state.mjs",
 ]);
 
 export const contractSurfaces = Object.freeze([

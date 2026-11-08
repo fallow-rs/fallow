@@ -26,10 +26,18 @@ const DEFAULT_MAX_RUNS = 200;
  * number of runs after which the process ends.
  */
 export const createReusedPool = (name, WorkerClass, { maxRuns = DEFAULT_MAX_RUNS } = {}) => {
-  const state = { worker: null, started: false, runs: 0, key: null, current: null };
+  const state = {
+    worker: null,
+    started: false,
+    runs: 0,
+    key: null,
+    environment: null,
+    dirty: false,
+    current: null,
+  };
 
-  const dispatch = (event, args) => {
-    const listeners = state.current?.listeners.get(event);
+  const deliver = (target, event, args) => {
+    const listeners = target?.listeners.get(event);
     if (listeners) for (const listener of Array.from(listeners)) listener(...args);
   };
 
@@ -37,6 +45,8 @@ export const createReusedPool = (name, WorkerClass, { maxRuns = DEFAULT_MAX_RUNS
     state.worker = null;
     state.started = false;
     state.runs = 0;
+    state.environment = null;
+    state.dirty = false;
   };
 
   const close = async () => {
@@ -45,12 +55,17 @@ export const createReusedPool = (name, WorkerClass, { maxRuns = DEFAULT_MAX_RUNS
     await worker?.stop();
   };
 
+  /** The environment of a worker: the worker sets it up only at start. */
+  const environmentKey = (environment) =>
+    JSON.stringify([environment?.name ?? null, environment?.options ?? null]);
+
   class ReusedWorker {
     name = name;
 
     constructor(options) {
       this.options = options;
       this.listeners = new Map();
+      this.stopAsked = false;
     }
 
     get reportMemory() {
@@ -71,18 +86,30 @@ export const createReusedPool = (name, WorkerClass, { maxRuns = DEFAULT_MAX_RUNS
     }
 
     async start() {
+      const environment = environmentKey(this.options.environment);
+      if (state.worker !== null && (state.dirty || state.environment !== environment)) {
+        await close();
+      }
       state.current = this;
       if (state.worker !== null) return;
       const worker = new WorkerClass(this.options);
       await worker.start();
       state.worker = worker;
+      state.environment = environment;
       // Only the active process reaches the runner of the current run. A
       // process that this pool closed must not report its exit to the next
-      // run as a crash.
+      // run as a crash. A message with no current run (for example a call
+      // of a timer that a test left) cannot get an answer, so the process is
+      // not reused.
       const forward =
         (event) =>
         (...args) => {
-          if (state.worker === worker) dispatch(event, args);
+          if (state.worker !== worker) return;
+          if (state.current === null) {
+            state.dirty = true;
+            return;
+          }
+          deliver(state.current, event, args);
         };
       worker.on("message", forward("message"));
       worker.on("error", forward("error"));
@@ -90,19 +117,25 @@ export const createReusedPool = (name, WorkerClass, { maxRuns = DEFAULT_MAX_RUNS
       // reused.
       worker.on("exit", (...args) => {
         if (state.worker !== worker) return;
+        const current = state.current;
         forget();
-        dispatch("exit", args);
+        deliver(current, "exit", args);
       });
     }
 
     send(message) {
+      // The reply goes to the runner that asked, also when the next run has
+      // already started.
       const reply = (type) =>
         queueMicrotask(() =>
-          dispatch("message", [{ type, __vitest_worker_response__: true, fallowReply: true }]),
+          deliver(this, "message", [{ type, __vitest_worker_response__: true, fallowReply: true }]),
         );
       if (message?.type === "start" && state.started) return reply("started");
       if (message?.type === "start") state.started = true;
-      if (message?.type === "stop") return reply("stopped");
+      if (message?.type === "stop") {
+        this.stopAsked = true;
+        return reply("stopped");
+      }
       if (message?.type === "run") state.runs += 1;
       return state.worker.send(message);
     }
@@ -113,7 +146,9 @@ export const createReusedPool = (name, WorkerClass, { maxRuns = DEFAULT_MAX_RUNS
 
     async stop() {
       if (state.current === this) state.current = null;
-      if (state.runs >= maxRuns) await close();
+      // Vitest stops a runner without a stop message after a task error, a
+      // start failure or a forced cancel. That process is not reused.
+      if (!this.stopAsked || state.runs >= maxRuns) await close();
     }
   }
 

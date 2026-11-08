@@ -445,8 +445,9 @@ const createIsolationControl = (projects) => {
 
 // A reused worker reads `testTimeout` only when it starts. A run rounds its
 // timeout up to a multiple of this step, so that most runs keep the process.
-// Rounding up never ends a test earlier than `timeout_ms`.
-const REUSED_TIMEOUT_STEP_MS = 5000;
+// Rounding up never ends a test earlier than `timeout_ms`, and the step stays
+// below the 2 second grace of the watchdog of the API.
+const REUSED_TIMEOUT_STEP_MS = 1000;
 
 const reusedTimeout = (timeoutMs) =>
   timeoutMs === null
@@ -477,7 +478,8 @@ const createReuseControl = (projects, workers) => {
       for (const entry of entries) {
         const { project, reused: pool } = entry;
         if (reused) {
-          await pool.prepare(`${project.config.testTimeout}\u0000${project.config.hookTimeout}`);
+          const { testTimeout, hookTimeout, bail } = project.config;
+          await pool.prepare(JSON.stringify([testTimeout, hookTimeout, bail]));
         }
         project.config.pool = reused ? pool.name : entry.pool;
         project.config.poolRunner = reused ? pool : entry.poolRunner;
@@ -763,15 +765,19 @@ export const createAdapter = async (init) => {
   // Mutant and control runs share one worker for their test files only after
   // a dry run proves that the tests give the same results that way.
   let sharedRuns = false;
+  // Mutant runs keep one worker process only after a dry run proves that the
+  // tests give the same results in a reused process, also on a second load.
+  let reusedRuns = false;
   const reuse = createReuseControl(vitest.projects, workers);
   const runSpecifications = async (
     specifications,
-    { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false },
+    { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false, reuseProcess = null },
   ) => {
     provideActiveMutant(vitest, mutantId, loopBudgetMs);
     // A mutant run in a shared worker keeps the worker process for the next
-    // mutant run. Control and dry runs, and runs without bail, start a new one.
-    const reused = shared && bail && mutantId !== null;
+    // mutant run. Control and dry runs, and runs without bail, start a new
+    // one. The dry-run check passes `reuseProcess` to test the reused process.
+    const reused = reuseProcess ?? (reusedRuns && shared && bail && mutantId !== null);
     setTimeouts(reused ? reusedTimeout(timeoutMs) : timeoutMs);
     setBail(vitest, bail);
     setShared(shared);
@@ -834,6 +840,36 @@ export const createAdapter = async (init) => {
     }
   };
 
+  /**
+   * Runs the dry-run files two times in one reused worker process and
+   * compares each outcome with the isolated dry run. The second run loads
+   * each module a second time in the same process, which shows a module that
+   * fails when it loads again. The check runs without bail, so it gets the
+   * status of each test. Mutant runs use bail, so they start a new process.
+   */
+  const reusesLikeIsolated = async (specifications, isolated) => {
+    const again = () =>
+      specifications.map((specification) =>
+        specification.project.createSpecification(specification.moduleId),
+      );
+    try {
+      for (let round = 0; round < 2; round += 1) {
+        const reused = await runSpecifications(again, {
+          mutantId: null,
+          bail: false,
+          shared: true,
+          reuseProcess: true,
+        });
+        if (!sameOutcome(isolated, reused, root)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      await reuse.recycle();
+    }
+  };
+
   const dryRun = async (request) => {
     validateDryRun(request);
     const selected = dryRunSelection(request.test_files);
@@ -845,6 +881,7 @@ export const createAdapter = async (init) => {
       specifications.length > 1 &&
       performance.now() - started <= SHARED_CHECK_MAX_DRY_RUN_MS &&
       (await sharesLikeIsolated(specifications, result));
+    reusedRuns = sharedRuns && (await reusesLikeIsolated(specifications, result));
     const fileByModule = new Map(
       selected.map(([file, spec]) => [moduleKey(spec.project, spec.moduleId), file]),
     );
@@ -972,6 +1009,11 @@ export const createAdapter = async (init) => {
     );
     if (polluted) await reuse.recycle();
     if (!sharedRuns || !DETECTED.has(outcome.body.status)) return outcome.body;
+    // A kill with no failing test (an error outside each test) can come from
+    // a timer or a promise of an earlier run of a reused process.
+    if (reusedRuns && outcome.firstFailure === undefined) {
+      return (await runRequested(request, requested, false)).body;
+    }
     // A mutant can leave state in a module that a later test file of the
     // shared worker reads, which an isolated run never shows. A kill in a
     // later file, or in a worker with changed globals, must also kill in a

@@ -123,3 +123,64 @@ test("another key closes the process", async () => {
   assert.equal(processes[0].stopped, true);
   await pool.close();
 });
+
+test("a run in another environment gets a new process", async () => {
+  processes = [];
+  const pool = createReusedPool("fallow-reused-forks", FakeWorker);
+  const node = pool.createPoolWorker({ environment: { name: "node", options: null } });
+  await node.start();
+  await node.stop();
+  const jsdom = pool.createPoolWorker({ environment: { name: "jsdom", options: null } });
+  await jsdom.start();
+  assert.equal(processes.length, 2);
+  assert.equal(processes[0].stopped, true);
+  await pool.close();
+});
+
+test("the stopped reply reaches the runner that asked, after the next run started", async () => {
+  processes = [];
+  const pool = createReusedPool("fallow-reused-forks", FakeWorker);
+  const first = pool.createPoolWorker({});
+  const replies = [];
+  first.on("message", (message) => replies.push(first.deserialize(message).type));
+  await first.start();
+  first.send({ type: "start" });
+  await new Promise((resolve) => setImmediate(resolve));
+  first.send({ type: "stop" });
+  const stopping = first.stop();
+  const next = pool.createPoolWorker({});
+  await next.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  await stopping;
+  assert.deepEqual(replies, ["started", "stopped"]);
+  await pool.close();
+});
+
+test("a stop without a stop message ends the process", async () => {
+  processes = [];
+  const pool = createReusedPool("fallow-reused-forks", FakeWorker);
+  const worker = pool.createPoolWorker({});
+  await worker.start();
+  await worker.stop();
+  assert.equal(processes[0].stopped, true);
+  await (
+    await runOnce(pool)
+  ).stopping;
+  assert.equal(processes.length, 2);
+  await pool.close();
+});
+
+test("a message between runs makes the next run use a new process", async () => {
+  processes = [];
+  const pool = createReusedPool("fallow-reused-forks", FakeWorker);
+  await (
+    await runOnce(pool)
+  ).stopping;
+  processes[0].emit("message", { type: "late" });
+  await (
+    await runOnce(pool)
+  ).stopping;
+  assert.equal(processes.length, 2);
+  assert.equal(processes[0].stopped, true);
+  await pool.close();
+});

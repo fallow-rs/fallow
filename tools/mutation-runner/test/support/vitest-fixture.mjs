@@ -146,7 +146,7 @@ export function double(value: number): number {
 }
 
 export function stays(): number {
-  if ((__fallow_m_a("m41") ? (true) : (__fallow_m_c("m41"), (false)))) process.exit(3);
+  if ((__fallow_m_a("m41") ? (true) : (__fallow_m_c("m41"), (false)))) process.kill(process.pid, "SIGKILL");
   return 1;
 }
 `;

@@ -50,6 +50,7 @@ pub const COMPANION_FILES: &[EmbeddedFile] = embedded!(
     "runtime/overlay-hook.mjs",
     "runtime/subprocess-options.mjs",
     "runtime/vitest-setup.mjs",
+    "runtime/worker-state.mjs",
 );
 
 /// The entry point that the runtime starts.

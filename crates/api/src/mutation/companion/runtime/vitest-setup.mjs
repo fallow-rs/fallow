@@ -3,6 +3,7 @@ import { afterEach, beforeEach, inject, vi } from "vitest";
 
 import { installFallowMutation } from "./global.mjs";
 import { setSubprocessPreload } from "./subprocess-options.mjs";
+import { captureWorkerState, workerStateChanged } from "./worker-state.mjs";
 
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
 const LOOP_BUDGET_KEY = "fallowLoopBudget";
@@ -116,41 +117,64 @@ const loadChildCoverage = async (hooksReady) => {
 // The setup file runs before the test file imports any source module. The
 // active mutant is set here at the top level, so a mutant in module scope
 // (a static mutant) is active when the module evaluates.
-const GLOBAL_BASELINE = Symbol.for("fallow.mutation.globalBaseline");
-// Variables that Vitest and the adapter set for each file or test.
-const OWN_ENV = /^(?:VITEST|NODE_OPTIONS$)/u;
-
-const envSnapshot = () =>
-  Object.fromEntries(Object.entries(process.env ?? {}).filter(([key]) => !OWN_ENV.test(key)));
+const WORKER_BASELINE = Symbol.for("fallow.mutation.workerBaseline");
+// Global keys that the runtime of the adapter changes itself.
+const OWN_GLOBALS = new Set([WORKER_BASELINE, REQUIRE_HOOK, "__fallowMutation"]);
 
 /**
- * True when a test file of an earlier run of this worker added a global or
- * changed the environment. The first file of the worker records the state.
+ * True when a test of an earlier run of this worker process left state
+ * outside the modules: a global, a prototype, the environment, a listener,
+ * the working directory, the exit code or a timer. The first test of the
+ * process records the state, after each setup file of the project ran.
  */
-const globalsChanged = () => {
-  const baseline = (globalThis[GLOBAL_BASELINE] ??= {
-    keys: new Set(Object.getOwnPropertyNames(globalThis)),
-    env: JSON.stringify(envSnapshot()),
-  });
-  return (
-    Object.getOwnPropertyNames(globalThis).some((key) => !baseline.keys.has(key)) ||
-    JSON.stringify(envSnapshot()) !== baseline.env
-  );
+const workerPolluted = () => {
+  const baseline = globalThis[WORKER_BASELINE];
+  if (baseline === undefined) {
+    Object.defineProperty(globalThis, WORKER_BASELINE, {
+      value: captureWorkerState(),
+      configurable: true,
+    });
+    return false;
+  }
+  return workerStateChanged(baseline, OWN_GLOBALS);
+};
+
+/**
+ * Removes the overlay files from the CommonJS cache of the process, so that a
+ * native `require` of a reused worker loads them again with the current
+ * mutant. `vi.resetModules()` resets only the modules of Vitest.
+ */
+const clearRequireCache = () => {
+  // Browser mode has no Node modules, so the import stays dynamic.
+  const createRequire = globalThis.process?.getBuiltinModule?.("node:module")?.createRequire;
+  if (typeof createRequire !== "function") return;
+  const cache = createRequire(import.meta.url).cache;
+  const overlay = inject(OVERLAY_KEY);
+  if (overlay === null || typeof overlay !== "object") return;
+  for (const [source, entry] of Object.entries(overlay)) {
+    delete cache[source];
+    if (typeof entry?.target === "string") delete cache[entry.target];
+  }
 };
 
 // A worker that the adapter keeps for more than one run still has the
 // modules of the earlier runs. Each test file then loads them again.
 const freshModules = inject(FRESH_MODULES_KEY) === true;
-if (freshModules) vi.resetModules();
+if (freshModules) {
+  vi.resetModules();
+  clearRequireCache();
+}
 const mutation = installFallowMutation();
 mutation.startFile();
 mutation.setActive(activeMutant());
 const requireHook = await installRequireHook();
 shareWithChildProcesses(requireHook.hooksReady, activeMutant(), null);
 const childCoverage = await loadChildCoverage(requireHook.hooksReady);
-const pollutedAtStart = freshModules && globalsChanged();
+
+let pollutedAtStart = null;
 
 beforeEach(() => {
+  pollutedAtStart ??= freshModules && workerPolluted();
   const active = activeMutant();
   mutation.setActive(active);
   mutation.setLoopBudget(inject(LOOP_BUDGET_KEY));
@@ -166,5 +190,5 @@ afterEach((context) => {
   context.task.meta.fallowHits = [...new Set([...hits, ...children.hits])];
   context.task.meta.fallowStaticHits = staticHits;
   context.task.meta.fallowLoaded = [...new Set([...requireHook.loaded, ...children.loaded])];
-  if (freshModules) context.task.meta.fallowPolluted = pollutedAtStart || globalsChanged();
+  if (freshModules) context.task.meta.fallowPolluted = pollutedAtStart || workerPolluted();
 });
