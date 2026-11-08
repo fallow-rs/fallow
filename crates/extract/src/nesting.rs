@@ -219,15 +219,8 @@ impl Scanner<'_> {
             }
             self.pos += 1;
             match byte {
-                b'\\' if self.dialect == Dialect::Style => self.skip_escape(),
-                b'(' if self.dialect == Dialect::Style && self.at_unquoted_url() => {
-                    self.skip_unquoted_url();
-                }
-                b'(' if self.dialect == Dialect::Style && self.at_color_function() => {
-                    self.open();
-                    self.colors.push(self.depth);
-                    self.max_colors = self.max_colors.max(self.colors.len());
-                }
+                b'\\' | b'(' | b'/'
+                    if self.dialect == Dialect::Style && self.scan_style_byte(byte) => {}
                 b'(' | b'[' | b'{' => {
                     self.open();
                     self.regex_allowed = true;
@@ -240,16 +233,13 @@ impl Scanner<'_> {
                 b')' | b']' | b'}' => {
                     self.depth = self.depth.saturating_sub(1);
                     self.regex_allowed = byte == b'}';
-                    while self.colors.last().is_some_and(|open| *open > self.depth) {
-                        self.colors.pop();
-                    }
+                    self.close_color_functions();
                 }
                 b'\'' | b'"' => {
                     self.skip_string(byte);
                     self.regex_allowed = false;
                 }
                 b'`' if self.dialect == Dialect::Script => self.skip_template_text(),
-                b'/' if self.dialect == Dialect::Style => self.skip_block_comment(),
                 b'/' => self.skip_slash(),
                 b' ' | b'\t' | b'\n' | b'\r' => {}
                 _ => self.regex_allowed = starts_expression(byte),
@@ -260,6 +250,31 @@ impl Scanner<'_> {
     fn open(&mut self) {
         self.depth += 1;
         self.max_depth = self.max_depth.max(self.depth);
+    }
+
+    /// Handles the stylesheet tokens that differ from script: an escape, a
+    /// `/* */` comment, an unquoted `url(` body and a color function. Returns
+    /// false for a `(` that opens a plain bracket.
+    fn scan_style_byte(&mut self, byte: u8) -> bool {
+        match byte {
+            b'\\' => self.skip_escape(),
+            b'/' => self.skip_block_comment(),
+            _ if self.at_unquoted_url() => self.skip_unquoted_url(),
+            _ if self.at_color_function() => {
+                self.open();
+                self.colors.push(self.depth);
+                self.max_colors = self.max_colors.max(self.colors.len());
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Ends the color functions that a closing bracket closed.
+    fn close_color_functions(&mut self) {
+        while self.colors.last().is_some_and(|open| *open > self.depth) {
+            self.colors.pop();
+        }
     }
 
     /// Skips a comment, a regex literal, or a division operator.
