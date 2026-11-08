@@ -3,22 +3,54 @@ import { GLOBAL_NAME } from "../generated-protocol.mjs";
 
 const CONTROL = Symbol.for("fallow.mutation.control");
 
-/** The `name` of the error that ends a test whose mutant runs past the loop budget. */
+/**
+ * The `name` of the error that ends a test of a mutant run past the loop
+ * budget, measured in CPU time of the test thread.
+ */
 export const LOOP_TIMEOUT_NAME = "FallowMutationLoopTimeout";
 
-// `a` reads the clock once per this many evaluations of the active mutant.
+/**
+ * The `name` of the same error when the runtime has no thread CPU clock and
+ * measures wall time. Host load can use wall time, so the API retries it.
+ */
+export const WALL_LOOP_TIMEOUT_NAME = "FallowMutationWallLoopTimeout";
+
+// `a` reads the clock once per this many site evaluations of a mutant run.
 // A clock read on each evaluation would slow a hot loop that ends.
 const LOOP_CHECK_MASK = 0x7f;
 
-// The real clock, read when the module loads. A test with fake timers can
-// replace `performance` or its `now` method, and fake time must not reach
-// the loop budget. The setup file loads this module before any test code.
-const realNow = performance.now.bind(performance);
+// The clock of the loop budget, in ms. The CPU time of the test thread is
+// the first choice: a test that waits uses none, and other load on the host
+// does not count. `process.cpuUsage` is no fallback, because it adds the
+// time of every thread of the process. A runtime without
+// `process.threadCpuUsage` (Node before 22.19 and 23.9, or browser mode)
+// uses the wall clock. The functions are read when the module loads, so
+// fake timers of a test cannot replace them. The setup file loads this
+// module before any test code.
+const clock = (() => {
+  const proc = globalThis.process;
+  if (typeof proc?.threadCpuUsage === "function") {
+    const usage = proc.threadCpuUsage.bind(proc);
+    return {
+      read: () => {
+        const { user, system } = usage();
+        return (user + system) / 1000;
+      },
+      errorName: LOOP_TIMEOUT_NAME,
+    };
+  }
+  const perf = globalThis.performance;
+  if (typeof perf?.now === "function") {
+    return { read: perf.now.bind(perf), errorName: WALL_LOOP_TIMEOUT_NAME };
+  }
+  return null;
+})();
 
-/** Gives the real time in ms, or null when the clock fails. */
+/** Gives the clock value in ms, or null without a working clock. */
 const readClock = () => {
+  if (clock === null) return null;
   try {
-    return realNow();
+    return clock.read();
   } catch {
     return null;
   }
@@ -26,18 +58,19 @@ const readClock = () => {
 
 const loopTimeout = (budgetMs) => {
   const error = new Error(
-    `Test timed out in ${budgetMs}ms: the active mutant still ran after the loop budget`,
+    `Test timed out in ${budgetMs}ms: the mutant run still evaluated instrumented code after the loop budget`,
   );
-  error.name = LOOP_TIMEOUT_NAME;
+  error.name = clock?.errorName ?? LOOP_TIMEOUT_NAME;
   return error;
 };
 
 const createRuntime = () => {
   // `running` counts the tests that started and did not finish. Concurrent
   // tests overlap, so a hit belongs to a test while any test runs.
-  // `loopBudget` is the time in ms that the tests of one file can run with
-  // the active mutant. `loopSpent` is the test time of the earlier tests of
-  // the file, and `testStarted` the start of the current test time.
+  // `loopBudget` is the CPU time in ms that the tests of one file can use
+  // in a mutant run. `loopSpent` is the CPU time of the earlier tests
+  // of the file, and `testStarted` the clock value at the start of the
+  // current test time.
   const state = {
     active: null,
     running: 0,
@@ -46,17 +79,18 @@ const createRuntime = () => {
     loopBudget: null,
     loopSpent: 0,
     testStarted: 0,
-    activeHits: 0,
+    evaluations: 0,
   };
   // A synchronous endless loop blocks the test worker, so no timer can stop
-  // it. When the loop passes through the active mutant, this check ends it
-  // with an error that the adapter reports as a timeout. The companion then
-  // stays alive. A loop that does not pass through the mutant waits for the
-  // watchdog of the API.
+  // it. In a mutant run, each instrumented site calls `a` on each
+  // evaluation. When a loop runs through any instrumented code, this check
+  // ends it with an error that the adapter reports as a timeout, and the
+  // companion stays alive. A loop through code with no site (test code or a
+  // dependency) waits for the watchdog of the API.
   const checkLoop = () => {
-    state.activeHits += 1;
-    if ((state.activeHits & LOOP_CHECK_MASK) !== 0) return;
-    if (state.loopBudget === null || state.running === 0) return;
+    if (state.loopBudget === null) return;
+    state.evaluations += 1;
+    if ((state.evaluations & LOOP_CHECK_MASK) !== 0 || state.running === 0) return;
     const now = readClock();
     if (now === null || state.loopSpent + now - state.testStarted <= state.loopBudget) return;
     throw loopTimeout(state.loopBudget);
@@ -66,13 +100,15 @@ const createRuntime = () => {
   // error that `a` throws is the loop timeout.
   const runtime = {
     a: (id) => {
+      const current = state.active;
+      if (current === null) return false;
       let active;
       try {
-        active = state.active !== null && state.active === id;
+        active = current === id;
       } catch {
         return false;
       }
-      if (active) checkLoop();
+      checkLoop();
       return active;
     },
     c: (id) => {
@@ -101,7 +137,7 @@ const createRuntime = () => {
     startTest: () => {
       if (state.running === 0) {
         state.testStarted = readClock() ?? 0;
-        state.activeHits = 0;
+        state.evaluations = 0;
       }
       state.running += 1;
     },

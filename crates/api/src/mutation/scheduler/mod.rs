@@ -32,7 +32,7 @@ mod window;
 use classification::{attempt_record, classify, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use targets::{config_targets, job_targets};
-use window::{loop_budget_ms, scaled_ms, timeout_ms};
+use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
 mod stored;
 
 pub use stored::{CachedResult, OutcomeJournal, ResultLookup};
@@ -300,8 +300,8 @@ struct Job {
     /// outside target mode.
     targets: Vec<String>,
     timeout_ms: u64,
-    /// The test time after which the companion ends a test that still runs
-    /// the active mutant: `1.5 *` the covering-test time plus
+    /// The test CPU time after which the companion ends a test that still
+    /// evaluates instrumented code: `1.5 *` the covering-test time plus
     /// [`window::LOOP_BUDGET_BASE_MS`].
     loop_budget_ms: u64,
     /// `1.5 *` the setup time of the covering test files, rounded up. Only
@@ -390,8 +390,8 @@ struct Attempt {
     /// The covering tests that the companion left out, because they did not
     /// pass in its dry run or in a control run.
     dropped_tests: Vec<String>,
-    /// A failed control run decided the status, so a retry in a new
-    /// companion cannot change it.
+    /// A failed control run or a loop timeout of a short job decided the
+    /// status, so a retry in a new companion cannot change it.
     settled: bool,
 }
 
@@ -459,17 +459,6 @@ impl Attempt {
 /// so does a run path that executes no test at all.
 fn is_load_kill(result: &RunResult, status: MutantStatus, killed_by: Option<&String>) -> bool {
     status == MutantStatus::Killed && killed_by.is_none() && result.tests_executed == 0
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "durations are finite and non-negative milliseconds"
-)]
-fn round_ms(value: Option<f64>) -> Option<u64> {
-    value
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .map(|value| value.round() as u64)
 }
 
 /// A companion that has sent `ready` and a dry run.
@@ -679,6 +668,9 @@ impl<'a> Worker<'a> {
                         killing_tests,
                         kill_matrix_complete: kill_matrix_complete && dropped_tests.is_empty(),
                         failure_kind: kind.or(decided.failure_kind),
+                        settled: status == MutantStatus::Timeout
+                            && result.loop_timeout
+                            && settles_loop_timeout(job.loop_budget_ms),
                         ..decided
                     }
                 }
@@ -1631,7 +1623,7 @@ fn record_first_runs(
     for (job, attempt) in attempts {
         let suspect = match attempt.status {
             MutantStatus::Survived => Some(job.clone().for_confirmation()),
-            MutantStatus::Timeout => Some(job.clone().with_doubled_timeout()),
+            MutantStatus::Timeout if !attempt.settled => Some(job.clone().with_doubled_timeout()),
             _ => None,
         };
         if let Some(suspect) = suspect {

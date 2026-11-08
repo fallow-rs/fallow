@@ -9,6 +9,9 @@ const FAULTS = "test/faults.test.ts";
 const CONCURRENT = "test/concurrent.test.ts";
 const UNHANDLED = "test/unhandled.test.ts";
 const id = (name, file = FILE) => `${file}::${name}`;
+// Without a thread CPU clock (Node before 22.19 and 23.9), a loop timeout
+// uses wall time, and the run result has no `loop_timeout` flag.
+const HAS_THREAD_CLOCK = typeof process.threadCpuUsage === "function";
 const withoutMessage = ({ message: _message, ...entry }) => entry;
 
 for (const { packageName, version } of VITEST_MAJORS) {
@@ -200,6 +203,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
       const started = performance.now();
       const result = await run("m5", [id("pauses", FAULTS)], 500);
       assert.equal(result.status, "timeout", JSON.stringify(result));
+      assert.equal(result.loop_timeout, undefined, "the test timeout is no loop timeout");
       assert.equal(result.killed_by, null);
       assert.deepEqual(result.tests.map(withoutMessage), [
         { test_id: id("pauses", FAULTS), status: "fail", failure_kind: "timeout" },
@@ -221,6 +225,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
           bail: true,
         });
         assert.equal(result.status, "timeout", JSON.stringify(result));
+        assert.equal(result.loop_timeout, HAS_THREAD_CLOCK || undefined);
         assert.equal(result.killed_by, null);
         assert.deepEqual(result.tests.map(withoutMessage), [
           { test_id: id("spins", FAULTS), status: "fail", failure_kind: "timeout" },
@@ -228,6 +233,23 @@ for (const { packageName, version } of VITEST_MAJORS) {
         assert.ok(performance.now() - started < 10_000, "the run waited past the loop budget");
         const control = await run(null, [id("spins", FAULTS)]);
         assert.equal(control.status, "survived", JSON.stringify(control));
+      },
+    );
+
+    test(
+      "an endless loop through other instrumented code times out at loop_budget_ms",
+      { timeout: 20_000 },
+      async () => {
+        const result = await request({
+          type: "run",
+          mutant_id: "m13",
+          test_ids: [id("drains", FAULTS)],
+          timeout_ms: 60_000,
+          loop_budget_ms: 200,
+          bail: true,
+        });
+        assert.equal(result.status, "timeout", JSON.stringify(result));
+        assert.equal(result.loop_timeout, HAS_THREAD_CLOCK || undefined);
       },
     );
 

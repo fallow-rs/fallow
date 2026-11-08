@@ -18,4 +18,13 @@ export function spin(limit: number): number {
   return count;
 }
 
+export function drain(limit: number): number {
+  const step = 1;
+  let count = 0;
+  while (count < limit) {
+    count += step;
+  }
+  return count;
+}
+
 export const READY = true;

@@ -223,6 +223,7 @@ fn run_result(run: &RunRequest, status: RunStatus, killed_by: Option<&str>) -> R
         tests_executed: tests.len(),
         tests,
         unhandled_errors: Vec::new(),
+        loop_timeout: false,
     })
 }
 
@@ -477,6 +478,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 tests_executed: 0,
                 tests: Vec::new(),
                 unhandled_errors: Vec::new(),
+                loop_timeout: false,
             })
         }),
         ("one of two tests", |run| {
@@ -493,6 +495,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                     message: None,
                 }],
                 unhandled_errors: Vec::new(),
+                loop_timeout: false,
             })
         }),
         ("a failed test", |run| {
@@ -517,6 +520,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                     },
                 ],
                 unhandled_errors: Vec::new(),
+                loop_timeout: false,
             })
         }),
         ("another mutant", |run| {
@@ -533,6 +537,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 tests_executed: 0,
                 tests: Vec::new(),
                 unhandled_errors: Vec::new(),
+                loop_timeout: false,
             })
         }),
     ];
@@ -576,6 +581,7 @@ fn a_kill_by_an_unhandled_error_has_no_killer() {
                     message: "late rejection".to_owned(),
                     file: Some("test/a.test.ts".to_owned()),
                 }],
+                loop_timeout: false,
             }))
         },
     ));
@@ -701,6 +707,72 @@ fn a_watchdog_timeout_is_timeout_and_the_next_mutant_gets_a_new_companion() {
         Some("m1"),
         "the retry runs the timed-out mutant"
     );
+}
+
+/// A `timeout` result that the loop budget of the request decided.
+fn loop_timeout(run: &RunRequest) -> Response {
+    let Response::Run(result) = run_result(run, RunStatus::Timeout, None) else {
+        unreachable!("run_result gives a run response")
+    };
+    Response::Run(RunResult {
+        loop_timeout: true,
+        ..result
+    })
+}
+
+#[test]
+fn a_loop_timeout_of_short_covering_tests_gets_no_retry() {
+    let spawner = FakeSpawner::new(script(|_| standard_dry(), |_, run| Ok(loop_timeout(run))));
+    let outcome = run_schedule(&spawner, &plan(&["m2"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Timeout);
+    assert!(!outcome.results["m2"].retried);
+    assert_eq!(
+        spawner.runs().len(),
+        1,
+        "the loop budget of 102 ms of tests counts thread CPU time, so host load cannot reach it"
+    );
+}
+
+#[test]
+fn a_survivor_with_a_loop_timeout_flag_still_gets_its_confirmation() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| {
+            let Response::Run(result) = run_result(run, RunStatus::Survived, None) else {
+                unreachable!("run_result gives a run response")
+            };
+            Ok(Response::Run(RunResult {
+                loop_timeout: true,
+                ..result
+            }))
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m2"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Survived);
+    assert!(
+        outcome.results["m2"].retried,
+        "only a timeout status settles"
+    );
+}
+
+#[test]
+fn a_loop_timeout_of_slow_covering_tests_gets_the_doubled_retry() {
+    let spawner = FakeSpawner::new(script(
+        |_| DryRunResult {
+            tests: vec![
+                test("t1", 2.0, TestStatus::Pass),
+                test("t2", 400.0, TestStatus::Pass),
+            ],
+            ..standard_dry()
+        },
+        |_, run| Ok(loop_timeout(run)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m2"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Timeout);
+    assert!(outcome.results["m2"].retried);
+    let runs = spawner.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[1].1.loop_budget_ms, Some(2 * (603 + 500)));
 }
 
 #[test]
@@ -2068,6 +2140,7 @@ fn load_failure(run: &RunRequest) -> Response {
             message: "createSpecification failed\n    at stack".to_owned(),
             file: None,
         }],
+        loop_timeout: false,
     })
 }
 
@@ -2163,6 +2236,7 @@ fn t2_fails_in_control(run: &RunRequest) -> Response {
         tests_executed: tests.len(),
         tests,
         unhandled_errors: Vec::new(),
+        loop_timeout: false,
     })
 }
 
@@ -2494,6 +2568,7 @@ fn a_timeout_of_the_self_check_is_reported_as_a_timeout_not_as_a_broken_run_path
                 tests_executed: 0,
                 tests: Vec::new(),
                 unhandled_errors: Vec::new(),
+                loop_timeout: false,
             }))
         }),
         ("a watchdog timeout", |_| Err(LinkFault::Timeout)),
@@ -2579,6 +2654,7 @@ fn only_t1_passes_in_control(run: &RunRequest) -> Response {
         tests_executed: tests.len(),
         tests,
         unhandled_errors: Vec::new(),
+        loop_timeout: false,
     })
 }
 
