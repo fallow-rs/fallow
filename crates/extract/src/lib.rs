@@ -464,3 +464,5 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
 
 #[cfg(all(test, not(miri)))]
 mod tests;
+#[cfg(all(test, not(miri)))]
+mod unicode_span_oracle;

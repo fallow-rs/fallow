@@ -239,6 +239,25 @@ test("the oracle seeds workflow runs the permutation oracle seeds", () => {
   );
 });
 
+test("the oracle seeds workflow runs the Unicode span tests with a wide case range", () => {
+  const workflow = readWorkflow(".github/workflows/oracle-seeds.yml");
+  const job = indentedBlock(workflow, "unicode-span-seeds", 2);
+
+  assert.match(job, /permissions:\n      contents: read/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(job, /--lib unicode_span_oracle/);
+  assert.match(job, /export PROPTEST_CASES=/);
+  assert.match(job, /export PROPTEST_RNG_SEED=/);
+  assert.match(job, /minimal failing input[\s\S]*GITHUB_STEP_SUMMARY/, "a failure prints the case");
+  assert.match(job, /exit "\$status"/);
+  assert.doesNotMatch(
+    readWorkflow(".github/workflows/ci.yml"),
+    /PROPTEST_RNG_SEED|PROPTEST_CASES/,
+    "pull request CI keeps the fixed seed and the default case count",
+  );
+});
+
+
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);
