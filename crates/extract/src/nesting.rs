@@ -285,9 +285,12 @@ impl Scanner<'_> {
         let Some(name) = open.checked_sub(3).map(|start| &self.bytes[start..open]) else {
             return false;
         };
-        let starts_word = open
-            .checked_sub(4)
-            .is_none_or(|before| !is_css_name_byte(self.bytes[before]));
+        // A name byte or an escape before `url` makes a longer name, such as
+        // `a\url(` or `\61 url(`, which is a plain function.
+        let starts_word = open.checked_sub(4).is_none_or(|before| {
+            let byte = self.bytes[before];
+            !is_css_name_byte(byte) && byte != b'\\' && self.escape_whitespace_len(before) == 0
+        });
         let body = self.bytes[self.pos..].trim_ascii_start();
         name.eq_ignore_ascii_case(b"url")
             && starts_word
@@ -304,11 +307,12 @@ impl Scanner<'_> {
             while start > 0 && is_css_name_byte_or_escape(self.bytes[start - 1]) {
                 start -= 1;
             }
-            match start.checked_sub(1).map(|before| self.bytes[before]) {
-                // The whitespace after a hex escape belongs to the name.
-                Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0C) if self.ends_hex_escape(start - 1) => {
-                    start -= 1;
-                }
+            // The whitespace after a hex escape belongs to the name.
+            match start
+                .checked_sub(1)
+                .map(|before| self.escape_whitespace_len(before))
+            {
+                Some(len) if len > 0 => start -= len,
                 _ => break,
             }
         }
@@ -317,6 +321,21 @@ impl Scanner<'_> {
             || COLOR_FUNCTIONS
                 .iter()
                 .any(|color| name.eq_ignore_ascii_case(color))
+    }
+
+    /// The length of the whitespace that ends at `last` when it ends a hex
+    /// escape such as `\67 `, else 0. CSS reads `\r\n` as one whitespace, so
+    /// it has length 2.
+    fn escape_whitespace_len(&self, last: usize) -> usize {
+        match self.bytes[last] {
+            b'\n'
+                if last > 0 && self.bytes[last - 1] == b'\r' && self.ends_hex_escape(last - 1) =>
+            {
+                2
+            }
+            b' ' | b'\t' | b'\n' | b'\r' | 0x0C if self.ends_hex_escape(last) => 1,
+            _ => 0,
+        }
     }
 
     /// Whether a hex escape such as `\67` ends right before `end`.
@@ -598,6 +617,21 @@ mod tests {
     fn an_escaped_function_name_counts_as_a_color_function() {
         assert_eq!(color_depth_of(".a{x:r\\67 b(r\\gb(\\72\tgb(1)))}"), 3);
         assert_eq!(color_depth_of(".a{x:f\\(1)}"), 0);
+        // CSS reads `\r\n` after a hex escape as one whitespace.
+        assert_eq!(color_depth_of(".a{x:r\\67\r\nb(r\\67\r\nb(1))}"), 2);
+    }
+
+    /// An escape before `url` makes a longer name such as `aurl`, a plain
+    /// function whose body lightningcss parses. Its color functions count.
+    #[test]
+    fn an_escaped_name_that_ends_in_url_is_not_a_url() {
+        let nested = "rgb(".repeat(3);
+        for prefix in ["a\\", "\\61 ", "\\61\r\n", "\\61\t"] {
+            let source = format!(".a{{x:{prefix}url({nested}");
+            // The escaped name itself can also spell a color function.
+            assert!(color_depth_of(&source) >= 3, "{prefix:?}");
+        }
+        assert_eq!(color_depth_of(".a{x:url(rgb(rgb(}"), 0);
     }
 
     #[test]
