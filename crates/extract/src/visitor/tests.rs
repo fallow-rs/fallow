@@ -18217,3 +18217,90 @@ fn this_in_function_with_own_this_gives_no_class_this_fact() {
         );
     }
 }
+
+#[test]
+fn this_read_in_function_with_own_this_gives_no_this_member_access() {
+    // Issue #4351: a bare `this.<member>` read in a nested `function` or an
+    // object-literal method inside a class method is not a read on the class
+    // instance. A function that the code gives the instance keeps the `this`
+    // of the method: `.bind(this)`, `.call(this)` or `.apply(this)` on the
+    // function or its name, a call that also passes `this`, an assignment to a
+    // `this.<field>` or a class field, and a `this` parameter with a named
+    // type. This holds for the bare read and for the class `this` fact of a
+    // chain.
+    let info = parse(
+        r"
+        import { Floor } from './floor';
+
+        export class Viewer extends Floor {
+            mark(): void {
+                function g(this: unknown) {
+                    this.inFunction();
+                }
+                const handlers = {
+                    run() {
+                        this.inObjectMethod();
+                    },
+                };
+                const visit = () => this.inArrow();
+                setTimeout(function () { this.inBound(); this.find().inBoundChain(); }.bind(this), 0);
+                (function () { this.inCalled(); }).call(this);
+                (function () { this.inApplied(); }).apply(this, []);
+                (function () { this.inCalledOther(); }).call({});
+                function named() { this.inNamedCalled(); }
+                named.call(this);
+                const later = function () { this.inNamedBound(); };
+                setTimeout(later.bind(this), 0);
+                [1].forEach(function () { this.inThisArg(); }, this);
+                Object.defineProperty(this, 'x', { get() { return this.inDescriptor(); } });
+                this.handler = function () { this.inThisField(); };
+                function typed(this: Viewer) { this.inTypedThis(); }
+                el.onclick = function () { this.inElementHandler(); };
+                this.inMethod();
+            }
+            field = function () { this.inClassField(); };
+        }
+        ",
+    );
+
+    let reads_this = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "this" && access.member == member)
+    };
+    for member in [
+        "inArrow",
+        "inBound",
+        "inCalled",
+        "inApplied",
+        "inNamedCalled",
+        "inNamedBound",
+        "inThisArg",
+        "inDescriptor",
+        "inThisField",
+        "inTypedThis",
+        "inClassField",
+        "inMethod",
+    ] {
+        assert!(reads_this(member), "{member}: {:?}", info.member_accesses);
+    }
+    for member in [
+        "inFunction",
+        "inObjectMethod",
+        "inCalledOther",
+        "inElementHandler",
+    ] {
+        assert!(!reads_this(member), "{member}: {:?}", info.member_accesses);
+    }
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::ClassThisMemberAccess(access)
+                if access.class_local_name == "Viewer"
+                    && access.object == "this.find()"
+                    && access.member == "inBoundChain"
+        )),
+        "{:?}",
+        info.semantic_facts
+    );
+}

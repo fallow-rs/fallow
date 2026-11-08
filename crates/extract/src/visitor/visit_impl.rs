@@ -116,6 +116,8 @@ mod visit_svelte_events;
 mod visit_sveltekit_load;
 #[path = "visit_impl_taint_sources.rs"]
 mod visit_taint_sources;
+#[path = "visit_impl_this_assignments.rs"]
+mod visit_this_assignments;
 
 pub(super) use visit_chain_names::jsx_member_object_name;
 pub use visit_chain_names::push_member_tag_accesses;
@@ -2269,6 +2271,9 @@ impl<'a> ModuleInfoExtractor {
                 member: member.to_string(),
             });
         }
+        if self.defer_independent_this_read(object_name, member) {
+            return;
+        }
         // Qualify a `this.<field>` receiver with the enclosing class scope so
         // it resolves against the same class's binding key (issue #1821);
         // stripped back to `this.` before emission. A bare `this` object and
@@ -3212,40 +3217,6 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    /// Handle `this.member = ...` / `this.#member = ...` assignments: record the
-    /// member access and propagate the instance-binding target name from a
-    /// `new Class()` RHS, an identifier bound to a known class, and nested
-    /// binding targets. `member_name` is the property spelling (`dep` for a
-    /// public field, `#dep` for a `#`-private field, issue #1821), so the
-    /// recorded key is `this.<member_name>` and matches the receiver key
-    /// `static_member_object_name` produces for the same field.
-    fn handle_this_member_assignment(
-        &mut self,
-        member_name: &str,
-        expr: &AssignmentExpression<'a>,
-    ) {
-        self.member_accesses.push(MemberAccess {
-            object: "this".to_string(),
-            member: member_name.to_string(),
-        });
-        if let Expression::NewExpression(new_expr) = &expr.right
-            && let Expression::Identifier(callee) = &new_expr.callee
-            && !super::helpers::is_builtin_constructor(callee.name.as_str())
-        {
-            let key = self.this_member_key(member_name);
-            self.insert_class_binding_target(key, callee.name.to_string());
-        } else if let Expression::Identifier(ident) = &expr.right
-            && let Some(target_name) = self.binding_target_names.get(ident.name.as_str()).cloned()
-        {
-            let key = self.this_member_key(member_name);
-            self.binding_target_names.insert(key, target_name);
-        }
-        if let Expression::Identifier(ident) = &expr.right {
-            let target = self.this_member_key(member_name);
-            self.copy_nested_binding_targets(ident.name.as_str(), target.as_str());
-        }
-    }
-
     fn invalidate_assignment_target_proof(&mut self, target: &AssignmentTarget<'_>) {
         match target {
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
@@ -3659,6 +3630,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         {
             self.capture_hardcoded_secret_literal_sink(&name.text(), value, prop.span);
         }
+        self.record_this_bound_function(prop.value.as_ref());
 
         walk::walk_property_definition(self, prop);
     }
@@ -3754,10 +3726,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         let constructor_function = self.active_constructor_function.replace(func.span);
-        let independent_this = self.class_method_function_span != Some(func.span);
-        if independent_this {
-            self.independent_this_depth += 1;
-        }
+        let function_this = self.enter_function_this(func);
         self.record_next_function_param_sources(func);
         let type_parameter_scope_pushed = func
             .type_parameters
@@ -3809,9 +3778,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.pop_function_declaration_scope();
         self.direct_object_binding_function_scopes.pop();
         self.pop_direct_object_binding_scope();
-        if independent_this {
-            self.independent_this_depth -= 1;
-        }
+        self.exit_function_this(function_this);
         self.active_constructor_function = constructor_function;
     }
 
@@ -4364,6 +4331,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_declaration(decl);
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
+            self.record_declarator_function_name(declarator);
         }
         walk::walk_variable_declaration(self, decl);
     }
@@ -4387,6 +4355,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         self.record_angular_entry_component_refs(prop);
+        self.record_property_function_name(prop);
 
         walk::walk_object_property(self, prop);
     }
@@ -4491,6 +4460,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.record_callee_use(&expr.callee, expr.span.start, false);
         self.record_imported_call_site(expr);
+        self.record_this_binding_call(expr);
 
         walk::walk_call_expression(self, expr);
     }
@@ -4718,6 +4688,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             if matches!(member.object, Expression::ThisExpression(_)) {
                 self.handle_this_member_assignment(member.property.name.as_str(), expr);
             }
+            self.record_member_assigned_function(member, &expr.right);
         }
         if !matches!(expr.left, AssignmentTarget::StaticMemberExpression(_))
             && Self::assignment_target_mutates_cjs_exports(&expr.left)

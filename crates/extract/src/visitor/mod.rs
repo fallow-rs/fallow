@@ -1,6 +1,7 @@
 mod callee_uses;
 mod declarations;
 mod helpers;
+mod independent_this;
 mod local_class_heritage;
 mod remap;
 mod requirements;
@@ -23,14 +24,13 @@ use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    AngularTemplateMemberAccessFact, ClassThisMemberAccessFact, ClassThisWholeObjectUseFact,
-    ComputedEnumKeyUseFact, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
-    ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
-    FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact, ImportInfo, ImportedName,
-    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    PlaywrightFixtureDefinitionFact, PlaywrightTestBindingFact, QualifiedClassMemberAccessFact,
-    ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
-    TypedPropertyMemberAccessFact, VisibilityTag,
+    AngularTemplateMemberAccessFact, ComputedEnumKeyUseFact, DynamicImportInfo,
+    DynamicImportPattern, ExportInfo, ExportName, ExportedObjectInstancePropertyFact,
+    FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
+    FactoryReturnObjectPropertyAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureDefinitionFact,
+    PlaywrightTestBindingFact, QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo,
+    SemanticFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use crate::{js_text::JsText, suppress::ParsedSuppressions};
 use fallow_types::extract::{
@@ -880,6 +880,7 @@ pub(crate) struct ModuleInfoExtractor {
     factory_property_classes: FxHashMap<Span, FxHashMap<String, BindingClassProof>>,
     independent_this_depth: usize,
     class_method_function_span: Option<Span>,
+    independent_this: independent_this::IndependentThisState,
     this_result_locals: FxHashMap<String, Vec<visit_impl::visit_signature::ThisResultLocal>>,
     /// String `const` locals that a dynamic `import()` can name.
     const_specifiers: visit_impl::visit_dynamic_imports::ConstSpecifierScopes,
@@ -1707,56 +1708,11 @@ impl ModuleInfoExtractor {
     pub(crate) fn take_template_expression_usage(&mut self) -> (Vec<MemberAccess>, Vec<String>) {
         self.resolve_typed_destructure_bindings();
         self.resolve_bound_member_accesses();
-        self.strip_this_scope_qualifiers();
+        self.finish_this_reads();
         (
             std::mem::take(&mut self.member_accesses),
             std::mem::take(&mut self.whole_object_uses),
         )
-    }
-
-    /// Preserve exact enclosing-class provenance before internal `this@<id>`
-    /// qualifiers are removed for legacy consumers.
-    fn record_class_this_facts(
-        &mut self,
-        class: &oxc_ast::ast::Class<'_>,
-        scope_id: u32,
-        member_access_start: usize,
-        whole_object_start: usize,
-    ) {
-        let prefix = format!("this@{scope_id}.");
-        let class_local_name = class
-            .id
-            .as_ref()
-            .map_or_else(|| "default".to_string(), |id| id.name.to_string());
-
-        let member_facts = self.member_accesses[member_access_start..]
-            .iter()
-            .filter_map(|access| {
-                let rest = access.object.strip_prefix(&prefix)?;
-                Some(SemanticFact::ClassThisMemberAccess(
-                    ClassThisMemberAccessFact {
-                        class_local_name: class_local_name.clone(),
-                        object: format!("this.{rest}"),
-                        member: access.member.clone(),
-                    },
-                ))
-            })
-            .collect::<Vec<_>>();
-        self.semantic_facts.extend(member_facts);
-
-        let whole_object_facts = self.whole_object_uses[whole_object_start..]
-            .iter()
-            .filter_map(|object| {
-                let rest = object.strip_prefix(&prefix)?;
-                Some(SemanticFact::ClassThisWholeObjectUse(
-                    ClassThisWholeObjectUseFact {
-                        class_local_name: class_local_name.clone(),
-                        object: format!("this.{rest}"),
-                    },
-                ))
-            })
-            .collect::<Vec<_>>();
-        self.semantic_facts.extend(whole_object_facts);
     }
 
     fn direct_object_binding_targets(&self, object: &str) -> Option<(&FxHashSet<String>, u64)> {
@@ -3561,7 +3517,7 @@ impl ModuleInfoExtractor {
         // Last: every resolution pass above relies on the per-class `this@<id>.`
         // keys, so the qualifier is stripped only once they have run, before any
         // spelling is emitted into `ModuleInfo`. See issue #1821 (Fix B).
-        self.strip_this_scope_qualifiers();
+        self.finish_this_reads();
         namespace_object_aliases
     }
 

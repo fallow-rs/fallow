@@ -1,6 +1,7 @@
-//! Class scope qualifiers of `this` receivers (issue #1821).
+//! Class scope qualifiers and class facts of `this` receivers (issue #1821).
 
 use super::ModuleInfoExtractor;
+use crate::{ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, SemanticFact};
 
 impl ModuleInfoExtractor {
     /// Build the class-scoped `binding_target_names` key for a `this.<suffix>`
@@ -46,6 +47,58 @@ impl ModuleInfoExtractor {
         spelling.to_string()
     }
 
+    /// Preserve exact enclosing-class provenance before internal `this@<id>`
+    /// qualifiers are removed for legacy consumers.
+    pub(super) fn record_class_this_facts(
+        &mut self,
+        class: &oxc_ast::ast::Class<'_>,
+        scope_id: u32,
+        member_access_start: usize,
+        whole_object_start: usize,
+    ) {
+        let prefix = format!("this@{scope_id}.");
+        let class_local_name = class
+            .id
+            .as_ref()
+            .map_or_else(|| "default".to_string(), |id| id.name.to_string());
+
+        let member_facts = self.member_accesses[member_access_start..]
+            .iter()
+            .filter_map(|access| {
+                let rest = access.object.strip_prefix(&prefix)?;
+                Some(SemanticFact::ClassThisMemberAccess(
+                    ClassThisMemberAccessFact {
+                        class_local_name: class_local_name.clone(),
+                        object: format!("this.{rest}"),
+                        member: access.member.clone(),
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        self.semantic_facts.extend(member_facts);
+
+        let whole_object_facts = self.whole_object_uses[whole_object_start..]
+            .iter()
+            .filter_map(|object| {
+                let rest = object.strip_prefix(&prefix)?;
+                Some(SemanticFact::ClassThisWholeObjectUse(
+                    ClassThisWholeObjectUseFact {
+                        class_local_name: class_local_name.clone(),
+                        object: format!("this.{rest}"),
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        self.semantic_facts.extend(whole_object_facts);
+    }
+
+    /// Give credit to the held bare `this` reads (issue #4351), then strip the
+    /// scope qualifiers. Called last, before any spelling is emitted.
+    pub(super) fn finish_this_reads(&mut self) {
+        self.resolve_independent_this_reads();
+        self.strip_this_scope_qualifiers();
+    }
+
     /// Rewrite every internal `this@<id>.` scope qualifier (issue #1821) back to
     /// a plain `this.` across the emitted `member_accesses` and
     /// `whole_object_uses`, so no persisted spelling and no downstream consumer
@@ -54,7 +107,7 @@ impl ModuleInfoExtractor {
     /// ever sees the qualifier. Called last in `finalize_resolution_phase`, after
     /// every resolution pass that relies on the per-class keys, so the strip is
     /// invariant across the `into_module_info` and `merge_into` (SFC) paths.
-    pub(super) fn strip_this_scope_qualifiers(&mut self) {
+    fn strip_this_scope_qualifiers(&mut self) {
         for access in &mut self.member_accesses {
             strip_this_scope_qualifier(&mut access.object);
         }
