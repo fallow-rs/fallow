@@ -225,6 +225,33 @@ Keep benchmark names globally unique across `crates/*/benches/*.rs`.
 Benchmarks in `programmatic_stable` must use the `stable_` prefix because they
 are part of the fast PR regression signal.
 
+## Mutation runs on Vitest projects
+
+`scripts/mutation-bench.mjs` measures `fallow mutation` on three public Vitest
+projects at pinned commits (unjs/defu, unjs/cookie-es and unjs/ufo) and checks
+the targets of issue #4341. It needs `git`, `pnpm` and `/usr/bin/time`, and
+it does not run in pull-request CI.
+
+```bash
+cargo build --release -p fallow-cli --bin fallow
+cp target/release/fallow /tmp/fallow-candidate
+node scripts/mutation-bench.mjs --bin /tmp/fallow-candidate --base <base fallow> --runs 3 --check
+```
+
+- Each run is `fallow mutation --all --concurrency 2 --no-cache --format
+  json` in a clone under `target/mutation-bench` (`--workdir` changes it).
+  The first run of a fresh clone fills the caches of Vite, so compare the
+  later runs.
+- With `--base`, the base binary and `--bin` run as interleaved pairs, so
+  that other work on the host changes both sides. Copy each binary out of
+  `target/` first, because a build replaces it.
+- The CPU time is user plus system time of the run and its child processes,
+  from `time -p`. Under host load, CPU time is more stable than wall time,
+  but a busy host still raises it. Record the load with the results.
+- Each run must give the verdicts of the first run. A difference, and with
+  `--check` a missed target, makes the exit code 1. `--json` prints each
+  run as JSON.
+
 ## Validation
 
 Run this before changing benchmark matrices or bench targets:
