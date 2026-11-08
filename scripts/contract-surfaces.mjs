@@ -19,6 +19,7 @@ export const MUTATION_COMPANION_FILES = Object.freeze([
   "adapters/child-process.mjs",
   "adapters/common.mjs",
   "adapters/node-test.mjs",
+  "adapters/vitest-reuse.mjs",
   "adapters/vitest.mjs",
   "companion.mjs",
   "generated-protocol.mjs",
@@ -33,6 +34,7 @@ export const MUTATION_COMPANION_FILES = Object.freeze([
   "runtime/overlay-hook.mjs",
   "runtime/subprocess-options.mjs",
   "runtime/vitest-setup.mjs",
+  "runtime/worker-state.mjs",
 ]);
 
 export const contractSurfaces = Object.freeze([

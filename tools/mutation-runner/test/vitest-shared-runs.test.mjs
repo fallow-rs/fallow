@@ -13,6 +13,10 @@ const LEAK_A = "leak/a.test.ts::marks the module";
 const LEAK_B = "leak/b.test.ts::expects a fresh worker";
 const STORE_A = "storeleak/a.test.ts::fills the store";
 const STORE_B = "storeleak/b.test.ts::starts empty";
+const MEMO = "reuse/memo.test.ts::doubles";
+const EXIT = "reuse/exit.test.ts::stays";
+const REGISTRY_A = "registry/a.test.ts::registers once";
+const REGISTRY_B = "registry/b.test.ts::adds";
 
 const startProject = async (packageName, configPath, env = {}, options = {}) => {
   const fixture = createFixtureProject({ packageName, ...options });
@@ -48,6 +52,8 @@ for (const { packageName, version } of VITEST_MAJORS) {
     let shared;
     let leak;
     let storeLeak;
+    let reuse;
+    let registry;
     let pidDir;
     let pidLog;
 
@@ -65,10 +71,19 @@ for (const { packageName, version } of VITEST_MAJORS) {
         {},
         { store: true },
       );
+      reuse = await startProject(
+        packageName,
+        "vitest.reuse.config.mjs",
+        { FALLOW_PID_LOG: pidLog },
+        { reuse: true },
+      );
+      registry = await startProject(packageName, "vitest.registry.config.mjs", {
+        FALLOW_PID_LOG: pidLog,
+      });
     });
 
     after(() => {
-      for (const project of [shared, leak, storeLeak]) {
+      for (const project of [shared, leak, storeLeak, reuse, registry]) {
         project?.companion.stop();
         project?.fixture.cleanup();
       }
@@ -83,12 +98,21 @@ for (const { packageName, version } of VITEST_MAJORS) {
       assert.equal(pids.size, 1, `one worker for both files, got ${[...pids].join(", ")}`);
     });
 
-    test("a run of each file stays a new worker for each mutant run", async () => {
+    test("consecutive mutant runs reuse one worker process", async () => {
       writeFileSync(pidLog, "");
       await shared.run("m9", [FIRST, SECOND]);
       await shared.run("m9", [FIRST, SECOND]);
       const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
-      assert.equal(pids.size, 2, "each run gets a fresh worker");
+      assert.equal(pids.size, 1, `one process for both runs, got ${[...pids].join(", ")}`);
+    });
+
+    test("a control run gets a new worker process", async () => {
+      await shared.run("m9", [FIRST, SECOND]);
+      writeFileSync(pidLog, "");
+      await shared.run(null, [FIRST, SECOND]);
+      await shared.run("m9", [FIRST, SECOND]);
+      const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
+      assert.equal(pids.size, 2, "the control run does not use the reused process");
     });
 
     test("a project whose tests differ in a shared worker keeps isolated runs", async () => {
@@ -101,6 +125,40 @@ for (const { packageName, version } of VITEST_MAJORS) {
       assert.equal(control.status, "survived", JSON.stringify(control));
       const result = await storeLeak.run("m30", [STORE_A, STORE_B]);
       assert.equal(result.status, "survived", JSON.stringify(result));
+    });
+
+    test("a module cache of an earlier mutant run does not hide a later mutant", async () => {
+      writeFileSync(pidLog, "");
+      const first = await reuse.run("m9", [MEMO]);
+      assert.equal(first.status, "survived", JSON.stringify(first));
+      const later = await reuse.run("m40", [MEMO]);
+      assert.equal(later.status, "killed", JSON.stringify(later));
+      const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
+      assert.equal(pids.size, 1, "both runs used one reused process");
+    });
+
+    test("a project whose module fails on a second load keeps a new process for each run", async () => {
+      writeFileSync(pidLog, "");
+      for (let run = 0; run < 3; run += 1) {
+        const result = await registry.run("m9", [REGISTRY_A, REGISTRY_B]);
+        assert.equal(result.status, "survived", JSON.stringify(result));
+      }
+      const counts = new Map();
+      for (const pid of readFileSync(pidLog, "utf8").trim().split("\n")) {
+        counts.set(pid, (counts.get(pid) ?? 0) + 1);
+      }
+      assert.deepEqual(
+        [...counts.values()],
+        [2, 2, 2],
+        "each run used its own process for both of its test files",
+      );
+    });
+
+    test("a mutant that ends the worker process does not break the next run", async () => {
+      const crashed = await reuse.run("m41", [MEMO, EXIT]);
+      assert.equal(crashed.status, "killed", JSON.stringify(crashed));
+      const next = await reuse.run("m9", [MEMO, EXIT]);
+      assert.equal(next.status, "survived", JSON.stringify(next));
     });
   });
 }
